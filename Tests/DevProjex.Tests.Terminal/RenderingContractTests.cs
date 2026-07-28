@@ -206,15 +206,15 @@ public sealed class RenderingContractTests
 			progress.Report(new ProjectCopyExportProgress(1, 4, 1_024, 25));
 			await Task.Delay(120, TestContext.Current.CancellationToken);
 			progress.Report(new ProjectCopyExportProgress(2, 4, 2_048, 50));
-			await Task.Delay(300, TestContext.Current.CancellationToken);
+			await Task.Delay(120, TestContext.Current.CancellationToken);
+			progress.Report(new ProjectCopyExportProgress(4, 4, 4_096, 100));
 			return 42;
 		});
 
 		Assert.Equal(42, result);
 		Assert.Empty(environment.StandardOutput);
-		Assert.Contains("Exporting project 1/4 (1 KB)", environment.StandardError, StringComparison.Ordinal);
-		Assert.Contains("25%", environment.StandardError, StringComparison.Ordinal);
-		Assert.Contains("50%", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Exporting project 4/4 (4 KB)", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("100%", environment.StandardError, StringComparison.Ordinal);
 		Assert.Matches(@"\d+:\d{2}", environment.StandardError);
 	}
 

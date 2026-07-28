@@ -1,0 +1,40 @@
+ DevProjex Terminal  <PROJECT>
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├────┐┌┤  CONTEXT CONTROLS├───────────────────────────────┐
+│v [x] <PROJECT>   ││+ <PROJECT>                            ││ Source: <PROJECT>          │
+│  > [x] src                              ││  + src                                                       ││ ...sts.Terminal/<PROJECT>  │
+│    [x] global.json              ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐d                                 │
+│    [x] readme.md                │ Filter actions:                                                                         │gitignore                         │
+│                                 │ Preview presentation                                                                    │s: 3                              │
+│                                 │                                                                                         │nings: 0                          │
+│                                 │ Preview presentation: Readable  [V]                                                     │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │ntation: Readable                 │
+│                                 │                                                                                         │e + content                       │
+│                                 │                                                                                         │own                               │
+│                                 │                                                                                         │: .gitignore                      │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │ all (1)                          │
+│                                 │                                                                                         │ll (3)                            │
+│                                 │                                                                                         │t                                 │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │e…                                │
+│                                 │ CONTEXT PREVIEW · Preview presentation · Readable                                       │ Standard                         │
+│                                 │ Choose a readable context view or the exact export payload.                             │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                  │
+│                                 │                                  ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▘                                   │                                  │
+│                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                  │
+│                                         ││                                                              ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││ Files 1-4/4  |  Lines 1-27/27                                ││                                                   │
+└─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
+
+ Files 4  |  Folders 3  |  76 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

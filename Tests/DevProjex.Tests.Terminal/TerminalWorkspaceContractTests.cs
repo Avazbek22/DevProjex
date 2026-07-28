@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using DevProjex.Application.Preview;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -143,6 +144,173 @@ public sealed class TerminalWorkspaceContractTests
 		var content = XDocument.Parse(state.PreviewText);
 		Assert.Empty(content.Descendants("tree").Elements());
 		Assert.Single(content.Descendants("file"));
+	}
+
+	[Fact]
+	public async Task ReadableLargePreviewIsFileBackedAndIndexesFirstMiddleAndFinalFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		const int fileCount = 120;
+		for (var index = 0; index < fileCount; index++)
+		{
+			workspace.WriteFile(
+				$"src/file-{index:D3}.txt",
+				$"marker-{index:D3}\n{new string((char)('a' + index % 26), 6_000)}");
+		}
+
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.RefreshPreviewAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TerminalPreviewPresentation.Readable,
+			TestContext.Current.CancellationToken);
+
+		var document = Assert.IsType<FileBackedPreviewTextDocument>(state.PreviewDocument);
+		Assert.Equal(fileCount, document.Sections.Count);
+		Assert.True(document.CharacterCount > 500_000);
+		Assert.Contains(
+			"marker-000",
+			document.GetLineRangeText(
+				document.Sections[0].ContentStartLine,
+				document.Sections[0].EndLine),
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"marker-060",
+			document.GetLineRangeText(
+				document.Sections[60].ContentStartLine,
+				document.Sections[60].EndLine),
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"marker-119",
+			document.GetLineRangeText(
+				document.Sections[^1].ContentStartLine,
+				document.Sections[^1].EndLine),
+			StringComparison.Ordinal);
+
+		var view = new TerminalVirtualizedPreviewView();
+		try
+		{
+			view.SetDocument(document, preserveViewport: false);
+			var match = view.FindNext("marker-119", startLine: 0);
+			Assert.True(match >= document.Sections[^1].ContentStartLine - 1);
+		}
+		finally
+		{
+			view.Dispose();
+		}
+	}
+
+	[Fact]
+	public async Task ReadablePreviewMakesBinaryAndOversizedTextOmissionsExplicit()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/large.txt", new string('x', 10 * 1024 * 1024 + 1));
+		var binaryPath = Path.Combine(workspace.Path, "src", "binary.dat");
+		Directory.CreateDirectory(Path.GetDirectoryName(binaryPath)!);
+		File.WriteAllBytes(binaryPath, [0, 1, 2, 3]);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.RefreshPreviewAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TerminalPreviewPresentation.Readable,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, state.PreviewDocument.Sections.Count);
+		Assert.Contains(
+			"[Binary or unreadable file; content omitted]",
+			state.PreviewText,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Large text file; open Raw output or export to inspect complete content]",
+			state.PreviewText,
+			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Text)]
+	[InlineData(ProjectContextDocumentFormat.Markdown)]
+	[InlineData(ProjectContextDocumentFormat.Json)]
+	[InlineData(ProjectContextDocumentFormat.Xml)]
+	public async Task RawPreviewMatchesCompleteExportPayload(
+		ProjectContextDocumentFormat format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		workspace.WriteFile("README.md", "# App");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.RefreshPreviewAsync(
+			state,
+			ProjectContextView.TreeContent,
+			format,
+			TerminalPreviewPresentation.RawOutput,
+			TestContext.Current.CancellationToken);
+		var exported = await services.ContextDocumentService.BuildAsync(
+			state.Plan,
+			ProjectContextView.TreeContent,
+			format,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(exported, state.PreviewText);
+	}
+
+	[Fact]
+	public async Task LargeRawPreviewStreamsToFileAndKeepsFinalFileReachable()
+	{
+		using var workspace = new TemporaryDirectory();
+		const int fileCount = 120;
+		for (var index = 0; index < fileCount; index++)
+		{
+			workspace.WriteFile(
+				$"src/raw-{index:D3}.txt",
+				$"raw-marker-{index:D3}\n{new string((char)('a' + index % 26), 6_000)}");
+		}
+
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.RefreshPreviewAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TerminalPreviewPresentation.RawOutput,
+			TestContext.Current.CancellationToken);
+
+		var document = Assert.IsType<FileBackedPreviewTextDocument>(state.PreviewDocument);
+		Assert.True(document.CharacterCount > 500_000);
+		Assert.Contains(
+			"raw-marker-119",
+			document.GetLineRangeText(
+				Math.Max(1, document.LineCount - 8),
+				document.LineCount),
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

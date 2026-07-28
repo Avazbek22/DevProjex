@@ -327,7 +327,7 @@ public sealed class RecentProjectsStoreTests
 
 		var loaded = store.Load();
 
-		Assert.Equal(2, loaded.SchemaVersion);
+		Assert.Equal(3, loaded.SchemaVersion);
 		Assert.Empty(loaded.RecentFolders);
 		Assert.Empty(loaded.RecentRepositories);
 		Assert.Equal(invalidJson, File.ReadAllText(filePath));
@@ -411,13 +411,14 @@ public sealed class RecentProjectsStoreTests
 		});
 
 		Assert.NotNull(persisted);
-		Assert.Equal(2, loaded.SchemaVersion);
+		Assert.Equal(3, loaded.SchemaVersion);
 		Assert.Empty(loaded.RecentFolders);
 		Assert.Empty(loaded.RecentRepositories);
-		Assert.Equal(2, persisted!.SchemaVersion);
+		Assert.Equal(3, persisted!.SchemaVersion);
 		Assert.Empty(persisted.RecentFolders);
 		Assert.Empty(persisted.RecentFolderRemovals);
 		Assert.Empty(persisted.RecentRepositories);
+		Assert.Empty(persisted.RecentRepositoryRemovals);
 	}
 
 	[Fact]
@@ -478,6 +479,82 @@ public sealed class RecentProjectsStoreTests
 		Assert.Single(state.RecentFolders);
 		Assert.Single(reloaded.RecentFolders);
 		Assert.Equal(PathUtility.Normalize(folderPath), reloaded.RecentFolders[0].Path);
+	}
+
+	[Fact]
+	public void RemoveRepository_RemovesEquivalentUrlAndPersistsTombstone()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var state = store.AddRepository(
+			store.Load(),
+			"https://github.com/example/repository.git");
+		state = store.AddRepository(
+			state,
+			"https://github.com/example/retained");
+
+		state = store.RemoveRepository(
+			state,
+			"git@github.com:example/repository.git");
+		var reloaded = store.Load();
+
+		Assert.DoesNotContain(
+			state.RecentRepositories,
+			entry => RepositoryUrlUtility.AreEquivalent(
+				entry.Url,
+				"https://github.com/example/repository"));
+		Assert.Single(reloaded.RecentRepositories);
+		Assert.Equal(
+			"https://github.com/example/retained",
+			reloaded.RecentRepositories[0].Url);
+		var removal = Assert.Single(reloaded.RecentRepositoryRemovals);
+		Assert.True(RepositoryUrlUtility.AreEquivalent(
+			removal.Url,
+			"https://github.com/example/repository"));
+	}
+
+	[Fact]
+	public void TryPersist_StaleSnapshot_DoesNotResurrectExplicitlyRemovedRepository()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var repositoryUrl = "https://github.com/example/repository";
+		var current = store.AddRepository(store.Load(), repositoryUrl);
+		var stale = new RecentProjectsDb
+		{
+			SchemaVersion = current.SchemaVersion,
+			RecentRepositories = current.RecentRepositories
+				.Select(static entry => entry with { })
+				.ToList()
+		};
+
+		store.RemoveRepository(current, repositoryUrl);
+		Assert.True(store.TryPersist(stale));
+
+		var reloaded = store.Load();
+		Assert.Empty(reloaded.RecentRepositories);
+		Assert.Single(reloaded.RecentRepositoryRemovals);
+	}
+
+	[Fact]
+	public void AddRepository_AfterExplicitRemoval_RestoresItAsNewerHistory()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var repositoryUrl = "https://github.com/example/repository";
+		var state = store.AddRepository(store.Load(), repositoryUrl);
+		state = store.RemoveRepository(state, repositoryUrl);
+
+		state = store.AddRepository(
+			state,
+			"git@github.com:example/repository.git");
+		var reloaded = store.Load();
+
+		Assert.Single(state.RecentRepositories);
+		Assert.Single(reloaded.RecentRepositories);
+		Assert.Equal(
+			"git@github.com:example/repository.git",
+			reloaded.RecentRepositories[0].Url);
 	}
 
 	[Fact]

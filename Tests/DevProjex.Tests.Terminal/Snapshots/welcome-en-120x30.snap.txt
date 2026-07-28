@@ -7,6 +7,7 @@
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
   │> Recent projects                       │  │ Choose a previously opened project and return here when canceled.    │
+  │  Recent Git repositories               │  │                                                                      │
   │  Browse folder                         │  │                                                                      │
   │  Clone repository                      │  │                                                                      │
   │  Open saved profile                    │  │                                                                      │
@@ -26,5 +27,4 @@
 
 
 
-
-  Up/Down or j/k Navigate   Enter Select   ? Help   q Exit
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

@@ -1,7 +1,7 @@
  DevProjex Terminal  <PROJECT>
  <PROJECT_ROOT>
- Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
-┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree + content · Markdown├────────────────┐
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├─────┐
 │v [x] <PROJECT>               ││+ <PROJECT>                             │
 │  > [x] src                                          ││  + src                                                        │
 │    [┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐      │
@@ -23,8 +23,8 @@
 │                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
-│                                                     ││                                                               │
+│                                                     ││ Files 4  |  Lines 1-7/7                                       │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
- Files 4  |  Folders 3  |  76 B  |  ~132 tokens  |  Warnings 0
- Up/Down Navigate   Enter Expand   Space Toggle   Tab/F6 Preview   / Search   X Exclusions   E/Z Export
+ Files 4  |  Folders 3  |  76 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

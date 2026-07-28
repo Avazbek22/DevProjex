@@ -6,8 +6,9 @@
   <PROJECT_ROOT>
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
-  │  Recent projects                       │  │ Select a project folder without scanning anything until you confirm  │
-  │> Browse folder                         │  │ it.                                                                  │
+  │  Recent projects                       │  │ Open a cached Git repository or explicitly clone a missing cache.    │
+  │> Recent Git repositories               │  │                                                                      │
+  │  Browse folder                         │  │                                                                      │
   │  Clone repository                      │  │                                                                      │
   │  Open saved profile                    │  │                                                                      │
   │  Open Desktop                          │  │                                                                      │
@@ -26,5 +27,4 @@
 
 
 
-
-  Up/Down or j/k Navigate   Enter Select   ? Help   q Exit
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

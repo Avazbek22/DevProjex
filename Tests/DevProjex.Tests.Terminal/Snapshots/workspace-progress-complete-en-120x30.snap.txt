@@ -1,30 +1,30 @@
  DevProjex Terminal  <PROJECT>
- ...s\avazb\AppData\Local\Temp\DevProjex.Tests.Terminal\<ID>\<PROJECT>
- Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
-┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree + content · Markdown├────────────────┐
-│v [x] <PROJECT>                 ││+ <PROJECT>                              ▲│
-│  > [x] src                                          ││  + src                                                       █│
-│    [┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐     █│
-│     │ Destination: <OUTPUT_ROOT>\project-export           ▲ │     █│
-│     │ Files: 101  |  Folders: 2  |  Size: 100 KB                                                            █ │     █│
-│     │ Elapsed: <ELAPSED>                                                                                         █ │     ░│
-│     │                                                                                                       █ │     ░│
-│     │ Equivalent command:                                                                                   █ │     ░│
-│     │ devprojex export project                                                                              █ │     ░│
-│     │ <TEMP_ROOT>\<PROJECT>vProjex-█ │     ░│
-│     │ Tui-Progress-Project --as folder -o                                                                   ░ │     ░│
-│     │ <OUTPUT_ROOT>\project-export --profile standard     ░ │     ░│
-│     │ --git-mode gitignore --exclude smart-ignore --exclude hidden-folders --exclude hidden-files --exclude ▼ │     ░│
-│     │                                                                                                         │     ░│
-│     │                                                                                                         │     ░│
-│     │                                              ⟦► Close ◄⟧▖                                               │     ░│
-│     │                                              ▝▀▀▀▀▀▀▀▀▀▀▘                                               │     ░│
-│     └─────────────────────────────────────────────────────────────────────────────────────────────────────────┘     ░│
-│                                                     ││    - File0017.bin                                            ░│
-│                                                     ││    - File0018.bin                                            ░│
-│                                                     ││    - File0019.bin                                            ░│
-│                                                     ││    - File0020.bin                                            ▼│
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├─────┐
+│v [x] <PROJECT>                 ││+ <PROJECT>                              #│
+│  > [x] src                                          ││  + src                                                       #│
+│    [┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐     #│
+│     │ Destination: <OUTPUT_ROOT>\project-export           ▲ │     #│
+│     │ Files: 101  |  Folders: 2  |  Size: 100 KB                                                            █ │     |│
+│     │ Elapsed: <ELAPSED>                                                                                         █ │     |│
+│     │                                                                                                       █ │     |│
+│     │ Equivalent command:                                                                                   █ │     |│
+│     │ devprojex export project                                                                              █ │     |│
+│     │ <PROJECT_ROOT>vProjex-█ │     |│
+│     │ Tui-Progress-Project --as folder -o                                                                   ░ │     |│
+│     │ <OUTPUT_ROOT>\project-export --profile standard     ░ │     |│
+│     │ --git-mode gitignore --exclude smart-ignore --exclude hidden-folders --exclude hidden-files --exclude ▼ │     |│
+│     │                                                                                                         │     |│
+│     │                                                                                                         │     |│
+│     │                                              ⟦► Close ◄⟧▖                                               │     |│
+│     │                                              ▝▀▀▀▀▀▀▀▀▀▀▘                                               │     |│
+│     └─────────────────────────────────────────────────────────────────────────────────────────────────────────┘     |│
+│                                                     ││    - File0017.bin                                            |│
+│                                                     ││    - File0018.bin                                            |│
+│                                                     ││    - File0019.bin                                            |│
+│                                                     ││ Files 101  |  Lines 1-21/103                                  │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
- Files 101  |  Folders 2  |  100 KB  |  ~35 tokens  |  Warnings 0
- Up/Down Navigate   Enter Expand   Space Toggle   Tab/F6 Preview   / Search   X Exclusions   E/Z Export
+ Files 101  |  Folders 2  |  100 KB  |  ~<TOKENS> tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

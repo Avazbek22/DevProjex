@@ -171,7 +171,9 @@ public sealed class DocumentationAndPackagingContractTests
 			.Select(element => Path.GetFullPath(
 				Path.Combine(
 					Path.GetDirectoryName(desktopProjectPath)!,
-					element.Attribute("Include")?.Value ?? string.Empty)))
+					(element.Attribute("Include")?.Value ?? string.Empty)
+					.Replace('\\', Path.DirectorySeparatorChar)
+					.Replace('/', Path.DirectorySeparatorChar))))
 			.ToArray();
 		Assert.Contains(
 			Path.GetFullPath(terminalProjectPath),
@@ -189,6 +191,15 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("retained redirected CLI handles", workflow, StringComparison.Ordinal);
 		Assert.Contains("env -u CI \"$2\"", workflow, StringComparison.Ordinal);
 		Assert.Contains("Portable Launcher ConPTY TUI Smoke", workflow, StringComparison.Ordinal);
+		Assert.Contains("Published Native PTY TUI Smoke", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"TerminalRecentRepositoriesPtyTests.PopulatedCachedRepositoryOpensOfflineWithCleanIdentity",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"TerminalLargePreviewPtyTests.FileBackedReadablePreviewReachesFirstMiddleAndFinalSections",
+			workflow,
+			StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_TUI_TEST_BINARY", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("DevProjex.Cli", workflow, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("\"--path\"", workflow, StringComparison.Ordinal);
@@ -248,15 +259,5 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	private static string FindRepositoryRoot()
-	{
-		var directory = new DirectoryInfo(AppContext.BaseDirectory);
-		while (directory is not null)
-		{
-			if (File.Exists(Path.Combine(directory.FullName, "DevProjex.sln")))
-				return directory.FullName;
-			directory = directory.Parent;
-		}
-
-		throw new InvalidOperationException("Repository root not found.");
-	}
+		=> PublishedApplicationLocator.FindRepositoryRoot();
 }

@@ -1,0 +1,40 @@
+ DevProjex Terminal  <PROJECT>
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Raw output / Tree + content / Markdown
+┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Raw output · Tree + content · Markdown├──┐┌┤> CONTEXT CONTROLS├───────────────────────────────┐
+│v [x] <PROJECT>   ││# <PROJECT>                           #││ Source: <PROJECT>          │
+│  > [x] src                              ││                                                             #││ ...sts.Terminal/<PROJECT>  │
+│    [x] global.json                      ││## Project tree                                              #││ Profile: Standard                                 │
+│    [x] readme.md                ┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐gitignore                         │
+│                                 │ CONTEXT CONTROLS                                                                      ▲ │s: 3                              │
+│                                 │ Up/Down or j/k selects a visible parameter or action; Enter opens it. Use this panel  █ │nings: 0                          │
+│                                 │ to inspect source/profile state, change Git filtering, Exclusions, Root Folders, File █ │                                  │
+│                                 │ Types, Preview presentation/view/format, analyze, and start context/folder/ZIP        █ │                                  │
+│                                 │ exports. Tab/F6 returns to Tree; Shift+Tab/Shift+F6 moves to Preview.                 █ │                                  │
+│                                 │                                                                                       █ │                                  │
+│                                 │ WORKSPACE MODEL                                                                       █ │ntation: Raw output               │
+│                                 │ Tree selects the effective project subtree. Preview inspects the generated context.   █ │e + content                       │
+│                                 │ Controls makes the current profile, Git mode, Exclusions, roots, file types, Preview  █ │own                               │
+│                                 │ settings, diagnostics, and all export actions visible.                                ░ │: .gitignore                      │
+│                                 │                                                                                       ░ │                                  │
+│                                 │ ACTION PALETTE                                                                        ░ │ all (1)                          │
+│                                 │ Ctrl+P opens a searchable list of every important action and shows its shortcut. Type ░ │ll (3)                            │
+│                                 │ to filter, use Up/Down, then Enter. Esc returns to the exact previous pane.           ░ │t                                 │
+│                                 │                                                                                       ░ │                                  │
+│                                 │ PREVIEW                                                                               ░ │e…                                │
+│                                 │ 1/2/3 selects Tree, Content, or Tree + Content. V chooses Readable or Raw output. F   ░ │ Standard                         │
+│                                 │ chooses Text, Markdown, JSON, or XML. Readable is optimized for inspection; Raw is    ▼ │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                      ⟦► Close ◄⟧▖                                       │                                  │
+│                                 │                                      ▝▀▀▀▀▀▀▀▀▀▀▘                                       │                                  │
+│                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                  │
+│                                         ││                                                             |││                                                   │
+│                                         ││## `src/App.cs`                                              |││                                                   │
+│                                         ││                                                             |││                                                   │
+│                                         ││```cs                                                        |││                                                   │
+│                                         ││ Files 4  |  Lines 1-31/39  |  Columns 1-61/<COLUMNS>                ││                                                   │
+└─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
+
+ Files 4  |  Folders 3  |  76 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Up/Down or j/k Navigate   Enter Run   Tab/F6 Tree   Ctrl+P Action palette   ? Help

@@ -1,0 +1,29 @@
+
+  DevProjex Terminal                                                                                              v<VERSION>
+  Choose a workspace action. No project is scanned until you open it.
+
+  Current directory                                                                      No project workspace detected
+  <WELCOME_ROOT>┌┤Recent Git repositories├──────────────────────────────────────────────────────────────────────┐ │ Open a cached repository without network access, or choose an explicit recovery action.       │
+  ┌┤Actions│                                                                                               │─────────┐
+  │> Recent│ > [-] DevProjex                                                                               │eled.    │
+  │  Recent│                                                                                               │         │
+  │  Browse│                                                                                               │         │
+  │  Clone │                                                                                               │         │
+  │  Open s│ Repository: DevProjex                                                                         │         │
+  │  Open D│ Host / owner: github.com/Avazbek22                                                            │         │
+  │  Help  │ Local cache: Not cached                                                                       │         │
+  │  Exit  │ Last opened: <TIMESTAMP>│         │
+  └────────│ Repository URL:                                                                               │─────────┘
+           │ https://github.com/Avazbek22/DevProjex                                                        │
+  Direct au│                                                                                               │
+           │                                                                                               │
+           │                            ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                            │
+           │                            ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                            │
+           └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

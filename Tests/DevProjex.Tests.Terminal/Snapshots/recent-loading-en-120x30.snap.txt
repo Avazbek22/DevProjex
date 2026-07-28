@@ -2,9 +2,9 @@
   DevProjex Terminal
 
 
-  |   Loading project
+  <SPINNER>   Loading project
 
-      <PROJECTS_ROOT>\Beta Project
+      <PROJECTS_ROOT>/Beta Project
 
 
 

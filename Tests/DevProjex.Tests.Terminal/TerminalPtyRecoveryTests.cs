@@ -153,9 +153,9 @@ public sealed class TerminalPtyRecoveryTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.WaitForScreenAsync(
-			"Choose a workspace action",
+			"│  Help",
 			cancellationToken: TestContext.Current.CancellationToken);
-		var helpRow = terminal.FindVisibleRow("Help");
+		var helpRow = terminal.FindVisibleRow("│  Help");
 		Assert.True(helpRow >= 0);
 		await terminal.SendMouseClickAsync(
 			8,
@@ -163,12 +163,12 @@ public sealed class TerminalPtyRecoveryTests
 			clickCount: 2,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Only Exit or q",
+			"Prepare a controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Only Exit or q",
+			"Prepare a controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",

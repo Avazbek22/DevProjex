@@ -1,0 +1,30 @@
+ DevProjex Terminal  <PROJECT>
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Content / Markdown
+┌┤  PROJECT TREE├─────────────────────────────────────┐┌┤> CONTEXT PREVIEW · Readable · Content · Markdown├────────────┐
+│v [x] <PROJECT>               ││                                                              |│
+│  > [x] src                                          ││internal sealed class LargeMarker117 { }                      |│
+│                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/File118.cs:                                               |│
+│                                                     ││                                                              |│
+│                                                     ││internal sealed class LargeMarker118 { }                      |│
+│                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/File119.cs:                                               |│
+│                                                     ││                                                              |│
+│                                                     ││internal sealed class LargeMarker119 { }                      |│
+│                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/File120.cs:                                               |│
+│                                                     ││                                                              |│
+│                                                     ││internal sealed class LargeMarker120 { }                      |│
+│                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx#│
+│                                                     ││ F 117-120/120  |  L 698-718/718  |  C 1-62/5 500              │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 120  |  Folders 2  |  649.34 KB  |  ~<TOKENS> tokens  |  Warnings 0
+ j/k Scroll   PgUp/PgDn Page   1/2/3 View   V Readable/Raw   F Format   Tab/F6 Controls   Ctrl+P Actions

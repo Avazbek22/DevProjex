@@ -1,0 +1,30 @@
+ DevProjex Terminal  <PROJECT>
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Content / Markdown
+┌┤  PROJECT TREE├─────────────────────────────────────┐┌┤> CONTEXT PREVIEW · Readable · Content · Markdown├────────────┐
+│v [x] <PROJECT>               ││src/File001.cs:                                               #│
+│  > [x] src                                          ││                                                              |│
+│                                                     ││internal sealed class LargeMarker001 { }                      |│
+│                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/File002.cs:                                               |│
+│                                                     ││                                                              |│
+│                                                     ││internal sealed class LargeMarker002 { }                      |│
+│                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/File003.cs:                                               |│
+│                                                     ││                                                              |│
+│                                                     ││internal sealed class LargeMarker003 { }                      |│
+│                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/File004.cs:                                               |│
+│                                                     ││                                                              |│
+│                                                     ││internal sealed class LargeMarker004 { }                      |│
+│                                                     ││ Files 1-4/120  |  Lines 1-21/718  |  Columns 1-62/<COLUMNS> 500       │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 120  |  Folders 2  |  649.34 KB  |  ~<TOKENS> tokens  |  Warnings 0
+ j/k Scroll   PgUp/PgDn Page   1/2/3 View   V Readable/Raw   F Format   Tab/F6 Controls   Ctrl+P Actions

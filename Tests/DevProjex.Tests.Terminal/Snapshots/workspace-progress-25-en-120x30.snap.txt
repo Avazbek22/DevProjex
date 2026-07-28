@@ -1,30 +1,30 @@
  DevProjex Terminal  <PROJECT>
- ...s\avazb\AppData\Local\Temp\DevProjex.Tests.Terminal\<ID>\<PROJECT>
- Profile: Standard  |  Git filtering: .gitignore  |  View: Tree + content / Markdown
-┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree + content · Markdown├────────────────┐
-│v [x] <PROJECT>                 ││# <PROJECT>                              ▲│
-│  > [x] src                                          ││                                                              █│
-│    [x] global.json                                  ││## Project tree                                               ░│
-│                                                     ││                                                              ░│
-│                                                     ││```text                                                       ░│
-│              ┌┤Export project├────────────────────────────────────────────────────────────────────────┐.Terminal\<ID-PART>░│
-│              │                                                                                        │             ░│
-│              │  Copying files                                                                         │             ░│
-│              │                                                                                        │             ░│
-│              │  █████████████████████                   25%                                           │             ░│
-│              │                                                                                        │             ░│
-│              │  Folder  |  26 / 103  |  23 KB                                                         │             ░│
-│              │  Elapsed: <ELAPSED>                                                                         │             ░│
-│              │                                                                                        │             ░│
-│              │  Esc or Ctrl+C cancels this operation                                                  │             ░│
-│              └────────────────────────────────────────────────────────────────────────────────────────┘             ░│
-│                                                     │││   │   ├── File0008.bin                                      ░│
-│                                                     │││   │   ├── File0009.bin                                      ░│
-│                                                     │││   │   ├── File0010.bin                                      ░│
-│                                                     │││   │   ├── File0011.bin                                      ░│
-│                                                     │││   │   ├── File0012.bin                                      ▼│
-│                                                     ││◄██████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░► │
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├─────┐
+│v [x] <PROJECT>                 ││+ <PROJECT>                              #│
+│  > [x] src                                          ││  + src                                                       |│
+│    [x] global.json                                  ││    - File0001.bin                                            |│
+│              ┌┤Export project├────────────────────────────────────────────────────────────────────────┐             |│
+│              │                                                                                        │             |│
+│              │  Copying files                                                                         │             |│
+│              │                                                                                        │             |│
+│              │                                                                                        │             |│
+│              │                                                                                        │             |│
+│              │  █████████████████████                   25%                                           │             |│
+│              │                                                                                        │             |│
+│              │  Folder  |  26 / 103  |  23 KB                                                         │             |│
+│              │                                                                                        │             |│
+│              │  Elapsed: <ELAPSED>                                                                         │             |│
+│              │                                                                                        │             |│
+│              │                                                                                        │             |│
+│              │  Esc or Ctrl+C cancels this operation                                                  │             |│
+│              └────────────────────────────────────────────────────────────────────────────────────────┘             |│
+│                                                     ││    - File0017.bin                                            |│
+│                                                     ││    - File0018.bin                                            |│
+│                                                     ││    - File0019.bin                                            |│
+│                                                     ││ Files 101  |  Lines 1-21/608                                  │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
  Export project
- Up/Down Navigate   Enter Expand   Space Toggle   Tab/F6 Preview   / Search   X Exclusions   E/Z Export
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

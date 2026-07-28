@@ -3,10 +3,11 @@
   Choose a workspace action. No project is scanned until you open it.
 
   Current directory                              No project workspace detected
-  ...Data\Local\Temp\DevProjex.Tests.Terminal\<PROJECT>
+  <PROJECT_ROOT>
 
   ┌┤Actions├─────────────────────────────────────────────────────────────────┐
   │> Recent projects                                                         │
+  │  Recent Git repositories                                                 │
   │  Browse folder                                                           │
   │  Clone repository                                                        │
   │  Open saved profile                                                      │
@@ -18,7 +19,6 @@
   │ Choose a previously opened project and return here when canceled.        │
   │                                                                          │
   │                                                                          │
-  │                                                                          │
   └──────────────────────────────────────────────────────────────────────────┘
 
-  Up/Down or j/k Navigate   Enter Select   ? Help   q Exit
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

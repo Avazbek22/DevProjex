@@ -101,11 +101,11 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 		var markersBeforeHelp = GetVisibleMarkers(beforeHelp);
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Tab or Shift+Tab",
+			"Tab/F6 moves to Controls",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Tab or Shift+Tab",
+			"Tab/F6 moves to Controls",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var afterHelp = await WaitForStableScreenAsync(
 			terminal,
@@ -164,8 +164,11 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
 		var compact = await terminal.WaitForScreenAsync(
-			"Tab/F6 Tree   ? Help",
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> CONTEXT PREVIEW", compact, StringComparison.Ordinal);
 		Assert.DoesNotContain("> PROJECT TREE", compact, StringComparison.Ordinal);
@@ -181,9 +184,9 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			"1/2/3 View",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var restored = await terminal.WaitForScreenAsync(
-			"> CONTEXT PREVIEW",
+			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("PROJECT TREE", restored, StringComparison.Ordinal);
+		Assert.Contains("> CONTEXT PREVIEW", restored, StringComparison.Ordinal);
 		await terminal.SendShiftF6Async(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"> PROJECT TREE",

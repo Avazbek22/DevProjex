@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace DevProjex.Tests.Terminal;
 
 [Collection(TerminalProcessCollection.Name)]
@@ -17,15 +19,17 @@ public sealed class TerminalVisualSnapshotTests
 		Verify("welcome-en-120x30", terminal, workspace.Path);
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "> Browse folder");
+		await WaitForStableScreenAsync(terminal, "> Recent Git repositories");
 		Verify("welcome-selected-en-120x30", terminal, workspace.Path);
 
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Only Exit or q");
+		await WaitForStableScreenAsync(
+			terminal,
+			"Prepare a controlled project context without leaving the terminal.");
 		Verify("welcome-help-en-120x30", terminal, workspace.Path);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Only Exit or q",
+			"Prepare a controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
@@ -165,6 +169,83 @@ public sealed class TerminalVisualSnapshotTests
 		await ExitAsync(terminal);
 	}
 
+	[Fact(Timeout = 90_000)]
+	public async Task WideWorkspaceSnapshotsCoverControlsActionPaletteAndReadableRawPreview()
+	{
+		using var project = CreateProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"en"
+			],
+			columns: 160,
+			rows: 40,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await WaitForStableScreenAsync(terminal, "CONTEXT CONTROLS");
+		var readable = terminal.CaptureScreen();
+		Assert.Contains("Readable", readable, StringComparison.Ordinal);
+		Assert.DoesNotContain("```", readable, StringComparison.Ordinal);
+		Verify("workspace-wide-readable-en-160x40", terminal, project.Path);
+
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "Filter actions:");
+		Verify("workspace-action-palette-en-160x40", terminal, project.Path);
+		await terminal.SendAsync(
+			"Preview presentation",
+			TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			"Choose a readable context view or the exact export payload.");
+		Verify("workspace-action-palette-filtered-en-160x40", terminal, project.Path);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			"Choose a readable context view or the exact export payload.");
+		var beforeSelection = CaptureListItemVisuals(terminal, "Readable", "Raw output");
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		var afterSelection = await WaitForListItemVisualsToChangeAsync(
+			terminal,
+			beforeSelection,
+			"Readable",
+			"Raw output");
+		Assert.NotEqual(beforeSelection.Readable, afterSelection.Readable);
+		Assert.NotEqual(afterSelection.Readable, afterSelection.Raw);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "Raw output");
+		await WaitForStableScreenAsync(terminal, "```text");
+		Verify("workspace-wide-raw-markdown-en-160x40", terminal, project.Path);
+
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "Filter actions:");
+		await terminal.SendAsync("Context controls", TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> CONTEXT CONTROLS");
+		Verify("workspace-controls-focused-en-160x40", terminal, project.Path);
+
+		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			"Up/Down or j/k selects a visible parameter or action");
+		Verify("workspace-controls-help-en-160x40", terminal, project.Path);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Up/Down or j/k selects a visible parameter or action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExitAsync(terminal);
+	}
+
 	[Fact(Timeout = 60_000)]
 	public async Task MonochromeWelcomeSnapshotPreservesVisibleFocus()
 	{
@@ -234,10 +315,30 @@ public sealed class TerminalVisualSnapshotTests
 		TerminalPtyHarness terminal,
 		string expected)
 	{
-		await terminal.WaitForScreenAsync(
-			expected,
-			cancellationToken: TestContext.Current.CancellationToken);
-		await Task.Delay(150, TestContext.Current.CancellationToken);
+		var previous = string.Empty;
+		var stableSamples = 0;
+		var timeout = Stopwatch.StartNew();
+		while (timeout.Elapsed < TimeSpan.FromSeconds(10))
+		{
+			var current = terminal.CaptureScreen();
+			if (current.Contains(expected, StringComparison.Ordinal) &&
+			    string.Equals(previous, current, StringComparison.Ordinal))
+			{
+				stableSamples++;
+				if (stableSamples >= 3)
+					return;
+			}
+			else
+			{
+				stableSamples = 0;
+			}
+
+			previous = current;
+			await Task.Delay(80, TestContext.Current.CancellationToken);
+		}
+
+		throw new TimeoutException(
+			$"Screen did not stabilize for '{expected}'.\n{terminal.CaptureScreen()}");
 	}
 
 	private static void Verify(
@@ -259,6 +360,63 @@ public sealed class TerminalVisualSnapshotTests
 			terminal.CaptureScreen(),
 			normalizedValues);
 		TerminalVisualArtifactWriter.WriteIfRequested(name, terminal);
+	}
+
+	private static (
+		(int BackgroundMode, int Background, bool Inverse) Readable,
+		(int BackgroundMode, int Background, bool Inverse) Raw)
+		CaptureListItemVisuals(
+		TerminalPtyHarness terminal,
+		string readableText,
+		string rawText)
+	{
+		var screenLines = terminal.CaptureScreen().Split('\n');
+		var rawRow = terminal.FindVisibleRow(rawText);
+		Assert.True(rawRow >= 0, terminal.CaptureScreen());
+		var readableRow = screenLines
+			.Select((line, index) => (line, index))
+			.Where(item =>
+				item.index != rawRow &&
+				item.line.Contains(readableText, StringComparison.Ordinal))
+			.OrderBy(item => Math.Abs(item.index - rawRow))
+			.Select(item => item.index)
+			.FirstOrDefault(-1);
+		Assert.True(readableRow >= 0, terminal.CaptureScreen());
+		var readableColumn = screenLines[readableRow].IndexOf(readableText, StringComparison.Ordinal);
+		var rawColumn = screenLines[rawRow].IndexOf(rawText, StringComparison.Ordinal);
+		var readableStyle = terminal.CaptureCellStyle(readableRow, readableColumn);
+		var rawStyle = terminal.CaptureCellStyle(rawRow, rawColumn);
+		return (
+			(readableStyle.BackgroundMode, readableStyle.Background, readableStyle.Inverse),
+			(rawStyle.BackgroundMode, rawStyle.Background, rawStyle.Inverse));
+	}
+
+	private static async Task<(
+		(int BackgroundMode, int Background, bool Inverse) Readable,
+		(int BackgroundMode, int Background, bool Inverse) Raw)>
+		WaitForListItemVisualsToChangeAsync(
+			TerminalPtyHarness terminal,
+			(
+				(int BackgroundMode, int Background, bool Inverse) Readable,
+				(int BackgroundMode, int Background, bool Inverse) Raw) previous,
+			string readableText,
+			string rawText)
+	{
+		var timeout = Stopwatch.StartNew();
+		while (timeout.Elapsed < TimeSpan.FromSeconds(5))
+		{
+			var current = CaptureListItemVisuals(terminal, readableText, rawText);
+			if (current.Readable != previous.Readable &&
+			    current.Readable != current.Raw)
+			{
+				return current;
+			}
+
+			await Task.Delay(50, TestContext.Current.CancellationToken);
+		}
+
+		throw new TimeoutException(
+			$"List selection focus did not change.{Environment.NewLine}{terminal.CaptureScreen()}");
 	}
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)
@@ -283,7 +441,7 @@ public sealed class TerminalVisualSnapshotTests
 		project.WriteFile("global.json", "{}");
 		project.WriteFile("src/App.cs", "internal sealed class App {}");
 		project.WriteFile("src/Feature/Handler.cs", "internal sealed class Handler {}");
-		project.WriteFile("README.md", "# Test project");
+		project.WriteFile("readme.md", "# Test project");
 		return project;
 	}
 

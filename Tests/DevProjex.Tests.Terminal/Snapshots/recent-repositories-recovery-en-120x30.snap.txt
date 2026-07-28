@@ -1,0 +1,30 @@
+
+  DevProjex Terminal                                                                                              v<VERSION>
+  Choose a workspace action. No project is scanned until you open it.
+
+  Current directory                                                                      No project workspace detected
+  <WELCOME_ROOT>
+
+  ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
+  │> Recent projects                       │  │ Choose a previously opened project and return here when canceled.    │
+  │  Recent Git rep┌┤Recent Git repositories├──────────────────────────────────────────────────────┐                 │
+  │  Browse folder │ The repository is still in history, but its local cache is missing. A         │                 │
+  │  Clone reposito│ network clone is required before it can be opened.                            │                 │
+  │  Open saved pro│                                                                               │                 │
+  │  Open Desktop  │ https://github.com/Avazbek22/DevProjex                                        │                 │
+  │  Help          │                                                                               │                 │
+  │  Exit          │                                                                               │                 │
+  └────────────────│                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Clone again ◄⟧▖                 │─────────────────┘
+                   │                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘                 │
+  Direct automation└───────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

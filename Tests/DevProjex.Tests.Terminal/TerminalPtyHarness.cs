@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using Porta.Pty;
 using XTerm;
 using XTerm.Options;
@@ -9,15 +10,26 @@ namespace DevProjex.Tests.Terminal;
 
 internal sealed class TerminalPtyHarness : IAsyncDisposable
 {
+	private const string WindowSizeQuery = "\u001b[18t";
 	private readonly IPtyConnection _connection;
 	private readonly XTermTerminal _terminal;
 	private readonly CancellationTokenSource _readerCts = new();
 	private readonly SemaphoreSlim _writerGate = new(1, 1);
 	private readonly object _terminalGate = new();
 	private readonly StringBuilder _rawOutput = new();
+	private readonly StringBuilder _terminalQueryScanBuffer = new();
+	private readonly StringBuilder _terminalResponseLog = new();
 	private readonly TaskCompletionSource<int> _exit =
 		new(TaskCreationOptions.RunContinuationsAsynchronously);
+	private readonly Channel<string> _terminalResponses =
+		Channel.CreateUnbounded<string>(
+			new UnboundedChannelOptions
+			{
+				SingleReader = true,
+				SingleWriter = true
+			});
 	private readonly Task _readerTask;
+	private readonly Task _terminalResponseTask;
 	private readonly string _dataRoot;
 
 	private TerminalPtyHarness(
@@ -29,6 +41,12 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		_terminal = terminal;
 		_dataRoot = dataRoot;
 		_connection.ProcessExited += (_, args) => _exit.TrySetResult(args.ExitCode);
+		_terminal.DataReceived += (_, args) =>
+		{
+			if (!string.IsNullOrEmpty(args.Data))
+				_terminalResponses.Writer.TryWrite(args.Data);
+		};
+		_terminalResponseTask = Task.Run(WriteTerminalResponsesAsync);
 		_readerTask = Task.Run(ReadOutputAsync);
 	}
 
@@ -331,7 +349,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 
 		throw new TimeoutException(
-			$"Timed out waiting for '{expected}'.\n{CaptureScreen()}");
+			$"Timed out waiting for '{expected}'.\n{CaptureScreen()}\n" +
+			$"Raw output tail:\n{CaptureRawOutputTail()}\n" +
+			$"Terminal responses: {CaptureTerminalResponseLog()}");
 	}
 
 	public async Task<string> WaitForScreenWithoutAsync(
@@ -354,7 +374,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 
 		throw new TimeoutException(
-			$"Timed out waiting for '{unexpected}' to disappear.\n{CaptureScreen()}");
+			$"Timed out waiting for '{unexpected}' to disappear.\n{CaptureScreen()}\n" +
+			$"Raw output tail:\n{CaptureRawOutputTail()}\n" +
+			$"Terminal responses: {CaptureTerminalResponseLog()}");
 	}
 
 	public async Task<int> WaitForExitAsync(
@@ -379,10 +401,13 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	{
 		if (!HasExited)
 			_connection.Kill();
+		_terminalResponses.Writer.TryComplete();
 		_readerCts.Cancel();
 		try
 		{
-			await _readerTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+			await Task.WhenAll(_readerTask, _terminalResponseTask)
+				.WaitAsync(TimeSpan.FromSeconds(2))
+				.ConfigureAwait(false);
 		}
 		catch
 		{
@@ -435,8 +460,10 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 					flush: false);
 				lock (_terminalGate)
 				{
-					_rawOutput.Append(characters, 0, characterCount);
-					_terminal.Write(new string(characters, 0, characterCount));
+					var output = new string(characters, 0, characterCount);
+					_rawOutput.Append(output);
+					_terminal.Write(output);
+					QueueMissingTerminalResponses(output);
 				}
 			}
 		}
@@ -448,10 +475,79 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 	}
 
+	private void QueueMissingTerminalResponses(string output)
+	{
+		_terminalQueryScanBuffer.Append(output);
+		while (true)
+		{
+			var bufferedOutput = _terminalQueryScanBuffer.ToString();
+			var queryIndex = bufferedOutput.IndexOf(WindowSizeQuery, StringComparison.Ordinal);
+			if (queryIndex < 0)
+			{
+				var retainedLength = Math.Min(
+					WindowSizeQuery.Length - 1,
+					_terminalQueryScanBuffer.Length);
+				if (_terminalQueryScanBuffer.Length > retainedLength)
+				_terminalQueryScanBuffer.Remove(
+					0,
+					_terminalQueryScanBuffer.Length - retainedLength);
+				return;
+			}
+
+			_terminalQueryScanBuffer.Remove(0, queryIndex + WindowSizeQuery.Length);
+
+			// XTerm.NET handles color and cursor queries but not CSI 18 t. Terminal.Gui
+			// waits for the standard response before its first Linux frame.
+			_terminalResponses.Writer.TryWrite(
+				$"\u001b[8;{_terminal.Rows};{_terminal.Cols}t");
+		}
+	}
+
+	private async Task WriteTerminalResponsesAsync()
+	{
+		try
+		{
+			await foreach (var response in _terminalResponses.Reader
+				               .ReadAllAsync(_readerCts.Token)
+				               .ConfigureAwait(false))
+			{
+				lock (_terminalGate)
+					_terminalResponseLog.Append(Convert.ToHexString(Encoding.UTF8.GetBytes(response))).Append(' ');
+				await SendAsync(response, _readerCts.Token).ConfigureAwait(false);
+			}
+		}
+		catch (OperationCanceledException) when (_readerCts.IsCancellationRequested)
+		{
+		}
+		catch (ObjectDisposedException)
+		{
+		}
+		catch (IOException) when (HasExited)
+		{
+		}
+	}
+
 	private string CaptureRawOutput()
 	{
 		lock (_terminalGate)
 			return _rawOutput.ToString();
+	}
+
+	private string CaptureRawOutputTail()
+	{
+		lock (_terminalGate)
+		{
+			const int maximumLength = 4_096;
+			return _rawOutput.Length <= maximumLength
+				? _rawOutput.ToString()
+				: _rawOutput.ToString(_rawOutput.Length - maximumLength, maximumLength);
+		}
+	}
+
+	private string CaptureTerminalResponseLog()
+	{
+		lock (_terminalGate)
+			return _terminalResponseLog.ToString();
 	}
 }
 
@@ -504,6 +600,12 @@ internal static class PublishedApplicationLocator
 
 	internal static string FindRepositoryRoot()
 	{
+		var explicitRoot = Environment.GetEnvironmentVariable(
+			"DEVPROJEX_TUI_TEST_REPOSITORY_ROOT");
+		if (!string.IsNullOrWhiteSpace(explicitRoot) &&
+		    File.Exists(Path.Combine(explicitRoot, "DevProjex.sln")))
+			return Path.GetFullPath(explicitRoot);
+
 		foreach (var origin in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
 		{
 			var directory = new DirectoryInfo(origin);

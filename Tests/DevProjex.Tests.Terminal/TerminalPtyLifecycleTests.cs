@@ -142,19 +142,20 @@ public sealed class TerminalPtyLifecycleTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		var screen = terminal.CaptureScreen();
+		var screen = await terminal.WaitForScreenAsync(
+			"Files 2",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("CONTEXT PREVIEW", screen, StringComparison.Ordinal);
-		Assert.Contains("Files 2", screen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Only q on the root workspace exits",
+			"WORKSPACE MODEL",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Only q on the root workspace exits",
+			"WORKSPACE MODEL",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
@@ -200,8 +201,16 @@ public sealed class TerminalPtyLifecycleTests
 		Assert.Contains("\u001b[?25h", terminal.RawOutput, StringComparison.Ordinal);
 		Assert.Contains("\u001b[?2004h", terminal.RawOutput, StringComparison.Ordinal);
 		Assert.Contains("\u001b[?2004l", terminal.RawOutput, StringComparison.Ordinal);
-		Assert.Contains("\u001b[?1003;1006h", terminal.RawOutput, StringComparison.Ordinal);
-		Assert.Contains("\u001b[?1003;1006l", terminal.RawOutput, StringComparison.Ordinal);
+		Assert.True(
+			terminal.RawOutput.Contains("\u001b[?1003;1006h", StringComparison.Ordinal) ||
+			(terminal.RawOutput.Contains("\u001b[?1003h", StringComparison.Ordinal) &&
+			 terminal.RawOutput.Contains("\u001b[?1006h", StringComparison.Ordinal)),
+			"Mouse tracking was not enabled.");
+		Assert.True(
+			terminal.RawOutput.Contains("\u001b[?1003;1006l", StringComparison.Ordinal) ||
+			(terminal.RawOutput.Contains("\u001b[?1003l", StringComparison.Ordinal) &&
+			 terminal.RawOutput.Contains("\u001b[?1006l", StringComparison.Ordinal)),
+			"Mouse tracking was not restored.");
 	}
 
 	[Fact(Timeout = 60_000)]

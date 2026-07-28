@@ -341,6 +341,8 @@ public sealed class VirtualizedPreviewTextControlTests
 
         public IReadOnlyList<PreviewDocumentSection> Sections => [];
 
+        public string GetFullText() => "test";
+
         public string GetLineText(int lineNumber) => "test";
 
         public string GetLineRangeText(int firstLine, int lastLine) => "test";

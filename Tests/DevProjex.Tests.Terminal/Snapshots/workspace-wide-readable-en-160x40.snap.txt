@@ -1,0 +1,40 @@
+ DevProjex Terminal  <PROJECT>
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├────┐┌┤  CONTEXT CONTROLS├───────────────────────────────┐
+│v [x] <PROJECT>   ││+ <PROJECT>                            ││ Source: <PROJECT>          │
+│  > [x] src                              ││  + src                                                       ││ ...sts.Terminal\<PROJECT>  │
+│    [x] global.json                      ││    + Feature                                                 ││ Profile: Standard                                 │
+│    [x] readme.md                        ││      - Handler.cs                                            ││ Git filtering: .gitignore                         │
+│                                         ││    - App.cs                                                  ││ Files: 4  Folders: 3                              │
+│                                         ││  - global.json                                               ││ ~<TOKENS> tokens  Warnings: 0                          │
+│                                         ││  - readme.md                                                 ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││                                                              ││[A] Analyze                                        │
+│                                         ││global.json:                                                  ││[/] Search                                         │
+│                                         ││                                                              ││[V] Preview presentation: Readable                 │
+│                                         ││{}                                                            ││[1/2/3] View: Tree + content                       │
+│                                         ││                                                              ││[F] Format: Markdown                               │
+│                                         ││                                                              ││[M] Git filtering: .gitignore                      │
+│                                         ││readme.md:                                                    ││[X] Exclusions: 8                                  │
+│                                         ││                                                              ││[R] Root folders: all (1)                          │
+│                                         ││# Test project                                                ││[T] File types: all (3)                            │
+│                                         ││                                                              ││[E] Export context                                 │
+│                                         ││                                                              ││[Z] To Folder…                                     │
+│                                         ││src/App.cs:                                                   ││[Z] To ZIP Archive…                                │
+│                                         ││                                                              ││[P] Save profile: Standard                         │
+│                                         ││internal sealed class App {}                                  ││[G] Open Desktop                                   │
+│                                         ││                                                              ││    Details                                        │
+│                                         ││                                                              ││                                                   │
+│                                         ││src/Feature/Handler.cs:                                       ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││internal sealed class Handler {}                              ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││ Files 1-4/4  |  Lines 1-27/27                                ││                                                   │
+└─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
+
+ Files 4  |  Folders 3  |  76 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

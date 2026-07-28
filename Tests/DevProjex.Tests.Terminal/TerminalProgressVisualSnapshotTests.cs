@@ -69,7 +69,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"? Help",
+			"Readable / MD",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await WaitForStableMeasuredScreenAsync(terminal, "50%");
 		Verify(
@@ -79,7 +79,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"/ Search",
+			"Git filtering:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await WaitForStableMeasuredScreenAsync(terminal, "50%");
 		ReleaseCheckpoint(checkpointRoot, "50");

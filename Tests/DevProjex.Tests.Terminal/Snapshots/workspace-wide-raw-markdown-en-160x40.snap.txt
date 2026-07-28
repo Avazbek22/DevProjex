@@ -1,0 +1,40 @@
+ DevProjex Terminal  <PROJECT>
+ <PROJECT_ROOT>
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Raw output / Tree + content / Markdown
+┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Raw output · Tree + content · Markdown├──┐┌┤  CONTEXT CONTROLS├───────────────────────────────┐
+│v [x] <PROJECT>   ││# <PROJECT>                           #││ Source: <PROJECT>          │
+│  > [x] src                              ││                                                             #││ ...sts.Terminal\<PROJECT>  │
+│    [x] global.json                      ││## Project tree                                              #││ Profile: Standard                                 │
+│    [x] readme.md                        ││                                                             #││ Git filtering: .gitignore                         │
+│                                         ││```text                                                      #││ Files: 4  Folders: 3                              │
+│                                         ││<PROJECT_ROOT>#││ ~<TOKENS> tokens  Warnings: 0                          │
+│                                         ││                                                             #││                                                   │
+│                                         ││├── <PROJECT>                         #││                                                   │
+│                                         │││   ├── src                                                  #││[A] Analyze                                        │
+│                                         │││   │   ├── Feature                                          #││[/] Search                                         │
+│                                         │││   │   │   └── Handler.cs                                   #││[V] Preview presentation: Raw output               │
+│                                         │││   │   └── App.cs                                           #││[1/2/3] View: Tree + content                       │
+│                                         │││   ├── global.json                                          #││[F] Format: Markdown                               │
+│                                         │││   └── readme.md                                            #││[M] Git filtering: .gitignore                      │
+│                                         ││```                                                          #││[X] Exclusions: 8                                  │
+│                                         ││                                                             #││[R] Root folders: all (1)                          │
+│                                         ││## `global.json`                                             #││[T] File types: all (3)                            │
+│                                         ││                                                             #││[E] Export context                                 │
+│                                         ││```json                                                      #││[Z] To Folder…                                     │
+│                                         ││{}                                                           #││[Z] To ZIP Archive…                                │
+│                                         ││```                                                          #││[P] Save profile: Standard                         │
+│                                         ││                                                             #││[G] Open Desktop                                   │
+│                                         ││## `readme.md`                                               #││    Details                                        │
+│                                         ││                                                             #││                                                   │
+│                                         ││```md                                                        #││                                                   │
+│                                         ││# Test project                                               |││                                                   │
+│                                         ││```                                                          |││                                                   │
+│                                         ││                                                             |││                                                   │
+│                                         ││## `src/App.cs`                                              |││                                                   │
+│                                         ││                                                             |││                                                   │
+│                                         ││```cs                                                        |││                                                   │
+│                                         ││ Files 4  |  Lines 1-31/39  |  Columns 1-61/<COLUMNS>                ││                                                   │
+└─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
+
+ Files 4  |  Folders 3  |  76 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

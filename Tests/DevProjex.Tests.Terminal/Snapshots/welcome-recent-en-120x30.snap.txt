@@ -7,15 +7,16 @@
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
   │> Recent projects                       │  │ Choose a previously opened project and return here when canceled.    │
-  │  Browse folder                         │  │                                                                      │
-  │  Clone reposito┌┤Recent projects├──────────────────────────────────────────────────────────────┐                 │
-  │  Open saved pro│ (none available)                                                              │                 │
+  │  Recent Git repositories               │  │                                                                      │
+  │  Browse folder ┌┤Recent projects├──────────────────────────────────────────────────────────────┐                 │
+  │  Clone reposito│ (none available)                                                              │                 │
+  │  Open saved pro│                                                                               │                 │
   │  Open Desktop  │                                                                               │                 │
   │  Help          │                                                                               │                 │
-  │  Exit          │                                                                               │                 │
-  └────────────────│                                 ⟦► Close ◄⟧▖                                  │─────────────────┘
-                   │                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │
-  Direct automation└───────────────────────────────────────────────────────────────────────────────┘
+  │  Exit          │                                 ⟦► Close ◄⟧▖                                  │                 │
+  └────────────────│                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │─────────────────┘
+                   └───────────────────────────────────────────────────────────────────────────────┘
+  Direct automation: devprojex analyze .  |  devprojex export context . -o context.md
 
 
 
@@ -26,5 +27,4 @@
 
 
 
-
-  Up/Down or j/k Navigate   Enter Select   ? Help   q Exit
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

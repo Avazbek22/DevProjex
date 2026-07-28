@@ -1,30 +1,30 @@
 
   DevProjex Terminal                                                                                              v<VERSION>
-  Choose a workspace action. No project is scanned until you open it.
+  Choose a wor┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐
+              │ DEVPROJEX TERMINAL                                                                    ▲ │
+  Current dire│ Prepare a controlled project context without leaving the terminal.                    █ │pace detected
+  <PROJECT_ROOT>│                                                                                       █ │
+              │ WELCOME                                                                               █ │
+  ┌┤Actions├──│ Open the current directory, browse to a local project, or choose Recent Projects.     █ │────────────┐
+  │  Recent pr│ Recent Git Repositories shows the same repository history as Desktop: a valid cache   █ │g cache.    │
+  │> Recent Gi│ opens without network access; a missing or damaged cache asks before cloning again.   █ │            │
+  │  Browse fo│ Clone Repository never performs a hidden update. Open Profile applies a portable      █ │            │
+  │  Clone rep│ profile, and Open Desktop hands the selected work to Avalonia.                        █ │            │
+  │  Open save│                                                                                       █ │            │
+  │  Open Desk│ WORKSPACE                                                                             ░ │            │
+  │  Help     │ Project Tree controls the selected files and folders. Context Preview has Readable    ░ │            │
+  │  Exit     │ and exact Raw output presentations. Context Controls exposes profiles, Root Folders,  ░ │            │
+  └───────────│ File Types, Git filtering, Exclusions, Preview view/format, diagnostics, and          ░ │────────────┘
+              │ context/folder/ZIP exports.                                                           ░ │
+  Direct autom│                                                                                       ░ │
+              │ NAVIGATION                                                                            ░ │
+              │ Up/Down or j/k moves through lists. Enter opens or confirms. Esc closes one overlay   ▼ │
+              │                                                                                         │
+              │                                                                                         │
+              │                                      ⟦► Close ◄⟧▖                                       │
+              │                                      ▝▀▀▀▀▀▀▀▀▀▀▘                                       │
+              └─────────────────────────────────────────────────────────────────────────────────────────┘
 
-  Current directory                                                                      No project workspace detected
-  <PROJECT_ROOT>
-                  ┌┤Help├───────────────────────────────────────────────────────────────────────────┐
-  ┌┤Actions├──────│ Up/Down or j/k moves through actions; Enter opens the selected action.          │────────────────┐
-  │  Recent projec│ Esc closes a dialog and returns here without exiting. ? or F1 opens this help.  │il you confirm  │
-  │> Browse folder│ In a workspace, Tab or F6 moves to the next pane; Shift+Tab or Shift+F6 moves   │                │
-  │  Clone reposit│ to the previous pane.                                                           │                │
-  │  Open saved pr│ Preview supports Up/Down, j/k, Page Up/Page Down, Home/End, and Left/Right      │                │
-  │  Open Desktop │ scrolling.                                                                      │                │
-  │  Help         │ Long operations show their state. Esc or Ctrl+C cancels the active operation    │                │
-  │  Exit         │ first.                                                                          │                │
-  └───────────────│ Only Exit or q on this root screen closes DevProjex Terminal.                   │────────────────┘
-                  │ No project is scanned until you choose it. Use analyze and export for direct    │
-  Direct automatio│ automation.                                                                     │
-                  │                                                                                 │
-                  │                                                                                 │
-                  │                                  ⟦► Close ◄⟧▖                                   │
-                  │                                  ▝▀▀▀▀▀▀▀▀▀▀▘                                   │
-                  └─────────────────────────────────────────────────────────────────────────────────┘
 
 
-
-
-
-
-  Up/Down or j/k Navigate   Enter Select   ? Help   q Exit
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

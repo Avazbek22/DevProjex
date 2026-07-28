@@ -810,3 +810,23 @@ jobs:
             --no-restore `
             --filter "FullyQualifiedName~TerminalPtyJourneyTests.OpenCurrentProjectFromWelcomeReachesWorkspaceAndStaysAlive" `
             --logger "console;verbosity=minimal"
+
+      - name: Published Native PTY TUI Smoke (Unix)
+        if: ${{ startsWith(matrix.rid, 'linux-') || startsWith(matrix.rid, 'osx-') }}
+        shell: pwsh
+        run: |
+          $binaryPath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $env:DEVPROJEX_TUI_TEST_BINARY = $binaryPath
+          $env:DEVPROJEX_TUI_TEST_REPOSITORY_ROOT = (Resolve-Path ".").Path
+          $filter = @(
+            "FullyQualifiedName~TerminalPtyJourneyTests.OpenCurrentProjectFromWelcomeReachesWorkspaceAndStaysAlive",
+            "FullyQualifiedName~TerminalPreviewNavigationPtyTests.PreviewViewportAndFocusSurviveKeyboardNavigationOverlaysAndResize",
+            "FullyQualifiedName~TerminalRecentRepositoriesPtyTests.PopulatedCachedRepositoryOpensOfflineWithCleanIdentity",
+            "FullyQualifiedName~TerminalClonePtyTests.CloneProgressCancellationCleansCacheAndRetryOpensWorkspace",
+            "FullyQualifiedName~TerminalLargePreviewPtyTests.FileBackedReadablePreviewReachesFirstMiddleAndFinalSections"
+          ) -join "|"
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
+            -c Release `
+            --no-restore `
+            --filter $filter `
+            --logger "console;verbosity=minimal"

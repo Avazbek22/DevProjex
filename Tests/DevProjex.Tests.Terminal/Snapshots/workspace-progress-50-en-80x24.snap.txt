@@ -1,24 +1,24 @@
  DevProjex Terminal  <PROJECT>
- ...ts.Terminal\<ID>\<PROJECT>
- Profile: Standard  |  Git: gitignore  |  Tree + content / MD
+ <PROJECT_ROOT>
+ Readable / MD / Tree + content  |  Git: gitignore  |  Standard
 ┌┤> PROJECT TREE├──────────────────────────────────────────────────────────────┐
-│v [x] <PROJECT>                                          │
-│  > [x] src                                                                   │
-│ ┌┤Export project├──────────────────────────────────────────────────────────┐ │
+│v┌┤Export project├──────────────────────────────────────────────────────────┐ │
 │ │                                                                          │ │
 │ │  Copying files                                                           │ │
+│ │                                                                          │ │
+│ │                                                                          │ │
 │ │                                                                          │ │
 │ │  █████████████████████████████████50%                                    │ │
 │ │                                                                          │ │
 │ │  Folder  |  52 / 103  |  49 KB                                           │ │
+│ │                                                                          │ │
 │ │  Elapsed: <ELAPSED>                                                           │ │
+│ │                                                                          │ │
 │ │                                                                          │ │
 │ │  Esc or Ctrl+C cancels this operation                                    │ │
 │ └──────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
-│                                                                              │
-│                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 
- Files 101  |  Folders 2  |  100 KB  |  ~35 tokens  |  Warnings 0
- Up/Down Navigate   Enter Expand   Space Toggle   Tab/F6 Preview   ? Help
+ Files 101  |  Folders 2  |  100 KB  |  ~<TOKENS> tokens  |  Warnings 0
+ Up/Down Move  Enter Open  Space Toggle  Tab/F6 Preview  Ctrl+P Actions

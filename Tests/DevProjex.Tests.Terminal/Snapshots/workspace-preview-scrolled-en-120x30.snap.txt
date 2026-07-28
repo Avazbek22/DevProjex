@@ -1,30 +1,30 @@
  DevProjex Terminal  <ID>
  <PROJECTS_ROOT>
- Profile: Standard  |  Git filtering: .gitignore  |  View: Content / Markdown
-┌┤  PROJECT TREE├─────────────────────────────────────┐┌┤> CONTEXT PREVIEW · Content · Markdown├───────────────────────┐
-│v [x] <ID>               ││## `src/Feature003.cs`                                        ▲│
-│  > [x] src                                          ││                                                              ░│
-│    [x] global.json                                  ││```cs                                                         █│
-│                                                     ││internal sealed class ContentMarker003 { }                    ░│
-│                                                     ││```                                                           ░│
-│                                                     ││                                                              ░│
-│                                                     ││## `src/Feature004.cs`                                        ░│
-│                                                     ││                                                              ░│
-│                                                     ││```cs                                                         ░│
-│                                                     ││internal sealed class ContentMarker004 { }                    ░│
-│                                                     ││```                                                           ░│
-│                                                     ││                                                              ░│
-│                                                     ││## `src/Feature005.cs`                                        ░│
-│                                                     ││                                                              ░│
-│                                                     ││```cs                                                         ░│
-│                                                     ││internal sealed class ContentMarker005 { }                    ░│
-│                                                     ││```                                                           ░│
-│                                                     ││                                                              ░│
-│                                                     ││## `src/Feature006.cs`                                        ░│
-│                                                     ││                                                              ░│
-│                                                     ││```cs                                                         ░│
-│                                                     ││internal sealed class ContentMarker006 { }                    ▼│
+ Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Content / Markdown
+┌┤  PROJECT TREE├─────────────────────────────────────┐┌┤> CONTEXT PREVIEW · Readable · Content · Markdown├────────────┐
+│v [x] <ID>               ││src/Feature004.cs:                                            |│
+│  > [x] src                                          ││                                                              #│
+│    [x] global.json                                  ││internal sealed class ContentMarker004 { }                    |│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/Feature005.cs:                                            |│
+│                                                     ││                                                              |│
+│                                                     ││internal sealed class ContentMarker005 { }                    |│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/Feature006.cs:                                            |│
+│                                                     ││                                                              |│
+│                                                     ││internal sealed class ContentMarker006 { }                    |│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/Feature007.cs:                                            |│
+│                                                     ││                                                              |│
+│                                                     ││internal sealed class ContentMarker007 { }                    |│
+│                                                     ││                                                              |│
+│                                                     ││                                                              |│
+│                                                     ││src/Feature008.cs:                                            |│
+│                                                     ││ Files 5-9/61  |  Lines 21-41/303                              │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
- Files 61  |  Folders 2  |  2,46 KB  |  ~2 428 tokens  |  Warnings 0
- Up/Down or j/k Scroll   PgUp/PgDn Page   Tab/F6 Tree   1/2/3 View   F Format   ? Help
+ Files 61  |  Folders 2  |  2.46 KB  |  ~<TOKENS> tokens  |  Warnings 0
+ j/k Scroll   PgUp/PgDn Page   1/2/3 View   V Readable/Raw   F Format   Tab/F6 Controls   Ctrl+P Actions

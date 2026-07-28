@@ -162,12 +162,12 @@ public sealed class TerminalPtyJourneyTests
 
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Only Exit or q",
+			"Prepare a controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Only Exit or q",
+			"Prepare a controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await SelectWelcomeActionAsync(
@@ -210,12 +210,12 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.SendAsync("not-a-repository", TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"DPX-TUI-CLONE-FAILED",
+			"DPX-TUI-GIT-URL-INVALID",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"DPX-TUI-CLONE-FAILED",
+			"DPX-TUI-GIT-URL-INVALID",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await SelectWelcomeActionAsync(
@@ -274,11 +274,11 @@ public sealed class TerminalPtyJourneyTests
 
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Only q on the root workspace exits",
+			"WORKSPACE MODEL",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Only q on the root workspace exits",
+			"WORKSPACE MODEL",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("\t", TestContext.Current.CancellationToken);
@@ -287,9 +287,16 @@ public sealed class TerminalPtyJourneyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"CONTEXT PREVIEW · Tree",
+			"CONTEXT PREVIEW · Readable · Tree",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("\t", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT CONTROLS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("\t", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("/", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(

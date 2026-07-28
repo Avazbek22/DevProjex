@@ -1,11 +1,11 @@
  DevProjex Terminal  <PROJECT>
- ...ppData\Local\Temp\DevProjex.Tests.Terminal\<PROJECT>
- Profile: Standard  |  Git: gitignore  |  Tree + content / MD
+ <PROJECT_ROOT>
+ Readable / MD / Tree + content  |  Git: gitignore  |  Standard
 ┌┤> PROJECT TREE├──────────────────────────────────────────────────────────────┐
 │v [x] <PROJECT>                                        │
 │  > [x] src                                                                   │
 │    [x] global.json                                                           │
-│    [x] README.md                                                             │
+│    [x] readme.md                                                             │
 │                                                                              │
 │                                                                              │
 │                                                                              │
@@ -20,5 +20,5 @@
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 
- Files 4  |  Folders 3  |  76 B  |  ~132 tokens  |  Warnings 0
- Up/Down Navigate   Enter Expand   Space Toggle   Tab/F6 Preview   ? Help
+ Files 4  |  Folders 3  |  76 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Up/Down Move  Enter Open  Space Toggle  Tab/F6 Preview  Ctrl+P Actions

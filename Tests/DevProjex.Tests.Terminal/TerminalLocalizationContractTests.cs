@@ -95,6 +95,31 @@ public sealed partial class TerminalLocalizationContractTests
 		}
 	}
 
+	[Fact]
+	public void CompactFooterText_FitsTheMinimumSupportedViewport()
+	{
+		var catalogs = ReadCatalogs();
+		var workspaceFooterKeys = new[]
+		{
+			"Terminal.Tui.Footer.Tree",
+			"Terminal.Tui.Footer.Preview",
+			"Terminal.Tui.Footer.Controls"
+		};
+
+		foreach (var (locale, catalog) in catalogs)
+		{
+			Assert.True(
+				catalog["Terminal.Tui.Footer.Welcome"].Length <= 76,
+				$"The compact Welcome footer does not fit 80 columns in {locale}.");
+			foreach (var key in workspaceFooterKeys)
+			{
+				Assert.True(
+					catalog[key].Length <= 80,
+					$"{key} does not fit 80 columns in {locale}.");
+			}
+		}
+	}
+
 	private static Dictionary<string, Dictionary<string, string>> ReadCatalogs()
 	{
 		var directory = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
@@ -114,15 +139,7 @@ public sealed partial class TerminalLocalizationContractTests
 	}
 
 	private static string FindRepositoryRoot()
-	{
-		for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-		{
-			if (File.Exists(Path.Combine(directory.FullName, "DevProjex.sln")))
-				return directory.FullName;
-		}
-
-		throw new InvalidOperationException("Repository root not found.");
-	}
+		=> PublishedApplicationLocator.FindRepositoryRoot();
 
 	[GeneratedRegex(@"\{\d+\}", RegexOptions.CultureInvariant)]
 	private static partial Regex PlaceholderRegex();

@@ -69,6 +69,7 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		ReleaseCheckpoint(checkpointRoot, "project-loading");
 
 		await WaitForStableScreenAsync(terminal, "BetaMarker.cs");
+		await WaitForStableScreenAsync(terminal, "internal sealed class Marker");
 		Verify(
 			"recent-workspace-en-120x30",
 			terminal,
@@ -121,7 +122,7 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		Verify("workspace-preview-scrolled-en-120x30", terminal, project.Path);
 
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Tab/F6 Tree   ? Help");
+		await WaitForStableScreenAsync(terminal, "Tab/F6 Controls");
 		Assert.Contains(
 			"> CONTEXT PREVIEW",
 			terminal.CaptureScreen(),
