@@ -816,6 +816,13 @@ jobs:
         if: ${{ startsWith(matrix.rid, 'linux-') || startsWith(matrix.rid, 'osx-') }}
         shell: pwsh
         run: |
+          if ($env:RUNNER_OS -eq "macOS") {
+            # Keep the test host and forkpty child on one non-symlinked temp path.
+            $nativePtyTemp = Join-Path $env:RUNNER_TEMP "devprojex-native-pty-${{ matrix.rid }}"
+            New-Item -ItemType Directory -Path $nativePtyTemp -Force | Out-Null
+            $env:TMPDIR = $nativePtyTemp + [IO.Path]::DirectorySeparatorChar
+          }
+
           $binaryPath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
           $env:DEVPROJEX_TUI_TEST_BINARY = $binaryPath
           $env:DEVPROJEX_TUI_TEST_REPOSITORY_ROOT = (Resolve-Path ".").Path
