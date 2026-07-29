@@ -18,22 +18,35 @@ public partial class MainWindow
 
     private void SyncRecentProjectsToViewModel()
     {
+        var workspaces = _recentWorkspacesService.Project(
+            _recentProjectsDb.RecentFolders
+                .Select(static entry => new RecentWorkspaceSource(
+                    RecentWorkspaceKind.Folder,
+                    entry.Path,
+                    entry.OpenedUtc))
+                .Concat(_recentProjectsDb.RecentRepositories.Select(static entry =>
+                    new RecentWorkspaceSource(
+                        RecentWorkspaceKind.Repository,
+                        entry.Url,
+                        entry.OpenedUtc))));
         _viewModel.RecentFolders.Clear();
-        foreach (var entry in _recentProjectsDb.RecentFolders)
+        foreach (var workspace in workspaces.Where(static item =>
+                     item.Kind == RecentWorkspaceKind.Folder))
         {
             _viewModel.RecentFolders.Add(new RecentProjectEntryViewModel(
-                entry.Path,
-                RecentProjectPresentationService.CreateFolderDisplayText(entry.Path),
-                RecentProjectPresentationService.CreateFolderToolTip(entry.Path)));
+                workspace.Source,
+                RecentProjectPresentationService.CreateFolderDisplayText(workspace.Source),
+                RecentProjectPresentationService.CreateFolderToolTip(workspace.Source)));
         }
 
         _viewModel.RecentRepositories.Clear();
-        foreach (var entry in _recentProjectsDb.RecentRepositories)
+        foreach (var workspace in workspaces.Where(static item =>
+                     item.Kind == RecentWorkspaceKind.Repository))
         {
             _viewModel.RecentRepositories.Add(new RecentProjectEntryViewModel(
-                entry.Url,
-                RecentProjectPresentationService.CreateRepositoryDisplayText(entry.Url),
-                RecentProjectPresentationService.CreateRepositoryToolTip(entry.Url)));
+                workspace.Source,
+                RecentProjectPresentationService.CreateRepositoryDisplayText(workspace.Source),
+                RecentProjectPresentationService.CreateRepositoryToolTip(workspace.Source)));
         }
     }
 

@@ -9,86 +9,175 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalVirtualizedPreviewView : View
 {
+	private readonly List<PreviewTextSearchMatch> _searchMatches = [];
 	private IPreviewTextDocument? _document;
-	private int _firstVisibleLine;
-	private int _horizontalOffset;
+	private string _searchQuery = string.Empty;
+	private int _currentSearchMatchIndex = -1;
+	private readonly Rune _horizontalScrollThumb;
+	private readonly Rune _verticalScrollThumb;
+	private readonly Rune _scrollTrack;
 
-	public TerminalVirtualizedPreviewView()
+	public TerminalVirtualizedPreviewView(bool useUnicode = true)
 	{
+		_horizontalScrollThumb = new Rune(useUnicode ? '━' : '-');
+		_verticalScrollThumb = new Rune(useUnicode ? '┃' : '|');
+		_scrollTrack = new Rune(useUnicode ? '·' : '.');
 		CanFocus = true;
 		SchemeName = TerminalWorkspaceTheme.Base;
+		ViewportSettings |= ViewportSettingsFlags.HasScrollBars;
+		VerticalScrollBar.SchemeName = TerminalWorkspaceTheme.Secondary;
+		HorizontalScrollBar.SchemeName = TerminalWorkspaceTheme.Secondary;
+		VerticalScrollBar.DrawingContent += (_, _) =>
+			DrawScrollTrack(VerticalScrollBar, _scrollTrack, vertical: true);
+		HorizontalScrollBar.DrawingContent += (_, _) =>
+			DrawScrollTrack(HorizontalScrollBar, _scrollTrack, vertical: false);
+		VerticalScrollBar.Slider.DrawingContent += (_, _) =>
+			DrawScrollThumb(VerticalScrollBar.Slider, _verticalScrollThumb);
+		HorizontalScrollBar.Slider.DrawingContent += (_, _) =>
+			DrawScrollThumb(HorizontalScrollBar.Slider, _horizontalScrollThumb);
 		ViewportChanged += (_, _) => RaiseVisibleRangeChanged();
 	}
 
 	public event EventHandler? VisibleRangeChanged;
 
-	public int FirstVisibleLine => _firstVisibleLine;
+	public int FirstVisibleLine => Viewport.Y;
 
-	public int HorizontalOffset => _horizontalOffset;
+	public int HorizontalOffset => Viewport.X;
 
 	public int LineCount => _document?.LineCount ?? 1;
 
 	public int PageSize => Math.Max(1, Viewport.Height);
 
 	public int VisibleLastLine =>
-		Math.Min(LineCount, _firstVisibleLine + PageSize);
+		Math.Min(LineCount, FirstVisibleLine + PageSize);
 
 	public int MaxLineLength => _document?.MaxLineLength ?? 0;
 
-	public int VisibleTextWidth =>
-		Math.Max(1, Viewport.Width - ResolveVerticalIndicatorWidth());
+	public int VisibleTextWidth => Math.Max(1, Viewport.Width);
 
 	public IReadOnlyList<PreviewDocumentSection> Sections =>
 		_document?.Sections ?? [];
 
-	public bool HasHorizontalOverflow =>
-		MaxLineLength > VisibleTextWidth;
+	public bool HasHorizontalOverflow => MaxLineLength > VisibleTextWidth;
 
-	public void SetDocument(IPreviewTextDocument document, bool preserveViewport)
+	public bool HasVerticalOverflow => LineCount > PageSize;
+
+	public string SearchQuery => _searchQuery;
+
+	public int SearchMatchCount => _searchMatches.Count;
+
+	public int CurrentSearchMatchOrdinal =>
+		_currentSearchMatchIndex >= 0 ? _currentSearchMatchIndex + 1 : 0;
+
+	public PreviewTextSearchMatch? CurrentSearchMatch =>
+		_currentSearchMatchIndex >= 0
+			? _searchMatches[_currentSearchMatchIndex]
+			: null;
+
+	public bool SetDocument(IPreviewTextDocument document, bool preserveViewport)
 	{
 		ArgumentNullException.ThrowIfNull(document);
-		_document = document;
-		if (!preserveViewport)
-		{
-			_firstVisibleLine = 0;
-			_horizontalOffset = 0;
-		}
+		if (ReferenceEquals(_document, document))
+			return false;
 
-		ClampViewport();
-		SetNeedsDraw();
-		RaiseVisibleRangeChanged();
+		var previousLocation = Viewport.Location;
+		_document = document;
+		SetContentSize(new Size(
+			Math.Max(1, document.MaxLineLength),
+			Math.Max(1, document.LineCount)));
+		_searchMatches.Clear();
+		_currentSearchMatchIndex = -1;
+		ScrollTo(
+			preserveViewport ? previousLocation.Y : 0,
+			preserveViewport ? previousLocation.X : 0);
+		return true;
 	}
 
 	public void ScrollTo(int zeroBasedLine, int horizontalOffset)
 	{
 		var maximumFirstLine = Math.Max(0, LineCount - PageSize);
-		_firstVisibleLine = Math.Clamp(zeroBasedLine, 0, maximumFirstLine);
-		var textWidth = VisibleTextWidth;
-		_horizontalOffset = Math.Clamp(
-			horizontalOffset,
-			0,
-			Math.Max(0, MaxLineLength - textWidth));
+		var firstLine = Math.Clamp(zeroBasedLine, 0, maximumFirstLine);
+		var maximumColumn = Math.Max(0, MaxLineLength - VisibleTextWidth);
+		var firstColumn = Math.Clamp(horizontalOffset, 0, maximumColumn);
+		Viewport = new Rectangle(
+			firstColumn,
+			firstLine,
+			Viewport.Width,
+			Viewport.Height);
 		SetNeedsDraw();
 		RaiseVisibleRangeChanged();
 	}
 
-	public int FindNext(string query, int startLine)
+	public PreviewTextSearchMatch? SetSearchQuery(
+		string? query,
+		int startLine,
+		int startColumn = -1)
 	{
-		if (_document is null || string.IsNullOrWhiteSpace(query))
-			return -1;
+		_searchQuery = query?.Trim() ?? string.Empty;
+		_searchMatches.Clear();
+		_searchMatches.AddRange(
+			_document is null
+				? []
+				: PreviewTextDocumentSearch.FindAll(_document, _searchQuery));
+		return FindNextSearchMatch(startLine, startColumn, reverse: false);
+	}
 
-		var normalizedStart = Math.Clamp(startLine, -1, LineCount - 1);
-		for (var offset = 1; offset <= LineCount; offset++)
-		{
-			var line = (normalizedStart + offset) % LineCount;
-			if (_document.GetLineText(line + 1)
-			    .Contains(query, StringComparison.OrdinalIgnoreCase))
-			{
-				return line;
-			}
-		}
+	public void BeginSearch(string query)
+	{
+		_searchQuery = query.Trim();
+		_searchMatches.Clear();
+		_currentSearchMatchIndex = -1;
+		SetNeedsDraw();
+		RaiseVisibleRangeChanged();
+	}
 
-		return -1;
+	public PreviewTextSearchMatch? ApplySearchResults(
+		string query,
+		IReadOnlyList<PreviewTextSearchMatch> matches,
+		int startLine,
+		int startColumn = -1)
+	{
+		if (!string.Equals(_searchQuery, query.Trim(), StringComparison.Ordinal))
+			return null;
+
+		_searchMatches.Clear();
+		_searchMatches.AddRange(matches);
+		_currentSearchMatchIndex = -1;
+		return FindNextSearchMatch(startLine, startColumn, reverse: false);
+	}
+
+	public int FindNext(string query, int startLine) =>
+		SetSearchQuery(query, startLine)?.Line ?? -1;
+
+	public void ClearSearch()
+	{
+		_searchQuery = string.Empty;
+		_searchMatches.Clear();
+		_currentSearchMatchIndex = -1;
+		SetNeedsDraw();
+		RaiseVisibleRangeChanged();
+	}
+
+	public PreviewTextSearchMatch? FindNextSearchMatch(
+		int startLine,
+		int startColumn,
+		bool reverse)
+	{
+		if (_searchMatches.Count == 0)
+			return null;
+
+		var index = reverse
+			? _searchMatches.FindLastIndex(match =>
+				match.Line < startLine ||
+				match.Line == startLine && match.Column < startColumn)
+			: _searchMatches.FindIndex(match =>
+				match.Line > startLine ||
+				match.Line == startLine && match.Column > startColumn);
+		if (index < 0)
+			index = reverse ? _searchMatches.Count - 1 : 0;
+
+		_currentSearchMatchIndex = index;
+		return _searchMatches[index];
 	}
 
 	protected override bool OnDrawingContent(DrawContext? context)
@@ -96,22 +185,16 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_document is null)
 			return true;
 
-		ClampViewport();
-		var indicatorWidth = ResolveVerticalIndicatorWidth();
-		var textWidth = VisibleTextWidth;
 		SetAttributeForRole(VisualRole.ReadOnly);
 		for (var row = 0; row < Viewport.Height; row++)
 		{
-			var lineIndex = _firstVisibleLine + row;
+			var lineIndex = FirstVisibleLine + row;
 			if (lineIndex >= LineCount)
 				break;
 
 			var line = _document.GetLineText(lineIndex + 1);
-			AddStr(0, row, SliceColumns(line, _horizontalOffset, textWidth));
+			AddStr(0, row, SliceColumns(line, HorizontalOffset, VisibleTextWidth));
 		}
-
-		if (indicatorWidth > 0)
-			DrawVerticalPositionIndicator(textWidth);
 
 		return true;
 	}
@@ -126,64 +209,48 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		}
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledUp))
 		{
-			ScrollTo(_firstVisibleLine - 3, _horizontalOffset);
+			ScrollTo(FirstVisibleLine - 3, HorizontalOffset);
 			return true;
 		}
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledDown))
 		{
-			ScrollTo(_firstVisibleLine + 3, _horizontalOffset);
+			ScrollTo(FirstVisibleLine + 3, HorizontalOffset);
 			return true;
 		}
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledLeft))
 		{
-			ScrollTo(_firstVisibleLine, _horizontalOffset - 4);
+			ScrollTo(FirstVisibleLine, HorizontalOffset - 4);
 			return true;
 		}
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledRight))
 		{
-			ScrollTo(_firstVisibleLine, _horizontalOffset + 4);
+			ScrollTo(FirstVisibleLine, HorizontalOffset + 4);
 			return true;
 		}
 
 		return base.OnMouseEvent(mouse);
 	}
 
-	private void DrawVerticalPositionIndicator(int column)
-	{
-		var height = Math.Max(1, Viewport.Height);
-		var thumbHeight = Math.Max(1, (int)Math.Round(
-			height * Math.Min(1d, height / (double)Math.Max(1, LineCount))));
-		var maximumThumbTop = Math.Max(0, height - thumbHeight);
-		var maximumFirstLine = Math.Max(1, LineCount - height);
-		var thumbTop = Math.Clamp(
-			(int)Math.Round(maximumThumbTop * (_firstVisibleLine / (double)maximumFirstLine)),
-			0,
-			maximumThumbTop);
-
-		SetAttributeForRole(VisualRole.Disabled);
-		for (var row = 0; row < height; row++)
-			AddRune(
-				column,
-				row,
-				new Rune(row >= thumbTop && row < thumbTop + thumbHeight ? '#' : '|'));
-	}
-
-	private int ResolveVerticalIndicatorWidth() =>
-		LineCount > Math.Max(1, Viewport.Height) && Viewport.Width >= 4 ? 1 : 0;
-
-	private void ClampViewport()
-	{
-		var maximumFirstLine = Math.Max(0, LineCount - PageSize);
-		_firstVisibleLine = Math.Clamp(_firstVisibleLine, 0, maximumFirstLine);
-		var textWidth = VisibleTextWidth;
-		_horizontalOffset = Math.Clamp(
-			_horizontalOffset,
-			0,
-			Math.Max(0, MaxLineLength - textWidth));
-	}
-
 	private void RaiseVisibleRangeChanged() =>
 		VisibleRangeChanged?.Invoke(this, EventArgs.Empty);
+
+	private static void DrawScrollThumb(View slider, Rune glyph)
+	{
+		slider.SetAttributeForRole(VisualRole.ReadOnly);
+		slider.FillRect(
+			new Rectangle(Point.Empty, slider.Viewport.Size),
+			glyph);
+	}
+
+	private static void DrawScrollTrack(View scrollBar, Rune glyph, bool vertical)
+	{
+		scrollBar.SetAttributeForRole(VisualRole.ReadOnly);
+		var track = vertical
+			? new Rectangle(0, 1, scrollBar.Viewport.Width, Math.Max(0, scrollBar.Viewport.Height - 2))
+			: new Rectangle(1, 0, Math.Max(0, scrollBar.Viewport.Width - 2), scrollBar.Viewport.Height);
+		if (track.Width > 0 && track.Height > 0)
+			scrollBar.FillRect(track, glyph);
+	}
 
 	private static string SliceColumns(string value, int startColumn, int maximumColumns)
 	{

@@ -10,6 +10,7 @@ public sealed record AvaloniaAppServices(
     UserSettingsStore UserSettingsStore,
     ThemeSettingsStore ThemeSettingsStore,
     RecentProjectsStore RecentProjectsStore,
+    RecentWorkspacesService RecentWorkspacesService,
     RecentFolderAvailabilityService RecentFolderAvailabilityService,
     IProjectProfileStore ProjectProfileStore,
     IAppInstanceLauncher AppInstanceLauncher,

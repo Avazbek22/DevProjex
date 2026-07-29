@@ -4,7 +4,6 @@ internal enum TerminalWorkspaceActionKind
 {
 	Analyze,
 	Search,
-	PreviewPresentation,
 	PreviewView,
 	PreviewFormat,
 	OpenControls,
@@ -20,7 +19,7 @@ internal enum TerminalWorkspaceActionKind
 	SourceDetails,
 	GetUpdates,
 	SwitchBranch,
-	RecentRepositories,
+	RecentWorkspaces,
 	ReturnToWelcome,
 	Help
 }
@@ -71,10 +70,4 @@ internal sealed class TerminalPaletteRow(TerminalPaletteItem item)
 			: $": {Item.Value}";
 		return Item.Title + value + shortcut;
 	}
-}
-
-public enum TerminalPreviewPresentation
-{
-	Readable,
-	RawOutput
 }

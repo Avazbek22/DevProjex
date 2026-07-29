@@ -6,12 +6,19 @@ namespace DevProjex.Application.Services;
 /// Builds readable preview documents with bounded memory usage.
 /// Large payloads are stored in a temporary UTF-8 backing file instead of one giant managed string.
 /// </summary>
-public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
+public sealed class PreviewDocumentBuilder(
+    IFileContentAnalyzer contentAnalyzer,
+    Func<FileContentClassification, string>? omissionMessageProvider = null)
 {
     private const string ClipboardBlankLine = "\u00A0";
     private const string NoContentMarker = "[No Content, 0 bytes]";
-    private const string BinaryOrUnreadableMarker = "[Binary or unreadable file; content omitted]";
-    private const string LargeTextMarker = "[Large text file; open Raw output or export to inspect complete content]";
+    private const string BinaryMarker = "[Binary file; content omitted]";
+    private const string LargeTextMarker = "[File is too large for interactive preview; export to inspect complete content]";
+    private const string UnreadableMarker = "[File could not be read]";
+    private const string AccessDeniedMarker = "[Access denied while reading file]";
+    private const string MissingMarker = "[File disappeared while it was being read]";
+    private const string UnsupportedEncodingMarker = "[Unsupported text encoding]";
+    private const long MaximumInteractiveFileBytes = 10 * 1024 * 1024;
     private const string WhitespaceMarkerPrefix = "[Whitespace, ";
     private const string WhitespaceMarkerSuffix = " bytes]";
     private const int InMemoryDocumentThresholdChars = 500_000;
@@ -133,8 +140,11 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var content = await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
-            if (content is null && !includeOmissionMarkers)
+            var readResult = await contentAnalyzer
+                .ReadClassifiedAsync(file, MaximumInteractiveFileBytes, cancellationToken)
+                .ConfigureAwait(false);
+            var content = readResult.Content;
+            if ((!readResult.IsText || content is null) && !includeOmissionMarkers)
                 continue;
 
             if (!anyWritten)
@@ -159,9 +169,9 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
             builder.AppendLine($"{displayPath}:");
             builder.AppendLine(ClipboardBlankLine);
 
-            if (content is null)
+            if (!readResult.IsText || content is null)
             {
-                builder.AppendLine(BinaryOrUnreadableMarker);
+                builder.AppendLine(GetOmissionMarker(readResult.Classification));
                 sections.Add(new PreviewDocumentSection(
                     displayPath,
                     sectionStartLine,
@@ -199,7 +209,7 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
             {
                 if (includeOmissionMarkers)
                 {
-                    builder.AppendLine(LargeTextMarker);
+                    builder.AppendLine(GetOmissionMarker(FileContentClassification.TooLarge));
                 }
                 else
                 {
@@ -230,6 +240,22 @@ public sealed class PreviewDocumentBuilder(IFileContentAnalyzer contentAnalyzer)
             builder.TrimTrailingEmptyLine();
 
         return anyWritten;
+    }
+
+    private string GetOmissionMarker(FileContentClassification classification)
+    {
+        if (omissionMessageProvider is not null)
+            return $"[{omissionMessageProvider(classification)}]";
+
+        return classification switch
+        {
+            FileContentClassification.Binary => BinaryMarker,
+            FileContentClassification.TooLarge => LargeTextMarker,
+            FileContentClassification.AccessDenied => AccessDeniedMarker,
+            FileContentClassification.Missing => MissingMarker,
+            FileContentClassification.UnsupportedEncoding => UnsupportedEncodingMarker,
+            _ => UnreadableMarker
+        };
     }
 
     private static List<string> BuildOrderedUniqueFiles(IEnumerable<string> filePaths)

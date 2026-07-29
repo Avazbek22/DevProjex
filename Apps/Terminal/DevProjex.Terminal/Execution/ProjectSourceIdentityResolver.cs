@@ -11,7 +11,11 @@ public sealed class ProjectSourceIdentityResolver(
 	{
 		var normalizedPath = PathUtility.Normalize(projectPath);
 		if (knownIdentity is not null)
-			return NormalizeKnownIdentity(knownIdentity, normalizedPath);
+		{
+			var normalizedIdentity = NormalizeKnownIdentity(knownIdentity, normalizedPath);
+			RecordCachedIdentity(normalizedIdentity, normalizedPath);
+			return normalizedIdentity;
+		}
 
 		if (!repoCacheService.IsInCache(normalizedPath))
 			return CreateLocalIdentity(normalizedPath);
@@ -29,6 +33,14 @@ public sealed class ProjectSourceIdentityResolver(
 			? RepositoryUrlUtility.GetRepositoryName(repositoryUrl)
 			: RemoveCacheSuffix(GetPathName(normalizedPath));
 		var safeUrl = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
+		if (safeUrl.Length > 0)
+		{
+			repoCacheService.RecordIndexedRepository(
+				safeUrl,
+				normalizedPath,
+				branch,
+				commitHash);
+		}
 
 		return new ProjectSourceIdentity(
 			displayName,
@@ -38,6 +50,27 @@ public sealed class ProjectSourceIdentityResolver(
 			branch,
 			commitHash,
 			IsCachedRepository: true);
+	}
+
+	private void RecordCachedIdentity(
+		ProjectSourceIdentity identity,
+		string normalizedPath)
+	{
+		if (identity.SourceType != ProjectSourceType.GitClone ||
+		    !repoCacheService.IsInCache(normalizedPath))
+		{
+			return;
+		}
+
+		var repositoryUrl = identity.RepositoryUrl ?? identity.SourceReference;
+		if (RepositoryUrlUtility.GetComparisonKey(repositoryUrl).Length == 0)
+			return;
+
+		repoCacheService.RecordIndexedRepository(
+			repositoryUrl,
+			normalizedPath,
+			identity.Branch,
+			identity.CommitHash);
 	}
 
 	public static ProjectSourceIdentity CreateCloneIdentity(

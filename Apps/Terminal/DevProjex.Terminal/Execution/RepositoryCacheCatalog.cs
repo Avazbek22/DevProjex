@@ -26,44 +26,96 @@ public sealed class RepositoryCacheCatalog(
 	{
 		var safeUrl = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
 		var repositoryName = RepositoryUrlUtility.GetRepositoryName(safeUrl);
+		var indexed = repoCacheService.FindIndexedRepository(safeUrl);
+		if (indexed is not null)
+		{
+			if (!Directory.Exists(indexed.LocalPath))
+			{
+				repoCacheService.RemoveIndexedRepository(indexed.LocalPath);
+			}
+			else
+			{
+				var indexedResult = await ResolveCandidateAsync(
+						safeUrl,
+						repositoryName,
+						indexed.LocalPath,
+						cancellationToken)
+					.ConfigureAwait(false);
+				if (indexedResult is not null)
+					return indexedResult;
+
+				repoCacheService.RemoveIndexedRepository(indexed.LocalPath);
+			}
+		}
+
 		var candidates = EnumerateCandidates(repositoryName);
 		CachedRepository? damaged = null;
 		foreach (var candidate in candidates)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var remoteUrl = await gitRepositoryService
-				.GetRemoteUrlAsync(candidate, cancellationToken)
+			var resolved = await ResolveCandidateAsync(
+					safeUrl,
+					repositoryName,
+					candidate,
+					cancellationToken)
 				.ConfigureAwait(false);
-			if (!RepositoryUrlUtility.AreEquivalent(remoteUrl, safeUrl))
+			if (resolved is null)
 			{
-				if (remoteUrl is null && damaged is null)
-					damaged = CreateDamaged(safeUrl, repositoryName, candidate);
 				continue;
 			}
 
-			if (!HasGitMetadata(candidate))
-				return CreateDamaged(safeUrl, repositoryName, candidate);
-
-			var branch = await gitRepositoryService
-				.GetCurrentBranchAsync(candidate, cancellationToken)
-				.ConfigureAwait(false);
-			var commitHash = await gitRepositoryService
-				.GetHeadCommitAsync(candidate, cancellationToken)
-				.ConfigureAwait(false);
-			return new CachedRepository(
-				safeUrl,
-				repositoryName,
-				RepositoryCacheState.Ready,
-				candidate,
-				branch,
-				commitHash,
-				GetLastModified(candidate));
+			if (resolved.State == RepositoryCacheState.Ready)
+				return resolved;
+			damaged ??= resolved;
 		}
 
 		return damaged ?? new CachedRepository(
 			safeUrl,
 			repositoryName,
 			RepositoryCacheState.Missing);
+	}
+
+	private async Task<CachedRepository?> ResolveCandidateAsync(
+		string repositoryUrl,
+		string repositoryName,
+		string candidate,
+		CancellationToken cancellationToken)
+	{
+		if (!Directory.Exists(candidate))
+			return null;
+
+		var remoteUrl = await gitRepositoryService
+			.GetRemoteUrlAsync(candidate, cancellationToken)
+			.ConfigureAwait(false);
+		if (!RepositoryUrlUtility.AreEquivalent(remoteUrl, repositoryUrl))
+		{
+			return remoteUrl is null
+				? RecordDamaged(repositoryUrl, repositoryName, candidate)
+				: null;
+		}
+
+		if (!HasGitMetadata(candidate))
+			return RecordDamaged(repositoryUrl, repositoryName, candidate);
+
+		var branch = await gitRepositoryService
+			.GetCurrentBranchAsync(candidate, cancellationToken)
+			.ConfigureAwait(false);
+		var commitHash = await gitRepositoryService
+			.GetHeadCommitAsync(candidate, cancellationToken)
+			.ConfigureAwait(false);
+		repoCacheService.RecordIndexedRepository(
+			repositoryUrl,
+			candidate,
+			branch,
+			commitHash);
+		return new CachedRepository(
+			repositoryUrl,
+			repositoryName,
+			RepositoryCacheState.Ready,
+			candidate,
+			branch,
+			commitHash,
+			GetLastModified(candidate));
 	}
 
 	private IReadOnlyList<string> EnumerateCandidates(string repositoryName)
@@ -76,6 +128,10 @@ public sealed class RepositoryCacheCatalog(
 			var prefix = repositoryName + "_";
 			return Directory
 				.EnumerateDirectories(repoCacheService.CacheRootPath)
+				.Where(path => !string.Equals(
+					Path.GetFileName(path),
+					".staging",
+					StringComparison.Ordinal))
 				.OrderByDescending(path =>
 					Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
 				.ThenByDescending(GetLastModified)
@@ -101,6 +157,18 @@ public sealed class RepositoryCacheCatalog(
 			RepositoryCacheState.Damaged,
 			path,
 			LastModifiedUtc: GetLastModified(path));
+
+	private CachedRepository RecordDamaged(
+		string repositoryUrl,
+		string repositoryName,
+		string path)
+	{
+		repoCacheService.RecordIndexedRepository(
+			repositoryUrl,
+			path,
+			state: RepositoryCacheEntryState.Damaged);
+		return CreateDamaged(repositoryUrl, repositoryName, path);
+	}
 
 	private static DateTimeOffset? GetLastModified(string path)
 	{

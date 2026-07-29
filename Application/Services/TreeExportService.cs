@@ -36,28 +36,46 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		TreeTextFormat format,
 		string? displayRootPath = null,
-		string? displayRootName = null)
+		string? displayRootName = null,
+		bool includeRootPath = true)
 	{
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 
 		return format switch
 		{
-			TreeTextFormat.Json => BuildFullTreeJson(outputRootPath, root),
-			TreeTextFormat.Xml => BuildFullTreeXml(outputRootPath, root),
-			TreeTextFormat.Markdown => BuildFullTreeMarkdown(outputRootPath, root),
-			_ => BuildFullTreeAscii(outputRootPath, outputRootName, root)
+			TreeTextFormat.Json => includeRootPath
+				? BuildFullTreeJson(outputRootPath, root)
+				: BuildNamedTreeJson(outputRootName, root),
+			TreeTextFormat.Xml => includeRootPath
+				? BuildFullTreeXml(outputRootPath, root)
+				: BuildNamedTreeXml(outputRootName, root),
+			TreeTextFormat.Markdown => includeRootPath
+				? BuildFullTreeMarkdown(outputRootPath, root)
+				: BuildNamedTreeMarkdown(outputRootName, root),
+			_ => BuildFullTreeAscii(outputRootPath, outputRootName, root, includeRootPath)
 		};
 	}
 
-	private static string BuildFullTreeAscii(string outputRootPath, string outputRootName, TreeNodeDescriptor root)
+	private static string BuildFullTreeAscii(
+		string outputRootPath,
+		string outputRootName,
+		TreeNodeDescriptor root,
+		bool includeRootPath = true)
 	{
 		var sb = new StringBuilder();
-		sb.Append(outputRootPath).AppendLine(":");
-		sb.AppendLine();
-
-		sb.Append("├── ").AppendLine(outputRootName);
-		AppendAscii(root, "│   ", sb);
+		if (includeRootPath)
+		{
+			sb.Append(outputRootPath).AppendLine(":");
+			sb.AppendLine();
+			sb.Append("├── ").AppendLine(outputRootName);
+			AppendAscii(root, "│   ", sb);
+		}
+		else
+		{
+			sb.AppendLine(outputRootName);
+			AppendAscii(root, string.Empty, sb);
+		}
 
 		return sb.ToString();
 	}
@@ -284,6 +302,50 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root)
 	{
 		return BuildMarkdownDocument(localRootPath, root, includedPaths: null);
+	}
+
+	private static string BuildNamedTreeJson(
+		string rootName,
+		TreeNodeDescriptor root)
+	{
+		var buffer = new ArrayBufferWriter<byte>();
+		using (var writer = new Utf8JsonWriter(buffer, JsonWriterOptions))
+		{
+			writer.WriteStartObject();
+			writer.WritePropertyName(rootName);
+			WriteJsonTreeContents(writer, root, includedPaths: null);
+			writer.WriteEndObject();
+			writer.Flush();
+		}
+
+		return Encoding.UTF8.GetString(buffer.WrittenSpan);
+	}
+
+	private static string BuildNamedTreeXml(
+		string rootName,
+		TreeNodeDescriptor root)
+	{
+		var output = new StringBuilder();
+		using (var writer = XmlWriter.Create(output, XmlWriterSettings))
+		{
+			writer.WriteStartElement("d");
+			writer.WriteAttributeString("n", rootName);
+			WriteXmlTreeContents(writer, root, includedPaths: null);
+			writer.WriteEndElement();
+		}
+
+		return output.ToString();
+	}
+
+	private static string BuildNamedTreeMarkdown(
+		string rootName,
+		TreeNodeDescriptor root)
+	{
+		var output = new StringBuilder();
+		AppendMarkdownItem(output, level: 0, rootName, root.IsDirectory);
+		if (root.IsDirectory)
+			AppendMarkdownChildren(output, root.Children, includedPaths: null, level: 1);
+		return output.ToString();
 	}
 
 	private static string BuildSelectedTreeMarkdown(

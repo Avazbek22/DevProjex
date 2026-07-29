@@ -10,6 +10,7 @@ public sealed record TerminalServices(
 	ProjectSourceIdentityResolver SourceIdentityResolver,
 	RepositoryCacheCatalog RepositoryCacheCatalog,
 	ProjectContextDocumentService ContextDocumentService,
+	TreeExportService TreeExportService,
 	PreviewDocumentBuilder PreviewDocumentBuilder,
 	ProjectCopyExportService ProjectCopyExportService,
 	ProjectAnalysisReportWriter AnalysisReportWriter,
@@ -19,6 +20,7 @@ public sealed record TerminalServices(
 	TerminalSettingsStore TerminalSettingsStore,
 	ITerminalCommandSetupService TerminalCommandSetupService,
 	GitTrackedModeReadinessProbe GitTrackedModeReadinessProbe,
+	RecentWorkspacesService RecentWorkspacesService,
 	RecentProjectsStore RecentProjectsStore,
 	IGitRepositoryService GitRepositoryService,
 	IRepoCacheService RepoCacheService);

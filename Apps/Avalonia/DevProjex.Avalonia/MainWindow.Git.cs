@@ -62,7 +62,7 @@ public partial class MainWindow
         _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
         _taskbarProgress.BeginGitClone();
 
-        string? targetPath = null;
+        string? stagingPath = null;
 
         try
         {
@@ -78,14 +78,7 @@ public partial class MainWindow
                 return;
             }
 
-            // Clean up previous cached repository before cloning a new one
-            if (_currentCachedRepoPath is not null)
-            {
-                await DeleteRepositoryDirectoryAsync(_currentCachedRepoPath, cancellationToken);
-                _currentCachedRepoPath = null;
-            }
-
-            targetPath = _repoCacheService.CreateRepositoryDirectory(url);
+            stagingPath = _repoCacheService.CreateRepositoryStagingDirectory(url);
 
             // Track current operation for progress reporting
             string currentOperation = string.Empty;
@@ -127,7 +120,7 @@ public partial class MainWindow
                 currentOperation = _viewModel.GitCloneProgressCloning;
                 _viewModel.GitCloneStatus = currentOperation;
                 _taskbarProgress.SetGitCloneIndeterminate();
-                result = await _gitService.CloneAsync(url, targetPath, progress, cancellationToken);
+                result = await _gitService.CloneAsync(url, stagingPath, progress, cancellationToken);
             }
             else
             {
@@ -138,14 +131,14 @@ public partial class MainWindow
                 currentOperation = _viewModel.GitCloneProgressDownloading;
                 _viewModel.GitCloneStatus = currentOperation;
                 _taskbarProgress.SetGitCloneIndeterminate();
-                result = await _zipDownloadService.DownloadAndExtractAsync(url, targetPath, progress, cancellationToken);
+                result = await _zipDownloadService.DownloadAndExtractAsync(url, stagingPath, progress, cancellationToken);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
 
             if (!result.Success)
             {
-                await DeleteRepositoryDirectoryAsync(targetPath, CancellationToken.None);
+                await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
                 _gitCloneWindow?.Close();
                 _gitCloneWindow = null;
                 _viewModel.GitCloneInProgress = false;
@@ -155,20 +148,25 @@ public partial class MainWindow
                 return;
             }
 
-            await ApplySuccessfulGitCloneAsync(result, targetPath, url, cancellationToken);
+            var cachePath = _repoCacheService.PublishRepositoryDirectory(
+                stagingPath,
+                string.IsNullOrWhiteSpace(result.RepositoryUrl) ? url : result.RepositoryUrl);
+            stagingPath = null;
+            result = result with { LocalPath = cachePath };
+            await ApplySuccessfulGitCloneAsync(result, cachePath, url, cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            if (targetPath is not null)
+            if (stagingPath is not null)
             {
-                await DeleteRepositoryDirectoryAsync(targetPath, CancellationToken.None);
+                await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
             }
         }
         catch (Exception ex)
         {
-            if (targetPath is not null)
+            if (stagingPath is not null)
             {
-                await DeleteRepositoryDirectoryAsync(targetPath, CancellationToken.None);
+                await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
             }
 
             _gitCloneWindow?.Close();
@@ -209,8 +207,16 @@ public partial class MainWindow
         _viewModel.ProjectSourceType = result.SourceType;
         _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
         _currentProjectDisplayName = result.RepositoryName;
-        _currentRepositoryUrl = result.RepositoryUrl;
+        _currentRepositoryUrl = string.IsNullOrWhiteSpace(result.RepositoryUrl)
+            ? requestedUrl
+            : result.RepositoryUrl;
         _currentCachedRepoPath = cachePath;
+        await RecordCachedRepositoryAsync(
+            cachePath,
+            _currentRepositoryUrl,
+            result.DefaultBranch,
+            commitHash: null,
+            cancellationToken);
 
         var opened = await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
         if (!opened || !PathComparer.Default.Equals(_currentPath, result.LocalPath))
@@ -310,6 +316,12 @@ public partial class MainWindow
             await ReloadProjectAsync(cancellationToken);
 
             var afterHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
+            await RecordCachedRepositoryAsync(
+                _currentPath,
+                _currentRepositoryUrl,
+                _viewModel.CurrentBranch,
+                afterHash,
+                cancellationToken);
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
             {
                 _toastService.Show(_localization["Toast.Git.NoUpdates"]);
@@ -386,6 +398,13 @@ public partial class MainWindow
             _statusOperations.Complete(statusOperationId);
 
             _viewModel.CurrentBranch = branchName;
+            var commitHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
+            await RecordCachedRepositoryAsync(
+                _currentPath,
+                _currentRepositoryUrl,
+                branchName,
+                commitHash,
+                cancellationToken);
             UpdateTitle();
             _toastService.Show(_localization.Format("Toast.Git.BranchSwitched", branchName));
 
@@ -429,6 +448,28 @@ public partial class MainWindow
         {
             // Ignore branch loading errors
         }
+    }
+
+    private Task RecordCachedRepositoryAsync(
+        string repositoryPath,
+        string? repositoryUrl,
+        string? branch,
+        string? commitHash,
+        CancellationToken cancellationToken)
+    {
+        if (!_repoCacheService.IsInCache(repositoryPath) ||
+            string.IsNullOrWhiteSpace(repositoryUrl))
+        {
+            return Task.CompletedTask;
+        }
+
+        return Task.Run(
+            () => _repoCacheService.RecordIndexedRepository(
+                repositoryUrl,
+                repositoryPath,
+                branch,
+                commitHash),
+            cancellationToken);
     }
 
     private void UpdateBranchMenu()

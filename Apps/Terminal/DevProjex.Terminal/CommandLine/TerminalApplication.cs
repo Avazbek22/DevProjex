@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using DevProjex.Terminal.Execution;
 
 namespace DevProjex.Terminal.CommandLine;
@@ -22,6 +23,17 @@ public sealed class TerminalApplication(
 			environment.Error.WriteLine(localization["Terminal.Error.LegacySyntax"]);
 			environment.Error.WriteLine(localization["Terminal.Label.NewCommand"]);
 			environment.Error.WriteLine($"  {migration.Replacement}");
+			return CommandLineExitCodes.UsageError;
+		}
+		if (ContainsMalformedVersionAlias(arguments))
+		{
+			environment.Error.WriteLine(
+				$"error[DPX-CLI-UNKNOWN-OPTION]: " +
+				localization.Format("Terminal.Error.UnknownOption", "-version"));
+			environment.Error.WriteLine(
+				localization.Format(
+					"Terminal.Hint.DidYouMean",
+					"devprojex --version"));
 			return CommandLineExitCodes.UsageError;
 		}
 
@@ -55,14 +67,13 @@ public sealed class TerminalApplication(
 		var parseResult = root.Parse(arguments.ToArray());
 		if (parseResult.Errors.Count > 0)
 		{
-			foreach (var error in parseResult.Errors)
-				environment.Error.WriteLine(
-					$"error[DPX-CLI-INVALID-SYNTAX]: {localization.Format(
-						"Terminal.Error.InvalidSyntax",
-						LocalizedParseError.Resolve(error.Message, localization))}");
+			var errors = PresentParseErrors(root, arguments, parseResult.Errors, localization);
+			foreach (var error in errors)
+				environment.Error.WriteLine($"error[{error.Code}]: {error.Message}");
 			if (TryBuildSuggestion(root, arguments, out var suggestion))
 				environment.Error.WriteLine(localization.Format("Terminal.Hint.DidYouMean", suggestion));
-			environment.Error.WriteLine(localization["Terminal.Hint.Help"]);
+			else
+				environment.Error.WriteLine(localization["Terminal.Hint.Help"]);
 			return CommandLineExitCodes.UsageError;
 		}
 
@@ -95,6 +106,161 @@ public sealed class TerminalApplication(
 			}
 			return CommandLineExitCodes.RuntimeError;
 		}
+	}
+
+	private static IReadOnlyList<PresentedParseError> PresentParseErrors(
+		RootCommand root,
+		IReadOnlyList<string> arguments,
+		IReadOnlyList<ParseError> parseErrors,
+		LocalizationService localization)
+	{
+		if (TryFindUnknownOption(root, arguments, out var unknownOption))
+		{
+			return
+			[
+				new PresentedParseError(
+					"DPX-CLI-UNKNOWN-OPTION",
+					localization.Format("Terminal.Error.UnknownOption", unknownOption))
+			];
+		}
+
+		if (TryFindUnknownCommand(root, arguments, out var unknownCommand))
+		{
+			return
+			[
+				new PresentedParseError(
+					"DPX-CLI-UNKNOWN-COMMAND",
+					localization.Format("Terminal.Error.UnknownCommand", unknownCommand))
+			];
+		}
+
+		var presented = new List<PresentedParseError>();
+		foreach (var error in parseErrors)
+		{
+			PresentedParseError item;
+			if (IsMissingOptionValue(error) &&
+			    TryResolveMissingValueOption(error, arguments, out var optionName))
+			{
+				item = new PresentedParseError(
+					"DPX-CLI-MISSING-VALUE",
+					localization.Format(
+						"Terminal.Error.MissingValue",
+						optionName));
+			}
+			else
+			{
+				var localized = LocalizedParseError.Resolve(error.Message, localization);
+				item = new PresentedParseError(
+					error.Message.StartsWith(LocalizedParseError.Prefix, StringComparison.Ordinal)
+						? "DPX-CLI-INVALID-VALUE"
+						: "DPX-CLI-INVALID-SYNTAX",
+					localization.Format("Terminal.Error.InvalidSyntax", localized));
+			}
+
+			if (!presented.Contains(item))
+				presented.Add(item);
+		}
+
+		return presented;
+	}
+
+	private static bool ContainsMalformedVersionAlias(
+		IReadOnlyList<string> arguments) =>
+		arguments
+			.TakeWhile(static token => token != "--")
+			.Contains("-version", StringComparer.Ordinal);
+
+	private static bool IsMissingOptionValue(ParseError error) =>
+		error.SymbolResult is OptionResult optionResult &&
+		optionResult.Option.Arity.MinimumNumberOfValues > 0 &&
+		optionResult.Tokens.Count == 0;
+
+	private static bool TryResolveMissingValueOption(
+		ParseError error,
+		IReadOnlyList<string> arguments,
+		out string optionName)
+	{
+		if (error.SymbolResult is OptionResult optionResult)
+		{
+			optionName = optionResult.Option.Name;
+			return true;
+		}
+
+		optionName = arguments
+			.TakeWhile(static value => value != "--")
+			.LastOrDefault(static value => value.StartsWith("--", StringComparison.Ordinal))
+			?.Split('=', 2)[0] ?? string.Empty;
+		return optionName.Length > 0;
+	}
+
+	private static bool TryFindUnknownOption(
+		RootCommand root,
+		IReadOnlyList<string> arguments,
+		out string option)
+	{
+		option = string.Empty;
+		var current = ResolveCommand(root, arguments);
+		var knownOptions = root.Options
+			.Concat(current.Options)
+			.SelectMany(static known => new[] { known.Name }.Concat(known.Aliases))
+			.ToHashSet(StringComparer.Ordinal);
+		foreach (var token in arguments.TakeWhile(static token => token != "--"))
+		{
+			if (token == "-" || !token.StartsWith("-", StringComparison.Ordinal))
+				continue;
+			var candidate = token.Split('=', 2)[0];
+			if (knownOptions.Contains(candidate))
+				continue;
+			option = candidate;
+			return true;
+		}
+		return false;
+	}
+
+	private static bool TryFindUnknownCommand(
+		RootCommand root,
+		IReadOnlyList<string> arguments,
+		out string command)
+	{
+		command = string.Empty;
+		Command current = root;
+		foreach (var token in arguments.TakeWhile(static token => token != "--"))
+		{
+			if (token.StartsWith("-", StringComparison.Ordinal))
+				break;
+			var child = current.Subcommands.FirstOrDefault(candidate =>
+				!candidate.Hidden &&
+				candidate.Name.Equals(token, StringComparison.Ordinal));
+			if (child is not null)
+			{
+				current = child;
+				continue;
+			}
+			if (current.Subcommands.Any(static candidate => !candidate.Hidden))
+			{
+				command = token;
+				return true;
+			}
+			break;
+		}
+		return false;
+	}
+
+	private static Command ResolveCommand(RootCommand root, IReadOnlyList<string> arguments)
+	{
+		Command current = root;
+		foreach (var token in arguments.TakeWhile(static token => token != "--"))
+		{
+			if (token.StartsWith("-", StringComparison.Ordinal))
+				break;
+			var child = current.Subcommands.FirstOrDefault(candidate =>
+				!candidate.Hidden &&
+				candidate.Name.Equals(token, StringComparison.Ordinal));
+			if (child is null)
+				break;
+			current = child;
+		}
+		return current;
 	}
 
 	private static bool IsHelpToken(string value) =>
@@ -290,4 +456,6 @@ public sealed class TerminalApplication(
 
 		return previous[right.Length];
 	}
+
+	private sealed record PresentedParseError(string Code, string Message);
 }

@@ -10,58 +10,263 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed partial class TerminalWorkspaceSession
 {
-	private string? _recentRepositorySelectionUrl;
-
-	private void BeginOpenRecentRepositories()
+	private void OpenRecentWorkspaces()
 	{
-		var loadResult = _services.RecentProjectsStore.LoadForStartupWithStatus(
-			TimeSpan.FromMilliseconds(200));
-		_recentProjectsSnapshot = loadResult.Database;
-		_recentProjectsLoadStatus = loadResult.Status;
-		if (loadResult.Status != RecentProjectsLoadStatus.Success)
+		while (!_stopping)
 		{
-			var retry = ShowChoice(
-				L("Terminal.Tui.Welcome.RecentRepositories"),
-				L("Terminal.Tui.Recent.StorageUnavailable"),
-				L("Terminal.Tui.Back"),
-				L("Terminal.Tui.Retry"));
-			if (retry == 1)
-				BeginOpenRecentRepositories();
+			var loadResult = _services.RecentProjectsStore.LoadForStartupWithStatus(
+				TimeSpan.FromMilliseconds(200));
+			_recentProjectsSnapshot = loadResult.Database;
+			if (loadResult.Status != RecentProjectsLoadStatus.Success)
+			{
+				var retry = ShowChoice(
+					L("Terminal.Tui.Welcome.Recent"),
+					L("Terminal.Tui.Recent.StorageUnavailable"),
+					L("Terminal.Tui.Back"),
+					L("Terminal.Tui.Retry"));
+				if (retry != 1)
+					return;
+				continue;
+			}
+
+			var workspaces = BuildRecentWorkspaces(loadResult.Database);
+			if (workspaces.Count == 0)
+			{
+				ShowNotice(
+					L("Terminal.Tui.Welcome.Recent"),
+					L("Terminal.Tui.NoneAvailable"),
+					TerminalWorkspaceTheme.Warning);
+				return;
+			}
+
+			var decision = SelectRecentWorkspace(workspaces);
+			if (decision.Kind == TerminalRecentWorkspaceDecisionKind.Back ||
+			    decision.Workspace is null)
+			{
+				return;
+			}
+
+			var workspace = decision.Workspace;
+			_recentWorkspaceSelectionKey = workspace.IdentityKey;
+			if (decision.Kind == TerminalRecentWorkspaceDecisionKind.Remove)
+			{
+				var confirmed = Confirm(
+					L("Terminal.Tui.Recent.Remove"),
+					L("Terminal.Tui.RecentRepositories.RemoveHistoryOnly"));
+				if (!confirmed)
+					continue;
+				_recentProjectsSnapshot = workspace.Kind == RecentWorkspaceKind.Repository
+					? _services.RecentProjectsStore.RemoveRepository(
+						_recentProjectsSnapshot,
+						workspace.Source)
+					: _services.RecentProjectsStore.RemoveFolder(
+						_recentProjectsSnapshot,
+						workspace.Source);
+				_recentWorkspaceSelectionKey = null;
+				continue;
+			}
+
+			if (workspace.Kind == RecentWorkspaceKind.Folder)
+			{
+				if (!TryResolveDirectory(workspace.Source, out var project))
+				{
+					var remove = ShowChoice(
+						L("Terminal.Tui.Error"),
+						$"{L("Terminal.Tui.Error.ProjectUnavailable")}\n\n{workspace.Source}",
+						L("Terminal.Tui.Back"),
+						L("Terminal.Tui.Recent.Remove"));
+					if (remove == 1)
+					{
+						_recentProjectsSnapshot = _services.RecentProjectsStore.RemoveFolder(
+							_recentProjectsSnapshot,
+							workspace.Source);
+						_recentWorkspaceSelectionKey = null;
+					}
+					continue;
+				}
+				if (!TryResolveAutomaticProfileInteractively(project, out var profile))
+					continue;
+				BeginOpenProject(project, profile, TerminalProjectOpenSource.Recent);
+				return;
+			}
+
+			BeginResolveRecentRepository(workspace);
 			return;
 		}
+	}
 
-		if (loadResult.Database.RecentRepositories.Count == 0)
+	private IReadOnlyList<RecentWorkspaceDescriptor> BuildRecentWorkspaces(
+		RecentProjectsDb database) =>
+		_services.RecentWorkspacesService.Project(
+			database.RecentFolders
+				.Select(static entry => new RecentWorkspaceSource(
+					RecentWorkspaceKind.Folder,
+					entry.Path,
+					entry.OpenedUtc))
+				.Concat(database.RecentRepositories.Select(static entry =>
+					new RecentWorkspaceSource(
+						RecentWorkspaceKind.Repository,
+						entry.Url,
+						entry.OpenedUtc))));
+
+	private TerminalRecentWorkspaceDecision SelectRecentWorkspace(
+		IReadOnlyList<RecentWorkspaceDescriptor> workspaces)
+	{
+		var dialogWidth = ResolveDialogWidth(106);
+		var height = Math.Clamp(
+			workspaces.Count + 15,
+			16,
+			Math.Max(16, _application.Screen.Height - 2));
+		using var dialog = CreateDialog(
+			L("Terminal.Tui.Welcome.Recent"),
+			dialogWidth,
+			height);
+		AlignWelcomeDialogAfterActions(dialog, dialogWidth);
+		var description = new TerminalLiteralLabel
 		{
-			ShowNotice(
-				L("Terminal.Tui.Welcome.RecentRepositories"),
-				L("Terminal.Tui.NoneAvailable"),
-				TerminalWorkspaceTheme.Warning);
-			return;
+			X = 1,
+			Y = 0,
+			Width = Dim.Fill(1),
+			Text = L("Terminal.Tui.Welcome.Recent.Description"),
+			SchemeName = TerminalWorkspaceTheme.Secondary
+		};
+		string KindLabel(RecentWorkspaceKind kind) =>
+			kind == RecentWorkspaceKind.Repository
+				? "Git"
+				: L("Terminal.Tui.Folder");
+		string OpenedLabel(DateTimeOffset openedUtc)
+		{
+			var localDate = openedUtc.ToLocalTime().Date;
+			var today = DateTimeOffset.Now.Date;
+			if (localDate == today)
+				return L("Terminal.Tui.Recent.Today");
+			if (localDate == today.AddDays(-1))
+				return L("Terminal.Tui.Recent.Yesterday");
+			return openedUtc.ToLocalTime().ToString("d", CultureInfo.CurrentCulture);
+		}
+		var rows = new ObservableCollection<TerminalRecentWorkspaceRow>(
+			workspaces.Select(workspace =>
+				new TerminalRecentWorkspaceRow(workspace, KindLabel, OpenedLabel)));
+		var list = new ListView
+		{
+			X = 1,
+			Y = 2,
+			Width = Dim.Fill(1),
+			Height = Math.Clamp(workspaces.Count, 2, 10),
+			SchemeName = TerminalWorkspaceTheme.List
+		};
+		list.SetSource(rows);
+		var selectedIndex = string.IsNullOrWhiteSpace(_recentWorkspaceSelectionKey)
+			? 0
+			: workspaces
+				.Select((workspace, index) => (workspace, index))
+				.FirstOrDefault(pair => string.Equals(
+					pair.workspace.IdentityKey,
+					_recentWorkspaceSelectionKey,
+					StringComparison.OrdinalIgnoreCase))
+				.index;
+		list.SelectedItem = Math.Clamp(selectedIndex, 0, workspaces.Count - 1);
+		var details = new TextView
+		{
+			X = 1,
+			Y = Pos.Bottom(list) + 1,
+			Width = Dim.Fill(1),
+			Height = Dim.Fill(1),
+			ReadOnly = true,
+			WordWrap = true,
+			CanFocus = false,
+			SchemeName = TerminalWorkspaceTheme.Base
+		};
+		var result = new TerminalRecentWorkspaceDecision(
+			TerminalRecentWorkspaceDecisionKind.Back);
+
+		void UpdateSelection()
+		{
+			var index = Math.Clamp(list.SelectedItem ?? 0, 0, workspaces.Count - 1);
+			for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+				rows[rowIndex].IsSelected = rowIndex == index;
+			list.SetNeedsDraw();
+			var workspace = workspaces[index];
+			_recentWorkspaceSelectionKey = workspace.IdentityKey;
+			var sourceWidth = Math.Max(8, dialogWidth - 8);
+			details.Text =
+				$"{KindLabel(workspace.Kind)} · {workspace.DisplayName}\n" +
+				$"{FitPathToWidth(workspace.DisplaySource, sourceWidth)}\n" +
+				$"{L("Terminal.Tui.Recent.LastOpened")}: " +
+				workspace.OpenedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
 		}
 
+		void SelectCurrent(TerminalRecentWorkspaceDecisionKind kind)
+		{
+			var index = Math.Clamp(list.SelectedItem ?? 0, 0, workspaces.Count - 1);
+			result = new TerminalRecentWorkspaceDecision(kind, workspaces[index]);
+			_application.RequestStop(dialog);
+		}
+
+		list.ValueChanged += (_, _) => UpdateSelection();
+		list.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open);
+		dialog.Add(description, list, details);
+		dialog.AddButton(new Button { Text = L("Terminal.Tui.Back") });
+		var remove = new Button { Text = L("Terminal.Tui.Recent.Remove") };
+		remove.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Remove);
+		dialog.AddButton(remove);
+		var open = new Button { Text = L("Terminal.Tui.Open") };
+		open.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open);
+		dialog.AddButton(open);
+		UpdateSelection();
+		RunOverlay(dialog, list);
+		return result;
+	}
+
+	private void BeginResolveRecentRepository(RecentWorkspaceDescriptor workspace)
+	{
 		ShowLoading(
-			L("Terminal.Tui.RecentRepositories.Loading"),
-			L("Terminal.Tui.RecentRepositories.CacheLookup"));
+			L("Terminal.Tui.LoadingProject"),
+			workspace.DisplaySource);
 		var operationCts = ReplaceActiveOperation();
 		_activeOperationTask = Task.Run(async () =>
 		{
 			try
 			{
-				var repositories = new List<TerminalRecentRepository>(
-					loadResult.Database.RecentRepositories.Count);
-				foreach (var entry in loadResult.Database.RecentRepositories)
-				{
-					operationCts.Token.ThrowIfCancellationRequested();
-					var cache = await _services.RepositoryCacheCatalog
-						.FindAsync(entry.Url, operationCts.Token)
-						.ConfigureAwait(false);
-					repositories.Add(new TerminalRecentRepository(entry.Url, entry.OpenedUtc, cache));
-				}
-
+				var cache = await _services.RepositoryCacheCatalog
+					.FindAsync(workspace.Source, operationCts.Token)
+					.ConfigureAwait(false);
 				await InvokeAsync(() =>
 				{
+					if (cache.State == RepositoryCacheState.Ready &&
+					    cache.LocalPath is { Length: > 0 } localPath &&
+					    Directory.Exists(localPath))
+					{
+						if (!TryResolveAutomaticProfileInteractively(localPath, out var profile))
+						{
+							ShowWelcome();
+							_application.Invoke(OpenRecentWorkspaces);
+							return true;
+						}
+						var identity = ProjectSourceIdentityResolver.CreateCloneIdentity(
+							workspace.Source,
+							cache.RepositoryName,
+							cache.Branch,
+							cache.CommitHash);
+						BeginOpenProject(
+							localPath,
+							profile,
+							TerminalProjectOpenSource.RecentRepository,
+							identity);
+						return true;
+					}
+
 					ShowWelcome();
-					OpenRecentRepositoryList(repositories);
+					var repository = new TerminalRecentRepository(
+						workspace.Source,
+						workspace.OpenedUtc,
+						cache);
+					if (!HandleUnavailableRepository(
+						    repository,
+						    cache.State == RepositoryCacheState.Damaged))
+					{
+						_application.Invoke(OpenRecentWorkspaces);
+					}
 					return true;
 				}).ConfigureAwait(false);
 			}
@@ -83,87 +288,12 @@ internal sealed partial class TerminalWorkspaceSession
 		}, CancellationToken.None);
 	}
 
-	private void OpenRecentRepositoryList(
-		IReadOnlyList<TerminalRecentRepository> initialRepositories)
-	{
-		var repositories = initialRepositories.ToList();
-		while (!_stopping && repositories.Count > 0)
-		{
-			var decision = SelectRecentRepository(repositories);
-			if (decision.Kind == TerminalRecentRepositoryDecisionKind.Back ||
-			    decision.Repository is null)
-			{
-				return;
-			}
-
-			var repository = decision.Repository;
-			_recentRepositorySelectionUrl = repository.Url;
-			if (decision.Kind == TerminalRecentRepositoryDecisionKind.Remove)
-			{
-				var confirmed = ShowChoice(
-					L("Terminal.Tui.RecentRepositories.Remove"),
-					L("Terminal.Tui.RecentRepositories.RemoveHistoryOnly"),
-					L("Terminal.Tui.Back"),
-					L("Terminal.Tui.Recent.Remove"));
-				if (confirmed == 1)
-				{
-					_recentProjectsSnapshot = _services.RecentProjectsStore.RemoveRepository(
-						_recentProjectsSnapshot,
-						repository.Url);
-					repositories.RemoveAll(item =>
-						RepositoryUrlUtility.AreEquivalent(item.Url, repository.Url));
-					_recentRepositorySelectionUrl = null;
-				}
-				continue;
-			}
-
-			switch (repository.Cache.State)
-			{
-				case RepositoryCacheState.Ready
-					when repository.Cache.LocalPath is { Length: > 0 } localPath &&
-					     Directory.Exists(localPath):
-				{
-					if (!TryResolveAutomaticProfileInteractively(localPath, out var profile))
-						continue;
-
-					var identity = ProjectSourceIdentityResolver.CreateCloneIdentity(
-						repository.Url,
-						repository.Name,
-						repository.Cache.Branch,
-						repository.Cache.CommitHash);
-					BeginOpenProject(
-						localPath,
-						profile,
-						TerminalProjectOpenSource.RecentRepository,
-						identity);
-					return;
-				}
-				case RepositoryCacheState.Damaged:
-				if (HandleUnavailableRepository(repository, damaged: true))
-					return;
-				break;
-				default:
-				if (HandleUnavailableRepository(repository, damaged: false))
-					return;
-				break;
-			}
-		}
-
-		if (!_stopping && repositories.Count == 0)
-		{
-			ShowNotice(
-				L("Terminal.Tui.Welcome.RecentRepositories"),
-				L("Terminal.Tui.NoneAvailable"),
-				TerminalWorkspaceTheme.Warning);
-		}
-	}
-
 	private bool HandleUnavailableRepository(
 		TerminalRecentRepository repository,
 		bool damaged)
 	{
 		var decision = ShowChoice(
-			L("Terminal.Tui.Welcome.RecentRepositories"),
+			L("Terminal.Tui.Welcome.Recent"),
 			$"{L(damaged
 				? "Terminal.Tui.RecentRepositories.CacheDamaged"
 				: "Terminal.Tui.RecentRepositories.CacheMissing")}\n\n{repository.Url}",
@@ -184,146 +314,6 @@ internal sealed partial class TerminalWorkspaceSession
 		return true;
 	}
 
-	private TerminalRecentRepositoryDecision SelectRecentRepository(
-		IReadOnlyList<TerminalRecentRepository> repositories)
-	{
-		var dialogWidth = ResolveDialogWidth(98);
-		var detailsWidth = Math.Max(8, dialogWidth - 6);
-		var height = Math.Clamp(
-			repositories.Count + 18,
-			19,
-			Math.Max(19, _application.Screen.Height - 2));
-		using var dialog = CreateDialog(
-			L("Terminal.Tui.Welcome.RecentRepositories"),
-			dialogWidth,
-			height);
-		AlignWelcomeDialogAfterActions(dialog, dialogWidth);
-		var description = new TerminalLiteralLabel
-		{
-			X = 1,
-			Y = 0,
-			Width = Dim.Fill(1),
-			Text = L("Terminal.Tui.RecentRepositories.Description"),
-			SchemeName = TerminalWorkspaceTheme.Secondary
-		};
-		var rows = new ObservableCollection<TerminalRecentRepositoryRow>(
-			repositories.Select(static repository => new TerminalRecentRepositoryRow(repository)));
-		var list = new ListView
-		{
-			X = 1,
-			Y = 2,
-			Width = Dim.Fill(1),
-			Height = Math.Min(Math.Max(3, repositories.Count), 8),
-			SchemeName = TerminalWorkspaceTheme.List
-		};
-		list.SetSource(rows);
-		var selectedIndex = string.IsNullOrWhiteSpace(_recentRepositorySelectionUrl)
-			? 0
-			: repositories
-				.Select((repository, index) => (repository, index))
-				.FirstOrDefault(pair => RepositoryUrlUtility.AreEquivalent(
-					pair.repository.Url,
-					_recentRepositorySelectionUrl))
-				.index;
-		list.SelectedItem = Math.Clamp(selectedIndex, 0, repositories.Count - 1);
-		var details = new TextView
-		{
-			X = 1,
-			Y = Pos.Bottom(list) + 1,
-			Width = Dim.Fill(1),
-			Height = Dim.Fill(1),
-			ReadOnly = true,
-			WordWrap = true,
-			CanFocus = false,
-			SchemeName = TerminalWorkspaceTheme.Base
-		};
-		var result = new TerminalRecentRepositoryDecision(
-			TerminalRecentRepositoryDecisionKind.Back);
-
-		void UpdateSelection()
-		{
-			var index = Math.Clamp(list.SelectedItem ?? 0, 0, repositories.Count - 1);
-			for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
-				rows[rowIndex].IsSelected = rowIndex == index;
-			list.SetNeedsDraw();
-			var repository = repositories[index];
-			_recentRepositorySelectionUrl = repository.Url;
-			details.Text = BuildRepositoryDetails(repository, detailsWidth);
-		}
-
-		void SelectCurrent(TerminalRecentRepositoryDecisionKind kind)
-		{
-			var index = Math.Clamp(list.SelectedItem ?? 0, 0, repositories.Count - 1);
-			result = new TerminalRecentRepositoryDecision(kind, repositories[index]);
-		}
-
-		list.ValueChanged += (_, _) => UpdateSelection();
-		list.Accepted += (_, _) =>
-		{
-			SelectCurrent(TerminalRecentRepositoryDecisionKind.Open);
-			_application.RequestStop(dialog);
-		};
-		dialog.Add(description, list, details);
-		dialog.AddButton(new Button { Text = L("Terminal.Tui.Back") });
-		var remove = new Button { Text = L("Terminal.Tui.Recent.Remove") };
-		remove.Accepted += (_, _) => SelectCurrent(TerminalRecentRepositoryDecisionKind.Remove);
-		dialog.AddButton(remove);
-		var open = new Button { Text = L("Terminal.Tui.Open") };
-		open.Accepted += (_, _) => SelectCurrent(TerminalRecentRepositoryDecisionKind.Open);
-		dialog.AddButton(open);
-		UpdateSelection();
-		RunOverlay(dialog, list);
-		return result;
-	}
-
-	private string BuildRepositoryDetails(
-		TerminalRecentRepository repository,
-		int width)
-	{
-		var cacheState = repository.Cache.State switch
-		{
-			RepositoryCacheState.Ready => L("Terminal.Tui.RecentRepositories.Cached"),
-			RepositoryCacheState.Damaged => L("Terminal.Tui.RecentRepositories.Damaged"),
-			_ => L("Terminal.Tui.RecentRepositories.NotCached")
-		};
-		var owner = TryResolveRepositoryOwner(repository.Url);
-		var output = new StringBuilder()
-			.Append(L("Terminal.Tui.RecentRepositories.Repository")).Append(": ")
-			.AppendLine(repository.Name);
-		if (owner.Length > 0)
-			output.Append(L("Terminal.Tui.RecentRepositories.Owner")).Append(": ").AppendLine(owner);
-		output.Append(L("Terminal.Tui.RecentRepositories.Cache")).Append(": ").AppendLine(cacheState);
-		if (repository.Cache.Branch is { Length: > 0 } branch)
-			output.Append(L("Terminal.Tui.RecentRepositories.Branch")).Append(": ").AppendLine(branch);
-		output.Append(L("Terminal.Tui.Recent.LastOpened")).Append(": ")
-			.AppendLine(repository.OpenedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture));
-		output.Append(L("Terminal.Tui.RepositoryUrl")).AppendLine()
-			.Append(FitPathToWidth(repository.Url, width));
-		return output.ToString();
-	}
-
-	private static string TryResolveRepositoryOwner(string repositoryUrl)
-	{
-		var normalized = RepositoryUrlUtility.Normalize(repositoryUrl);
-		if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
-		{
-			var segments = uri.AbsolutePath
-				.Split('/', StringSplitOptions.RemoveEmptyEntries);
-			return segments.Length >= 2 ? $"{uri.Host}/{segments[^2]}" : uri.Host;
-		}
-
-		var colon = normalized.IndexOf(':');
-		var slash = normalized.LastIndexOf('/');
-		if (colon <= 0 || slash <= colon)
-			return string.Empty;
-
-		var authority = normalized[..colon];
-		var at = authority.LastIndexOf('@');
-		var host = at >= 0 ? authority[(at + 1)..] : authority;
-		var ownerPath = normalized[(colon + 1)..slash].Trim('/');
-		return ownerPath.Length > 0 ? $"{host}/{ownerPath}" : host;
-	}
-
 	private void ReturnToRepositoryHistoryAfterCancellation(
 		CancellationTokenSource operationCts)
 	{
@@ -333,7 +323,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			ShowWelcome();
 			ShowWelcomeStatus(L("Terminal.Tui.OperationCanceled"), TerminalWorkspaceTheme.Warning);
-			_application.Invoke(BeginOpenRecentRepositories);
+			_application.Invoke(OpenRecentWorkspaces);
 		});
 	}
 
@@ -351,7 +341,7 @@ internal sealed partial class TerminalWorkspaceSession
 			{
 				ShowError(code, message);
 				if (!_stopping)
-					BeginOpenRecentRepositories();
+					OpenRecentWorkspaces();
 			});
 		});
 	}

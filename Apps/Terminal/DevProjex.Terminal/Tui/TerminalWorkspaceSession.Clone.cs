@@ -31,7 +31,8 @@ internal sealed partial class TerminalWorkspaceSession
 			L(_clonePhaseKey),
 			L("Terminal.Tui.Progress.CancelHint"),
 			FormatElapsed,
-			safeRepositoryUrl);
+			safeRepositoryUrl,
+			UseTextProgress);
 		_operationProgress.SetIndeterminate(
 			L(_clonePhaseKey),
 			repositoryName,

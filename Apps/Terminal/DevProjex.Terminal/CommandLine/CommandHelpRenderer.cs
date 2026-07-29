@@ -51,7 +51,7 @@ public sealed class CommandHelpRenderer(
 				WriteItem(
 					output,
 					FormatOptionNames(option),
-					option.Description ?? string.Empty,
+					ResolveOptionDescription(option),
 					environment.Width);
 			if (!includesLanguage)
 			{
@@ -90,6 +90,14 @@ public sealed class CommandHelpRenderer(
 		output.WriteLine();
 		output.WriteLine(title);
 	}
+
+	private string ResolveOptionDescription(Option option) =>
+		option.Name switch
+		{
+			"--help" => _localization["Terminal.Option.Help"],
+			"--version" => _localization["Terminal.Option.Version"],
+			_ => option.Description ?? string.Empty
+		};
 
 	private static string FormatOptionNames(Option option)
 	{

@@ -1,14 +1,24 @@
 using System.Buffers;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.Git;
 
 /// <summary>
-/// Manages the repository cache directory in system temp folder.
+/// Manages persistent repository clones and short-lived staging directories.
 /// </summary>
 public sealed class RepoCacheService : IRepoCacheService
 {
 	private const string AppFolderName = "DevProjex";
 	private const string CacheFolderName = "RepoCache";
+	private const string StagingFolderName = ".staging";
+	private const string CacheIndexFileName = "cache-index.json";
+	private const int CacheIndexSchemaVersion = 1;
+	private static readonly TimeSpan IndexLockTimeout = TimeSpan.FromMilliseconds(500);
+	private static readonly JsonSerializerOptions IndexSerializerOptions = new(JsonSerializerDefaults.Web)
+	{
+		WriteIndented = true,
+		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+	};
 
 	// Pre-compiled search values for O(1) invalid character lookup (uses SIMD when available)
 	private static readonly SearchValues<char> InvalidFileNameChars =
@@ -18,8 +28,10 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	public RepoCacheService()
 	{
-		var tempPath = Path.GetTempPath();
-		CacheRootPath = Path.Combine(tempPath, AppFolderName, CacheFolderName);
+		CacheRootPath = Path.Combine(
+			UserDataPathResolver.GetLocalDataRoot(),
+			AppFolderName,
+			CacheFolderName);
 	}
 
 	/// <summary>
@@ -32,13 +44,115 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	public string CreateRepositoryDirectory(string repositoryUrl)
 	{
-		var repoName = ExtractRepoName(repositoryUrl);
-		var timestamp = DateTime.UtcNow.Ticks.ToString("X");
-		var folderName = $"{repoName}_{timestamp}";
-		var path = Path.Combine(CacheRootPath, folderName);
-
+		var path = CreateUniqueRepositoryPath(CacheRootPath, repositoryUrl);
 		Directory.CreateDirectory(path);
 		return path;
+	}
+
+	public string CreateRepositoryStagingDirectory(string repositoryUrl)
+	{
+		var stagingRoot = Path.Combine(CacheRootPath, StagingFolderName);
+		var path = CreateUniqueRepositoryPath(stagingRoot, repositoryUrl);
+		Directory.CreateDirectory(path);
+		return path;
+	}
+
+	public string PublishRepositoryDirectory(string stagingPath, string repositoryUrl)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(stagingPath);
+		var stagingRoot = Path.Combine(CacheRootPath, StagingFolderName);
+		var normalizedStagingPath = PathUtility.Normalize(stagingPath);
+		if (!PathUtility.IsPathInside(normalizedStagingPath, stagingRoot) ||
+		    !Directory.Exists(normalizedStagingPath))
+		{
+			throw new InvalidOperationException("Repository staging path is invalid.");
+		}
+
+		Directory.CreateDirectory(CacheRootPath);
+		var destination = CreateUniqueRepositoryPath(CacheRootPath, repositoryUrl);
+		Directory.Move(normalizedStagingPath, destination);
+		RecordIndexedRepository(repositoryUrl, destination);
+		return destination;
+	}
+
+	public RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl)
+	{
+		var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		if (identity.Length == 0)
+			return null;
+
+		var fileSet = GetIndexFileSet();
+		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+			return null;
+
+		using (heldLock)
+		{
+			return LoadIndex(fileSet).Entries
+				.Where(entry => string.Equals(
+					entry.Identity,
+					identity,
+					StringComparison.OrdinalIgnoreCase))
+				.OrderByDescending(static entry => entry.LastUsedUtc)
+				.FirstOrDefault();
+		}
+	}
+
+	public void RecordIndexedRepository(
+		string repositoryUrl,
+		string localPath,
+		string? branch = null,
+		string? commitHash = null,
+		RepositoryCacheEntryState state = RepositoryCacheEntryState.Ready)
+	{
+		var safeUrl = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
+		var identity = RepositoryUrlUtility.GetComparisonKey(safeUrl);
+		if (identity.Length == 0 || string.IsNullOrWhiteSpace(localPath))
+			return;
+
+		string normalizedPath;
+		try
+		{
+			normalizedPath = PathUtility.Normalize(localPath);
+		}
+		catch
+		{
+			return;
+		}
+
+		if (!IsInCache(normalizedPath))
+			return;
+
+		var fileSet = GetIndexFileSet();
+		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+			return;
+
+		using (heldLock)
+		{
+			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+				return;
+
+			var document = LoadIndex(fileSet);
+			var entries = document.Entries
+				.Where(entry =>
+					!string.Equals(
+						entry.Identity,
+						identity,
+						StringComparison.OrdinalIgnoreCase) &&
+					!PathComparer.Default.Equals(entry.LocalPath, normalizedPath))
+				.ToList();
+			entries.Add(new RepositoryCacheIndexEntry(
+				identity,
+				safeUrl,
+				normalizedPath,
+				string.IsNullOrWhiteSpace(branch) ? null : branch.Trim(),
+				string.IsNullOrWhiteSpace(commitHash) ? null : commitHash.Trim(),
+				DateTimeOffset.UtcNow,
+				state));
+			JsonStorePersistence.TryWriteAtomic(
+				fileSet,
+				new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries),
+				IndexSerializerOptions);
+		}
 	}
 
 	public void DeleteRepositoryDirectory(string path)
@@ -53,6 +167,8 @@ public sealed class RepoCacheService : IRepoCacheService
 		{
 			if (Directory.Exists(path))
 				Directory.Delete(path, recursive: true);
+			if (!Directory.Exists(path))
+				RemoveIndexedRepository(path);
 		}
 		catch
 		{
@@ -75,14 +191,15 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	public void CleanupStaleCacheOnStartup()
 	{
-		if (!Directory.Exists(CacheRootPath))
+		var stagingRoot = Path.Combine(CacheRootPath, StagingFolderName);
+		if (!Directory.Exists(stagingRoot))
 			return;
 
 		try
 		{
 			var staleThreshold = DateTime.UtcNow.AddHours(-24);
 
-			foreach (var dir in Directory.GetDirectories(CacheRootPath))
+			foreach (var dir in Directory.GetDirectories(stagingRoot))
 			{
 				try
 				{
@@ -98,6 +215,20 @@ public sealed class RepoCacheService : IRepoCacheService
 		catch
 		{
 			// Best effort - ignore errors
+		}
+	}
+
+	private static string CreateUniqueRepositoryPath(string root, string repositoryUrl)
+	{
+		var repoName = ExtractRepoName(repositoryUrl);
+		while (true)
+		{
+			var suffix = $"{DateTime.UtcNow.Ticks:X}{Guid.NewGuid():N}"
+				[..29]
+				.ToUpperInvariant();
+			var path = Path.Combine(root, $"{repoName}_{suffix}");
+			if (!Directory.Exists(path) && !File.Exists(path))
+				return path;
 		}
 	}
 
@@ -188,5 +319,108 @@ public sealed class RepoCacheService : IRepoCacheService
 				return true;
 		}
 		return false;
+	}
+
+	private JsonStoreFileSet GetIndexFileSet()
+	{
+		var primaryPath = Path.Combine(CacheRootPath, CacheIndexFileName);
+		return new JsonStoreFileSet(
+			primaryPath,
+			$"{primaryPath}.bak",
+			$"{primaryPath}.lock");
+	}
+
+	private RepositoryCacheIndexDocument LoadIndex(JsonStoreFileSet fileSet)
+	{
+		if (TryLoadIndex(fileSet.PrimaryPath, out var primary))
+			return primary;
+		if (TryLoadIndex(fileSet.BackupPath, out var backup))
+			return backup;
+		return RepositoryCacheIndexDocument.Empty;
+	}
+
+	private bool TryLoadIndex(
+		string path,
+		out RepositoryCacheIndexDocument document)
+	{
+		if (!JsonStorePersistence.TryReadNormalized(
+			    path,
+			    IndexSerializerOptions,
+			    static () => RepositoryCacheIndexDocument.Empty,
+			    NormalizeIndex,
+			    out document,
+			    out _))
+		{
+			document = RepositoryCacheIndexDocument.Empty;
+			return false;
+		}
+
+		return document.SchemaVersion <= CacheIndexSchemaVersion;
+	}
+
+	private RepositoryCacheIndexDocument NormalizeIndex(
+		RepositoryCacheIndexDocument document)
+	{
+		var entries = (document.Entries ?? [])
+			.Where(entry =>
+				entry is not null &&
+				!string.IsNullOrWhiteSpace(entry.Identity) &&
+				!string.IsNullOrWhiteSpace(entry.RepositoryUrl) &&
+				!string.IsNullOrWhiteSpace(entry.LocalPath) &&
+				IsInCache(entry.LocalPath))
+			.GroupBy(
+				static entry => entry.Identity,
+				StringComparer.OrdinalIgnoreCase)
+			.Select(static group => group
+				.OrderByDescending(entry => entry.LastUsedUtc)
+				.First())
+			.OrderByDescending(static entry => entry.LastUsedUtc)
+			.ToList();
+		return new RepositoryCacheIndexDocument(
+			CacheIndexSchemaVersion,
+			entries);
+	}
+
+	public void RemoveIndexedRepository(string localPath)
+	{
+		string normalizedPath;
+		try
+		{
+			normalizedPath = PathUtility.Normalize(localPath);
+		}
+		catch
+		{
+			return;
+		}
+
+		var fileSet = GetIndexFileSet();
+		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+			return;
+
+		using (heldLock)
+		{
+			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+				return;
+
+			var document = LoadIndex(fileSet);
+			var entries = document.Entries
+				.Where(entry => !PathComparer.Default.Equals(entry.LocalPath, normalizedPath))
+				.ToList();
+			if (entries.Count == document.Entries.Count)
+				return;
+
+			JsonStorePersistence.TryWriteAtomic(
+				fileSet,
+				new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries),
+				IndexSerializerOptions);
+		}
+	}
+
+	private sealed record RepositoryCacheIndexDocument(
+		int SchemaVersion,
+		List<RepositoryCacheIndexEntry> Entries)
+	{
+		public static RepositoryCacheIndexDocument Empty =>
+			new(CacheIndexSchemaVersion, []);
 	}
 }

@@ -29,7 +29,8 @@ public sealed record ProjectContextDocumentLimits(
 
 public sealed class ProjectContextDocumentService(
 	TreeExportService treeExportService,
-	IFileContentAnalyzer contentAnalyzer)
+	IFileContentAnalyzer contentAnalyzer,
+	Func<FileContentClassification, string>? omissionMessageProvider = null)
 {
 	private const string SchemaVersion = "1";
 	private const string Kind = "devprojex-context";
@@ -187,11 +188,11 @@ public sealed class ProjectContextDocumentService(
 				await WriteLineAsync(writer, BuildMarkdownCodeSpan(file.Path), cancellationToken)
 					.ConfigureAwait(false);
 				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
-				if (file.IsBinary)
+				if (file.Classification != FileContentClassification.Text)
 				{
 					await WriteLineAsync(
 							writer,
-							"_Binary file; content omitted._",
+							$"_{GetOmissionText(file.Classification)}_",
 							cancellationToken)
 						.ConfigureAwait(false);
 				}
@@ -263,7 +264,7 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken)
 	{
 		await using var streamWriter = CreateStreamWriter(destination);
-		var encodingWriter = new EncodingReportingTextWriter(streamWriter, Encoding.Unicode);
+		var encodingWriter = new EncodingReportingTextWriter(streamWriter, Utf8WithoutBom);
 		using var writer = XmlWriter.Create(encodingWriter, new XmlWriterSettings
 		{
 			Indent = true,
@@ -324,12 +325,13 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken)
 	{
 		var relativePath = NormalizeRelativePath(sourceRoot, path);
-		var content = await contentAnalyzer
-			.TryReadAsTextAsync(path, long.MaxValue, cancellationToken)
+		var result = await contentAnalyzer
+			.ReadClassifiedAsync(path, long.MaxValue, cancellationToken)
 			.ConfigureAwait(false);
-		return content is null
-			? new ContextFileDocument(relativePath, IsBinary: true, Content: null)
-			: new ContextFileDocument(relativePath, IsBinary: false, content.Content);
+		return new ContextFileDocument(
+			relativePath,
+			result.Classification,
+			result.Content?.Content);
 	}
 
 	private static StreamWriter CreateStreamWriter(Stream destination) =>
@@ -358,17 +360,18 @@ public sealed class ProjectContextDocumentService(
 		await WriteLineAsync(writer, fence, cancellationToken).ConfigureAwait(false);
 	}
 
-	private static string GetTextContent(ContextFileDocument file) =>
-		file.IsBinary
-			? "[Binary file; content omitted]"
-			: file.Content ?? string.Empty;
+	private string GetTextContent(ContextFileDocument file) =>
+		file.Classification == FileContentClassification.Text
+			? file.Content ?? string.Empty
+			: $"[{GetOmissionText(file.Classification)}]";
 
 	private static void WriteContextFileJson(Utf8JsonWriter writer, ContextFileDocument file)
 	{
 		writer.WriteStartObject();
 		writer.WriteString("path", file.Path);
 		writer.WriteBoolean("isBinary", file.IsBinary);
-		if (file.IsBinary)
+		writer.WriteString("classification", ToToken(file.Classification));
+		if (file.Classification != FileContentClassification.Text)
 			writer.WriteNull("content");
 		else
 			writer.WriteString("content", file.Content);
@@ -380,7 +383,8 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteStartElement("file");
 		writer.WriteAttributeString("path", file.Path);
 		writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
-		if (!file.IsBinary)
+		writer.WriteAttributeString("classification", ToToken(file.Classification));
+		if (file.Classification == FileContentClassification.Text)
 			writer.WriteElementString("content", file.Content ?? string.Empty);
 		writer.WriteEndElement();
 	}
@@ -418,12 +422,16 @@ public sealed class ProjectContextDocumentService(
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var relativePath = NormalizeRelativePath(plan.SourceRoot, path);
-			var content = await contentAnalyzer
-				.TryReadAsTextAsync(path, maximumFileBytes, cancellationToken)
+			var result = await contentAnalyzer
+				.ReadClassifiedAsync(path, maximumFileBytes, cancellationToken)
 				.ConfigureAwait(false);
-			if (content is null)
+			var content = result.Content;
+			if (!result.IsText || content is null)
 			{
-				files.Add(new ContextFileDocument(relativePath, IsBinary: true, Content: null));
+				files.Add(new ContextFileDocument(
+					relativePath,
+					result.Classification,
+					Content: null));
 				continue;
 			}
 
@@ -431,7 +439,7 @@ public sealed class ProjectContextDocumentService(
 			{
 				files.Add(new ContextFileDocument(
 					relativePath,
-					IsBinary: false,
+					FileContentClassification.TooLarge,
 					Content: null,
 					IsOmitted: true));
 				isTruncated = true;
@@ -446,7 +454,7 @@ public sealed class ProjectContextDocumentService(
 			}
 			files.Add(new ContextFileDocument(
 				relativePath,
-				IsBinary: false,
+				FileContentClassification.Text,
 				fileContent,
 				IsTruncated: fileContent.Length != content.Content.Length));
 			remainingCharacters -= fileContent.Length;
@@ -510,9 +518,12 @@ public sealed class ProjectContextDocumentService(
 			output.AppendLine();
 			output.Append("## ").AppendLine(BuildMarkdownCodeSpan(file.Path));
 			output.AppendLine();
-			if (file.IsBinary)
+			if (file.Classification != FileContentClassification.Text &&
+			    !file.IsOmitted)
 			{
-				output.AppendLine("_Binary file; content omitted._");
+				output.Append('_')
+					.Append(GetOmissionText(file.Classification))
+					.AppendLine("_");
 				continue;
 			}
 			if (file.IsOmitted)
@@ -565,7 +576,8 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteStartObject();
 			writer.WriteString("path", file.Path);
 			writer.WriteBoolean("isBinary", file.IsBinary);
-			if (file.IsBinary || file.IsOmitted)
+			writer.WriteString("classification", ToToken(file.Classification));
+			if (file.Classification != FileContentClassification.Text || file.IsOmitted)
 				writer.WriteNull("content");
 			else
 				writer.WriteString("content", file.Content);
@@ -592,11 +604,17 @@ public sealed class ProjectContextDocumentService(
 		bool truncated)
 	{
 		var output = new StringBuilder();
-		using var writer = XmlWriter.Create(output, new XmlWriterSettings
+		using var stringWriter = new StringWriter(
+			output,
+			System.Globalization.CultureInfo.InvariantCulture);
+		using var encodingWriter = new EncodingReportingTextWriter(
+			stringWriter,
+			Utf8WithoutBom);
+		using var writer = XmlWriter.Create(encodingWriter, new XmlWriterSettings
 		{
 			Indent = true,
 			OmitXmlDeclaration = false,
-			Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+			Encoding = Utf8WithoutBom
 		});
 
 		writer.WriteStartDocument();
@@ -620,11 +638,12 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteStartElement("file");
 			writer.WriteAttributeString("path", file.Path);
 			writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
+			writer.WriteAttributeString("classification", ToToken(file.Classification));
 			if (file.IsOmitted)
 				writer.WriteAttributeString("omitted", XmlConvert.ToString(true));
 			if (file.IsTruncated)
 				writer.WriteAttributeString("truncated", XmlConvert.ToString(true));
-			if (!file.IsBinary && !file.IsOmitted)
+			if (file.Classification == FileContentClassification.Text && !file.IsOmitted)
 				writer.WriteElementString("content", file.Content ?? string.Empty);
 			writer.WriteEndElement();
 		}
@@ -650,7 +669,7 @@ public sealed class ProjectContextDocumentService(
 		return output.ToString();
 	}
 
-	private static void AppendTextFiles(
+	private void AppendTextFiles(
 		StringBuilder output,
 		IReadOnlyList<ContextFileDocument> files)
 	{
@@ -661,11 +680,11 @@ public sealed class ProjectContextDocumentService(
 
 			output.Append(file.Path).AppendLine(":");
 			output.AppendLine();
-			output.Append(file.IsBinary
-				? "[Binary file; content omitted]"
-				: file.IsOmitted
+			output.Append(file.IsOmitted
 					? "[Large text file; content omitted from bounded preview]"
-					: file.Content);
+					: file.Classification == FileContentClassification.Text
+						? file.Content
+						: $"[{GetOmissionText(file.Classification)}]");
 			if (file.IsTruncated)
 				output.AppendLine().Append("[File preview truncated]");
 		}
@@ -971,16 +990,40 @@ public sealed class ProjectContextDocumentService(
 	private static string ToToken(ContextDiagnosticSeverity severity) =>
 		severity.ToString().ToLowerInvariant();
 
+	private static string ToToken(FileContentClassification classification) =>
+		classification switch
+		{
+			FileContentClassification.TooLarge => "too-large",
+			FileContentClassification.AccessDenied => "access-denied",
+			FileContentClassification.UnsupportedEncoding => "unsupported-encoding",
+			_ => classification.ToString().ToLowerInvariant()
+		};
+
+	private string GetOmissionText(FileContentClassification classification) =>
+		omissionMessageProvider?.Invoke(classification) ??
+		classification switch
+		{
+			FileContentClassification.Binary => "Binary file; content omitted.",
+			FileContentClassification.TooLarge => "File is too large for interactive preview.",
+			FileContentClassification.AccessDenied => "Access denied while reading file.",
+			FileContentClassification.Missing => "File disappeared while it was being read.",
+			FileContentClassification.UnsupportedEncoding => "Text encoding is unsupported.",
+			_ => "File could not be read."
+		};
+
 	private sealed record ContextFileReadResult(
 		IReadOnlyList<ContextFileDocument> Files,
 		bool IsTruncated);
 
 	private sealed record ContextFileDocument(
 		string Path,
-		bool IsBinary,
+		FileContentClassification Classification,
 		string? Content,
 		bool IsOmitted = false,
-		bool IsTruncated = false);
+		bool IsTruncated = false)
+	{
+		public bool IsBinary => Classification == FileContentClassification.Binary;
+	}
 
 	private sealed class EncodingReportingTextWriter(
 		TextWriter inner,

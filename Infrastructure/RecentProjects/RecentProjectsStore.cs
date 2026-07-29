@@ -11,8 +11,12 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	private const int MaxRecentRepositoryRemovals = 32;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "recent-projects.json";
-	private static readonly string RepoCacheRootPath = Path.Combine(
+	private static readonly string LegacyRepoCacheRootPath = Path.Combine(
 		Path.GetTempPath(),
+		FolderName,
+		"RepoCache");
+	private static readonly string PersistentRepoCacheRootPath = Path.Combine(
+		UserDataPathResolver.GetLocalDataRoot(),
 		FolderName,
 		"RepoCache");
 
@@ -704,7 +708,8 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 
 		try
 		{
-			return PathUtility.IsPathInside(path, RepoCacheRootPath);
+			return PathUtility.IsPathInside(path, LegacyRepoCacheRootPath) ||
+			       PathUtility.IsPathInside(path, PersistentRepoCacheRootPath);
 		}
 		catch
 		{

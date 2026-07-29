@@ -30,7 +30,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	private static readonly FrozenSet<string> KnownBinaryExtensions = new[]
 	{
 		// Images
-		".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
+		".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tiff", ".tif",
 		// Video
 		".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
 		// Audio
@@ -46,38 +46,42 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		// Other binary
 		".bin", ".dat", ".db", ".sqlite", ".mdb"
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+	private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+		encoderShouldEmitUTF8Identifier: false,
+		throwOnInvalidBytes: true);
+	private static readonly Encoding StrictUtf16Le = new UnicodeEncoding(
+		bigEndian: false,
+		byteOrderMark: true,
+		throwOnInvalidBytes: true);
+	private static readonly Encoding StrictUtf16Be = new UnicodeEncoding(
+		bigEndian: true,
+		byteOrderMark: true,
+		throwOnInvalidBytes: true);
+	private static readonly Encoding StrictUtf32Le = new UTF32Encoding(
+		bigEndian: false,
+		byteOrderMark: true,
+		throwOnInvalidCharacters: true);
+	private static readonly Encoding StrictUtf32Be = new UTF32Encoding(
+		bigEndian: true,
+		byteOrderMark: true,
+		throwOnInvalidCharacters: true);
+
+	public FileContentClassification? ClassifyWithoutReading(string path) =>
+		HasKnownBinaryExtension(path)
+			? FileContentClassification.Binary
+			: null;
+
+	public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+		string path,
+		long maxSizeForFullRead,
+		CancellationToken cancellationToken = default) =>
+		ValueTask.FromResult(ReadClassifiedSync(path, maxSizeForFullRead, cancellationToken));
 
 	/// <inheritdoc />
 	public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
 	{
-		return ValueTask.FromResult(IsTextFileSync(path, cancellationToken));
-	}
-
-	private static bool IsTextFileSync(string path, CancellationToken cancellationToken)
-	{
-		try
-		{
-			// Fast path: known binary extensions - no file I/O needed
-			if (HasKnownBinaryExtension(path))
-				return false;
-
-			using var stream = OpenSequentialRead(path, BinaryCheckBufferSize, FileShare.ReadWrite);
-
-			// Empty files are considered text
-			if (stream.Length == 0)
-				return true;
-
-			// Check for null bytes in first 512 bytes
-			return CheckForNullBytes(stream, cancellationToken);
-		}
-		catch (OperationCanceledException)
-		{
-			throw;
-		}
-		catch
-		{
-			return false;
-		}
+		var result = GetClassifiedMetricsSync(path, cancellationToken);
+		return ValueTask.FromResult(result.IsText);
 	}
 
 	/// <inheritdoc />
@@ -85,61 +89,97 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		string path,
 		CancellationToken cancellationToken = default)
 	{
-		return ValueTask.FromResult(GetTextFileMetricsSync(path, cancellationToken));
+		var result = GetClassifiedMetricsSync(path, cancellationToken);
+		return ValueTask.FromResult(result.IsText ? result.Metrics : null);
 	}
 
-	private TextFileMetrics? GetTextFileMetricsSync(string path, CancellationToken cancellationToken)
+	public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+		string path,
+		CancellationToken cancellationToken = default) =>
+		ValueTask.FromResult(GetClassifiedMetricsSync(path, cancellationToken));
+
+	private static FileContentMetricsResult GetClassifiedMetricsSync(
+		string path,
+		CancellationToken cancellationToken)
 	{
 		try
 		{
-			// Fast path: known binary extensions - no file I/O needed
 			if (HasKnownBinaryExtension(path))
-				return null;
+				return new FileContentMetricsResult(FileContentClassification.Binary);
 
 			using var stream = OpenSequentialRead(path, StreamingBufferSize, FileShare.Read);
 			var sizeBytes = stream.Length;
 
-			// Empty file
 			if (sizeBytes == 0)
-				return new TextFileMetrics(
-					SizeBytes: 0,
-					LineCount: 0,
-					CharCount: 0,
-					IsEmpty: true,
-					IsWhitespaceOnly: false,
-					IsEstimated: false,
-					CrLfPairCount: 0);
-
-			// For very large files, keep fast binary probe before returning estimated metrics.
-			// Small/medium files use a single streaming pass that also detects null bytes.
-			if (sizeBytes > DefaultMaxSizeForFullRead)
 			{
-				if (!CheckForNullBytes(stream, cancellationToken))
-					return null;
-
-				return new TextFileMetrics(
-					SizeBytes: sizeBytes,
-					LineCount: Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
-					CharCount: (int)Math.Min(sizeBytes, int.MaxValue),
-					IsEmpty: false,
-					IsWhitespaceOnly: false,
-					IsEstimated: true,
-					CrLfPairCount: 0,
-					TrailingNewlineChars: 0,
-					TrailingNewlineLineBreaks: 0);
+				return new FileContentMetricsResult(
+					FileContentClassification.Text,
+					new TextFileMetrics(
+						SizeBytes: 0,
+						LineCount: 0,
+						CharCount: 0,
+						IsEmpty: true,
+						IsWhitespaceOnly: false,
+						IsEstimated: false,
+						CrLfPairCount: 0));
 			}
 
-			// Stream through file counting metrics without loading content into memory.
-			// Null byte detection is performed during the same pass.
-			return CountMetricsStreaming(stream, sizeBytes, cancellationToken);
+			var encoding = DetectBomEncoding(stream, cancellationToken);
+			if (encoding is null && !CheckForNullBytes(stream, cancellationToken))
+				return new FileContentMetricsResult(FileContentClassification.Binary);
+
+			if (sizeBytes > DefaultMaxSizeForFullRead)
+			{
+				return new FileContentMetricsResult(
+					FileContentClassification.TooLarge,
+					new TextFileMetrics(
+						SizeBytes: sizeBytes,
+						LineCount: Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
+						CharCount: (int)Math.Min(sizeBytes, int.MaxValue),
+						IsEmpty: false,
+						IsWhitespaceOnly: false,
+						IsEstimated: true,
+						CrLfPairCount: 0,
+						TrailingNewlineChars: 0,
+						TrailingNewlineLineBreaks: 0));
+			}
+
+			var metrics = CountMetricsStreaming(
+				stream,
+				sizeBytes,
+				encoding ?? StrictUtf8,
+				cancellationToken);
+			return metrics is null
+				? new FileContentMetricsResult(FileContentClassification.Binary)
+				: new FileContentMetricsResult(FileContentClassification.Text, metrics);
 		}
 		catch (OperationCanceledException)
 		{
 			throw;
 		}
+		catch (UnauthorizedAccessException)
+		{
+			return new FileContentMetricsResult(FileContentClassification.AccessDenied);
+		}
+		catch (FileNotFoundException)
+		{
+			return new FileContentMetricsResult(FileContentClassification.Missing);
+		}
+		catch (DirectoryNotFoundException)
+		{
+			return new FileContentMetricsResult(FileContentClassification.Missing);
+		}
+		catch (DecoderFallbackException)
+		{
+			return new FileContentMetricsResult(FileContentClassification.UnsupportedEncoding);
+		}
+		catch (IOException)
+		{
+			return new FileContentMetricsResult(FileContentClassification.Unreadable);
+		}
 		catch
 		{
-			return null;
+			return new FileContentMetricsResult(FileContentClassification.Unreadable);
 		}
 	}
 
@@ -162,55 +202,99 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 	private TextFileContent? TryReadAsTextSync(string path, long maxSizeForFullRead, CancellationToken cancellationToken)
 	{
+		var result = ReadClassifiedSync(path, maxSizeForFullRead, cancellationToken);
+		return result.IsText ? result.Content : null;
+	}
+
+	private static FileContentReadResult ReadClassifiedSync(
+		string path,
+		long maxSizeForFullRead,
+		CancellationToken cancellationToken)
+	{
 		try
 		{
 			// Fast path: known binary extensions - no file I/O needed
 			if (HasKnownBinaryExtension(path))
-				return null;
+				return new FileContentReadResult(FileContentClassification.Binary);
 
 			using var stream = OpenSequentialRead(path, StreamingBufferSize, FileShare.Read);
 			var sizeBytes = stream.Length;
 
 			// Empty file
 			if (sizeBytes == 0)
-				return new TextFileContent(
-					Content: string.Empty,
-					SizeBytes: 0,
-					LineCount: 0,
-					CharCount: 0,
-					IsEmpty: true,
-					IsWhitespaceOnly: false,
-					IsEstimated: false);
+			{
+				return new FileContentReadResult(
+					FileContentClassification.Text,
+					new TextFileContent(
+						Content: string.Empty,
+						SizeBytes: 0,
+						LineCount: 0,
+						CharCount: 0,
+						IsEmpty: true,
+						IsWhitespaceOnly: false,
+						IsEstimated: false));
+			}
 
-			// Check if binary (fast - only 512 bytes)
-			if (!CheckForNullBytes(stream, cancellationToken))
-				return null;
+			var encoding = DetectBomEncoding(stream, cancellationToken);
+			if (encoding is null && !CheckForNullBytes(stream, cancellationToken))
+				return new FileContentReadResult(FileContentClassification.Binary);
 
 			// For large files, return estimated metrics without full content
 			if (sizeBytes > maxSizeForFullRead)
 			{
-				return new TextFileContent(
-					Content: string.Empty,
-					SizeBytes: sizeBytes,
-					LineCount: Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
-					CharCount: (int)Math.Min(sizeBytes, int.MaxValue),
-					IsEmpty: false,
-					IsWhitespaceOnly: false,
-					IsEstimated: true,
-					TrailingNewlineChars: 0,
-					TrailingNewlineLineBreaks: 0);
+				return new FileContentReadResult(
+					FileContentClassification.TooLarge,
+					new TextFileContent(
+						Content: string.Empty,
+						SizeBytes: sizeBytes,
+						LineCount: Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
+						CharCount: (int)Math.Min(sizeBytes, int.MaxValue),
+						IsEmpty: false,
+						IsWhitespaceOnly: false,
+						IsEstimated: true,
+						TrailingNewlineChars: 0,
+						TrailingNewlineLineBreaks: 0));
 			}
 
-			// Read full content for export
-			return ReadFullContent(stream, sizeBytes, cancellationToken);
+			return new FileContentReadResult(
+				FileContentClassification.Text,
+				ReadFullContentStrict(
+					stream,
+					sizeBytes,
+					encoding ?? StrictUtf8,
+					cancellationToken));
 		}
 		catch (OperationCanceledException)
 		{
 			throw;
 		}
+		catch (UnauthorizedAccessException)
+		{
+			return new FileContentReadResult(FileContentClassification.AccessDenied);
+		}
+		catch (FileNotFoundException)
+		{
+			return new FileContentReadResult(FileContentClassification.Missing);
+		}
+		catch (DirectoryNotFoundException)
+		{
+			return new FileContentReadResult(FileContentClassification.Missing);
+		}
+		catch (BinaryContentException)
+		{
+			return new FileContentReadResult(FileContentClassification.Binary);
+		}
+		catch (DecoderFallbackException)
+		{
+			return new FileContentReadResult(FileContentClassification.UnsupportedEncoding);
+		}
+		catch (IOException)
+		{
+			return new FileContentReadResult(FileContentClassification.Unreadable);
+		}
 		catch
 		{
-			return null;
+			return new FileContentReadResult(FileContentClassification.Unreadable);
 		}
 	}
 
@@ -229,6 +313,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			Span<byte> buffer = stackalloc byte[toRead];
 			int bytesRead = stream.Read(buffer);
 
+			if (TryResolveBomEncoding(buffer[..bytesRead], out _))
+				return true;
+
 			// Span.Contains uses the runtime's vectorized search without changing the
 			// established null-byte binary detection contract.
 			return !buffer[..bytesRead].Contains((byte)0);
@@ -241,6 +328,57 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		{
 			return false;
 		}
+	}
+
+	private static Encoding? DetectBomEncoding(
+		FileStream stream,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		stream.Position = 0;
+		Span<byte> bom = stackalloc byte[(int)Math.Min(4, stream.Length)];
+		var bytesRead = stream.Read(bom);
+		stream.Position = 0;
+		return TryResolveBomEncoding(bom[..bytesRead], out var encoding)
+			? encoding
+			: null;
+	}
+
+	private static bool TryResolveBomEncoding(ReadOnlySpan<byte> value, out Encoding encoding)
+	{
+		if (value.Length >= 4 &&
+		    value[0] == 0x00 && value[1] == 0x00 &&
+		    value[2] == 0xFE && value[3] == 0xFF)
+		{
+			encoding = StrictUtf32Be;
+			return true;
+		}
+		if (value.Length >= 4 &&
+		    value[0] == 0xFF && value[1] == 0xFE &&
+		    value[2] == 0x00 && value[3] == 0x00)
+		{
+			encoding = StrictUtf32Le;
+			return true;
+		}
+		if (value.Length >= 3 &&
+		    value[0] == 0xEF && value[1] == 0xBB && value[2] == 0xBF)
+		{
+			encoding = StrictUtf8;
+			return true;
+		}
+		if (value.Length >= 2 && value[0] == 0xFE && value[1] == 0xFF)
+		{
+			encoding = StrictUtf16Be;
+			return true;
+		}
+		if (value.Length >= 2 && value[0] == 0xFF && value[1] == 0xFE)
+		{
+			encoding = StrictUtf16Le;
+			return true;
+		}
+
+		encoding = null!;
+		return false;
 	}
 
 	private static FileStream OpenSequentialRead(string path, int bufferSize, FileShare fileShare)
@@ -277,6 +415,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	private static TextFileMetrics? CountMetricsStreaming(
 		FileStream stream,
 		long sizeBytes,
+		Encoding encoding,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -296,7 +435,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			stream.Position = 0;
 			using var reader = new StreamReader(
 				stream,
-				Encoding.UTF8,
+				encoding,
 				detectEncodingFromByteOrderMarks: true,
 				bufferSize: StreamingBufferSize,
 				leaveOpen: true);
@@ -369,14 +508,6 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				TrailingNewlineChars: trailingNewlineChars,
 				TrailingNewlineLineBreaks: trailingNewlineLineBreaks);
 		}
-		catch (OperationCanceledException)
-		{
-			throw;
-		}
-		catch
-		{
-			return null;
-		}
 		finally
 		{
 			// Always return buffer to pool
@@ -384,58 +515,40 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		}
 	}
 
-	/// <summary>
-	/// Reads full file content for export operations.
-	/// Content is loaded into memory - use only when content is needed.
-	/// </summary>
-	private static TextFileContent? ReadFullContent(
+	private static TextFileContent ReadFullContentStrict(
 		FileStream stream,
 		long sizeBytes,
+		Encoding encoding,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-
-		try
+		stream.Position = 0;
+		string content;
+		using (var reader = new StreamReader(
+			       stream,
+			       encoding,
+			       detectEncodingFromByteOrderMarks: true,
+			       bufferSize: StreamingBufferSize,
+			       leaveOpen: true))
 		{
-			stream.Position = 0;
-			string content;
-			using (var reader = new StreamReader(
-				       stream,
-				       Encoding.UTF8,
-				       detectEncodingFromByteOrderMarks: true,
-				       bufferSize: StreamingBufferSize,
-				       leaveOpen: true))
-			{
-				content = reader.ReadToEnd();
-			}
-
-			// Check for null bytes (edge case: null after first 512 bytes)
-			if (content.Contains('\0'))
-				return null;
-
-			bool isWhitespaceOnly = string.IsNullOrWhiteSpace(content);
-			int lineCount = content.Length == 0 ? 0 : 1 + CountNormalizedLineBreaks(content);
-			var trailingInfo = GetTrailingNewlineInfo(content);
-
-			return new TextFileContent(
-				Content: content,
-				SizeBytes: sizeBytes,
-				LineCount: lineCount,
-				CharCount: content.Length,
-				IsEmpty: content.Length == 0,
-				IsWhitespaceOnly: isWhitespaceOnly,
-				IsEstimated: false,
-				TrailingNewlineChars: trailingInfo.Chars,
-				TrailingNewlineLineBreaks: trailingInfo.LineBreaks);
+			content = reader.ReadToEnd();
 		}
-		catch (OperationCanceledException)
-		{
-			throw;
-		}
-		catch
-		{
-			return null;
-		}
+
+		if (content.Contains('\0'))
+			throw new BinaryContentException();
+
+		var lineCount = content.Length == 0 ? 0 : 1 + CountNormalizedLineBreaks(content);
+		var trailingInfo = GetTrailingNewlineInfo(content);
+		return new TextFileContent(
+			Content: content,
+			SizeBytes: sizeBytes,
+			LineCount: lineCount,
+			CharCount: content.Length,
+			IsEmpty: content.Length == 0,
+			IsWhitespaceOnly: content.Length > 0 && string.IsNullOrWhiteSpace(content),
+			IsEstimated: false,
+			TrailingNewlineChars: trailingInfo.Chars,
+			TrailingNewlineLineBreaks: trailingInfo.LineBreaks);
 	}
 
 	/// <summary>
@@ -470,5 +583,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 		var trailing = content.AsSpan(start);
 		return (trailing.Length, CountNormalizedLineBreaks(trailing));
+	}
+
+	private sealed class BinaryContentException : Exception
+	{
 	}
 }

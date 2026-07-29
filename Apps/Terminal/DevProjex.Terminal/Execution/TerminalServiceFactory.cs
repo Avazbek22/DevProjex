@@ -43,7 +43,12 @@ public sealed class TerminalServiceFactory(
 			treeExport,
 			contentAnalyzer);
 		var contextPlanner = new ProjectContextPlanner(analysis);
-		var contextDocumentService = new ProjectContextDocumentService(treeExport, contentAnalyzer);
+		string ResolveContentClassification(FileContentClassification classification) =>
+			localization[FileContentClassificationCatalog.Get(classification).LabelKey];
+		var contextDocumentService = new ProjectContextDocumentService(
+			treeExport,
+			contentAnalyzer,
+			ResolveContentClassification);
 		var projectCopyExportService = new ProjectCopyExportService(new ProjectCopyExportPlanBuilder());
 		var localProfiles = new ProjectProfileStore(resolvedAppDataPathProvider);
 		var portableProfiles = new PortableProjectProfileService();
@@ -66,7 +71,10 @@ public sealed class TerminalServiceFactory(
 			SourceIdentityResolver: sourceIdentityResolver,
 			RepositoryCacheCatalog: repositoryCacheCatalog,
 			ContextDocumentService: contextDocumentService,
-			PreviewDocumentBuilder: new PreviewDocumentBuilder(contentAnalyzer),
+			TreeExportService: treeExport,
+			PreviewDocumentBuilder: new PreviewDocumentBuilder(
+				contentAnalyzer,
+				ResolveContentClassification),
 			ProjectCopyExportService: projectCopyExportService,
 			AnalysisReportWriter: new ProjectAnalysisReportWriter(),
 			LocalProfileStore: localProfiles,
@@ -75,6 +83,7 @@ public sealed class TerminalServiceFactory(
 			TerminalSettingsStore: new TerminalSettingsStore(resolvedAppDataPathProvider),
 			TerminalCommandSetupService: new TerminalCommandSetupService(),
 			GitTrackedModeReadinessProbe: new GitTrackedModeReadinessProbe(),
+			RecentWorkspacesService: new RecentWorkspacesService(),
 			RecentProjectsStore: new RecentProjectsStore(resolvedAppDataPathProvider),
 			GitRepositoryService: gitRepository,
 			RepoCacheService: repoCache);

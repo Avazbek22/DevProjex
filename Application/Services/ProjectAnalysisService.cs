@@ -375,7 +375,7 @@ public sealed class ProjectAnalysisService(
 			CancellationToken = cancellationToken
 		};
 		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		var batchMetrics = new TextFileMetrics?[Math.Min(ContentMetricBatchSize, orderedFilePaths.Count)];
+		var batchMetrics = new FileContentMetricsResult?[Math.Min(ContentMetricBatchSize, orderedFilePaths.Count)];
 		for (var batchStart = 0; batchStart < orderedFilePaths.Count; batchStart += batchMetrics.Length)
 		{
 			var batchCount = Math.Min(batchMetrics.Length, orderedFilePaths.Count - batchStart);
@@ -386,14 +386,15 @@ public sealed class ProjectAnalysisService(
 				async (batchIndex, token) =>
 				{
 					batchMetrics[batchIndex] = await fileContentAnalyzer
-						.GetTextFileMetricsAsync(orderedFilePaths[batchStart + batchIndex], token)
+						.GetClassifiedMetricsAsync(orderedFilePaths[batchStart + batchIndex], token)
 						.ConfigureAwait(false);
 				}).ConfigureAwait(false);
 
 			for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var metrics = batchMetrics[batchIndex];
+				var result = batchMetrics[batchIndex];
+				var metrics = result?.IsText == true ? result.Metrics : null;
 				if (metrics is null)
 					continue;
 

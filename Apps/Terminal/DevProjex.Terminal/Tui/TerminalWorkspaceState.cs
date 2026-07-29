@@ -48,6 +48,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 	private readonly List<IPreviewTextDocument> _retiredPreviewDocuments = [];
 	private readonly object _previewSync = new();
 	private int _selectedFolderCount;
+	private long _revision;
+	private string _treeFilterQuery = string.Empty;
 	private bool _disposed;
 
 	public TerminalWorkspaceState(ProjectContextPlan plan)
@@ -72,11 +74,16 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public ObservableCollection<TerminalTreeRow> VisibleRows { get; } = [];
 	public int SelectedFileCount => _selectedFiles.Count;
 	public int SelectedFolderCount => _selectedFolderCount;
+	public string TreeFilterQuery => _treeFilterQuery;
+	public int TreeFilterMatchCount { get; private set; }
+	public bool HasTreeFilter => _treeFilterQuery.Length > 0;
+	public long Revision => Volatile.Read(ref _revision);
 	public IPreviewTextDocument PreviewDocument { get; private set; }
 	public string PreviewText => PreviewDocument.GetFullText();
 
 	public void ReplacePlan(ProjectContextPlan plan)
 	{
+		Interlocked.Increment(ref _revision);
 		var expandedPaths = _expandedPaths.ToArray();
 		Plan = plan;
 		_nodesByPath.Clear();
@@ -99,10 +106,17 @@ public sealed class TerminalWorkspaceState : IDisposable
 			if (_nodesByPath.ContainsKey(path))
 				_expandedPaths.Add(path);
 		}
-		_expandedPaths.Add(plan.EffectiveTree.FullPath);
 		RecomputeCheckStates();
 		RebuildVisibleRows();
 		SetPreviewDocument(new InMemoryPreviewTextDocument(BuildTreePreview()));
+	}
+
+	public bool TryReplacePlan(ProjectContextPlan plan, long expectedRevision)
+	{
+		if (Revision != expectedRevision)
+			return false;
+		ReplacePlan(plan);
+		return true;
 	}
 
 	public void SetPreviewText(string value) =>
@@ -116,6 +130,20 @@ public sealed class TerminalWorkspaceState : IDisposable
 			ThrowIfDisposed();
 			_retiredPreviewDocuments.Add(PreviewDocument);
 			PreviewDocument = document;
+		}
+	}
+
+	public bool TrySetPreviewDocument(IPreviewTextDocument document, long expectedRevision)
+	{
+		ArgumentNullException.ThrowIfNull(document);
+		lock (_previewSync)
+		{
+			if (_disposed || Revision != expectedRevision)
+				return false;
+
+			_retiredPreviewDocuments.Add(PreviewDocument);
+			PreviewDocument = document;
+			return true;
 		}
 	}
 
@@ -163,6 +191,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		if (!TryGetRow(rowIndex, out var row))
 			return;
 
+		Interlocked.Increment(ref _revision);
 		var select = GetCheckState(row.Node) != TerminalTreeCheckState.Checked;
 		SetSubtreeSelection(row.Node, select);
 		RecomputeCheckStates();
@@ -171,7 +200,35 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 	public int FindNext(string query, int startIndex, bool reverse = false)
 	{
-		if (string.IsNullOrWhiteSpace(query) || _orderedPaths.Count == 0)
+		if (string.IsNullOrWhiteSpace(query))
+			return -1;
+		if (!HasTreeFilter)
+			return FindNextInCompleteTree(query, startIndex, reverse);
+		if (VisibleRows.Count == 0)
+			return -1;
+
+		var currentIndex = startIndex >= 0 && startIndex < VisibleRows.Count
+			? startIndex
+			: reverse ? 0 : -1;
+		for (var offset = 1; offset <= VisibleRows.Count; offset++)
+		{
+			var index = reverse
+				? Mod(currentIndex - offset, VisibleRows.Count)
+				: Mod(currentIndex + offset, VisibleRows.Count);
+			if (!VisibleRows[index].Node.DisplayName.Contains(
+				    query,
+				    StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			return index;
+		}
+
+		return -1;
+	}
+
+	private int FindNextInCompleteTree(string query, int startIndex, bool reverse)
+	{
+		if (_orderedPaths.Count == 0)
 			return -1;
 
 		var currentPath = startIndex >= 0 && startIndex < VisibleRows.Count
@@ -186,8 +243,12 @@ public sealed class TerminalWorkspaceState : IDisposable
 				? Mod(currentIndex - offset, _orderedPaths.Count)
 				: Mod(currentIndex + offset, _orderedPaths.Count);
 			var path = _orderedPaths[index];
-			if (!_nodesByPath[path].DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase))
+			if (!_nodesByPath[path].DisplayName.Contains(
+				    query,
+				    StringComparison.OrdinalIgnoreCase))
+			{
 				continue;
+			}
 
 			ExpandAncestors(path);
 			return VisibleRows
@@ -197,6 +258,16 @@ public sealed class TerminalWorkspaceState : IDisposable
 		}
 
 		return -1;
+	}
+
+	public void ApplyTreeFilter(string? query)
+	{
+		var normalized = query?.Trim() ?? string.Empty;
+		if (string.Equals(_treeFilterQuery, normalized, StringComparison.Ordinal))
+			return;
+
+		_treeFilterQuery = normalized;
+		RebuildVisibleRows();
 	}
 
 	public IReadOnlyList<string> BuildSelectedRelativePaths()
@@ -245,11 +316,71 @@ public sealed class TerminalWorkspaceState : IDisposable
 	private void RebuildVisibleRows()
 	{
 		var rows = new List<TerminalTreeRow>();
-		AppendVisible(Plan.EffectiveTree, depth: 0, rows);
+		if (_treeFilterQuery.Length == 0)
+		{
+			TreeFilterMatchCount = 0;
+			AppendVisible(Plan.EffectiveTree, depth: 0, rows);
+		}
+		else
+		{
+			TreeFilterMatchCount = CountFilterMatches(Plan.EffectiveTree);
+			AppendFiltered(Plan.EffectiveTree, depth: 0, rows);
+		}
 
 		VisibleRows.Clear();
 		foreach (var row in rows)
 			VisibleRows.Add(row);
+	}
+
+	private bool AppendFiltered(
+		TreeNodeDescriptor node,
+		int depth,
+		List<TerminalTreeRow> rows)
+	{
+		var insertionIndex = rows.Count;
+		var selfMatches = node.DisplayName.Contains(
+			_treeFilterQuery,
+			StringComparison.OrdinalIgnoreCase);
+		var descendantMatches = false;
+		if (node.IsDirectory)
+		{
+			foreach (var child in node.Children)
+				descendantMatches |= AppendFiltered(child, depth + 1, rows);
+		}
+
+		if (!selfMatches && !descendantMatches)
+			return false;
+
+		rows.Insert(
+			insertionIndex,
+			new TerminalTreeRow(
+				node,
+				depth,
+				node.IsDirectory && descendantMatches,
+				GetCheckState(node)));
+		return true;
+	}
+
+	private int CountFilterMatches(TreeNodeDescriptor root)
+	{
+		var count = 0;
+		var stack = new Stack<TreeNodeDescriptor>();
+		stack.Push(root);
+		while (stack.Count > 0)
+		{
+			var node = stack.Pop();
+			if (node.DisplayName.Contains(
+				    _treeFilterQuery,
+				    StringComparison.OrdinalIgnoreCase))
+			{
+				count++;
+			}
+
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				stack.Push(node.Children[index]);
+		}
+
+		return count;
 	}
 
 	private void AppendVisible(

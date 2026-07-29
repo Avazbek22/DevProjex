@@ -65,14 +65,22 @@ public sealed class TerminalWorkspaceController(
 		TerminalWorkspaceState state,
 		CancellationToken cancellationToken)
 	{
-		var plan = await services.ContextPlanner
-			.ReprojectSelectionAsync(
+		var plan = await BuildReprojectedPlanAsync(
 				state.Plan,
 				state.BuildSelectedRelativePaths(),
 				cancellationToken)
 			.ConfigureAwait(false);
 		state.ReplacePlan(plan);
 	}
+
+	public Task<ProjectContextPlan> BuildReprojectedPlanAsync(
+		ProjectContextPlan plan,
+		IReadOnlyList<string> selectedPaths,
+		CancellationToken cancellationToken) =>
+		services.ContextPlanner.ReprojectSelectionAsync(
+			plan,
+			selectedPaths,
+			cancellationToken);
 
 	public async Task SetGitModeAsync(
 		TerminalWorkspaceState state,
@@ -142,48 +150,55 @@ public sealed class TerminalWorkspaceController(
 		state.SetPreviewText(preview);
 	}
 
-	public async Task RefreshPreviewAsync(
+	public async Task<IPreviewTextDocument> BuildPreviewDocumentAsync(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
-		TerminalPreviewPresentation presentation,
 		CancellationToken cancellationToken)
 	{
-		IPreviewTextDocument document;
-		if (presentation == TerminalPreviewPresentation.RawOutput)
-		{
-			document = await services.PreviewDocumentBuilder.CreateDocumentAsync(
-					(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
-						state.Plan,
-						view,
-						format,
-						stream,
-						token),
-					cancellationToken)
-				.ConfigureAwait(false);
-		}
-		else
-		{
-			document = await BuildReadablePreviewAsync(state, view, cancellationToken)
-				.ConfigureAwait(false);
-		}
-
-		state.SetPreviewDocument(document);
+		var plan = state.Plan;
+		var tree = view is ProjectContextView.Tree or ProjectContextView.TreeContent
+			? services.TreeExportService.BuildFullTree(
+				plan.SourceRoot,
+				plan.ProjectedTree,
+				MapTreeFormat(format),
+				GetDisplaySource(plan),
+				GetDisplayName(plan),
+				includeRootPath: false)
+			: string.Empty;
+		return await BuildInteractivePreviewAsync(
+				plan,
+				tree,
+				view,
+				cancellationToken)
+			.ConfigureAwait(false);
 	}
 
-	private async Task<IPreviewTextDocument> BuildReadablePreviewAsync(
+	public Task<IPreviewTextDocument> BuildExactExportDocumentAsync(
 		TerminalWorkspaceState state,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		CancellationToken cancellationToken) =>
+		services.PreviewDocumentBuilder.CreateDocumentAsync(
+			(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
+				state.Plan,
+				view,
+				format,
+				stream,
+				token),
+			cancellationToken);
+
+	private async Task<IPreviewTextDocument> BuildInteractivePreviewAsync(
+		ProjectContextPlan plan,
+		string tree,
 		ProjectContextView view,
 		CancellationToken cancellationToken)
 	{
-		var tree = view is ProjectContextView.Tree or ProjectContextView.TreeContent
-			? state.BuildTreePreview(int.MaxValue)
-			: string.Empty;
 		var files = view is ProjectContextView.Content or ProjectContextView.TreeContent
-			? state.Plan.IncludedFiles
+			? plan.IncludedFiles
 			: [];
 		string MapDisplayPath(string path) =>
-			Path.GetRelativePath(state.Plan.SourceRoot, path).Replace('\\', '/');
+			Path.GetRelativePath(plan.SourceRoot, path).Replace('\\', '/');
 
 		return view switch
 		{
@@ -208,6 +223,29 @@ public sealed class TerminalWorkspaceController(
 				.ConfigureAwait(false)
 		};
 	}
+
+	private static TreeTextFormat MapTreeFormat(ProjectContextDocumentFormat format) =>
+		format switch
+		{
+			ProjectContextDocumentFormat.Json => TreeTextFormat.Json,
+			ProjectContextDocumentFormat.Xml => TreeTextFormat.Xml,
+			ProjectContextDocumentFormat.Markdown => TreeTextFormat.Markdown,
+			_ => TreeTextFormat.Ascii
+		};
+
+	private static string GetDisplayName(ProjectContextPlan plan) =>
+		plan.SourceIdentity?.DisplayName is { Length: > 0 } name
+			? name
+			: Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot));
+
+	private static string GetDisplaySource(ProjectContextPlan plan) =>
+		plan.SourceIdentity is
+		{
+			SourceType: ProjectSourceType.GitClone,
+			SourceReference.Length: > 0
+		} identity
+			? identity.SourceReference
+			: plan.SourceRoot;
 
 	public async Task<string> ExportContextAsync(
 		TerminalWorkspaceState state,

@@ -46,6 +46,7 @@ public partial class MainWindow
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
     private readonly RecentProjectsStore _recentProjectsStore;
+    private readonly RecentWorkspacesService _recentWorkspacesService;
     private readonly RecentFolderAvailabilityService _recentFolderAvailabilityService;
     private readonly HashSet<string> _unavailableRecentFolderPaths = new(PathComparer.Default);
 
@@ -212,6 +213,7 @@ public partial class MainWindow
         _terminalCommandSetupService = services.TerminalCommandSetupService;
         _sessionMetrics = services.SessionMetricsRecorder;
         _recentProjectsStore = services.RecentProjectsStore;
+        _recentWorkspacesService = services.RecentWorkspacesService;
         _recentFolderAvailabilityService = services.RecentFolderAvailabilityService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);

@@ -13,10 +13,9 @@ namespace DevProjex.Terminal.Tui;
 internal sealed partial class TerminalWorkspaceSession
 {
 	private FrameView? _controlsFrame;
-	private TextView? _controlsSummary;
-	private ListView? _controls;
-	private ObservableCollection<TerminalWorkspaceActionRow>? _controlRows;
-	private TerminalPreviewPresentation _previewPresentation = TerminalPreviewPresentation.Readable;
+	private TerminalParameterListView? _controls;
+	private ObservableCollection<TerminalParameterRow>? _controlRows;
+	private string? _selectedControlKey;
 
 	private void CreateContextControls()
 	{
@@ -25,64 +24,158 @@ internal sealed partial class TerminalWorkspaceSession
 			BorderStyle = LineStyle.Single,
 			SchemeName = TerminalWorkspaceTheme.Panel
 		};
-		_controlsSummary = new TextView
-		{
-			X = 1,
-			Y = 0,
-			Width = Dim.Fill(1),
-			Height = 8,
-			ReadOnly = true,
-			WordWrap = true,
-			CanFocus = false,
-			SchemeName = TerminalWorkspaceTheme.Base
-		};
-		_controls = new ListView
+		_controls = new TerminalParameterListView
 		{
 			X = 0,
-			Y = 8,
+			Y = 0,
 			Width = Dim.Fill(),
 			Height = Dim.Fill(),
 			ShowMarks = false,
 			SchemeName = TerminalWorkspaceTheme.List
 		};
 		_controls.Accepted += (_, _) => _application.Invoke(ActivateSelectedControl);
+		_controls.SelectionToggleRequested += (_, _) =>
+			_application.Invoke(ActivateSelectedControl);
+		_controls.ValueChanged += (_, _) => TrackSelectedControl();
 		_controls.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
-		_controlsFrame.Add(_controlsSummary, _controls);
+		_controlsFrame.Add(_controls);
 		RefreshContextControls();
 	}
 
 	private void RefreshContextControls()
 	{
-		if (_state is null || _controls is null || _controlsSummary is null)
+		if (_state is null || _controls is null)
 			return;
 
-		var selectedIndex = Math.Max(0, _controls.SelectedItem ?? 0);
-		_controlRows = new ObservableCollection<TerminalWorkspaceActionRow>(
-			BuildWorkspaceActions().Select(static action => new TerminalWorkspaceActionRow(action)));
+		TrackSelectedControl();
+		_controlRows = new ObservableCollection<TerminalParameterRow>(
+			BuildParameterRows());
 		_controls.SetSource(_controlRows);
 		if (_controlRows.Count > 0)
+		{
+			var selectedIndex = _selectedControlKey is null
+				? 1
+				: _controlRows
+					.Select((row, index) => (row, index))
+					.FirstOrDefault(pair => pair.row.Key == _selectedControlKey)
+					.index;
 			_controls.SelectedItem = Math.Clamp(selectedIndex, 0, _controlRows.Count - 1);
+		}
+	}
 
-		var identity = _state.Plan.SourceIdentity;
-		var source = identity?.RepositoryUrl ?? identity?.SourceReference ?? _state.Plan.SourceRoot;
-		var sourceWidth = _layoutMode == TerminalWorkspaceLayoutMode.Wide
-			? Math.Max(12, _terminalWidth / 3 - 5)
-			: Math.Max(12, _terminalWidth - 6);
-		var branch = identity?.Branch is { Length: > 0 }
-			? $"\n{L("Terminal.Tui.RecentRepositories.Branch")}: {identity.Branch}"
-			: string.Empty;
-		_controlsSummary.Text =
-			$"{L("Terminal.Tui.Source")}: {GetProjectDisplayName(_state.Plan)}\n" +
-			$"{FitPathToWidth(source, sourceWidth)}{branch}\n" +
-			$"{L("Terminal.Tui.Profile")}: " +
-			$"{FormatProfileSource(_state.Plan.Selection.ProfileSource)}\n" +
-			$"{L("Terminal.Tui.GitFiltering")}: " +
-			$"{FormatGitMode(_state.Plan.GitReadiness.Mode)}\n" +
-			$"{L("Terminal.Analysis.Files")}: {_state.SelectedFileCount:N0}  " +
-			$"{L("Terminal.Analysis.Folders")}: {_state.SelectedFolderCount:N0}\n" +
-			$"~{_state.Plan.Analysis.Metrics.Content.Tokens:N0} " +
-			$"{L("Terminal.Tui.TokensShort")}  " +
-			$"{L("Terminal.Tui.Warnings")}: {_state.Plan.Diagnostics.Count:N0}";
+	private IReadOnlyList<TerminalParameterRow> BuildParameterRows()
+	{
+		if (_state is null)
+			return [];
+		var plan = _state.Plan;
+		var exclusions = (plan.Selection.Exclusions ?? [])
+			.ToHashSet();
+		var selectedExtensions = plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var selectedRoots = plan.SelectedRoots.ToHashSet(PathComparer.Default);
+		var rows = new List<TerminalParameterRow>();
+		if (plan.Selection.ProfileSource?.Kind is
+		    ProjectProfileSourceKind.Local or ProjectProfileSourceKind.Portable)
+		{
+			rows.Add(new TerminalParameterRow(
+				"section:settings",
+				TerminalParameterRowKind.Section,
+				L("Terminal.Tui.Profile")));
+			rows.Add(new TerminalParameterRow(
+				"settings:source",
+				TerminalParameterRowKind.Information,
+				FormatSettingsSource(plan.Selection.ProfileSource)));
+		}
+		rows.Add(
+			new("section:git", TerminalParameterRowKind.Section, L("Terminal.Tui.GitFiltering"))
+		);
+		rows.AddRange(ProjectPresentationCatalog.GitFiltering.Select(descriptor =>
+			new TerminalParameterRow(
+				$"git:{descriptor.Token}",
+				TerminalParameterRowKind.GitMode,
+				L(descriptor.LabelKey),
+				plan.GitReadiness.Mode == descriptor.Id,
+				GitMode: descriptor.Id)));
+		rows.Add(new TerminalParameterRow(
+			"section:exclusions",
+			TerminalParameterRowKind.Section,
+			L("Terminal.Tui.Exclusions")));
+		rows.Add(new TerminalParameterRow(
+			"exclusions:all",
+			TerminalParameterRowKind.ToggleAllExclusions,
+			L("Settings.All"),
+			exclusions.Count == ProjectPresentationCatalog.Exclusions.Count));
+		rows.AddRange(ProjectPresentationCatalog.Exclusions.Select(descriptor =>
+			new TerminalParameterRow(
+				$"exclusion:{descriptor.Token}",
+				TerminalParameterRowKind.Exclusion,
+				L(descriptor.LabelKey),
+				exclusions.Contains(descriptor.Id),
+				Exclusion: descriptor.Id)));
+		rows.Add(new TerminalParameterRow(
+			"section:extensions",
+			TerminalParameterRowKind.Section,
+			L("Terminal.Tui.FileTypes")));
+		rows.Add(new TerminalParameterRow(
+			"extensions:all",
+			TerminalParameterRowKind.ToggleAllExtensions,
+			L("Settings.All"),
+			plan.AvailableExtensions.Count == selectedExtensions.Count));
+		rows.AddRange(plan.AvailableExtensions.Select(extension =>
+			new TerminalParameterRow(
+				$"extension:{extension}",
+				TerminalParameterRowKind.Extension,
+				extension,
+				selectedExtensions.Contains(extension),
+				Value: extension)));
+		var unavailableExtensions = (plan.Selection.Extensions ?? [])
+			.Where(extension => !plan.AvailableExtensions.Contains(
+				extension,
+				StringComparer.OrdinalIgnoreCase))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.Order(StringComparer.OrdinalIgnoreCase);
+		rows.AddRange(unavailableExtensions.Select(extension =>
+			new TerminalParameterRow(
+				$"extension-unavailable:{extension}",
+				TerminalParameterRowKind.Information,
+				$"{L("Terminal.Tui.Recent.Unavailable")}: {extension}")));
+		rows.Add(new TerminalParameterRow(
+			"section:roots",
+			TerminalParameterRowKind.Section,
+			L("Terminal.Tui.RootFolders")));
+		rows.Add(new TerminalParameterRow(
+			"roots:all",
+			TerminalParameterRowKind.ToggleAllRoots,
+			L("Settings.All"),
+			plan.AvailableRoots.Count == selectedRoots.Count));
+		rows.AddRange(plan.AvailableRoots.Select(root =>
+			new TerminalParameterRow(
+				$"root:{root}",
+				TerminalParameterRowKind.Root,
+				root,
+				selectedRoots.Contains(root),
+				Value: root)));
+		var unavailableRoots = (plan.Selection.Roots ?? [])
+			.Where(root => !plan.AvailableRoots.Contains(root, PathComparer.Default))
+			.Distinct(PathComparer.Default)
+			.Order(PathComparer.Default);
+		rows.AddRange(unavailableRoots.Select(root =>
+			new TerminalParameterRow(
+				$"root-unavailable:{root}",
+				TerminalParameterRowKind.Information,
+				$"{L("Terminal.Tui.Recent.Unavailable")}: {root}")));
+		return rows;
+	}
+
+	private void TrackSelectedControl()
+	{
+		if (_controlRows is null ||
+		    _controls?.SelectedItem is not { } index ||
+		    index < 0 ||
+		    index >= _controlRows.Count)
+		{
+			return;
+		}
+		_selectedControlKey = _controlRows[index].Key;
 	}
 
 	private IReadOnlyList<TerminalWorkspaceAction> BuildWorkspaceActions()
@@ -106,26 +199,19 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.SearchPrompt",
 				"/"),
 			CreateAction(
-				TerminalWorkspaceActionKind.PreviewPresentation,
-				"Terminal.Tui.Preview",
-				"Terminal.Tui.Action.Presentation",
-				"Terminal.Tui.Action.Presentation.Description",
-				"V",
-				LocalizePreviewPresentation()),
-			CreateAction(
 				TerminalWorkspaceActionKind.PreviewView,
 				"Terminal.Tui.Preview",
-				"Terminal.Tui.View",
-				"Terminal.Option.PreviewView",
+				"Terminal.Tui.Action.PreviewView",
+				"Terminal.Tui.Action.PreviewView.Description",
 				"1/2/3",
 				_workspace.LocalizeView(_previewView)),
 			CreateAction(
 				TerminalWorkspaceActionKind.PreviewFormat,
 				"Terminal.Tui.Preview",
-				"Terminal.Tui.Format",
-				"Terminal.Option.DocumentFormat",
+				"Terminal.Tui.Action.Format",
+				"Terminal.Tui.Action.Format.Description",
 				"F",
-				_format.ToString()),
+				TerminalWorkspace.FormatContextFormat(_format)),
 			CreateAction(
 				TerminalWorkspaceActionKind.GitFiltering,
 				"Terminal.Tui.Selection",
@@ -179,8 +265,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Profile",
 				"Terminal.Tui.SaveProfile",
 				"Terminal.Command.ProfileExport",
-				"P",
-				FormatProfileSource(plan.Selection.ProfileSource)),
+				"P"),
 			CreateAction(
 				TerminalWorkspaceActionKind.OpenDesktop,
 				"Terminal.Tui.Profile",
@@ -210,10 +295,10 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Action.SwitchBranch.Description",
 				string.Empty));
 			actions.Add(CreateAction(
-				TerminalWorkspaceActionKind.RecentRepositories,
+				TerminalWorkspaceActionKind.RecentWorkspaces,
 				"Terminal.Tui.RecentRepositories.Repository",
-				"Terminal.Tui.Welcome.RecentRepositories",
-				"Terminal.Tui.Welcome.RecentRepositories.Description",
+				"Terminal.Tui.Welcome.Recent",
+				"Terminal.Tui.Welcome.Recent.Description",
 				string.Empty));
 		}
 
@@ -230,12 +315,7 @@ internal sealed partial class TerminalWorkspaceSession
 		new(kind, L(categoryKey), L(titleKey), L(descriptionKey), shortcut, value);
 
 	private string FormatGitMode(GitFilteringMode mode) =>
-		mode switch
-		{
-			GitFilteringMode.RespectGitIgnore => ".gitignore",
-			GitFilteringMode.TrackedFilesOnly => L("Terminal.Tui.GitTracked"),
-			_ => L("Terminal.Tui.GitNone")
-		};
+		L(ProjectPresentationCatalog.Get(mode).LabelKey);
 
 	private string FormatExclusions(IReadOnlyCollection<ProjectExclusion> exclusions) =>
 		exclusions.Count == 0
@@ -244,15 +324,17 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private string FormatSelectionCount(int selected, int available) =>
 		selected == available
-			? $"{L("Terminal.Profile.All")} ({available:N0})"
+			? $"{L("Settings.All")} ({available:N0})"
 			: $"{selected:N0}/{available:N0}";
 
-	private string FormatProfileSource(ProjectProfileReference? source) =>
+	private string FormatSettingsSource(ProjectProfileReference source) =>
 		source?.Kind switch
 		{
-			ProjectProfileSourceKind.Local => L("Terminal.Profile.Local"),
-			ProjectProfileSourceKind.Portable => L("Terminal.Profile.Portable"),
-			_ => L("Terminal.Profile.Standard")
+			ProjectProfileSourceKind.Local => L("Terminal.Tui.Settings.Project"),
+			ProjectProfileSourceKind.Portable =>
+				$"{L("Terminal.Tui.Settings.File")}: " +
+				$"{Path.GetFileName(source.Path) ?? source.Path}",
+			_ => L("Terminal.Tui.Settings.Default")
 		};
 
 	private void ActivateSelectedControl()
@@ -263,7 +345,118 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		}
 
-		ExecuteWorkspaceAction(_controlRows[selected].Action.Kind);
+		var row = _controlRows[selected];
+		_selectedControlKey = row.Key;
+		switch (row.Kind)
+		{
+			case TerminalParameterRowKind.Section:
+			case TerminalParameterRowKind.Information:
+				return;
+			case TerminalParameterRowKind.GitMode when row.GitMode is { } mode:
+				ApplyGitMode(mode);
+				return;
+			case TerminalParameterRowKind.ToggleAllExclusions:
+				ApplyExclusions(
+					row.IsSelected == true
+						? []
+						: ProjectPresentationCatalog.Exclusions
+							.Select(static descriptor => descriptor.Id)
+							.ToArray());
+				return;
+			case TerminalParameterRowKind.Exclusion when row.Exclusion is { } exclusion:
+			{
+				var values = (_state?.Plan.Selection.Exclusions ?? []).ToHashSet();
+				if (!values.Add(exclusion))
+					values.Remove(exclusion);
+				ApplyExclusions(values);
+				return;
+			}
+			case TerminalParameterRowKind.ToggleAllExtensions:
+				ApplyExtensions(
+					row.IsSelected == true
+						? []
+						: _state?.Plan.AvailableExtensions ?? []);
+				return;
+			case TerminalParameterRowKind.Extension when row.Value is { } extension:
+			{
+				var values = (_state?.Plan.SelectedExtensions ?? [])
+					.ToHashSet(StringComparer.OrdinalIgnoreCase);
+				if (!values.Add(extension))
+					values.Remove(extension);
+				ApplyExtensions(values);
+				return;
+			}
+			case TerminalParameterRowKind.ToggleAllRoots:
+				ApplyRoots(
+					row.IsSelected == true
+						? []
+						: _state?.Plan.AvailableRoots ?? []);
+				return;
+			case TerminalParameterRowKind.Root when row.Value is { } root:
+			{
+				var values = (_state?.Plan.SelectedRoots ?? []).ToHashSet(PathComparer.Default);
+				if (!values.Add(root))
+					values.Remove(root);
+				ApplyRoots(values);
+				return;
+			}
+		}
+	}
+
+	private void ApplyGitMode(GitFilteringMode mode)
+	{
+		if (_state is null || mode == _state.Plan.GitReadiness.Mode)
+			return;
+		var state = _state;
+		_activeOperationTask = RunOperationAsync(
+			L("Terminal.Tui.GitFiltering"),
+			async token =>
+			{
+				await _controller.SetGitModeAsync(state, mode, token).ConfigureAwait(false);
+				return null;
+			});
+	}
+
+	private void ApplyExclusions(IReadOnlyCollection<ProjectExclusion> exclusions)
+	{
+		if (_state is null)
+			return;
+		var state = _state;
+		_activeOperationTask = RunOperationAsync(
+			L("Terminal.Tui.Exclusions"),
+			async token =>
+			{
+				await _controller.SetExclusionsAsync(state, exclusions, token).ConfigureAwait(false);
+				return null;
+			});
+	}
+
+	private void ApplyExtensions(IReadOnlyCollection<string> extensions)
+	{
+		if (_state is null)
+			return;
+		var state = _state;
+		_activeOperationTask = RunOperationAsync(
+			L("Terminal.Tui.FileTypes"),
+			async token =>
+			{
+				await _controller.SetExtensionsAsync(state, extensions, token).ConfigureAwait(false);
+				return null;
+			});
+	}
+
+	private void ApplyRoots(IReadOnlyCollection<string> roots)
+	{
+		if (_state is null)
+			return;
+		var state = _state;
+		_activeOperationTask = RunOperationAsync(
+			L("Terminal.Tui.RootFolders"),
+			async token =>
+			{
+				await _controller.SetRootsAsync(state, roots, token).ConfigureAwait(false);
+				return null;
+			});
 	}
 
 	private void ExecuteWorkspaceAction(TerminalWorkspaceActionKind action)
@@ -275,9 +468,6 @@ internal sealed partial class TerminalWorkspaceSession
 				break;
 			case TerminalWorkspaceActionKind.Search:
 				SearchTree();
-				break;
-			case TerminalWorkspaceActionKind.PreviewPresentation:
-				SelectPreviewPresentation();
 				break;
 			case TerminalWorkspaceActionKind.PreviewView:
 				SelectPreviewView();
@@ -324,9 +514,9 @@ internal sealed partial class TerminalWorkspaceSession
 			case TerminalWorkspaceActionKind.SwitchBranch:
 				SwitchRepositoryBranch();
 				break;
-			case TerminalWorkspaceActionKind.RecentRepositories:
+			case TerminalWorkspaceActionKind.RecentWorkspaces:
 				ShowWelcome();
-				_application.Invoke(BeginOpenRecentRepositories);
+				_application.Invoke(OpenRecentWorkspaces);
 				break;
 			case TerminalWorkspaceActionKind.ReturnToWelcome:
 				if (Confirm(L("Terminal.Tui.BackToWelcome"), L("Terminal.Tui.ConfirmBackToWelcome")))
@@ -516,6 +706,13 @@ internal sealed partial class TerminalWorkspaceSession
 				string.Empty,
 				null,
 				() => ActivateWelcomeAction(action.Kind)))
+			.Append(new TerminalPaletteItem(
+				L("Terminal.Tui.Actions"),
+				L("Terminal.Tui.Welcome.OpenProfile"),
+				L("Terminal.Tui.Welcome.OpenProfile.Description"),
+				string.Empty,
+				null,
+				OpenPortableProfile))
 			.ToArray();
 	}
 
@@ -541,63 +738,41 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 	}
 
-	private void SelectPreviewPresentation()
-	{
-		var values = new[]
-		{
-			L("Terminal.Tui.Preview.Readable"),
-			L("Terminal.Tui.Preview.Raw")
-		};
-		var selected = SelectFromList(
-			L("Terminal.Tui.Action.Presentation"),
-			L("Terminal.Tui.Action.Presentation.Description"),
-			values);
-		if (selected is null)
-			return;
-		_previewPresentation = string.Equals(selected, values[0], StringComparison.Ordinal)
-			? TerminalPreviewPresentation.Readable
-			: TerminalPreviewPresentation.RawOutput;
-		RefreshWorkspace();
-		SchedulePreviewRefresh();
-	}
-
 	private void SelectPreviewView()
 	{
-		var values = Enum.GetValues<ProjectContextView>()
-			.Select(_workspace.LocalizeView)
+		var modes = ProjectPresentationCatalog.PreviewModes;
+		var values = modes
+			.Select(mode => L(mode.LabelKey))
 			.ToArray();
 		var selected = SelectFromList(
 			L("Terminal.Tui.Action.PreviewView"),
 			L("Terminal.Tui.Action.PreviewView.Description"),
-			values);
+			values,
+			preferredWidth: 56);
 		var index = Array.IndexOf(values, selected);
 		if (index < 0)
 			return;
-		_previewView = Enum.GetValues<ProjectContextView>()[index];
+		_previewView = modes[index].Id;
 		RefreshWorkspace();
 		SchedulePreviewRefresh();
 	}
 
 	private void SelectPreviewFormat()
 	{
-		var formats = Enum.GetValues<ProjectContextDocumentFormat>();
-		var values = formats.Select(static format => format.ToString()).ToArray();
+		var formats = ProjectPresentationCatalog.Formats;
+		var values = formats.Select(static format => format.UserLabel).ToArray();
 		var selected = SelectFromList(
 			L("Terminal.Tui.Action.Format"),
 			L("Terminal.Tui.Action.Format.Description"),
-			values);
+			values,
+			preferredWidth: 56);
 		var index = Array.IndexOf(values, selected);
 		if (index < 0)
 			return;
-		_format = formats[index];
+		_format = formats[index].Id;
 		RefreshWorkspace();
 		SchedulePreviewRefresh();
 	}
-
-	private string LocalizePreviewPresentation() =>
-		L(_previewPresentation == TerminalPreviewPresentation.Readable
-			? "Terminal.Tui.Preview.Readable"
-			: "Terminal.Tui.Preview.Raw");
 
 	private void AnalyzeCurrentContext()
 	{
@@ -609,12 +784,16 @@ internal sealed partial class TerminalWorkspaceSession
 			{
 				var plan = await _controller.BuildCurrentPlanAsync(_state, token)
 					.ConfigureAwait(false);
+				var warnings = plan.Diagnostics.Count(static diagnostic =>
+					diagnostic.Severity == ContextDiagnosticSeverity.Warning);
+				var errors = plan.Diagnostics.Count(static diagnostic =>
+					diagnostic.Severity == ContextDiagnosticSeverity.Error);
 				return $"{L("Terminal.Analysis.Files")}: {plan.IncludedFiles.Count}\n" +
 				       $"{L("Terminal.Analysis.Folders")}: {plan.IncludedFolders.Count}\n" +
 				       $"{L("Terminal.Analysis.Characters")}: {plan.Analysis.Metrics.Content.Chars:N0}\n" +
 				       $"{L("Terminal.Analysis.Tokens")}: {plan.Analysis.Metrics.Content.Tokens:N0}\n" +
-				       $"{L("Terminal.Tui.Diagnostics")}: {plan.Diagnostics.Count}\n" +
-				       $"{L("Terminal.Analysis.Fingerprint")}: {plan.Fingerprint}";
+				       $"{L("Terminal.Tui.Warnings")}: {warnings:N0}\n" +
+				       $"{L("Terminal.Label.Error")}: {errors:N0}";
 			});
 	}
 

@@ -3,11 +3,9 @@ namespace DevProjex.Terminal.Tui;
 internal enum TerminalWelcomeActionKind
 {
 	OpenCurrent,
-	RecentProjects,
-	RecentRepositories,
+	RecentWorkspaces,
 	BrowseFolder,
 	CloneRepository,
-	OpenProfile,
 	OpenDesktop,
 	Help,
 	Exit

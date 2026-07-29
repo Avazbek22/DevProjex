@@ -20,11 +20,15 @@ internal sealed class TerminalOperationProgressView : IDisposable
 	private readonly string _sourceText;
 	private readonly SpinnerView _spinner;
 	private readonly ProgressBar _progressBar;
+	private readonly Label _textProgressBar;
 	private readonly Label _metrics;
 	private readonly Label _detail;
 	private readonly Label _elapsed;
 	private readonly Label _cancelHint;
 	private readonly object? _timerToken;
+	private readonly bool _useTextProgress;
+	private double? _measuredFraction;
+	private int _frameWidth;
 	private bool _disposed;
 
 	public TerminalOperationProgressView(
@@ -33,11 +37,13 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		string phase,
 		string cancelHint,
 		Func<TimeSpan, string> elapsedFormatter,
-		string? source = null)
+		string? source = null,
+		bool useTextProgress = false)
 	{
 		_application = application;
 		_elapsedFormatter = elapsedFormatter;
 		_sourceText = source ?? string.Empty;
+		_useTextProgress = useTextProgress;
 		_frame = new TerminalLiteralFrameView
 		{
 			Title = operationName,
@@ -52,6 +58,16 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			Width = Dim.Fill(2),
 			Text = phase,
 			SchemeName = TerminalWorkspaceTheme.Accent
+		};
+		_textProgressBar = new TerminalLiteralLabel
+		{
+			X = 2,
+			Y = 5,
+			Width = Dim.Fill(2),
+			Height = 1,
+			Visible = false,
+			CanFocus = false,
+			SchemeName = TerminalWorkspaceTheme.Base
 		};
 		_source = new TerminalLiteralLabel
 		{
@@ -118,6 +134,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			_source,
 			_spinner,
 			_progressBar,
+			_textProgressBar,
 			_metrics,
 			_detail,
 			_elapsed,
@@ -132,11 +149,14 @@ internal sealed class TerminalOperationProgressView : IDisposable
 	{
 		var availableWidth = Math.Max(20, terminalWidth - 4);
 		var frameWidth = Math.Min(90, availableWidth);
+		_frameWidth = frameWidth;
 		_frame.Width = frameWidth;
 		_frame.Height = Math.Min(15, Math.Max(13, terminalHeight - 4));
 		_frame.X = Pos.Center();
 		_frame.Y = Pos.Center();
 		_source.Text = FitSourceToWidth(_sourceText, Math.Max(8, frameWidth - 6));
+		if (_measuredFraction is { } fraction)
+			_textProgressBar.Text = BuildTextProgress(fraction, frameWidth);
 	}
 
 	public void SetIndeterminate(
@@ -145,8 +165,10 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		string? detail = null)
 	{
 		_phase.Text = phase;
+		_measuredFraction = null;
 		_spinner.Visible = true;
 		_progressBar.Visible = false;
+		_textProgressBar.Visible = false;
 		_metrics.Text = metrics ?? string.Empty;
 		_detail.Text = detail ?? string.Empty;
 		_frame.SetNeedsDraw();
@@ -159,9 +181,15 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		string? detail = null)
 	{
 		_phase.Text = phase;
+		_measuredFraction = Math.Clamp(fraction, 0, 1);
 		_spinner.Visible = false;
-		_progressBar.Visible = true;
+		_progressBar.Visible = !_useTextProgress;
+		_textProgressBar.Visible = _useTextProgress;
 		_progressBar.Fraction = Math.Clamp((float)fraction, 0, 1);
+		if (_useTextProgress)
+			_textProgressBar.Text = BuildTextProgress(
+				_measuredFraction.Value,
+				_frameWidth);
 		_metrics.Text = metrics;
 		_detail.Text = detail ?? string.Empty;
 		_frame.SetNeedsDraw();
@@ -209,6 +237,20 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			start--;
 		}
 		return stablePrefix + "..." + string.Concat(runes.AsSpan(start).ToArray());
+	}
+
+	private static string BuildTextProgress(double fraction, int frameWidth)
+	{
+		var percentage = (int)Math.Round(
+			Math.Clamp(fraction, 0, 1) * 100,
+			MidpointRounding.AwayFromZero);
+		var suffix = $" {percentage}%";
+		var barWidth = Math.Max(5, frameWidth - suffix.Length - 8);
+		var filled = Math.Clamp(
+			(int)Math.Round(barWidth * fraction, MidpointRounding.AwayFromZero),
+			0,
+			barWidth);
+		return $"[{new string('#', filled)}{new string('-', barWidth - filled)}]{suffix}";
 	}
 
 	private static string GetStableSourcePrefix(string value, int width)

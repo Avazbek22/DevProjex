@@ -76,7 +76,10 @@ public static class AvaloniaCompositionRoot
         var sessionMetricsRecorder = sessionMetrics.Enabled
             ? new SessionMetricsRecorder(sessionMetrics, localAppDataProvider)
             : SessionMetricsRecorder.Disabled;
-        var previewDocumentBuilder = new PreviewDocumentBuilder(fileContentAnalyzer);
+        var previewDocumentBuilder = new PreviewDocumentBuilder(
+            fileContentAnalyzer,
+            classification => localization[
+                FileContentClassificationCatalog.Get(classification).LabelKey]);
         var repositoryWebPathPresentationService = new RepositoryWebPathPresentationService();
         var textFileExportService = new TextFileExportService();
         var toastService = new ToastService();
@@ -103,6 +106,7 @@ public static class AvaloniaCompositionRoot
             UserSettingsStore: userSettingsStore,
             ThemeSettingsStore: themeSettingsStore,
             RecentProjectsStore: recentProjectsStore,
+            RecentWorkspacesService: new RecentWorkspacesService(),
             RecentFolderAvailabilityService: recentFolderAvailabilityService,
             ProjectProfileStore: projectProfileStore,
             AppInstanceLauncher: appInstanceLauncher,

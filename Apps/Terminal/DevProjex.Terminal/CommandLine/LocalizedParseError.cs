@@ -2,7 +2,7 @@ namespace DevProjex.Terminal.CommandLine;
 
 internal static class LocalizedParseError
 {
-	private const string Prefix = "\u001fdevprojex-localized:";
+	internal const string Prefix = "\u001fdevprojex-localized:";
 
 	public static string Create(string message) => Prefix + message;
 

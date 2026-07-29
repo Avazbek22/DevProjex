@@ -134,12 +134,7 @@ public sealed class TerminalWorkspace(
 		var destinationState = summary.DestinationState == TerminalExportDestinationState.Ready
 			? L("Terminal.Tui.DestinationReady")
 			: L("Terminal.Tui.DestinationConflict");
-		var gitMode = summary.GitMode switch
-		{
-			GitFilteringMode.RespectGitIgnore => ".gitignore",
-			GitFilteringMode.TrackedFilesOnly => L("Terminal.Tui.GitTracked"),
-			_ => L("Terminal.Tui.GitNone")
-		};
+		var gitMode = L(ProjectPresentationCatalog.Get(summary.GitMode).LabelKey);
 		var exclusions = summary.Exclusions.Count == 0
 			? L("Terminal.Tui.NoneAvailable")
 			: string.Join(", ", summary.Exclusions.Select(LocalizeExclusion));
@@ -150,7 +145,9 @@ public sealed class TerminalWorkspace(
 		if (summary.View is { } view)
 			lines.Add($"{L("Terminal.Tui.View")}: {LocalizeView(view)}");
 		if (summary.DocumentFormat is { } format)
-			lines.Add($"{L("Terminal.Tui.Format")}: {format}");
+			lines.Add(
+				$"{L("Terminal.Tui.Format")}: " +
+				$"{ProjectPresentationCatalog.Get(format).UserLabel}");
 		lines.AddRange(
 		[
 			$"{L("Terminal.Analysis.Files")}: {summary.FileCount:N0}",
@@ -162,32 +159,19 @@ public sealed class TerminalWorkspace(
 			$"{L("Terminal.Tui.DestinationState")}: {destinationState}",
 			$"{L("Terminal.Tui.GitFiltering")}: {gitMode}",
 			$"{L("Terminal.Tui.Exclusions")}: {exclusions}",
-			$"{L("Terminal.Tui.Warnings")}: {summary.DiagnosticCount:N0}"
+			$"{L("Terminal.Tui.Diagnostics")}: {summary.DiagnosticCount:N0}"
 		]);
 		return string.Join(Environment.NewLine, lines);
 	}
 
 	internal string LocalizeView(ProjectContextView view) =>
-		view switch
-		{
-			ProjectContextView.Tree => L("Preview.Mode.Tree"),
-			ProjectContextView.Content => L("Preview.Mode.Content"),
-			_ => L("Preview.Mode.TreeAndContent")
-		};
+		L(ProjectPresentationCatalog.Get(view).LabelKey);
 
 	internal string LocalizeExclusion(ProjectExclusion exclusion) =>
-		L(exclusion switch
-		{
-			ProjectExclusion.SmartIgnore => "Settings.Ignore.SmartIgnore",
-			ProjectExclusion.HiddenFolders => "Settings.Ignore.HiddenFolders",
-			ProjectExclusion.HiddenFiles => "Settings.Ignore.HiddenFiles",
-			ProjectExclusion.DotFolders => "Settings.Ignore.DotFolders",
-			ProjectExclusion.DotFiles => "Settings.Ignore.DotFiles",
-			ProjectExclusion.EmptyFolders => "Settings.Ignore.EmptyFolders",
-			ProjectExclusion.EmptyFiles => "Settings.Ignore.EmptyFiles",
-			ProjectExclusion.ExtensionlessFiles => "Settings.Ignore.ExtensionlessFiles",
-			_ => throw new ArgumentOutOfRangeException(nameof(exclusion), exclusion, null)
-		});
+		L(ProjectPresentationCatalog.Get(exclusion).LabelKey);
+
+	internal static string FormatContextFormat(ProjectContextDocumentFormat format) =>
+		ProjectPresentationCatalog.Get(format).UserLabel;
 
 	internal static string FormatBytes(long bytes)
 	{

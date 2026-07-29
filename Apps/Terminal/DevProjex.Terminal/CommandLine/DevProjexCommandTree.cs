@@ -24,6 +24,9 @@ public sealed class DevProjexCommandTree(
 	public RootCommand Build()
 	{
 		var root = new RootCommand(L("Terminal.Command.Root"));
+		var defaultVersionOption = root.Options.OfType<VersionOption>().Single();
+		root.Options.Remove(defaultVersionOption);
+		root.Options.Add(new VersionOption("--version", "-v"));
 		_language.Recursive = true;
 		root.Options.Add(_language);
 		root.Subcommands.Add(BuildTuiCommand());

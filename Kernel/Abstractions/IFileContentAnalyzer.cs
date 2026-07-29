@@ -1,16 +1,39 @@
 namespace DevProjex.Kernel.Abstractions;
 
 /// <summary>
-/// Analyzes file content to determine if it's text or binary.
-/// Single source of truth for text file detection across the application.
-/// Uses null-byte detection as the universal, reliable method.
+/// Classifies file content and reads supported text through one shared contract.
+/// Binary, encoding, size, access, and transient filesystem failures remain distinct.
 /// </summary>
 public interface IFileContentAnalyzer
 {
 	/// <summary>
-	/// Quickly checks if a file contains text content (not binary).
-	/// Reads only the first 512 bytes to detect null bytes - sufficient for any binary format.
-	/// This is the fastest check with minimal I/O.
+	/// Returns a definitive classification available from path metadata alone.
+	/// A null result means the file must be inspected before it can be classified.
+	/// </summary>
+	FileContentClassification? ClassifyWithoutReading(string path) => null;
+
+	/// <summary>
+	/// Reads a file and preserves the reason why text content is unavailable.
+	/// Implementations should prefer this method for user-facing preview and export diagnostics.
+	/// </summary>
+	async ValueTask<FileContentReadResult> ReadClassifiedAsync(
+		string path,
+		long maxSizeForFullRead,
+		CancellationToken cancellationToken = default)
+	{
+		var content = await TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken)
+			.ConfigureAwait(false);
+		if (content is null)
+			return new FileContentReadResult(FileContentClassification.Binary);
+		return new FileContentReadResult(
+			content.IsEstimated
+				? FileContentClassification.TooLarge
+				: FileContentClassification.Text,
+			content);
+	}
+
+	/// <summary>
+	/// Determines whether a file contains valid supported text without materializing its content.
 	/// </summary>
 	/// <param name="path">Absolute path to the file.</param>
 	/// <param name="cancellationToken">Cancellation token.</param>
@@ -26,6 +49,23 @@ public interface IFileContentAnalyzer
 	/// <param name="cancellationToken">Cancellation token.</param>
 	/// <returns>File metrics, or null if not a text file.</returns>
 	ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Streams file metrics while preserving why metrics are unavailable.
+	/// </summary>
+	async ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+		string path,
+		CancellationToken cancellationToken = default)
+	{
+		var metrics = await GetTextFileMetricsAsync(path, cancellationToken).ConfigureAwait(false);
+		return metrics is null
+			? new FileContentMetricsResult(FileContentClassification.Unreadable)
+			: new FileContentMetricsResult(
+				metrics.IsEstimated
+					? FileContentClassification.TooLarge
+					: FileContentClassification.Text,
+				metrics);
+	}
 
 	/// <summary>
 	/// Tries to read file as text content with full content loaded.
@@ -49,6 +89,33 @@ public interface IFileContentAnalyzer
 		string path,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default);
+}
+
+public enum FileContentClassification
+{
+	Text,
+	Binary,
+	TooLarge,
+	Unreadable,
+	AccessDenied,
+	Missing,
+	UnsupportedEncoding
+}
+
+public sealed record FileContentReadResult(
+	FileContentClassification Classification,
+	TextFileContent? Content = null)
+{
+	public bool IsText =>
+		Classification is FileContentClassification.Text or FileContentClassification.TooLarge;
+}
+
+public sealed record FileContentMetricsResult(
+	FileContentClassification Classification,
+	TextFileMetrics? Metrics = null)
+{
+	public bool IsText =>
+		Classification is FileContentClassification.Text or FileContentClassification.TooLarge;
 }
 
 /// <summary>
