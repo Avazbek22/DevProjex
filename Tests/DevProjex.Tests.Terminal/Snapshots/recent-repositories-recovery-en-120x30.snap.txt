@@ -6,17 +6,17 @@
   <WELCOME_ROOT>
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
-  │> Recent projects                       │  │ Choose a previously opened project and return here when canceled.    │
-  │  Recent Git rep┌┤Recent Git repositories├──────────────────────────────────────────────────────┐                 │
-  │  Browse folder │ The repository is still in history, but its local cache is missing. A         │                 │
-  │  Clone reposito│ network clone is required before it can be opened.                            │                 │
-  │  Open saved pro│                                                                               │                 │
-  │  Open Desktop  │ https://github.com/Avazbek22/DevProjex                                        │                 │
+  │> Recent workspaces                     │  │ Open a recent local folder or Git repository from one shared         │
+  │  Browse folder ┌┤Recent workspaces├────────────────────────────────────────────────────────────┐                 │
+  │  Clone reposito│ The repository is still in history, but its local cache is missing. A         │                 │
+  │  Open Desktop  │ network clone is required before it can be opened.                            │                 │
   │  Help          │                                                                               │                 │
-  │  Exit          │                                                                               │                 │
-  └────────────────│                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Clone again ◄⟧▖                 │─────────────────┘
+  │  Exit          │ https://github.com/Avazbek22/DevProjex                                        │                 │
+  └────────────────│                                                                               │─────────────────┘
+                   │                                                                               │
+  Direct automation│                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Clone again ◄⟧▖                 │
                    │                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘                 │
-  Direct automation└───────────────────────────────────────────────────────────────────────────────┘
+                   └───────────────────────────────────────────────────────────────────────────────┘
 
 
 

@@ -27,7 +27,7 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await SelectWelcomeActionAsync(
 			terminal,
-			"Recent Git repositories",
+			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -38,8 +38,10 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		var repositoryList = terminal.CaptureScreen();
 		Assert.Contains("DevProjex", repositoryList, StringComparison.Ordinal);
-		Assert.Contains("Cached and ready", repositoryList, StringComparison.Ordinal);
-		Assert.Contains("│  Recent Git repositories", repositoryList, StringComparison.Ordinal);
+		Assert.Contains("Git", repositoryList, StringComparison.Ordinal);
+		Assert.Contains("Recent workspaces", repositoryList, StringComparison.Ordinal);
+		Assert.DoesNotContain("Cached and ready", repositoryList, StringComparison.Ordinal);
+		Assert.DoesNotContain("Not cached", repositoryList, StringComparison.Ordinal);
 		Assert.DoesNotContain(CacheFolderName, repositoryList, StringComparison.Ordinal);
 		Verify(
 			"recent-repositories-cached-en-150x35",
@@ -47,21 +49,18 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			welcomeDirectory.Path);
 
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var workspace = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"RepositoryMarker.cs",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"# DevProjex",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Files 1-2/2",
+		var workspace = await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Contains("DevProjex Terminal  DevProjex", workspace, StringComparison.Ordinal);
+		Assert.Contains("DevProjex Terminal · DevProjex", workspace, StringComparison.Ordinal);
 		Assert.Contains(RepositoryUrl, workspace, StringComparison.Ordinal);
 		Assert.Contains("PROJECT TREE", workspace, StringComparison.Ordinal);
-		Assert.Contains("CONTEXT CONTROLS", workspace, StringComparison.Ordinal);
+		Assert.Contains("PARAMETERS", workspace, StringComparison.Ordinal);
 		Assert.DoesNotContain(CacheFolderName, workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		Verify(
@@ -96,12 +95,12 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await SelectWelcomeActionAsync(
 			terminal,
-			"Recent Git repositories",
+			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(
 			terminal,
-			"Not cached",
+			RepositoryUrl,
 			TestContext.Current.CancellationToken);
 		Verify(
 			"recent-repositories-missing-en-120x30",
@@ -119,14 +118,14 @@ public sealed class TerminalRecentRepositoriesPtyTests
 
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		var repositoryList = await terminal.WaitForScreenAsync(
-			"Not cached",
+			RepositoryUrl,
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(RepositoryUrl, repositoryList, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Open a cached repository without network access",
+			RepositoryUrl,
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(
 			"Choose a workspace action",

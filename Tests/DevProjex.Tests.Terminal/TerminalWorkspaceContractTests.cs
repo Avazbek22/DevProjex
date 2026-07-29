@@ -147,7 +147,7 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
-	public async Task ReadableLargePreviewIsFileBackedAndIndexesFirstMiddleAndFinalFiles()
+	public async Task InteractiveLargePreviewIsFileBackedAndIndexesFirstMiddleAndFinalFiles()
 	{
 		using var workspace = new TemporaryDirectory();
 		const int fileCount = 120;
@@ -166,12 +166,12 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
 
-		await controller.RefreshPreviewAsync(
+		var preview = await controller.BuildPreviewDocumentAsync(
 			state,
 			ProjectContextView.Content,
 			ProjectContextDocumentFormat.Markdown,
-			TerminalPreviewPresentation.Readable,
 			TestContext.Current.CancellationToken);
+		state.SetPreviewDocument(preview);
 
 		var document = Assert.IsType<FileBackedPreviewTextDocument>(state.PreviewDocument);
 		Assert.Equal(fileCount, document.Sections.Count);
@@ -209,7 +209,7 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
-	public async Task ReadablePreviewMakesBinaryAndOversizedTextOmissionsExplicit()
+	public async Task InteractivePreviewDistinguishesBinaryAndOversizedText()
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("src/large.txt", new string('x', 10 * 1024 * 1024 + 1));
@@ -224,22 +224,55 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
 
-		await controller.RefreshPreviewAsync(
+		var preview = await controller.BuildPreviewDocumentAsync(
 			state,
 			ProjectContextView.Content,
 			ProjectContextDocumentFormat.Markdown,
-			TerminalPreviewPresentation.Readable,
 			TestContext.Current.CancellationToken);
+		state.SetPreviewDocument(preview);
 
 		Assert.Equal(2, state.PreviewDocument.Sections.Count);
 		Assert.Contains(
-			"[Binary or unreadable file; content omitted]",
+			"[Binary file; content omitted.]",
 			state.PreviewText,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"[Large text file; open Raw output or export to inspect complete content]",
+			"[File is too large for interactive preview; export to inspect complete content.]",
 			state.PreviewText,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task InteractivePreviewLocalizesDistinctContentOmissionReasons()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/large.txt", new string('x', 10 * 1024 * 1024 + 1));
+		var binaryPath = Path.Combine(workspace.Path, "src", "binary.dat");
+		Directory.CreateDirectory(Path.GetDirectoryName(binaryPath)!);
+		File.WriteAllBytes(binaryPath, [0, 1, 2, 3]);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.Ru);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		state.SetPreviewDocument(await controller.BuildPreviewDocumentAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken));
+
+		Assert.Contains(
+			"[Двоичный файл — содержимое пропущено.]",
+			state.PreviewText,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Файл слишком большой для интерактивного предпросмотра; экспортируйте его для полного просмотра.]",
+			state.PreviewText,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("Binary file", state.PreviewText, StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -247,7 +280,7 @@ public sealed class TerminalWorkspaceContractTests
 	[InlineData(ProjectContextDocumentFormat.Markdown)]
 	[InlineData(ProjectContextDocumentFormat.Json)]
 	[InlineData(ProjectContextDocumentFormat.Xml)]
-	public async Task RawPreviewMatchesCompleteExportPayload(
+	public async Task ExactExportDocumentMatchesCompleteExportPayload(
 		ProjectContextDocumentFormat format)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -261,12 +294,12 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
 
-		await controller.RefreshPreviewAsync(
+		var preview = await controller.BuildExactExportDocumentAsync(
 			state,
 			ProjectContextView.TreeContent,
 			format,
-			TerminalPreviewPresentation.RawOutput,
 			TestContext.Current.CancellationToken);
+		state.SetPreviewDocument(preview);
 		var exported = await services.ContextDocumentService.BuildAsync(
 			state.Plan,
 			ProjectContextView.TreeContent,
@@ -277,7 +310,7 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
-	public async Task LargeRawPreviewStreamsToFileAndKeepsFinalFileReachable()
+	public async Task LargeExactExportDocumentStreamsToFileAndKeepsFinalFileReachable()
 	{
 		using var workspace = new TemporaryDirectory();
 		const int fileCount = 120;
@@ -296,12 +329,12 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
 
-		await controller.RefreshPreviewAsync(
+		var preview = await controller.BuildExactExportDocumentAsync(
 			state,
 			ProjectContextView.Content,
 			ProjectContextDocumentFormat.Markdown,
-			TerminalPreviewPresentation.RawOutput,
 			TestContext.Current.CancellationToken);
+		state.SetPreviewDocument(preview);
 
 		var document = Assert.IsType<FileBackedPreviewTextDocument>(state.PreviewDocument);
 		Assert.True(document.CharacterCount > 500_000);

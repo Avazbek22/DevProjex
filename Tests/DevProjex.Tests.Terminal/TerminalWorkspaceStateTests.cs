@@ -105,6 +105,21 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.NotEqual(initialSelection, state.SelectedFileCount);
 	}
 
+	[Fact]
+	public void SelectionReprojectionPreservesCollapsedRoot()
+	{
+		var state = new TerminalWorkspaceState(CreatePlan());
+		state.Collapse(0);
+		var revision = state.Revision;
+
+		var applied = state.TryReplacePlan(CreatePlan(), revision);
+
+		Assert.True(applied);
+		var root = Assert.Single(state.VisibleRows);
+		Assert.False(root.IsExpanded);
+		Assert.Equal("project", root.Node.DisplayName);
+	}
+
 	[Theory]
 	[InlineData(59, 20, TerminalWorkspaceLayoutMode.TooSmall)]
 	[InlineData(60, 20, TerminalWorkspaceLayoutMode.Compact)]

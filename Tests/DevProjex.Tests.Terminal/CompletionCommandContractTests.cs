@@ -33,6 +33,7 @@ public sealed class CompletionCommandContractTests
 
 		Assert.Contains("--git-mode", script, StringComparison.Ordinal);
 		Assert.Contains("--exclude", script, StringComparison.Ordinal);
+		Assert.Contains("-v", script, StringComparison.Ordinal);
 		Assert.DoesNotContain("--no-ui", script, StringComparison.Ordinal);
 		Assert.DoesNotContain("--report", script, StringComparison.Ordinal);
 		Assert.DoesNotContain("--copy", script, StringComparison.Ordinal);

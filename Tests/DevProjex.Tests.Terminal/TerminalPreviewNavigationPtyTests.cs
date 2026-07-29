@@ -48,7 +48,39 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> CONTEXT PREVIEW", focusedPreview, StringComparison.Ordinal);
 		Assert.Contains("j/k Scroll", focusedPreview, StringComparison.Ordinal);
-		var before = focusedPreview;
+		await terminal.SendAsync("/", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Find text across the complete context:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("ContentMarker", TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var firstSearchMatch = await terminal.WaitForScreenAsync(
+			"1/60",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var firstSearchMarker = GetMaximumVisibleMarker(firstSearchMatch);
+		await terminal.SendAsync("nnnnnnnn", TestContext.Current.CancellationToken);
+		var nextSearchMatch = await terminal.WaitForScreenAsync(
+			"9/60",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.True(
+			GetMaximumVisibleMarker(nextSearchMatch) > firstSearchMarker,
+			"Preview Search next did not move the visible viewport.");
+		await terminal.SendAsync("N", TestContext.Current.CancellationToken);
+		var previousSearchMatch = await terminal.WaitForScreenAsync(
+			"8/60",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.True(
+			GetMaximumVisibleMarker(previousSearchMatch) <=
+			GetMaximumVisibleMarker(nextSearchMatch),
+			"Preview Search previous did not move back through the document.");
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"/ContentMarker",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		var before = await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
 		await terminal.SendAsync("j", TestContext.Current.CancellationToken);
 		var afterLine = await WaitForScreenChangeAsync(
 			terminal,
@@ -104,11 +136,11 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 		var markersBeforeHelp = GetVisibleMarkers(beforeHelp);
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Tab/F6 moves to Controls",
+			"Parameters; Shift+Tab/Shift+F6",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Tab/F6 moves to Controls",
+			"Parameters; Shift+Tab/Shift+F6",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var afterHelp = await WaitForStableScreenAsync(
 			terminal,
@@ -126,12 +158,21 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			"Choose exactly one mode",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var afterGitRefresh = await terminal.WaitForScreenAsync(
-			"Git filtering: No Git filtering",
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> CONTEXT PREVIEW", afterGitRefresh, StringComparison.Ordinal);
+		Assert.DoesNotContain("Git filtering:", afterGitRefresh, StringComparison.Ordinal);
 		await WaitForStableScreenAsync(
 			terminal,
 			TestContext.Current.CancellationToken);
+		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"(*) No Git filtering",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Choose exactly one mode",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("x", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -149,18 +190,19 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			"Files 62",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> CONTEXT PREVIEW", afterExclusionsRefresh, StringComparison.Ordinal);
-		Assert.Contains("No Git filtering", afterExclusionsRefresh, StringComparison.Ordinal);
 		await WaitForStableScreenAsync(
 			terminal,
 			TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("A", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Fingerprint",
+		var analysis = await terminal.WaitForScreenAsync(
+			"Files:",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Estimated tokens:", analysis, StringComparison.Ordinal);
+		Assert.DoesNotContain("Fingerprint", analysis, StringComparison.Ordinal);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Fingerprint",
+			"Files:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",

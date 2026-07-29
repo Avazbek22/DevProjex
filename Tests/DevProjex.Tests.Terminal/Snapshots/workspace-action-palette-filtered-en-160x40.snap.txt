@@ -1,29 +1,28 @@
- DevProjex Terminal  <PROJECT>
+ DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
- Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
-┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├────┐┌┤  CONTEXT CONTROLS├───────────────────────────────┐
-│v [x] <PROJECT>   ││+ <PROJECT>                            ││ Source: <PROJECT>          │
-│  > [x] src                              ││  + src                                                       ││ ...sts.Terminal\<PROJECT>  │
-│    [x] global.json              ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐d                                 │
-│    [x] readme.md                │ Filter actions:                                                                         │gitignore                         │
-│                                 │ Preview presentation                                                                    │s: 3                              │
-│                                 │                                                                                         │nings: 0                          │
-│                                 │ Preview presentation: Readable  [V]                                                     │                                  │
+┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────┐┌┤  PARAMETERS├─────────────────────────────────────┐
+│v [x] <PROJECT>   ││<PROJECT>                              ││  GIT FILTERING                                    │
+│  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
+│    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
+│    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
+│                                 │ Filter actions:                                                                         │                                  │
+│                                 │ Preview format                                                                          │                                  │
+│                                 │                                                                                         │e                                 │
+│                                 │ Preview format: ASCII  [F]                                                              │rs                                │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │ers                               │
+│                                 │                                                                                         │s                                 │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │ut extension                      │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
-│                                 │                                                                                         │ntation: Readable                 │
-│                                 │                                                                                         │e + content                       │
-│                                 │                                                                                         │own                               │
-│                                 │                                                                                         │: .gitignore                      │
 │                                 │                                                                                         │                                  │
-│                                 │                                                                                         │ all (1)                          │
-│                                 │                                                                                         │ll (3)                            │
-│                                 │                                                                                         │t                                 │
 │                                 │                                                                                         │                                  │
-│                                 │                                                                                         │e…                                │
-│                                 │ CONTEXT PREVIEW · Preview presentation · Readable                                       │ Standard                         │
-│                                 │ Choose a readable context view or the exact export payload.                             │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │                                  │
+│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
@@ -33,8 +32,9 @@
 │                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                  │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
-│                                         ││ Files 1-4/4  |  Lines 1-27/27                                ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││ Files 4  |  Lines 1-8/8                                      ││                                                   │
 └─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
 
- Files 4  |  Folders 3  |  76 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

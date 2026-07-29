@@ -1,24 +1,24 @@
- DevProjex Terminal  <ID>
+ DevProjex Terminal · <ID>
  <PROJECTS_ROOT>
- Readable / MD / Content  |  Git: gitignore  |  Standard
-┌┤> CONTEXT PREVIEW · Readable · MD├───────────────────────────────────────────┐
-│src/Feature004.cs:                                                           |│
-│                                                                             #│
-│internal sealed class ContentMarker004 { }                                   |│
-│                                                                             |│
-│                                                                             |│
-│src/Feature005.cs:                                                           |│
-│                                                                             |│
-│internal sealed class ContentMarker005 { }                                   |│
-│                                                                             |│
-│                                                                             |│
-│src/Feature006.cs:                                                           |│
-│                                                                             |│
-│internal sealed class ContentMarker006 { }                                   |│
-│                                                                             |│
-│                                                                             |│
-│ Files 5-7/61  |  Lines 21-35/303                                             │
+┌┤> CONTEXT PREVIEW · Content · ASCII├─────────────────────────────────────────┐
+│                                                                             ▲│
+│internal sealed class ContentMarker004 { }                                   ·│
+│                                                                             ┃│
+│                                                                             ·│
+│src/Feature005.cs:                                                           ·│
+│                                                                             ·│
+│internal sealed class ContentMarker005 { }                                   ·│
+│                                                                             ·│
+│                                                                             ·│
+│src/Feature006.cs:                                                           ·│
+│                                                                             ·│
+│internal sealed class ContentMarker006 { }                                   ·│
+│                                                                             ·│
+│                                                                             ·│
+│src/Feature007.cs:                                                           ·│
+│                                                                             ▼│
+│ Files 5-8/61  |  Lines 22-37/303                                             │
 └──────────────────────────────────────────────────────────────────────────────┘
 
- Files 61  |  Folders 2  |  2.46 KB  |  ~<TOKENS> tokens  |  Warnings 0
- j/k Scroll  PgUp/PgDn Page  Tab/F6 Controls  Ctrl+P Actions  ? Help
+ Files 61 · Folders 2 · 2.46 KB · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ j/k Scroll  PgUp/PgDn Page  Tab/F6 Parameters  Ctrl+P Actions  ? Help

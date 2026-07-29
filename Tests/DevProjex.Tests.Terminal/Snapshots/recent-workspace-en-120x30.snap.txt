@@ -1,21 +1,10 @@
- DevProjex Terminal  Beta Project
+ DevProjex Terminal · Beta Project
  <PROJECTS_ROOT>/Beta Project
- Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
-┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├─────┐
-│v [x] Beta Project                                   ││+ Beta Project                                                 │
-│  > [x] src                                          ││  + src                                                        │
-│    [x] global.json                                  ││    - BetaMarker.cs                                            │
-│                                                     ││  - global.json                                                │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││global.json:                                                   │
-│                                                     ││                                                               │
-│                                                     ││{}                                                             │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││src/BetaMarker.cs:                                             │
-│                                                     ││                                                               │
-│                                                     ││internal sealed class Marker {}                                │
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
+│v [x] Beta Project                                   ││Beta Project                                                   │
+│  > [x] src                                          ││├── src                                                        │
+│    [x] global.json                                  │││   └── BetaMarker.cs                                          │
+│                                                     ││└── global.json                                                │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
@@ -23,8 +12,19 @@
 │                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
-│                                                     ││ Files 1-2/2  |  Lines 1-14/14                                 │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││ Files 2  |  Lines 1-5/5                                       │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
- Files 2  |  Folders 2  |  33 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Files 2 · Folders 2 · 33 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

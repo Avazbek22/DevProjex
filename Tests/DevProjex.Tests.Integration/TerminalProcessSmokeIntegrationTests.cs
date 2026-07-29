@@ -18,6 +18,28 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Matches(@"^\d+\.\d+(?:\.\d+)?$", version.StandardOutput.Trim());
 		Assert.Empty(version.StandardError);
 
+		var shortVersion = await RunAsync(["-v"]);
+		Assert.Equal(CommandLineExitCodes.Success, shortVersion.ExitCode);
+		Assert.Equal(version.StandardOutput, shortVersion.StandardOutput);
+		Assert.Empty(shortVersion.StandardError);
+
+		var malformedVersion = await RunAsync(["-version"]);
+		Assert.Equal(CommandLineExitCodes.UsageError, malformedVersion.ExitCode);
+		Assert.Empty(malformedVersion.StandardOutput);
+		Assert.Equal(
+			2,
+			malformedVersion.StandardError
+				.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+				.Length);
+		Assert.Contains(
+			"error[DPX-CLI-UNKNOWN-OPTION]",
+			malformedVersion.StandardError,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"devprojex --version",
+			malformedVersion.StandardError,
+			StringComparison.Ordinal);
+
 		var legacy = await RunAsync(["--path", ".", "--report", "-"]);
 		Assert.Equal(CommandLineExitCodes.UsageError, legacy.ExitCode);
 		Assert.Empty(legacy.StandardOutput);
@@ -92,6 +114,72 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		}
 		Assert.DoesNotContain("\u001b", context.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(context.StandardError);
+	}
+
+	[Fact]
+	public async Task ParseFailuresKeepSpecificMachineCategoriesThroughTheRealEntryPoint()
+	{
+		var unknownCommand = await RunAsync(["analze", "--language", "en"]);
+		Assert.Equal(CommandLineExitCodes.UsageError, unknownCommand.ExitCode);
+		Assert.Empty(unknownCommand.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-UNKNOWN-COMMAND]",
+			unknownCommand.StandardError,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"DPX-CLI-INVALID-SYNTAX",
+			unknownCommand.StandardError,
+			StringComparison.Ordinal);
+
+		var unknownOption = await RunAsync(
+			["analyze", ".", "--formt", "json", "--language", "en"]);
+		Assert.Equal(CommandLineExitCodes.UsageError, unknownOption.ExitCode);
+		Assert.Empty(unknownOption.StandardOutput);
+		Assert.Equal(
+			2,
+			unknownOption.StandardError
+				.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+				.Length);
+		Assert.Contains(
+			"error[DPX-CLI-UNKNOWN-OPTION]",
+			unknownOption.StandardError,
+			StringComparison.Ordinal);
+
+		var missingValue = await RunAsync(
+			["export", "project", "--as", "--language", "en"]);
+		Assert.Equal(CommandLineExitCodes.UsageError, missingValue.ExitCode);
+		Assert.Empty(missingValue.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-MISSING-VALUE]",
+			missingValue.StandardError,
+			StringComparison.Ordinal);
+
+		var invalidValue = await RunAsync(
+			["analyze", ".", "--format", "yaml", "--language", "en"]);
+		Assert.Equal(CommandLineExitCodes.UsageError, invalidValue.ExitCode);
+		Assert.Empty(invalidValue.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-INVALID-VALUE]",
+			invalidValue.StandardError,
+			StringComparison.Ordinal);
+
+		var conflict = await RunAsync(
+		[
+			"analyze",
+			".",
+			"--exclude",
+			"none",
+			"--exclude",
+			"smart-ignore",
+			"--language",
+			"en"
+		]);
+		Assert.Equal(CommandLineExitCodes.UsageError, conflict.ExitCode);
+		Assert.Empty(conflict.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-INVALID-VALUE]",
+			conflict.StandardError,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

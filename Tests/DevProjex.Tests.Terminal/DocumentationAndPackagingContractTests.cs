@@ -201,7 +201,7 @@ public sealed class DocumentationAndPackagingContractTests
 			workflow,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"TerminalLargePreviewPtyTests.FileBackedReadablePreviewReachesFirstMiddleAndFinalSections",
+			"TerminalLargePreviewPtyTests.FileBackedPreviewReachesFirstMiddleAndFinalSectionsWithDistinctScrollbars",
 			workflow,
 			StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_TUI_TEST_BINARY", workflow, StringComparison.Ordinal);

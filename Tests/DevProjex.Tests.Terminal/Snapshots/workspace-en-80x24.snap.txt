@@ -1,6 +1,5 @@
- DevProjex Terminal  <PROJECT>
+ DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
- Readable / MD / Tree + content  |  Git: gitignore  |  Standard
 ┌┤> PROJECT TREE├──────────────────────────────────────────────────────────────┐
 │v [x] <PROJECT>                                        │
 │  > [x] src                                                                   │
@@ -18,7 +17,8 @@
 │                                                                              │
 │                                                                              │
 │                                                                              │
+│                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 
- Files 4  |  Folders 3  |  76 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down Move  Enter Open  Space Toggle  Tab/F6 Preview  Ctrl+P Actions

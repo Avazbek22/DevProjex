@@ -103,7 +103,6 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			["DEVPROJEX_TERMINAL_HOST"] = "1",
 			["TERM"] = "xterm-256color",
 			["CI"] = string.Empty,
-			["NO_COLOR"] = string.Empty,
 			["DEVPROJEX_INTERNAL_DATA_ROOT"] = Path.Combine(dataRoot, "devprojex"),
 			["XDG_CONFIG_HOME"] = Path.Combine(dataRoot, "config"),
 			["XDG_DATA_HOME"] = Path.Combine(dataRoot, "data"),
@@ -161,9 +160,13 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			var launch = binary.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)
 				? $"call {command}"
 				: $"start \"\" /wait /b {command}";
+			var clearInheritedNoColor = environment.ContainsKey("NO_COLOR")
+				? string.Empty
+				: "set NO_COLOR=&& ";
 			return (
 				host,
 				["/d", "/q", "/v:on"],
+				clearInheritedNoColor +
 				$"set {InvocationEnvironment.TerminalHostVariable}=1&& " +
 				$"{launch} & exit /b !errorlevel!");
 		}
@@ -173,7 +176,10 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		var environmentArguments = environment
 			.OrderBy(static pair => pair.Key, StringComparer.Ordinal)
 			.Select(static pair => QuoteForPosixShell($"{pair.Key}={pair.Value}"));
-		var shellCommand = "exec env " + string.Join(
+		var unixNoColorArguments = environment.ContainsKey("NO_COLOR")
+			? string.Empty
+			: "-u NO_COLOR ";
+		var shellCommand = "exec env " + unixNoColorArguments + string.Join(
 			' ',
 			environmentArguments
 				.Append(QuoteForPosixShell(binary))
@@ -204,8 +210,13 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	public Task SendEnterAsync(CancellationToken cancellationToken = default) =>
 		SendAsync("\r", cancellationToken);
 
-	public Task SendEscapeAsync(CancellationToken cancellationToken = default) =>
-		SendAsync("\u001b", cancellationToken);
+	public async Task SendEscapeAsync(CancellationToken cancellationToken = default)
+	{
+		await SendAsync("\u001b", cancellationToken).ConfigureAwait(false);
+		// A lone Esc must outlive the ANSI driver's escape-sequence window before
+		// another key is sent, otherwise the next key is interpreted as Alt+key.
+		await Task.Delay(150, cancellationToken).ConfigureAwait(false);
+	}
 
 	public Task SendDownAsync(CancellationToken cancellationToken = default) =>
 		SendAsync("\u001b[B", cancellationToken);

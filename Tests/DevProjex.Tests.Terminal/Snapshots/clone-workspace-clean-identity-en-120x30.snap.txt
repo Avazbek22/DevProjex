@@ -1,9 +1,8 @@
- DevProjex Terminal  CombatRepository
+ DevProjex Terminal · CombatRepository [main]
  file:///<ORIGIN_ROOT>/CombatRepository
- Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
-┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├─────┐
-│v [x] CombatRepository                               ││+ CombatRepository                                             │
-│    [x] CloneMarker.cs                               ││  - CloneMarker.cs                                             │
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree + content · ASCII├───────────────────┐
+│v [x] CombatRepository                               ││CombatRepository                                               │
+│    [x] CloneMarker.cs                               ││└── CloneMarker.cs                                             │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││CloneMarker.cs:                                                │
@@ -23,8 +22,9 @@
 │                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
+│                                                     ││                                                               │
 │                                                     ││ Files 1/1 · CloneMarker.cs  |  Lines 1-7/7                    │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
- Files 1  |  Folders 1  |  36 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Files 1 · Folders 1 · 36 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

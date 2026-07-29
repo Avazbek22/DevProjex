@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using DevProjex.Application.Presentation;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -37,7 +38,8 @@ public sealed partial class TerminalLocalizationContractTests
 		"Terminal.Tui.Progress.CopyingFiles",
 		"Terminal.Tui.Progress.CancelHint",
 		"Terminal.Exit.Runtime",
-		"Terminal.Doctor.current-directory"
+		"Terminal.Doctor.current-directory",
+		"Content.Classification.Binary"
 	];
 
 	[Fact]
@@ -62,6 +64,64 @@ public sealed partial class TerminalLocalizationContractTests
 				Assert.DoesNotContain("[[", entry.Value, StringComparison.Ordinal);
 			});
 		}
+	}
+
+	[Fact]
+	public void EveryTerminalLocalizationKeyReferencedBySourceExistsInAllLocales()
+	{
+		var catalogs = ReadCatalogs();
+		var repositoryRoot = FindRepositoryRoot();
+		var sourceDirectories = new[]
+		{
+			Path.Combine(repositoryRoot, "Apps", "Terminal", "DevProjex.Terminal"),
+			Path.Combine(repositoryRoot, "Application", "Presentation")
+		};
+		var sourceKeys = sourceDirectories
+			.SelectMany(static directory => Directory.EnumerateFiles(
+				directory,
+				"*.cs",
+				SearchOption.AllDirectories))
+			.SelectMany(path => SourceLocalizationKeyRegex()
+				.Matches(File.ReadAllText(path))
+				.Select(static match => match.Groups[1].Value))
+			.Distinct(StringComparer.Ordinal)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+
+		Assert.NotEmpty(sourceKeys);
+		foreach (var locale in Locales)
+		{
+			var missing = sourceKeys
+				.Where(key => !catalogs[locale].ContainsKey(key))
+				.ToArray();
+			Assert.Empty(missing);
+		}
+	}
+
+	[Fact]
+	public void SharedPresentationDescriptorsHaveLocalizedLabelsAndStableUserFormats()
+	{
+		var catalogs = ReadCatalogs();
+		var labelKeys = ProjectPresentationCatalog.GitFiltering
+			.Select(static descriptor => descriptor.LabelKey)
+			.Concat(ProjectPresentationCatalog.Exclusions.Select(static descriptor => descriptor.LabelKey))
+			.Concat(ProjectPresentationCatalog.PreviewModes.Select(static descriptor => descriptor.LabelKey))
+			.Concat(FileContentClassificationCatalog.All.Select(static descriptor => descriptor.LabelKey))
+			.Distinct(StringComparer.Ordinal)
+			.ToArray();
+
+		foreach (var locale in Locales)
+		{
+			Assert.All(labelKeys, key =>
+			{
+				Assert.True(catalogs[locale].ContainsKey(key), $"{key} is missing in {locale}.json.");
+				Assert.DoesNotContain("[[", catalogs[locale][key], StringComparison.Ordinal);
+			});
+		}
+
+		Assert.Equal(
+			["ASCII", "JSON", "XML", "Markdown"],
+			ProjectPresentationCatalog.Formats.Select(static descriptor => descriptor.UserLabel));
 	}
 
 	[Fact]
@@ -120,6 +180,24 @@ public sealed partial class TerminalLocalizationContractTests
 		}
 	}
 
+	[Fact]
+	public void OrdinaryTuiCatalogUsesDesktopTerminologyWithoutPresentationOrProfileJargon()
+	{
+		var catalogs = ReadCatalogs();
+		foreach (var catalog in catalogs.Values)
+		{
+			Assert.DoesNotContain("Terminal.Tui.Preview.Readable", catalog.Keys);
+			Assert.DoesNotContain("Terminal.Tui.Preview.Raw", catalog.Keys);
+			Assert.DoesNotContain("Terminal.Tui.Action.Presentation", catalog.Keys);
+			Assert.DoesNotContain("Terminal.Tui.Action.Presentation.Description", catalog.Keys);
+		}
+
+		Assert.Equal("Settings", catalogs["en"]["Terminal.Tui.Profile"]);
+		Assert.Equal("Settings file:", catalogs["en"]["Terminal.Tui.ProfileFile"]);
+		Assert.Equal("Параметры", catalogs["ru"]["Terminal.Tui.Profile"]);
+		Assert.Equal("Файл параметров:", catalogs["ru"]["Terminal.Tui.ProfileFile"]);
+	}
+
 	private static Dictionary<string, Dictionary<string, string>> ReadCatalogs()
 	{
 		var directory = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
@@ -143,4 +221,7 @@ public sealed partial class TerminalLocalizationContractTests
 
 	[GeneratedRegex(@"\{\d+\}", RegexOptions.CultureInvariant)]
 	private static partial Regex PlaceholderRegex();
+
+	[GeneratedRegex("\"((?:Terminal|Content)\\.[A-Za-z0-9_.-]+)\"", RegexOptions.CultureInvariant)]
+	private static partial Regex SourceLocalizationKeyRegex();
 }

@@ -70,7 +70,7 @@ public sealed class CommandTreeContractTests
 			.RunAsync(["some-project"], TestContext.Current.CancellationToken);
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
-		Assert.Contains("DPX-CLI-INVALID-SYNTAX", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("DPX-CLI-UNKNOWN-COMMAND", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -109,6 +109,56 @@ public sealed class CommandTreeContractTests
 		Assert.Contains("devprojex analyze --format", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("--version")]
+	[InlineData("-v")]
+	public async Task VersionAliasesReturnTheSameCleanValue(string option)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync([option], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Matches(@"^\d+\.\d+(?:\.\d+)?$", environment.StandardOutput.Trim());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task SingleDashVersionProducesOneTargetedErrorAndOneHint()
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync(["-version", "--language", "en"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Equal(
+			2,
+			environment.StandardError
+				.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+				.Length);
+		Assert.Contains(
+			"error[DPX-CLI-UNKNOWN-OPTION]: Unknown option: -version",
+			environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.Contains("devprojex --version", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-CLI-INVALID-SYNTAX", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task MissingOptionValueKeepsItsSpecificCategory()
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync(["export", "project", "--as"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("DPX-CLI-MISSING-VALUE", environment.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task ParserOwnedErrorIsLocalizedInsteadOfLeakingEnglishDetails()
 	{
@@ -119,7 +169,7 @@ public sealed class CommandTreeContractTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Contains(
-			"Команда, параметр или значение указаны неверно.",
+			"Неизвестная команда: analze",
 			environment.StandardError,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain("Unrecognized", environment.StandardError, StringComparison.OrdinalIgnoreCase);

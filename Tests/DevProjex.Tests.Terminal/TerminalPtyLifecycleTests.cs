@@ -33,13 +33,13 @@ public sealed class TerminalPtyLifecycleTests
 	}
 
 	[Theory(Timeout = 60_000)]
-	[InlineData("tg", "Кушодани профили нигоҳдошташуда", "Баромад")]
-	[InlineData("ru", "Открыть сохранённый профиль", "Выход")]
-	[InlineData("fr", "Ouvrir un profil enregistré", "Quitter")]
-	[InlineData("de", "Gespeichertes Profil öffnen", "Beenden")]
+	[InlineData("tg", "Фазоҳои кории охирин", "Баромад")]
+	[InlineData("ru", "Недавние рабочие пространства", "Выход")]
+	[InlineData("fr", "Espaces de travail récents", "Quitter")]
+	[InlineData("de", "Letzte Arbeitsbereiche", "Beenden")]
 	public async Task CompactWelcomeShowsLongestLocalizedActionsWithoutClipping(
 		string language,
-		string profileAction,
+		string recentWorkspacesAction,
 		string exitAction)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -52,13 +52,14 @@ public sealed class TerminalPtyLifecycleTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.WaitForScreenAsync(
-			profileAction,
+			recentWorkspacesAction,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			exitAction,
 			cancellationToken: TestContext.Current.CancellationToken);
 		var screen = terminal.CaptureScreen();
-		Assert.Contains(profileAction, screen, StringComparison.Ordinal);
+		Assert.Contains(recentWorkspacesAction, screen, StringComparison.Ordinal);
+		Assert.DoesNotContain("[[", screen, StringComparison.Ordinal);
 		Assert.Contains(exitAction, screen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
@@ -150,12 +151,12 @@ public sealed class TerminalPtyLifecycleTests
 
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"WORKSPACE MODEL",
+			"WORKSPACE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"WORKSPACE MODEL",
+			"ACTION PALETTE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);

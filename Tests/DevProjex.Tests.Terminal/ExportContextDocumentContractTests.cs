@@ -61,6 +61,10 @@ public sealed class ExportContextDocumentContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, await RunAsync(workspace, environment, "xml"));
 
+		Assert.StartsWith(
+			"<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+			environment.StandardOutput,
+			StringComparison.Ordinal);
 		var document = XDocument.Parse(environment.StandardOutput);
 		Assert.Equal("devprojexContext", document.Root!.Name.LocalName);
 		Assert.Equal("1", document.Root.Attribute("schemaVersion")?.Value);

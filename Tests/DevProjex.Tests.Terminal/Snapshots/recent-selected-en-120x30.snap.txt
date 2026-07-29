@@ -3,23 +3,24 @@
   Choose a workspace action. No project is scanned until you open it.
 
   Current directory                                                                      No project workspace detected
-  <PROJECTS_ROOT>┌┤Recent projects├────────────────────────────────────────────────────────────────────────┐ │ Open a recent project:                                                                  │
-  ┌┤Actions├──│                                                                                         │────────────┐
-  │> Recent pr│   [+] AlphaProject                                                                      │anceled.    │
-  │  Recent Gi│ > [+] Beta Project                                                                      │            │
-  │  Browse fo│                                                                                         │            │
-  │  Clone rep│                                                                                         │            │
-  │  Open save│ Status: Available                                                                       │            │
-  │  Open Desk│ Profile: Standard                                                                       │            │
-  │  Help     │ Last opened: <TIMESTAMP>│            │
-  │  Exit     │ Full path:                                                                              │            │
-  └───────────│ <PROJECTS_ROOT>/Beta Project │────────────┘
-              │                                                                                         │
-  Direct autom│                                                                                         │
-              │                                                                                         │
-              │                         ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                         │
-              │                         ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                         │
-              └─────────────────────────────────────────────────────────────────────────────────────────┘
+  <TEMP_ROOT>/<ID>
+       ┌┤Recent workspaces├────────────────────────────────────────────────────────────────────────────────────┐
+  ┌┤Act│ Open a recent local folder or Git repository from one shared history.                                 │─────┐
+  │> Re│                                                                                                       │     │
+  │  Br│   Folder     AlphaProject                 Today                                                       │     │
+  │  Cl│ > Folder     Beta Project                 Today                                                       │     │
+  │  Op│                                                                                                       │     │
+  │  He│ Folder · Beta Project                                                                                 │     │
+  │  Ex│ <PROJECTS_ROOT>/Beta Project │     │
+  └────│ Last opened: <TIMESTAMP>│─────┘
+       │                                                                                                       │
+  Direc│                                                                                                       │
+       │                                                                                                       │
+       │                                                                                                       │
+       │                                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                                │
+       │                                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                                │
+       └───────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
 
 
 

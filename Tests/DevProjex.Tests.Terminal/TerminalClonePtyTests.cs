@@ -73,8 +73,7 @@ public sealed class TerminalClonePtyTests
 			welcomeDirectory.Path);
 		var cacheRoot = Path.Combine(internalDataRoot!, "RepoCache");
 		await WaitUntilAsync(
-			() => !Directory.Exists(cacheRoot) ||
-			      !Directory.EnumerateDirectories(cacheRoot).Any(),
+			() => HasNoIncompleteRepository(cacheRoot),
 			TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 
@@ -86,14 +85,19 @@ public sealed class TerminalClonePtyTests
 			"CloneMarker.cs",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"internal sealed class CloneMarker",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Lines 1-7/7",
+			"Lines 1-",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			"internal sealed class CloneMarker",
+			TestContext.Current.CancellationToken);
 		Assert.Contains(
-			"DevProjex Terminal  CombatRepository",
+			"DevProjex Terminal · CombatRepository",
 			workspace,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain(
@@ -281,5 +285,27 @@ public sealed class TerminalClonePtyTests
 		}
 
 		throw new TimeoutException("The expected clone test condition was not reached.");
+	}
+
+	private static bool HasNoIncompleteRepository(string cacheRoot)
+	{
+		if (!Directory.Exists(cacheRoot))
+			return true;
+
+		foreach (var directory in Directory.EnumerateDirectories(cacheRoot))
+		{
+			if (!string.Equals(
+				    Path.GetFileName(directory),
+				    ".staging",
+				    StringComparison.Ordinal))
+			{
+				return false;
+			}
+
+			if (Directory.EnumerateFileSystemEntries(directory).Any())
+				return false;
+		}
+
+		return true;
 	}
 }

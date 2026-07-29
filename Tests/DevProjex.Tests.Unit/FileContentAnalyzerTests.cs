@@ -178,8 +178,13 @@ public sealed class FileContentAnalyzerTests
 		var file = temp.CreateBinaryFile("binary.bin", [0x00, 0x01, 0x02]);
 
 		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
+		var classified = await _analyzer.ReadClassifiedAsync(
+			file,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
+		Assert.Equal(FileContentClassification.Binary, classified.Classification);
 	}
 
 	[Fact]
@@ -200,8 +205,13 @@ public sealed class FileContentAnalyzerTests
 		var file = temp.CreateBinaryFile("hidden_binary.txt", withNull);
 
 		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
+		var classified = await _analyzer.ReadClassifiedAsync(
+			file,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
+		Assert.Equal(FileContentClassification.Binary, classified.Classification);
 	}
 
 	[Fact]
@@ -406,6 +416,114 @@ public sealed class FileContentAnalyzerTests
 
 		Assert.NotNull(result);
 		Assert.Equal(content, result.Content);
+	}
+
+	[Fact]
+	public async Task SupportedBomEncodingsAreClassifiedAndDecodedAsText()
+	{
+		using var temp = new TemporaryDirectory();
+		const string source = "namespace EncodingFixture;\ninternal sealed class Пример { }";
+		(string Name, Encoding Encoding)[] encodings =
+		[
+			("utf8-bom", new UTF8Encoding(true, true)),
+			("utf16-le", new UnicodeEncoding(false, true, true)),
+			("utf16-be", new UnicodeEncoding(true, true, true)),
+			("utf32-le", new UTF32Encoding(false, true, true)),
+			("utf32-be", new UTF32Encoding(true, true, true))
+		];
+
+		foreach (var fixture in encodings)
+		{
+			var path = Path.Combine(temp.Path, $"{fixture.Name}.cs");
+			var payload = fixture.Encoding.GetPreamble()
+				.Concat(fixture.Encoding.GetBytes(source))
+				.ToArray();
+			File.WriteAllBytes(path, payload);
+
+			var classified = await _analyzer.ReadClassifiedAsync(
+				path,
+				long.MaxValue,
+				TestContext.Current.CancellationToken);
+			var metrics = await _analyzer.GetTextFileMetricsAsync(
+				path,
+				TestContext.Current.CancellationToken);
+			var classifiedMetrics = await _analyzer.GetClassifiedMetricsAsync(
+				path,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(FileContentClassification.Text, classified.Classification);
+			Assert.Equal(FileContentClassification.Text, classifiedMetrics.Classification);
+			Assert.Equal(source, classified.Content?.Content);
+			Assert.True(await _analyzer.IsTextFileAsync(
+				path,
+				TestContext.Current.CancellationToken));
+			Assert.Equal(source.Length, metrics?.CharCount);
+			Assert.Equal(source.Length, classifiedMetrics.Metrics?.CharCount);
+		}
+	}
+
+	[Fact]
+	public async Task SvgUsesContentClassificationInsteadOfBinaryExtensionShortcut()
+	{
+		using var temp = new TemporaryDirectory();
+		const string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>Пример</text></svg>";
+		var path = temp.CreateFile("diagram.svg", svg);
+
+		var result = await _analyzer.ReadClassifiedAsync(
+			path,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Text, result.Classification);
+		Assert.Equal(svg, result.Content?.Content);
+	}
+
+	[Fact]
+	public async Task ClassifiedReadPreservesUnavailableContentReasons()
+	{
+		using var temp = new TemporaryDirectory();
+		var binary = temp.CreateBinaryFile("payload.custom", [0x41, 0x00, 0x42]);
+		var tooLarge = temp.CreateFile("large.cs", "class LargeFixture { }");
+		var invalidUtf8 = temp.CreateBinaryFile("invalid.cs", [0xC3, 0x28]);
+		var missing = Path.Combine(temp.Path, "missing.cs");
+
+		var binaryResult = await _analyzer.ReadClassifiedAsync(
+			binary,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+		var tooLargeResult = await _analyzer.ReadClassifiedAsync(
+			tooLarge,
+			1,
+			TestContext.Current.CancellationToken);
+		var invalidResult = await _analyzer.ReadClassifiedAsync(
+			invalidUtf8,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+		var missingResult = await _analyzer.ReadClassifiedAsync(
+			missing,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+		var binaryMetrics = await _analyzer.GetClassifiedMetricsAsync(
+			binary,
+			TestContext.Current.CancellationToken);
+		var invalidMetrics = await _analyzer.GetClassifiedMetricsAsync(
+			invalidUtf8,
+			TestContext.Current.CancellationToken);
+		var missingMetrics = await _analyzer.GetClassifiedMetricsAsync(
+			missing,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Binary, binaryResult.Classification);
+		Assert.Equal(FileContentClassification.TooLarge, tooLargeResult.Classification);
+		Assert.True(tooLargeResult.Content?.IsEstimated);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding, invalidResult.Classification);
+		Assert.Equal(FileContentClassification.Missing, missingResult.Classification);
+		Assert.Equal(FileContentClassification.Binary, binaryMetrics.Classification);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding, invalidMetrics.Classification);
+		Assert.Equal(FileContentClassification.Missing, missingMetrics.Classification);
+		Assert.Null(binaryMetrics.Metrics);
+		Assert.Null(invalidMetrics.Metrics);
+		Assert.Null(missingMetrics.Metrics);
 	}
 
 	[Fact]

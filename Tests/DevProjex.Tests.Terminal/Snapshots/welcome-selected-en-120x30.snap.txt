@@ -6,17 +6,17 @@
   <PROJECT_ROOT>
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
-  │  Recent projects                       │  │ Open a cached Git repository or explicitly clone a missing cache.    │
-  │> Recent Git repositories               │  │                                                                      │
-  │  Browse folder                         │  │                                                                      │
+  │  Recent workspaces                     │  │ Select a project folder without scanning anything until you confirm  │
+  │> Browse folder                         │  │ it.                                                                  │
   │  Clone repository                      │  │                                                                      │
-  │  Open saved profile                    │  │                                                                      │
   │  Open Desktop                          │  │                                                                      │
   │  Help                                  │  │                                                                      │
   │  Exit                                  │  │                                                                      │
   └────────────────────────────────────────┘  └──────────────────────────────────────────────────────────────────────┘
 
   Direct automation: devprojex analyze .  |  devprojex export context . -o context.md
+
+
 
 
 

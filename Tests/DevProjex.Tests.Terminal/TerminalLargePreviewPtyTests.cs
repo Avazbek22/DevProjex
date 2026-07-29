@@ -4,7 +4,7 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalLargePreviewPtyTests
 {
 	[Fact(Timeout = 120_000)]
-	public async Task FileBackedReadablePreviewReachesFirstMiddleAndFinalSections()
+	public async Task FileBackedPreviewReachesFirstMiddleAndFinalSectionsWithDistinctScrollbars()
 	{
 		using var project = CreateLargeProject();
 		await using var terminal = await TerminalPtyHarness.StartAsync(
@@ -41,7 +41,23 @@ public sealed class TerminalLargePreviewPtyTests
 		await terminal.WaitForScreenAsync(
 			"j/k Scroll",
 			cancellationToken: TestContext.Current.CancellationToken);
+		first = terminal.CaptureScreen();
+		Assert.Contains("┃", first, StringComparison.Ordinal);
+		Assert.Contains("━", first, StringComparison.Ordinal);
+		Assert.Contains("·", first, StringComparison.Ordinal);
+		Assert.DoesNotContain("░", first, StringComparison.Ordinal);
 		Verify("large-preview-first-en-120x30", terminal, project.Path);
+
+		await terminal.SendRightAsync(TestContext.Current.CancellationToken);
+		var horizontallyScrolled = await terminal.WaitForScreenAsync(
+			"5-66/",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("> CONTEXT PREVIEW", horizontallyScrolled, StringComparison.Ordinal);
+		Assert.Contains("━", horizontallyScrolled, StringComparison.Ordinal);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"1-62/",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("/", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -57,7 +73,7 @@ public sealed class TerminalLargePreviewPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("/120", middle, StringComparison.Ordinal);
 		await terminal.WaitForScreenAsync(
-			"Files 60-",
+			"F 60-",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"j/k Scroll",

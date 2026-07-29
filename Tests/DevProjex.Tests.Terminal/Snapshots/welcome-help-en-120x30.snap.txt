@@ -2,23 +2,23 @@
   DevProjex Terminal                                                                                              v<VERSION>
   Choose a wor┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐
               │ DEVPROJEX TERMINAL                                                                    ▲ │
-  Current dire│ Prepare a controlled project context without leaving the terminal.                    █ │pace detected
+  Current dire│ Prepare controlled project context without leaving the terminal.                      █ │pace detected
   <PROJECT_ROOT>│                                                                                       █ │
               │ WELCOME                                                                               █ │
-  ┌┤Actions├──│ Open the current directory, browse to a local project, or choose Recent Projects.     █ │────────────┐
-  │  Recent pr│ Recent Git Repositories shows the same repository history as Desktop: a valid cache   █ │g cache.    │
-  │> Recent Gi│ opens without network access; a missing or damaged cache asks before cloning again.   █ │            │
-  │  Browse fo│ Clone Repository never performs a hidden update. Open Profile applies a portable      █ │            │
-  │  Clone rep│ profile, and Open Desktop hands the selected work to Avalonia.                        █ │            │
-  │  Open save│                                                                                       █ │            │
-  │  Open Desk│ WORKSPACE                                                                             ░ │            │
-  │  Help     │ Project Tree controls the selected files and folders. Context Preview has Readable    ░ │            │
-  │  Exit     │ and exact Raw output presentations. Context Controls exposes profiles, Root Folders,  ░ │            │
-  └───────────│ File Types, Git filtering, Exclusions, Preview view/format, diagnostics, and          ░ │────────────┘
-              │ context/folder/ZIP exports.                                                           ░ │
-  Direct autom│                                                                                       ░ │
+  ┌┤Actions├──│ Open the current folder, choose a folder, clone a repository, or use Recent           █ │────────────┐
+  │  Recent wo│ Workspaces for local folders and Git repositories. The list opens from saved history  █ │ou confirm  │
+  │> Browse fo│ without network access; repository cache is checked only after selection. Open        █ │            │
+  │  Clone rep│ project with settings file is available from the Action Palette.                      █ │            │
+  │  Open Desk│                                                                                       █ │            │
+  │  Help     │ WORKSPACE                                                                             █ │            │
+  │  Exit     │ Tree controls selection. Preview shows Tree, Content, or Tree + Content in ASCII,     █ │            │
+  └───────────│ JSON, XML, or Markdown. Parameters exposes Git filtering, Exclusions, File Types, and █ │────────────┘
+              │ Root Folders. Ctrl+P opens every action, including exports and Desktop.               █ │
+  Direct autom│                                                                                       █ │
               │ NAVIGATION                                                                            ░ │
-              │ Up/Down or j/k moves through lists. Enter opens or confirms. Esc closes one overlay   ▼ │
+              │ Up/Down or j/k moves, Enter opens, Space toggles, Tab/F6 changes panes, Shift         ░ │
+              │ reverses direction, / searches, and ? opens contextual Help. Esc closes one overlay   ░ │
+              │ or clears the current search.                                                         ▼ │
               │                                                                                         │
               │                                                                                         │
               │                                      ⟦► Close ◄⟧▖                                       │

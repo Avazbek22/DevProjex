@@ -30,7 +30,7 @@ public sealed class TerminalRecentProjectsPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await SelectWelcomeActionAsync(
 			terminal,
-			"Recent projects",
+			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -42,7 +42,7 @@ public sealed class TerminalRecentProjectsPtyTests
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"> [+] Second Project",
+			"Folder · Second Project",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
@@ -50,7 +50,7 @@ public sealed class TerminalRecentProjectsPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"> [+] Second Project",
+			"Folder · Second Project",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -83,7 +83,7 @@ public sealed class TerminalRecentProjectsPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await SelectWelcomeActionAsync(
 			terminal,
-			"Recent projects",
+			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -145,7 +145,14 @@ public sealed class TerminalRecentProjectsPtyTests
 			"UnicodeMarker.cs",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Contains("Profile: Local", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("global.json", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("Profile:", workspace, StringComparison.Ordinal);
+		await terminal.ResizeAsync(160, 40, TestContext.Current.CancellationToken);
+		await terminal.SendShiftF6Async(TestContext.Current.CancellationToken);
+		var parameters = await terminal.WaitForScreenAsync(
+			"Saved project settings",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("PARAMETERS", parameters, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -181,7 +188,7 @@ public sealed class TerminalRecentProjectsPtyTests
 			"Warnings 2",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Contains("Profile: Local", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("Profile:", workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -209,12 +216,12 @@ public sealed class TerminalRecentProjectsPtyTests
 		await OpenRecentOverlayAsync(terminal, TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Local profile recovery",
+			"Saved settings recovery",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var recovery = await terminal.WaitForScreenAsync(
-			"Use Standard",
+			"Use default settings",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Local profile recovery", recovery, StringComparison.Ordinal);
+		Assert.Contains("Saved settings recovery", recovery, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
@@ -224,7 +231,7 @@ public sealed class TerminalRecentProjectsPtyTests
 		var workspace = await terminal.WaitForScreenAsync(
 			"RecoveredMarker.cs",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Profile: Standard", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("Profile:", workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -248,10 +255,9 @@ public sealed class TerminalRecentProjectsPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await OpenRecentOverlayAsync(terminal, TestContext.Current.CancellationToken);
-		var recent = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"Deleted Project",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Unavailable", recent, StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		var error = await terminal.WaitForScreenAsync(
 			"selected project directory is unavailable",
@@ -465,7 +471,7 @@ public sealed class TerminalRecentProjectsPtyTests
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
 			cancellationToken: cancellationToken);
-		await SelectWelcomeActionAsync(terminal, "Recent projects", cancellationToken);
+		await SelectWelcomeActionAsync(terminal, "Recent workspaces", cancellationToken);
 		await terminal.SendEnterAsync(cancellationToken);
 	}
 

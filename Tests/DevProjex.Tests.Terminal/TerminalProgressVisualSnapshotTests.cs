@@ -69,7 +69,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Readable / MD",
+			"Up/Down Move",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await WaitForStableMeasuredScreenAsync(terminal, "50%");
 		Verify(
@@ -79,7 +79,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Git filtering:",
+			"CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await WaitForStableMeasuredScreenAsync(terminal, "50%");
 		ReleaseCheckpoint(checkpointRoot, "50");
@@ -312,7 +312,9 @@ public sealed class TerminalProgressVisualSnapshotTests
 			GetCheckpointRoot(dataRoot),
 			"50",
 			TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, phase);
+		var active = await WaitForStableScreenAsync(terminal, phase);
+		if (monochrome)
+			Assert.Matches(@"\[[#\-]+\] 50%", active);
 		Verify(
 			snapshot,
 			terminal,
@@ -466,7 +468,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			string.Empty,
 			new UTF8Encoding(false));
 
-	private static async Task WaitForStableScreenAsync(
+	private static async Task<string> WaitForStableScreenAsync(
 		TerminalPtyHarness terminal,
 		string expected)
 	{
@@ -480,7 +482,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			{
 				stableSamples++;
 				if (stableSamples >= 3)
-					return;
+					return screen;
 			}
 			else
 			{

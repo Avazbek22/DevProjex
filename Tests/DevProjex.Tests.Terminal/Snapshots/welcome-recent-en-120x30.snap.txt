@@ -6,17 +6,17 @@
   <PROJECT_ROOT>
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
-  │> Recent projects                       │  │ Choose a previously opened project and return here when canceled.    │
-  │  Recent Git repositories               │  │                                                                      │
-  │  Browse folder ┌┤Recent projects├──────────────────────────────────────────────────────────────┐                 │
-  │  Clone reposito│ (none available)                                                              │                 │
-  │  Open saved pro│                                                                               │                 │
-  │  Open Desktop  │                                                                               │                 │
+  │> Recent workspaces                     │  │ Open a recent local folder or Git repository from one shared         │
+  │  Browse folder                         │  │ history.                                                             │
+  │  Clone reposito┌┤Recent workspaces├────────────────────────────────────────────────────────────┐                 │
+  │  Open Desktop  │ (none available)                                                              │                 │
   │  Help          │                                                                               │                 │
-  │  Exit          │                                 ⟦► Close ◄⟧▖                                  │                 │
-  └────────────────│                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │─────────────────┘
+  │  Exit          │                                                                               │                 │
+  └────────────────│                                                                               │─────────────────┘
+                   │                                 ⟦► Close ◄⟧▖                                  │
+  Direct automation│                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │
                    └───────────────────────────────────────────────────────────────────────────────┘
-  Direct automation: devprojex analyze .  |  devprojex export context . -o context.md
+
 
 
 

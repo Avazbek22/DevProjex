@@ -45,12 +45,12 @@ public sealed class TerminalPtyRecoveryTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Git filtering: .gitignore", terminal.CaptureScreen(), StringComparison.Ordinal);
 
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
+		var initialMode = await terminal.WaitForScreenAsync(
 			"Tracked Git files only",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("(*) Use .gitignore", initialMode, StringComparison.Ordinal);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -62,8 +62,14 @@ public sealed class TerminalPtyRecoveryTests
 		await terminal.WaitForScreenWithoutAsync(
 			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		var recoveredMode = await terminal.WaitForScreenAsync(
+			"Tracked Git files only",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("(*) Use .gitignore", recoveredMode, StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		var recovered = await terminal.WaitForScreenAsync(
-			"Git filtering: .gitignore",
+			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Files 4", recovered, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
@@ -163,12 +169,12 @@ public sealed class TerminalPtyRecoveryTests
 			clickCount: 2,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Prepare a controlled project context without leaving the terminal.",
+			"Prepare controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Prepare a controlled project context without leaving the terminal.",
+			"Prepare controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",

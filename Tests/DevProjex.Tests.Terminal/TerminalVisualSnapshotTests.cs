@@ -6,7 +6,7 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalVisualSnapshotTests
 {
 	[Fact(Timeout = 60_000)]
-	public async Task WelcomeWideSnapshotsCoverEnglishSelectionHelpAndRecentProjects()
+	public async Task WelcomeWideSnapshotsCoverEnglishSelectionHelpAndRecentWorkspaces()
 	{
 		using var workspace = CreateMarkerlessWorkspace();
 		await using var terminal = await StartWelcomeAsync(
@@ -19,21 +19,21 @@ public sealed class TerminalVisualSnapshotTests
 		Verify("welcome-en-120x30", terminal, workspace.Path);
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "> Recent Git repositories");
+		await WaitForStableScreenAsync(terminal, "> Browse folder");
 		Verify("welcome-selected-en-120x30", terminal, workspace.Path);
 
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(
 			terminal,
-			"Prepare a controlled project context without leaving the terminal.");
+			"Prepare controlled project context without leaving the terminal.");
 		Verify("welcome-help-en-120x30", terminal, workspace.Path);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Prepare a controlled project context without leaving the terminal.",
+			"Prepare controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "> Recent projects");
+		await WaitForStableScreenAsync(terminal, "> Recent workspaces");
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "(none available)");
 		Verify("welcome-recent-en-120x30", terminal, workspace.Path);
@@ -170,7 +170,7 @@ public sealed class TerminalVisualSnapshotTests
 	}
 
 	[Fact(Timeout = 90_000)]
-	public async Task WideWorkspaceSnapshotsCoverControlsActionPaletteAndReadableRawPreview()
+	public async Task WideWorkspaceSnapshotsCoverParametersActionPaletteAndAllFormats()
 	{
 		using var project = CreateProject();
 		await using var terminal = await TerminalPtyHarness.StartAsync(
@@ -190,21 +190,26 @@ public sealed class TerminalVisualSnapshotTests
 			rows: 40,
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await WaitForStableScreenAsync(terminal, "CONTEXT CONTROLS");
-		var readable = terminal.CaptureScreen();
-		Assert.Contains("Readable", readable, StringComparison.Ordinal);
-		Assert.DoesNotContain("```", readable, StringComparison.Ordinal);
-		Verify("workspace-wide-readable-en-160x40", terminal, project.Path);
+		await WaitForStableScreenAsync(terminal, "PARAMETERS");
+		var parameters = terminal.CaptureScreen();
+		Assert.Contains("GIT FILTERING", parameters, StringComparison.Ordinal);
+		Assert.Contains("EXCLUSIONS", parameters, StringComparison.Ordinal);
+		Assert.Contains("FILE TYPES", parameters, StringComparison.Ordinal);
+		Assert.Contains("ROOT FOLDERS", parameters, StringComparison.Ordinal);
+		Assert.DoesNotContain("Profile: Standard", parameters, StringComparison.Ordinal);
+		Assert.DoesNotContain("Readable", parameters, StringComparison.Ordinal);
+		Assert.DoesNotContain("Raw output", parameters, StringComparison.Ordinal);
+		Verify("workspace-wide-parameters-en-160x40", terminal, project.Path);
 
 		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "Filter actions:");
 		Verify("workspace-action-palette-en-160x40", terminal, project.Path);
 		await terminal.SendAsync(
-			"Preview presentation",
+			"Preview format",
 			TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(
 			terminal,
-			"Choose a readable context view or the exact export payload.");
+			"Choose ASCII, JSON, XML, or Markdown for the tree.");
 		Verify("workspace-action-palette-filtered-en-160x40", terminal, project.Path);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
@@ -212,37 +217,88 @@ public sealed class TerminalVisualSnapshotTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(
 			terminal,
-			"Choose a readable context view or the exact export payload.");
-		var beforeSelection = CaptureListItemVisuals(terminal, "Readable", "Raw output");
+			"Choose ASCII, JSON, XML, or Markdown for the tree.");
+		var formatSelector = terminal.CaptureScreen();
+		Assert.Contains("ASCII", formatSelector, StringComparison.Ordinal);
+		Assert.Contains("JSON", formatSelector, StringComparison.Ordinal);
+		Assert.Contains("XML", formatSelector, StringComparison.Ordinal);
+		Assert.Contains(
+			formatSelector.Split('\n'),
+			static line => line.Contains("│ Markdown", StringComparison.Ordinal));
+		Verify("workspace-format-selector-en-160x40", terminal, project.Path);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		var afterSelection = await WaitForListItemVisualsToChangeAsync(
-			terminal,
-			beforeSelection,
-			"Readable",
-			"Raw output");
-		Assert.NotEqual(beforeSelection.Readable, afterSelection.Readable);
-		Assert.NotEqual(afterSelection.Readable, afterSelection.Raw);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Raw output");
-		await WaitForStableScreenAsync(terminal, "```text");
-		Verify("workspace-wide-raw-markdown-en-160x40", terminal, project.Path);
+		await WaitForStableScreenAsync(terminal, "CONTEXT PREVIEW · Tree · XML");
+		await WaitForStableScreenAsync(terminal, "<d n=");
+		Verify("workspace-wide-xml-en-160x40", terminal, project.Path);
 
 		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "Filter actions:");
-		await terminal.SendAsync("Context controls", TestContext.Current.CancellationToken);
+		await terminal.SendAsync("Parameters", TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "> CONTEXT CONTROLS");
+		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
 		Verify("workspace-controls-focused-en-160x40", terminal, project.Path);
 
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(
 			terminal,
-			"Up/Down or j/k selects a visible parameter or action");
+			"Up/Down or j/k selects a row");
 		Verify("workspace-controls-help-en-160x40", terminal, project.Path);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Up/Down or j/k selects a visible parameter or action",
+			"Up/Down or j/k selects a row",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task RussianWideWorkspaceLocalizesParametersAndCompleteFormatSelector()
+	{
+		using var project = CreateProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"ru"
+			],
+			columns: 160,
+			rows: 40,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await WaitForStableScreenAsync(terminal, "ПАРАМЕТРЫ");
+		var workspace = terminal.CaptureScreen();
+		Assert.Contains("GIT-ФИЛЬТРАЦИЯ", workspace, StringComparison.Ordinal);
+		Assert.Contains("ИСКЛЮЧЕНИЯ", workspace, StringComparison.Ordinal);
+		Assert.Contains("ТИПЫ ФАЙЛОВ", workspace, StringComparison.Ordinal);
+		Assert.Contains("КОРНЕВЫЕ ПАПКИ", workspace, StringComparison.Ordinal);
+		Assert.Contains("Использовать .gitignore", workspace, StringComparison.Ordinal);
+		Assert.Contains("Скрытые папки", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("[[", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("smart-ignore", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("hidden-folders", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("extensionless-files", workspace, StringComparison.Ordinal);
+		Verify("workspace-wide-parameters-ru-160x40", terminal, project.Path);
+
+		await terminal.SendAsync("F", TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			"Выберите ASCII, JSON, XML или Markdown для дерева.");
+		var selector = terminal.CaptureScreen();
+		Assert.Contains("ASCII", selector, StringComparison.Ordinal);
+		Assert.Contains("JSON", selector, StringComparison.Ordinal);
+		Assert.Contains("XML", selector, StringComparison.Ordinal);
+		Assert.Contains("Markdown", selector, StringComparison.Ordinal);
+		Assert.DoesNotContain("[[", selector, StringComparison.Ordinal);
+		Verify("workspace-format-selector-ru-160x40", terminal, project.Path);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
@@ -259,11 +315,11 @@ public sealed class TerminalVisualSnapshotTests
 
 		await WaitForStableScreenAsync(terminal, "Choose a workspace action");
 		Verify("welcome-monochrome-en-120x30", terminal, workspace.Path);
-		var selectedRow = terminal.FindVisibleRow("> Recent projects");
+		var selectedRow = terminal.FindVisibleRow("> Recent workspaces");
 		Assert.True(selectedRow >= 0);
 		var selectedColumn = terminal.CaptureScreen()
 			.Split('\n')[selectedRow]
-			.IndexOf("Recent projects", StringComparison.Ordinal);
+			.IndexOf("Recent workspaces", StringComparison.Ordinal);
 		Assert.True(terminal.CaptureCellStyle(selectedRow, selectedColumn).Inverse);
 		await ExitAsync(terminal);
 	}
@@ -360,63 +416,6 @@ public sealed class TerminalVisualSnapshotTests
 			terminal.CaptureScreen(),
 			normalizedValues);
 		TerminalVisualArtifactWriter.WriteIfRequested(name, terminal);
-	}
-
-	private static (
-		(int BackgroundMode, int Background, bool Inverse) Readable,
-		(int BackgroundMode, int Background, bool Inverse) Raw)
-		CaptureListItemVisuals(
-		TerminalPtyHarness terminal,
-		string readableText,
-		string rawText)
-	{
-		var screenLines = terminal.CaptureScreen().Split('\n');
-		var rawRow = terminal.FindVisibleRow(rawText);
-		Assert.True(rawRow >= 0, terminal.CaptureScreen());
-		var readableRow = screenLines
-			.Select((line, index) => (line, index))
-			.Where(item =>
-				item.index != rawRow &&
-				item.line.Contains(readableText, StringComparison.Ordinal))
-			.OrderBy(item => Math.Abs(item.index - rawRow))
-			.Select(item => item.index)
-			.FirstOrDefault(-1);
-		Assert.True(readableRow >= 0, terminal.CaptureScreen());
-		var readableColumn = screenLines[readableRow].IndexOf(readableText, StringComparison.Ordinal);
-		var rawColumn = screenLines[rawRow].IndexOf(rawText, StringComparison.Ordinal);
-		var readableStyle = terminal.CaptureCellStyle(readableRow, readableColumn);
-		var rawStyle = terminal.CaptureCellStyle(rawRow, rawColumn);
-		return (
-			(readableStyle.BackgroundMode, readableStyle.Background, readableStyle.Inverse),
-			(rawStyle.BackgroundMode, rawStyle.Background, rawStyle.Inverse));
-	}
-
-	private static async Task<(
-		(int BackgroundMode, int Background, bool Inverse) Readable,
-		(int BackgroundMode, int Background, bool Inverse) Raw)>
-		WaitForListItemVisualsToChangeAsync(
-			TerminalPtyHarness terminal,
-			(
-				(int BackgroundMode, int Background, bool Inverse) Readable,
-				(int BackgroundMode, int Background, bool Inverse) Raw) previous,
-			string readableText,
-			string rawText)
-	{
-		var timeout = Stopwatch.StartNew();
-		while (timeout.Elapsed < TimeSpan.FromSeconds(5))
-		{
-			var current = CaptureListItemVisuals(terminal, readableText, rawText);
-			if (current.Readable != previous.Readable &&
-			    current.Readable != current.Raw)
-			{
-				return current;
-			}
-
-			await Task.Delay(50, TestContext.Current.CancellationToken);
-		}
-
-		throw new TimeoutException(
-			$"List selection focus did not change.{Environment.NewLine}{terminal.CaptureScreen()}");
 	}
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)

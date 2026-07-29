@@ -1,35 +1,35 @@
- DevProjex Terminal  DevProjex
+ DevProjex Terminal · DevProjex
  https://github.com/Avazbek22/DevProjex
- Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
-┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├┐┌┤  CONTEXT CONTROLS├────────────────────────────┐
-│v [x] DevProjex                       ││+ DevProjex                                               ││ Source: DevProjex                              │
-│  > [x] src                           ││  + src                                                   ││ https://github.com/Avazbek22/DevProjex         │
-│    [x] README.md                     ││    - RepositoryMarker.cs                                 ││ Profile: Standard                              │
-│                                      ││  - README.md                                             ││ Git filtering: .gitignore                      │
-│                                      ││                                                          ││ Files: 2  Folders: 2                           │
-│                                      ││                                                          ││ ~<TOKENS> tokens  Warnings: 0                        │
-│                                      ││README.md:                                                ││                                                │
+┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────┐┌┤  PARAMETERS├──────────────────────────────────┐
+│v [x] DevProjex                       ││DevProjex                                                 ││  GIT FILTERING                                 │
+│  > [x] src                           ││├── src                                                   ││  ( ) No Git filtering                          │
+│    [x] README.md                     │││   └── RepositoryMarker.cs                               ││  (*) Use .gitignore                            │
+│                                      ││└── README.md                                             ││  ( ) Tracked Git files only                    │
+│                                      ││                                                          ││  EXCLUSIONS                                    │
+│                                      ││                                                          ││  [x] All                                       │
+│                                      ││                                                          ││  [x] Smart ignore                              │
+│                                      ││                                                          ││  [x] Empty folders                             │
+│                                      ││                                                          ││  [x] Empty files                               │
+│                                      ││                                                          ││  [x] Hidden folders                            │
+│                                      ││                                                          ││  [x] Hidden files                              │
+│                                      ││                                                          ││  [x] dot folders                               │
+│                                      ││                                                          ││  [x] dot files                                 │
+│                                      ││                                                          ││  [x] Files without extension                   │
+│                                      ││                                                          ││  FILE TYPES                                    │
+│                                      ││                                                          ││  [x] All                                       │
+│                                      ││                                                          ││  [x] .cs                                       │
+│                                      ││                                                          ││  [x] .md                                       │
+│                                      ││                                                          ││  ROOT FOLDERS                                  │
+│                                      ││                                                          ││  [x] All                                       │
+│                                      ││                                                          ││  [x] src                                       │
 │                                      ││                                                          ││                                                │
-│                                      ││# DevProjex                                               ││[A] Analyze                                     │
-│                                      ││                                                          ││[/] Search                                      │
-│                                      ││                                                          ││[V] Preview presentation: Readable              │
-│                                      ││src/RepositoryMarker.cs:                                  ││[1/2/3] View: Tree + content                    │
-│                                      ││                                                          ││[F] Format: Markdown                            │
-│                                      ││internal sealed class RepositoryMarker {}                 ││[M] Git filtering: .gitignore                   │
-│                                      ││                                                          ││[X] Exclusions: 8                               │
-│                                      ││                                                          ││[R] Root folders: all (1)                       │
-│                                      ││                                                          ││[T] File types: all (2)                         │
-│                                      ││                                                          ││[E] Export context                              │
-│                                      ││                                                          ││[Z] To Folder…                                  │
-│                                      ││                                                          ││[Z] To ZIP Archive…                             │
-│                                      ││                                                          ││[P] Save profile: Standard                      │
-│                                      ││                                                          ││[G] Open Desktop                                │
-│                                      ││                                                          ││    Details                                     │
-│                                      ││                                                          ││    Get repository updates                      │
-│                                      ││                                                          ││    Switch branch                               │
-│                                      ││                                                          ││    Recent Git repositories                     │
-│                                      ││ Files 1-2/2  |  Lines 1-14/14                            ││                                                │
+│                                      ││                                                          ││                                                │
+│                                      ││                                                          ││                                                │
+│                                      ││                                                          ││                                                │
+│                                      ││                                                          ││                                                │
+│                                      ││                                                          ││                                                │
+│                                      ││ Files 2  |  Lines 1-5/5                                  ││                                                │
 └──────────────────────────────────────┘└──────────────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
 
- Files 2  |  Folders 2  |  52 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Files 2 · Folders 2 · 52 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

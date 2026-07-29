@@ -1,28 +1,27 @@
- DevProjex Terminal  <PROJECT>
+ DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
- Profile: Standard  |  Git filtering: .gitignore  |  CONTEXT PREVIEW: Readable / Tree + content / Markdown
-┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Readable · Tree + content · Markdown├────┐┌┤  CONTEXT CONTROLS├───────────────────────────────┐
-│v [x] <PROJECT>   ││+ <PROJECT>                            ││ Source: <PROJECT>          │
-│  > [x] src                              ││  + src                                                       ││ ...sts.Terminal\<PROJECT>  │
-│    [x] global.json              ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐d                                 │
-│    [x] readme.md                │ Filter actions:                                                                         │gitignore                         │
-│                                 │                                                                                         │s: 3                              │
-│                                 │                                                                                         │nings: 0                          │
-│                                 │ Analyze  [A]                                                                            │                                  │
+┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────┐┌┤  PARAMETERS├─────────────────────────────────────┐
+│v [x] <PROJECT>   ││<PROJECT>                              ││  GIT FILTERING                                    │
+│  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
+│    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
+│    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
+│                                 │ Filter actions:                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │e                                 │
+│                                 │ Analyze  [A]                                                                            │rs                                │
 │                                 │ Search  [/]                                                                             │                                  │
-│                                 │ Preview presentation: Readable  [V]                                                     │                                  │
-│                                 │ View: Tree + content  [1/2/3]                                                           │                                  │
-│                                 │ Format: Markdown  [F]                                                                   │ntation: Readable                 │
-│                                 │ Git filtering: .gitignore  [M]                                                          │e + content                       │
-│                                 │ Exclusions: 8  [X]                                                                      │own                               │
-│                                 │ Root folders: all (1)  [R]                                                              │: .gitignore                      │
-│                                 │ File types: all (3)  [T]                                                                │                                  │
-│                                 │ Export context  [E]                                                                     │ all (1)                          │
-│                                 │ To Folder…  [Z]                                                                         │ll (3)                            │
-│                                 │ To ZIP Archive…  [Z]                                                                    │t                                 │
-│                                 │ Save profile: Standard  [P]                                                             │                                  │
-│                                 │                                                                                         │e…                                │
-│                                 │ Diagnostics · Analyze                                                                   │ Standard                         │
+│                                 │ Preview mode: Tree  [1/2/3]                                                             │ers                               │
+│                                 │ Preview format: ASCII  [F]                                                              │s                                 │
+│                                 │ Git filtering: Use .gitignore  [M]                                                      │                                  │
+│                                 │ Exclusions: 8  [X]                                                                      │                                  │
+│                                 │ Root folders: All (1)  [R]                                                              │ut extension                      │
+│                                 │ File types: All (3)  [T]                                                                │                                  │
+│                                 │ Export context  [E]                                                                     │                                  │
+│                                 │ To Folder…  [Z]                                                                         │                                  │
+│                                 │ To ZIP Archive…  [Z]                                                                    │                                  │
+│                                 │ Export settings...  [P]                                                                 │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │ Diagnostics · Analyze                                                                   │                                  │
 │                                 │ Analyze the effective project context.                                                  │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
@@ -33,8 +32,9 @@
 │                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                  │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
-│                                         ││ Files 1-4/4  |  Lines 1-27/27                                ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││ Files 4  |  Lines 1-8/8                                      ││                                                   │
 └─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
 
- Files 4  |  Folders 3  |  76 B  |  ~<TOKENS> tokens  |  Warnings 0
+ Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

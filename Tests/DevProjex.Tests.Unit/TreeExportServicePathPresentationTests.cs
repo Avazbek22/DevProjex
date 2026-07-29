@@ -100,6 +100,49 @@ public sealed class TreeExportServicePathPresentationTests
 		Assert.False(doc.RootElement.TryGetProperty("root", out _));
 	}
 
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
+	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void BuildFullTree_WithoutRootPath_KeepsCleanRootIdentityAndValidFormat(
+		TreeTextFormat format)
+	{
+		var service = new TreeExportService();
+		var root = CreateSimpleRoot();
+
+		var result = service.BuildFullTree(
+			@"C:\repo",
+			root,
+			format,
+			displayRootPath: "https://github.com/user/repo",
+			displayRootName: "repo-clean",
+			includeRootPath: false);
+
+		Assert.DoesNotContain(
+			"https://github.com/user/repo",
+			result,
+			StringComparison.Ordinal);
+		Assert.Contains("repo-clean", result, StringComparison.Ordinal);
+		switch (format)
+		{
+			case TreeTextFormat.Json:
+				using (var document = JsonDocument.Parse(result))
+					Assert.True(document.RootElement.TryGetProperty("repo-clean", out _));
+				break;
+			case TreeTextFormat.Xml:
+				var xml = System.Xml.Linq.XDocument.Parse(result);
+				Assert.Equal("repo-clean", xml.Root!.Attribute("n")?.Value);
+				break;
+			case TreeTextFormat.Markdown:
+				Assert.StartsWith("- repo-clean/", result, StringComparison.Ordinal);
+				break;
+			default:
+				Assert.StartsWith("repo-clean", result, StringComparison.Ordinal);
+				break;
+		}
+	}
+
 	[Fact]
 	public void BuildSelectedTree_Json_UsesDisplayRootPathWhenProvided()
 	{

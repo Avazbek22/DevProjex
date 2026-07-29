@@ -35,7 +35,7 @@ public sealed class TerminalInteractionVisualSnapshotTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.WaitForScreenAsync(
-			"> Recent projects",
+			"> Recent workspaces",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "AlphaProject");
@@ -46,7 +46,11 @@ public sealed class TerminalInteractionVisualSnapshotTests
 			welcomeDirectory.Path);
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "> [+] Beta Project");
+		await WaitForStableScreenAsync(terminal, "Beta Project");
+		Assert.Contains(
+			terminal.CaptureScreen().Split('\n'),
+			line => line.Contains("> Folder", StringComparison.Ordinal) &&
+			        line.Contains("Beta Project", StringComparison.Ordinal));
 		Verify(
 			"recent-selected-en-120x30",
 			terminal,
@@ -69,7 +73,6 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		ReleaseCheckpoint(checkpointRoot, "project-loading");
 
 		await WaitForStableScreenAsync(terminal, "BetaMarker.cs");
-		await WaitForStableScreenAsync(terminal, "internal sealed class Marker");
 		Verify(
 			"recent-workspace-en-120x30",
 			terminal,
@@ -122,7 +125,7 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		Verify("workspace-preview-scrolled-en-120x30", terminal, project.Path);
 
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Tab/F6 Controls");
+		await WaitForStableScreenAsync(terminal, "Tab/F6 Parameters");
 		Assert.Contains(
 			"> CONTEXT PREVIEW",
 			terminal.CaptureScreen(),

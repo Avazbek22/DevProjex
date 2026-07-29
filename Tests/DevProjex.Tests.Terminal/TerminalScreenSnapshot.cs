@@ -26,12 +26,19 @@ internal static partial class TerminalScreenSnapshot
 			    StringComparison.Ordinal))
 		{
 			Directory.CreateDirectory(snapshotDirectory);
-			var updatePath = platformPath is not null &&
-			                 File.Exists(commonPath) &&
-			                 !string.Equals(
-				                 Normalize(File.ReadAllText(commonPath), []),
-				                 normalized,
-				                 StringComparison.Ordinal)
+			if (platformPath is not null &&
+			    File.Exists(commonPath) &&
+			    string.Equals(
+				    Normalize(File.ReadAllText(commonPath), []),
+				    normalized,
+				    StringComparison.Ordinal))
+			{
+				if (File.Exists(platformPath))
+					File.Delete(platformPath);
+				return;
+			}
+
+			var updatePath = platformPath is not null && File.Exists(commonPath)
 				? platformPath
 				: commonPath;
 			File.WriteAllText(

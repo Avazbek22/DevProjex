@@ -62,6 +62,9 @@ public sealed class TerminalPtyJourneyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
 		var workspaceScreen = await terminal.WaitForScreenAsync(
 			"App.cs",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -140,7 +143,7 @@ public sealed class TerminalPtyJourneyTests
 			"Marker_With_Underscores.cs",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(
-			$"DevProjex Terminal  {projectName}",
+			$"DevProjex Terminal · {projectName}",
 			screen,
 			StringComparison.Ordinal);
 		Assert.Contains(
@@ -173,6 +176,9 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Clone repository",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await SelectWelcomeActionAsync(
 			terminal,
 			"Clone repository",
@@ -186,9 +192,12 @@ public sealed class TerminalPtyJourneyTests
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
 		var workspace = await terminal.WaitForScreenAsync(
 			"App.cs",
-			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("PROJECT TREE", workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
@@ -223,10 +232,12 @@ public sealed class TerminalPtyJourneyTests
 		Assert.Contains("Browse folder", welcome, StringComparison.Ordinal);
 		Assert.Contains("Clone repository", welcome, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
-		Assert.Contains("Recent projects", welcome, StringComparison.Ordinal);
+		Assert.Contains("Recent workspaces", welcome, StringComparison.Ordinal);
+		Assert.DoesNotContain("Recent Git repositories", welcome, StringComparison.Ordinal);
+		Assert.DoesNotContain("Open saved profile", welcome, StringComparison.Ordinal);
 		await SelectWelcomeActionAsync(
 			terminal,
-			"Recent projects",
+			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -246,12 +257,12 @@ public sealed class TerminalPtyJourneyTests
 
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Prepare a controlled project context without leaving the terminal.",
+			"Prepare controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Prepare a controlled project context without leaving the terminal.",
+			"Prepare controlled project context without leaving the terminal.",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await SelectWelcomeActionAsync(
@@ -260,26 +271,29 @@ public sealed class TerminalPtyJourneyTests
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Select folder",
+			"Browse folder",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Select folder",
+			"Current folder",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await SelectWelcomeActionAsync(
-			terminal,
-			"Open saved profile",
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(
+			"Open project with settings file",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Find",
+			"Open project with settings file",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Find",
+			"Current folder",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await SelectWelcomeActionAsync(
@@ -360,11 +374,11 @@ public sealed class TerminalPtyJourneyTests
 
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"WORKSPACE MODEL",
+			"WORKSPACE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"WORKSPACE MODEL",
+			"ACTION PALETTE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("\t", TestContext.Current.CancellationToken);
@@ -373,11 +387,11 @@ public sealed class TerminalPtyJourneyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"CONTEXT PREVIEW · Readable · Tree",
+			"CONTEXT PREVIEW · Tree · ASCII",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("\t", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"> CONTEXT CONTROLS",
+			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("\t", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -448,13 +462,14 @@ public sealed class TerminalPtyJourneyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("A", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Fingerprint",
+		var analysis = await terminal.WaitForScreenAsync(
+			"Files:",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Fingerprint", analysis, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Fingerprint",
+			"Files:",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		var dryRunDestination = Path.Combine(

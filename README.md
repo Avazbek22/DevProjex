@@ -206,8 +206,8 @@ devprojex analyze . --git-mode tracked --exclude smart-ignore
 Use it to:
 
 * work interactively in the Terminal Workspace without starting Avalonia;
-* reopen local projects or cached Git repositories from the shared Desktop history;
-* inspect Readable context or the exact Raw export through Tree, Preview, and Context Controls;
+* reopen local folders or cached Git repositories from one shared Recent Workspaces history;
+* inspect Tree, Content, or Tree + Content in ASCII, JSON, XML, or Markdown through Tree, Preview, and Parameters;
 * discover every important workflow through the searchable Action Palette;
 * open or control the desktop app through semantic local IPC;
 * generate clean AI-ready context without opening the UI;
