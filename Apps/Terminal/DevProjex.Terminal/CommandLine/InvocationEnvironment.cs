@@ -23,6 +23,8 @@ public interface ITerminalEnvironment
 
 public sealed class InvocationEnvironment : ITerminalEnvironment
 {
+	private const int DefaultTerminalWidth = 80;
+	private const int DefaultTerminalHeight = 24;
 	public const string TerminalHostVariable = "DEVPROJEX_TERMINAL_HOST";
 	public const string DesktopRequestVariable = "DEVPROJEX_DESKTOP_REQUEST_FILE";
 	internal const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
@@ -90,11 +92,15 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 
 		try
 		{
-			return (Math.Max(1, Console.WindowWidth), Math.Max(1, Console.WindowHeight));
+			var width = Console.WindowWidth;
+			var height = Console.WindowHeight;
+			return (
+				width > 0 ? width : DefaultTerminalWidth,
+				height > 0 ? height : DefaultTerminalHeight);
 		}
 		catch
 		{
-			return (80, 24);
+			return (DefaultTerminalWidth, DefaultTerminalHeight);
 		}
 	}
 
