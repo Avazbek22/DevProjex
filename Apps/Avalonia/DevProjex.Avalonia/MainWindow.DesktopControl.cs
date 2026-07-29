@@ -81,7 +81,7 @@ public partial class MainWindow
         }
 
         if (request.Language is { } language)
-            SetLanguageAndPersist(language);
+            SetLanguageForCurrentSession(language);
 
         var controller = CreateStartupInteractionController(
             request,

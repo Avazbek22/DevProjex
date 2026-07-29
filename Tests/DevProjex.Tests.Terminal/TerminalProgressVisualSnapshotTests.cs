@@ -19,8 +19,8 @@ public sealed class TerminalProgressVisualSnapshotTests
 			rows: 30,
 			new Dictionary<string, string>
 			{
-				[TerminalProgressTestCheckpoint.CheckpointsVariable] = "25,50,90",
-				[TerminalProgressTestCheckpoint.PhasesVariable] = "preparing"
+				[TerminalProgressCheckpointProtocol.CheckpointsVariable] = "25,50,90",
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "preparing"
 			},
 			path => dataRoot = path);
 
@@ -124,7 +124,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			30,
 			new Dictionary<string, string>
 			{
-				[TerminalProgressTestCheckpoint.CheckpointsVariable] = "50"
+				[TerminalProgressCheckpointProtocol.CheckpointsVariable] = "50"
 			},
 			path => dataRoot = path);
 
@@ -170,7 +170,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			30,
 			new Dictionary<string, string>
 			{
-				[TerminalProgressTestCheckpoint.PhasesVariable] = "writing-context"
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "writing-context"
 			},
 			path => dataRoot = path);
 
@@ -231,7 +231,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			30,
 			new Dictionary<string, string>
 			{
-				[TerminalProgressTestCheckpoint.CheckpointsVariable] = "50"
+				[TerminalProgressCheckpointProtocol.CheckpointsVariable] = "50"
 			},
 			path => dataRoot = path);
 
@@ -287,7 +287,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 		string? dataRoot = null;
 		var environment = new Dictionary<string, string>
 		{
-			[TerminalProgressTestCheckpoint.CheckpointsVariable] = "50"
+			[TerminalProgressCheckpointProtocol.CheckpointsVariable] = "50"
 		};
 		if (monochrome)
 			environment["NO_COLOR"] = "1";
@@ -351,7 +351,8 @@ public sealed class TerminalProgressVisualSnapshotTests
 			rows,
 			environment,
 			TestContext.Current.CancellationToken,
-			initializeDataRoot);
+			initializeDataRoot,
+			useProgressCheckpointHost: true);
 
 	private static async Task OpenFolderExportDestinationAsync(
 		TerminalPtyHarness terminal,
@@ -443,7 +444,9 @@ public sealed class TerminalProgressVisualSnapshotTests
 	private static string GetCheckpointRoot(string? dataRoot)
 	{
 		Assert.False(string.IsNullOrWhiteSpace(dataRoot));
-		return Path.Combine(dataRoot!, "tui-progress-checkpoints");
+		return Path.Combine(
+			dataRoot!,
+			TerminalProgressCheckpointProtocol.DirectoryName);
 	}
 
 	private static async Task WaitForCheckpointAsync(
@@ -451,7 +454,9 @@ public sealed class TerminalProgressVisualSnapshotTests
 		string checkpoint,
 		CancellationToken cancellationToken)
 	{
-		var path = Path.Combine(root, $"reached-{checkpoint}");
+		var path = Path.Combine(
+			root,
+			TerminalProgressCheckpointProtocol.GetReachedFileName(checkpoint));
 		var timeout = Stopwatch.StartNew();
 		while (timeout.Elapsed < TimeSpan.FromSeconds(45))
 		{
@@ -464,7 +469,9 @@ public sealed class TerminalProgressVisualSnapshotTests
 
 	private static void ReleaseCheckpoint(string root, string checkpoint) =>
 		File.WriteAllText(
-			Path.Combine(root, $"release-{checkpoint}"),
+			Path.Combine(
+				root,
+				TerminalProgressCheckpointProtocol.GetReleaseFileName(checkpoint)),
 			string.Empty,
 			new UTF8Encoding(false));
 

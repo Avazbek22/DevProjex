@@ -80,9 +80,9 @@ DevProjex интерактивті терминал жұмыс кеңістіг�
 * `devprojex` — интерактивті терминал жұмыс кеңістігін ашу.
 * `devprojex open . --preview` — ағымдағы папканы Desktop алдын ала қарау режимінде ашу.
 * `devprojex analyze . --format json` — ағымдағы жобаны JSON түрінде талдау.
-* `devprojex export context . --format markdown -o context.md` — ЖИ үшін дайын контексті сақтау.
-* `devprojex export project . --as folder -o submission` — тиімді жоба ағашын нақты папкаға экспорттау.
-* `devprojex export project . --as zip -o submission.zip` — тиімді жоба ағашын ZIP архивіне экспорттау.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — ЖИ үшін дайын контексті бастапқы жобадан тыс сақтау.
+* `devprojex export project . --as folder -o ../devprojex-submission` — тиімді жоба ағашын нақты папкаға экспорттау.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — тиімді жоба ағашын ZIP архивіне экспорттау.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — Git бақылайтын файлдарды Smart Ignore арқылы талдау.
 
 Ерекшеліктер:

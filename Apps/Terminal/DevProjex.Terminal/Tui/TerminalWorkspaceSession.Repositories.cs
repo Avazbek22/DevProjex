@@ -190,7 +190,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_recentWorkspaceSelectionKey = workspace.IdentityKey;
 			var sourceWidth = Math.Max(8, dialogWidth - 8);
 			details.Text =
-				$"{KindLabel(workspace.Kind)} · {workspace.DisplayName}\n" +
+				$"{KindLabel(workspace.Kind)}{PanelSeparator}{workspace.DisplayName}\n" +
 				$"{FitPathToWidth(workspace.DisplaySource, sourceWidth)}\n" +
 				$"{L("Terminal.Tui.Recent.LastOpened")}: " +
 				workspace.OpenedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
@@ -206,11 +206,11 @@ internal sealed partial class TerminalWorkspaceSession
 		list.ValueChanged += (_, _) => UpdateSelection();
 		list.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open);
 		dialog.Add(description, list, details);
-		dialog.AddButton(new Button { Text = L("Terminal.Tui.Back") });
-		var remove = new Button { Text = L("Terminal.Tui.Recent.Remove") };
+		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Back")));
+		var remove = CreateDialogButton(L("Terminal.Tui.Recent.Remove"));
 		remove.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Remove);
 		dialog.AddButton(remove);
-		var open = new Button { Text = L("Terminal.Tui.Open") };
+		var open = CreateDialogButton(L("Terminal.Tui.Open"));
 		open.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open);
 		dialog.AddButton(open);
 		UpdateSelection();
@@ -239,7 +239,7 @@ internal sealed partial class TerminalWorkspaceSession
 					{
 						if (!TryResolveAutomaticProfileInteractively(localPath, out var profile))
 						{
-							ShowWelcome();
+							ShowWelcome(TerminalWelcomeActionKind.RecentWorkspaces);
 							_application.Invoke(OpenRecentWorkspaces);
 							return true;
 						}
@@ -256,7 +256,7 @@ internal sealed partial class TerminalWorkspaceSession
 						return true;
 					}
 
-					ShowWelcome();
+					ShowWelcome(TerminalWelcomeActionKind.RecentWorkspaces);
 					var repository = new TerminalRecentRepository(
 						workspace.Source,
 						workspace.OpenedUtc,
@@ -321,7 +321,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		_application.Invoke(() =>
 		{
-			ShowWelcome();
+			ShowWelcome(TerminalWelcomeActionKind.RecentWorkspaces);
 			ShowWelcomeStatus(L("Terminal.Tui.OperationCanceled"), TerminalWorkspaceTheme.Warning);
 			_application.Invoke(OpenRecentWorkspaces);
 		});
@@ -336,7 +336,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		_application.Invoke(() =>
 		{
-			ShowWelcome();
+			ShowWelcome(TerminalWelcomeActionKind.RecentWorkspaces);
 			_application.Invoke(() =>
 			{
 				ShowError(code, message);

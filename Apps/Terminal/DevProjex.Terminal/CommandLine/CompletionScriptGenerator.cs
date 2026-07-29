@@ -7,50 +7,76 @@ public static class CompletionScriptGenerator
 	public static string Generate(RootCommand root, string shell)
 	{
 		ArgumentNullException.ThrowIfNull(root);
-		var tokens = CollectTokens(root);
-		var words = string.Join(' ', tokens);
-		return shell.ToLowerInvariant() switch
+		var script = shell.ToLowerInvariant() switch
 		{
-			"bash" => $"_devprojex_complete() {{ COMPREPLY=( $(compgen -W '{EscapeSingle(words)}' -- \"${{COMP_WORDS[COMP_CWORD]}}\") ); }}\ncomplete -F _devprojex_complete devprojex",
-			"zsh" => $"#compdef devprojex\n_arguments '*:command:({EscapeSingle(words)})'",
-			"fish" => string.Join(
-				Environment.NewLine,
-				tokens.Select(token => $"complete -c devprojex -a '{EscapeSingle(token)}'")),
-			"powershell" => BuildPowerShell(tokens),
+			"bash" => Bash,
+			"zsh" => Zsh,
+			"fish" => Fish,
+			"powershell" => PowerShell,
 			_ => throw new ArgumentOutOfRangeException(nameof(shell), shell, null)
 		};
+		return script.ReplaceLineEndings("\n").TrimEnd('\n') + "\n";
 	}
 
-	private static IReadOnlyList<string> CollectTokens(Command command)
-	{
-		var tokens = new HashSet<string>(StringComparer.Ordinal);
-		var stack = new Stack<Command>();
-		stack.Push(command);
-		while (stack.Count > 0)
-		{
-			var current = stack.Pop();
-			foreach (var option in current.Options.Where(static option => !option.Hidden))
-			{
-				tokens.Add(option.Name);
-				foreach (var alias in option.Aliases)
-					tokens.Add(alias);
-			}
-
-			foreach (var child in current.Subcommands.Where(static command => !command.Hidden))
-			{
-				tokens.Add(child.Name);
-				stack.Push(child);
-			}
+	private const string Bash =
+		"""
+		_devprojex_complete() {
+		    local command_path
+		    command_path="$(command -v devprojex)" || return
+		    COMPREPLY=()
+		    while IFS= read -r candidate; do
+		        COMPREPLY+=("$candidate")
+		    done < <("$command_path" dev complete --position "$COMP_POINT" -- "$COMP_LINE")
 		}
+		complete -F _devprojex_complete devprojex
+		""";
 
-		return tokens.OrderBy(static token => token, StringComparer.Ordinal).ToArray();
-	}
+	private const string Zsh =
+		"""
+		#compdef devprojex
+		_devprojex_complete() {
+		    local command_path
+		    local -a candidates
+		    command_path="$(whence -p devprojex)" || return
+		    candidates=("${(@f)$("$command_path" dev complete --position "$CURSOR" -- "$BUFFER")}")
+		    _describe 'DevProjex values' candidates
+		}
+		compdef _devprojex_complete devprojex
+		""";
 
-	private static string BuildPowerShell(IReadOnlyList<string> tokens)
-	{
-		var values = string.Join(", ", tokens.Select(token => $"'{EscapeSingle(token)}'"));
-		return $"Register-ArgumentCompleter -Native -CommandName devprojex -ScriptBlock {{ param($wordToComplete) @({values}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }} }}";
-	}
+	private const string Fish =
+		"""
+		function __devprojex_complete
+		    set -l command_path (command -s devprojex)
+		    test -n "$command_path"; or return
+		    $command_path dev complete --position (commandline -C) -- (commandline)
+		end
+		complete -c devprojex -f -a '(__devprojex_complete)'
+		""";
 
-	private static string EscapeSingle(string value) => value.Replace("'", "''");
+	private const string PowerShell =
+		"""
+		Register-ArgumentCompleter -Native -CommandName devprojex -ScriptBlock {
+		    param($wordToComplete, $commandAst, $cursorPosition)
+		    $commandPath = Get-Command devprojex -CommandType Application -ErrorAction Stop |
+		        Select-Object -First 1 -ExpandProperty Source
+		    $commandLine = $commandAst.ToString()
+		    if ($commandLine.Length -lt $cursorPosition) {
+		        $commandLine = $commandLine.PadRight($cursorPosition)
+		    }
+		    $encodedCommandLine = [Convert]::ToBase64String(
+		        [System.Text.Encoding]::UTF8.GetBytes($commandLine))
+		    & $commandPath dev complete --position $cursorPosition --base64 -- $encodedCommandLine |
+		        ForEach-Object {
+		            $value = [string]$_
+		            $completionText = if ($value -notmatch '^[\p{L}\p{N}_./:\\=-]+$') {
+		                "'" + $value.Replace("'", "''") + "'"
+		            } else {
+		                $value
+		            }
+		            [System.Management.Automation.CompletionResult]::new(
+		                $completionText, $value, 'ParameterValue', $value)
+		        }
+		}
+		""";
 }

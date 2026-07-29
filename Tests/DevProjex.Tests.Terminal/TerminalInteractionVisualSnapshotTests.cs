@@ -23,7 +23,7 @@ public sealed class TerminalInteractionVisualSnapshotTests
 			rows: 30,
 			environment: new Dictionary<string, string>
 			{
-				[TerminalProgressTestCheckpoint.PhasesVariable] = "project-loading"
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "project-loading"
 			},
 			initializeDataRoot: root =>
 			{
@@ -32,8 +32,13 @@ public sealed class TerminalInteractionVisualSnapshotTests
 				var snapshot = store.AddFolder(null, secondProject);
 				store.AddFolder(snapshot, firstProject);
 			},
+			useProgressCheckpointHost: true,
 			cancellationToken: TestContext.Current.CancellationToken);
 
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"> Recent workspaces",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -59,7 +64,9 @@ public sealed class TerminalInteractionVisualSnapshotTests
 
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		Assert.NotNull(dataRoot);
-		var checkpointRoot = Path.Combine(dataRoot, "tui-progress-checkpoints");
+		var checkpointRoot = Path.Combine(
+			dataRoot,
+			TerminalProgressCheckpointProtocol.DirectoryName);
 		await WaitForCheckpointAsync(
 			checkpointRoot,
 			"project-loading",
@@ -179,7 +186,9 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		string checkpoint,
 		CancellationToken cancellationToken)
 	{
-		var reached = Path.Combine(root, $"reached-{checkpoint}");
+		var reached = Path.Combine(
+			root,
+			TerminalProgressCheckpointProtocol.GetReachedFileName(checkpoint));
 		var timeout = Stopwatch.StartNew();
 		while (timeout.Elapsed < TimeSpan.FromSeconds(45))
 		{
@@ -192,7 +201,9 @@ public sealed class TerminalInteractionVisualSnapshotTests
 
 	private static void ReleaseCheckpoint(string root, string checkpoint) =>
 		File.WriteAllText(
-			Path.Combine(root, $"release-{checkpoint}"),
+			Path.Combine(
+				root,
+				TerminalProgressCheckpointProtocol.GetReleaseFileName(checkpoint)),
 			string.Empty,
 			new UTF8Encoding(false));
 

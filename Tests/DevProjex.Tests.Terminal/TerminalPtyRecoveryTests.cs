@@ -3,6 +3,70 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalPtyRecoveryTests
 {
+	[Fact(Timeout = 90_000)]
+	public async Task AcceptingDefaultContextDestinationFromTuiDotCreatesOnlyAnExternalArtifact()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("Project");
+		File.WriteAllText(
+			Path.Combine(source, "global.json"),
+			"{}",
+			new UTF8Encoding(false));
+		var sourceFile = Path.Combine(source, "App.cs");
+		File.WriteAllText(
+			sourceFile,
+			"internal sealed class App {}",
+			new UTF8Encoding(false));
+		var before = await File.ReadAllBytesAsync(
+			sourceFile,
+			TestContext.Current.CancellationToken);
+		var destination = Path.Combine(workspace.Path, "Project-context.txt");
+		await using var terminal = await StartProjectAsync(
+			source,
+			[],
+			TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("E", TestContext.Current.CancellationToken);
+		var prompt = await terminal.WaitForScreenAsync(
+			"Destination:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(
+			Path.GetFileName(destination),
+			prompt,
+			StringComparison.Ordinal);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Destination state: Ready",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Equivalent command:",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(File.Exists(destination));
+		Assert.Equal(
+			before,
+			await File.ReadAllBytesAsync(
+				sourceFile,
+				TestContext.Current.CancellationToken));
+		Assert.DoesNotContain(
+			Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories),
+			path => Path.GetFileName(path).Equals(
+				"Project-context.txt",
+				StringComparison.OrdinalIgnoreCase));
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Equivalent command:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExitAsync(terminal);
+	}
+
 	[Fact(Timeout = 60_000)]
 	public async Task InvalidPortableProfileShowsSpecificErrorAndReturnsToWelcome()
 	{

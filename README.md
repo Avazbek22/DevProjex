@@ -32,7 +32,7 @@ It’s built for real projects where terminal output is noisy, IDE integrations 
 
 DevProjex is not an autonomous coding agent. It gives you a manual, fully controlled way to prepare project context when agents, IDE plugins, or remote indexing cannot be used.
 
-> 🔒 Read-only & without telemetry by design — DevProjex never modifies your files.
+> 🔒 Source-project read-only & without telemetry by design — DevProjex never modifies the opened source project. Explicit export destinations, profiles, settings, clones, and caches are intentional writes outside that source-read-only guarantee.
 
 ---
 
@@ -197,9 +197,9 @@ DevProjex is not only a desktop context builder. The same app can run from the t
 devprojex
 devprojex open . --preview
 devprojex analyze . --format json
-devprojex export context . --format markdown -o ./context.md
-devprojex export project . --as folder -o ./submission
-devprojex export project . --as zip -o ./submission.zip
+devprojex export context . --format markdown -o ../devprojex-context.md
+devprojex export project . --as folder -o ../devprojex-submission
+devprojex export project . --as zip -o ../devprojex-submission.zip
 devprojex analyze . --git-mode tracked --exclude smart-ignore
 ```
 

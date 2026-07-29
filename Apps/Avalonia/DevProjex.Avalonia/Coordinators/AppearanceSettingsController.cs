@@ -152,7 +152,7 @@ internal sealed class AppearanceSettingsController(
 
     public void SetLanguage(AppLanguage language)
     {
-        localization.SetLanguage(language);
+        SetLanguageForCurrentSession(language);
         var current = ViewSettings;
         _userSettings.ViewSettings = current with
         {
@@ -160,6 +160,9 @@ internal sealed class AppearanceSettingsController(
         };
         userSettingsStore.TryPersistViewSettings(_userSettings);
     }
+
+    public void SetLanguageForCurrentSession(AppLanguage language)
+        => localization.SetLanguage(language);
 
     public void MarkTerminalCommandPromptDismissed()
     {

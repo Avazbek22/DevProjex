@@ -274,8 +274,199 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 		Assert.Equal(TerminalCommandSetupState.Stale, stale.State);
 		Assert.True(repair.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.Repaired, repair.Outcome);
-		Assert.Contains("rem target: " + secondTarget, launcher, StringComparison.Ordinal);
-		Assert.DoesNotContain("rem target: " + firstTarget, launcher, StringComparison.Ordinal);
+		Assert.Contains(WindowsTargetMarker(secondTarget), launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain(WindowsTargetMarker(firstTarget), launcher, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void InstallOrRepair_ReleaseGateEnvironment_InstallsOfficialWindowsLauncherThroughPublicApi()
+	{
+		using var fallbackWorkspace = new TemporaryDirectory();
+		var configuredTarget = Environment.GetEnvironmentVariable(
+			"DEVPROJEX_RELEASE_WINDOWS_LAUNCHER_TARGET");
+		var configuredLocalAppData = Environment.GetEnvironmentVariable(
+			"DEVPROJEX_RELEASE_WINDOWS_LAUNCHER_LOCAL_APP_DATA");
+		Assert.True(
+			string.IsNullOrWhiteSpace(configuredTarget) ==
+			string.IsNullOrWhiteSpace(configuredLocalAppData),
+			"Release launcher target and local application data root must be provided together.");
+		var targetPath = string.IsNullOrWhiteSpace(configuredTarget)
+			? fallbackWorkspace.CreateFile("published/DevProjex.exe", "test executable")
+			: Path.GetFullPath(configuredTarget!);
+		var localAppData = string.IsNullOrWhiteSpace(configuredLocalAppData)
+			? fallbackWorkspace.Path
+			: Path.GetFullPath(configuredLocalAppData!);
+		Assert.True(File.Exists(targetPath), $"Release launcher target does not exist: {targetPath}");
+		var userPath = string.Empty;
+		var service = CreateWindowsPortableService(
+			localAppData,
+			() => userPath,
+			value => userPath = value,
+			targetPath);
+
+		var result = service.InstallOrRepair();
+		var expectedLauncherPath = Path.Combine(
+			localAppData,
+			"DevProjex",
+			"bin",
+			CommandLineExecutableAliases.WindowsPortableCommandFileName);
+
+		Assert.True(result.Success, result.ErrorMessage);
+		Assert.Equal(TerminalCommandInstallOutcome.Created, result.Outcome);
+		Assert.Equal(expectedLauncherPath, result.Snapshot.CommandPath);
+		Assert.Equal(
+			TerminalCommandSetupService.BuildWindowsLauncherContent(targetPath),
+			File.ReadAllText(expectedLauncherPath));
+	}
+
+	[Fact]
+	public async Task WindowsPortableLauncher_ForwardsArgumentsAndReturnsExactExitCode()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("The portable .cmd launcher requires the native Windows command processor.");
+
+		using var workspace = new TemporaryDirectory();
+		var targetDirectory = workspace.CreateDirectory("portable & ^ ! 100% (кириллица)");
+		var targetPath = Path.Combine(targetDirectory, "DevProjex.exe");
+		File.Copy(Path.Combine(Environment.SystemDirectory, "cscript.exe"), targetPath);
+		var scriptPath = workspace.CreateFile(
+			"script folder/сapture args.js",
+			"""
+			var shell = new ActiveXObject("WScript.Shell");
+			var fileSystem = new ActiveXObject("Scripting.FileSystemObject");
+			var output = fileSystem.CreateTextFile(shell.Environment("PROCESS")("DPX_CAPTURE"), true, true);
+			for (var index = 0; index < WScript.Arguments.length; index++) {
+			    output.WriteLine(encodeURIComponent(WScript.Arguments.Item(index)));
+			}
+			output.Close();
+			WScript.Quit(37);
+			""");
+		var capturePath = Path.Combine(workspace.Path, "captured-arguments.txt");
+		string[] expectedArguments =
+		[
+			"space value",
+			string.Empty,
+			"-leading",
+			"--",
+			"кириллица",
+			"ampersand&value",
+			"percent%value",
+			"bang!value",
+			"caret^value",
+			"(parentheses)"
+		];
+		var userPath = string.Empty;
+		var service = CreateWindowsPortableService(
+			workspace.Path,
+			() => userPath,
+			value => userPath = value,
+			targetPath);
+		var install = service.InstallOrRepair();
+		Assert.True(install.Success, install.ErrorMessage);
+		var launcherPath = install.Snapshot.CommandPath;
+		Assert.False(string.IsNullOrWhiteSpace(launcherPath));
+		var command = string.Join(
+			" ",
+			new[] { QuoteForCmd(launcherPath!), "//nologo", QuoteForCmd(scriptPath) }
+				.Concat(expectedArguments.Select(QuoteForCmd)));
+		var callerPath = workspace.CreateFile(
+			"caller folder/run-launcher.cmd",
+			string.Join(
+				"\r\n",
+				"@echo off",
+				"setlocal DisableDelayedExpansion",
+				command,
+				string.Empty));
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+		startInfo.Environment["DPX_CAPTURE"] = capturePath;
+		startInfo.ArgumentList.Add("/d");
+		startInfo.ArgumentList.Add("/c");
+		startInfo.ArgumentList.Add(callerPath);
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("Could not start cmd.exe.");
+		var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		var stdoutText = await stdout;
+		var stderrText = await stderr;
+		if (!File.Exists(capturePath))
+		{
+			throw new Xunit.Sdk.XunitException(
+				$"Launcher did not create the capture file. ExitCode={process.ExitCode}; " +
+				$"StdOut={stdoutText}; StdErr={stderrText}; Command={command}");
+		}
+		var actualArguments = File.ReadAllLines(capturePath)
+			.Select(Uri.UnescapeDataString)
+			.ToArray();
+
+		Assert.Equal(37, process.ExitCode);
+		Assert.Equal(string.Empty, stdoutText);
+		Assert.Equal(string.Empty, stderrText);
+		Assert.Equal(expectedArguments, actualArguments);
+	}
+
+	[Fact]
+	public async Task WindowsFrameworkDependentLauncher_ReturnsExactManagedApplicationExitCode()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("The framework-dependent .cmd launcher requires the native Windows command processor.");
+
+		using var workspace = new TemporaryDirectory();
+		var targetPath = Path.Combine(AppContext.BaseDirectory, "DevProjex.exe");
+		var managedAssemblyPath = Path.ChangeExtension(targetPath, ".dll");
+		Assert.True(File.Exists(targetPath), $"Application host does not exist: {targetPath}");
+		Assert.True(File.Exists(managedAssemblyPath), $"Managed application does not exist: {managedAssemblyPath}");
+		var userPath = string.Empty;
+		var service = CreateWindowsPortableService(
+			workspace.Path,
+			() => userPath,
+			value => userPath = value,
+			targetPath);
+		var install = service.InstallOrRepair();
+		Assert.True(install.Success, install.ErrorMessage);
+		var launcherPath = Assert.IsType<string>(install.Snapshot.CommandPath);
+		var callerPath = workspace.CreateFile(
+			"caller/run-framework-launcher.cmd",
+			string.Join(
+				"\r\n",
+				"@echo off",
+				"setlocal DisableDelayedExpansion",
+				"call " + QuoteForCmd(launcherPath) + " --definitely-unknown --language en",
+				"exit /b %ERRORLEVEL%",
+				string.Empty));
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			WorkingDirectory = workspace.Path
+		};
+		startInfo.ArgumentList.Add("/d");
+		startInfo.ArgumentList.Add("/c");
+		startInfo.ArgumentList.Add(callerPath);
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("Could not start cmd.exe.");
+		var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, process.ExitCode);
+		Assert.Empty(await stdout);
+		Assert.Contains(
+			"error[DPX-CLI-UNKNOWN-OPTION]",
+			await stderr,
+			StringComparison.Ordinal);
 	}
 
 	private static TerminalCommandSetupService CreateWindowsPortableService(
@@ -298,6 +489,17 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 			PathListSeparator = ';'
 		});
 	}
+
+	private static string WindowsTargetMarker(string targetPath) =>
+		"rem target-base64: " +
+		Convert.ToBase64String(Encoding.UTF8.GetBytes(targetPath));
+
+	private static string QuoteForCmd(string value) =>
+		"\"" +
+		value
+			.Replace("%", "%%", StringComparison.Ordinal)
+			.Replace("\"", "\"\"", StringComparison.Ordinal) +
+		"\"";
 
 	private static string? FindExecutableInPath(string executableName)
 	{

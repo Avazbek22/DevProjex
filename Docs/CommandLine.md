@@ -1,8 +1,13 @@
 # DevProjex Command Line
 
-DevProjex Desktop, Terminal, and CLI are presentation layers over the same
-project-analysis, selection, exclusion, preview, and export services. The portable
-distribution contains one executable: `DevProjex.exe`.
+DevProjex Desktop, Terminal, and CLI follow the same
+inspect -> select -> verify -> export product workflow. Terminal Workspace and
+direct CLI share terminal planning and document services; Desktop keeps its
+established presentation and export orchestration. They are not one
+interchangeable implementation pipeline.
+
+The portable distribution contains one primary executable per RID:
+`DevProjex.exe` on Windows and `DevProjex` on Linux and macOS.
 
 ## Getting Started
 
@@ -12,7 +17,7 @@ After enabling **Help > Launch from terminal**:
 devprojex --help
 devprojex
 devprojex analyze .
-devprojex export context . -o context.md
+devprojex export context . -o ../devprojex-context.md
 devprojex open . --preview
 ```
 
@@ -21,8 +26,9 @@ interactive. With redirected streams it prints plain root help and exits. A
 desktop shortcut or direct launch without an attached terminal opens Avalonia.
 
 The executable name is shown as `devprojex` throughout this document. Portable
-users can invoke the same commands through the generated wrapper or directly with
-the platform-specific executable path.
+users should install or generate the platform launcher and use that command.
+Direct invocation of the physical Windows WinExe path is an advanced diagnostic
+detail and is not the supported shell entry point.
 
 ## Command Tree
 
@@ -67,7 +73,7 @@ status, diagnostics, and Terminal Workspace labels.
 ## Common Selection Options
 
 `analyze`, `export context`, `export project`, and `open` accept the same typed
-selection:
+selection. `open` additionally accepts `auto`:
 
 ```text
 --profile <standard|local|FILE>
@@ -77,6 +83,9 @@ selection:
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>             repeatable
 ```
+
+For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
+default is `auto`. Direct analyze/export commands default to `standard`.
 
 Git filtering is independent from ordinary Exclusions.
 
@@ -122,7 +131,7 @@ devprojex tui [PROJECT]
 Options:
 
 ```text
---profile <standard|local|FILE>
+--profile <auto|standard|local|FILE>
 --screen <auto|alternate|inline>
 --mouse
 --no-mouse
@@ -131,8 +140,8 @@ Options:
 --language <CODE>
 ```
 
-The TUI uses the local project profile when one exists, otherwise the standard
-profile. It provides recent local and Git workspaces, a lazy project tree,
+The TUI default `auto` profile uses the local project profile when one exists,
+otherwise the standard profile. It provides recent local and Git workspaces, a lazy project tree,
 readable and exact Raw Preview, Context Controls, a searchable Action Palette,
 selection, search, roots, extensions, Git filtering, Exclusions, metrics,
 profiles, and context/folder/ZIP export.
@@ -158,8 +167,8 @@ Useful options:
 ```
 
 `PROJECT` defaults to the current directory. `--last` cannot be combined with a
-project argument. `--filter` and `--search` are mutually exclusive. `--view` and
-`--search` imply `--preview`.
+project argument or selection/profile overrides. `--filter` and `--search` are
+mutually exclusive. `--view` and `--search` imply `--preview`.
 
 Without `--new-window`, DevProjex reuses a suitable desktop instance through
 local per-user IPC. The default returns after the desktop accepts the request;
@@ -193,7 +202,6 @@ Specific options:
 --format <text|json>
 -o, --output <PATH|->
 --strict
---dry-run
 --color <auto|always|never>
 --progress <auto|always|never>
 --verbosity <quiet|minimal|normal|detailed|diagnostic>
@@ -202,7 +210,9 @@ Specific options:
 
 Text is a human-readable project summary. JSON is a stable machine document with
 `schemaVersion`. `--strict` still writes the report, then returns exit code `3`
-when policy diagnostics exist.
+when policy diagnostics exist. Analysis is already read-only and therefore has
+no `--dry-run` option. A file destination must be outside the source project and
+must not already exist.
 
 Examples:
 
@@ -245,13 +255,18 @@ When output is stdout, stdout contains only the context document. When output is
 file, stdout contains one absolute result path. Existing files are conflicts
 unless `--force` is used; replacement is atomic.
 
+`--force` is valid only for a file destination, never for stdout. `--dry-run`
+performs planning and destination preflight but does not generate a document,
+create an artifact, or print a result path. Its operational plan is written to
+stderr.
+
 Examples:
 
 ```shell
 devprojex export context .
 devprojex export context . --view tree --format json -o -
-devprojex export context . --view content --format xml -o context.xml
-devprojex export context . --format markdown -o context.md --force
+devprojex export context . --view content --format xml -o ../devprojex-context.xml
+devprojex export context . --format markdown -o ../devprojex-context.md --force
 ```
 
 ## Export Project
@@ -263,12 +278,12 @@ devprojex export project [PROJECT] --as <folder|zip> -o <PATH> [options]
 The destination is exact:
 
 ```shell
-devprojex export project . --as folder -o ./submission
-devprojex export project . --as zip -o ./submission.zip
+devprojex export project . --as folder -o ../devprojex-submission
+devprojex export project . --as zip -o ../devprojex-submission.zip
 ```
 
-The first command creates exactly `./submission`; it does not create an additional
-project-name child or `(2)` suffix. The folder must not exist. A ZIP path must end
+The first command creates exactly `../devprojex-submission`; it does not create an
+additional project-name child or `(2)` suffix. The folder must not exist. A ZIP path must end
 in `.zip` and must not exist unless `--force` is supplied. `--force` is not valid
 for folder exports.
 
@@ -333,7 +348,8 @@ devprojex doctor --format json
 Doctor inspects version/runtime, package type, terminal capabilities, launcher and
 PATH resolution, Git, current directory, profile/data/cache/temp access, desktop
 IPC registrations, and tracked-mode readiness. It reports fixes as hints but does
-not change the system.
+not change the system. Desktop IPC is reported as skipped until a Desktop session
+initializes it; an existing inaccessible or path-conflicted registry is a failure.
 
 ## Completion
 
@@ -346,8 +362,11 @@ devprojex completion fish
 devprojex completion powershell
 ```
 
-Evaluate or install the generated script according to the shell's normal
-completion mechanism.
+The generated script queries the production command tree using the current
+command line and cursor position. Suggestions are scoped to the active command,
+option values, repeatability, conflicts, and path arguments. It does not execute
+Avalonia or require another DevProjex executable. Evaluate or install it using
+the shell's normal completion mechanism.
 
 ## Streams and Exit Codes
 
@@ -370,8 +389,10 @@ platform exception messages. See [CLI-Output-Contract.md](CLI-Output-Contract.md
 
 ## Legacy Syntax
 
-The experimental flat CLI is no longer executed. Recognized legacy action flags
-return exit code `2` and print an exact replacement command to stderr. See
+The experimental flat CLI is no longer executed. A small set of unambiguous
+legacy action/value shapes returns exit code `2` and prints an exact replacement
+argument vector to stderr. Malformed, incomplete, duplicated, or unsupported
+legacy shapes do not receive a speculative replacement. See
 [CLI-Migration.md](CLI-Migration.md).
 
 ## More Detail

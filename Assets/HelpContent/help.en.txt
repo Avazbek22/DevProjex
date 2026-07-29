@@ -80,9 +80,9 @@ Examples:
 * `devprojex` — open the interactive Terminal Workspace.
 * `devprojex open . --preview` — open the current folder in Desktop Preview.
 * `devprojex analyze . --format json` — analyze the current project as JSON.
-* `devprojex export context . --format markdown -o context.md` — save AI-ready context.
-* `devprojex export project . --as folder -o submission` — export the effective project tree to an exact folder.
-* `devprojex export project . --as zip -o submission.zip` — export the effective project tree to a ZIP archive.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — save AI-ready context outside the source project.
+* `devprojex export project . --as folder -o ../devprojex-submission` — export the effective project tree to an exact folder.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — export the effective project tree to a ZIP archive.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analyze tracked Git files with Smart Ignore.
 
 Notes:

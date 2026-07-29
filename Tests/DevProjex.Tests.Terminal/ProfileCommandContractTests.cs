@@ -15,6 +15,8 @@ public sealed class ProfileCommandContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("devprojex-profile", document.RootElement.GetProperty("kind").GetString());
 		var selection = document.RootElement.GetProperty("selection");
 		Assert.Equal("gitignore", selection.GetProperty("gitMode").GetString());
 		Assert.Contains(
@@ -22,6 +24,27 @@ public sealed class ProfileCommandContractTests
 			static value => value.GetString() == "smart-ignore");
 		Assert.Equal(JsonValueKind.Null, selection.GetProperty("roots").ValueKind);
 		Assert.Equal(JsonValueKind.Null, selection.GetProperty("extensions").ValueKind);
+	}
+
+	[Fact]
+	public async Task TextProfileUsesCanonicalPublicSelectionTokens()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"profile", "show", workspace.Path, "--profile", "standard", "--format", "text");
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("gitignore", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("smart-ignore", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("hidden-folders", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("RespectGitIgnore", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("SmartIgnore", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("HiddenFolders", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
 	}
 
 	[Fact]
@@ -197,6 +220,14 @@ public sealed class ProfileCommandContractTests
 				missingEnvironment,
 				"profile", "show", workspace.Path, "--profile", "local", "--format", "json"));
 		Assert.Contains("DPX-CLI-PROFILE-NOT-FOUND", missingEnvironment.StandardError, StringComparison.Ordinal);
+		Assert.Contains(
+			"The selected profile could not be resolved.",
+			missingEnvironment.StandardError,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"The local project profile was not found",
+			missingEnvironment.StandardError,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -213,9 +244,10 @@ public sealed class ProfileCommandContractTests
 			"--profile", "standard",
 			"-o", destination);
 
-		Assert.Equal(CommandLineExitCodes.UsageError, conflict);
+		Assert.Equal(CommandLineExitCodes.DestinationConflict, conflict);
 		Assert.Equal("unchanged", File.ReadAllText(destination));
 		Assert.Contains("DPX-PROFILE-DESTINATION-EXISTS", conflictEnvironment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("--force", conflictEnvironment.StandardError, StringComparison.Ordinal);
 
 		var forceEnvironment = new TestTerminalEnvironment();
 		var success = await RunAsync(
@@ -228,7 +260,39 @@ public sealed class ProfileCommandContractTests
 		Assert.Equal(CommandLineExitCodes.Success, success);
 		using var document = JsonDocument.Parse(File.ReadAllText(destination));
 		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("devprojex-profile", document.RootElement.GetProperty("kind").GetString());
 		Assert.Equal(Path.GetFullPath(destination) + Environment.NewLine, forceEnvironment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task PortableProfileRejectsAConflictingDocumentKind()
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "different-product-document",
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"profile", "validate", profile);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("DPX-CLI-PROFILE-INVALID", environment.StandardError, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardOutput);
 	}
 
 	[Fact]

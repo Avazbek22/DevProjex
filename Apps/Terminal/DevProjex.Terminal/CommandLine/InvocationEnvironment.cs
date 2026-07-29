@@ -26,9 +26,11 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 	public const string TerminalHostVariable = "DEVPROJEX_TERMINAL_HOST";
 	public const string DesktopRequestVariable = "DEVPROJEX_DESKTOP_REQUEST_FILE";
 	internal const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
+	private readonly TextWriter _output;
 
 	public InvocationEnvironment(bool hasAttachedConsole)
 	{
+		_output = new TerminalOutputWriter(Console.Out);
 		HasAttachedConsole = hasAttachedConsole;
 		IsInputInteractive = hasAttachedConsole && !ReadRedirected(static () => Console.IsInputRedirected);
 		IsOutputInteractive = hasAttachedConsole && !ReadRedirected(static () => Console.IsOutputRedirected);
@@ -42,14 +44,14 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 			Environment.GetEnvironmentVariable("TERM"),
 			"dumb",
 			StringComparison.OrdinalIgnoreCase);
-		IsNoColor = Environment.GetEnvironmentVariable("NO_COLOR") is not null;
+		IsNoColor = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR"));
 		SupportsUnicode = DetectUnicodeCapability();
 		(Width, Height) = ReadTerminalSize();
 		Variables = CaptureVariables();
 	}
 
 	public TextReader Input => Console.In;
-	public TextWriter Output => Console.Out;
+	public TextWriter Output => _output;
 	public TextWriter Error => Console.Error;
 	public bool IsInputInteractive { get; }
 	public bool IsOutputInteractive { get; }

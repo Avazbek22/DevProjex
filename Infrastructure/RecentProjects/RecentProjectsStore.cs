@@ -2,7 +2,7 @@ using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.RecentProjects;
 
-public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null)
+public sealed class RecentProjectsStore
 {
 	private const int CurrentSchemaVersion = 3;
 	private const int MaxRecentFolders = 15;
@@ -15,8 +15,12 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		Path.GetTempPath(),
 		FolderName,
 		"RepoCache");
+	private static readonly string LegacyPersistentRepoCacheRootPath = Path.Combine(
+		UserDataPathResolver.GetLegacyLocalDataRoot(),
+		FolderName,
+		"RepoCache");
 	private static readonly string PersistentRepoCacheRootPath = Path.Combine(
-		UserDataPathResolver.GetLocalDataRoot(),
+		UserDataPathResolver.GetCacheRoot(),
 		FolderName,
 		"RepoCache");
 
@@ -29,8 +33,27 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 	};
 
 	private readonly object _sync = new();
-	private readonly Func<string> _appDataPathProvider =
-		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+	private readonly Func<string> _appDataPathProvider;
+	private readonly Func<string>? _legacyAppDataPathProvider;
+
+	public RecentProjectsStore(Func<string>? appDataPathProvider = null)
+	{
+		_appDataPathProvider = appDataPathProvider ?? UserDataPathResolver.GetStateRoot;
+		_legacyAppDataPathProvider = appDataPathProvider is null
+			? UserDataPathResolver.GetConfigurationRoot
+			: null;
+	}
+
+	internal RecentProjectsStore(
+		Func<string> statePathProvider,
+		Func<string> legacyConfigurationPathProvider)
+	{
+		_appDataPathProvider =
+			statePathProvider ?? throw new ArgumentNullException(nameof(statePathProvider));
+		_legacyAppDataPathProvider =
+			legacyConfigurationPathProvider ??
+			throw new ArgumentNullException(nameof(legacyConfigurationPathProvider));
+	}
 
 	public RecentProjectsDb Load()
 	{
@@ -65,7 +88,10 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 				}
 
 				using var _ = heldLock;
-				var database = LoadInternal(fileSet, out var status);
+				var database = LoadInternal(
+					fileSet,
+					out var status,
+					persistLegacyMigration: true);
 				return new RecentProjectsLoadResult(database, status);
 			}
 			catch
@@ -251,8 +277,20 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 
 	private RecentProjectsDb LoadInternal(
 		JsonStoreFileSet fileSet,
-		out RecentProjectsLoadStatus status)
+		out RecentProjectsLoadStatus status,
+		bool persistLegacyMigration = false)
 	{
+		if (!File.Exists(fileSet.PrimaryPath) &&
+		    !File.Exists(fileSet.BackupPath) &&
+		    TryLoadLegacy(fileSet, out var legacyDb))
+		{
+			status = RecentProjectsLoadStatus.Success;
+			var sanitizedLegacyDb = SanitizeState(fileSet, legacyDb);
+			if (persistLegacyMigration)
+				TrySave(fileSet, sanitizedLegacyDb);
+			return sanitizedLegacyDb;
+		}
+
 		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
 			status = RecentProjectsLoadStatus.Success;
@@ -300,6 +338,13 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 
 	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
 	{
+		if (!File.Exists(fileSet.PrimaryPath) &&
+		    !File.Exists(fileSet.BackupPath) &&
+		    TryLoadLegacy(fileSet, out var legacyDb))
+		{
+			return TrySave(fileSet, SanitizeState(fileSet, legacyDb));
+		}
+
 		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
 			var sanitizedPrimaryDb = SanitizeState(fileSet, primaryDb, out var primaryRequiresSanitizationRewrite);
@@ -684,6 +729,43 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
+	private bool TryLoadLegacy(
+		JsonStoreFileSet currentFileSet,
+		out RecentProjectsDb database)
+	{
+		database = CreateDefaultDb();
+		if (_legacyAppDataPathProvider is null)
+			return false;
+
+		JsonStoreFileSet legacyFileSet;
+		try
+		{
+			legacyFileSet = JsonStoreFileSet.Create(
+				_legacyAppDataPathProvider,
+				FolderName,
+				FileName);
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or
+			IOException or
+			InvalidOperationException or
+			NotSupportedException or
+			UnauthorizedAccessException or
+			System.Security.SecurityException)
+		{
+			return false;
+		}
+
+		if (PathComparer.Default.Equals(
+			    legacyFileSet.PrimaryPath,
+			    currentFileSet.PrimaryPath))
+			return false;
+
+		if (TryLoadFromPath(legacyFileSet.PrimaryPath, out database, out _))
+			return true;
+		return TryLoadFromPath(legacyFileSet.BackupPath, out database, out _);
+	}
+
 	private static bool TryNormalizeFolderPath(string path, out string normalizedPath)
 	{
 		normalizedPath = string.Empty;
@@ -709,6 +791,7 @@ public sealed class RecentProjectsStore(Func<string>? appDataPathProvider = null
 		try
 		{
 			return PathUtility.IsPathInside(path, LegacyRepoCacheRootPath) ||
+			       PathUtility.IsPathInside(path, LegacyPersistentRepoCacheRootPath) ||
 			       PathUtility.IsPathInside(path, PersistentRepoCacheRootPath);
 		}
 		catch

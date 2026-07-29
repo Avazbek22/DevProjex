@@ -3,25 +3,25 @@
 ┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
 │v [x] <PROJECT>                 ││+ <PROJECT>                              ▲│
 │  > [x] src                                          ││  + src                                                       ┃│
-│    [x] global.json                                  ││    - File0001.bin                                            ┃│
-│     ┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐     ┃│
+│    [┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐     ┃│
 │     │ Destination: <OUTPUT_ROOT>\project-export           ▲ │     ┃│
-│     │ Files: 101  |  Folders: 2  |  Size: 100 KB                                                            █ │     ·│
+│     │ Files: 101  |  Folders: 2  |  Size: 100 KB                                                            █ │     ┃│
 │     │ Elapsed: <ELAPSED>                                                                                         █ │     ·│
 │     │                                                                                                       █ │     ·│
 │     │ Equivalent command:                                                                                   █ │     ·│
-│     │ devprojex export project                                                                              █ │     ·│
-│     │ <PROJECT_ROOT>vProjex-█ │     ·│
-│     │ Tui-Progress-Project --as folder -o                                                                   ░ │     ·│
-│     │ <OUTPUT_ROOT>\project-export --profile standard     ░ │     ·│
-│     │ --git-mode gitignore --exclude smart-ignore --exclude hidden-folders --exclude hidden-files --exclude ▼ │     ·│
+│     │ argv[0] = "devprojex"                                                                                 ░ │     ·│
+│     │ argv[1] = "export"                                                                                    ░ │     ·│
+│     │ argv[2] = "project"                                                                                   ░ │     ·│
+│     │ argv[3] =                                                                                             ░ │     ·│
+│     │ "<TEMP_ROOT>//D░ │     ·│
+│     │ evProjex-Tui-Progress-Project"                                                                        ░ │     ·│
+│     │ argv[4] = "--as"                                                                                      ░ │     ·│
+│     │ argv[5] = "folder"                                                                                    ▼ │     ·│
 │     │                                                                                                         │     ·│
 │     │                                                                                                         │     ·│
 │     │                                              ⟦► Close ◄⟧▖                                               │     ·│
 │     │                                              ▝▀▀▀▀▀▀▀▀▀▀▘                                               │     ·│
 │     └─────────────────────────────────────────────────────────────────────────────────────────────────────────┘     ·│
-│                                                     ││    - File0018.bin                                            ·│
-│                                                     ││    - File0019.bin                                            ·│
 │                                                     ││    - File0020.bin                                            ▼│
 │                                                     ││ Files 101  |  Lines 1-22/103                                  │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘

@@ -10,6 +10,7 @@ namespace DevProjex.Tests.Terminal;
 
 internal sealed class TerminalPtyHarness : IAsyncDisposable
 {
+	public const string ShellCompletionMarker = "__DEVPROJEX_SHELL_RESTORED__";
 	private const string WindowSizeQuery = "\u001b[18t";
 	private readonly Hex1bTerminalChildProcess _process;
 	private readonly XTermTerminal _terminal;
@@ -78,12 +79,17 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		int rows = 30,
 		IReadOnlyDictionary<string, string>? environment = null,
 		CancellationToken cancellationToken = default,
-		Action<string>? initializeDataRoot = null)
+		Action<string>? initializeDataRoot = null,
+		bool writeShellCompletionMarker = false,
+		bool useProgressCheckpointHost = false)
 	{
-		var binary = PublishedApplicationLocator.FindExecutable();
+		var binary = useProgressCheckpointHost
+			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
+			: PublishedApplicationLocator.FindExecutable();
 		var launchArguments = arguments?.ToArray() ?? [];
 		if (OperatingSystem.IsWindows() &&
-		    Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY") is null &&
+		    (useProgressCheckpointHost ||
+		     Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY") is null) &&
 		    File.Exists(Path.ChangeExtension(binary, ".dll")))
 		{
 			launchArguments =
@@ -103,6 +109,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			["DEVPROJEX_TERMINAL_HOST"] = "1",
 			["TERM"] = "xterm-256color",
 			["CI"] = string.Empty,
+			["TMUX"] = string.Empty,
+			["ZELLIJ"] = string.Empty,
 			["DEVPROJEX_INTERNAL_DATA_ROOT"] = Path.Combine(dataRoot, "devprojex"),
 			["XDG_CONFIG_HOME"] = Path.Combine(dataRoot, "config"),
 			["XDG_DATA_HOME"] = Path.Combine(dataRoot, "data"),
@@ -119,7 +127,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		var (host, commandLine, startupInput) = CreateShellCommand(
 			binary,
 			launchArguments,
-			variables);
+			variables,
+			writeShellCompletionMarker);
 
 		var process = new Hex1bTerminalChildProcess(
 			host,
@@ -147,7 +156,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	private static (string Host, string[] CommandLine, string? StartupInput) CreateShellCommand(
 		string binary,
 		IReadOnlyList<string> arguments,
-		IReadOnlyDictionary<string, string> environment)
+		IReadOnlyDictionary<string, string> environment,
+		bool writeShellCompletionMarker)
 	{
 		if (OperatingSystem.IsWindows())
 		{
@@ -163,12 +173,16 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			var clearInheritedNoColor = environment.ContainsKey("NO_COLOR")
 				? string.Empty
 				: "set NO_COLOR=&& ";
+			var completion = writeShellCompletionMarker
+				? $" & set \"dpx_exit=!errorlevel!\" & echo({ShellCompletionMarker} & exit /b !dpx_exit!"
+				: " & exit /b !errorlevel!";
 			return (
 				host,
 				["/d", "/q", "/v:on"],
 				clearInheritedNoColor +
 				$"set {InvocationEnvironment.TerminalHostVariable}=1&& " +
-				$"{launch} & exit /b !errorlevel!");
+				launch +
+				completion);
 		}
 
 		// Hex1b's Unix forkpty adapter inherits the test host environment. Use env
@@ -179,11 +193,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		var unixNoColorArguments = environment.ContainsKey("NO_COLOR")
 			? string.Empty
 			: "-u NO_COLOR ";
-		var shellCommand = "exec env " + unixNoColorArguments + string.Join(
+		var invocation = "env " + unixNoColorArguments + string.Join(
 			' ',
 			environmentArguments
 				.Append(QuoteForPosixShell(binary))
 				.Concat(arguments.Select(QuoteForPosixShell)));
+		var shellCommand = writeShellCompletionMarker
+			? $"{invocation}; dpx_exit=$?; printf '%s\\n' " +
+			  $"{QuoteForPosixShell(ShellCompletionMarker)}; exit \"$dpx_exit\""
+			: "exec " + invocation;
 		return ("/bin/sh", ["-c", shellCommand], null);
 	}
 
@@ -401,12 +419,20 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		timeoutCts.CancelAfter(timeout ?? TimeSpan.FromSeconds(10));
 		try
 		{
-			return await _exit.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+			var exitCode = await _exit.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+
+			// Process exit and PTY EOF are separate events. Await the reader so callers
+			// never assert against a truncated restoration sequence or a missing shell marker.
+			await _readerTask.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+			return exitCode;
 		}
 		catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 		{
+			var pendingOperation = HasExited
+				? "the PTY output reader to reach EOF"
+				: "the terminal process to exit";
 			throw new TimeoutException(
-				$"Timed out waiting for the terminal process to exit.\n" +
+				$"Timed out waiting for {pendingOperation}.\n" +
 				$"Screen:\n{CaptureScreen()}\nRaw output:\n{CaptureRawOutput()}");
 		}
 	}
@@ -588,6 +614,9 @@ internal sealed record TerminalCellStyle(
 
 internal static class PublishedApplicationLocator
 {
+	private const string ProgressCheckpointHostName =
+		"DevProjex.Tests.Terminal.ProgressHost";
+
 	public static string FindExecutable()
 	{
 		var explicitPath = Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY");
@@ -616,6 +645,32 @@ internal static class PublishedApplicationLocator
 			return path;
 		throw new FileNotFoundException(
 			"Build the DevProjex Avalonia host before running PTY tests, or set DEVPROJEX_TUI_TEST_BINARY.",
+			path);
+	}
+
+	public static string FindProgressCheckpointHostExecutable()
+	{
+		var repository = FindRepositoryRoot();
+		var configuration = AppContext.BaseDirectory.Contains(
+			$"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}",
+			StringComparison.OrdinalIgnoreCase)
+			? "Release"
+			: "Debug";
+		var executableName = OperatingSystem.IsWindows()
+			? $"{ProgressCheckpointHostName}.exe"
+			: ProgressCheckpointHostName;
+		var path = Path.Combine(
+			repository,
+			"Tests",
+			"DevProjex.Tests.Terminal.ProgressHost",
+			"bin",
+			configuration,
+			"net10.0",
+			executableName);
+		if (File.Exists(path))
+			return path;
+		throw new FileNotFoundException(
+			"Build the terminal progress checkpoint test host before running progress PTY tests.",
 			path);
 	}
 

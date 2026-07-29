@@ -72,7 +72,7 @@ public static class AvaloniaCompositionRoot
             treeExportService,
             fileContentAnalyzer);
         var terminalCommandSetupService = new TerminalCommandSetupService();
-        var localAppDataProvider = appDataPathProvider ?? UserDataPathResolver.GetLocalDataRoot;
+        var localAppDataProvider = appDataPathProvider ?? UserDataPathResolver.GetStateRoot;
         var sessionMetricsRecorder = sessionMetrics.Enabled
             ? new SessionMetricsRecorder(sessionMetrics, localAppDataProvider)
             : SessionMetricsRecorder.Disabled;

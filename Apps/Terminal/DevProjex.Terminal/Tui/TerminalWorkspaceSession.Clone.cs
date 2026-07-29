@@ -27,12 +27,13 @@ internal sealed partial class TerminalWorkspaceSession
 		};
 		_operationProgress = new TerminalOperationProgressView(
 			_application,
-			$"{L("Terminal.Tui.CloningRepository")} · {repositoryName}",
+			$"{L("Terminal.Tui.CloningRepository")}{PanelSeparator}{repositoryName}",
 			L(_clonePhaseKey),
 			L("Terminal.Tui.Progress.CancelHint"),
 			FormatElapsed,
 			safeRepositoryUrl,
-			UseTextProgress);
+			UseTextProgress,
+			plain: _options.Plain);
 		_operationProgress.SetIndeterminate(
 			L(_clonePhaseKey),
 			repositoryName,

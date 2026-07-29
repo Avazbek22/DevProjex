@@ -31,6 +31,6 @@ public sealed class DesktopControlPaths(Func<string>? dataRootProvider = null)
 		    Path.IsPathFullyQualified(xdgRuntime))
 			return xdgRuntime;
 
-		return UserDataPathResolver.GetLocalDataRoot();
+		return UserDataPathResolver.GetStateRoot();
 	}
 }

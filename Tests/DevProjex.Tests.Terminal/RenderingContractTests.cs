@@ -1,4 +1,5 @@
 using DevProjex.Terminal.Rendering;
+using DevProjex.Infrastructure.ResourceStore;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -79,6 +80,65 @@ public sealed class RenderingContractTests
 			forStandardError: true);
 
 		Assert.Equal(expectedProgress, capabilities.UseInteractiveProgress);
+	}
+
+	[Theory]
+	[InlineData(TerminalVerbosity.Quiet, false)]
+	[InlineData(TerminalVerbosity.Minimal, false)]
+	[InlineData(TerminalVerbosity.Normal, true)]
+	[InlineData(TerminalVerbosity.Detailed, true)]
+	[InlineData(TerminalVerbosity.Diagnostic, true)]
+	public void VerbosityControlsOptionalStatusAndProgress(
+		TerminalVerbosity verbosity,
+		bool expectedProgress)
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			IsErrorInteractive = true
+		};
+
+		var capabilities = TerminalCapabilities.Resolve(
+			environment,
+			new TerminalOutputOptions(
+				Progress: TerminalProgressMode.Always,
+				Verbosity: verbosity),
+			forStandardError: true);
+
+		Assert.Equal(expectedProgress, capabilities.UseInteractiveProgress);
+	}
+
+	[Theory]
+	[InlineData(TerminalVerbosity.Quiet, false, false, true)]
+	[InlineData(TerminalVerbosity.Minimal, false, true, true)]
+	[InlineData(TerminalVerbosity.Normal, true, true, true)]
+	public void VerbosityFiltersDiagnosticsBySeverity(
+		TerminalVerbosity verbosity,
+		bool expectsInformation,
+		bool expectsWarning,
+		bool expectsError)
+	{
+		var environment = new TestTerminalEnvironment();
+		var renderer = new ContextDiagnosticRenderer(
+			environment,
+			new TerminalOutputOptions(Verbosity: verbosity),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En));
+
+		renderer.Write(
+		[
+			new ContextDiagnostic("DPX-TEST-INFO", ContextDiagnosticSeverity.Information, "ignored"),
+			new ContextDiagnostic("DPX-TEST-WARNING", ContextDiagnosticSeverity.Warning, "ignored"),
+			new ContextDiagnostic("DPX-TEST-ERROR", ContextDiagnosticSeverity.Error, "ignored")
+		]);
+
+		Assert.Equal(
+			expectsInformation,
+			environment.StandardError.Contains("DPX-TEST-INFO", StringComparison.Ordinal));
+		Assert.Equal(
+			expectsWarning,
+			environment.StandardError.Contains("DPX-TEST-WARNING", StringComparison.Ordinal));
+		Assert.Equal(
+			expectsError,
+			environment.StandardError.Contains("DPX-TEST-ERROR", StringComparison.Ordinal));
 	}
 
 	[Fact]
@@ -183,6 +243,43 @@ public sealed class RenderingContractTests
 		Assert.Empty(environment.StandardOutput);
 	}
 
+	[Theory]
+	[InlineData(false, false, true)]
+	[InlineData(false, true, true)]
+	[InlineData(true, false, true)]
+	public async Task PlainNonInteractiveOrDumbExplicitStatusIsStatic(
+		bool plain,
+		bool termDumb,
+		bool expectStatus)
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			IsErrorInteractive = false,
+			IsTermDumb = termDumb
+		};
+		var renderer = new StatusRenderer(
+			environment,
+			new TerminalOutputOptions(
+				Color: TerminalColorMode.Always,
+				Progress: TerminalProgressMode.Always,
+				Plain: plain));
+
+		var result = await renderer.RunAsync(
+			"Analyzing project",
+			() => Task.FromResult(42));
+
+		Assert.Equal(42, result);
+		Assert.Equal(
+			expectStatus ? $"Analyzing project{Environment.NewLine}" : string.Empty,
+			environment.StandardError);
+		Assert.DoesNotContain(
+			"\r",
+			environment.StandardError.Replace("\r\n", string.Empty, StringComparison.Ordinal),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.Empty(environment.StandardOutput);
+	}
+
 	[Fact]
 	public async Task InteractiveProjectExportProgressShowsMeasuredStateOnlyOnStandardError()
 	{
@@ -246,5 +343,45 @@ public sealed class RenderingContractTests
 		Assert.Contains("Exporting project 2/4 (2 KB)", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("50%", environment.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain("\u001b", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RedirectedExplicitProjectProgressIsStaticEvenWhenColorIsAlways()
+	{
+		using var appData = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment
+		{
+			IsErrorInteractive = false,
+			Width = 100
+		};
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var renderer = new ProgressRenderer(
+			environment,
+			new TerminalOutputOptions(
+				Color: TerminalColorMode.Always,
+				Progress: TerminalProgressMode.Always),
+			services.Localization);
+
+		await renderer.RunProjectExportAsync(progress =>
+		{
+			Assert.NotNull(progress);
+			progress.Report(new ProjectCopyExportProgress(1, 2, 1_024, 50));
+			progress.Report(new ProjectCopyExportProgress(2, 2, 2_048, 100));
+			return Task.FromResult(true);
+		});
+
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("Exporting project 2/2 (2 KB)", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"\r",
+			environment.StandardError.Replace("\r\n", string.Empty, StringComparison.Ordinal),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.InRange(
+			environment.StandardError.Split(
+				Environment.NewLine,
+				StringSplitOptions.RemoveEmptyEntries).Length,
+			1,
+			2);
 	}
 }

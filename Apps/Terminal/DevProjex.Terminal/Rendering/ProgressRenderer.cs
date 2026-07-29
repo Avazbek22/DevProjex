@@ -13,18 +13,22 @@ public sealed class ProgressRenderer(
 	public async Task<T> RunProjectExportAsync<T>(
 		Func<IProgress<ProjectCopyExportProgress>?, Task<T>> operation)
 	{
+		if (ShouldRenderStaticProgress())
+			return await RunPlainProjectExportAsync(operation).ConfigureAwait(false);
+
 		var capabilities = TerminalCapabilities.Resolve(environment, options, forStandardError: true);
 		if (!capabilities.UseInteractiveProgress)
 			return await operation(null).ConfigureAwait(false);
 		if (!capabilities.UseAnsi)
 			return await RunPlainProjectExportAsync(operation).ConfigureAwait(false);
 
-		var channel = Channel.CreateUnbounded<ProjectCopyExportProgress>(
-			new UnboundedChannelOptions
+		var channel = Channel.CreateBounded<ProjectCopyExportProgress>(
+			new BoundedChannelOptions(32)
 			{
 				SingleReader = true,
 				SingleWriter = false,
-				AllowSynchronousContinuations = false
+				AllowSynchronousContinuations = false,
+				FullMode = BoundedChannelFullMode.DropOldest
 			});
 		var progress = new CallbackProgress<ProjectCopyExportProgress>(
 			value => channel.Writer.TryWrite(value));
@@ -62,6 +66,15 @@ public sealed class ProgressRenderer(
 		channel.Writer.TryComplete();
 		return await operationTask.ConfigureAwait(false);
 	}
+
+	private bool ShouldRenderStaticProgress() =>
+		options.Progress == TerminalProgressMode.Always &&
+		options.Verbosity is not (
+			TerminalVerbosity.Quiet or
+			TerminalVerbosity.Minimal) &&
+		(options.Plain ||
+		 environment.IsTermDumb ||
+		 !environment.IsErrorInteractive);
 
 	private async Task<T> RunPlainProjectExportAsync<T>(
 		Func<IProgress<ProjectCopyExportProgress>?, Task<T>> operation)

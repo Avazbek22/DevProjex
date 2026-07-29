@@ -19,6 +19,7 @@ public sealed class TerminalVisualSnapshotTests
 		Verify("welcome-en-120x30", terminal, workspace.Path);
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "> Browse folder");
 		Verify("welcome-selected-en-120x30", terminal, workspace.Path);
 
@@ -33,6 +34,7 @@ public sealed class TerminalVisualSnapshotTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "> Recent workspaces");
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "(none available)");
@@ -315,11 +317,11 @@ public sealed class TerminalVisualSnapshotTests
 
 		await WaitForStableScreenAsync(terminal, "Choose a workspace action");
 		Verify("welcome-monochrome-en-120x30", terminal, workspace.Path);
-		var selectedRow = terminal.FindVisibleRow("> Recent workspaces");
+		var selectedRow = terminal.FindVisibleRow("> Open current directory");
 		Assert.True(selectedRow >= 0);
 		var selectedColumn = terminal.CaptureScreen()
 			.Split('\n')[selectedRow]
-			.IndexOf("Recent workspaces", StringComparison.Ordinal);
+			.IndexOf("Open current directory", StringComparison.Ordinal);
 		Assert.True(terminal.CaptureCellStyle(selectedRow, selectedColumn).Inverse);
 		await ExitAsync(terminal);
 	}

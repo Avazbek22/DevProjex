@@ -53,6 +53,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const string WindowsLauncherMarker = "rem DevProjex terminal command wrapper";
 	private const string UnixTargetPrefix = "# target: ";
 	private const string WindowsTargetPrefix = "rem target: ";
+	private const string WindowsEncodedTargetPrefix = "rem target-base64: ";
 	private const string WindowsPathHint =
 		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
 	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
@@ -353,19 +354,20 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		var escapedTargetPath = EscapeWindowsBatchValue(targetPath);
 		var escapedManagedAssemblyPath = EscapeWindowsBatchValue(BuildWindowsManagedAssemblyPath(targetPath));
+		var encodedTargetPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(targetPath));
 		return string.Join(
 			"\r\n",
 			"@echo off",
 			"setlocal DisableDelayedExpansion",
 			WindowsLauncherMarker,
-			WindowsTargetPrefix + targetPath,
+			WindowsEncodedTargetPrefix + encodedTargetPath,
 			"set \"DEVPROJEX_EXE=" + escapedTargetPath + "\"",
 			"set \"DEVPROJEX_DLL=" + escapedManagedAssemblyPath + "\"",
 			"set \"DEVPROJEX_TERMINAL_HOST=1\"",
-			"if exist \"%DEVPROJEX_DLL%\" (",
-			"  dotnet \"%DEVPROJEX_DLL%\" %*",
-			"  exit /b %ERRORLEVEL%",
-			")",
+			"if not exist \"%DEVPROJEX_DLL%\" goto :run-native",
+			"dotnet \"%DEVPROJEX_DLL%\" %*",
+			"exit /b %ERRORLEVEL%",
+			":run-native",
 			"\"%DEVPROJEX_EXE%\" %*",
 			"exit /b %ERRORLEVEL%",
 			string.Empty);
@@ -829,12 +831,37 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			if (string.Equals(marker, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase))
 				targetPrefix = WindowsTargetPrefix;
 
-			if (!IsManagedWrapperMarker(marker) ||
-			    target is null ||
-			    !target.StartsWith(targetPrefix, StringComparison.OrdinalIgnoreCase))
+			if (!IsManagedWrapperMarker(marker) || target is null)
 				return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
 
-			return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Managed, target[targetPrefix.Length..]);
+			if (string.Equals(marker, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase) &&
+			    target.StartsWith(WindowsEncodedTargetPrefix, StringComparison.OrdinalIgnoreCase))
+			{
+				try
+				{
+					var encoded = target[WindowsEncodedTargetPrefix.Length..];
+					var decoded = new UTF8Encoding(
+						encoderShouldEmitUTF8Identifier: false,
+						throwOnInvalidBytes: true).GetString(Convert.FromBase64String(encoded));
+					return string.IsNullOrWhiteSpace(decoded)
+						? new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null)
+						: new ManagedWrapperReadResult(ManagedWrapperReadStatus.Managed, decoded);
+				}
+				catch (FormatException)
+				{
+					return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
+				}
+				catch (DecoderFallbackException)
+				{
+					return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
+				}
+			}
+
+			if (!target.StartsWith(targetPrefix, StringComparison.OrdinalIgnoreCase))
+				return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
+			return new ManagedWrapperReadResult(
+				ManagedWrapperReadStatus.Managed,
+				target[targetPrefix.Length..]);
 		}
 		catch (UnauthorizedAccessException)
 		{

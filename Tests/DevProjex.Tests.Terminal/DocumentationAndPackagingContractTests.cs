@@ -86,6 +86,61 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void ReleaseDocumentationStatesCurrentSurfaceAndArtifactLimits()
+	{
+		var rootPath = FindRepositoryRoot();
+		var v1Contract = File.ReadAllText(
+			Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var commandLine = File.ReadAllText(
+			Path.Combine(rootPath, "Docs", "CommandLine.md"));
+		var contributing = File.ReadAllText(
+			Path.Combine(rootPath, "CONTRIBUTING.md"));
+		var readme = File.ReadAllText(
+			Path.Combine(rootPath, "README.md"));
+		var macPackaging = File.ReadAllText(
+			Path.Combine(rootPath, "Packaging", "MacOS", "README.md"));
+		var normalizedCommandLine = commandLine.ReplaceLineEndings(" ");
+		var normalizedContributing = contributing.ReplaceLineEndings(" ");
+
+		Assert.DoesNotContain(
+			"All three surfaces consume the same",
+			v1Contract,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"interchangeable implementation pipeline",
+			normalizedCommandLine,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"interchangeable implementation pipeline",
+			normalizedContributing,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"`DevProjex.exe` on Windows and `DevProjex` on Linux and macOS",
+			commandLine,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"outside that source-read-only guarantee",
+			readme,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"DevProjex never modifies your files",
+			readme,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"<string>14.0</string>",
+			macPackaging,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"unprepared `.app`",
+			macPackaging,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"do not build, sign, notarize, or execute this bundle",
+			macPackaging,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void UserDocumentationDoesNotAdvertiseTheRemovedFlatCli()
 	{
 		var rootPath = FindRepositoryRoot();
@@ -137,9 +192,9 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("`devprojex`", content, StringComparison.Ordinal);
 		Assert.Contains("`devprojex open . --preview`", content, StringComparison.Ordinal);
 		Assert.Contains("`devprojex analyze . --format json`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex export context . --format markdown -o context.md`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex export project . --as folder -o submission`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex export project . --as zip -o submission.zip`", content, StringComparison.Ordinal);
+		Assert.Contains("`devprojex export context . --format markdown -o ../devprojex-context.md`", content, StringComparison.Ordinal);
+		Assert.Contains("`devprojex export project . --as folder -o ../devprojex-submission`", content, StringComparison.Ordinal);
+		Assert.Contains("`devprojex export project . --as zip -o ../devprojex-submission.zip`", content, StringComparison.Ordinal);
 		Assert.Contains("`--git-mode`", content, StringComparison.Ordinal);
 		Assert.Contains("`--exclude`", content, StringComparison.Ordinal);
 	}
@@ -189,19 +244,115 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_TERMINAL_HOST=1", workflow, StringComparison.Ordinal);
 		Assert.Contains("Validate Single-File Output", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"Get-ChildItem -LiteralPath $publishDirectory -File -Recurse",
+			workflow,
+			StringComparison.Ordinal);
 		Assert.Contains("$files.Count -ne 1", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"[System.IO.Path]::GetRelativePath($publishDirectory, $_.FullName)",
+			workflow,
+			StringComparison.Ordinal);
 		Assert.Contains("${{ matrix.binary }}", workflow, StringComparison.Ordinal);
 		Assert.Contains("Desktop IPC and Redirected EOF Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("retained redirected CLI handles", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"[IO.Path]::GetFullPath([string]$_.projectPath)",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"$statusResponse = $status.Stdout | ConvertFrom-Json",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains("$statusResponse.ok", workflow, StringComparison.Ordinal);
+		Assert.Contains("$state = $statusResponse.state", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"$state = $status.Stdout | ConvertFrom-Json",
+			workflow,
+			StringComparison.Ordinal);
 		Assert.Contains("env -u CI \"$2\"", workflow, StringComparison.Ordinal);
 		Assert.Contains("Portable Launcher ConPTY TUI Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Published Native PTY TUI Smoke", workflow, StringComparison.Ordinal);
+		Assert.Contains("Published Single-File Extraction Contract", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"PublishedSingleFileExtractionProcessTests",
+			workflow,
+			StringComparison.Ordinal);
+		var publishStepIndex = workflow.IndexOf(
+			"\n      - name: Publish\n",
+			StringComparison.Ordinal);
+		var completionStepName =
+			"\n      - name: Published Completion Native Shell Integration\n";
+		var completionStepIndex = workflow.IndexOf(
+			completionStepName,
+			StringComparison.Ordinal);
+		Assert.True(
+			publishStepIndex >= 0,
+			"The release workflow must publish the application before validating it.");
+		Assert.True(
+			completionStepIndex > publishStepIndex,
+			"The native-shell completion gate must run after the application is published.");
+		var completionStepEndIndex = workflow.IndexOf(
+			"\n      - name:",
+			completionStepIndex + completionStepName.Length,
+			StringComparison.Ordinal);
+		var completionStep = workflow[
+			completionStepIndex..
+			(completionStepEndIndex >= 0 ? completionStepEndIndex : workflow.Length)];
+		Assert.Contains(
+			"artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}",
+			completionStep,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"FullyQualifiedName~GeneratedCompletionNativeShellIntegrationTests",
+			completionStep,
+			StringComparison.Ordinal);
+		Assert.Contains("Published Broken Pipe Smoke", workflow, StringComparison.Ordinal);
+		Assert.Contains("Startup Smoke (macOS)", workflow, StringComparison.Ordinal);
+		Assert.Contains("mixed-case analysis JSON", workflow, StringComparison.Ordinal);
+		Assert.Contains("NO_COLOR analysis", workflow, StringComparison.Ordinal);
+		Assert.Contains("context dry-run", workflow, StringComparison.Ordinal);
+		Assert.Contains("existing destination conflict", workflow, StringComparison.Ordinal);
+		Assert.Contains("real CLI usage-error contract", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"InstallOrRepair_ReleaseGateEnvironment_InstallsOfficialWindowsLauncherThroughPublicApi",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"DEVPROJEX_RELEASE_WINDOWS_LAUNCHER_TARGET",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"DEVPROJEX_RELEASE_WINDOWS_LAUNCHER_LOCAL_APP_DATA",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"Join-Path $env:RUNNER_TEMP \"devprojex.cmd\"",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("rem target-base64:", workflow, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"Set-Content -LiteralPath $launcherPath",
+			workflow,
+			StringComparison.Ordinal);
 		Assert.Contains(
 			"TerminalRecentRepositoriesPtyTests.PopulatedCachedRepositoryOpensOfflineWithCleanIdentity",
 			workflow,
 			StringComparison.Ordinal);
 		Assert.Contains(
+			"TerminalClonePtyTests.LocalRepositoryCloneThroughApplicationBinaryOpensWorkspaceAndPreservesSource",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"TerminalClonePtyTests.CloneProgressCancellationCleansCacheAndRetryOpensWorkspace",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
 			"TerminalLargePreviewPtyTests.FileBackedPreviewReachesFirstMiddleAndFinalSectionsWithDistinctScrollbars",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"TerminalPtyLifecycleTests.SupportedTerminalSizeMatrixRemainsKeyboardUsableAndWithinViewport",
 			workflow,
 			StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_TUI_TEST_BINARY", workflow, StringComparison.Ordinal);
@@ -212,7 +363,7 @@ public sealed class DocumentationAndPackagingContractTests
 
 		var desktopEntry = File.ReadAllText(
 			Path.Combine(rootPath, "Packaging", "Linux", "devprojex.desktop"));
-		Assert.Contains("Exec=devprojex open %F", desktopEntry, StringComparison.Ordinal);
+		Assert.Contains("Exec=devprojex open %f", desktopEntry, StringComparison.Ordinal);
 		Assert.DoesNotContain("Exec=devprojex %F", desktopEntry, StringComparison.Ordinal);
 
 		var macPackaging = File.ReadAllText(
@@ -277,6 +428,33 @@ public sealed class DocumentationAndPackagingContractTests
 			Assert.DoesNotContain(
 				productProject.Descendants("PackageReference"),
 				element => element.Attribute("Include")?.Value is "Hex1b" or "Porta.Pty");
+		}
+	}
+
+	[Fact]
+	public void ProductSourcesContainNoEnvironmentDrivenProgressCheckpointBackdoor()
+	{
+		var rootPath = FindRepositoryRoot();
+		var productRoots = new[]
+		{
+			Path.Combine(rootPath, "Kernel"),
+			Path.Combine(rootPath, "Application"),
+			Path.Combine(rootPath, "Infrastructure"),
+			Path.Combine(rootPath, "Apps")
+		};
+
+		foreach (var file in productRoots.SelectMany(path =>
+			         Directory.EnumerateFiles(path, "*.cs", SearchOption.AllDirectories)))
+		{
+			var source = File.ReadAllText(file);
+			Assert.DoesNotContain(
+				"DEVPROJEX_INTERNAL_TUI_PROGRESS_",
+				source,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				"TerminalProgressTestCheckpoint",
+				source,
+				StringComparison.Ordinal);
 		}
 	}
 

@@ -27,6 +27,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "git.exe" : "git";
     private const int CommandOutputBufferChars = 64 * 1024;
     private const int CommandErrorBufferChars = 64 * 1024;
+    private static readonly TimeSpan ProcessTerminationWaitTimeout = TimeSpan.FromSeconds(5);
+    private const int ProcessTerminationFallbackWaitMilliseconds = 1_000;
 
     /// <summary>
     /// Checks if Git CLI is available on the system by running "git --version".
@@ -719,31 +721,94 @@ public sealed class GitRepositoryService : IGitRepositoryService
             }
         };
 
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        await WaitForExitOrTerminateAsync(process, cancellationToken);
+
+        return new GitCommandResult(
+            process.ExitCode,
+            outputBuffer.ToString(),
+            errorBuffer.ToString());
+    }
+
+    internal static async Task WaitForExitOrTerminateAsync(
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
         try
         {
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            await process.WaitForExitAsync(cancellationToken);
-
-            return new GitCommandResult(
-                process.ExitCode,
-                outputBuffer.ToString(),
-                errorBuffer.ToString());
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Kill the process tree on cancellation
-            try
-            {
-                process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-                // Ignore kill errors - process might have already exited
-            }
+            TryKillProcess(process, entireProcessTree: true);
+            await WaitForKilledProcessExitAsync(process).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private static async Task WaitForKilledProcessExitAsync(Process process)
+    {
+        using var terminationTimeout = new CancellationTokenSource(ProcessTerminationWaitTimeout);
+        try
+        {
+            // The caller token is already canceled. A separate bounded token lets the OS
+            // finish terminating and reaping the process before redirected handles are disposed.
+            await process.WaitForExitAsync(terminationTimeout.Token).ConfigureAwait(false);
+            return;
+        }
+        catch (OperationCanceledException) when (terminationTimeout.IsCancellationRequested)
+        {
+            // Fall through to one final bounded direct-process termination attempt.
+        }
+        catch (InvalidOperationException)
+        {
+            // The process exited or was detached while cancellation cleanup was starting.
+            return;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Fall through: a final direct kill/wait can still observe a transient handle race.
+        }
+
+        TryKillProcess(process, entireProcessTree: false);
+        TryWaitForExit(process, ProcessTerminationFallbackWaitMilliseconds);
+    }
+
+    private static void TryKillProcess(Process process, bool entireProcessTree)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree);
+        }
+        catch (InvalidOperationException)
+        {
+            // Exit can race the HasExited check.
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Cancellation must remain the observable outcome if the OS rejects a redundant kill.
+        }
+    }
+
+    private static void TryWaitForExit(Process process, int timeoutMilliseconds)
+    {
+        try
+        {
+            process.WaitForExit(timeoutMilliseconds);
+        }
+        catch (InvalidOperationException)
+        {
+            // The process already exited or is no longer associated with this instance.
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // The bounded async wait already expired; preserve the original cancellation.
         }
     }
 

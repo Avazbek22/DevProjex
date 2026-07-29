@@ -270,6 +270,15 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains("\"/p:IncludeNativeLibrariesForSelfExtract=true\"", releaseScript, StringComparison.Ordinal);
         Assert.Contains("\"/p:PublishReadyToRun=true\"", releaseScript, StringComparison.Ordinal);
         Assert.Contains("\"/p:PublishTrimmed=false\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains(
+            "Get-ChildItem -LiteralPath $ridOutDir -File -Recurse",
+            releaseScript,
+            StringComparison.Ordinal);
+        Assert.Contains("$publishedFiles.Count -ne 1", releaseScript, StringComparison.Ordinal);
+        Assert.Contains(
+            "[System.IO.Path]::GetRelativePath($ridOutDir, $_.FullName)",
+            releaseScript,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("\"/p:PublishTrimmed=true\"", releaseScript, StringComparison.Ordinal);
     }
 
@@ -302,7 +311,7 @@ public sealed class AppInstancePackagingContractTests
 
         Assert.Contains($"/usr/local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"~/.local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
-        Assert.Contains($"Exec={CommandLineExecutableAliases.UnixCommand} open %F", desktopEntry, StringComparison.Ordinal);
+        Assert.Contains($"Exec={CommandLineExecutableAliases.UnixCommand} open %f", desktopEntry, StringComparison.Ordinal);
         Assert.Contains($"Icon={CommandLineExecutableAliases.UnixCommand}", desktopEntry, StringComparison.Ordinal);
         Assert.Contains("always open DevProjex Desktop", readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsPortableExecutable, readme, StringComparison.Ordinal);
@@ -320,6 +329,8 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains($"~/.local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"/Applications/{CommandLineExecutableAliases.DisplayName}.app/Contents/MacOS/{CommandLineExecutableAliases.DisplayName}", readme, StringComparison.Ordinal);
         Assert.Contains("DEVPROJEX_TERMINAL_HOST=1", readme, StringComparison.Ordinal);
+        Assert.Contains("<string>14.0</string>", readme, StringComparison.Ordinal);
+        Assert.Contains("unprepared `.app`", readme, StringComparison.Ordinal);
         Assert.Contains("does not modify shell profiles or global environment variables", readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, readme, StringComparison.Ordinal);
     }

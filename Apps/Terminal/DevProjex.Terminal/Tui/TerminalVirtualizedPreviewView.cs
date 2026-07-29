@@ -17,13 +17,18 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private readonly Rune _verticalScrollThumb;
 	private readonly Rune _scrollTrack;
 
-	public TerminalVirtualizedPreviewView(bool useUnicode = true)
+	public TerminalVirtualizedPreviewView(
+		bool useUnicode = true,
+		bool showScrollBars = true)
 	{
 		_horizontalScrollThumb = new Rune(useUnicode ? '━' : '-');
 		_verticalScrollThumb = new Rune(useUnicode ? '┃' : '|');
 		_scrollTrack = new Rune(useUnicode ? '·' : '.');
 		CanFocus = true;
 		SchemeName = TerminalWorkspaceTheme.Base;
+		if (!showScrollBars)
+			return;
+
 		ViewportSettings |= ViewportSettingsFlags.HasScrollBars;
 		VerticalScrollBar.SchemeName = TerminalWorkspaceTheme.Secondary;
 		HorizontalScrollBar.SchemeName = TerminalWorkspaceTheme.Secondary;

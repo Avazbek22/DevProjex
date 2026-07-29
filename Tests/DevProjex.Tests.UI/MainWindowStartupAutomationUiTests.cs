@@ -1,12 +1,69 @@
 using System.Reflection;
 using System.Text.Json;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowStartupAutomationUiTests
 {
+	[AvaloniaFact]
+	public async Task DesktopOpenLanguage_IsSessionScopedWhileGuiLanguageActionPersistsPreference()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var settingsStore = new UserSettingsStore(() => appDataPath);
+		Assert.True(settingsStore.TrySave(new UserSettingsDb
+		{
+			ViewSettings = new AppViewSettings
+			{
+				PreferredLanguage = AppLanguage.En
+			}
+		}));
+
+		var startupOptions = new DesktopStartupOptions(
+			new DesktopOpenRequest(project.RootPath, Language: AppLanguage.En));
+		var services = AvaloniaCompositionRoot.CreateDefault(startupOptions, () => appDataPath);
+		var window = new MainWindow(startupOptions, services)
+		{
+			Width = 1500,
+			Height = 920
+		};
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"startup project to load before applying a Desktop open request");
+
+			var result = await InvokeDesktopInteractionAsync(
+				window,
+				new DesktopOpenProjectRequest(
+					new DesktopOpenRequest(project.RootPath, Language: AppLanguage.Ru)));
+
+			Assert.True(result.Success, result.ErrorCode ?? "Desktop open request failed.");
+			Assert.Equal(AppLanguage.Ru, services.Localization.CurrentLanguage);
+			Assert.Equal(
+				AppLanguage.En,
+				new UserSettingsStore(() => appDataPath).Load().ViewSettings.PreferredLanguage);
+
+			InvokeGuiLanguageAction(window, "OnLangDe");
+
+			Assert.Equal(AppLanguage.De, services.Localization.CurrentLanguage);
+			Assert.Equal(
+				AppLanguage.De,
+				new UserSettingsStore(() => appDataPath).Load().ViewSettings.PreferredLanguage);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task OpenFolder_RelativePath_NormalizesCurrentPathAndTitle()
 	{
@@ -448,6 +505,27 @@ public sealed class MainWindowStartupAutomationUiTests
 		};
 		UiTestDriver.TrackTopLevelWindow(window);
 		return window;
+	}
+
+	private static async Task<DesktopInteractionResult> InvokeDesktopInteractionAsync(
+		MainWindow window,
+		DesktopInteractionRequest request)
+	{
+		var method = typeof(MainWindow).GetMethod(
+			"HandleDesktopInteractionAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		var invocation = method.Invoke(window, [request, CancellationToken.None]);
+		return await Assert.IsAssignableFrom<Task<DesktopInteractionResult>>(invocation);
+	}
+
+	private static void InvokeGuiLanguageAction(MainWindow window, string methodName)
+	{
+		var method = typeof(MainWindow).GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method.Invoke(window, [null, new global::Avalonia.Interactivity.RoutedEventArgs()]);
 	}
 
 	private static bool HasSuccessfulBenchmarkStep(JsonElement item, string stepName)

@@ -10,11 +10,10 @@ public sealed class ProfileCommandHandler(
 {
 	public async Task<int> ShowAsync(
 		string projectPath,
-		string profileValue,
-		string format,
+		ProjectProfileReference profile,
+		bool json,
 		CancellationToken cancellationToken)
 	{
-		var profile = ResolveReference(profileValue);
 		var selection = await services.SelectionResolver
 			.ResolveAsync(
 				projectPath,
@@ -22,7 +21,7 @@ public sealed class ProfileCommandHandler(
 				new ProjectSelectionSpec(),
 				cancellationToken)
 			.ConfigureAwait(false);
-		if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
+		if (json)
 			environment.Output.WriteLine(SerializeSelection(selection));
 		else
 			environment.Output.WriteLine(BuildText(selection));
@@ -31,12 +30,11 @@ public sealed class ProfileCommandHandler(
 
 	public async Task<int> ExportAsync(
 		string projectPath,
-		string profileValue,
+		ProjectProfileReference profile,
 		string outputPath,
 		bool force,
 		CancellationToken cancellationToken)
 	{
-		var profile = ResolveReference(profileValue);
 		var selection = await services.SelectionResolver
 			.ResolveAsync(
 				projectPath,
@@ -120,15 +118,6 @@ public sealed class ProfileCommandHandler(
 		return CommandLineExitCodes.Success;
 	}
 
-	private static ProjectProfileReference ResolveReference(string value)
-	{
-		if (value.Equals("standard", StringComparison.OrdinalIgnoreCase))
-			return ProjectProfileReference.Standard;
-		if (value.Equals("local", StringComparison.OrdinalIgnoreCase))
-			return ProjectProfileReference.Local;
-		return new ProjectProfileReference(ProjectProfileSourceKind.Portable, Path.GetFullPath(value));
-	}
-
 	private static ProjectSelectionProfile ToLegacyProfile(ProjectContextPlan plan)
 	{
 		var selectedRoots = plan.SelectedRoots.ToHashSet(PathComparer.Default);
@@ -161,9 +150,11 @@ public sealed class ProfileCommandHandler(
 		var output = new StringBuilder();
 		var all = services.Localization["Terminal.Profile.All"];
 		output.Append(services.Localization["Terminal.Analysis.Profile"]).Append(": ")
-			.AppendLine(selection.ProfileSource?.Kind.ToString().ToLowerInvariant() ?? "standard");
+			.AppendLine(FormatProfile(selection.ProfileSource));
 		output.Append(services.Localization["Terminal.Analysis.GitMode"]).Append(": ")
-			.AppendLine(selection.GitMode?.ToString() ?? "None");
+			.AppendLine(selection.GitMode is { } gitMode
+				? ProjectSelectionTokens.ToToken(gitMode)
+				: ProjectSelectionTokens.ToToken(GitFilteringMode.None));
 		output.Append(services.Localization["Terminal.Analysis.Roots"]).Append(": ")
 			.AppendLine(selection.Roots is null ? all : string.Join(", ", selection.Roots));
 		output.Append(services.Localization["Terminal.Analysis.Extensions"]).Append(": ")
@@ -171,15 +162,28 @@ public sealed class ProfileCommandHandler(
 		output.Append(services.Localization["Terminal.Profile.SelectedPaths"]).Append(": ")
 			.AppendLine(string.Join(", ", selection.SelectedPaths ?? []));
 		output.Append(services.Localization["Terminal.Analysis.Exclusions"]).Append(": ")
-			.AppendLine(string.Join(", ", selection.Exclusions ?? []));
+			.AppendLine(string.Join(
+				", ",
+				(selection.Exclusions ?? []).Select(ProjectSelectionTokens.ToToken)));
 		return output.ToString().TrimEnd('\r', '\n');
 	}
+
+	private static string FormatProfile(ProjectProfileReference? profile) =>
+		profile?.Kind switch
+		{
+			null => "standard",
+			ProjectProfileSourceKind.Standard => "standard",
+			ProjectProfileSourceKind.Local => "local",
+			ProjectProfileSourceKind.Portable => profile.Path ?? "portable",
+			_ => throw new ArgumentOutOfRangeException(nameof(profile), profile, null)
+		};
 
 	private static string SerializeSelection(ProjectSelectionSpec selection) =>
 		JsonSerializer.Serialize(
 			new
 			{
 				schemaVersion = 1,
+				kind = PortableProjectProfileService.DocumentKind,
 				selection = new
 				{
 					roots = selection.Roots,

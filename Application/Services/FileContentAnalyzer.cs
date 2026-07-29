@@ -1,5 +1,8 @@
 using System.Buffers;
 using System.Collections.Frozen;
+using System.Runtime.InteropServices;
+using System.Security;
+using System.Security.Cryptography;
 
 namespace DevProjex.Application.Services;
 
@@ -98,6 +101,11 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		CancellationToken cancellationToken = default) =>
 		ValueTask.FromResult(GetClassifiedMetricsSync(path, cancellationToken));
 
+	public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+		string path,
+		CancellationToken cancellationToken = default) =>
+		ValueTask.FromResult(OpenCompleteSnapshotSync(path, cancellationToken));
+
 	private static FileContentMetricsResult GetClassifiedMetricsSync(
 		string path,
 		CancellationToken cancellationToken)
@@ -148,7 +156,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				stream,
 				sizeBytes,
 				encoding ?? StrictUtf8,
-				cancellationToken);
+				cancellationToken,
+				calculateFingerprint: false,
+				out _);
 			return metrics is null
 				? new FileContentMetricsResult(FileContentClassification.Binary)
 				: new FileContentMetricsResult(FileContentClassification.Text, metrics);
@@ -180,6 +190,112 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		catch
 		{
 			return new FileContentMetricsResult(FileContentClassification.Unreadable);
+		}
+	}
+
+	private static IFileContentSnapshot OpenCompleteSnapshotSync(
+		string path,
+		CancellationToken cancellationToken)
+	{
+		FileStream? stream = null;
+		try
+		{
+			if (HasKnownBinaryExtension(path))
+			{
+				return new ClassifiedFileContentSnapshot(
+					new FileContentMetricsResult(FileContentClassification.Binary));
+			}
+
+			stream = OpenSequentialRead(
+				path,
+				StreamingBufferSize,
+				FileShare.Read | FileShare.Delete,
+				asynchronous: true);
+			var sizeBytes = stream.Length;
+			if (sizeBytes == 0)
+			{
+				var emptySnapshot = new StreamFileContentSnapshot(
+					stream,
+					StrictUtf8,
+					new TextFileMetrics(
+						SizeBytes: 0,
+						LineCount: 0,
+						CharCount: 0,
+						IsEmpty: true,
+						IsWhitespaceOnly: false,
+						IsEstimated: false),
+					SHA256.HashData(ReadOnlySpan<byte>.Empty));
+				stream = null;
+				return emptySnapshot;
+			}
+
+			var encoding = DetectBomEncoding(stream, cancellationToken);
+			if (encoding is null && !CheckForNullBytes(stream, cancellationToken))
+			{
+				return new ClassifiedFileContentSnapshot(
+					new FileContentMetricsResult(FileContentClassification.Binary));
+			}
+
+			var metrics = CountMetricsStreaming(
+				stream,
+				sizeBytes,
+				encoding ?? StrictUtf8,
+				cancellationToken,
+				calculateFingerprint: true,
+				out var contentFingerprint);
+			if (metrics is null)
+			{
+				return new ClassifiedFileContentSnapshot(
+					new FileContentMetricsResult(FileContentClassification.Binary));
+			}
+			if (stream.Length != sizeBytes)
+				throw new IOException("The file changed while its snapshot was being measured.");
+
+			var snapshot = new StreamFileContentSnapshot(
+				stream,
+				encoding ?? StrictUtf8,
+				metrics,
+				contentFingerprint!);
+			stream = null;
+			return snapshot;
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (UnauthorizedAccessException)
+		{
+			return new ClassifiedFileContentSnapshot(
+				new FileContentMetricsResult(FileContentClassification.AccessDenied));
+		}
+		catch (FileNotFoundException)
+		{
+			return new ClassifiedFileContentSnapshot(
+				new FileContentMetricsResult(FileContentClassification.Missing));
+		}
+		catch (DirectoryNotFoundException)
+		{
+			return new ClassifiedFileContentSnapshot(
+				new FileContentMetricsResult(FileContentClassification.Missing));
+		}
+		catch (DecoderFallbackException)
+		{
+			return new ClassifiedFileContentSnapshot(
+				new FileContentMetricsResult(FileContentClassification.UnsupportedEncoding));
+		}
+		catch (IOException)
+		{
+			return new ClassifiedFileContentSnapshot(
+				new FileContentMetricsResult(FileContentClassification.Unreadable));
+		}
+		catch (SecurityException)
+		{
+			return new ClassifiedFileContentSnapshot(
+				new FileContentMetricsResult(FileContentClassification.AccessDenied));
+		}
+		finally
+		{
+			stream?.Dispose();
 		}
 	}
 
@@ -381,7 +497,11 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		return false;
 	}
 
-	private static FileStream OpenSequentialRead(string path, int bufferSize, FileShare fileShare)
+	private static FileStream OpenSequentialRead(
+		string path,
+		int bufferSize,
+		FileShare fileShare,
+		bool asynchronous = false)
 	{
 		// Callers keep this handle for length, probing, and decoding. Besides saving an
 		// extra open/stat cycle, one handle gives each operation a more coherent file view.
@@ -391,7 +511,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			FileAccess.Read,
 			fileShare,
 			bufferSize,
-			FileOptions.SequentialScan);
+			FileOptions.SequentialScan |
+			(asynchronous ? FileOptions.Asynchronous : FileOptions.None));
 	}
 
 	private static bool HasKnownBinaryExtension(string path)
@@ -416,12 +537,18 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		FileStream stream,
 		long sizeBytes,
 		Encoding encoding,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool calculateFingerprint,
+		out byte[]? contentFingerprint)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		contentFingerprint = null;
 
 		// Rent buffer from pool to avoid allocation per file
 		char[] buffer = ArrayPool<char>.Shared.Rent(StreamingBufferSize);
+		using var fingerprint = calculateFingerprint
+			? IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
+			: null;
 		try
 		{
 			int lineCount = 1; // Start with 1 (file with no newlines = 1 line)
@@ -431,6 +558,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			int trailingNewlineChars = 0;
 			int trailingNewlineLineBreaks = 0;
 			bool previousWasCarriageReturn = false;
+			int currentBacktickRun = 0;
+			int longestBacktickRun = 0;
 
 			stream.Position = 0;
 			using var reader = new StreamReader(
@@ -448,6 +577,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 				// Use Span for faster iteration without bounds checking
 				var span = buffer.AsSpan(0, charsRead);
+				fingerprint?.AppendData(MemoryMarshal.AsBytes(span));
 				for (int i = 0; i < span.Length; i++)
 				{
 					char c = span[i];
@@ -490,12 +620,18 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 					if (!hasNonWhitespace && !char.IsWhiteSpace(c))
 						hasNonWhitespace = true;
+
+					if (c == '`')
+						longestBacktickRun = Math.Max(longestBacktickRun, ++currentBacktickRun);
+					else
+						currentBacktickRun = 0;
 				}
 			}
 
 			// Adjust line count: if file is empty, 0 lines
 			if (charCount == 0)
 				lineCount = 0;
+			contentFingerprint = fingerprint?.GetHashAndReset();
 
 			return new TextFileMetrics(
 				SizeBytes: sizeBytes,
@@ -506,7 +642,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				IsEstimated: false,
 				CrLfPairCount: crLfPairCount,
 				TrailingNewlineChars: trailingNewlineChars,
-				TrailingNewlineLineBreaks: trailingNewlineLineBreaks);
+				TrailingNewlineLineBreaks: trailingNewlineLineBreaks,
+				LongestBacktickRun: longestBacktickRun);
 		}
 		finally
 		{
@@ -523,7 +660,9 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		stream.Position = 0;
-		string content;
+		var contentBuilder = new StringBuilder(
+			(int)Math.Min(sizeBytes, 1024 * 1024));
+		var buffer = ArrayPool<char>.Shared.Rent(StreamingBufferSize);
 		using (var reader = new StreamReader(
 			       stream,
 			       encoding,
@@ -531,12 +670,24 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			       bufferSize: StreamingBufferSize,
 			       leaveOpen: true))
 		{
-			content = reader.ReadToEnd();
+			try
+			{
+				int charactersRead;
+				while ((charactersRead = reader.Read(buffer, 0, buffer.Length)) > 0)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (buffer.AsSpan(0, charactersRead).Contains('\0'))
+						throw new BinaryContentException();
+					contentBuilder.Append(buffer, 0, charactersRead);
+				}
+			}
+			finally
+			{
+				ArrayPool<char>.Shared.Return(buffer);
+			}
 		}
 
-		if (content.Contains('\0'))
-			throw new BinaryContentException();
-
+		var content = contentBuilder.ToString();
 		var lineCount = content.Length == 0 ? 0 : 1 + CountNormalizedLineBreaks(content);
 		var trailingInfo = GetTrailingNewlineInfo(content);
 		return new TextFileContent(
@@ -583,6 +734,154 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 		var trailing = content.AsSpan(start);
 		return (trailing.Length, CountNormalizedLineBreaks(trailing));
+	}
+
+	private sealed class ClassifiedFileContentSnapshot(
+		FileContentMetricsResult result) : IFileContentSnapshot
+	{
+		public FileContentMetricsResult Result { get; } = result;
+
+		public ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default)
+		{
+			ArgumentOutOfRangeException.ThrowIfNegative(maximumCharacters);
+			ArgumentNullException.ThrowIfNull(writeChunk);
+			return ValueTask.FromException(
+				new IOException("The snapshot does not contain readable text."));
+		}
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	private sealed class StreamFileContentSnapshot(
+		FileStream stream,
+		Encoding encoding,
+		TextFileMetrics metrics,
+		byte[] contentFingerprint) : IFileContentSnapshot
+	{
+		private FileStream? _stream = stream;
+
+		public FileContentMetricsResult Result { get; } =
+			new(FileContentClassification.Text, metrics);
+
+		public async ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default)
+		{
+			ArgumentOutOfRangeException.ThrowIfNegative(maximumCharacters);
+			ArgumentNullException.ThrowIfNull(writeChunk);
+			ArgumentOutOfRangeException.ThrowIfGreaterThan(
+				maximumCharacters,
+				metrics.CharCount);
+			var source = _stream ??
+			             throw new ObjectDisposedException(
+				             nameof(StreamFileContentSnapshot));
+			if (source.Length != metrics.SizeBytes)
+				throw CreateChangedFileException();
+
+			var buffer = ArrayPool<char>.Shared.Rent(StreamingBufferSize);
+			using var fingerprint = IncrementalHash.CreateHash(
+				HashAlgorithmName.SHA256);
+			try
+			{
+				source.Position = 0;
+				using var reader = new StreamReader(
+					source,
+					encoding,
+					detectEncodingFromByteOrderMarks: true,
+					bufferSize: StreamingBufferSize,
+					leaveOpen: true);
+				var totalCharacters = 0;
+				var writtenCharacters = 0;
+				var hasPendingHighSurrogate = false;
+				var pendingHighSurrogate = '\0';
+				while (true)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					var prefixLength = hasPendingHighSurrogate ? 1 : 0;
+					if (hasPendingHighSurrogate)
+						buffer[0] = pendingHighSurrogate;
+					var count = await reader
+						.ReadAsync(
+							buffer.AsMemory(
+								prefixLength,
+								StreamingBufferSize - prefixLength),
+							cancellationToken)
+						.ConfigureAwait(false);
+					if (count == 0)
+					{
+						if (prefixLength != 0)
+						throw new DecoderFallbackException(
+							"The text ends with an unmatched high surrogate.");
+						break;
+					}
+
+					count += prefixLength;
+					hasPendingHighSurrogate = false;
+					if (char.IsHighSurrogate(buffer[count - 1]))
+					{
+						pendingHighSurrogate = buffer[count - 1];
+						hasPendingHighSurrogate = true;
+						count--;
+					}
+					if (count == 0)
+						continue;
+
+					var chunk = buffer.AsMemory(0, count);
+					if (chunk.Span.Contains('\0'))
+						throw CreateChangedFileException();
+					fingerprint.AppendData(MemoryMarshal.AsBytes(chunk.Span));
+					totalCharacters = checked(totalCharacters + count);
+
+					var charactersToWrite = Math.Min(
+						count,
+						maximumCharacters - writtenCharacters);
+					if (charactersToWrite <= 0)
+						continue;
+					if (charactersToWrite < count &&
+					    char.IsHighSurrogate(buffer[charactersToWrite - 1]) &&
+					    char.IsLowSurrogate(buffer[charactersToWrite]))
+					{
+						throw new IOException(
+							"The requested snapshot prefix splits a Unicode scalar.");
+					}
+
+					await writeChunk(
+							chunk[..charactersToWrite],
+							cancellationToken)
+						.ConfigureAwait(false);
+					writtenCharacters += charactersToWrite;
+				}
+
+				var currentFingerprint = fingerprint.GetHashAndReset();
+				if (totalCharacters != metrics.CharCount ||
+				    writtenCharacters != maximumCharacters ||
+				    source.Length != metrics.SizeBytes ||
+				    !CryptographicOperations.FixedTimeEquals(
+					    currentFingerprint,
+					    contentFingerprint))
+				{
+					throw CreateChangedFileException();
+				}
+			}
+			finally
+			{
+				ArrayPool<char>.Shared.Return(buffer);
+			}
+		}
+
+		public async ValueTask DisposeAsync()
+		{
+			var source = Interlocked.Exchange(ref _stream, null);
+			if (source is not null)
+				await source.DisposeAsync().ConfigureAwait(false);
+		}
+
+		private static IOException CreateChangedFileException() =>
+			new("The file changed while its snapshot was being streamed.");
 	}
 
 	private sealed class BinaryContentException : Exception

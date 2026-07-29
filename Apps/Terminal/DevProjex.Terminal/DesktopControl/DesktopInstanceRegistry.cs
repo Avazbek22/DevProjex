@@ -16,6 +16,8 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 	};
 	private readonly DesktopControlPaths _paths = paths ?? new DesktopControlPaths();
 
+	internal string RegistryDirectory => _paths.RegistryDirectory;
+
 	public async Task RegisterAsync(
 		DesktopInstanceRegistration registration,
 		CancellationToken cancellationToken = default)

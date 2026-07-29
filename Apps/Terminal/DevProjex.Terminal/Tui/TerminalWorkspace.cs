@@ -8,19 +8,51 @@ using Terminal.Gui.Views;
 
 namespace DevProjex.Terminal.Tui;
 
+public enum TerminalMouseMode
+{
+	Auto,
+	Enabled,
+	Disabled
+}
+
 public sealed record TerminalWorkspaceOptions(
 	string ProjectPath,
 	ProjectProfileReference Profile,
 	TerminalScreenMode ScreenMode,
-	bool MouseEnabled,
+	TerminalMouseMode MouseMode,
 	TerminalColorMode ColorMode,
 	bool Plain,
 	bool ShowWelcome = false);
 
-public sealed class TerminalWorkspace(
-	TerminalServices services,
-	ITerminalEnvironment environment)
+public sealed class TerminalWorkspace
 {
+	private readonly TerminalServices services;
+	private readonly ITerminalEnvironment environment;
+	private readonly ITerminalOperationObserver operationObserver;
+
+	public TerminalWorkspace(
+		TerminalServices services,
+		ITerminalEnvironment environment)
+		: this(
+			services,
+			environment,
+			NullTerminalOperationObserver.Instance)
+	{
+	}
+
+	internal TerminalWorkspace(
+		TerminalServices services,
+		ITerminalEnvironment environment,
+		ITerminalOperationObserver operationObserver)
+	{
+		this.services = services ??
+			throw new ArgumentNullException(nameof(services));
+		this.environment = environment ??
+			throw new ArgumentNullException(nameof(environment));
+		this.operationObserver = operationObserver ??
+			throw new ArgumentNullException(nameof(operationObserver));
+	}
+
 	public async Task<int> RunAsync(
 		TerminalWorkspaceOptions options,
 		CancellationToken cancellationToken)
@@ -35,7 +67,15 @@ public sealed class TerminalWorkspace(
 			return CommandLineExitCodes.UsageError;
 		}
 
+		var mouseEnabled = ResolveMouseEnabled(options.MouseMode, environment);
+		using var mousePolicy = new TerminalGuiMousePolicy(mouseEnabled);
+		// Terminal.Gui can leave the cursor hidden on either side of application
+		// disposal, so bracket its teardown with idempotent visibility restoration.
+		using var postApplicationCursorRestoration =
+			new TerminalCursorRestoration(environment.Output);
 		using IApplication application = global::Terminal.Gui.App.Application.Create();
+		using var preDisposeCursorRestoration = new TerminalCursorRestoration(environment.Output);
+		application.Mouse.IsMouseDisabled = !mouseEnabled;
 		var initialized = false;
 		Window? root = null;
 		try
@@ -46,7 +86,14 @@ public sealed class TerminalWorkspace(
 				: AppModel.FullScreen;
 			application.Init();
 			initialized = true;
-			application.Mouse.IsMouseDisabled = !options.MouseEnabled;
+			application.Mouse.IsMouseDisabled = !mouseEnabled;
+			if (!mouseEnabled)
+			{
+				// Terminal.Gui enables tracking during ANSI driver initialization.
+				// Disable it before session input is processed.
+				application.Driver?.WriteRaw(
+					global::Terminal.Gui.Drivers.EscSeqUtils.CSI_DisableMouseEvents);
+			}
 			var rootWidth = environment.Width;
 			var rootHeight = environment.Height;
 			if (screenMode == TerminalScreenMode.Inline &&
@@ -78,6 +125,7 @@ public sealed class TerminalWorkspace(
 				environment,
 				options,
 				this,
+				operationObserver,
 				cancellationToken);
 			session.Start();
 			try
@@ -108,6 +156,47 @@ public sealed class TerminalWorkspace(
 			}
 
 			root?.Dispose();
+		}
+	}
+
+	internal static bool ResolveMouseEnabled(
+		TerminalMouseMode mode,
+		ITerminalEnvironment terminalEnvironment) =>
+		mode switch
+		{
+			TerminalMouseMode.Auto =>
+				terminalEnvironment.IsInputInteractive &&
+				terminalEnvironment.IsOutputInteractive &&
+				!terminalEnvironment.IsTermDumb,
+			TerminalMouseMode.Enabled => true,
+			TerminalMouseMode.Disabled => false,
+			_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+		};
+
+	private sealed class TerminalGuiMousePolicy : IDisposable
+	{
+		private readonly bool _previousValue =
+			global::Terminal.Gui.Configuration.ApplicationSettings.Defaults.IsMouseDisabled;
+
+		public TerminalGuiMousePolicy(bool mouseEnabled)
+		{
+			global::Terminal.Gui.Configuration.ApplicationSettings.Defaults.IsMouseDisabled =
+				!mouseEnabled;
+		}
+
+		public void Dispose()
+		{
+			global::Terminal.Gui.Configuration.ApplicationSettings.Defaults.IsMouseDisabled =
+				_previousValue;
+		}
+	}
+
+	private sealed class TerminalCursorRestoration(TextWriter output) : IDisposable
+	{
+		public void Dispose()
+		{
+			output.Write(global::Terminal.Gui.Drivers.EscSeqUtils.CSI_ShowCursor);
+			output.Flush();
 		}
 	}
 
@@ -189,11 +278,6 @@ public sealed class TerminalWorkspace(
 			? $"{value} {units[unit]}"
 			: $"{display:0.##} {units[unit]}";
 	}
-
-	internal static string QuoteForDisplay(string value) =>
-		value.Any(char.IsWhiteSpace)
-			? $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\""
-			: value;
 
 	internal string FormatCount(long value) =>
 		value.ToString("N0", CultureInfo.CurrentCulture);

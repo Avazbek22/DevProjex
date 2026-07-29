@@ -1,21 +1,21 @@
 
   DevProjex Terminal                                                                                                                            v<VERSION>
-  Choose a workspace action. No project is scanned until you open it.
+  Choose a workspace action. No folder is scanned until you open it.
 
-  Current directory                                                                                                    No project workspace detected
+  Current directory                                                                                                          Current folder is ready
   <WELCOME_ROOT>
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├───────────────────────────────────────────────────────────────────────────────────────────┐
-  │> Recent workspaces                     │  │ Open a recent local folder or Git repository from one shared history.                              │
-  │  Browse folder    ┌┤Recent workspaces├────────────────────────────────────────────────────────────────────────────────────┐                    │
-  │  Clone repository │ Open a recent local folder or Git repository from one shared history.                                 │                    │
-  │  Open Desktop     │                                                                                                       │                    │
-  │  Help             │ > Git        DevProjex                    Today                                                       │                    │
+  │  Open current directory                │  │ Open a recent local folder or Git repository from one shared history.                              │
+  │> Recent workspaces┌┤Recent workspaces├────────────────────────────────────────────────────────────────────────────────────┐                    │
+  │  Browse folder    │ Open a recent local folder or Git repository from one shared history.                                 │                    │
+  │  Clone repository │                                                                                                       │                    │
+  │  Open Desktop     │ > Git        DevProjex                    Today                                                       │                    │
+  │  Help             │                                                                                                       │                    │
   │  Exit             │                                                                                                       │                    │
-  └───────────────────│                                                                                                       │────────────────────┘
-                      │ Git · DevProjex                                                                                       │
-  Direct automation: d│ https://github.com/Avazbek22/DevProjex                                                                │
-                      │ Last opened: <TIMESTAMP>│
+  └───────────────────│ Git · DevProjex                                                                                       │────────────────────┘
+                      │ https://github.com/Avazbek22/DevProjex                                                                │
+  Direct automation: d│ Last opened: <TIMESTAMP>│
                       │                                                                                                       │
                       │                                                                                                       │
                       │                                                                                                       │

@@ -120,27 +120,40 @@ public sealed class RepositoryCacheCatalog(
 
 	private IReadOnlyList<string> EnumerateCandidates(string repositoryName)
 	{
-		try
+		var candidates = new List<string>();
+		foreach (var searchRoot in repoCacheService.CacheSearchRootPaths)
 		{
-			if (!Directory.Exists(repoCacheService.CacheRootPath))
-				return [];
+			try
+			{
+				if (!Directory.Exists(searchRoot))
+					continue;
 
-			var prefix = repositoryName + "_";
-			return Directory
-				.EnumerateDirectories(repoCacheService.CacheRootPath)
-				.Where(path => !string.Equals(
-					Path.GetFileName(path),
-					".staging",
-					StringComparison.Ordinal))
-				.OrderByDescending(path =>
-					Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-				.ThenByDescending(GetLastModified)
-				.ToArray();
+				candidates.AddRange(
+					Directory
+						.EnumerateDirectories(searchRoot)
+						.Where(path => !string.Equals(
+							Path.GetFileName(path),
+							".staging",
+							StringComparison.Ordinal)));
+			}
+			catch (Exception ex) when (ex is
+				IOException or
+				UnauthorizedAccessException or
+				ArgumentException or
+				NotSupportedException or
+				System.Security.SecurityException)
+			{
+				// An unavailable compatibility root must not hide healthy roots.
+			}
 		}
-		catch
-		{
-			return [];
-		}
+
+		var prefix = repositoryName + "_";
+		return candidates
+			.Distinct(PathComparer.Default)
+			.OrderByDescending(path =>
+				Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+			.ThenByDescending(GetLastModified)
+			.ToArray();
 	}
 
 	private static bool HasGitMetadata(string path) =>

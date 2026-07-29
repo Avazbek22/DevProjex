@@ -8,13 +8,36 @@ internal sealed class OutputDestinationConflictException(string path)
 
 internal static class AtomicOutputWriter
 {
-	public static async Task<string> WriteTextAsync(
+	public static Task<string> WriteTextAsync(
 		string path,
 		string content,
 		bool overwrite,
 		CancellationToken cancellationToken,
+		Action<string>? validateDestination = null) =>
+		WriteAsync(
+			path,
+			overwrite,
+			async (destination, token) =>
+			{
+				await using var writer = new StreamWriter(
+					destination,
+					new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+					bufferSize: 16 * 1024,
+					leaveOpen: true);
+				await writer.WriteAsync(content.AsMemory(), token).ConfigureAwait(false);
+				await writer.FlushAsync(token).ConfigureAwait(false);
+			},
+			cancellationToken,
+			validateDestination);
+
+	public static async Task<string> WriteAsync(
+		string path,
+		bool overwrite,
+		Func<Stream, CancellationToken, Task> write,
+		CancellationToken cancellationToken,
 		Action<string>? validateDestination = null)
 	{
+		ArgumentNullException.ThrowIfNull(write);
 		var fullPath = Path.GetFullPath(path);
 		cancellationToken.ThrowIfCancellationRequested();
 		validateDestination?.Invoke(fullPath);
@@ -30,11 +53,17 @@ internal static class AtomicOutputWriter
 			$".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
 		try
 		{
-			await File.WriteAllTextAsync(
-				tempPath,
-				content,
-				new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-				cancellationToken).ConfigureAwait(false);
+			await using (var destination = new FileStream(
+				             tempPath,
+				             FileMode.CreateNew,
+				             FileAccess.Write,
+				             FileShare.None,
+				             bufferSize: 64 * 1024,
+				             FileOptions.Asynchronous | FileOptions.SequentialScan))
+			{
+				await write(destination, cancellationToken).ConfigureAwait(false);
+				await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+			}
 			cancellationToken.ThrowIfCancellationRequested();
 			validateDestination?.Invoke(fullPath);
 			File.Move(tempPath, fullPath, overwrite);
@@ -51,9 +80,11 @@ internal static class AtomicOutputWriter
 				if (File.Exists(tempPath))
 					File.Delete(tempPath);
 			}
-			catch
+			catch (Exception exception) when (
+				exception is IOException or UnauthorizedAccessException)
 			{
-				// The next write uses a new sibling temp path.
+				// Preserve the primary write/cancellation failure. A later invocation
+				// uses a unique sibling staging path and never treats this file as output.
 			}
 		}
 	}

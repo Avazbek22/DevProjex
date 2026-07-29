@@ -46,7 +46,10 @@ public sealed class ExportProjectCommandHandler(
 			request.Force);
 		if (request.DryRun)
 		{
-			environment.Output.WriteLine(exactOutput);
+			DryRunRenderer.WritePlan(
+				environment,
+				services.Localization,
+				exactOutput);
 			return CommandLineExitCodes.Success;
 		}
 

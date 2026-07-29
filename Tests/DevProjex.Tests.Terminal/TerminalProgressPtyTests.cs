@@ -27,9 +27,10 @@ public sealed class TerminalProgressPtyTests
 			],
 			environment: new Dictionary<string, string>
 			{
-				[TerminalProgressTestCheckpoint.CheckpointsVariable] = "25"
+				[TerminalProgressCheckpointProtocol.CheckpointsVariable] = "25"
 			},
 			initializeDataRoot: path => dataRoot = path,
+			useProgressCheckpointHost: true,
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.WaitForScreenAsync(
@@ -58,7 +59,10 @@ public sealed class TerminalProgressPtyTests
 
 		Assert.NotNull(dataRoot);
 		await WaitForFileAsync(
-			Path.Combine(dataRoot, "tui-progress-checkpoints", "reached-25"),
+			Path.Combine(
+				dataRoot,
+				TerminalProgressCheckpointProtocol.DirectoryName,
+				TerminalProgressCheckpointProtocol.GetReachedFileName("25")),
 			TestContext.Current.CancellationToken);
 		var active = await terminal.WaitForScreenAsync(
 			"25%",

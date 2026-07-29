@@ -13,6 +13,7 @@ namespace DevProjex.Terminal.Tui;
 internal sealed partial class TerminalWorkspaceSession
 {
 	private FrameView? _controlsFrame;
+	private Label? _controlsPanelHeading;
 	private TerminalParameterListView? _controls;
 	private ObservableCollection<TerminalParameterRow>? _controlRows;
 	private string? _selectedControlKey;
@@ -21,13 +22,22 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		_controlsFrame = new TerminalLiteralFrameView
 		{
-			BorderStyle = LineStyle.Single,
+			BorderStyle = _presentation.BorderStyle,
 			SchemeName = TerminalWorkspaceTheme.Panel
+		};
+		_controlsPanelHeading = new TerminalLiteralLabel
+		{
+			X = 0,
+			Y = 0,
+			Width = Dim.Fill(),
+			Height = 1,
+			Visible = _options.Plain,
+			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		_controls = new TerminalParameterListView
 		{
 			X = 0,
-			Y = 0,
+			Y = _options.Plain ? 1 : 0,
 			Width = Dim.Fill(),
 			Height = Dim.Fill(),
 			ShowMarks = false,
@@ -38,7 +48,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_application.Invoke(ActivateSelectedControl);
 		_controls.ValueChanged += (_, _) => TrackSelectedControl();
 		_controls.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
-		_controlsFrame.Add(_controls);
+		_controlsFrame.Add(_controlsPanelHeading, _controls);
 		RefreshContextControls();
 	}
 
@@ -652,8 +662,8 @@ internal sealed partial class TerminalWorkspaceSession
 		list.ValueChanged += (_, _) => UpdateDetail();
 		list.Accepted += (_, _) => Accept();
 		dialog.Add(prompt, input, list, detail);
-		dialog.AddButton(new Button { Text = L("Terminal.Tui.Back") });
-		var execute = new Button { Text = L("Terminal.Tui.ActionPalette.Run") };
+		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Back")));
+		var execute = CreateDialogButton(L("Terminal.Tui.ActionPalette.Run"));
 		execute.Accepted += (_, _) => Accept();
 		dialog.AddButton(execute);
 		Refresh();
@@ -716,12 +726,12 @@ internal sealed partial class TerminalWorkspaceSession
 			.ToArray();
 	}
 
-	private static string BuildPaletteDetail(TerminalPaletteItem item)
+	private string BuildPaletteDetail(TerminalPaletteItem item)
 	{
 		var value = string.IsNullOrWhiteSpace(item.Value)
 			? string.Empty
-			: $" · {item.Value}";
-		return $"{item.Category} · {item.Title}{value}\n{item.Description}";
+			: $"{PanelSeparator}{item.Value}";
+		return $"{item.Category}{PanelSeparator}{item.Title}{value}\n{item.Description}";
 	}
 
 	private void ActivateWelcomeAction(TerminalWelcomeActionKind kind)

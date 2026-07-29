@@ -25,19 +25,32 @@ spinners, tables around a machine payload, or additional summary lines.
 
 ## Terminal Modes
 
-Color and progress modes accept `auto`, `always`, or `never`. `--plain` disables
-decorative rendering. Auto mode evaluates stream redirection, `NO_COLOR`,
-`TERM=dumb`, and CI. Unicode symbols have ASCII fallbacks and no output depends on
-emoji or Nerd Fonts.
+Color and progress modes accept `auto`, `always`, or `never`. Their precedence is
+`--plain`, an explicit command-line color value, non-empty `NO_COLOR`, then
+terminal capability detection. `NO_COLOR=` is unset. `--plain --color always`
+is a usage error.
+
+`--color never` disables ANSI color but does not imply ASCII. `--plain` disables
+ANSI, markup, box-drawing characters, emoji, and animations and uses stable ASCII
+lines. `TERM=dumb` selects the same conservative terminal-capability fallback and
+never starts the TUI. stdout and stderr TTY state are evaluated independently;
+machine payloads remain undecorated in every mode.
+Explicit `--plain --progress always` uses bounded static ASCII stderr lines rather
+than a spinner. Plain `auto`, `quiet`, and `minimal` do not emit optional progress.
 
 ## Analysis JSON
 
 Analysis JSON is a deterministic document with `schemaVersion`. It contains
-project inventory, effective selection, metrics, diagnostics, timings, and the
-deterministic context fingerprint available to the current engine.
+project inventory, effective selection, metrics, diagnostics, and the
+deterministic context fingerprint available to the current engine. v1 does not
+publish a timings field.
 
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
+
+Plain or redirected text and text written to a file use one canonical field
+model, ordering, and final-newline policy. An interactive rich presentation may
+change layout but not the represented fields or values.
 
 ## Context JSON
 
@@ -45,7 +58,7 @@ The top-level shape is:
 
 ```json
 {
-  "schemaVersion": "1",
+  "schemaVersion": 1,
   "kind": "devprojex-context",
   "project": {
     "root": "/workspace/app",
@@ -93,7 +106,28 @@ Markdown contains one project heading, an optional fenced tree block, and file
 headings with safe variable-length fences. File names and content cannot break
 the document structure.
 
-Text preserves the existing readable ASCII-tree and file-section semantics.
+Text preserves the existing readable tree and file-section semantics. With
+`--plain`, tree connectors use strict ASCII.
+
+Context generation streams UTF-8 to stdout or an adjacent temporary file. File
+output is flushed and moved atomically; cancellation or write failure removes
+staging. A complete project context is never materialized as one managed string,
+and exact export validates then decodes each included text file through bounded
+chunks rather than retaining a full per-file string.
+
+File output is rollback-safe because only the adjacent staging file is visible
+until completion. stdout is inherently not rollback-capable: cancellation can
+leave an already-written document prefix on stdout, but never writes the
+cancellation diagnostic or other error text into that payload.
+
+## Dry run
+
+Context and project `--dry-run` perform source planning plus destination safety
+and conflict checks. They create no file, folder, ZIP, or stdout payload. stdout
+is empty and the operational plan is written to stderr. Success means that
+preflight is ready; it is not a result path.
+The readiness line is the requested dry-run result and remains visible at
+`quiet` and `minimal`; incidental status and progress remain suppressed.
 
 ## Errors
 
@@ -125,3 +159,5 @@ stack trace, and request identifier, but never file content or secrets.
 | 130 | canceled |
 
 These codes are part of CLI v1 and are suitable for shell and CI decisions.
+An expected downstream pipe close is a quiet success and is not rendered as
+`DPX-CLI-UNEXPECTED`.

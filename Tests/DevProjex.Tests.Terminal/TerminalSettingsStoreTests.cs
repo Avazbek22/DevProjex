@@ -36,7 +36,7 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
-	public async Task ExplicitCommandOptionIsPersistedBeforeTheTuiCapabilityGate()
+	public async Task ExplicitCommandOptionDoesNotPersistBeforeTheTuiCapabilityGate()
 	{
 		using var workspace = new TemporaryDirectory();
 		var appData = workspace.CreateDirectory("app-data");
@@ -51,7 +51,7 @@ public sealed class TerminalSettingsStoreTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Equal(
-			TerminalScreenMode.Inline,
+			TerminalScreenMode.Auto,
 			new TerminalSettingsStore(() => appData).LoadScreenMode());
 	}
 }

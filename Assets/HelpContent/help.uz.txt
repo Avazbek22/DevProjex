@@ -80,9 +80,9 @@ Misollar:
 * `devprojex` — interaktiv terminal ish maydonini ochish.
 * `devprojex open . --preview` — joriy papkani Desktop ko‘rib chiqish rejimida ochish.
 * `devprojex analyze . --format json` — joriy loyihani JSON sifatida tahlil qilish.
-* `devprojex export context . --format markdown -o context.md` — AI uchun tayyor kontekstni saqlash.
-* `devprojex export project . --as folder -o submission` — samarali loyiha daraxtini aniq papkaga eksport qilish.
-* `devprojex export project . --as zip -o submission.zip` — samarali loyiha daraxtini ZIP arxiviga eksport qilish.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — AI uchun tayyor kontekstni manba loyihasidan tashqarida saqlash.
+* `devprojex export project . --as folder -o ../devprojex-submission` — samarali loyiha daraxtini aniq papkaga eksport qilish.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — samarali loyiha daraxtini ZIP arxiviga eksport qilish.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — Git kuzatuvidagi fayllarni Smart Ignore bilan tahlil qilish.
 
 Xususiyatlar:

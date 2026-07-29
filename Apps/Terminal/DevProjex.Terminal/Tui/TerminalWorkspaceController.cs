@@ -144,8 +144,8 @@ public sealed class TerminalWorkspaceController(
 				state.Plan,
 				view,
 				format,
-				cancellationToken,
-				PreviewLimits)
+				PreviewLimits,
+				cancellationToken)
 			.ConfigureAwait(false);
 		state.SetPreviewText(preview);
 	}
@@ -154,18 +154,30 @@ public sealed class TerminalWorkspaceController(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool plain = false)
 	{
+		ValidateView(view);
+		ValidateDocumentFormat(format);
 		var plan = state.Plan;
-		var tree = view is ProjectContextView.Tree or ProjectContextView.TreeContent
-			? services.TreeExportService.BuildFullTree(
-				plan.SourceRoot,
-				plan.ProjectedTree,
-				MapTreeFormat(format),
-				GetDisplaySource(plan),
-				GetDisplayName(plan),
-				includeRootPath: false)
-			: string.Empty;
+		var tree = string.Empty;
+		if (view is ProjectContextView.Tree or ProjectContextView.TreeContent)
+		{
+			tree = plain && format == ProjectContextDocumentFormat.Text
+				? services.TreeExportService.BuildFullTreePlain(
+					plan.SourceRoot,
+					plan.ProjectedTree,
+					GetDisplaySource(plan),
+					GetDisplayName(plan),
+					includeRootPath: false)
+				: services.TreeExportService.BuildFullTree(
+					plan.SourceRoot,
+					plan.ProjectedTree,
+					MapTreeFormat(format),
+					GetDisplaySource(plan),
+					GetDisplayName(plan),
+					includeRootPath: false);
+		}
 		return await BuildInteractivePreviewAsync(
 				plan,
 				tree,
@@ -178,8 +190,11 @@ public sealed class TerminalWorkspaceController(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
-		CancellationToken cancellationToken) =>
-		services.PreviewDocumentBuilder.CreateDocumentAsync(
+		CancellationToken cancellationToken)
+	{
+		ValidateView(view);
+		ValidateDocumentFormat(format);
+		return services.PreviewDocumentBuilder.CreateDocumentAsync(
 			(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
 				state.Plan,
 				view,
@@ -187,6 +202,7 @@ public sealed class TerminalWorkspaceController(
 				stream,
 				token),
 			cancellationToken);
+	}
 
 	private async Task<IPreviewTextDocument> BuildInteractivePreviewAsync(
 		ProjectContextPlan plan,
@@ -213,24 +229,26 @@ public sealed class TerminalWorkspaceController(
 						includeOmissionMarkers: true)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
-			_ => await services.PreviewDocumentBuilder
+			ProjectContextView.TreeContent => await services.PreviewDocumentBuilder
 				.BuildTreeAndContentDocumentAsync(
 					tree,
 					files,
 					cancellationToken,
 					MapDisplayPath,
 					includeOmissionMarkers: true)
-				.ConfigureAwait(false)
+				.ConfigureAwait(false),
+			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};
 	}
 
 	private static TreeTextFormat MapTreeFormat(ProjectContextDocumentFormat format) =>
 		format switch
 		{
+			ProjectContextDocumentFormat.Text => TreeTextFormat.Ascii,
 			ProjectContextDocumentFormat.Json => TreeTextFormat.Json,
 			ProjectContextDocumentFormat.Xml => TreeTextFormat.Xml,
 			ProjectContextDocumentFormat.Markdown => TreeTextFormat.Markdown,
-			_ => TreeTextFormat.Ascii
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
 		};
 
 	private static string GetDisplayName(ProjectContextPlan plan) =>
@@ -253,22 +271,28 @@ public sealed class TerminalWorkspaceController(
 		ProjectContextDocumentFormat format,
 		string destination,
 		bool overwrite,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool plain = false)
 	{
+		ValidateView(view);
+		ValidateDocumentFormat(format);
 		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
 		EnsureExportable(plan);
 		var exactDestination = ExactOutputDestinationValidator.ValidateContext(
 			plan.SourceRoot,
 			destination,
 			overwrite);
-		var payload = await services.ContextDocumentService
-			.BuildAsync(plan, view, format, cancellationToken)
-			.ConfigureAwait(false);
 		return await AtomicOutputWriter
-			.WriteTextAsync(
+			.WriteAsync(
 				exactDestination,
-				payload,
 				overwrite,
+				(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
+					plan,
+					view,
+					format,
+					stream,
+					token,
+					plain),
 				cancellationToken,
 				path => ExactOutputDestinationValidator.ValidateContext(
 					plan.SourceRoot,
@@ -285,6 +309,8 @@ public sealed class TerminalWorkspaceController(
 		bool overwrite,
 		CancellationToken cancellationToken)
 	{
+		ValidateView(view);
+		ValidateDocumentFormat(format);
 		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
 		EnsureExportable(plan);
 		var (exactDestination, destinationState) = ResolveDestination(
@@ -356,9 +382,7 @@ public sealed class TerminalWorkspaceController(
 				overwrite: false));
 		return CreateSummary(
 			plan,
-			format == ProjectCopyExportFormat.Zip
-				? TerminalExportKind.Zip
-				: TerminalExportKind.Folder,
+			MapExportKind(format),
 			view: null,
 			documentFormat: null,
 			exactDestination,
@@ -453,13 +477,14 @@ public sealed class TerminalWorkspaceController(
 			ProjectContextView.Content => (
 				plan.Analysis.Metrics.Content.Chars,
 				plan.Analysis.Metrics.Content.Tokens),
-			_ => (
+			ProjectContextView.TreeContent => (
 				SaturatingAdd(
 					plan.Analysis.Metrics.Tree.Chars,
 					plan.Analysis.Metrics.Content.Chars),
 				SaturatingAdd(
 					plan.Analysis.Metrics.Tree.Tokens,
-					plan.Analysis.Metrics.Content.Tokens))
+					plan.Analysis.Metrics.Content.Tokens)),
+			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};
 
 	private static long SaturatingAdd(long left, long right) =>
@@ -469,12 +494,19 @@ public sealed class TerminalWorkspaceController(
 		ProjectCopyExportFormat format,
 		string destination)
 	{
-		if (format == ProjectCopyExportFormat.Zip &&
-		    !destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+		switch (format)
 		{
-			throw new ProjectContextValidationException(
-				"DPX-CLI-ZIP-EXTENSION-REQUIRED",
-				"ZIP output must use the .zip extension.");
+			case ProjectCopyExportFormat.Folder:
+				return;
+			case ProjectCopyExportFormat.Zip
+				when !destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase):
+				throw new ProjectContextValidationException(
+					"DPX-CLI-ZIP-EXTENSION-REQUIRED",
+					"ZIP output must use the .zip extension.");
+			case ProjectCopyExportFormat.Zip:
+				return;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(format), format, null);
 		}
 	}
 
@@ -506,57 +538,81 @@ public sealed class TerminalWorkspaceController(
 	public static string BuildEquivalentContextCommand(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
-		ProjectContextDocumentFormat format)
+		ProjectContextDocumentFormat format,
+		string destination,
+		bool dryRun = false)
 	{
-		var command = new StringBuilder("devprojex export context ");
-		AppendQuoted(command, state.Plan.SourceRoot);
-		command.Append(" --view ").Append(ToToken(view));
-		command.Append(" --format ").Append(ToToken(format));
+		var arguments = new List<string>
+		{
+			"devprojex",
+			"export",
+			"context",
+			state.Plan.SourceRoot,
+			"--view",
+			ToToken(view),
+			"--format",
+			ToToken(format),
+			"-o",
+			destination
+		};
 		foreach (var path in state.BuildSelectedRelativePaths())
 		{
-			command.Append(" --select ");
-			AppendQuoted(command, path);
+			arguments.Add("--select");
+			arguments.Add(path);
 		}
-		AppendSelection(command, state.Plan);
-		return command.ToString();
+		AppendSelection(arguments, state.Plan);
+		if (dryRun)
+			arguments.Add("--dry-run");
+		return CliArgumentVectorFormatter.Format(arguments);
 	}
 
 	public static string BuildEquivalentProjectCommand(
 		TerminalWorkspaceState state,
 		ProjectCopyExportFormat format,
-		string destination)
+		string destination,
+		bool dryRun = false)
 	{
-		var command = new StringBuilder("devprojex export project ");
-		AppendQuoted(command, state.Plan.SourceRoot);
-		command.Append(" --as ")
-			.Append(format == ProjectCopyExportFormat.Zip ? "zip" : "folder")
-			.Append(" -o ");
-		AppendQuoted(command, destination);
-		AppendSelection(command, state.Plan);
+		var arguments = new List<string>
+		{
+			"devprojex",
+			"export",
+			"project",
+			state.Plan.SourceRoot,
+			"--as",
+			ToToken(format),
+			"-o",
+			destination
+		};
+		AppendSelection(arguments, state.Plan);
 		foreach (var path in state.BuildSelectedRelativePaths())
 		{
-			command.Append(" --select ");
-			AppendQuoted(command, path);
+			arguments.Add("--select");
+			arguments.Add(path);
 		}
-		return command.ToString();
+		if (dryRun)
+			arguments.Add("--dry-run");
+		return CliArgumentVectorFormatter.Format(arguments);
 	}
 
-	private static void AppendSelection(StringBuilder command, ProjectContextPlan plan)
+	private static void AppendSelection(ICollection<string> arguments, ProjectContextPlan plan)
 	{
-		command.Append(" --profile standard --git-mode ")
-			.Append(ProjectSelectionTokens.ToToken(plan.GitReadiness.Mode));
+		arguments.Add("--profile");
+		arguments.Add("standard");
+		arguments.Add("--git-mode");
+		arguments.Add(ProjectSelectionTokens.ToToken(plan.GitReadiness.Mode));
 
 		var exclusions = plan.Selection.Exclusions ?? [];
 		if (exclusions.Count == 0)
 		{
-			command.Append(" --exclude none");
+			arguments.Add("--exclude");
+			arguments.Add("none");
 		}
 		else
 		{
 			foreach (var exclusion in exclusions.OrderBy(static value => value))
 			{
-				command.Append(" --exclude ")
-					.Append(ProjectSelectionTokens.ToToken(exclusion));
+				arguments.Add("--exclude");
+				arguments.Add(ProjectSelectionTokens.ToToken(exclusion));
 			}
 		}
 
@@ -564,8 +620,8 @@ public sealed class TerminalWorkspaceController(
 		{
 			foreach (var root in plan.SelectedRoots)
 			{
-				command.Append(" --root ");
-				AppendQuoted(command, root);
+				arguments.Add("--root");
+				arguments.Add(root);
 			}
 		}
 
@@ -576,8 +632,8 @@ public sealed class TerminalWorkspaceController(
 		{
 			foreach (var extension in plan.SelectedExtensions)
 			{
-				command.Append(" --extension ");
-				AppendQuoted(command, extension);
+				arguments.Add("--extension");
+				arguments.Add(extension);
 			}
 		}
 	}
@@ -589,29 +645,32 @@ public sealed class TerminalWorkspaceController(
 		left.Count == right.Count &&
 		left.ToHashSet(comparer).SetEquals(right);
 
-	private static string ToToken(ProjectContextView view) => view switch
-	{
-		ProjectContextView.Tree => "tree",
-		ProjectContextView.Content => "content",
-		_ => "tree-content"
-	};
+	private static string ToToken(ProjectContextView view) =>
+		ProjectPresentationCatalog.Get(view).Token;
 
-	private static string ToToken(ProjectContextDocumentFormat format) => format switch
-	{
-		ProjectContextDocumentFormat.Text => "text",
-		ProjectContextDocumentFormat.Json => "json",
-		ProjectContextDocumentFormat.Xml => "xml",
-		_ => "markdown"
-	};
+	private static string ToToken(ProjectContextDocumentFormat format) =>
+		ProjectPresentationCatalog.Get(format).Token;
 
-	private static void AppendQuoted(StringBuilder command, string value)
-	{
-		if (!value.Any(char.IsWhiteSpace) && !value.Contains('"'))
+	private static string ToToken(ProjectCopyExportFormat format) =>
+		format switch
 		{
-			command.Append(value);
-			return;
-		}
+			ProjectCopyExportFormat.Folder => "folder",
+			ProjectCopyExportFormat.Zip => "zip",
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+		};
 
-		command.Append('"').Append(value.Replace("\"", "\\\"", StringComparison.Ordinal)).Append('"');
-	}
+	private static TerminalExportKind MapExportKind(ProjectCopyExportFormat format) =>
+		format switch
+		{
+			ProjectCopyExportFormat.Folder => TerminalExportKind.Folder,
+			ProjectCopyExportFormat.Zip => TerminalExportKind.Zip,
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+		};
+
+	private static void ValidateView(ProjectContextView view) =>
+		_ = ProjectPresentationCatalog.Get(view);
+
+	private static void ValidateDocumentFormat(ProjectContextDocumentFormat format) =>
+		_ = ProjectPresentationCatalog.Get(format);
+
 }

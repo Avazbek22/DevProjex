@@ -1,22 +1,60 @@
-# DevProjex CLI v1 Contract
+# DevProjex Terminal and CLI v1 Contract
 
 This document is the normative public contract for DevProjex Terminal and CLI v1.
-The parser, generated help, process tests, and completion output are derived from
-one `System.CommandLine` command tree.
+Code, generated help, completion, README examples, packaging documentation, and
+release validation must agree with this document. Other terminal documents explain
+the contract but do not override it.
 
 ## Product Surfaces
 
-- `DevProjex.exe` launched without a console starts DevProjex Desktop.
-- `devprojex` in an interactive terminal starts DevProjex Terminal.
-- `devprojex <command>` runs a deterministic command without initializing Avalonia.
+DevProjex follows one workflow across all presentation surfaces:
+
+```text
+inspect -> select -> verify -> export
+```
+
+- Desktop provides the most visual workflow.
+- Terminal Workspace provides keyboard-first interactive work.
+- Direct CLI commands provide deterministic stdout, scripts, and CI automation.
+- The three surfaces follow the same product workflow; this contract does not
+  claim that their presentation and export orchestration is one interchangeable
+  implementation pipeline.
+- Terminal Workspace and direct CLI share terminal planning and document
+  services. Desktop keeps its established presentation and export orchestration.
+- Opening or analyzing a source project never modifies that project.
+- The source-project read-only promise does not cover explicit export
+  destinations, profiles, settings, clone/cache storage, or runtime state.
+- DevProjex has no telemetry.
+
+`DevProjex.Terminal` remains a class library inside the primary application. Every
+RID publish contains exactly one primary DevProjex application executable.
+
+## Supported Entry Points
+
+- `devprojex` in an interactive terminal starts Terminal Workspace.
+- `devprojex <command>` runs a direct command without initializing Avalonia.
 - `devprojex open` opens or reuses Desktop.
-- `devprojex ui` sends semantic commands to an existing Desktop instance over local,
-  per-user IPC.
+- `devprojex ui` sends a semantic request to an existing Desktop instance.
+- A graphical launch starts Desktop.
 
-The portable distribution contains one primary executable. Terminal and CLI code
-is linked into that executable as a class library.
+On Windows, `devprojex` means the installed App Execution Alias or the generated
+`devprojex.cmd` launcher. The launcher waits for completion, forwards arguments
+without changing their values, preserves stdout and stderr, and returns the exact
+application exit code. Direct invocation of the physical WinExe path is an
+advanced implementation detail and is not the supported shell entry point.
 
-## Command Tree
+On Linux and macOS, `devprojex` is the installed executable or generated POSIX
+launcher. The launcher uses `exec` and forwards the original argument vector.
+
+The published application is a self-contained single-file bundle. Its .NET host
+may extract native libraries before managed routing: by default under
+`$HOME/.net` on Linux/macOS and `%TEMP%/.net` on Windows. DevProjex guarantees
+direct-command startup when that default is writable or when a private writable
+`DOTNET_BUNDLE_EXTRACT_BASE_DIR` is supplied. An unset or read-only Unix home, or
+an unusable Windows temporary directory, therefore requires the explicit
+extraction base. The v1 contract does not promise extraction-free startup.
+
+## Public Command Tree
 
 ```text
 devprojex
@@ -37,98 +75,587 @@ devprojex
 │   ├── status
 │   ├── activate
 │   ├── preview
+│   │   ├── open
+│   │   ├── close
+│   │   └── set-view
 │   ├── tree
+│   │   └── set-format
 │   ├── filter
+│   │   ├── set
+│   │   └── clear
 │   └── search
+│       ├── set
+│       ├── next
+│       ├── previous
+│       └── clear
 ├── doctor
-├── completion
-└── dev
-    ├── benchmark
-    │   ├── analysis
-    │   └── ui
-    └── session
+└── completion
 ```
 
-`dev` is a maintainer surface and is hidden from normal root help. There is no
-root-level arbitrary project argument.
+`dev` is a hidden maintainer namespace. It is not part of the stable public v1
+contract and never appears in normal help or completion.
 
-## Selection
+Command and option names are case-sensitive. Choice values are accepted
+case-insensitively, converted once at the parser boundary, and represented in
+help, completion, diagnostics, profiles, JSON, and XML by canonical lowercase
+tokens. A supplied unknown choice is a usage error; it never selects a default.
 
-Commands accept a typed selection:
+Both `--name value` and `--name=value` are supported where System.CommandLine
+supports them. An empty inline assignment such as `--name=` is a missing-value
+usage error for a value-taking option and never consumes the following token as
+its value. Adding `=` to a flag, for example `--plain=`, is invalid syntax.
+Explicit empty argv values for public options and positional arguments are usage
+errors; defaults apply only when a value is absent. Lexical integrity errors are
+reported before other parser diagnostics. `--` terminates option, help, legacy
+detection, and the inline-assignment check. Every following token is argument
+data.
 
-- `--profile standard|local|FILE`
-- repeatable `--root PATH`
-- repeatable `--extension EXT`
-- repeatable `--select RELATIVE_PATH`
-- `--git-mode none|gitignore|tracked`
-- repeatable `--exclude NAME`
+## Recursive Options
 
-Git filtering is independent from ordinary exclusions. `--exclude none` is an
-exact empty exclusion set and cannot be combined with another exclusion. An absent
-option inherits the selected profile. Direct commands default to `standard`; TUI
-defaults to `local` when a local profile exists, otherwise `standard`.
+`--language <CODE>` is recursive and may occur before or after a subcommand. The
+supported canonical tokens are:
 
-Selected paths are relative to the source root. Empty selection means the full
-effective tree. A directory means its effective subtree. Absolute paths, parent
-traversal, and paths escaping through links are rejected.
+```text
+en ru de fr it es pt pt-pt kk tg uz
+```
 
-## Streams
+The default is the detected application language. It affects human help,
+diagnostics, status, and TUI labels only. Machine identifiers remain English.
 
-`stdout` is the payload channel:
+`--help`, `-h`, `-?`, `/?`, `/h`, `--version`, and `-v` use stdout and exit `0`.
+Help targets only a valid command path. An unknown token before a help token
+remains a usage error instead of silently selecting a later command.
 
-- analysis or context documents;
-- one absolute result path for file, folder, and ZIP output;
+## Shared Selection
+
+`analyze`, `export context`, `export project`, and `open` use:
+
+```text
+--profile <standard|local|FILE>
+--root <PATH>                         repeatable
+--extension <EXT>                    repeatable
+--select <RELATIVE_PATH>             repeatable
+--git-mode <none|gitignore|tracked>
+--exclude <NAME>                     repeatable
+```
+
+Exclusion tokens are:
+
+```text
+smart-ignore
+hidden-folders
+hidden-files
+dot-folders
+dot-files
+empty-folders
+empty-files
+extensionless-files
+none
+```
+
+`--exclude none` is an exact empty exclusion set. Repeating `none` is idempotent,
+but combining it with another exclusion is a usage error.
+
+Selection precedence is:
+
+1. Load the selected baseline profile.
+2. Replace each field explicitly supplied by the command.
+3. Validate paths and Git readiness against the source.
+4. Build one canonical `ProjectContextPlan`.
+
+An absent collection inherits the profile. An explicitly supplied collection
+replaces that profile field. Selected paths are relative to the source root.
+Selecting a directory selects its effective subtree. Parent traversal, absolute
+selected paths, and link-based escapes are rejected.
+
+Direct commands default to `standard`. TUI and `open` default to `local` when a
+valid local profile exists, otherwise `standard`.
+
+`open --last` resolves the last project itself. It cannot be combined with a
+project argument or any selection override because silently discarding those
+overrides is forbidden.
+
+## Command Contracts
+
+### `tui`
+
+```text
+devprojex tui [PROJECT]
+  --profile <auto|standard|local|FILE>
+                                      default: auto
+  --screen <auto|alternate|inline>    default: stored setting, then auto
+  --mouse
+  --no-mouse
+  --color <auto|always|never>         default: auto
+  --plain
+```
+
+`PROJECT` defaults to the current directory. Any readable directory is valid.
+Filesystem roots, broad home directories, and protected system locations are not
+opened automatically from Welcome.
+
+The default mouse policy is enabled when the active terminal driver supports it.
+`--mouse` enables mouse input for this session, `--no-mouse` disables it, and the
+combination is a usage error. Every required workflow remains keyboard-accessible.
+
+An explicit `--screen` applies only to the current invocation. It never writes a
+persistent setting. `auto` resolves from terminal capabilities and multiplexer
+signals. Normal exit, cancellation, and failure restore cursor, colors, mouse,
+input mode, and alternate-screen state.
+
+TUI requires interactive input and output and refuses `TERM=dumb`.
+
+### `open`
+
+```text
+devprojex open [PROJECT]
+  --last
+  --new-window
+  --wait
+  --preview
+  --view <tree|content|tree-content>
+  --tree-format <text|markdown|json|xml>
+  --filter <QUERY>
+  --search <QUERY>
+  <shared selection options>
+```
+
+`PROJECT` defaults to the current directory. `--filter` and `--search` conflict.
+`--view` and `--search` imply `--preview`. `--wait` means wait until the requested
+project and state have been applied, not until Desktop closes.
+`--profile auto` is accepted by `open` and resolves `local` when a valid local
+profile exists, otherwise `standard`.
+
+On success, stdout contains the accepted absolute project path when a project was
+resolved. Operational and handoff diagnostics use stderr.
+
+### `analyze`
+
+```text
+devprojex analyze [PROJECT]
+  --format <text|json>                default: text
+  -o, --output <PATH|->               default: -
+  --strict
+  <shared selection options>
+  <shared output options>
+```
+
+Analysis is already read-only, so it has no `--dry-run` option. `--strict` writes
+the requested report first and returns `3` when policy diagnostics exist.
+
+For text output, one canonical serializer defines fields, ordering, values, and
+exactly one platform-native final line separator. Redirected stdout, `--plain`,
+and file output use that
+canonical text. Interactive stdout without `--plain` may use a rich presentation,
+but it contains the same logical fields and values.
+
+An analysis file must be outside the source project and must not already exist.
+There is no analysis `--force` option in v1.
+
+### `export context`
+
+```text
+devprojex export context [PROJECT]
+  --view <tree|content|tree-content>  default: tree-content
+  --format <text|markdown|json|xml>   default: markdown
+  -o, --output <PATH|->               default: -
+  --force
+  --dry-run
+  <shared selection options>
+  <shared output options>
+```
+
+`--force` is valid only for a file destination and performs atomic replacement.
+It is a usage error with stdout.
+
+### `export project`
+
+```text
+devprojex export project [PROJECT]
+  --as <folder|zip>                   required
+  -o, --output <PATH>                 required
+  --force
+  --dry-run
+  <shared selection options>
+  <shared output options>
+```
+
+Folder output creates exactly the requested, previously absent directory. It
+never adds a project-name child or a numeric suffix. `--force` is invalid for
+folder output. ZIP output requires a `.zip` path; `--force` permits atomic ZIP
+replacement.
+
+### Profiles
+
+```text
+devprojex profile show [PROJECT]
+  --profile <standard|local|FILE>     default: standard
+  --format <text|json>                default: text
+
+devprojex profile export [PROJECT]
+  --profile <standard|local|FILE>     default: local
+  -o, --output <FILE>                 required
+  --force
+
+devprojex profile import <FILE> [PROJECT]
+  --apply
+
+devprojex profile validate <FILE>
+devprojex profile reset [PROJECT]
+```
+
+Profile export is an explicit profile-file write and is not constrained by the
+source-project destination policy. It is atomic and conflicts unless `--force` is
+present. An existing profile destination returns destination-conflict exit code
+`4`. Import validates without modifying local state unless `--apply` is
+present.
+
+### Desktop control
+
+```text
+devprojex ui list
+  --format <text|json>               default: text
+
+devprojex ui status
+devprojex ui activate
+devprojex ui preview open
+  --view <tree|content|tree-content>
+devprojex ui preview close
+devprojex ui preview set-view <VIEW>
+devprojex ui tree set-format <FORMAT>
+devprojex ui filter set <QUERY>
+devprojex ui filter clear
+devprojex ui search set <QUERY>
+devprojex ui search next
+devprojex ui search previous
+devprojex ui search clear
+```
+
+`VIEW` is required and accepts `tree`, `content`, or `tree-content`. `FORMAT` is
+required and accepts `text`, `markdown`, `json`, or `xml`. `QUERY` is one
+required argument; use shell quoting when it contains spaces. `preview open`
+without `--view` preserves the Desktop view while opening the preview.
+
+Every action except `ui list` accepts:
+
+```text
+--instance <ID>
+--project <PATH>
+--timeout <DURATION>                  default: 10s
+```
+
+The successful stdout payload is the versioned Desktop protocol response
+envelope (`protocolVersion`, `requestId`, `ok`, `state`, `error`), not an
+unversioned state fragment. IPC is local, per-user, versioned, and does not expose
+arbitrary methods or properties.
+
+### `doctor`
+
+```text
+devprojex doctor --format <text|json>
+```
+
+The default format is `text`. Checks use `pass`, `warning`, `failure`, or `skip`.
+Warnings do not fail the command. A real failure of a required runtime component
+returns policy exit code `3`. Doctor is read-only and leaves no probe files.
+Desktop IPC is `skip` before a Desktop session has initialized its registry;
+an existing but unreadable or path-conflicted registry is a `failure`.
+
+### `completion`
+
+```text
+devprojex completion <bash|zsh|fish|powershell>
+```
+
+The generated script queries completion from the same command tree and current
+cursor context. It does not expose hidden commands. It scopes subcommands and
+options, completes choice values and paths, and does not suggest a non-repeatable
+option already present. Hidden completion transport details, including the
+UTF-8 Base64 argument used to preserve unfinished quoted input in Windows
+PowerShell 5.1, are internal and are not part of the public v1 syntax.
+
+## Shared Output Options
+
+Direct analysis and export commands use:
+
+```text
+--color <auto|always|never>           default: auto
+--progress <auto|always|never>        default: auto
+--verbosity <quiet|minimal|normal|detailed|diagnostic>
+                                      default: normal
+--plain
+```
+
+Verbosity controls operational stderr only and never removes a requested stdout
+payload:
+
+- `quiet`: errors only;
+- `minimal`: errors and warnings;
+- `normal`: normal status, warnings, and safe errors;
+- `detailed`: normal output plus safe operation context;
+- `diagnostic`: detailed output plus exception type and safe stack/request context.
+
+Adjacent levels may currently share messages where no additional safe context
+exists. Normal output never contains raw platform exception messages, file
+contents, credentials, or environment secrets.
+
+## Public Option Semantics Matrix
+
+This matrix is the option audit index. Detailed tokens and document shapes remain
+defined in the command sections above; the matrix records the observable effect
+that prevents an accepted option from becoming a no-op.
+
+| Command scope | Option | Default | Explicit observable effect | Conflict or restriction | Stream and exit contract | Contract tests |
+|---|---|---|---|---|---|---|
+| all commands | `--language` | detected application language | changes localized human help, diagnostics, status, and TUI labels | machine identifiers never localize | requested payload remains on stdout; invalid value exits `2` | parser, help, completion, localization |
+| `tui` | `--profile` | `auto` | selects `standard`, `local`, or a profile file before building the workspace plan | `auto` is TUI/open-only | interactive screen; invalid/unresolved value exits `2` | parser, workspace, help, completion |
+| `tui` | `--screen` | stored setting, then `auto` | overrides alternate/inline behavior for this invocation only | never persists the override | terminal screen; invalid value exits `2`; state restores on every exit path | parser, settings, PTY lifecycle |
+| `tui` | `--mouse`, `--no-mouse` | capability-based auto policy | enables or disables input handling for this session | mutually exclusive | terminal screen; conflict exits `2`; tracking restores on exit | parser, workspace, PTY lifecycle |
+| `tui` | `--color`, `--plain` | `auto`, off | selects color policy or strict plain presentation/export rendering | `--plain --color always` exits `2` | terminal screen; no payload stream repurposing | parser, presentation, plain PTY |
+| `open` | `--last` | off | resolves the most recent workspace | conflicts with `PROJECT` and every selection override | accepted absolute path on stdout; conflict exits `2` | parser, handler, Desktop IPC |
+| `open` | `--new-window` | off | requests a new Desktop instance | none | accepted path on stdout; handoff failures use stderr and `5` | handler, Desktop IPC |
+| `open` | `--wait` | off | guarantees that the requested project/state is applied before return | does not wait for Desktop termination | accepted path on stdout; timeout uses stderr and `5` | handler, Desktop IPC |
+| `open` | `--preview`, `--view`, `--tree-format` | closed; no explicit view/format | opens preview and applies its typed view/tree format | `--view` implies preview | accepted path on stdout; invalid value exits `2` | parser, handler, Desktop IPC |
+| `open` | `--filter`, `--search` | absent | applies the requested Desktop filter or preview search | mutually exclusive; search implies preview | accepted path on stdout; conflict exits `2` | parser, handler, Desktop IPC |
+| analyze/context/project/open | `--profile` | `standard`; `open`: `auto` | resolves `standard`, `local`, or a portable profile before explicit overrides | `auto` is accepted only by `open`; conflicts with `open --last` | requested payload/path stays on stdout; unresolved profile exits `2` | parser, resolver, handler, process |
+| analyze/context/project/open | `--root` | profile roots | replaces the profile root set with each repeated top-level relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
+| analyze/context/project/open | `--extension` | profile extensions | replaces the profile extension set with each repeated normalized extension | repeatable; conflicts with `open --last` | requested payload/path stays on stdout | parser, resolver, handler, process |
+| analyze/context/project/open | `--select` | profile selected paths | replaces the profile explicit path set with each repeated source-relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
+| analyze/context/project/open | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; unavailable tracked index becomes a coded policy diagnostic | requested payload/path stays on stdout; policy failure exits `3` | parser, resolver, handler, process |
+| analyze/context/project/open | `--exclude` | profile exclusions | replaces the profile exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
+| `analyze` | `--format` | `text` | selects the canonical text serializer or analysis JSON | none | document on stdout or in the selected file; invalid value exits `2` | parser, serializer, handler, process |
+| `analyze` | `-o`, `--output` | `-` | selects stdout or an exact new report file | existing/unsafe file is rejected; no force or dry-run | document or real absolute path on stdout; conflict exits `4` | handler, destination, process |
+| `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |
+| analyze/context/project | `--color` | `auto` | selects ANSI color policy independently for the relevant human stream | `always` conflicts with `--plain`; `never` does not force ASCII | requested payload stays on stdout; conflict exits `2` | parser, rendering, process |
+| analyze/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; plain forced progress is static ASCII | requested payload stays on stdout | parser, rendering, process |
+| analyze/context/project | `--verbosity` | `normal` | controls optional operational stderr from quiet through safe diagnostic context | never removes requested stdout or suppresses errors | requested payload stays on stdout; invalid value exits `2` | parser, rendering, process |
+| analyze/context/project | `--plain` | off | selects line-oriented ASCII human output and disables ANSI, markup, decoration, and animation | conflicts with `--color always` | machine schema and requested payload stay unchanged; conflict exits `2` | parser, rendering, process |
+| `export context` | `--view`, `--format` | `tree-content`, `markdown` | selects typed document sections and serializer | none | document on stdout/file; invalid value exits `2` | parser, serializer, process |
+| `export context` | `-o`, `--output` | `-` | selects streaming stdout or an exact context file | destination must be outside source | document or real absolute path on stdout | destination, streaming, process |
+| `export context` | `--force` | off | atomically replaces an existing context file | invalid with stdout | success path on stdout; conflict exits `4`, invalid combination `2` | parser, destination, handler |
+| `export context` | `--dry-run` | off | runs plan and destination preflight without document generation | creates no parent, staging, or output | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
+| `export project` | `--as` | required | selects exact folder or ZIP export | missing/invalid value exits `2` | real absolute created destination on stdout | parser, handler, process |
+| `export project` | `-o`, `--output` | required | selects the exact destination | folder must be absent; ZIP path ends in `.zip`; destination outside source | real absolute created destination on stdout; conflict exits `4` | parser, destination, integration |
+| `export project` | `--force` | off | atomically replaces an existing ZIP | invalid for folder output | success path on stdout; invalid combination exits `2` | parser, destination, integration |
+| `export project` | `--dry-run` | off | validates plan, kind, and exact destination without copying | creates no folder, ZIP, parent, or staging | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
+| `profile show` | `--profile`, `--format` | `standard`, `text` | resolves a profile and selects text or profile JSON | `auto` is not accepted | document on stdout; invalid/unresolved value exits `2` | parser, profile handler |
+| `profile export` | `--profile`, `-o`/`--output`, `--force` | `local`, required, off | resolves and atomically writes the exact portable profile file | existing file needs force | real absolute path on stdout; conflict exits `4` | parser, profile handler, filesystem effects |
+| `profile import` | `--apply` | off | persists the validated imported profile as local state | absent means validation-only | status/path contract on stdout; invalid profile exits `2` | profile handler, persistence |
+| `ui list` | `--format` | `text` | selects text or versioned instance JSON | none | requested list on stdout; invalid value exits `2` | parser, schema, IPC |
+| targetable `ui` actions | `--instance`, `--project` | automatic single target | selects a Desktop target by stable id or project path | ambiguous/unavailable target fails rather than guessing | requested action payload on stdout; target failure exits `5` | parser, completion, IPC |
+| targetable `ui` actions | `--timeout` | `10s` | bounds local IPC connection/request time | finite positive duration within parser limits | timeout diagnostic on stderr and exit `5`; invalid duration exits `2` | parser, completion, IPC |
+| `doctor` | `--format` | `text` | selects localized text or versioned doctor JSON | none | report on stdout; required failure exits `3` | handler, schema, process |
+
+Commands whose public contract contains only required/optional arguments
+(`profile validate`, `profile reset`, nested semantic `ui` actions, and
+`completion`) have no additional command-local options beyond this matrix and
+their command definitions above. Help and context-aware completion are generated
+from the same command model, and contract tests fail when an option is added
+without metadata or observable coverage.
+
+## stdout and stderr
+
+stdout is the payload channel:
+
+- analysis and context documents;
+- one real absolute result path after a file, folder, or ZIP was created;
+- an accepted project path from `open`;
+- requested Desktop control payloads;
 - help, version, and completion scripts.
 
-`stderr` contains progress, status, warnings, diagnostics, migration guidance, and
-errors. Redirected JSON and XML contain no ANSI or additional lines. Direct
-commands never prompt.
+stderr is the operational channel:
+
+- progress and status;
+- warnings and diagnostics;
+- migration guidance;
+- errors and hints;
+- dry-run plans.
+
+Direct commands never prompt. JSON and XML stdout never contain ANSI, progress,
+spinner frames, tables, warning lines, result paths, or summaries.
+
+`--dry-run` performs source planning plus destination safety and conflict
+validation, creates no file, directory, ZIP, staging path, or parent directory,
+and leaves stdout empty. A localized readiness summary uses stderr. For stdout
+destinations, dry-run validates readiness but does not generate the document.
+The dry-run readiness line is the explicitly requested preflight result, so
+`--verbosity quiet` and `minimal` keep that one stderr line while suppressing
+incidental status and progress.
+
+An expected downstream pipe closure is not reported as an application crash. It
+produces no stack trace or DPX error and exits successfully so bounded consumers
+such as `head` remain usable.
+
+## Color, Plain, Unicode, and Progress
+
+`--color never` disables ANSI color but does not change document Unicode.
+
+`--plain` is the strictest human-output mode. For direct commands it guarantees:
+
+- no ANSI or markup;
+- no animations;
+- no emoji or decorative symbols;
+- no Unicode box-drawing;
+- ASCII, line-oriented human output.
+
+An interactive TUI necessarily uses terminal cursor, input-mode, and screen-buffer
+control sequences. In TUI `--plain` disables color styling, motion, decorated
+frames, Unicode box-drawing, emoji, and ornamental glyphs; the visible layout is
+monochrome and uses ASCII structure. Localized text, project content, and file
+names remain Unicode and are never transliterated or corrupted merely to satisfy
+plain mode. PTY restoration tests validate that all terminal-control modes are
+undone before the parent shell resumes.
+
+JSON and XML schemas do not change in plain mode. Text and Markdown tree sections
+use ASCII tree glyphs when plain mode is requested.
+
+Color precedence is:
+
+1. `--plain`;
+2. an explicit `--color` value;
+3. a non-empty `NO_COLOR` value;
+4. automatic terminal detection.
+
+`NO_COLOR=` is treated as unset. `--plain --color always` is a usage error.
+
+`TERM=dumb` disables ANSI, interactive progress, and TUI startup. Direct commands
+remain usable. stdout and stderr capabilities are evaluated independently.
+Automatic progress animates only when stderr is interactive and CI is not active.
+`--plain --progress always` emits bounded static ASCII progress lines on stderr;
+plain `auto` remains suppressed. Explicit `--progress always` also falls back to
+bounded static lines when stderr is redirected or `TERM=dumb`, even if
+`--color always` was requested. `quiet` and `minimal` suppress optional progress
+even when `always` is requested.
+
+## Destination and Atomicity
+
+Analysis reports, context files, project folders, and project ZIP files use one
+canonical destination-safety policy:
+
+- destination equal to or inside the canonical source is rejected;
+- a symlink or junction resolving into the source is rejected;
+- an existing destination conflicts with exit code `4` unless replacement is
+  explicitly allowed;
+- staging is adjacent to the destination;
+- a successful replacement is atomic where the platform filesystem supports it;
+- cancellation or failure removes staging and partial output;
+- the source tree is unchanged.
+
+Context and analysis file output may create a missing parent directory only during
+real execution. Dry-run creates nothing.
+
+Folder export creates exactly the requested directory and requires it to be
+absent. ZIP and context replacement require `--force`. Profile export follows its
+separate explicit-file policy.
+
+## Streaming Context Documents
+
+Complete context documents are written incrementally to a writable destination.
+stdout may be non-seekable. File output streams into an adjacent temporary file
+and then moves or replaces it atomically. The CLI handler never materializes a
+complete project context as one byte buffer or one managed string.
+
+Exact document generation validates and decodes each included text file in
+bounded chunks; it does not retain either the complete document or a complete
+currently processed file as a managed string. Memory therefore does not grow
+with the sum of included file contents or with the size of one large text file.
+Binary bytes are never embedded in text, Markdown, JSON, or XML context
+documents.
+
+## Cancellation and Signals
+
+- The first interrupt cancels active direct work or the active TUI operation.
+- Direct cancellation returns `130`, writes one concise localized diagnostic to
+  stderr, and removes file-output staging. A streamed stdout destination cannot
+  be rolled back and may contain the document prefix already accepted by the
+  downstream consumer; cancellation never appends error text to that payload.
+- TUI cancellation returns to a usable workspace when an operation is active.
+- SIGINT, SIGTERM, and applicable SIGHUP requests use the same cancellation path.
+- A repeated interrupt may terminate the process after cleanup had an opportunity
+  to start.
+- Child Git processes receive cancellation and are not intentionally orphaned.
+
+Terminal restoration is protected by `finally` paths on normal exit, cancellation,
+and unhandled failure.
+
+## Legacy Migration
+
+The flat CLI was experimental and is not a stable public contract. DevProjex does
+not execute it.
+
+Only explicitly recognized and unambiguous legacy action/value shapes before
+`--` trigger migration. Both `--option value` and `--option=value` are
+recognized. Missing values, unsupported values, duplicated non-repeatable
+options, unrelated tokens, similar names, and all data after `--` never produce
+a guessed migration.
+
+Migration writes a structured replacement argument vector to stderr and exits `2`;
+stdout remains empty. The presentation does not claim that one quoting algorithm
+is portable across PowerShell, CMD, Bash, Zsh, and Fish.
 
 ## Exit Codes
 
 | Code | Meaning |
 |---:|---|
-| 0 | Success, help, or version |
+| 0 | Success, help, version, or expected downstream pipe closure |
 | 1 | Runtime or I/O failure |
 | 2 | Invalid command, option, value, or combination |
-| 3 | Policy or explicit readiness failure |
+| 3 | Policy, readiness, or required doctor check failure |
 | 4 | Destination conflict |
 | 5 | Desktop target unavailable or ambiguous |
 | 130 | Canceled |
 
-Human errors include a stable `DPX-*` machine code. Raw platform exception messages
-are not written in normal verbosity.
+Human errors contain a stable `DPX-*` code. Diagnostic verbosity may add safe
+details but never changes the exit code.
 
-## Output Documents
+## Machine Documents
 
-All new machine-readable documents contain `schemaVersion`. JSON property names,
-XML element names, command names, option names, and enum tokens are stable English
-identifiers. Human text is localized.
+New public JSON documents use:
 
-Context export treats text/Markdown/JSON/XML as whole-document formats. Binary file
-bytes are never embedded in an AI text context; machine formats identify binary
-entries. Folder and ZIP export preserve binary bytes.
+- integer `schemaVersion`;
+- stable `kind`;
+- stable English property names;
+- canonical lowercase enum tokens;
+- `/` separators in machine paths;
+- UTF-8 without BOM;
+- no ANSI or localized identifiers.
 
-## Destinations
+The v1 kinds are:
 
-CLI destinations are exact:
+```text
+devprojex-analysis
+devprojex-context
+devprojex-doctor
+devprojex-profile
+devprojex-ui-instances
+```
 
-- folder export creates exactly the requested, previously absent directory;
-- ZIP export requires a `.zip` path;
-- existing destinations fail with exit code 4;
-- `--force` is valid only for atomic ZIP or context-file replacement.
+Newly written portable profiles include `kind: "devprojex-profile"`. Readers
+continue to accept schema-v1 profiles created before the kind discriminator was
+added, but reject any explicit conflicting kind.
 
-The source tree is never modified. Existing destination canonicalization, staging,
-cancellation cleanup, and symlink/junction protection remain mandatory.
+Context XML uses `devprojexContext`, numeric text `schemaVersion="1"`, and
+`kind="devprojex-context"`. Its XML declaration reports UTF-8. Generated JSON and
+XML must parse with standard parsers.
 
-## Compatibility
+Analysis v1 contains inventory, effective selection, metrics, diagnostics, and
+fingerprint. Timings are not part of the stable v1 analysis schema.
 
-The experimental flat CLI is not executed. Recognized legacy action flags produce
-one exact migration example on `stderr` and exit with code 2. Internal desktop
-relaunch and UI benchmark protocols are not public CLI options.
+## Stable After v1
 
-## Future Additions
+The following are stable after v1:
 
-Future Secret Guard, comments, signatures/ECO, token-budget, and MCP features must
-consume the same project context plan. They may add options or a new command
-namespace only when functional; v1 help contains no placeholders.
+- public command hierarchy;
+- command and option names;
+- canonical choice tokens;
+- option meaning, defaults, conflicts, and repeatability;
+- selection and profile precedence;
+- stream ownership;
+- exit-code meanings;
+- destination and dry-run semantics;
+- machine schema versions, kinds, and existing required properties;
+- supported terminal entry-point contract.
+
+Localized wording, rich interactive layout, additive machine properties, and
+hidden maintainer commands may evolve without redefining the public syntax.
+Breaking changes require an explicit major-version contract and migration path.

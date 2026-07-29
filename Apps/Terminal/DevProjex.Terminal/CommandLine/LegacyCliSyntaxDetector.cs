@@ -1,173 +1,307 @@
 namespace DevProjex.Terminal.CommandLine;
 
-public sealed record LegacyCliMigration(string Replacement, string Message);
+public sealed record LegacyCliMigration(
+	IReadOnlyList<string> ReplacementArguments);
 
 public static class LegacyCliSyntaxDetector
 {
-	private static readonly HashSet<string> LegacyActions = new(StringComparer.OrdinalIgnoreCase)
-	{
-		"--no-ui",
-		"--silent",
-		"--report",
-		"--export",
-		"--copy",
-		"--benchmark",
-		"--benchmark-ui",
-		"--session-metrics"
-	};
-	private static readonly HashSet<string> LegacyOptionsWithValues = new(StringComparer.OrdinalIgnoreCase)
-	{
-		"--path",
-		"--language",
-		"--report",
-		"--report-path",
-		"--report-format",
-		"--export",
-		"--copy",
-		"--output",
-		"-o",
-		"--format",
-		"--export-format",
-		"--include-root",
-		"--roots",
-		"--include-extension",
-		"--ext",
-		"--ignore",
-		"--benchmark",
-		"--benchmark-ui",
-		"--benchmark-output",
-		"--session-metrics",
-		"--session-metrics-output",
-		"--ui-benchmark-script",
-		"--preview-mode",
-		"--tree-format",
-		"--tree-filter",
-		"--preview-search"
-	};
+	private const string ReportAction = "--report";
+	private const string ExportAction = "--export";
+	private const string CopyAction = "--copy";
 
-	public static bool TryDetect(IReadOnlyList<string> args, out LegacyCliMigration migration)
+	public static bool TryDetect(
+		IReadOnlyList<string> arguments,
+		out LegacyCliMigration migration)
 	{
 		migration = null!;
-		if (!args.Any(LegacyActions.Contains))
+		if (arguments.Contains("--", StringComparer.Ordinal) ||
+		    !TryParse(arguments, out var invocation) ||
+		    !TryBuildReplacement(invocation, out var replacement))
+		{
 			return false;
-
-		var project = ReadValue(args, "--path") ?? FindLegacyPositionalProject(args) ?? ".";
-		var output = ReadValue(args, "--output") ?? ReadValue(args, "-o");
-		string replacement;
-		if (TryReadValue(args, "--copy", out var copyMode))
-		{
-			var format = copyMode.Equals("zip", StringComparison.OrdinalIgnoreCase) ? "zip" : "folder";
-			var destination = output ?? (format == "zip" ? "./project-export.zip" : "./project-export");
-			replacement = $"devprojex export project {Quote(project)} --as {format} -o {Quote(destination)}";
-		}
-		else if (TryReadValue(args, "--export", out var exportMode))
-		{
-			var view = exportMode.ToLowerInvariant() switch
-			{
-				"tree" => "tree",
-				"content" => "content",
-				_ => "tree-content"
-			};
-			var format = ReadValue(args, "--format") ?? "text";
-			var destination = output ?? "-";
-			replacement = $"devprojex export context {Quote(project)} --view {view} --format {format} -o {Quote(destination)}";
-		}
-		else if (args.Contains("--benchmark-ui", StringComparer.OrdinalIgnoreCase))
-		{
-			replacement = $"devprojex dev benchmark ui {Quote(project)}";
-		}
-		else if (args.Contains("--benchmark", StringComparer.OrdinalIgnoreCase))
-		{
-			replacement = $"devprojex dev benchmark analysis {Quote(project)}";
-		}
-		else if (args.Contains("--session-metrics", StringComparer.OrdinalIgnoreCase))
-		{
-			replacement = $"devprojex dev session {Quote(project)}";
-		}
-		else
-		{
-			var reportPath = ReadValue(args, "--report") ?? "-";
-			replacement = $"devprojex analyze {Quote(project)} --format json -o {Quote(reportPath)}";
 		}
 
-		replacement += BuildSelectionMigration(args);
-		migration = new LegacyCliMigration(
-			replacement,
-			"The experimental flat CLI has been replaced by hierarchical commands.");
+		migration = new LegacyCliMigration(replacement);
 		return true;
 	}
 
-	private static string BuildSelectionMigration(IReadOnlyList<string> args)
+	private static bool TryParse(
+		IReadOnlyList<string> arguments,
+		out LegacyInvocation invocation)
 	{
-		var output = new StringBuilder();
-		for (var index = 0; index < args.Count - 1; index++)
+		invocation = new LegacyInvocation();
+		for (var index = 0; index < arguments.Count; index++)
 		{
-			if (!args[index].Equals("--ignore", StringComparison.OrdinalIgnoreCase))
+			var token = arguments[index];
+			if (!token.StartsWith("-", StringComparison.Ordinal))
+			{
+				if (invocation.PositionalProject is not null)
+					return false;
+				invocation.PositionalProject = token;
 				continue;
+			}
 
-			switch (args[index + 1].ToLowerInvariant())
+			var equalsIndex = token.IndexOf('=');
+			var name = equalsIndex >= 0 ? token[..equalsIndex] : token;
+			if (!RequiresValue(name))
+				return false;
+
+			string value;
+			if (equalsIndex >= 0)
+			{
+				value = token[(equalsIndex + 1)..];
+			}
+			else
+			{
+				if (++index >= arguments.Count)
+					return false;
+				value = arguments[index];
+			}
+
+			if (value.Length == 0 || !invocation.TryAdd(name, value))
+				return false;
+		}
+
+		return invocation.Action is not null &&
+		       !(invocation.ProjectOption is not null &&
+		         invocation.PositionalProject is not null);
+	}
+
+	private static bool TryBuildReplacement(
+		LegacyInvocation invocation,
+		out IReadOnlyList<string> replacement)
+	{
+		replacement = [];
+		var project = invocation.ProjectOption ??
+		              invocation.PositionalProject ??
+		              ".";
+		if (project.Length == 0 ||
+		    !TryMapIgnores(invocation.Ignores, out var selectionArguments) ||
+		    !TryNormalizeLanguage(invocation.Language, out var language))
+		{
+			return false;
+		}
+
+		List<string> arguments;
+		switch (invocation.Action!.Value.Name.ToLowerInvariant())
+		{
+			case ReportAction:
+				if (invocation.Output is not null ||
+				    invocation.Format is not null)
+				{
+					return false;
+				}
+				arguments =
+				[
+					"devprojex",
+					"analyze",
+					project,
+					"--format",
+					"json",
+					"-o",
+					invocation.Action.Value.Value
+				];
+				break;
+			case ExportAction:
+				if (!CliChoiceSets.ContextView.TryParse(
+					    invocation.Action.Value.Value,
+					    out var view) ||
+				    !TryNormalizeContextFormat(invocation.Format, out var contextFormat))
+				{
+					return false;
+				}
+				arguments =
+				[
+					"devprojex",
+					"export",
+					"context",
+					project,
+					"--view",
+					CliChoiceSets.ContextView.ToToken(view),
+					"--format",
+					contextFormat,
+					"-o",
+					invocation.Output ?? "-"
+				];
+				break;
+			case CopyAction:
+				if (invocation.Format is not null ||
+				    invocation.Output is null ||
+				    !CliChoiceSets.ProjectExportFormat.TryParse(
+					    invocation.Action.Value.Value,
+					    out var outputKind))
+				{
+					return false;
+				}
+				arguments =
+				[
+					"devprojex",
+					"export",
+					"project",
+					project,
+					"--as",
+					CliChoiceSets.ProjectExportFormat.ToToken(outputKind),
+					"-o",
+					invocation.Output
+				];
+				break;
+			default:
+				return false;
+		}
+
+		arguments.AddRange(selectionArguments);
+		if (language is not null)
+		{
+			arguments.Add("--language");
+			arguments.Add(language);
+		}
+		replacement = arguments;
+		return true;
+	}
+
+	private static bool TryNormalizeContextFormat(
+		string? value,
+		out string format)
+	{
+		if (value is null)
+		{
+			format = "text";
+			return true;
+		}
+
+		if (CliChoiceSets.ContextDocumentFormat.TryParse(value, out var parsed))
+		{
+			format = CliChoiceSets.ContextDocumentFormat.ToToken(parsed);
+			return true;
+		}
+
+		format = string.Empty;
+		return false;
+	}
+
+	private static bool TryNormalizeLanguage(
+		string? value,
+		out string? language)
+	{
+		if (value is null)
+		{
+			language = null;
+			return true;
+		}
+
+		if (CliChoiceSets.Language.TryParse(value, out var parsed))
+		{
+			language = CliChoiceSets.Language.ToToken(parsed);
+			return true;
+		}
+
+		language = null;
+		return false;
+	}
+
+	private static bool TryMapIgnores(
+		IReadOnlyList<string> values,
+		out IReadOnlyList<string> arguments)
+	{
+		var mapped = new List<string>(values.Count * 2);
+		foreach (var value in values)
+		{
+			switch (value.ToLowerInvariant())
 			{
 				case "git-ignore":
-					output.Append(" --git-mode gitignore");
+					mapped.Add("--git-mode");
+					mapped.Add("gitignore");
 					break;
 				case "git-tracked-only":
-					output.Append(" --git-mode tracked");
+					mapped.Add("--git-mode");
+					mapped.Add("tracked");
 					break;
 				case "smart-ignore":
-					output.Append(" --exclude smart-ignore");
+					mapped.Add("--exclude");
+					mapped.Add("smart-ignore");
 					break;
+				default:
+					arguments = [];
+					return false;
 			}
 		}
 
-		return output.ToString();
+		arguments = mapped;
+		return true;
 	}
 
-	private static bool TryReadValue(
-		IReadOnlyList<string> args,
-		string option,
-		out string value)
-	{
-		value = ReadValue(args, option) ?? string.Empty;
-		return value.Length > 0;
-	}
+	private static bool RequiresValue(string name) =>
+		name.Equals(ReportAction, StringComparison.OrdinalIgnoreCase) ||
+		name.Equals(ExportAction, StringComparison.OrdinalIgnoreCase) ||
+		name.Equals(CopyAction, StringComparison.OrdinalIgnoreCase) ||
+		name.Equals("--path", StringComparison.OrdinalIgnoreCase) ||
+		name.Equals("--output", StringComparison.OrdinalIgnoreCase) ||
+		name.Equals("-o", StringComparison.OrdinalIgnoreCase) ||
+		name.Equals("--format", StringComparison.OrdinalIgnoreCase) ||
+		name.Equals("--ignore", StringComparison.OrdinalIgnoreCase) ||
+		name.Equals("--language", StringComparison.OrdinalIgnoreCase);
 
-	private static string? ReadValue(IReadOnlyList<string> args, string option)
+	private sealed class LegacyInvocation
 	{
-		for (var index = 0; index < args.Count; index++)
+		public (string Name, string Value)? Action { get; private set; }
+		public string? ProjectOption { get; private set; }
+		public string? PositionalProject { get; set; }
+		public string? Output { get; private set; }
+		public string? Format { get; private set; }
+		public string? Language { get; private set; }
+		public List<string> Ignores { get; } = [];
+
+		public bool TryAdd(string name, string value)
 		{
-			var argument = args[index];
-			if (argument.StartsWith(option + "=", StringComparison.OrdinalIgnoreCase))
-				return argument[(option.Length + 1)..];
-			if (argument.Equals(option, StringComparison.OrdinalIgnoreCase) && index + 1 < args.Count)
-				return args[index + 1];
-		}
-
-		return null;
-	}
-
-	private static string? FindLegacyPositionalProject(IReadOnlyList<string> args)
-	{
-		for (var index = 0; index < args.Count; index++)
-		{
-			var argument = args[index];
-			if (argument.StartsWith('-'))
+			if (IsAction(name))
 			{
-				var optionName = argument.Split('=', 2)[0];
-				if (!argument.Contains('=') &&
-				    LegacyOptionsWithValues.Contains(optionName) &&
-				    index + 1 < args.Count)
-				{
-					index++;
-				}
-				continue;
+				if (Action is not null)
+					return false;
+				Action = (name, value);
+				return true;
+			}
+			if (name.Equals("--path", StringComparison.OrdinalIgnoreCase))
+			{
+				if (ProjectOption is not null)
+					return false;
+				ProjectOption = value;
+				return true;
+			}
+			if (name.Equals("--output", StringComparison.OrdinalIgnoreCase) ||
+			    name.Equals("-o", StringComparison.OrdinalIgnoreCase))
+			{
+				if (Output is not null)
+					return false;
+				Output = value;
+				return true;
+			}
+			if (name.Equals("--format", StringComparison.OrdinalIgnoreCase))
+			{
+				if (Format is not null)
+					return false;
+				Format = value;
+				return true;
+			}
+			if (name.Equals("--language", StringComparison.OrdinalIgnoreCase))
+			{
+				if (Language is not null)
+					return false;
+				Language = value;
+				return true;
+			}
+			if (name.Equals("--ignore", StringComparison.OrdinalIgnoreCase))
+			{
+				Ignores.Add(value);
+				return true;
 			}
 
-			return argument;
+			return false;
 		}
 
-		return null;
-	}
+		private static bool IsAction(string name) =>
+			name.Equals(ReportAction, StringComparison.OrdinalIgnoreCase) ||
+			name.Equals(ExportAction, StringComparison.OrdinalIgnoreCase) ||
+			name.Equals(CopyAction, StringComparison.OrdinalIgnoreCase);
 
-	private static string Quote(string value) =>
-		value.Any(char.IsWhiteSpace) ? $"\"{value.Replace("\"", "\\\"")}\"" : value;
+	}
 }

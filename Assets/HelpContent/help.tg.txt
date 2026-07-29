@@ -80,9 +80,9 @@ DevProjex фазои кории интерактивии терминал ва �
 * `devprojex` — фазои кории интерактивии терминалро кушодан.
 * `devprojex open . --preview` — папкаи ҷориро дар пешнамоиши Desktop кушодан.
 * `devprojex analyze . --format json` — лоиҳаи ҷориро ҳамчун JSON таҳлил кардан.
-* `devprojex export context . --format markdown -o context.md` — контексти барои ЗС омодаро нигоҳ доштан.
-* `devprojex export project . --as folder -o submission` — дарахти самараноки лоиҳаро ба папкаи дақиқ содир кардан.
-* `devprojex export project . --as zip -o submission.zip` — дарахти самараноки лоиҳаро ба ZIP-архив содир кардан.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — контексти барои ЗС омодаро берун аз лоиҳаи манбаъ нигоҳ доштан.
+* `devprojex export project . --as folder -o ../devprojex-submission` — дарахти самараноки лоиҳаро ба папкаи дақиқ содир кардан.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — дарахти самараноки лоиҳаро ба ZIP-архив содир кардан.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — файлҳои пайгиришавандаи Git-ро бо Smart Ignore таҳлил кардан.
 
 Хусусиятҳо:

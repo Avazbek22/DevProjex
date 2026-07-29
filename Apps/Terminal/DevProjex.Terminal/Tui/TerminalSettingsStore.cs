@@ -25,7 +25,10 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 				? document.ScreenMode
 				: TerminalScreenMode.Auto;
 		}
-		catch
+		catch (Exception exception) when (exception is
+			       IOException or
+			       UnauthorizedAccessException or
+			       JsonException)
 		{
 			return TerminalScreenMode.Auto;
 		}
@@ -68,7 +71,9 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 				if (File.Exists(temporaryPath))
 					File.Delete(temporaryPath);
 			}
-			catch
+			catch (Exception exception) when (exception is
+				       IOException or
+				       UnauthorizedAccessException)
 			{
 				// A unique temporary settings file is harmless if a platform delays handle release.
 			}

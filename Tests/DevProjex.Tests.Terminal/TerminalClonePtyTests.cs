@@ -1,10 +1,67 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 
 namespace DevProjex.Tests.Terminal;
 
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalClonePtyTests
 {
+	[Fact(Timeout = 120_000)]
+	public async Task LocalRepositoryCloneThroughApplicationBinaryOpensWorkspaceAndPreservesSource()
+	{
+		using var originRoot = new TemporaryDirectory();
+		var origin = originRoot.CreateDirectory("PublishedCloneRepository");
+		File.WriteAllText(
+			Path.Combine(origin, "PublishedCloneMarker.cs"),
+			"internal sealed class PublishedCloneMarker {}",
+			new UTF8Encoding(false));
+		InitializeGitRepository(origin);
+		var sourceFingerprint = ComputeTreeFingerprint(origin);
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			new Uri(origin).AbsoluteUri,
+			TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"PublishedCloneMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(
+			"DevProjex Terminal · PublishedCloneRepository",
+			workspace,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"PublishedCloneRepository_",
+			workspace,
+			StringComparison.Ordinal);
+
+		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+		var preview = await terminal.WaitForScreenAsync(
+			"internal sealed class PublishedCloneMarker",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("PublishedCloneMarker.cs", preview, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+		Assert.Equal(sourceFingerprint, ComputeTreeFingerprint(origin));
+	}
+
 	[Fact(Timeout = 120_000)]
 	public async Task CloneProgressCancellationCleansCacheAndRetryOpensWorkspace()
 	{
@@ -25,10 +82,11 @@ public sealed class TerminalClonePtyTests
 			rows: 30,
 			environment: new Dictionary<string, string>
 			{
-				[TerminalProgressTestCheckpoint.PhasesVariable] = "clone-connecting"
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "clone-connecting"
 			},
 			cancellationToken: TestContext.Current.CancellationToken,
-			initializeDataRoot: dataRoot => internalDataRoot = dataRoot);
+			initializeDataRoot: dataRoot => internalDataRoot = dataRoot,
+			useProgressCheckpointHost: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -39,9 +97,12 @@ public sealed class TerminalClonePtyTests
 			TestContext.Current.CancellationToken);
 		var checkpointRoot = Path.Combine(
 			internalDataRoot!,
-			"tui-progress-checkpoints");
+			TerminalProgressCheckpointProtocol.DirectoryName);
 		await WaitForFileAsync(
-			Path.Combine(checkpointRoot, "reached-clone-connecting"),
+			Path.Combine(
+				checkpointRoot,
+				TerminalProgressCheckpointProtocol.GetReachedFileName(
+					"clone-connecting")),
 			TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Starting the existing Git clone engine.",
@@ -263,6 +324,30 @@ public sealed class TerminalClonePtyTests
 			process.ExitCode == 0,
 			$"git {string.Join(' ', arguments)} failed with exit code {process.ExitCode}.\n" +
 			$"{standardOutput}\n{standardError}");
+	}
+
+	private static string ComputeTreeFingerprint(string root)
+	{
+		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		foreach (var path in Directory
+			         .EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories)
+			         .OrderBy(
+				         path => Path.GetRelativePath(root, path),
+				         StringComparer.Ordinal))
+		{
+			var relativePath = Path
+				.GetRelativePath(root, path)
+				.Replace('\\', '/');
+			hash.AppendData(
+				Directory.Exists(path)
+					? [(byte)'D']
+					: [(byte)'F']);
+			hash.AppendData(Encoding.UTF8.GetBytes(relativePath));
+			if (File.Exists(path))
+				hash.AppendData(File.ReadAllBytes(path));
+		}
+
+		return Convert.ToHexString(hash.GetHashAndReset());
 	}
 
 	private static async Task WaitForFileAsync(

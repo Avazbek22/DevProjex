@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace DevProjex.Tests.Terminal;
@@ -193,7 +194,8 @@ internal static partial class TerminalScreenSnapshot
 		{
 			source,
 			source.Replace('\\', '/'),
-			source.Replace('/', '\\')
+			source.Replace('/', '\\'),
+			JsonSerializer.Serialize(source)[1..^1]
 		};
 		foreach (var variant in variants)
 		{

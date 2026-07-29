@@ -46,6 +46,49 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task OpenWritesTheAcceptedProjectPathForExistingAndLastProjectRequests()
+	{
+		using var workspace = new TemporaryDirectory();
+		var explicitProject = workspace.CreateDirectory("explicit-project");
+		var lastProject = workspace.CreateDirectory("last-project");
+		var paths = new DesktopControlPaths(() => workspace.CreateDirectory("ipc"));
+		var handler = new OpenStateDesktopHandler(lastProject);
+		await using var server = await DesktopControlServer.StartAsync(
+			handler,
+			explicitProject,
+			paths,
+			TestContext.Current.CancellationToken);
+		var client = new DesktopControlClient(new DesktopInstanceRegistry(paths));
+
+		var explicitEnvironment = new TestTerminalEnvironment();
+		var explicitExitCode = await new DesktopCommandHandler(
+				explicitEnvironment,
+				client: client)
+			.OpenAsync(
+				new DesktopOpenRequest(ProjectPath: explicitProject),
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, explicitExitCode);
+		Assert.Equal(
+			PathUtility.Normalize(explicitProject) + Environment.NewLine,
+			explicitEnvironment.StandardOutput);
+
+		var lastEnvironment = new TestTerminalEnvironment();
+		var lastExitCode = await new DesktopCommandHandler(
+				lastEnvironment,
+				client: client)
+			.OpenAsync(
+				new DesktopOpenRequest(UseLastProject: true),
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, lastExitCode);
+		Assert.Equal(
+			PathUtility.Normalize(lastProject) + Environment.NewLine,
+			lastEnvironment.StandardOutput);
+		Assert.DoesNotContain(server.InstanceId, lastEnvironment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SuccessIsReturnedOnlyAfterHandlerAppliedTheRequest()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -73,6 +116,47 @@ public sealed class DesktopControlIntegrationTests
 		var response = await sendTask;
 		Assert.True(response.Ok);
 		Assert.IsType<DesktopPreviewRequest>(handler.Request);
+	}
+
+	[Fact]
+	public async Task TargetedCliActionWritesTheVersionedProtocolEnvelope()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var handler = new RecordingDesktopHandler();
+		await using var server = await DesktopControlServer.StartAsync(
+			handler,
+			paths: paths,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var registry = new DesktopInstanceRegistry(paths);
+		var registration = Assert.Single(
+			await registry.ListAsync(TestContext.Current.CancellationToken));
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new DesktopCommandHandler(
+				environment,
+				new DesktopControlClient(registry))
+			.SendAsync(
+				new DesktopTarget(InstanceId: registration.InstanceId),
+				"status",
+				new { },
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(
+			DesktopProtocol.CurrentVersion,
+			document.RootElement.GetProperty("protocolVersion").GetInt32());
+		Assert.True(document.RootElement.GetProperty("ok").GetBoolean());
+		Assert.Equal(
+			"C:/workspace/Project",
+			document.RootElement
+				.GetProperty("state")
+				.GetProperty("projectPath")
+				.GetString());
+		Assert.Equal(
+			JsonValueKind.Null,
+			document.RootElement.GetProperty("error").ValueKind);
 	}
 
 	[Theory]
@@ -357,6 +441,37 @@ public sealed class DesktopControlIntegrationTests
 		}
 	}
 
+	[Theory]
+	[InlineData(false, false, false, false)]
+	[InlineData(true, false, false, true)]
+	[InlineData(false, true, false, true)]
+	[InlineData(false, false, true, true)]
+	public void OpenPreviewActivationIncludesExplicitTreeFormat(
+		bool explicitPreview,
+		bool hasView,
+		bool hasTreeFormat,
+		bool expectedOpenPreview)
+	{
+		var request = DesktopOpenRequestFactory.Create(
+			projectPath: ".",
+			useLastProject: false,
+			newWindow: false,
+			waitForCompletion: false,
+			explicitPreview,
+			previewView: hasView ? DesktopPreviewView.Tree : null,
+			treeFormat: hasTreeFormat ? TreeTextFormat.Json : null,
+			filter: null,
+			search: null,
+			selection: null,
+			language: AppLanguage.En,
+			elevationAttempted: false);
+
+		Assert.Equal(expectedOpenPreview, request.OpenPreview);
+		Assert.Equal(
+			hasTreeFormat ? TreeTextFormat.Json : null,
+			request.TreeFormat);
+	}
+
 	[Fact]
 	public void DesktopChildUsesIsolatedStandardStreams()
 	{
@@ -519,7 +634,29 @@ public sealed class DesktopControlIntegrationTests
 				true,
 				State: new Dictionary<string, object?>
 				{
-					["projectLoaded"] = true
+					["projectLoaded"] = true,
+					["projectPath"] = @"C:\workspace\Project"
+				}));
+		}
+	}
+
+	private sealed class OpenStateDesktopHandler(string lastProject) : IDesktopInteractionHandler
+	{
+		public Task<DesktopInteractionResult> HandleAsync(
+			DesktopInteractionRequest request,
+			CancellationToken cancellationToken)
+		{
+			var open = Assert.IsType<DesktopOpenProjectRequest>(request);
+			var projectPath = open.Request.UseLastProject
+				? lastProject
+				: open.Request.ProjectPath;
+			return Task.FromResult(new DesktopInteractionResult(
+				true,
+				State: new Dictionary<string, object?>
+				{
+					["startupReady"] = true,
+					["projectLoaded"] = true,
+					["projectPath"] = projectPath
 				}));
 		}
 	}

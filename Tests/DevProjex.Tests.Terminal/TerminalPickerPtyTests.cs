@@ -58,10 +58,13 @@ public sealed class TerminalPickerPtyTests
 			terminal);
 
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		var welcome = await terminal.WaitForScreenAsync(
-			"Недавние рабочие пространства",
+		var welcome = await terminal.WaitForScreenWithoutAsync(
+			"Enter открывает папку.",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.DoesNotContain("Текущая папка", welcome, StringComparison.Ordinal);
+		Assert.Contains(
+			"Недавние рабочие пространства",
+			welcome,
+			StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		Assert.Equal(

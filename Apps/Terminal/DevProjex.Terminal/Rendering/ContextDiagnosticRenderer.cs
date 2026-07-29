@@ -12,8 +12,13 @@ public sealed class ContextDiagnosticRenderer(
 	{
 		foreach (var diagnostic in diagnostics)
 		{
-			if (diagnostic.Severity != ContextDiagnosticSeverity.Error &&
-			    options.Verbosity == TerminalVerbosity.Quiet)
+			if (options.Verbosity == TerminalVerbosity.Quiet &&
+			    diagnostic.Severity != ContextDiagnosticSeverity.Error)
+			{
+				continue;
+			}
+			if (options.Verbosity == TerminalVerbosity.Minimal &&
+			    diagnostic.Severity == ContextDiagnosticSeverity.Information)
 			{
 				continue;
 			}

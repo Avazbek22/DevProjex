@@ -98,12 +98,17 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Equal(TerminalCommandSetupState.Installed, result.Snapshot.State);
 		Assert.Contains("rem DevProjex terminal command wrapper", launcher, StringComparison.Ordinal);
 		Assert.Contains("setlocal DisableDelayedExpansion", launcher, StringComparison.Ordinal);
-		Assert.Contains("rem target: " + target, launcher, StringComparison.Ordinal);
+		Assert.Contains(WindowsTargetMarker(target), launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_EXE=" + target + "\"", launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_DLL=" + Path.ChangeExtension(target, ".dll") + "\"", launcher, StringComparison.Ordinal);
+		Assert.Contains(
+			"if not exist \"%DEVPROJEX_DLL%\" goto :run-native",
+			launcher,
+			StringComparison.Ordinal);
 		Assert.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", launcher, StringComparison.Ordinal);
 		Assert.Contains("\"%DEVPROJEX_EXE%\" %*", launcher, StringComparison.Ordinal);
 		Assert.Contains("exit /b %ERRORLEVEL%", launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain("if exist \"%DEVPROJEX_DLL%\" (", launcher, StringComparison.Ordinal);
 		Assert.DoesNotContain("start /wait", launcher, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains(Path.GetDirectoryName(commandPath)!, userPath, StringComparison.OrdinalIgnoreCase);
 	}
@@ -114,8 +119,10 @@ public sealed class TerminalCommandSetupServiceTests
 		var target = @"C:\Users\me\100% portable\DevProjex.exe";
 
 		var launcher = TerminalCommandSetupService.BuildWindowsLauncherContent(target);
+		var encodedTarget = Convert.ToBase64String(Encoding.UTF8.GetBytes(target));
 
-		Assert.Contains("rem target: " + target, launcher, StringComparison.Ordinal);
+		Assert.Contains("rem target-base64: " + encodedTarget, launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain("rem target: " + target, launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_EXE=C:\\Users\\me\\100%% portable\\DevProjex.exe\"", launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_DLL=C:\\Users\\me\\100%% portable\\DevProjex.dll\"", launcher, StringComparison.Ordinal);
 	}
@@ -126,8 +133,10 @@ public sealed class TerminalCommandSetupServiceTests
 		var target = @"C:\Tools & Stuff\Dev^Projex!100%\DevProjex.exe";
 
 		var launcher = TerminalCommandSetupService.BuildWindowsLauncherContent(target);
+		var encodedTarget = Convert.ToBase64String(Encoding.UTF8.GetBytes(target));
 
-		Assert.Contains("rem target: " + target, launcher, StringComparison.Ordinal);
+		Assert.Contains("rem target-base64: " + encodedTarget, launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain("rem target: " + target, launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_EXE=C:\\Tools & Stuff\\Dev^Projex!100%%\\DevProjex.exe\"", launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_DLL=C:\\Tools & Stuff\\Dev^Projex!100%%\\DevProjex.dll\"", launcher, StringComparison.Ordinal);
 		Assert.DoesNotContain("start /wait", launcher, StringComparison.OrdinalIgnoreCase);
@@ -681,8 +690,8 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Equal(oldTarget, snapshot.InstalledTargetExecutablePath);
 		Assert.True(result.Success);
 		Assert.Equal(TerminalCommandInstallOutcome.Repaired, result.Outcome);
-		Assert.Contains("rem target: " + currentTarget, launcher, StringComparison.Ordinal);
-		Assert.DoesNotContain("rem target: " + oldTarget, launcher, StringComparison.Ordinal);
+		Assert.Contains(WindowsTargetMarker(currentTarget), launcher, StringComparison.Ordinal);
+		Assert.DoesNotContain(WindowsTargetMarker(oldTarget), launcher, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -721,8 +730,8 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Equal(0, writeCount);
 		Assert.Equal(originalUserPath, userPath);
 		Assert.Equal(2, userPath.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length);
-		Assert.Contains("rem target: " + currentTarget, repairedLauncher, StringComparison.Ordinal);
-		Assert.DoesNotContain("rem target: " + oldTarget, repairedLauncher, StringComparison.Ordinal);
+		Assert.Contains(WindowsTargetMarker(currentTarget), repairedLauncher, StringComparison.Ordinal);
+		Assert.DoesNotContain(WindowsTargetMarker(oldTarget), repairedLauncher, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -1907,6 +1916,10 @@ public sealed class TerminalCommandSetupServiceTests
 
 		return count;
 	}
+
+	private static string WindowsTargetMarker(string targetPath) =>
+		"rem target-base64: " +
+		Convert.ToBase64String(Encoding.UTF8.GetBytes(targetPath));
 
 	private static void AssertPathListContains(string pathValue, string expectedDirectory)
 	{

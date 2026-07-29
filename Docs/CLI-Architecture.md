@@ -2,7 +2,8 @@
 
 ## Product Boundary
 
-One published `DevProjex.exe` contains three presentation surfaces:
+One published DevProjex application executable (`DevProjex.exe` on Windows,
+`DevProjex` on Linux and macOS) contains three presentation surfaces:
 
 - Avalonia Desktop;
 - Terminal.Gui Terminal Workspace;
@@ -35,6 +36,12 @@ the long-running desktop from retaining redirected CLI streams.
 `System.CommandLine` owns parsing, validation, hierarchy, help metadata, and
 completion. There is no manual flat argument loop or parallel public parser.
 Human descriptions come from the shared 11-locale localization catalog.
+
+One bounded parser-boundary integrity check retains the distinction that
+System.CommandLine 2.0.10 loses for an empty inline assignment: `--name=`.
+It inspects only exact tokens before `--`, matches them to value-taking options
+on the already resolved command model, and returns a missing-value error. It
+does not resolve commands, parse option values, or reinterpret positional data.
 
 `Spectre.Console` is used only for direct human output. `Terminal.Gui` owns the
 terminal only during a TUI session; the two libraries never run concurrent live
@@ -82,9 +89,22 @@ cached clone retains its internal unique directory while human surfaces use the
 clean repository name and safe original URL. Machine documents may expose this
 identity as additive source metadata without changing filesystem discovery.
 
-Future content representations and policy transformations can consume the plan
-without replacing filesystem discovery. No nonfunctional future command is
-published.
+Direct CLI commands and Terminal Workspace consume this plan. Desktop retains
+its established selection-refresh and text-output orchestration; sharing the
+product workflow does not imply that all three presentation surfaces currently
+use one interchangeable implementation pipeline. No nonfunctional placeholder
+command is published.
+
+## Completion Transport
+
+Generated completion scripts query a hidden `dev complete` endpoint backed by
+the same command tree. Bash, Zsh, and Fish pass the current command line after
+`--`. Windows PowerShell 5.1 cannot preserve an unfinished quoted command line
+through its native argument binder, so the generated PowerShell script sends
+that one internal argument as strict UTF-8 Base64 with `--base64`. The endpoint
+decodes it before requesting completions. This transport flag is hidden,
+produces no user-facing contract, and never appears in normal help or
+completion.
 
 ## Output and Failures
 
@@ -133,5 +153,10 @@ Published-binary interaction tests use two test-only components:
 
 Neither package is referenced by the Terminal or Avalonia product projects.
 Release Validation drives the published single-file executable through this
-test boundary; the automation dependencies are never bundled into
-`DevProjex.exe`.
+test boundary; the automation dependencies are never bundled into the DevProjex
+application executable.
+
+Deterministic progress snapshots run through the separate
+`DevProjex.Tests.Terminal.ProgressHost` test project. It injects an internal
+operation observer from test composition; the published application always uses
+the no-op observer and contains no environment-driven checkpoint or pause logic.

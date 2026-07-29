@@ -25,7 +25,7 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Equal(first.StandardOutput, second.StandardOutput);
 
 		using var document = JsonDocument.Parse(first.StandardOutput);
-		Assert.Equal("1", document.RootElement.GetProperty("schemaVersion").GetString());
+		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("devprojex-context", document.RootElement.GetProperty("kind").GetString());
 		var files = document.RootElement.GetProperty("files").EnumerateArray().ToArray();
 		Assert.Equal(
@@ -165,7 +165,7 @@ public sealed class ExportContextDocumentContractTests
 			"markdown",
 			outputPath: destination);
 
-		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
 		Assert.False(File.Exists(destination));
 		Assert.Contains("DPX-EXPORT-UNSAFE-DESTINATION", environment.StandardError, StringComparison.Ordinal);
 		if (Directory.Exists(Path.GetDirectoryName(destination)!))

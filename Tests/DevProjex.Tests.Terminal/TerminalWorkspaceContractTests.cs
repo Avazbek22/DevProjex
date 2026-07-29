@@ -19,6 +19,26 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public void DefaultExportPathMovesOutsideTheSourceWhenTuiRunsFromTheProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("Project");
+
+		Assert.Equal(
+			Path.Combine(workspace.Path, "Project-context.txt"),
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				source,
+				"Project-context.txt"));
+		Assert.Equal(
+			Path.Combine(workspace.Path, "Project.zip"),
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				workspace.Path,
+				"Project.zip"));
+	}
+
+	[Fact]
 	public void WelcomeNeverOffersFilesystemRootOrUserHomeForImplicitScanning()
 	{
 		var root = Path.GetPathRoot(Path.GetFullPath(Environment.CurrentDirectory))!;
@@ -46,12 +66,64 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
-	public void MarkerlessDirectoryRequiresExplicitBrowseChoice()
+	public void MarkerlessReadableDirectoryIsAcceptedAsCurrentWorkspace()
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("notes.txt", "plain directory");
 
-		Assert.False(TerminalWelcomePolicy.IsSafeProjectWorkspace(workspace.Path));
+		Assert.True(TerminalWelcomePolicy.IsSafeProjectWorkspace(workspace.Path));
+	}
+
+	[Fact]
+	public async Task WorkspaceControllerRejectsUnknownPreviewChoicesInsteadOfUsingDefaults()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var formatException = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+			controller.BuildPreviewDocumentAsync(
+				state,
+				ProjectContextView.Tree,
+				(ProjectContextDocumentFormat)int.MaxValue,
+				TestContext.Current.CancellationToken));
+		var viewException = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+			controller.BuildPreviewDocumentAsync(
+				state,
+				(ProjectContextView)int.MaxValue,
+				ProjectContextDocumentFormat.Text,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("format", formatException.ParamName);
+		Assert.Equal("view", viewException.ParamName);
+	}
+
+	[Fact]
+	public async Task EquivalentProjectCommandRejectsUnknownOutputKind()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+			TerminalWorkspaceController.BuildEquivalentProjectCommand(
+				state,
+				(ProjectCopyExportFormat)int.MaxValue,
+				Path.Combine(workspace.Path, "output")));
+
+		Assert.Equal("format", exception.ParamName);
 	}
 
 	[Theory]
@@ -102,7 +174,8 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.True(bounded.RootElement.GetProperty("truncated").GetBoolean());
 		Assert.Equal(80, bounded.RootElement.GetProperty("files").GetArrayLength());
 
-		var completePayload = await services.ContextDocumentService.BuildAsync(
+		var completePayload = await CompleteContextDocumentTestHelper.BuildAsync(
+			services.ContextDocumentService,
 			state.Plan,
 			ProjectContextView.Content,
 			ProjectContextDocumentFormat.Json,
@@ -300,7 +373,8 @@ public sealed class TerminalWorkspaceContractTests
 			format,
 			TestContext.Current.CancellationToken);
 		state.SetPreviewDocument(preview);
-		var exported = await services.ContextDocumentService.BuildAsync(
+		var exported = await CompleteContextDocumentTestHelper.BuildAsync(
+			services.ContextDocumentService,
 			state.Plan,
 			ProjectContextView.TreeContent,
 			format,
@@ -399,6 +473,41 @@ public sealed class TerminalWorkspaceContractTests
 				TestContext.Current.CancellationToken));
 
 		Assert.Equal("existing", File.ReadAllText(destination));
+	}
+
+	[Fact]
+	public async Task PlainTuiContextExportUsesAsciiTreePresentation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var destination = Path.Combine(workspace.Path, "context.txt");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.ExportContextAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken,
+			plain: true);
+
+		var payload = await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("|--", payload, StringComparison.Ordinal);
+		Assert.Contains("src", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("├", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("└", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("│", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("─", payload, StringComparison.Ordinal);
 	}
 
 	[Fact]

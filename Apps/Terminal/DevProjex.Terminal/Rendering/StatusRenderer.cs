@@ -11,6 +11,12 @@ public sealed class StatusRenderer(
 		string description,
 		Func<Task<T>> operation)
 	{
+		if (ShouldRenderStaticStatus())
+		{
+			environment.Error.WriteLine(description);
+			return await operation().ConfigureAwait(false);
+		}
+
 		var capabilities = TerminalCapabilities.Resolve(
 			environment,
 			options,
@@ -24,4 +30,13 @@ public sealed class StatusRenderer(
 			.StartAsync(description, _ => operation())
 			.ConfigureAwait(false);
 	}
+
+	private bool ShouldRenderStaticStatus() =>
+		options.Progress == TerminalProgressMode.Always &&
+		options.Verbosity is not (
+			TerminalVerbosity.Quiet or
+			TerminalVerbosity.Minimal) &&
+		(options.Plain ||
+		 environment.IsTermDumb ||
+		 !environment.IsErrorInteractive);
 }

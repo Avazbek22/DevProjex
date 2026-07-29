@@ -1,21 +1,21 @@
 
   DevProjex Terminal                                                                                              v<VERSION>
-  Choose a workspace action. No project is scanned until you open it.
+  Choose a workspace action. No folder is scanned until you open it.
 
-  Current directory                                                                      No project workspace detected
+  Current directory                                                                            Current folder is ready
   <WELCOME_ROOT>
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
-  │> Recent workspaces                     │  │ Open a recent local folder or Git repository from one shared         │
-  │  Browse folder ┌┤Recent workspaces├────────────────────────────────────────────────────────────┐                 │
-  │  Clone reposito│ The repository is still in history, but its local cache is missing. A         │                 │
-  │  Open Desktop  │ network clone is required before it can be opened.                            │                 │
-  │  Help          │                                                                               │                 │
-  │  Exit          │ https://github.com/Avazbek22/DevProjex                                        │                 │
+  │  Open current directory                │  │ Open a recent local folder or Git repository from one shared         │
+  │> Recent workspa┌┤Recent workspaces├────────────────────────────────────────────────────────────┐                 │
+  │  Browse folder │ The repository is still in history, but its local cache is missing. A         │                 │
+  │  Clone reposito│ network clone is required before it can be opened.                            │                 │
+  │  Open Desktop  │                                                                               │                 │
+  │  Help          │ https://github.com/Avazbek22/DevProjex                                        │                 │
+  │  Exit          │                                                                               │                 │
   └────────────────│                                                                               │─────────────────┘
-                   │                                                                               │
-  Direct automation│                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Clone again ◄⟧▖                 │
-                   │                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘                 │
+                   │                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Clone again ◄⟧▖                 │
+  Direct automation│                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘                 │
                    └───────────────────────────────────────────────────────────────────────────────┘
 
 

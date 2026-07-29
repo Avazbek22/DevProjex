@@ -44,10 +44,31 @@ public sealed class DoctorCommandContractTests
 		Assert.Contains("terminal-launcher", names);
 		Assert.Contains("terminal-capabilities", names);
 		Assert.Contains("tracked-git-mode", names);
+		Assert.Contains("configuration-root", names);
+		Assert.Contains("data-root", names);
+		Assert.Contains("state-root", names);
+		Assert.Contains("cache-root", names);
+		Assert.Contains("terminal-settings", names);
 		Assert.Contains("profile-store", names);
-		Assert.Contains("cache-directory", names);
+		Assert.Contains("recent-workspaces", names);
+		Assert.Contains("repository-cache", names);
 		Assert.Contains("desktop-ipc", names);
 		Assert.Contains("environment", names);
+		var environmentCheck = Assert.Single(
+			document.RootElement.GetProperty("checks").EnumerateArray(),
+			static check => check.GetProperty("name").GetString() == "environment");
+		Assert.Contains(
+			"NO_COLOR=true",
+			environmentCheck.GetProperty("detail").GetString(),
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"CI=true",
+			environmentCheck.GetProperty("detail").GetString(),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"NO_COLOR=1",
+			environmentCheck.GetProperty("detail").GetString(),
+			StringComparison.Ordinal);
 		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
 	}

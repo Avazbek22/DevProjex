@@ -11,6 +11,12 @@ public interface IRepoCacheService
     string CacheRootPath { get; }
 
     /// <summary>
+    /// Gets the current cache root followed by compatibility roots used for discovery.
+    /// New repositories and metadata are always written to <see cref="CacheRootPath"/>.
+    /// </summary>
+    IReadOnlyList<string> CacheSearchRootPaths { get; }
+
+    /// <summary>
     /// Creates a unique directory for a new cloned repository.
     /// </summary>
     string CreateRepositoryDirectory(string repositoryUrl);

@@ -124,6 +124,26 @@ public sealed class CommandTreeContractTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Theory]
+	[InlineData("--help")]
+	[InlineData("-h")]
+	[InlineData("-?")]
+	[InlineData("/?")]
+	[InlineData("/h")]
+	public async Task FrozenHelpAliasesReturnTheSameCleanLeafHelp(string option)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync(["analyze", option, "--language", "en"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("devprojex analyze", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--format <text|json>", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Fact]
 	public async Task SingleDashVersionProducesOneTargetedErrorAndOneHint()
 	{

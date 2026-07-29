@@ -10,6 +10,7 @@
     <InternalsVisibleTo Include="DevProjex.Tests.Terminal" />
     <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
     <InternalsVisibleTo Include="DevProjex.Tests.Integration" />
+    <InternalsVisibleTo Include="DevProjex.Tests.Terminal.ProgressHost" />
   </ItemGroup>
 
   <ItemGroup>

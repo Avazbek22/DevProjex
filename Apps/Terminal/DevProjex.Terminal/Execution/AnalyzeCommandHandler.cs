@@ -22,17 +22,15 @@ public sealed class AnalyzeCommandHandler(
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 
-		if (request.DryRun && request.OutputPath is not null and not "-")
-		{
-			environment.Output.WriteLine(Path.GetFullPath(request.OutputPath));
-			return request.Strict && plan.Diagnostics.Count > 0
-				? CommandLineExitCodes.PolicyFailure
-				: CommandLineExitCodes.Success;
-		}
+		var outputPath = request.OutputPath is not null and not "-"
+			? ExactOutputDestinationValidator.ValidateAnalysis(
+				plan.SourceRoot,
+				request.OutputPath)
+			: null;
 
 		if (request.OutputPath is null or "-")
 		{
-			if (request.Format.Equals("json", StringComparison.OrdinalIgnoreCase))
+			if (request.Format == AnalysisOutputFormat.Json)
 			{
 				await new MachineOutputRenderer(environment)
 					.WriteAnalysisJsonAsync(plan, environment.Output, cancellationToken)
@@ -40,18 +38,38 @@ public sealed class AnalyzeCommandHandler(
 			}
 			else
 			{
-				new HumanOutputRenderer(environment, request.Output, services.Localization).WriteAnalysis(plan);
+				if (request.Output.Plain ||
+				    !environment.IsOutputInteractive ||
+				    environment.IsTermDumb)
+				{
+					await environment.Output.WriteAsync(
+							AnalysisTextFormatter.Build(plan, services.Localization).AsMemory(),
+							cancellationToken)
+						.ConfigureAwait(false);
+				}
+				else
+				{
+					new HumanOutputRenderer(environment, request.Output, services.Localization)
+						.WriteAnalysis(plan);
+				}
 			}
 		}
 		else
 		{
-			var payload = request.Format.Equals("json", StringComparison.OrdinalIgnoreCase)
+			var payload = request.Format == AnalysisOutputFormat.Json
 				? await BuildJsonAsync(plan, cancellationToken).ConfigureAwait(false)
 				: AnalysisTextFormatter.Build(plan, services.Localization);
-			var outputPath = await AtomicOutputWriter
-				.WriteTextAsync(request.OutputPath, payload, overwrite: true, cancellationToken)
+			var writtenPath = await AtomicOutputWriter
+				.WriteTextAsync(
+					outputPath!,
+					payload,
+					overwrite: false,
+					cancellationToken,
+					path => ExactOutputDestinationValidator.ValidateAnalysis(
+						plan.SourceRoot,
+						path))
 				.ConfigureAwait(false);
-			environment.Output.WriteLine(outputPath);
+			environment.Output.WriteLine(writtenPath);
 		}
 
 		return request.Strict && plan.Diagnostics.Count > 0
@@ -76,36 +94,76 @@ internal static class AnalysisTextFormatter
 {
 	public static string Build(ProjectContextPlan plan, LocalizationService localization)
 	{
-		var output = new StringBuilder();
-		output.Append(localization["Terminal.Analysis.Project"]).Append(": ")
-			.AppendLine(plan.SourceIdentity?.DisplayName ?? plan.SourceRoot);
-		if (plan.SourceIdentity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
-			output.Append(localization["Terminal.Analysis.Source"]).Append(": ").AppendLine(repositoryUrl);
-		output.Append(localization["Terminal.Analysis.Profile"]).Append(": ")
-			.AppendLine(plan.Selection.ProfileSource?.Kind.ToString().ToLowerInvariant() ?? "standard");
-		output.Append(localization["Terminal.Analysis.GitMode"]).Append(": ")
-			.AppendLine(plan.Selection.GitMode?.ToString() ?? "None");
-		output.Append(localization["Terminal.Analysis.Files"]).Append(": ")
-			.AppendLine(plan.IncludedFiles.Count.ToString());
-		output.Append(localization["Terminal.Analysis.Folders"]).Append(": ")
-			.AppendLine(plan.IncludedFolders.Count.ToString());
-		output.Append(localization["Terminal.Analysis.Size"]).Append(": ")
-			.Append(plan.IncludedBytes.ToString()).AppendLine(" B");
-		output.Append(localization["Terminal.Analysis.Characters"]).Append(": ")
-			.AppendLine(plan.Analysis.Metrics.Content.Chars.ToString());
-		output.Append(localization["Terminal.Analysis.Tokens"]).Append(": ")
-			.AppendLine(plan.Analysis.Metrics.Content.Tokens.ToString());
-		output.Append(localization["Terminal.Analysis.Fingerprint"]).Append(": ")
-			.AppendLine(plan.Fingerprint);
-		foreach (var diagnostic in plan.Diagnostics)
-		{
-			output.Append(diagnostic.Code)
-				.Append(": ")
-				.AppendLine(ContextDiagnosticRenderer.ResolveMessage(localization, diagnostic.Code));
-		}
-		return output.ToString().TrimEnd('\r', '\n');
+		var rows = BuildRows(plan, localization);
+		return string.Join(
+			       Environment.NewLine,
+			       rows.Select(static row => $"{row.Label}: {row.Value}")) +
+		       Environment.NewLine;
 	}
+
+	public static IReadOnlyList<AnalysisTextRow> BuildRows(
+		ProjectContextPlan plan,
+		LocalizationService localization)
+	{
+		var rows = new List<AnalysisTextRow>
+		{
+			new(
+				localization["Terminal.Analysis.Project"],
+				plan.SourceIdentity?.DisplayName ?? plan.SourceRoot)
+		};
+		if (plan.SourceIdentity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
+			rows.Add(new AnalysisTextRow(localization["Terminal.Analysis.Source"], repositoryUrl));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Profile"],
+			FormatProfile(plan.Selection.ProfileSource)));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.GitMode"],
+			ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value)));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Exclusions"],
+			string.Join(", ", plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken))));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Roots"],
+			string.Join(", ", plan.SelectedRoots)));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Extensions"],
+			string.Join(", ", plan.SelectedExtensions)));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Files"],
+			plan.IncludedFiles.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Folders"],
+			plan.IncludedFolders.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Size"],
+			$"{plan.IncludedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture)} B"));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Characters"],
+			plan.Analysis.Metrics.Content.Chars.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Tokens"],
+			plan.Analysis.Metrics.Content.Tokens.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+		rows.Add(new AnalysisTextRow(
+			localization["Terminal.Analysis.Fingerprint"],
+			plan.Fingerprint));
+		rows.AddRange(plan.Diagnostics.Select(diagnostic => new AnalysisTextRow(
+			diagnostic.Code,
+			ContextDiagnosticRenderer.ResolveMessage(localization, diagnostic.Code))));
+		return rows;
+	}
+
+	private static string FormatProfile(ProjectProfileReference? profile) =>
+		profile?.Kind switch
+		{
+			null => "standard",
+			ProjectProfileSourceKind.Standard => "standard",
+			ProjectProfileSourceKind.Local => "local",
+			ProjectProfileSourceKind.Portable => profile.Path ?? "portable",
+			_ => throw new ArgumentOutOfRangeException(nameof(profile), profile, null)
+		};
 }
+
+internal sealed record AnalysisTextRow(string Label, string Value);
 
 internal sealed class WriterTerminalEnvironment(
 	ITerminalEnvironment source,

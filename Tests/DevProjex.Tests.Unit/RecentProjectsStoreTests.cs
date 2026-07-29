@@ -14,6 +14,47 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void StartupMigratesLegacyConfigurationStateWithoutDeletingLegacyData()
+	{
+		using var temp = new TemporaryDirectory();
+		var stateRoot = temp.CreateFolder("state");
+		var legacyConfigurationRoot = temp.CreateFolder("config");
+		var workspace = temp.CreateFolder("workspace");
+		var legacyStore = new RecentProjectsStore(() => legacyConfigurationRoot);
+		legacyStore.AddFolder(null, workspace);
+		var legacyPath = legacyStore.GetPath();
+		var store = new RecentProjectsStore(
+			() => stateRoot,
+			() => legacyConfigurationRoot);
+
+		var beforeStartup = store.Load();
+
+		Assert.Equal(PathUtility.Normalize(workspace), Assert.Single(beforeStartup.RecentFolders).Path);
+		Assert.False(File.Exists(store.GetPath()));
+
+		var migrated = store.LoadForStartup(TimeSpan.Zero);
+
+		Assert.Equal(PathUtility.Normalize(workspace), Assert.Single(migrated.RecentFolders).Path);
+		Assert.True(File.Exists(store.GetPath()));
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+		Assert.True(File.Exists(legacyPath));
+	}
+
+	[Fact]
+	public void Load_PropagatesUnexpectedLegacyPathProviderFailure()
+	{
+		using var temp = new TemporaryDirectory();
+		var expected = new ApplicationException("unexpected provider failure");
+		var store = new RecentProjectsStore(
+			() => temp.CreateFolder("state"),
+			() => throw expected);
+
+		var actual = Assert.Throws<ApplicationException>(() => store.Load());
+
+		Assert.Same(expected, actual);
+	}
+
+	[Fact]
 	public void AddFolder_MovesDuplicateToFront_AndPersists()
 	{
 		using var temp = new TemporaryDirectory();

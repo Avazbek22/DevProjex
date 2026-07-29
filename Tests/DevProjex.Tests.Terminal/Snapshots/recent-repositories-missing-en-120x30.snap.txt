@@ -1,21 +1,21 @@
 
   DevProjex Terminal                                                                                              v<VERSION>
-  Choose a workspace action. No project is scanned until you open it.
+  Choose a workspace action. No folder is scanned until you open it.
 
-  Current directory                                                                      No project workspace detected
+  Current directory                                                                            Current folder is ready
   <WELCOME_ROOT>
 
   ┌┤Act┌┤Recent workspaces├────────────────────────────────────────────────────────────────────────────────────┐─────┐
-  │> Re│ Open a recent local folder or Git repository from one shared history.                                 │     │
-  │  Br│                                                                                                       │     │
-  │  Cl│ > Git        DevProjex                    Today                                                       │     │
+  │  Op│ Open a recent local folder or Git repository from one shared history.                                 │     │
+  │> Re│                                                                                                       │     │
+  │  Br│ > Git        DevProjex                    Today                                                       │     │
+  │  Cl│                                                                                                       │     │
   │  Op│                                                                                                       │     │
-  │  He│                                                                                                       │     │
-  │  Ex│ Git · DevProjex                                                                                       │     │
-  └────│ https://github.com/Avazbek22/DevProjex                                                                │─────┘
-       │ Last opened: <TIMESTAMP>│
-  Direc│                                                                                                       │
+  │  He│ Git · DevProjex                                                                                       │     │
+  │  Ex│ https://github.com/Avazbek22/DevProjex                                                                │     │
+  └────│ Last opened: <TIMESTAMP>│─────┘
        │                                                                                                       │
+  Direc│                                                                                                       │
        │                                                                                                       │
        │                                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                                │
        │                                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                                │

@@ -27,12 +27,14 @@ public sealed class ProjectSourceIdentityContractTests
 		var plan = await services.ContextPlanner.BuildAsync(
 			new ProjectContextRequest(cachePath, selection, identity),
 			TestContext.Current.CancellationToken);
-		var markdown = await services.ContextDocumentService.BuildAsync(
+		var markdown = await CompleteContextDocumentTestHelper.BuildAsync(
+			services.ContextDocumentService,
 			plan,
 			ProjectContextView.TreeContent,
 			ProjectContextDocumentFormat.Markdown,
 			TestContext.Current.CancellationToken);
-		var json = await services.ContextDocumentService.BuildAsync(
+		var json = await CompleteContextDocumentTestHelper.BuildAsync(
+			services.ContextDocumentService,
 			plan,
 			ProjectContextView.Tree,
 			ProjectContextDocumentFormat.Json,

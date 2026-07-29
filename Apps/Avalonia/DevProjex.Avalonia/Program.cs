@@ -23,28 +23,15 @@ internal static class Program
             isFrameworkDependentLaunch: !ProcessEntryPointResolver.IsSingleFile());
         if (route == ProcessInvocationMode.Terminal)
         {
-            using var cancellationSource = new CancellationTokenSource();
-            ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
-            {
-                eventArgs.Cancel = true;
-                cancellationSource.Cancel();
-            };
-            Console.CancelKeyPress += cancelHandler;
-            try
-            {
-                return new TerminalApplication(
-                        environment,
-                        developerCommandRunner: new AvaloniaDeveloperCommandRunner(
-                            environment.Output,
-                            environment.Error))
-                    .RunAsync(args, cancellationSource.Token)
-                    .GetAwaiter()
-                    .GetResult();
-            }
-            finally
-            {
-                Console.CancelKeyPress -= cancelHandler;
-            }
+            using var cancellation = TerminalCancellationCoordinator.Register();
+            return new TerminalApplication(
+                    environment,
+                    developerCommandRunner: new AvaloniaDeveloperCommandRunner(
+                        environment.Output,
+                        environment.Error))
+                .RunAsync(args, cancellation.Token)
+                .GetAwaiter()
+                .GetResult();
         }
 
         return BuildAvaloniaApp()

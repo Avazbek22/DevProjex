@@ -54,4 +54,19 @@ public sealed class TerminalScreenSnapshotTests
 				path,
 				isMacOs: false));
 	}
+
+	[Fact]
+	public void ReplacePathForSnapshot_NormalizesJsonEscapedWindowsPath()
+	{
+		const string path = @"C:\Temp\folder\project";
+		const string screen = "argv[3] = \"C:\\\\Temp\\\\folder\\\\project\"";
+
+		Assert.Equal(
+			"argv[3] = \"<PROJECT_ROOT>\"",
+			TerminalScreenSnapshot.ReplacePathForSnapshot(
+				screen,
+				path,
+				"<PROJECT_ROOT>",
+				isMacOs: false));
+	}
 }

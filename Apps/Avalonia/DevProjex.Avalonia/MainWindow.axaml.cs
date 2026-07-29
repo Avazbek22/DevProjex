@@ -148,6 +148,9 @@ public partial class MainWindow : Window
     private void SetLanguageAndPersist(AppLanguage language)
         => _appearanceSettings.SetLanguage(language);
 
+    private void SetLanguageForCurrentSession(AppLanguage language)
+        => _appearanceSettings.SetLanguageForCurrentSession(language);
+
     private void InitializeFonts()
     {
         // Only use predefined fonts like WinForms

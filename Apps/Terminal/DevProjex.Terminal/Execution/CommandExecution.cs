@@ -18,6 +18,10 @@ internal static class CommandExecution
 		{
 			return await operation().ConfigureAwait(false);
 		}
+		catch (TerminalBrokenPipeException)
+		{
+			return CommandLineExitCodes.Success;
+		}
 		catch (OperationCanceledException)
 		{
 			new ErrorRenderer(environment, outputOptions, text).Write(new TerminalError(
@@ -28,10 +32,16 @@ internal static class CommandExecution
 		}
 		catch (PortableProjectProfileException exception)
 		{
+			var isDestinationConflict = exception.Code == "DPX-PROFILE-DESTINATION-EXISTS";
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
 				SafeMessageFor(exception.Code, text),
-				ExitCode: CommandLineExitCodes.UsageError,
+				isDestinationConflict
+					? text["Terminal.Hint.DestinationForce"]
+					: null,
+				ExitCode: isDestinationConflict
+					? CommandLineExitCodes.DestinationConflict
+					: CommandLineExitCodes.UsageError,
 				Exception: exception));
 		}
 		catch (ProjectContextValidationException exception)
@@ -106,6 +116,7 @@ internal static class CommandExecution
 		"DPX-PROJECT-PATH-REQUIRED" => localization["Terminal.Error.ProjectPathRequired"],
 		"DPX-PROJECT-NOT-FOUND" => localization["Terminal.Error.ProjectNotFound"],
 		"DPX-SELECTION-PATH-INVALID" => localization["Terminal.Error.SelectionPathInvalid"],
+		"DPX-CLI-PROFILE-NOT-FOUND" => localization["Terminal.Error.ProfileUnresolved"],
 		"DPX-CLI-PROFILE-UNRESOLVED" => localization["Terminal.Error.ProfileUnresolved"],
 		"DPX-CLI-PROFILE-INVALID" => localization["Terminal.Error.ProfileInvalid"],
 		"DPX-CLI-PROFILE-WRITE-FAILED" => localization["Terminal.Error.ProfileWriteFailed"],

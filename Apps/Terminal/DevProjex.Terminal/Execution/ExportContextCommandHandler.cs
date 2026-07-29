@@ -32,39 +32,58 @@ public sealed class ExportContextCommandHandler(
 				request.Force)
 			: null;
 
-		if (request.DryRun && outputPath is not null)
+		if (request.DryRun)
 		{
-			environment.Output.WriteLine(outputPath);
+			DryRunRenderer.WritePlan(
+				environment,
+				services.Localization,
+				outputPath ?? "-");
 			return CommandLineExitCodes.Success;
 		}
 
-		var payload = await status
-			.RunAsync(
-				services.Localization["Terminal.Status.BuildingContext"],
-				() => services.ContextDocumentService.BuildAsync(
-					plan,
-					request.View,
-					request.Format,
-					cancellationToken))
-			.ConfigureAwait(false);
 		if (request.OutputPath is null or "-")
 		{
-			await environment.Output.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
-			if (!payload.EndsWith('\n'))
-				await environment.Output.WriteLineAsync().ConfigureAwait(false);
+			await status.RunAsync(
+					services.Localization["Terminal.Status.BuildingContext"],
+					async () =>
+					{
+						await using var destination = new Utf8TextWriterStream(
+							environment.Output,
+							cancellationToken);
+						await services.ContextDocumentService.WriteCompleteAsync(
+								plan,
+								request.View,
+								request.Format,
+								destination,
+								cancellationToken,
+								plain: request.Output.Plain)
+							.ConfigureAwait(false);
+						await destination.CompleteAsync(cancellationToken).ConfigureAwait(false);
+						return true;
+					})
+				.ConfigureAwait(false);
+			await environment.Output.WriteLineAsync().ConfigureAwait(false);
 			return CommandLineExitCodes.Success;
 		}
 
-		var writtenPath = await AtomicOutputWriter
-			.WriteTextAsync(
-				outputPath!,
-				payload,
-				request.Force,
-				cancellationToken,
-				path => ExactOutputDestinationValidator.ValidateContext(
-					plan.SourceRoot,
-					path,
-					request.Force))
+		var writtenPath = await status.RunAsync(
+				services.Localization["Terminal.Status.BuildingContext"],
+				() => AtomicOutputWriter.WriteAsync(
+					outputPath!,
+					request.Force,
+					(destination, token) =>
+						services.ContextDocumentService.WriteCompleteAsync(
+							plan,
+							request.View,
+							request.Format,
+							destination,
+							token,
+							plain: request.Output.Plain),
+					cancellationToken,
+					path => ExactOutputDestinationValidator.ValidateContext(
+						plan.SourceRoot,
+						path,
+						request.Force)))
 			.ConfigureAwait(false);
 		environment.Output.WriteLine(writtenPath);
 		return CommandLineExitCodes.Success;

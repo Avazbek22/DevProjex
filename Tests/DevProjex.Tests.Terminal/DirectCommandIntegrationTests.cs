@@ -223,7 +223,7 @@ public sealed class DirectCommandIntegrationTests
 	}
 
 	[Fact]
-	public async Task AnalyzeDryRunResolvesDestinationWithoutCreatingIt()
+	public async Task AnalyzeDryRunIsRejectedWithoutCreatingDestination()
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("app.cs", "class App {}\n");
@@ -244,9 +244,10 @@ public sealed class DirectCommandIntegrationTests
 			],
 				TestContext.Current.CancellationToken);
 
-		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.False(File.Exists(destination));
-		Assert.Equal(System.IO.Path.GetFullPath(destination) + Environment.NewLine, environment.StandardOutput);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("--dry-run", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -273,7 +274,11 @@ public sealed class DirectCommandIntegrationTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.False(File.Exists(destination));
-		Assert.Equal(System.IO.Path.GetFullPath(destination) + Environment.NewLine, environment.StandardOutput);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			System.IO.Path.GetFullPath(destination),
+			environment.StandardError,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -317,7 +322,7 @@ public sealed class DirectCommandIntegrationTests
 			],
 				TestContext.Current.CancellationToken);
 
-		Assert.Equal(CommandLineExitCodes.RuntimeError, unsafeExit);
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, unsafeExit);
 		Assert.Contains(
 			"DPX-EXPORT-UNSAFE-DESTINATION",
 			unsafeEnvironment.StandardError,

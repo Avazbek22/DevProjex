@@ -6,12 +6,14 @@ DevProjex profiles store selection intent, not dynamic scan counts.
 
 `--profile` accepts:
 
+- `auto`: TUI/open only; resolves `local` when valid, otherwise `standard`;
 - `standard`: deterministic built-in defaults;
 - `local`: the existing per-project Desktop profile;
 - `FILE`: a portable versioned JSON profile.
 
-Direct commands default to `standard` so a script behaves consistently on another
-machine. Terminal Workspace uses `local` when available, then `standard`.
+`analyze`, context/project export, and `profile show` default to `standard` so
+scripts behave consistently on another machine. `profile export` defaults to
+`local`. TUI and `open` default to `auto`.
 
 ## Precedence
 
@@ -31,6 +33,7 @@ empty set.
 ```json
 {
   "schemaVersion": 1,
+  "kind": "devprojex-profile",
   "selection": {
     "roots": null,
     "extensions": null,
@@ -66,13 +69,14 @@ devprojex profile show .
 devprojex profile show . --profile local
 devprojex profile show . --profile ./profile.json --format json
 
-devprojex profile export . --profile local -o ./.devprojex/profile.json
+devprojex profile export . --profile local -o ../devprojex-profile.json
 devprojex profile import ./profile.json . --apply
 devprojex profile validate ./profile.json
 devprojex profile reset .
 ```
 
-Writing a portable profile is atomic. Existing output requires `--force`.
+Writing a portable profile is atomic. Existing output returns exit code `4` and
+requires `--force` for replacement.
 `profile import` validates without modifying local state unless `--apply` is
 present.
 

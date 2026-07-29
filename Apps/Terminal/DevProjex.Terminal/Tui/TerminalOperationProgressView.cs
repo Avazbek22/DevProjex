@@ -27,6 +27,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 	private readonly Label _cancelHint;
 	private readonly object? _timerToken;
 	private readonly bool _useTextProgress;
+	private readonly bool _allowMotion;
 	private double? _measuredFraction;
 	private int _frameWidth;
 	private bool _disposed;
@@ -38,16 +39,18 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		string cancelHint,
 		Func<TimeSpan, string> elapsedFormatter,
 		string? source = null,
-		bool useTextProgress = false)
+		bool useTextProgress = false,
+		bool plain = false)
 	{
 		_application = application;
 		_elapsedFormatter = elapsedFormatter;
 		_sourceText = source ?? string.Empty;
 		_useTextProgress = useTextProgress;
+		_allowMotion = !plain;
 		_frame = new TerminalLiteralFrameView
 		{
 			Title = operationName,
-			BorderStyle = LineStyle.Single,
+			BorderStyle = plain ? LineStyle.None : LineStyle.Single,
 			SchemeName = TerminalWorkspaceTheme.Dialog,
 			CanFocus = false
 		};
@@ -65,7 +68,8 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			Y = 5,
 			Width = Dim.Fill(2),
 			Height = 1,
-			Visible = false,
+			Visible = !_allowMotion,
+			Text = _allowMotion ? string.Empty : "[...]",
 			CanFocus = false,
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
@@ -83,7 +87,8 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		{
 			X = 2,
 			Y = 5,
-			AutoSpin = true,
+			AutoSpin = _allowMotion,
+			Visible = _allowMotion,
 			CanFocus = false,
 			SchemeName = TerminalWorkspaceTheme.Accent
 		};
@@ -119,6 +124,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			Y = 9,
 			Width = Dim.Fill(2),
 			Text = elapsedFormatter(TimeSpan.Zero),
+			Visible = _allowMotion,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		_cancelHint = new TerminalLiteralLabel
@@ -139,7 +145,9 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			_detail,
 			_elapsed,
 			_cancelHint);
-		_timerToken = application.AddTimeout(TimeSpan.FromMilliseconds(250), UpdateElapsed);
+		_timerToken = _allowMotion
+			? application.AddTimeout(TimeSpan.FromMilliseconds(250), UpdateElapsed)
+			: null;
 	}
 
 	public View View => _frame;
@@ -166,9 +174,11 @@ internal sealed class TerminalOperationProgressView : IDisposable
 	{
 		_phase.Text = phase;
 		_measuredFraction = null;
-		_spinner.Visible = true;
+		_spinner.Visible = _allowMotion;
 		_progressBar.Visible = false;
-		_textProgressBar.Visible = false;
+		_textProgressBar.Visible = !_allowMotion;
+		if (!_allowMotion)
+			_textProgressBar.Text = "[...]";
 		_metrics.Text = metrics ?? string.Empty;
 		_detail.Text = detail ?? string.Empty;
 		_frame.SetNeedsDraw();

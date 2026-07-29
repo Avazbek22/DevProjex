@@ -19,6 +19,8 @@ public sealed class PortableProjectProfileException(string code, string message,
 public sealed class PortableProjectProfileService
 {
 	public const int CurrentSchemaVersion = 1;
+	public const string DocumentKind = "devprojex-profile";
+	private readonly Action<string, string, bool> moveFile;
 
 	private static readonly JsonSerializerOptions ReadOptions = new()
 	{
@@ -34,6 +36,17 @@ public sealed class PortableProjectProfileService
 		WriteIndented = true,
 		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 	};
+
+	public PortableProjectProfileService()
+		: this(static (sourcePath, destinationPath, overwrite) =>
+			File.Move(sourcePath, destinationPath, overwrite))
+	{
+	}
+
+	internal PortableProjectProfileService(Action<string, string, bool> moveFile)
+	{
+		this.moveFile = moveFile ?? throw new ArgumentNullException(nameof(moveFile));
+	}
 
 	public async Task<ProjectSelectionSpec> LoadAsync(
 		string path,
@@ -112,7 +125,7 @@ public sealed class PortableProjectProfileService
 				await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 			}
 
-			File.Move(tempPath, fullPath, overwrite);
+			moveFile(tempPath, fullPath, overwrite);
 		}
 		catch (PortableProjectProfileException)
 		{
@@ -121,6 +134,13 @@ public sealed class PortableProjectProfileService
 		catch (OperationCanceledException)
 		{
 			throw;
+		}
+		catch (IOException exception) when (!overwrite && File.Exists(fullPath))
+		{
+			throw new PortableProjectProfileException(
+				"DPX-PROFILE-DESTINATION-EXISTS",
+				"The portable profile destination already exists.",
+				exception);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
@@ -156,6 +176,8 @@ public sealed class PortableProjectProfileService
 	{
 		if (document is null ||
 		    document.SchemaVersion != CurrentSchemaVersion ||
+		    (document.Kind is not null &&
+		     !string.Equals(document.Kind, DocumentKind, StringComparison.Ordinal)) ||
 		    document.Selection is null)
 		{
 			throw new PortableProjectProfileException(
@@ -217,6 +239,7 @@ public sealed class PortableProjectProfileService
 		return new PortableProfileDocument
 		{
 			SchemaVersion = CurrentSchemaVersion,
+			Kind = DocumentKind,
 			Selection = new PortableSelectionDocument
 			{
 				Roots = selection.Roots?.OrderBy(static value => value, PathComparer.Default).ToArray(),
@@ -294,6 +317,7 @@ public sealed class PortableProjectProfileService
 	private sealed class PortableProfileDocument
 	{
 		public int SchemaVersion { get; set; }
+		public string? Kind { get; set; }
 		public PortableSelectionDocument? Selection { get; set; }
 
 		[JsonExtensionData]

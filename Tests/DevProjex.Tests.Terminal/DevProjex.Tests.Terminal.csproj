@@ -25,9 +25,13 @@
       Include="..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj"
       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Apps\Terminal\DevProjex.Terminal\DevProjex.Terminal.csproj" />
+    <ProjectReference
+      Include="..\DevProjex.Tests.Terminal.ProgressHost\DevProjex.Tests.Terminal.ProgressHost.csproj"
+      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
     <None Include="Snapshots\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="..\Shared\TerminalProgress\**\*.cs" LinkBase="TerminalProgress" />
   </ItemGroup>
 </Project>

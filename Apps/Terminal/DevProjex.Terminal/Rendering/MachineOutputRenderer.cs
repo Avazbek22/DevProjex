@@ -60,7 +60,13 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 				tree = plan.Analysis.Metrics.Tree,
 				content = plan.Analysis.Metrics.Content
 			},
-			diagnostics = plan.Diagnostics,
+			diagnostics = plan.Diagnostics.Select(static diagnostic => new
+			{
+				code = diagnostic.Code,
+				severity = diagnostic.Severity.ToString().ToLowerInvariant(),
+				message = diagnostic.Message,
+				path = diagnostic.Path?.Replace('\\', '/')
+			}),
 			fingerprint = plan.Fingerprint
 		};
 		var json = JsonSerializer.Serialize(document, JsonOptions);

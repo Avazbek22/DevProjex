@@ -18,19 +18,26 @@ public sealed record TerminalCapabilities(
 			? environment.IsErrorInteractive
 			: environment.IsOutputInteractive;
 		var useAnsi = !options.Plain &&
-		              options.Color != TerminalColorMode.Never &&
-		              !environment.IsNoColor &&
 		              !environment.IsTermDumb &&
-		              (options.Color == TerminalColorMode.Always || streamInteractive);
+		              options.Color switch
+		              {
+			              TerminalColorMode.Always => true,
+			              TerminalColorMode.Never => false,
+			              _ => !environment.IsNoColor && streamInteractive
+		              };
 		var useProgress = !options.Plain &&
+		                  options.Verbosity is not (
+			                  TerminalVerbosity.Quiet or
+			                  TerminalVerbosity.Minimal) &&
 		                  options.Progress != TerminalProgressMode.Never &&
 		                  !environment.IsTermDumb &&
+		                  environment.IsErrorInteractive &&
 		                  (options.Progress == TerminalProgressMode.Always ||
-		                   (environment.IsErrorInteractive && !environment.IsCi));
+		                   !environment.IsCi);
 
 		return new TerminalCapabilities(
 			UseAnsi: useAnsi,
-			UseUnicode: environment.SupportsUnicode,
+			UseUnicode: !options.Plain && !environment.IsTermDumb && environment.SupportsUnicode,
 			UseInteractiveProgress: useProgress,
 			Width: Math.Max(40, environment.Width),
 			Height: Math.Max(10, environment.Height));

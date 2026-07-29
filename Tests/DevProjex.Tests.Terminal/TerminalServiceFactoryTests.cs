@@ -1,9 +1,31 @@
 using DevProjex.Infrastructure.Git;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalServiceFactoryTests
 {
+	[Fact]
+	public void DefaultServicesSeparateConfigurationStateAndCacheRoots()
+	{
+		var services = new TerminalServiceFactory().Create(AppLanguage.En);
+
+		Assert.Equal(
+			Path.Combine(
+				UserDataPathResolver.GetStateRoot(),
+				"DevProjex",
+				"recent-projects.json"),
+			services.RecentProjectsStore.GetPath(),
+			PathComparer.Default);
+		Assert.Equal(
+			Path.Combine(
+				UserDataPathResolver.GetCacheRoot(),
+				"DevProjex",
+				"RepoCache"),
+			services.RepoCacheService.CacheRootPath,
+			PathComparer.Default);
+	}
+
 	[Fact]
 	public void CustomDataRootAlsoScopesRepositoryCache()
 	{

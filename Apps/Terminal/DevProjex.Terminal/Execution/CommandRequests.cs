@@ -2,13 +2,18 @@ using DevProjex.Terminal.CommandLine;
 
 namespace DevProjex.Terminal.Execution;
 
+public enum AnalysisOutputFormat
+{
+	Text,
+	Json
+}
+
 public sealed record AnalyzeCommandRequest(
 	string ProjectPath,
 	ProjectSelectionSpec Selection,
-	string Format,
+	AnalysisOutputFormat Format,
 	string? OutputPath,
 	bool Strict,
-	bool DryRun,
 	TerminalOutputOptions Output);
 
 public sealed record ExportContextCommandRequest(

@@ -68,6 +68,23 @@ public interface IFileContentAnalyzer
 	}
 
 	/// <summary>
+	/// Opens one coherent file snapshot for exact document metadata and content.
+	/// The snapshot remains valid until disposed and must not reopen the source path
+	/// between classification, measurement, and content streaming.
+	/// </summary>
+	async ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+		string path,
+		CancellationToken cancellationToken = default)
+	{
+		var result = await ReadClassifiedAsync(
+				path,
+				long.MaxValue,
+				cancellationToken)
+			.ConfigureAwait(false);
+		return new MaterializedFileContentSnapshot(result);
+	}
+
+	/// <summary>
 	/// Tries to read file as text content with full content loaded.
 	/// Returns null if file is binary or cannot be read.
 	/// Use this for export operations where content is needed.
@@ -89,6 +106,91 @@ public interface IFileContentAnalyzer
 		string path,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default);
+}
+
+public interface IFileContentSnapshot : IAsyncDisposable
+{
+	FileContentMetricsResult Result { get; }
+
+	ValueTask CopyTextToAsync(
+		int maximumCharacters,
+		Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+		CancellationToken cancellationToken = default);
+}
+
+internal sealed class MaterializedFileContentSnapshot : IFileContentSnapshot
+{
+	private const int ChunkSize = 8192;
+	private readonly string? _content;
+
+	public MaterializedFileContentSnapshot(FileContentReadResult result)
+	{
+		ArgumentNullException.ThrowIfNull(result);
+		_content = result.Classification == FileContentClassification.Text
+			? result.Content?.Content
+			: null;
+		Result = new FileContentMetricsResult(
+			result.Classification,
+			result.Content is null
+				? null
+				: CreateMetrics(result.Content));
+	}
+
+	public FileContentMetricsResult Result { get; }
+
+	public async ValueTask CopyTextToAsync(
+		int maximumCharacters,
+		Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(maximumCharacters);
+		ArgumentNullException.ThrowIfNull(writeChunk);
+		if (Result.Classification != FileContentClassification.Text ||
+		    _content is null)
+		{
+			throw new IOException("The snapshot does not contain readable text.");
+		}
+		if (maximumCharacters > _content.Length)
+			throw new IOException("The snapshot contains fewer characters than expected.");
+
+		for (var offset = 0; offset < maximumCharacters; offset += ChunkSize)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var length = Math.Min(ChunkSize, maximumCharacters - offset);
+			await writeChunk(
+					_content.AsMemory(offset, length),
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
+	}
+
+	public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+	private static TextFileMetrics CreateMetrics(TextFileContent content) =>
+		new(
+			content.SizeBytes,
+			content.LineCount,
+			content.CharCount,
+			content.IsEmpty,
+			content.IsWhitespaceOnly,
+			content.IsEstimated,
+			TrailingNewlineChars: content.TrailingNewlineChars,
+			TrailingNewlineLineBreaks: content.TrailingNewlineLineBreaks,
+			LongestBacktickRun: FindLongestBacktickRun(content.Content));
+
+	private static int FindLongestBacktickRun(string value)
+	{
+		var current = 0;
+		var longest = 0;
+		foreach (var character in value)
+		{
+			if (character == '`')
+				longest = Math.Max(longest, ++current);
+			else
+				current = 0;
+		}
+		return longest;
+	}
 }
 
 public enum FileContentClassification
@@ -138,7 +240,8 @@ public sealed record TextFileMetrics(
 	bool IsEstimated = false,
 	int CrLfPairCount = 0,
 	int TrailingNewlineChars = 0,
-	int TrailingNewlineLineBreaks = 0);
+	int TrailingNewlineLineBreaks = 0,
+	int LongestBacktickRun = 0);
 
 /// <summary>
 /// Full text file content with metrics - content stored for export.

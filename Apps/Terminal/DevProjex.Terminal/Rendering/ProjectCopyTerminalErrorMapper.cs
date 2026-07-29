@@ -18,7 +18,7 @@ internal static class ProjectCopyTerminalErrorMapper
 				ProjectCopyExportError.UnsafeDestinationPath => new TerminalError(
 					"DPX-EXPORT-UNSAFE-DESTINATION",
 					localization["Terminal.Error.UnsafeDestination"],
-					ExitCode: CommandLineExitCodes.RuntimeError,
+					ExitCode: CommandLineExitCodes.PolicyFailure,
 					Exception: exception),
 			ProjectCopyExportError.UnsafeSourcePath => new TerminalError(
 				"DPX-EXPORT-UNSAFE-SOURCE",

@@ -7,29 +7,6 @@ public sealed record TerminalWelcomeContext(
 
 public static class TerminalWelcomePolicy
 {
-	private static readonly string[] ProjectMarkers =
-	[
-		".git",
-		"package.json",
-		"pyproject.toml",
-		"Cargo.toml",
-		"go.mod",
-		"pom.xml",
-		"build.gradle",
-		"build.gradle.kts",
-		"composer.json",
-		"Gemfile"
-	];
-
-	private static readonly string[] ProjectFilePatterns =
-	[
-		"*.sln",
-		"*.slnx",
-		"*.csproj",
-		"*.fsproj",
-		"*.vbproj"
-	];
-
 	public static TerminalWelcomeContext Create(
 		string currentDirectory,
 		IEnumerable<string> recentProjects)
@@ -66,18 +43,11 @@ public static class TerminalWelcomePolicy
 
 		try
 		{
-			if (ProjectMarkers.Any(marker =>
-				    Directory.Exists(Path.Combine(normalized, marker)) ||
-				    File.Exists(Path.Combine(normalized, marker))))
-			{
-				return true;
-			}
-
-			foreach (var pattern in ProjectFilePatterns)
-			{
-				if (Directory.EnumerateFiles(normalized, pattern, SearchOption.TopDirectoryOnly).Any())
-					return true;
-			}
+			using var entries = Directory
+				.EnumerateFileSystemEntries(normalized, "*", SearchOption.TopDirectoryOnly)
+				.GetEnumerator();
+			_ = entries.MoveNext();
+			return true;
 		}
 		catch (IOException)
 		{
@@ -88,7 +58,6 @@ public static class TerminalWelcomePolicy
 			return false;
 		}
 
-		return false;
 	}
 
 	private static bool IsBroadSystemLocation(string path)

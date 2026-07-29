@@ -10,6 +10,12 @@ public sealed class DesktopCommandHandler(
 	DesktopProcessLauncher? launcher = null,
 	bool writeOutput = true)
 {
+	private static readonly JsonSerializerOptions MachineJsonOptions = new()
+	{
+		WriteIndented = true,
+		PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+	};
+
 	private readonly DesktopControlClient _client = client ?? new DesktopControlClient();
 	private readonly DesktopProcessLauncher _launcher = launcher ?? new DesktopProcessLauncher();
 
@@ -20,9 +26,10 @@ public sealed class DesktopCommandHandler(
 		if (request.NewWindow)
 		{
 			var launched = await _launcher.LaunchAsync(request, cancellationToken).ConfigureAwait(false);
+			IReadOnlyDictionary<string, object?>? state;
 			try
 			{
-				await WaitForLaunchedInstanceAsync(
+				state = await WaitForLaunchedInstanceAsync(
 					launched.ProcessId,
 					request,
 					cancellationToken).ConfigureAwait(false);
@@ -32,7 +39,7 @@ public sealed class DesktopCommandHandler(
 				DesktopInstanceRegistry.TryDelete(launched.RequestPath);
 				throw;
 			}
-			WriteOutput(request.ProjectPath is null ? "desktop" : Path.GetFullPath(request.ProjectPath));
+			WriteOutput(ResolveAcceptedProjectPath(request, state));
 			return CommandLineExitCodes.Success;
 		}
 
@@ -48,9 +55,10 @@ public sealed class DesktopCommandHandler(
 			}
 
 			var launched = await _launcher.LaunchAsync(request, cancellationToken).ConfigureAwait(false);
+			IReadOnlyDictionary<string, object?>? state;
 			try
 			{
-				await WaitForLaunchedInstanceAsync(
+				state = await WaitForLaunchedInstanceAsync(
 					launched.ProcessId,
 					request,
 					cancellationToken).ConfigureAwait(false);
@@ -60,7 +68,7 @@ public sealed class DesktopCommandHandler(
 				DesktopInstanceRegistry.TryDelete(launched.RequestPath);
 				throw;
 			}
-			WriteOutput(request.ProjectPath is null ? "desktop" : Path.GetFullPath(request.ProjectPath));
+			WriteOutput(ResolveAcceptedProjectPath(request, state));
 			return CommandLineExitCodes.Success;
 		}
 
@@ -71,7 +79,7 @@ public sealed class DesktopCommandHandler(
 			request.WaitForCompletion ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(10),
 			cancellationToken).ConfigureAwait(false);
 		EnsureSuccess(response);
-		WriteOutput(matching.InstanceId);
+		WriteOutput(ResolveAcceptedProjectPath(request, response.State));
 		return CommandLineExitCodes.Success;
 	}
 
@@ -84,13 +92,20 @@ public sealed class DesktopCommandHandler(
 				new
 				{
 					schemaVersion = 1,
-					instances
+					kind = "devprojex-ui-instances",
+					instances = instances.Select(static instance => new
+					{
+						instance.ProtocolVersion,
+						instance.InstanceId,
+						instance.ProcessId,
+						instance.ProcessStartTimeUtcTicks,
+						projectPath = NormalizeMachinePath(instance.ProjectPath),
+						instance.LastActiveUtc,
+						instance.Transport,
+						instance.Endpoint
+					})
 				},
-				new JsonSerializerOptions
-				{
-					WriteIndented = true,
-					PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-				}));
+				MachineJsonOptions));
 		}
 		else
 		{
@@ -115,25 +130,50 @@ public sealed class DesktopCommandHandler(
 			target.Timeout ?? TimeSpan.FromSeconds(10),
 			cancellationToken).ConfigureAwait(false);
 		EnsureSuccess(response);
-		if (response.State is not null)
-		{
-			environment.Output.WriteLine(JsonSerializer.Serialize(
-				response.State,
-				new JsonSerializerOptions
-				{
-					WriteIndented = true,
-					PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-				}));
-		}
-		else
-		{
-			environment.Output.WriteLine(instance.InstanceId);
-		}
+		environment.Output.WriteLine(JsonSerializer.Serialize(
+			new
+			{
+				response.ProtocolVersion,
+				response.RequestId,
+				response.Ok,
+				state = NormalizeState(response.State),
+				response.Error
+			},
+			MachineJsonOptions));
 
 		return CommandLineExitCodes.Success;
 	}
 
-	private async Task WaitForLaunchedInstanceAsync(
+	private static IReadOnlyDictionary<string, object?>? NormalizeState(
+		IReadOnlyDictionary<string, object?>? state)
+	{
+		if (state is null)
+			return null;
+
+		return state.ToDictionary(
+			static pair => pair.Key,
+			static pair => NormalizeStateValue(pair.Key, pair.Value),
+			StringComparer.Ordinal);
+	}
+
+	private static object? NormalizeStateValue(string key, object? value)
+	{
+		if (!string.Equals(key, "projectPath", StringComparison.Ordinal))
+			return value;
+
+		return value switch
+		{
+			string path => NormalizeMachinePath(path),
+			JsonElement { ValueKind: JsonValueKind.String } element =>
+				NormalizeMachinePath(element.GetString()),
+			_ => value
+		};
+	}
+
+	private static string? NormalizeMachinePath(string? path) =>
+		path?.Replace('\\', '/');
+
+	private async Task<IReadOnlyDictionary<string, object?>?> WaitForLaunchedInstanceAsync(
 		int processId,
 		DesktopOpenRequest request,
 		CancellationToken cancellationToken)
@@ -156,16 +196,20 @@ public sealed class DesktopCommandHandler(
 					TimeSpan.FromSeconds(10),
 					cancellationToken).ConfigureAwait(false);
 				EnsureSuccess(response);
-				if (!request.WaitForCompletion)
-					return;
 				if (DesktopOpenReadiness.TryGetFailureCode(response.State, out var failureCode))
 				{
 					throw new DesktopControlException(
 						failureCode,
 						"DevProjex Desktop could not apply the startup request.");
 				}
+				if (!request.WaitForCompletion &&
+				    (!request.UseLastProject ||
+				     DesktopOpenReadiness.TryGetProjectPath(response.State, out _)))
+				{
+					return response.State;
+				}
 				if (DesktopOpenReadiness.IsApplied(request, response.State))
-					return;
+					return response.State;
 			}
 
 			await Task.Delay(100, cancellationToken).ConfigureAwait(false);
@@ -174,6 +218,20 @@ public sealed class DesktopCommandHandler(
 		throw new DesktopControlException(
 			"DPX-DESKTOP-TIMEOUT",
 			"DevProjex Desktop did not become ready before the timeout.");
+	}
+
+	private static string ResolveAcceptedProjectPath(
+		DesktopOpenRequest request,
+		IReadOnlyDictionary<string, object?>? state)
+	{
+		if (!string.IsNullOrWhiteSpace(request.ProjectPath))
+			return PathUtility.Normalize(request.ProjectPath);
+		if (DesktopOpenReadiness.TryGetProjectPath(state, out var projectPath))
+			return projectPath;
+
+		throw new DesktopControlException(
+			"DPX-DESKTOP-PROJECT-OPEN-FAILED",
+			"DevProjex Desktop did not report the accepted project path.");
 	}
 
 	private void WriteOutput(string value)
@@ -269,6 +327,14 @@ internal static class DesktopOpenReadiness
 		return ReadBoolean(state, "startupReady") && code.Length > 0;
 	}
 
+	public static bool TryGetProjectPath(
+		IReadOnlyDictionary<string, object?>? state,
+		out string projectPath)
+	{
+		projectPath = ReadPath(state, "projectPath") ?? string.Empty;
+		return projectPath.Length > 0 && ReadBoolean(state, "projectLoaded");
+	}
+
 	private static string? ReadPath(
 		IReadOnlyDictionary<string, object?>? state,
 		string key)
@@ -326,14 +392,16 @@ internal static class DesktopOpenReadiness
 	{
 		DesktopPreviewView.Tree => "tree",
 		DesktopPreviewView.Content => "content",
-		_ => "tree-content"
+		DesktopPreviewView.TreeContent => "tree-content",
+		_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 	};
 
 	private static string ToToken(TreeTextFormat format) => format switch
 	{
+		TreeTextFormat.Ascii => "text",
 		TreeTextFormat.Markdown => "markdown",
 		TreeTextFormat.Json => "json",
 		TreeTextFormat.Xml => "xml",
-		_ => "text"
+		_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
 	};
 }

@@ -214,6 +214,16 @@ boundary.
 `--no-mouse`, `--color never`, and `--plain` provide conservative fallbacks.
 `NO_COLOR`, `TERM=dumb`, redirected streams, and CI are also respected.
 
+Release validation currently has one upstream blocker: Terminal.Gui 2.4.17
+unconditionally writes its mouse-enable sequence while constructing the ANSI
+output driver, before the application mouse policy is available. DevProjex
+immediately disables tracking before processing input, ignores mouse input for
+`--no-mouse`, and restores terminal state, but the stricter invariant “no
+mouse-enable sequence is ever emitted” is not certified. This is tracked by an
+explicitly skipped PTY gate tied to the
+[pinned upstream implementation](https://github.com/tui-cs/Terminal.Gui/blob/d0a0ed9b150d3fc8aacf4ab07b7f7d91264fe6d6/Terminal.Gui/Drivers/AnsiDriver/AnsiOutput.cs#L128-L150);
+the skip must be removed before release-candidate approval.
+
 ## Export
 
 The export dialog reports output kind, view/format, destination, selected counts,

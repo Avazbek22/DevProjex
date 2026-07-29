@@ -25,6 +25,11 @@ devprojex ui search clear
 Targetable commands accept `--instance ID`, `--project PATH`, and
 `--timeout DURATION`.
 
+`ui list --format json` writes a versioned
+`devprojex-ui-instances` document. State returned by targetable actions is the
+versioned Desktop protocol state described below; it uses stable English keys
+and contains no localized identifiers or terminal styling.
+
 ## Target Selection
 
 1. An explicit instance ID selects that instance.

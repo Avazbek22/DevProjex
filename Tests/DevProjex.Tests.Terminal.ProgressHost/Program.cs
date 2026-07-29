@@ -1,0 +1,246 @@
+using System.Globalization;
+using System.Text;
+using DevProjex.Application.Services;
+using DevProjex.Kernel;
+using DevProjex.Kernel.Models;
+using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Tui;
+using DevProjex.Tests.Terminal.Progress;
+
+namespace DevProjex.Tests.Terminal.ProgressHost;
+
+internal static class Program
+{
+	public static int Main(string[] args)
+	{
+			if (string.Equals(
+			    Environment.GetEnvironmentVariable(
+				    TerminalSignalCheckpointProtocol.EnabledVariable),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			return RunSignalCheckpointProtocol();
+		}
+
+		var dataRoot = Environment.GetEnvironmentVariable(
+			InvocationEnvironment.InternalDataRootVariable);
+		if (string.IsNullOrWhiteSpace(dataRoot) ||
+		    !Path.IsPathFullyQualified(dataRoot))
+		{
+			Console.Error.WriteLine("The isolated terminal test data root is required.");
+			return CommandLineExitCodes.RuntimeError;
+		}
+
+		var observer = FileTerminalOperationObserver.Create(dataRoot);
+		var environment = new InvocationEnvironment(hasAttachedConsole: true);
+		var services = new TerminalServiceFactory(() => dataRoot);
+		using var cancellation = TerminalCancellationCoordinator.Register();
+		return new TerminalApplication(
+				environment,
+				services,
+				developerCommandRunner: null,
+				operationObserver: observer)
+			.RunAsync(args, cancellation.Token)
+			.GetAwaiter()
+			.GetResult();
+	}
+
+	private static int RunSignalCheckpointProtocol()
+	{
+		using var cancellation = TerminalCancellationCoordinator.Register();
+		Console.Out.WriteLine(TerminalSignalCheckpointProtocol.Ready);
+		Console.Out.Flush();
+
+		cancellation.Token.WaitHandle.WaitOne();
+		Console.Out.WriteLine(
+			TerminalSignalCheckpointProtocol.CancellationObserved);
+		Console.Out.Flush();
+
+		// The second interrupt must take the native termination path only after
+		// the first cancellation has been observed by the process.
+		using var nativeTerminationGate = new ManualResetEvent(false);
+		nativeTerminationGate.WaitOne();
+		return CommandLineExitCodes.Canceled;
+	}
+}
+
+internal sealed class FileTerminalOperationObserver : ITerminalOperationObserver
+{
+	private readonly string _directory;
+	private readonly Queue<int> _pendingPercentages;
+	private readonly HashSet<TerminalOperationPhase> _pendingPhases;
+
+	private FileTerminalOperationObserver(
+		string directory,
+		IEnumerable<int> percentages,
+		IEnumerable<TerminalOperationPhase> phases)
+	{
+		_directory = directory;
+		_pendingPercentages = new Queue<int>(percentages);
+		_pendingPhases = phases.ToHashSet();
+	}
+
+	public static FileTerminalOperationObserver Create(string dataRoot)
+	{
+		var percentages = ParsePercentages(
+			Environment.GetEnvironmentVariable(
+				TerminalProgressCheckpointProtocol.CheckpointsVariable));
+		var phases = ParsePhases(
+			Environment.GetEnvironmentVariable(
+				TerminalProgressCheckpointProtocol.PhasesVariable));
+		if (percentages.Length == 0 && phases.Length == 0)
+		{
+			throw new InvalidOperationException(
+				"The progress test host requires at least one checkpoint.");
+		}
+
+		var directory = Path.Combine(
+			dataRoot,
+			TerminalProgressCheckpointProtocol.DirectoryName);
+		Directory.CreateDirectory(directory);
+		return new FileTerminalOperationObserver(
+			directory,
+			percentages,
+			phases);
+	}
+
+	public ValueTask ObservePhaseAsync(
+		TerminalOperationPhase phase,
+		CancellationToken cancellationToken)
+	{
+		if (!_pendingPhases.Remove(phase))
+			return ValueTask.CompletedTask;
+
+		return new ValueTask(Task.Run(
+			() => PauseAt(ToToken(phase), cancellationToken),
+			CancellationToken.None));
+	}
+
+	public void ObserveProgress(
+		ProjectCopyExportProgress progress,
+		CancellationToken cancellationToken)
+	{
+		if (_pendingPercentages.Count == 0 || progress.TotalEntryCount <= 0)
+			return;
+
+		var actualPercentage = Math.Clamp(
+			(int)Math.Floor(
+				progress.ProcessedEntryCount * 100d /
+				progress.TotalEntryCount),
+			0,
+			100);
+		while (_pendingPercentages.TryPeek(out var requestedPercentage) &&
+		       actualPercentage >= requestedPercentage)
+		{
+			_pendingPercentages.Dequeue();
+			PauseAt(
+				requestedPercentage.ToString(CultureInfo.InvariantCulture),
+				cancellationToken);
+		}
+	}
+
+	private void PauseAt(
+		string checkpoint,
+		CancellationToken cancellationToken)
+	{
+		var reachedPath = Path.Combine(
+			_directory,
+			TerminalProgressCheckpointProtocol.GetReachedFileName(checkpoint));
+		var releasePath = Path.Combine(
+			_directory,
+			TerminalProgressCheckpointProtocol.GetReleaseFileName(checkpoint));
+		File.WriteAllText(
+			reachedPath,
+			checkpoint,
+			new UTF8Encoding(false));
+		if (File.Exists(releasePath))
+			return;
+
+		using var changed = new AutoResetEvent(initialState: false);
+		using var watcher = new FileSystemWatcher(_directory)
+		{
+			EnableRaisingEvents = true,
+			NotifyFilter = NotifyFilters.FileName
+		};
+		FileSystemEventHandler release = (_, args) =>
+		{
+			if (string.Equals(
+				    args.FullPath,
+				    releasePath,
+				    PathUtility.DefaultComparison))
+			{
+				changed.Set();
+			}
+		};
+		watcher.Created += release;
+		watcher.Renamed += (_, args) =>
+		{
+			if (string.Equals(
+				    args.FullPath,
+				    releasePath,
+				    PathUtility.DefaultComparison))
+			{
+				changed.Set();
+			}
+		};
+
+		while (!File.Exists(releasePath))
+		{
+			var signaled = WaitHandle.WaitAny(
+				[changed, cancellationToken.WaitHandle]);
+			if (signaled == 1)
+				cancellationToken.ThrowIfCancellationRequested();
+		}
+	}
+
+	private static int[] ParsePercentages(string? value) =>
+		(value ?? string.Empty)
+			.Split(
+				',',
+				StringSplitOptions.RemoveEmptyEntries |
+				StringSplitOptions.TrimEntries)
+			.Select(static item => int.TryParse(
+				item,
+				NumberStyles.None,
+				CultureInfo.InvariantCulture,
+				out var percentage)
+				? percentage
+				: -1)
+			.Where(static percentage => percentage is > 0 and < 100)
+			.Distinct()
+			.Order()
+			.ToArray();
+
+	private static TerminalOperationPhase[] ParsePhases(string? value) =>
+		(value ?? string.Empty)
+			.Split(
+				',',
+				StringSplitOptions.RemoveEmptyEntries |
+				StringSplitOptions.TrimEntries)
+			.Select(TryParsePhase)
+			.Where(static phase => phase is not null)
+			.Select(static phase => phase!.Value)
+			.Distinct()
+			.ToArray();
+
+	private static TerminalOperationPhase? TryParsePhase(string value) =>
+		value switch
+		{
+			"clone-connecting" => TerminalOperationPhase.CloneConnecting,
+			"project-loading" => TerminalOperationPhase.ProjectLoading,
+			"preparing" => TerminalOperationPhase.Preparing,
+			"writing-context" => TerminalOperationPhase.WritingContext,
+			_ => null
+		};
+
+	private static string ToToken(TerminalOperationPhase phase) =>
+		phase switch
+		{
+			TerminalOperationPhase.CloneConnecting => "clone-connecting",
+			TerminalOperationPhase.ProjectLoading => "project-loading",
+			TerminalOperationPhase.Preparing => "preparing",
+			TerminalOperationPhase.WritingContext => "writing-context",
+			_ => throw new ArgumentOutOfRangeException(nameof(phase), phase, null)
+		};
+}

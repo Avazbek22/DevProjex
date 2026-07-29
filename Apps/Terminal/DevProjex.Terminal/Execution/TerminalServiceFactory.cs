@@ -58,6 +58,9 @@ public sealed class TerminalServiceFactory(
 		var repoCache = appDataPathProvider is null
 			? new RepoCacheService()
 			: new RepoCacheService(Path.Combine(resolvedAppDataPathProvider(), "RepoCache"));
+		var recentProjects = appDataPathProvider is null
+			? new RecentProjectsStore()
+			: new RecentProjectsStore(resolvedAppDataPathProvider);
 		var gitRepository = new GitRepositoryService();
 		var sourceIdentityResolver = new ProjectSourceIdentityResolver(gitRepository, repoCache);
 		var repositoryCacheCatalog = new RepositoryCacheCatalog(gitRepository, repoCache);
@@ -84,7 +87,7 @@ public sealed class TerminalServiceFactory(
 			TerminalCommandSetupService: new TerminalCommandSetupService(),
 			GitTrackedModeReadinessProbe: new GitTrackedModeReadinessProbe(),
 			RecentWorkspacesService: new RecentWorkspacesService(),
-			RecentProjectsStore: new RecentProjectsStore(resolvedAppDataPathProvider),
+			RecentProjectsStore: recentProjects,
 			GitRepositoryService: gitRepository,
 			RepoCacheService: repoCache);
 	}

@@ -137,7 +137,7 @@ public sealed class ExportProjectCommandContractTests
 			"folder",
 			unsafeEnvironment,
 			"--dry-run");
-		Assert.Equal(CommandLineExitCodes.RuntimeError, unsafeExit);
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, unsafeExit);
 		Assert.Contains("DPX-EXPORT-UNSAFE-DESTINATION", unsafeEnvironment.StandardError, StringComparison.Ordinal);
 		Assert.False(Directory.Exists(unsafeOutput));
 

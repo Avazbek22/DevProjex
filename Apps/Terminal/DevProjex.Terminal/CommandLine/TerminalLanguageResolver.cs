@@ -19,18 +19,8 @@ internal static class TerminalLanguageResolver
 	}
 
 	public static AppLanguage ParseOrDefault(string? value) =>
-		value?.ToLowerInvariant() switch
-		{
-			"ru" => AppLanguage.Ru,
-			"de" => AppLanguage.De,
-			"fr" => AppLanguage.Fr,
-			"it" => AppLanguage.It,
-			"es" => AppLanguage.Es,
-			"pt" => AppLanguage.Pt,
-			"pt-pt" => AppLanguage.PtPt,
-			"kk" => AppLanguage.Kk,
-			"tg" => AppLanguage.Tg,
-			"uz" => AppLanguage.Uz,
-			_ => AppLanguage.En
-		};
+		value is not null &&
+		CliChoiceSets.Language.TryParse(value, out var language)
+			? language
+			: AppLanguage.En;
 }

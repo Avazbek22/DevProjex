@@ -25,13 +25,32 @@ public sealed class RepoCacheService : IRepoCacheService
 		SearchValues.Create("<>:\"/\\|?*");
 
 	public string CacheRootPath { get; }
+	public IReadOnlyList<string> CacheSearchRootPaths { get; }
 
 	public RepoCacheService()
+		: this(
+			UserDataPathResolver.GetCacheRoot,
+			UserDataPathResolver.GetLegacyLocalDataRoot)
 	{
+	}
+
+	internal RepoCacheService(Func<string> cacheRootProvider)
+		: this(cacheRootProvider, legacyDataRootProvider: null)
+	{
+	}
+
+	internal RepoCacheService(
+		Func<string> cacheRootProvider,
+		Func<string>? legacyDataRootProvider)
+	{
+		ArgumentNullException.ThrowIfNull(cacheRootProvider);
 		CacheRootPath = Path.Combine(
-			UserDataPathResolver.GetLocalDataRoot(),
+			cacheRootProvider(),
 			AppFolderName,
 			CacheFolderName);
+		CacheSearchRootPaths = BuildCacheSearchRoots(
+			CacheRootPath,
+			legacyDataRootProvider);
 	}
 
 	/// <summary>
@@ -40,6 +59,7 @@ public sealed class RepoCacheService : IRepoCacheService
 	public RepoCacheService(string customCachePath)
 	{
 		CacheRootPath = customCachePath ?? throw new ArgumentNullException(nameof(customCachePath));
+		CacheSearchRootPaths = Array.AsReadOnly([CacheRootPath]);
 	}
 
 	public string CreateRepositoryDirectory(string repositoryUrl)
@@ -81,20 +101,50 @@ public sealed class RepoCacheService : IRepoCacheService
 		if (identity.Length == 0)
 			return null;
 
-		var fileSet = GetIndexFileSet();
-		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
-			return null;
-
-		using (heldLock)
+		RepositoryCacheIndexEntry? matchingEntry = null;
+		foreach (var searchRoot in CacheSearchRootPaths)
 		{
-			return LoadIndex(fileSet).Entries
+			var fileSet = GetIndexFileSet(searchRoot);
+			if (!PathComparer.Default.Equals(searchRoot, CacheRootPath) &&
+			    !File.Exists(fileSet.PrimaryPath) &&
+			    !File.Exists(fileSet.BackupPath))
+			{
+				continue;
+			}
+
+			if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+				continue;
+
+			using (heldLock)
+			{
+				var candidate = LoadIndex(fileSet).Entries
 				.Where(entry => string.Equals(
 					entry.Identity,
 					identity,
 					StringComparison.OrdinalIgnoreCase))
 				.OrderByDescending(static entry => entry.LastUsedUtc)
 				.FirstOrDefault();
+				if (candidate is not null &&
+				    (matchingEntry is null ||
+				     candidate.LastUsedUtc > matchingEntry.LastUsedUtc))
+				{
+					matchingEntry = candidate;
+				}
+			}
 		}
+
+		if (matchingEntry is not null &&
+		    !PathUtility.IsPathInside(matchingEntry.LocalPath, CacheRootPath))
+		{
+			RecordIndexedRepository(
+				matchingEntry.RepositoryUrl,
+				matchingEntry.LocalPath,
+				matchingEntry.Branch,
+				matchingEntry.CommitHash,
+				matchingEntry.State);
+		}
+
+		return matchingEntry;
 	}
 
 	public void RecordIndexedRepository(
@@ -239,7 +289,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		try
 		{
-			return PathUtility.IsPathInside(path, CacheRootPath);
+			return CacheSearchRootPaths.Any(root =>
+				PathUtility.IsPathInside(path, root));
 		}
 		catch
 		{
@@ -321,13 +372,50 @@ public sealed class RepoCacheService : IRepoCacheService
 		return false;
 	}
 
-	private JsonStoreFileSet GetIndexFileSet()
+	private JsonStoreFileSet GetIndexFileSet() =>
+		GetIndexFileSet(CacheRootPath);
+
+	private static JsonStoreFileSet GetIndexFileSet(string cacheRoot)
 	{
-		var primaryPath = Path.Combine(CacheRootPath, CacheIndexFileName);
+		var primaryPath = Path.Combine(cacheRoot, CacheIndexFileName);
 		return new JsonStoreFileSet(
 			primaryPath,
 			$"{primaryPath}.bak",
 			$"{primaryPath}.lock");
+	}
+
+	private static IReadOnlyList<string> BuildCacheSearchRoots(
+		string currentCacheRoot,
+		Func<string>? legacyDataRootProvider)
+	{
+		var roots = new List<string> { currentCacheRoot };
+		if (legacyDataRootProvider is not null)
+		{
+			try
+			{
+				var legacyCacheRoot = Path.Combine(
+					legacyDataRootProvider(),
+					AppFolderName,
+					CacheFolderName);
+				if (!roots.Any(root =>
+					    PathComparer.Default.Equals(root, legacyCacheRoot)))
+				{
+					roots.Add(legacyCacheRoot);
+				}
+			}
+			catch (Exception ex) when (ex is
+				ArgumentException or
+				IOException or
+				NotSupportedException or
+				UnauthorizedAccessException or
+				InvalidOperationException or
+				System.Security.SecurityException)
+			{
+				// Compatibility lookup must not prevent use of the configured cache root.
+			}
+		}
+
+		return roots.AsReadOnly();
 	}
 
 	private RepositoryCacheIndexDocument LoadIndex(JsonStoreFileSet fileSet)

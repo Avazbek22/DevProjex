@@ -276,7 +276,7 @@ public sealed class TerminalPtyJourneyTests
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Current folder",
+			"Open selects the current folder",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
@@ -293,7 +293,7 @@ public sealed class TerminalPtyJourneyTests
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Current folder",
+			"Only JSON settings files are shown",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await SelectWelcomeActionAsync(

@@ -1,15 +1,45 @@
 using System.CommandLine;
+using System.CommandLine.Help;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Tui;
 
 namespace DevProjex.Terminal.CommandLine;
 
-public sealed class TerminalApplication(
-	ITerminalEnvironment environment,
-	TerminalServiceFactory? serviceFactory = null,
-	IDeveloperCommandRunner? developerCommandRunner = null)
+public sealed class TerminalApplication
 {
+	private readonly ITerminalEnvironment environment;
+	private readonly TerminalServiceFactory? serviceFactory;
+	private readonly IDeveloperCommandRunner? developerCommandRunner;
+	private readonly ITerminalOperationObserver operationObserver;
+
+	public TerminalApplication(
+		ITerminalEnvironment environment,
+		TerminalServiceFactory? serviceFactory = null,
+		IDeveloperCommandRunner? developerCommandRunner = null)
+		: this(
+			environment,
+			serviceFactory,
+			developerCommandRunner,
+			NullTerminalOperationObserver.Instance)
+	{
+	}
+
+	internal TerminalApplication(
+		ITerminalEnvironment environment,
+		TerminalServiceFactory? serviceFactory,
+		IDeveloperCommandRunner? developerCommandRunner,
+		ITerminalOperationObserver operationObserver)
+	{
+		this.environment = environment ??
+			throw new ArgumentNullException(nameof(environment));
+		this.serviceFactory = serviceFactory;
+		this.developerCommandRunner = developerCommandRunner;
+		this.operationObserver = operationObserver ??
+			throw new ArgumentNullException(nameof(operationObserver));
+	}
+
 	public async Task<int> RunAsync(
 		IReadOnlyList<string> arguments,
 		CancellationToken cancellationToken = default)
@@ -22,21 +52,14 @@ public sealed class TerminalApplication(
 			environment.Error.WriteLine("error[DPX-CLI-LEGACY-SYNTAX]:");
 			environment.Error.WriteLine(localization["Terminal.Error.LegacySyntax"]);
 			environment.Error.WriteLine(localization["Terminal.Label.NewCommand"]);
-			environment.Error.WriteLine($"  {migration.Replacement}");
+			foreach (var line in CliArgumentVectorFormatter
+				         .Format(migration.ReplacementArguments)
+				         .Split(Environment.NewLine))
+			{
+				environment.Error.WriteLine($"  {line}");
+			}
 			return CommandLineExitCodes.UsageError;
 		}
-		if (ContainsMalformedVersionAlias(arguments))
-		{
-			environment.Error.WriteLine(
-				$"error[DPX-CLI-UNKNOWN-OPTION]: " +
-				localization.Format("Terminal.Error.UnknownOption", "-version"));
-			environment.Error.WriteLine(
-				localization.Format(
-					"Terminal.Hint.DidYouMean",
-					"devprojex --version"));
-			return CommandLineExitCodes.UsageError;
-		}
-
 		var implicitTuiInvocation = IsImplicitTuiInvocation(arguments) &&
 		                            environment.IsInputInteractive &&
 		                            environment.IsOutputInteractive &&
@@ -46,7 +69,8 @@ public sealed class TerminalApplication(
 			serviceFactory ?? CreateDefaultServiceFactory(),
 			developerCommandRunner,
 			implicitTuiInvocation,
-			localization).Build();
+			localization,
+			operationObserver).Build();
 		if (implicitTuiInvocation)
 		{
 			arguments = ["tui", .. arguments];
@@ -57,24 +81,57 @@ public sealed class TerminalApplication(
 			return CommandLineExitCodes.Success;
 		}
 
-		if (ContainsHelpTokenBeforeDelimiter(arguments))
+		var parseResult = root.Parse(
+			arguments.ToArray(),
+			new ParserConfiguration
+			{
+				EnablePosixBundling = false
+			});
+		if (CliInputIntegrityGuard.TryFindError(
+			    arguments,
+			    root,
+			    parseResult,
+			    out var inputIntegrityError))
 		{
-			var (command, path) = ResolveHelpTarget(root, arguments);
-			new CommandHelpRenderer(environment, localization).Write(command, path);
-			return CommandLineExitCodes.Success;
+			var (code, messageKey) = inputIntegrityError.Kind switch
+			{
+				CliInputIntegrityErrorKind.MissingOptionValue => (
+					"DPX-CLI-MISSING-VALUE",
+					"Terminal.Error.MissingValue"),
+				CliInputIntegrityErrorKind.UnexpectedFlagValue => (
+					"DPX-CLI-INVALID-SYNTAX",
+					"Terminal.Error.OptionDoesNotTakeValue"),
+				CliInputIntegrityErrorKind.EmptyArgument => (
+					"DPX-CLI-INVALID-SYNTAX",
+					"Terminal.Error.EmptyArgument"),
+				_ => throw new ArgumentOutOfRangeException()
+			};
+			environment.Error.WriteLine(
+				$"error[{code}]: " +
+				localization.Format(
+					messageKey,
+					inputIntegrityError.SymbolName));
+			environment.Error.WriteLine(localization["Terminal.Hint.Help"]);
+			return CommandLineExitCodes.UsageError;
 		}
-
-		var parseResult = root.Parse(arguments.ToArray());
-		if (parseResult.Errors.Count > 0)
+		if (parseResult.Errors.Count > 0 || parseResult.UnmatchedTokens.Count > 0)
 		{
-			var errors = PresentParseErrors(root, arguments, parseResult.Errors, localization);
+			var errors = PresentParseErrors(parseResult, localization);
 			foreach (var error in errors)
 				environment.Error.WriteLine($"error[{error.Code}]: {error.Message}");
-			if (TryBuildSuggestion(root, arguments, out var suggestion))
+			if (TryBuildSuggestion(root, parseResult, out var suggestion))
 				environment.Error.WriteLine(localization.Format("Terminal.Hint.DidYouMean", suggestion));
 			else
 				environment.Error.WriteLine(localization["Terminal.Hint.Help"]);
 			return CommandLineExitCodes.UsageError;
+		}
+		if (parseResult.Action is HelpAction)
+		{
+			var command = parseResult.CommandResult.Command;
+			new CommandHelpRenderer(environment, localization).Write(
+				command,
+				ResolveCommandPath(root, command));
+			return CommandLineExitCodes.Success;
 		}
 
 		var configuration = new InvocationConfiguration
@@ -93,12 +150,15 @@ public sealed class TerminalApplication(
 				$"error[DPX-CLI-CANCELED]: {localization["Terminal.Error.Canceled"]}");
 			return CommandLineExitCodes.Canceled;
 		}
+		catch (TerminalBrokenPipeException)
+		{
+			return CommandLineExitCodes.Success;
+		}
 		catch (Exception exception)
 		{
 			environment.Error.WriteLine(
 				$"error[DPX-CLI-UNEXPECTED]: {localization["Terminal.Error.Unexpected"]}");
-			if (arguments.Contains("--verbosity", StringComparer.Ordinal) &&
-			    arguments.Contains("diagnostic", StringComparer.OrdinalIgnoreCase))
+			if (IsDiagnosticVerbosity(parseResult))
 			{
 				environment.Error.WriteLine(
 					$"{localization["Terminal.Label.Exception"]}: {exception.GetType().FullName}");
@@ -109,12 +169,10 @@ public sealed class TerminalApplication(
 	}
 
 	private static IReadOnlyList<PresentedParseError> PresentParseErrors(
-		RootCommand root,
-		IReadOnlyList<string> arguments,
-		IReadOnlyList<ParseError> parseErrors,
+		ParseResult parseResult,
 		LocalizationService localization)
 	{
-		if (TryFindUnknownOption(root, arguments, out var unknownOption))
+		if (TryFindUnknownOption(parseResult, out var unknownOption))
 		{
 			return
 			[
@@ -124,7 +182,7 @@ public sealed class TerminalApplication(
 			];
 		}
 
-		if (TryFindUnknownCommand(root, arguments, out var unknownCommand))
+		if (TryFindUnknownCommand(parseResult, out var unknownCommand))
 		{
 			return
 			[
@@ -135,11 +193,11 @@ public sealed class TerminalApplication(
 		}
 
 		var presented = new List<PresentedParseError>();
-		foreach (var error in parseErrors)
+		foreach (var error in parseResult.Errors)
 		{
 			PresentedParseError item;
 			if (IsMissingOptionValue(error) &&
-			    TryResolveMissingValueOption(error, arguments, out var optionName))
+			    TryResolveMissingValueOption(error, out var optionName))
 			{
 				item = new PresentedParseError(
 					"DPX-CLI-MISSING-VALUE",
@@ -161,14 +219,15 @@ public sealed class TerminalApplication(
 				presented.Add(item);
 		}
 
+		if (presented.Count == 0)
+		{
+			presented.Add(new PresentedParseError(
+				"DPX-CLI-INVALID-SYNTAX",
+				localization["Terminal.Error.ParserRejected"]));
+		}
+
 		return presented;
 	}
-
-	private static bool ContainsMalformedVersionAlias(
-		IReadOnlyList<string> arguments) =>
-		arguments
-			.TakeWhile(static token => token != "--")
-			.Contains("-version", StringComparer.Ordinal);
 
 	private static bool IsMissingOptionValue(ParseError error) =>
 		error.SymbolResult is OptionResult optionResult &&
@@ -177,7 +236,6 @@ public sealed class TerminalApplication(
 
 	private static bool TryResolveMissingValueOption(
 		ParseError error,
-		IReadOnlyList<string> arguments,
 		out string optionName)
 	{
 		if (error.SymbolResult is OptionResult optionResult)
@@ -186,85 +244,126 @@ public sealed class TerminalApplication(
 			return true;
 		}
 
-		optionName = arguments
-			.TakeWhile(static value => value != "--")
-			.LastOrDefault(static value => value.StartsWith("--", StringComparison.Ordinal))
-			?.Split('=', 2)[0] ?? string.Empty;
-		return optionName.Length > 0;
+		optionName = string.Empty;
+		return false;
 	}
 
 	private static bool TryFindUnknownOption(
-		RootCommand root,
-		IReadOnlyList<string> arguments,
+		ParseResult parseResult,
 		out string option)
 	{
-		option = string.Empty;
-		var current = ResolveCommand(root, arguments);
-		var knownOptions = root.Options
-			.Concat(current.Options)
-			.SelectMany(static known => new[] { known.Name }.Concat(known.Aliases))
-			.ToHashSet(StringComparer.Ordinal);
-		foreach (var token in arguments.TakeWhile(static token => token != "--"))
-		{
-			if (token == "-" || !token.StartsWith("-", StringComparison.Ordinal))
-				continue;
-			var candidate = token.Split('=', 2)[0];
-			if (knownOptions.Contains(candidate))
-				continue;
-			option = candidate;
-			return true;
-		}
-		return false;
+		option = GetUnmatchedTokensBeforeDelimiter(parseResult)
+			.Select(static token => token.Value)
+			.FirstOrDefault(static value =>
+				value != "-" &&
+				value.StartsWith("-", StringComparison.Ordinal))
+			?.Split('=', 2)[0] ?? string.Empty;
+		return option.Length > 0;
 	}
 
 	private static bool TryFindUnknownCommand(
-		RootCommand root,
-		IReadOnlyList<string> arguments,
+		ParseResult parseResult,
 		out string command)
 	{
 		command = string.Empty;
-		Command current = root;
-		foreach (var token in arguments.TakeWhile(static token => token != "--"))
+		var current = parseResult.CommandResult.Command;
+		var candidate = GetUnmatchedTokensBeforeDelimiter(parseResult)
+			.FirstOrDefault(static token =>
+				!token.Value.StartsWith("-", StringComparison.Ordinal));
+		if (candidate is null)
+			return false;
+		if (current.Subcommands.Any(static child => !child.Hidden) ||
+		    AppearsBeforeResolvedCommand(parseResult, candidate))
 		{
-			if (token.StartsWith("-", StringComparison.Ordinal))
-				break;
-			var child = current.Subcommands.FirstOrDefault(candidate =>
-				!candidate.Hidden &&
-				candidate.Name.Equals(token, StringComparison.Ordinal));
-			if (child is not null)
-			{
-				current = child;
-				continue;
-			}
-			if (current.Subcommands.Any(static candidate => !candidate.Hidden))
-			{
-				command = token;
-				return true;
-			}
-			break;
+			command = candidate.Value;
+			return true;
 		}
+
 		return false;
 	}
 
-	private static Command ResolveCommand(RootCommand root, IReadOnlyList<string> arguments)
+	private static bool AppearsBeforeResolvedCommand(
+		ParseResult parseResult,
+		Token unmatchedToken)
 	{
-		Command current = root;
-		foreach (var token in arguments.TakeWhile(static token => token != "--"))
+		var commandToken = parseResult.CommandResult.IdentifierToken;
+		if (commandToken is null)
+			return false;
+
+		var unmatchedIndex = -1;
+		var commandIndex = -1;
+		for (var index = 0; index < parseResult.Tokens.Count; index++)
 		{
-			if (token.StartsWith("-", StringComparison.Ordinal))
-				break;
-			var child = current.Subcommands.FirstOrDefault(candidate =>
-				!candidate.Hidden &&
-				candidate.Name.Equals(token, StringComparison.Ordinal));
-			if (child is null)
-				break;
-			current = child;
+			var token = parseResult.Tokens[index];
+			if (unmatchedIndex < 0 &&
+			    ReferenceEquals(token, unmatchedToken))
+			{
+				unmatchedIndex = index;
+			}
+			if (token.Type == TokenType.Command &&
+			    token.Value.Equals(commandToken.Value, StringComparison.Ordinal))
+			{
+				commandIndex = index;
+			}
 		}
-		return current;
+
+		return unmatchedIndex >= 0 &&
+		       commandIndex >= 0 &&
+		       unmatchedIndex < commandIndex;
 	}
 
-	private static bool IsHelpToken(string value) =>
-		value is "--help" or "-h" or "-?" or "/h" or "/?";
+	private static IReadOnlyList<Token> GetUnmatchedTokensBeforeDelimiter(
+		ParseResult parseResult)
+	{
+		var matchedTokens = new HashSet<Token>(ReferenceEqualityComparer.Instance);
+		CollectMatchedTokens(parseResult.RootCommandResult, matchedTokens);
+		var unmatchedCounts = parseResult.UnmatchedTokens
+			.GroupBy(static value => value, StringComparer.Ordinal)
+			.ToDictionary(
+				static group => group.Key,
+				static group => group.Count(),
+				StringComparer.Ordinal);
+		var result = new List<Token>();
+		foreach (var token in parseResult.Tokens)
+		{
+			if (token.Type == TokenType.DoubleDash)
+				break;
+			if (token.Type != TokenType.Argument ||
+			    matchedTokens.Contains(token) ||
+			    !unmatchedCounts.TryGetValue(token.Value, out var remaining))
+			{
+				continue;
+			}
+
+			result.Add(token);
+			if (remaining == 1)
+				unmatchedCounts.Remove(token.Value);
+			else
+				unmatchedCounts[token.Value] = remaining - 1;
+		}
+
+		return result;
+	}
+
+	private static void CollectMatchedTokens(
+		CommandResult commandResult,
+		ISet<Token> matchedTokens)
+	{
+		foreach (var token in commandResult.Tokens)
+			matchedTokens.Add(token);
+		if (commandResult.IdentifierToken is not null)
+			matchedTokens.Add(commandResult.IdentifierToken);
+
+		foreach (var child in commandResult.Children)
+		{
+			foreach (var token in child.Tokens)
+				matchedTokens.Add(token);
+			if (child is CommandResult childCommand)
+				CollectMatchedTokens(childCommand, matchedTokens);
+			else if (child is OptionResult { IdentifierToken: not null } optionResult)
+				matchedTokens.Add(optionResult.IdentifierToken);
+		}
+	}
 
 	private TerminalServiceFactory CreateDefaultServiceFactory()
 	{
@@ -292,83 +391,19 @@ public sealed class TerminalApplication(
 		       !string.IsNullOrWhiteSpace(arguments[1]);
 	}
 
-	private static bool ContainsHelpTokenBeforeDelimiter(IReadOnlyList<string> arguments)
-	{
-		foreach (var argument in arguments)
-		{
-			if (argument == "--")
-				return false;
-			if (IsHelpToken(argument))
-				return true;
-		}
-
-		return false;
-	}
-
-	private static (Command Command, IReadOnlyList<string> Path) ResolveHelpTarget(
-		RootCommand root,
-		IReadOnlyList<string> arguments)
-	{
-		Command current = root;
-		var path = new List<string> { "devprojex" };
-		foreach (var token in arguments)
-		{
-			if (IsHelpToken(token))
-				break;
-			var child = current.Subcommands.FirstOrDefault(command =>
-				!command.Hidden &&
-				command.Name.Equals(token, StringComparison.Ordinal));
-			if (child is null)
-				continue;
-			current = child;
-			path.Add(child.Name);
-		}
-		return (current, path);
-	}
-
 	private static bool TryBuildSuggestion(
 		RootCommand root,
-		IReadOnlyList<string> arguments,
+		ParseResult parseResult,
 		out string suggestion)
 	{
 		suggestion = string.Empty;
-		var first = arguments.FirstOrDefault(static value => value != "--");
-		if (string.IsNullOrWhiteSpace(first))
+		var unmatchedTokens = GetUnmatchedTokensBeforeDelimiter(parseResult);
+		if (unmatchedTokens.Count == 0)
 			return false;
 
-		var commandPath = new List<string>();
-		Command current = root;
-		string? unmatchedCommand = null;
-		foreach (var token in arguments)
-		{
-			if (token == "--" || token.StartsWith('-'))
-				break;
-			var child = current.Subcommands.FirstOrDefault(command =>
-				!command.Hidden &&
-				command.Name.Equals(token, StringComparison.Ordinal));
-			if (child is null)
-			{
-				unmatchedCommand = token;
-				break;
-			}
-			current = child;
-			commandPath.Add(child.Name);
-		}
-
-		if (commandPath.Count == 0 && !first.StartsWith('-'))
-		{
-			var command = FindClosest(
-				first,
-				root.Subcommands
-					.Where(static item => !item.Hidden)
-					.Select(static item => item.Name));
-			if (command is null)
-				return false;
-			suggestion = $"devprojex {command}";
-			return true;
-		}
-
-		if (unmatchedCommand is not null && current.Subcommands.Any(static command => !command.Hidden))
+		var current = parseResult.CommandResult.Command;
+		var commandPath = ResolveCommandPath(root, current);
+		if (TryFindUnknownCommand(parseResult, out var unmatchedCommand))
 		{
 			var child = FindClosest(
 				unmatchedCommand,
@@ -377,22 +412,24 @@ public sealed class TerminalApplication(
 					.Select(static command => command.Name));
 			if (child is not null)
 			{
-				var prefix = commandPath.Count == 0
-					? "devprojex"
-					: $"devprojex {string.Join(' ', commandPath)}";
+				var prefix = string.Join(' ', commandPath);
 				suggestion = $"{prefix} {child}";
 				return true;
 			}
 		}
 
-		var knownOptions = root.Options
+		var inheritedOptions = ReferenceEquals(current, root)
+			? root.Options
+			: root.Options.Where(static option => option.Recursive);
+		var knownOptions = inheritedOptions
 			.Concat(current.Options)
 			.Where(static option => !option.Hidden)
 			.SelectMany(static option => new[] { option.Name }.Concat(option.Aliases))
 			.Distinct(StringComparer.Ordinal)
 			.ToArray();
-		foreach (var token in arguments.TakeWhile(static token => token != "--"))
+		foreach (var unmatchedToken in unmatchedTokens)
 		{
+			var token = unmatchedToken.Value;
 			if (!token.StartsWith('-'))
 				continue;
 			var optionToken = token.Split('=', 2)[0];
@@ -401,14 +438,50 @@ public sealed class TerminalApplication(
 			var option = FindClosest(optionToken, knownOptions);
 			if (option is null)
 				continue;
-			var prefix = commandPath.Count == 0
-				? "devprojex"
-				: $"devprojex {string.Join(' ', commandPath)}";
+			var prefix = string.Join(' ', commandPath);
 			suggestion = $"{prefix} {option}";
 			return true;
 		}
 
 		return false;
+	}
+
+	private static IReadOnlyList<string> ResolveCommandPath(
+		RootCommand root,
+		Command target)
+	{
+		var path = new List<string> { "devprojex" };
+		if (ReferenceEquals(root, target))
+			return path;
+		if (TryAppendPath(root, target, path))
+			return path;
+
+		throw new InvalidOperationException($"Command is not part of the root tree: {target.Name}");
+	}
+
+	private static bool TryAppendPath(
+		Command current,
+		Command target,
+		ICollection<string> path)
+	{
+		foreach (var child in current.Subcommands)
+		{
+			path.Add(child.Name);
+			if (ReferenceEquals(child, target) || TryAppendPath(child, target, path))
+				return true;
+			path.Remove(child.Name);
+		}
+
+		return false;
+	}
+
+	private static bool IsDiagnosticVerbosity(ParseResult parseResult)
+	{
+		var option = parseResult.CommandResult.Command.Options
+			.OfType<Option<TerminalVerbosity>>()
+			.SingleOrDefault(static candidate => candidate.Name == "--verbosity");
+		return option is not null &&
+		       parseResult.GetValue(option) == TerminalVerbosity.Diagnostic;
 	}
 
 	private static string? FindClosest(string value, IEnumerable<string> candidates)

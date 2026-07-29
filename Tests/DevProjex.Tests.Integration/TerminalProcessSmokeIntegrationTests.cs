@@ -44,11 +44,23 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.UsageError, legacy.ExitCode);
 		Assert.Empty(legacy.StandardOutput);
 		Assert.Contains("DPX-CLI-LEGACY-SYNTAX", legacy.StandardError, StringComparison.Ordinal);
-		Assert.Contains(
-			"devprojex analyze . --format json -o -",
-			legacy.StandardError,
-			StringComparison.Ordinal);
+		Assert.Equal(
+			["devprojex", "analyze", ".", "--format", "json", "-o", "-"],
+			ReadArgumentVector(legacy.StandardError));
 	}
+
+	private static string[] ReadArgumentVector(string output) =>
+		output
+			.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+			.Select(static line => line.Trim())
+			.Where(static line => line.StartsWith("argv[", StringComparison.Ordinal))
+			.Select(static line =>
+			{
+				var separator = line.IndexOf(" = ", StringComparison.Ordinal);
+				Assert.True(separator > 0, $"Malformed argument-vector line: {line}");
+				return JsonSerializer.Deserialize<string>(line[(separator + 3)..])!;
+			})
+			.ToArray();
 
 	[Fact]
 	public async Task AnalyzeAndContextStdoutRemainPureMachineDocuments()
@@ -106,7 +118,7 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
 		using (var document = JsonDocument.Parse(context.StandardOutput))
 		{
-			Assert.Equal("1", document.RootElement.GetProperty("schemaVersion").GetString());
+			Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
 			Assert.Equal("devprojex-context", document.RootElement.GetProperty("kind").GetString());
 			Assert.Contains(
 				document.RootElement.GetProperty("files").EnumerateArray(),
@@ -145,6 +157,23 @@ public sealed class TerminalProcessSmokeIntegrationTests
 			unknownOption.StandardError,
 			StringComparison.Ordinal);
 
+		var delimiterData = await RunAsync(
+			["--language", "en", "analyze", ".", "--", "--fornat"]);
+		Assert.Equal(CommandLineExitCodes.UsageError, delimiterData.ExitCode);
+		Assert.Empty(delimiterData.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-INVALID-SYNTAX]",
+			delimiterData.StandardError,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"DPX-CLI-UNKNOWN-OPTION",
+			delimiterData.StandardError,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"devprojex analyze --format",
+			delimiterData.StandardError,
+			StringComparison.Ordinal);
+
 		var missingValue = await RunAsync(
 			["export", "project", "--as", "--language", "en"]);
 		Assert.Equal(CommandLineExitCodes.UsageError, missingValue.ExitCode);
@@ -180,6 +209,89 @@ public sealed class TerminalProcessSmokeIntegrationTests
 			"error[DPX-CLI-INVALID-VALUE]",
 			conflict.StandardError,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task EmptyInlineAssignmentCannotConsumeHelpOrCreateAnArtifact()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("source");
+		File.WriteAllText(
+			Path.Combine(project, "App.cs"),
+			"class App {}\n",
+			new UTF8Encoding(false));
+		var accidentalArtifact = Path.Combine(workspace.Path, "--help");
+
+		var result = await RunAsync(
+			[
+				"profile", "export", project,
+				"--profile", "standard",
+				"--output=",
+				"--help",
+				"--language", "en"
+			],
+			workspace.Path);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Empty(result.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-MISSING-VALUE]",
+			result.StandardError,
+			StringComparison.Ordinal);
+		Assert.False(File.Exists(accidentalArtifact));
+		Assert.Equal(
+			["App.cs"],
+			Directory.EnumerateFiles(project, "*", SearchOption.AllDirectories)
+				.Select(path => Path.GetRelativePath(project, path))
+				.ToArray());
+
+		var explicitEmptyValue = await RunAsync(
+			[
+				"profile", "export", project,
+				"--profile", "standard",
+				"--output", "",
+				"--help",
+				"--language", "en"
+			],
+			workspace.Path);
+		Assert.Equal(CommandLineExitCodes.UsageError, explicitEmptyValue.ExitCode);
+		Assert.Empty(explicitEmptyValue.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-MISSING-VALUE]",
+			explicitEmptyValue.StandardError,
+			StringComparison.Ordinal);
+
+		var emptyFlagAssignment = await RunAsync(
+			[
+				"analyze", project,
+				"--plain=",
+				"--help",
+				"--language", "en"
+			],
+			workspace.Path);
+		Assert.Equal(CommandLineExitCodes.UsageError, emptyFlagAssignment.ExitCode);
+		Assert.Empty(emptyFlagAssignment.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-INVALID-SYNTAX]",
+			emptyFlagAssignment.StandardError,
+			StringComparison.Ordinal);
+
+		var emptyProjectArgument = await RunAsync(
+			["analyze", "", "--help", "--language", "en"],
+			workspace.Path);
+		Assert.Equal(CommandLineExitCodes.UsageError, emptyProjectArgument.ExitCode);
+		Assert.Empty(emptyProjectArgument.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-INVALID-SYNTAX]",
+			emptyProjectArgument.StandardError,
+			StringComparison.Ordinal);
+
+		Assert.False(File.Exists(accidentalArtifact));
+		Assert.Equal(
+			["App.cs"],
+			Directory.EnumerateFiles(project, "*", SearchOption.AllDirectories)
+				.Select(path => Path.GetRelativePath(project, path))
+				.ToArray());
 	}
 
 	[Fact]
@@ -249,12 +361,15 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Empty(result.StandardError);
 	}
 
-	private static async Task<ProcessResult> RunAsync(IReadOnlyList<string> arguments)
+	private static async Task<ProcessResult> RunAsync(
+		IReadOnlyList<string> arguments,
+		string? workingDirectory = null)
 	{
 		var executableAssembly = ResolveExecutableAssembly();
 		var startInfo = new ProcessStartInfo
 		{
 			FileName = "dotnet",
+			WorkingDirectory = workingDirectory ?? FindRepositoryRoot(),
 			UseShellExecute = false,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,

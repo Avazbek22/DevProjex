@@ -32,6 +32,8 @@ public sealed record ProjectContextFormatDescriptor(
 /// </summary>
 public static class ProjectPresentationCatalog
 {
+	public const string NoExclusionsToken = "none";
+
 	public static IReadOnlyList<GitFilteringDescriptor> GitFiltering { get; } =
 	[
 		new(GitFilteringMode.None, null, "none", "Terminal.Tui.GitNone", 0),
@@ -117,14 +119,18 @@ public static class ProjectPresentationCatalog
 	];
 
 	public static ProjectExclusionDescriptor Get(ProjectExclusion exclusion) =>
-		Exclusions.Single(descriptor => descriptor.Id == exclusion);
+		Exclusions.FirstOrDefault(descriptor => descriptor.Id == exclusion) ??
+		throw new ArgumentOutOfRangeException(nameof(exclusion), exclusion, null);
 
 	public static GitFilteringDescriptor Get(GitFilteringMode mode) =>
-		GitFiltering.Single(descriptor => descriptor.Id == mode);
+		GitFiltering.FirstOrDefault(descriptor => descriptor.Id == mode) ??
+		throw new ArgumentOutOfRangeException(nameof(mode), mode, null);
 
 	public static ProjectContextViewDescriptor Get(ProjectContextView view) =>
-		PreviewModes.Single(descriptor => descriptor.Id == view);
+		PreviewModes.FirstOrDefault(descriptor => descriptor.Id == view) ??
+		throw new ArgumentOutOfRangeException(nameof(view), view, null);
 
 	public static ProjectContextFormatDescriptor Get(ProjectContextDocumentFormat format) =>
-		Formats.Single(descriptor => descriptor.Id == format);
+		Formats.FirstOrDefault(descriptor => descriptor.Id == format) ??
+		throw new ArgumentOutOfRangeException(nameof(format), format, null);
 }
