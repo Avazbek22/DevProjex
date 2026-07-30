@@ -270,9 +270,10 @@ public sealed class TerminalPtyJourneyTests
 			["--language", "en"],
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		var welcome = await terminal.WaitForScreenAsync(
-			"Choose a workspace action",
+		var welcome = await terminal.WaitForStableScreenAsync(
+			"Browse folder",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Choose a workspace action", welcome, StringComparison.Ordinal);
 		Assert.Contains("Browse folder", welcome, StringComparison.Ordinal);
 		Assert.Contains("Clone repository", welcome, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
