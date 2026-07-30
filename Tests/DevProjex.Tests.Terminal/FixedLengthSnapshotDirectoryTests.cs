@@ -1,3 +1,5 @@
+using DevProjex.Terminal.CommandLine;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class FixedLengthSnapshotDirectoryTests
@@ -65,5 +67,28 @@ public sealed class FixedLengthSnapshotDirectoryTests
 			Assert.Equal("/tmp", temporaryRoot);
 		else
 			Assert.Equal(Path.GetTempPath(), temporaryRoot);
+	}
+
+	[Fact]
+	public void JsonLengthBuilderCompensatesForPlatformPathEscaping()
+	{
+		const int serializedValueLength = 132;
+		var preservedLeafName = Path.Combine(
+			new string('a', 32),
+			"DevProjex-Tui-Progress-Project");
+
+		var result = FixedLengthSnapshotDirectory.BuildPathForArgumentJsonLength(
+			FixedLengthSnapshotDirectory.ResolveTemporaryRoot(),
+			serializedValueLength,
+			preservedLeafName,
+			new string('b', 32));
+		var serialized = CliArgumentVectorFormatter.Format([result.Path]);
+
+		Assert.Equal(
+			serializedValueLength,
+			serialized.Length - "argv[0] = ".Length);
+		Assert.Equal(
+			"DevProjex-Tui-Progress-Project",
+			Path.GetFileName(result.Path));
 	}
 }

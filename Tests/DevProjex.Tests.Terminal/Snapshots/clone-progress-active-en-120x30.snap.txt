@@ -8,7 +8,7 @@
                ┌┤Cloning repository · CombatRepository├─────────────────────────────────────────────────┐
                │                                                                                        │
                │  Connecting                                                                            │
-               │  file:///...evProjex.Tests.Terminal/<ID>/CombatRepository  │
+               │  file:///<ORIGIN_ROOT>/CombatRepository │
                │                                                                                        │
                │                                                                                        │
                │  <SPINNER>                                                                                     │

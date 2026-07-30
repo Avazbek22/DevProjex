@@ -6,6 +6,7 @@ namespace DevProjex.Tests.Terminal;
 internal static partial class TerminalScreenSnapshot
 {
 	private const string UpdateVariable = "DEVPROJEX_UPDATE_TUI_SNAPSHOTS";
+	private const int MinimumUniquePathFragmentLength = 24;
 
 	public static void Verify(
 		string name,
@@ -91,7 +92,7 @@ internal static partial class TerminalScreenSnapshot
 			: Path.Combine(directory, $"{name}.{platform}.snap.txt");
 	}
 
-	private static string Normalize(
+	internal static string Normalize(
 		string value,
 		IReadOnlyList<(string Value, string Replacement)> replacements)
 	{
@@ -189,7 +190,8 @@ internal static partial class TerminalScreenSnapshot
 				for (var start = 1; start < fileUri.Length; start++)
 				{
 					var suffix = fileUri[start..];
-					if (suffix.Length < 24 || suffix.Count(static character => character == '/') < 2)
+					if (suffix.Length < MinimumUniquePathFragmentLength ||
+					    suffix.Count(static character => character == '/') < 1)
 						continue;
 					value = value.Replace(
 						"..." + suffix,
@@ -216,8 +218,8 @@ internal static partial class TerminalScreenSnapshot
 			for (var start = 1; start < variant.Length; start++)
 			{
 				var suffix = variant[start..];
-				if (suffix.Length < 24 ||
-				    suffix.Count(static character => character is '/' or '\\') < 2)
+				if (suffix.Length < MinimumUniquePathFragmentLength ||
+				    suffix.Count(static character => character is '/' or '\\') < 1)
 				{
 					continue;
 				}
@@ -229,9 +231,8 @@ internal static partial class TerminalScreenSnapshot
 
 			if (!isFullyQualified)
 				continue;
-			const int minimumUniqueSuffixLength = 24;
 			for (var start = 1;
-			     start <= variant.Length - minimumUniqueSuffixLength;
+			     start <= variant.Length - MinimumUniquePathFragmentLength;
 			     start++)
 			{
 				var suffix = variant[start..];
@@ -308,7 +309,7 @@ internal static partial class TerminalScreenSnapshot
 			RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant);
 	}
 
-	private static string NormalizePathPlaceholderSeparators(string value)
+	internal static string NormalizePathPlaceholderSeparators(string value)
 	{
 		var pathPlaceholders = new[]
 		{
@@ -323,7 +324,9 @@ internal static partial class TerminalScreenSnapshot
 			'\n',
 			value.Split('\n').Select(line =>
 				pathPlaceholders.Any(line.Contains)
-					? line.Replace('\\', '/')
+					? line
+						.Replace("\\\\", "/", StringComparison.Ordinal)
+						.Replace('\\', '/')
 					: line));
 		normalizedLines = normalizedLines
 			.Replace(
@@ -345,7 +348,7 @@ internal static partial class TerminalScreenSnapshot
 	[GeneratedRegex(@"\b[0-9a-f]{32}\b", RegexOptions.IgnoreCase)]
 	private static partial Regex IdentifierPattern();
 
-	[GeneratedRegex(@"(?<=<TEMP_ROOT>[\\/])[0-9a-f]{1,32}", RegexOptions.IgnoreCase)]
+	[GeneratedRegex(@"(?<=<TEMP_ROOT>[\\/])[0-9a-f]{8,32}", RegexOptions.IgnoreCase)]
 	private static partial Regex TruncatedProjectIdentifierPattern();
 
 	[GeneratedRegex(@"(?<=Tests\.Terminal[\\/])[0-9a-f]{1,32}", RegexOptions.IgnoreCase)]

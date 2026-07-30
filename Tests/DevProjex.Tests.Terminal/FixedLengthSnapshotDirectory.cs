@@ -1,25 +1,42 @@
+using DevProjex.Terminal.CommandLine;
+
 namespace DevProjex.Tests.Terminal;
 
 internal sealed class FixedLengthSnapshotDirectory : IDisposable
 {
+	private const string ArgumentVectorPrefix = "argv[0] = ";
+
 	private readonly string _ownedRoot;
 
 	public FixedLengthSnapshotDirectory(
 		int totalPathLength,
 		string? preservedLeafName = null)
-	{
-		var (path, ownedRoot) = BuildPath(
+		: this(BuildPath(
 			ResolveTemporaryRoot(),
 			totalPathLength,
 			preservedLeafName,
-			Guid.NewGuid().ToString("N"));
-		Path = path;
-		_ownedRoot = ownedRoot;
+			Guid.NewGuid().ToString("N")))
+	{
+	}
+
+	private FixedLengthSnapshotDirectory((string Path, string OwnedRoot) path)
+	{
+		Path = path.Path;
+		_ownedRoot = path.OwnedRoot;
 		DeleteOwnedRoot();
 		Directory.CreateDirectory(Path);
 	}
 
 	public string Path { get; }
+
+	public static FixedLengthSnapshotDirectory CreateForArgumentJsonLength(
+		int serializedValueLength,
+		string? preservedLeafName = null) =>
+		new(BuildPathForArgumentJsonLength(
+			ResolveTemporaryRoot(),
+			serializedValueLength,
+			preservedLeafName,
+			Guid.NewGuid().ToString("N")));
 
 	internal static string ResolveTemporaryRoot()
 	{
@@ -68,6 +85,33 @@ internal sealed class FixedLengthSnapshotDirectory : IDisposable
 		}
 
 		return (path, ownedRoot);
+	}
+
+	internal static (string Path, string OwnedRoot) BuildPathForArgumentJsonLength(
+		string temporaryRoot,
+		int serializedValueLength,
+		string? preservedLeafName,
+		string uniqueToken)
+	{
+		ArgumentOutOfRangeException.ThrowIfLessThan(serializedValueLength, 2);
+		var physicalLength = serializedValueLength - 2;
+		for (var attempt = 0; attempt < 3; attempt++)
+		{
+			var candidate = BuildPath(
+				temporaryRoot,
+				physicalLength,
+				preservedLeafName,
+				uniqueToken);
+			var actualLength = CliArgumentVectorFormatter
+				.Format([candidate.Path])
+				.Length - ArgumentVectorPrefix.Length;
+			if (actualLength == serializedValueLength)
+				return candidate;
+			physicalLength += serializedValueLength - actualLength;
+		}
+
+		throw new InvalidOperationException(
+			$"Could not build a path with a {serializedValueLength}-character JSON representation.");
 	}
 
 	private static string ResizeComponent(string value, int length) =>

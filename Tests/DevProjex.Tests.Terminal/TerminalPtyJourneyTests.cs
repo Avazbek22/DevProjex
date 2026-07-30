@@ -55,7 +55,8 @@ public sealed class TerminalPtyJourneyTests
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			workspace.Path,
 			["--language", "en"],
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			writeShellCompletionMarker: true);
 
 		await terminal.WaitForScreenAsync(
 			"> Open current directory",
@@ -72,6 +73,12 @@ public sealed class TerminalPtyJourneyTests
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.CompleteShellRestorationHandshakeAsync(
+			TestContext.Current.CancellationToken);
+		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(
+			terminal.RawOutput,
+			"alternate");
+		await terminal.ReleaseParentShellAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

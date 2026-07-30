@@ -134,7 +134,14 @@ public sealed class ProjectCopyExportUiContractTests
 		Assert.DoesNotContain("file.OpenWriteAsync()", method, StringComparison.Ordinal);
 		Assert.Contains("string sourceRootPath", method, StringComparison.Ordinal);
 		Assert.DoesNotContain("_currentPath", method, StringComparison.Ordinal);
-		Assert.Contains("resolvedDestinationPath", method, StringComparison.Ordinal);
+		Assert.Contains(
+			"Path.GetFullPath(destinationPath)",
+			method,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"path => ProjectCopyExportService.ResolveDestinationOutsideProject(",
+			method,
+			StringComparison.Ordinal);
 		Assert.Contains(
 			"_localization[\"Error.ProjectCopy.UnsafeDestinationPath\"]",
 			method,

@@ -6,7 +6,8 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalProgressVisualSnapshotTests
 {
 	private const int SnapshotTemporaryRootLength = 33;
-	private const int SnapshotProjectOwnerPathLength = 91;
+	// Includes JSON quotes and the path prefix before the variable project name.
+	private const int SnapshotProjectArgumentJsonBaseLength = 102;
 
 	[Fact(Timeout = 120_000)]
 	public async Task MeasuredExportSnapshotsCoverPreparationProgressCompactAndCompletion()
@@ -427,8 +428,8 @@ public sealed class TerminalProgressVisualSnapshotTests
 	private static OwnedProject CreateProject(string name)
 	{
 		var ownerName = Guid.NewGuid().ToString("N");
-		var owner = new FixedLengthSnapshotDirectory(
-			SnapshotProjectOwnerPathLength + 1 + name.Length,
+		var owner = FixedLengthSnapshotDirectory.CreateForArgumentJsonLength(
+			SnapshotProjectArgumentJsonBaseLength + name.Length,
 			Path.Combine(ownerName, name));
 		var projectPath = owner.Path;
 		File.WriteAllText(

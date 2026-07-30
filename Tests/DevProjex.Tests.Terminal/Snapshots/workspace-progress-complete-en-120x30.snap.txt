@@ -13,7 +13,7 @@
 │     │ argv[1] = "export"                                                                                    ░ │     ·│
 │     │ argv[2] = "project"                                                                                   ░ │     ·│
 │     │ argv[3] =                                                                                             ░ │     ·│
-│     │ "<TEMP_ROOT>//D░ │     ·│
+│     │ "<TEMP_ROOT>/D░ │     ·│
 │     │ evProjex-Tui-Progress-Project"                                                                        ░ │     ·│
 │     │ argv[4] = "--as"                                                                                      ░ │     ·│
 │     │ argv[5] = "folder"                                                                                    ▼ │     ·│

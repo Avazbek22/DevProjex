@@ -88,4 +88,73 @@ public sealed class TerminalScreenSnapshotTests
 				"<PROJECT_ROOT>",
 				isMacOs: false));
 	}
+
+	[Theory]
+	[InlineData(
+		"Path: ...f4edda1e6ad83e9f53abfxxxxxxxxxxxxxxxxxxxxx/project",
+		"/tmp/d1a9390ae3bf4edda1e6ad83e9f53abfxxxxxxxxxxxxxxxxxxxxx/project",
+		"<PROJECT_ROOT>",
+		"Path: <PROJECT_ROOT>")]
+	[InlineData(
+		"Path: ...cbefdc7a4d228111ef1accc2d35cxxxxxxxxxxxxxxxxxxxxx/project/AlphaProject",
+		"/tmp/7297cbefdc7a4d228111ef1accc2d35cxxxxxxxxxxxxxxxxxxxxx/project",
+		"<PROJECTS_ROOT>",
+		"Path: <PROJECTS_ROOT>/AlphaProject")]
+	[InlineData(
+		"Source: file:///...evProjex.Tests.Terminal/e92fa456903c4997a865c53f11eccd66/CombatRepository",
+		"/tmp/DevProjex.Tests.Terminal/e92fa456903c4997a865c53f11eccd66",
+		"<ORIGIN_ROOT>",
+		"Source: file:///<ORIGIN_ROOT>/CombatRepository")]
+	public void ReplacePathForSnapshot_NormalizesClippedShallowUnixPath(
+		string screen,
+		string source,
+		string replacement,
+		string expected)
+	{
+		Assert.Equal(
+			expected,
+			TerminalScreenSnapshot.ReplacePathForSnapshot(
+				screen,
+				source,
+				replacement,
+				isMacOs: false));
+	}
+
+	[Fact]
+	public void NormalizePathPlaceholderSeparators_CanonicalizesJsonEscapedSeparator()
+	{
+		Assert.Equal(
+			"\"<TEMP_ROOT>/DevProjex\"",
+			TerminalScreenSnapshot.NormalizePathPlaceholderSeparators(
+				"\"<TEMP_ROOT>\\\\DevProjex\""));
+	}
+
+	[Fact]
+	public void NormalizePathPlaceholderSeparators_PreservesLiteralDoubleForwardSeparator()
+	{
+		Assert.Equal(
+			"<PROJECT_ROOT>//src",
+			TerminalScreenSnapshot.NormalizePathPlaceholderSeparators(
+				"<PROJECT_ROOT>//src"));
+	}
+
+	[Fact]
+	public void Normalize_DoesNotTreatHexadecimalLeafPrefixAsIdentifier()
+	{
+		Assert.Equal(
+			"\"<TEMP_ROOT>/DevProjex\"",
+			TerminalScreenSnapshot.Normalize(
+				"\"<TEMP_ROOT>/DevProjex\"",
+				[]));
+	}
+
+	[Fact]
+	public void Normalize_StillRecognizesUniqueTruncatedProjectIdentifier()
+	{
+		Assert.Equal(
+			"Path: <PROJECT_ROOT>",
+			TerminalScreenSnapshot.Normalize(
+				"Path: <TEMP_ROOT>/deadbeef",
+				[]));
+	}
 }

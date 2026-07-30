@@ -53,9 +53,11 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			"RepositoryMarker.cs",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
-		var workspace = await terminal.WaitForScreenAsync(
-			"PROJECT TREE",
-			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			"RepositoryMarker.cs",
+			TestContext.Current.CancellationToken);
+		var workspace = terminal.CaptureScreen();
 
 		Assert.Contains("DevProjex Terminal · DevProjex", workspace, StringComparison.Ordinal);
 		Assert.Contains(RepositoryUrl, workspace, StringComparison.Ordinal);

@@ -107,7 +107,6 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 			completionScript,
 			workingDirectory,
 			line,
-			rawCandidate,
 			TestContext.Current.CancellationToken);
 
 		Assert.True(
@@ -118,20 +117,69 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 			string.IsNullOrWhiteSpace(completed.StandardError),
 			$"powershell completion wrote stderr: {completed.StandardError}");
 		using var document = JsonDocument.Parse(completed.StandardOutput);
-		var result = document.RootElement;
+		var payload = document.RootElement;
+		var lineBase64 = EncodeUtf8Base64(line);
+		Assert.Equal(
+			lineBase64,
+			payload.GetProperty("lineBase64").GetString());
+		var rawCandidateBase64 = EncodeUtf8Base64(rawCandidate);
+		var candidates = payload
+			.GetProperty("candidates")
+			.EnumerateArray()
+			.ToArray();
+		var matchingCandidates = candidates
+			.Where(candidate => string.Equals(
+				candidate.GetProperty("listItemTextBase64").GetString(),
+				rawCandidateBase64,
+				StringComparison.Ordinal))
+			.ToArray();
+		Assert.True(
+			matchingCandidates.Length == 1,
+			BuildPowerShellCompletionDiagnostic(
+				lineBase64,
+				rawCandidateBase64,
+				payload,
+				candidates));
+		var result = matchingCandidates[0];
 		var expectedCompletionText =
 			"'" + rawCandidate.Replace("'", "''", StringComparison.Ordinal) + "'";
 		Assert.Equal(
-			expectedCompletionText,
-			result.GetProperty("completionText").GetString());
+			EncodeUtf8Base64(expectedCompletionText),
+			result.GetProperty("completionTextBase64").GetString());
 		Assert.Equal(
-			rawCandidate,
-			result.GetProperty("listItemText").GetString());
+			rawCandidateBase64,
+			result.GetProperty("listItemTextBase64").GetString());
 		Assert.Equal(
-			rawCandidate,
-			result.GetProperty("parsedValue").GetString());
+			rawCandidateBase64,
+			result.GetProperty("parsedValueBase64").GetString());
 		Assert.Equal(0, result.GetProperty("parseErrorCount").GetInt32());
 	}
+
+	private static string BuildPowerShellCompletionDiagnostic(
+		string expectedLineBase64,
+		string expectedRawCandidateBase64,
+		JsonElement payload,
+		IReadOnlyList<JsonElement> candidates)
+	{
+		var candidateSummary = candidates
+			.Select((candidate, index) =>
+				$"#{index}(" +
+				$"completion={candidate.GetProperty("completionTextBase64").GetString()}," +
+				$"list={candidate.GetProperty("listItemTextBase64").GetString()}," +
+				$"parsed={candidate.GetProperty("parsedValueBase64").GetString()}," +
+				$"errors={candidate.GetProperty("parseErrorCount").GetInt32()})");
+		return
+			"PowerShell completion did not return exactly one byte-exact candidate. " +
+			$"expectedLineBase64=[{expectedLineBase64}] " +
+			$"actualLineBase64=[{payload.GetProperty("lineBase64").GetString()}] " +
+			$"expectedListItemBase64=[{expectedRawCandidateBase64}] " +
+			$"replacementIndex={payload.GetProperty("replacementIndex").GetInt32()} " +
+			$"replacementLength={payload.GetProperty("replacementLength").GetInt32()} " +
+			$"candidates=[{string.Join(";", candidateSummary)}]";
+	}
+
+	private static string EncodeUtf8Base64(string value) =>
+		Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
 
 	[Fact]
 	public async Task WindowsPowerShell51CompletesAfterClosedQuotedWhitespacePath()
@@ -266,7 +314,6 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		string completionScript,
 		string workingDirectory,
 		string line,
-		string expectedRawCandidate,
 		CancellationToken cancellationToken)
 	{
 		var startInfo = CreateShellStartInfo("powershell", shellExecutable);
@@ -279,52 +326,49 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		startInfo.Environment["DPX_COMPLETION_SCRIPT"] = completionScript;
 		startInfo.Environment["DPX_COMPLETION_LINE_BASE64"] =
 			Convert.ToBase64String(Encoding.UTF8.GetBytes(line));
-		startInfo.Environment["DPX_EXPECTED_RAW_BASE64"] =
-			Convert.ToBase64String(Encoding.UTF8.GetBytes(expectedRawCandidate));
 		var driver =
 			"""
 			$ErrorActionPreference = 'Stop'
 			. $env:DPX_COMPLETION_SCRIPT
 			$line = [System.Text.Encoding]::UTF8.GetString(
 			    [Convert]::FromBase64String($env:DPX_COMPLETION_LINE_BASE64))
-			$expectedRaw = [System.Text.Encoding]::UTF8.GetString(
-			    [Convert]::FromBase64String($env:DPX_EXPECTED_RAW_BASE64))
 			$completion = TabExpansion2 -inputScript $line -cursorColumn $line.Length
-			$candidates = @($completion.CompletionMatches)
-			$match = $candidates |
-			    Where-Object { $_.ListItemText -eq $expectedRaw } |
-			    Select-Object -First 1
-			if ($null -eq $match) {
-			    $candidateSummary = $candidates |
-			        ForEach-Object { "$($_.CompletionText)|$($_.ListItemText)" }
-			    throw (
-			        "Expected completion candidate was not returned. " +
-			        "line=[$line] cursor=$($line.Length) " +
-			        "replacementIndex=$($completion.ReplacementIndex) " +
-			        "replacementLength=$($completion.ReplacementLength) " +
-			        "candidates=[$($candidateSummary -join '; ')]")
-			}
-			$completedLine = $line.Remove(
-			    $completion.ReplacementIndex,
-			    $completion.ReplacementLength).Insert(
+			$candidateResults = @($completion.CompletionMatches | ForEach-Object {
+			    $candidate = $_
+			    $completedLine = $line.Remove(
 			        $completion.ReplacementIndex,
-			        $match.CompletionText)
-			$tokens = $null
-			$parseErrors = $null
-			$ast = [System.Management.Automation.Language.Parser]::ParseInput(
-			    $completedLine,
-			    [ref]$tokens,
-			    [ref]$parseErrors)
-			$commandAst = $ast.Find(
-			    { param($node) $node -is [System.Management.Automation.Language.CommandAst] },
-			    $true)
-			$parsedValue = $commandAst.CommandElements[-1].Value
+			        $completion.ReplacementLength).Insert(
+			            $completion.ReplacementIndex,
+			            $candidate.CompletionText)
+			    $tokens = $null
+			    $parseErrors = $null
+			    $ast = [System.Management.Automation.Language.Parser]::ParseInput(
+			        $completedLine,
+			        [ref]$tokens,
+			        [ref]$parseErrors)
+			    $commandAst = $ast.Find(
+			        { param($node) $node -is [System.Management.Automation.Language.CommandAst] },
+			        $true)
+			    $parsedValue = [string]$commandAst.CommandElements[-1].Value
+			    [pscustomobject]@{
+			        completionTextBase64 = [Convert]::ToBase64String(
+			            [System.Text.Encoding]::UTF8.GetBytes(
+			                [string]$candidate.CompletionText))
+			        listItemTextBase64 = [Convert]::ToBase64String(
+			            [System.Text.Encoding]::UTF8.GetBytes(
+			                [string]$candidate.ListItemText))
+			        parsedValueBase64 = [Convert]::ToBase64String(
+			            [System.Text.Encoding]::UTF8.GetBytes($parsedValue))
+			        parseErrorCount = @($parseErrors).Count
+			    }
+			})
 			[pscustomobject]@{
-			    completionText = $match.CompletionText
-			    listItemText = $match.ListItemText
-			    parsedValue = $parsedValue
-			    parseErrorCount = @($parseErrors).Count
-			} | ConvertTo-Json -Compress
+			    lineBase64 = [Convert]::ToBase64String(
+			        [System.Text.Encoding]::UTF8.GetBytes($line))
+			    replacementIndex = $completion.ReplacementIndex
+			    replacementLength = $completion.ReplacementLength
+			    candidates = $candidateResults
+			} | ConvertTo-Json -Compress -Depth 4
 			""";
 		var driverPath = Path.Combine(
 			workingDirectory,

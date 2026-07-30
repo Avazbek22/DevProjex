@@ -7,6 +7,8 @@ public sealed class TerminalVisualSnapshotTests
 {
 	private const int SnapshotTemporaryRootLength = 33;
 	private const int SnapshotProjectPathLength = 91;
+	// Includes JSON quotes and preserves the committed equivalent-command wrap point.
+	private const int SnapshotProjectArgumentJsonLength = 100;
 
 	[Fact(Timeout = 60_000)]
 	public async Task WelcomeWideSnapshotsCoverEnglishSelectionHelpAndRecentWorkspaces()
@@ -443,8 +445,8 @@ public sealed class TerminalVisualSnapshotTests
 
 	private static OwnedProject CreateProject()
 	{
-		var owner = new FixedLengthSnapshotDirectory(
-			SnapshotProjectPathLength,
+		var owner = FixedLengthSnapshotDirectory.CreateForArgumentJsonLength(
+			SnapshotProjectArgumentJsonLength,
 			Guid.NewGuid().ToString("N"));
 		var projectPath = owner.Path;
 
