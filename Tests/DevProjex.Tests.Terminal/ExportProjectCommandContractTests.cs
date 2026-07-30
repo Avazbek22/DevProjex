@@ -73,7 +73,10 @@ public sealed class ExportProjectCommandContractTests
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/src/app.cs", "class App {}");
 		var output = workspace.WriteFile("output/submission.zip", "old zip bytes");
-		var conflictEnvironment = new TestTerminalEnvironment();
+		var conflictEnvironment = new TestTerminalEnvironment
+		{
+			Width = 40
+		};
 
 		var conflict = await RunAsync(project, output, "zip", conflictEnvironment);
 		Assert.Equal(CommandLineExitCodes.DestinationConflict, conflict);
@@ -135,7 +138,10 @@ public sealed class ExportProjectCommandContractTests
 				? File.Exists(Path.Combine(physicalDestination, "src", "app.cs"))
 				: File.Exists(physicalDestination));
 
-			var conflictEnvironment = new TestTerminalEnvironment();
+			var conflictEnvironment = new TestTerminalEnvironment
+			{
+				Width = 40
+			};
 			var conflict = await RunAsync(
 				project,
 				requestedDestination,

@@ -198,6 +198,63 @@ public sealed class RenderingContractTests
 	}
 
 	[Fact]
+	public void RedirectedErrorKeepsLongContextPathOnOneLine()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Width = 40
+		};
+		var renderer = new ErrorRenderer(
+			environment,
+			new TerminalOutputOptions());
+		var contextPath = Path.Combine(
+			Path.GetTempPath(),
+			"DevProjex.Tests.Terminal",
+			new string('a', 80),
+			"external-alias",
+			"submission.zip");
+
+		renderer.Write(new TerminalError(
+			"DPX-EXPORT-DESTINATION-EXISTS",
+			"The destination already exists.",
+			ContextPath: contextPath));
+
+		Assert.Contains(
+			contextPath + Environment.NewLine,
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RedirectedErrorEscapesControlCharactersInContextPath()
+	{
+		var environment = new TestTerminalEnvironment();
+		var renderer = new ErrorRenderer(
+			environment,
+			new TerminalOutputOptions(Plain: true));
+		const string contextPath =
+			"safe\nforged\rsegment\t\u001b]8;;https://example.invalid\u0007link\u001b\\\u2028end";
+
+		renderer.Write(new TerminalError(
+			"DPX-TEST",
+			"Failure.",
+			ContextPath: contextPath));
+
+		var lines = environment.StandardError
+			.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+		var pathLine = Assert.Single(
+			lines,
+			static line => line.Contains("safe\\nforged", StringComparison.Ordinal));
+		Assert.EndsWith(
+			"safe\\nforged\\rsegment\\t\\u001B]8;;https://example.invalid" +
+			"\\u0007link\\u001B\\\\u2028end",
+			pathLine);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.DoesNotContain('\u0007', environment.StandardError);
+		Assert.DoesNotContain('\u2028', environment.StandardError);
+	}
+
+	[Fact]
 	public async Task InteractiveStatusUsesOnlyStandardError()
 	{
 		var environment = new TestTerminalEnvironment
