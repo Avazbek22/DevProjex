@@ -439,18 +439,11 @@ public sealed class DoctorCommandHandler(
 		{
 			using var process = new Process
 			{
-				StartInfo = new ProcessStartInfo
-				{
-					FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
-					UseShellExecute = false,
-					CreateNoWindow = true,
-					RedirectStandardOutput = true,
-					RedirectStandardError = true
-				}
+				StartInfo = CreateGitVersionStartInfo()
 			};
-			process.StartInfo.ArgumentList.Add("--version");
 			if (!process.Start())
 				return (false, "unavailable");
+			process.StandardInput.Close();
 			using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 			timeoutSource.CancelAfter(TimeSpan.FromSeconds(3));
 			var outputTask = process.StandardOutput.ReadToEndAsync(timeoutSource.Token);
@@ -481,6 +474,22 @@ public sealed class DoctorCommandHandler(
 		{
 			return (false, "unavailable");
 		}
+	}
+
+	internal static ProcessStartInfo CreateGitVersionStartInfo()
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add("--version");
+		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+		return startInfo;
 	}
 
 	private static void TryTerminate(Process process)

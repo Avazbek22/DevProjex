@@ -29,6 +29,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     private const int CommandErrorBufferChars = 64 * 1024;
     private static readonly TimeSpan ProcessTerminationWaitTimeout = TimeSpan.FromSeconds(5);
     private const int ProcessTerminationFallbackWaitMilliseconds = 1_000;
+    internal const string NonInteractiveSshCommand = "ssh -o BatchMode=yes";
 
     /// <summary>
     /// Checks if Git CLI is available on the system by running "git --version".
@@ -662,20 +663,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
         // cancellation, which makes cancellation behavior platform-timing dependent.
         cancellationToken.ThrowIfCancellationRequested();
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = GitExecutable,
-            Arguments = arguments,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-
-        if (!string.IsNullOrEmpty(workingDirectory))
-            startInfo.WorkingDirectory = workingDirectory;
+        var startInfo = CreateGitCommandStartInfo(
+            workingDirectory,
+            arguments);
 
         using var process = new Process { StartInfo = startInfo };
 
@@ -722,6 +712,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         };
 
         process.Start();
+        process.StandardInput.Close();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
@@ -731,6 +722,40 @@ public sealed class GitRepositoryService : IGitRepositoryService
             process.ExitCode,
             outputBuffer.ToString(),
             errorBuffer.ToString());
+    }
+
+    internal static ProcessStartInfo CreateGitCommandStartInfo(
+        string? workingDirectory,
+        string arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = GitExecutable,
+            Arguments = arguments,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+        startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        // Git's own prompt switch does not prevent an SSH transport from opening
+        // /dev/tty directly. Use standard OpenSSH configuration and agents, but
+        // force its documented batch policy for GUI/TUI-safe authentication.
+        startInfo.Environment["GIT_SSH_COMMAND"] = NonInteractiveSshCommand;
+        startInfo.Environment["GIT_SSH_VARIANT"] = "ssh";
+        startInfo.Environment["GIT_ASKPASS"] = string.Empty;
+        startInfo.Environment["SSH_ASKPASS"] = string.Empty;
+        startInfo.Environment["SSH_ASKPASS_REQUIRE"] = "never";
+        startInfo.Environment["GCM_INTERACTIVE"] = "Never";
+        startInfo.Environment["GCM_GUI_PROMPT"] = "false";
+
+        if (!string.IsNullOrEmpty(workingDirectory))
+            startInfo.WorkingDirectory = workingDirectory;
+
+        return startInfo;
     }
 
     internal static async Task WaitForExitOrTerminateAsync(

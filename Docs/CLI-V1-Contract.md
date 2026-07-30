@@ -211,6 +211,12 @@ input mode, and alternate-screen state.
 
 TUI requires interactive input and output and refuses `TERM=dumb`.
 
+Git clone work never prompts through the TUI terminal. Git standard streams are
+isolated, Git/GCM/askpass prompting is disabled, and SSH transport uses OpenSSH
+batch mode while retaining the user's standard SSH config, known-hosts files,
+keys, and agent. Missing credentials or host trust therefore produce the normal
+recoverable clone error instead of taking over `/dev/tty`.
+
 ### `open`
 
 ```text
@@ -612,12 +618,23 @@ and unhandled failure. A detected macOS terminal-restore failure writes
 `DPX-TUI-MACOS-TERMINAL-RESTORE` to stderr and returns runtime exit code `1`;
 it is never reported as an unexpected CLI parser failure.
 
+On macOS, foreground `Ctrl+Z` restores the exact captured shell attributes,
+SGR, cursor visibility, and the active terminfo `rmkx` capability before the
+process group stops. After `fg`/SIGCONT, DevProjex reapplies deterministic
+Console raw input plus the matching terminfo `smkx` capability before accepting
+more input. Input polling is serialized across this handoff; a background
+SIGCONT never mutates the foreground terminal.
+
 Input delivered before the TUI process has completed belongs to the active TUI
 session; it may be consumed and is not guaranteed to be preserved or replayed
 to the parent shell. DevProjex does not explicitly flush unread operating-system
-input during teardown. The restoration guarantee starts when the parent shell
-resumes: subsequent input must remain usable, and PTY release gates verify that
-boundary after normal exit, cancellation, and failure.
+input during teardown. On Darwin, the kernel may reprocess such pending input
+through the restored line discipline; DevProjex temporarily suppresses signal,
+software flow-control, and extended control-character handling during that
+reprocessing, then restores the exact captured terminal attributes before
+return. The restoration guarantee starts when the parent shell resumes:
+subsequent input must remain usable, and PTY release gates verify that boundary
+after normal exit, cancellation, and failure.
 
 ## Legacy Migration
 

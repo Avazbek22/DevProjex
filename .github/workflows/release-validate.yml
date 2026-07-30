@@ -1297,7 +1297,7 @@ jobs:
             --filter $filter `
             --logger "console;verbosity=minimal"
 
-      - name: Published Native PTY TUI Smoke (Unix)
+      - name: Published TUI and Native Lifecycle PTY Smoke (Unix)
         if: ${{ startsWith(matrix.rid, 'linux-') || startsWith(matrix.rid, 'osx-') }}
         shell: pwsh
         run: |
@@ -1317,6 +1317,7 @@ jobs:
             "FullyQualifiedName~TerminalPreviewNavigationPtyTests.PreviewViewportAndFocusSurviveKeyboardNavigationOverlaysAndResize",
             "FullyQualifiedName~TerminalRecentRepositoriesPtyTests.PopulatedCachedRepositoryOpensOfflineWithCleanIdentity",
             "FullyQualifiedName~TerminalClonePtyTests.LocalRepositoryCloneThroughApplicationBinaryOpensWorkspaceAndPreservesSource",
+            "FullyQualifiedName~TerminalClonePtyTests.SshCloneCannotPromptThroughTheParentPty",
             "FullyQualifiedName~TerminalLargePreviewPtyTests.FileBackedPreviewReachesFirstMiddleAndFinalSectionsWithDistinctScrollbars",
             "FullyQualifiedName~TerminalPtyLifecycleTests.SupportedTerminalSizeMatrixRemainsKeyboardUsableAndWithinViewport",
             "FullyQualifiedName~TerminalPtyLifecycleTests.ScreenModesExitExplicitlyAndRestoreTerminalState",
@@ -1324,6 +1325,7 @@ jobs:
             "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitMouseModeEnablesTrackingAndRestoresItOnExit",
             "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitNoMouseModeIgnoresMouseInput",
             "FullyQualifiedName~TerminalPlainPtyTests.PlainWorkspaceIsStableKeyboardAccessibleAndRestoresTerminal",
+            "FullyQualifiedName~MacOsTerminalNativePtyTests",
             "FullyQualifiedName~TerminalSignalProcessRegressionTests"
           ) -join "|"
           dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `

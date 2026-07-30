@@ -21,6 +21,8 @@ public sealed class DesktopProcessLauncher
 			              throw new DesktopControlException(
 				              "DPX-DESKTOP-LAUNCH-FAILED",
 				              "DevProjex Desktop could not be started.");
+			if (startInfo.RedirectStandardInput)
+				process.StandardInput.Close();
 			var processId = process.Id;
 			process.Dispose();
 			return new DesktopLaunchResult(processId, requestPath);
@@ -69,6 +71,9 @@ public sealed class DesktopProcessLauncher
 			FileName = "/bin/sh",
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
 			WorkingDirectory = Directory.GetCurrentDirectory()
 		};
 		startInfo.ArgumentList.Add("-c");

@@ -7,6 +7,86 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalClonePtyTests
 {
 	[Fact(Timeout = 120_000)]
+	public async Task SshCloneCannotPromptThroughTheParentPty()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip(
+				"The fake OpenSSH /dev/tty probe requires a POSIX test host.");
+			return;
+		}
+
+		using var fakeTransportRoot = new TemporaryDirectory();
+		var fakeBin = fakeTransportRoot.CreateDirectory("fake ssh bin");
+		var fakeSsh = Path.Combine(fakeBin, "ssh");
+		var batchMarker = Path.Combine(
+			fakeTransportRoot.Path,
+			"batch-mode-observed");
+		File.WriteAllText(
+			fakeSsh,
+			"#!/bin/sh\n" +
+			"case \" $* \" in\n" +
+			"  *\" -o BatchMode=yes \"*)\n" +
+			"    printf '%s' batch > \"$DPX_FAKE_SSH_BATCH_MARKER\"\n" +
+			"    exit 73\n" +
+			"    ;;\n" +
+			"esac\n" +
+			"printf '__DEVPROJEX_FAKE_SSH_TTY_PROMPT__' > /dev/tty\n" +
+			"IFS= read -r dpx_secret < /dev/tty\n" +
+			"exit 74\n",
+			new UTF8Encoding(false));
+		File.SetUnixFileMode(
+			fakeSsh,
+			UnixFileMode.UserRead |
+			UnixFileMode.UserWrite |
+			UnixFileMode.UserExecute);
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+		var inheritedPath =
+			Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			environment: new Dictionary<string, string>
+			{
+				["PATH"] = fakeBin + Path.PathSeparator + inheritedPath,
+				["DPX_FAKE_SSH_BATCH_MARKER"] = batchMarker,
+				["GIT_SSH_COMMAND"] = "interactive-user-override",
+				["GIT_SSH_VARIANT"] = "simple"
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			"ssh://git@example.invalid/owner/repository.git",
+			TestContext.Current.CancellationToken);
+		await WaitForFileAsync(
+			batchMarker,
+			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"The repository could not be cloned.",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(
+			"__DEVPROJEX_FAKE_SSH_TTY_PROMPT__",
+			terminal.RawOutput,
+			StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task LocalRepositoryCloneThroughApplicationBinaryOpensWorkspaceAndPreservesSource()
 	{
 		using var originRoot = new TemporaryDirectory();

@@ -477,9 +477,6 @@ public sealed class DesktopControlIntegrationTests
 	{
 		var startInfo = DesktopProcessLauncher.CreateStartInfo("desktop-request.json");
 
-		Assert.False(startInfo.RedirectStandardInput);
-		Assert.False(startInfo.RedirectStandardOutput);
-		Assert.False(startInfo.RedirectStandardError);
 		Assert.Contains(
 			DesktopLaunchRequestStore.InternalRequestArgument,
 			startInfo.ArgumentList);
@@ -487,11 +484,17 @@ public sealed class DesktopControlIntegrationTests
 		if (OperatingSystem.IsWindows())
 		{
 			Assert.True(startInfo.UseShellExecute);
+			Assert.False(startInfo.RedirectStandardInput);
+			Assert.False(startInfo.RedirectStandardOutput);
+			Assert.False(startInfo.RedirectStandardError);
 			Assert.NotEqual("/bin/sh", startInfo.FileName);
 		}
 		else
 		{
 			Assert.False(startInfo.UseShellExecute);
+			Assert.True(startInfo.RedirectStandardInput);
+			Assert.True(startInfo.RedirectStandardOutput);
+			Assert.True(startInfo.RedirectStandardError);
 			Assert.Equal("/bin/sh", startInfo.FileName);
 			Assert.Contains("exec \"$@\" </dev/null >/dev/null 2>&1", startInfo.ArgumentList);
 			Assert.False(startInfo.Environment.ContainsKey(InvocationEnvironment.TerminalHostVariable));

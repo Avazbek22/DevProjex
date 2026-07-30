@@ -36,6 +36,68 @@ public sealed class TerminalPtyHarnessContractTests
 	}
 
 	[Fact]
+	public void UnixRestorationHandshakeCanCaptureAnInitiallyDisabledSignalPolicy()
+	{
+		var command = TerminalPtyHarness.BuildUnixShellCommand(
+			"exec-devprojex",
+			writeShellCompletionMarker: true,
+			disableSignalGeneration: true);
+
+		Assert.StartsWith("stty -isig; dpx_stty_before=", command);
+		Assert.True(
+			command.IndexOf("stty -isig", StringComparison.Ordinal) <
+			command.IndexOf("dpx_stty_before=", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void DarwinPendingInputFixturePinsEveryExercisedControlCharacter()
+	{
+		var command = TerminalPtyHarness.BuildUnixShellCommand(
+			"exec-devprojex",
+			writeShellCompletionMarker: true,
+			configureDarwinControlCharacters: true);
+
+		Assert.StartsWith(
+			"stty intr '^C' stop '^S' discard '^O' kill '^U'; ",
+			command);
+		Assert.True(
+			command.IndexOf("stty intr", StringComparison.Ordinal) <
+			command.IndexOf("dpx_stty_before=", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void UnixJobControlFixtureVerifiesStoppedStateAndExactTerminalHandoff()
+	{
+		var command = TerminalPtyHarness.BuildUnixJobControlShellCommand(
+			"exec-devprojex",
+			"/tmp/path with 'quote/resume");
+
+		Assert.Contains("set -m", command, StringComparison.Ordinal);
+		Assert.Contains("exec-devprojex & fg %1", command, StringComparison.Ordinal);
+		Assert.Contains(
+			"jobs -s -p %1",
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.SuspendedShellTerminalStateRestoredMarker[
+				..(TerminalPtyHarness.SuspendedShellTerminalStateRestoredMarker.Length / 2)],
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"'/tmp/path with '\"'\"'quote/resume'",
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"fg %1; dpx_exit=$?",
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"IFS= read -r dpx_sync",
+			command,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void TermiosMismatchDiagnosticRetainsOpaqueBeforeAndAfterSnapshots()
 	{
 		var output =

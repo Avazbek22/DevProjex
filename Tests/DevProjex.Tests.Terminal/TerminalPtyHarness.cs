@@ -16,6 +16,14 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		"__DEVPROJEX_TERMIOS_RESTORED__";
 	public const string ShellTerminalStateMismatchMarker =
 		"__DEVPROJEX_TERMIOS_MISMATCH__";
+	public const string SuspendedShellTerminalStateRestoredMarker =
+		"__DEVPROJEX_SUSPENDED_TERMIOS_RESTORED__";
+	public const string SuspendedShellTerminalStateMismatchMarker =
+		"__DEVPROJEX_SUSPENDED_TERMIOS_MISMATCH__";
+	public const string SuspendedJobMissingMarker =
+		"__DEVPROJEX_SUSPENDED_JOB_MISSING__";
+	internal const string JobControlResumeFileName =
+		"resume-suspended-devprojex";
 	internal const string ShellInputSentinel =
 		"__DEVPROJEX_FRESH_SHELL_INPUT__";
 	private const string ShellHandshakeMarker = "__DEVPROJEX_SHELL_HANDSHAKE__";
@@ -89,7 +97,10 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		CancellationToken cancellationToken = default,
 		Action<string>? initializeDataRoot = null,
 		bool writeShellCompletionMarker = false,
-		bool useProgressCheckpointHost = false)
+		bool useProgressCheckpointHost = false,
+		bool disableUnixSignalGeneration = false,
+		bool configureDarwinControlCharacters = false,
+		bool gateUnixJobControlSuspend = false)
 	{
 		var binary = useProgressCheckpointHost
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
@@ -131,12 +142,16 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			foreach (var pair in environment)
 				variables[pair.Key] = pair.Value;
 		}
+		InstallPrivateTermInfoFixture(dataRoot, variables);
 		initializeDataRoot?.Invoke(variables["DEVPROJEX_INTERNAL_DATA_ROOT"]);
 		var (host, commandLine, startupInput) = CreateShellCommand(
 			binary,
 			launchArguments,
 			variables,
-			writeShellCompletionMarker);
+			writeShellCompletionMarker,
+			disableUnixSignalGeneration,
+			configureDarwinControlCharacters,
+			gateUnixJobControlSuspend);
 
 		var process = new Hex1bTerminalChildProcess(
 			host,
@@ -165,7 +180,10 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		string binary,
 		IReadOnlyList<string> arguments,
 		IReadOnlyDictionary<string, string> environment,
-		bool writeShellCompletionMarker)
+		bool writeShellCompletionMarker,
+		bool disableUnixSignalGeneration,
+		bool configureDarwinControlCharacters,
+		bool gateUnixJobControlSuspend)
 	{
 		if (OperatingSystem.IsWindows())
 		{
@@ -207,15 +225,119 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			environmentArguments
 				.Append(QuoteForPosixShell(binary))
 				.Concat(arguments.Select(QuoteForPosixShell)));
-		return ("/bin/sh", ["-c", BuildUnixShellCommand(invocation, writeShellCompletionMarker)], null);
+		var shellCommand = gateUnixJobControlSuspend
+			? BuildUnixJobControlShellCommand(
+				invocation,
+				Path.Combine(
+					environment["DEVPROJEX_INTERNAL_DATA_ROOT"],
+					JobControlResumeFileName),
+				disableUnixSignalGeneration,
+				configureDarwinControlCharacters)
+			: BuildUnixShellCommand(
+				invocation,
+				writeShellCompletionMarker,
+				disableUnixSignalGeneration,
+				configureDarwinControlCharacters);
+		return (
+			"/bin/sh",
+			["-c", shellCommand],
+			null);
+	}
+
+	private static void InstallPrivateTermInfoFixture(
+		string dataRoot,
+		IDictionary<string, string> environment)
+	{
+		if (!OperatingSystem.IsMacOS() ||
+		    !environment.TryGetValue("TERM", out var terminalIdentity) ||
+		    !string.Equals(
+			    terminalIdentity,
+			    "xterm-noapp",
+			    StringComparison.Ordinal))
+		{
+			return;
+		}
+
+		const string termInfoCompilerPath = "/usr/bin/tic";
+		var termInfoRoot = Path.Combine(dataRoot, "terminfo");
+		var sourcePath = Path.Combine(dataRoot, "xterm-noapp.info");
+		Directory.CreateDirectory(termInfoRoot);
+		File.WriteAllText(
+			sourcePath,
+			"""
+			xterm-noapp|DevProjex PTY fixture without application cursor controls,
+				smkx=\E=,
+				rmkx=\E>,
+				use=xterm-256color,
+			""",
+			new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = termInfoCompilerPath,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+		startInfo.ArgumentList.Add("-o");
+		startInfo.ArgumentList.Add(termInfoRoot);
+		startInfo.ArgumentList.Add(sourcePath);
+
+		using var compiler = new Process { StartInfo = startInfo };
+		try
+		{
+			compiler.Start();
+			compiler.StandardInput.Close();
+			var standardOutput = compiler.StandardOutput.ReadToEndAsync();
+			var standardError = compiler.StandardError.ReadToEndAsync();
+			if (!compiler.WaitForExit(milliseconds: 5_000))
+			{
+				compiler.Kill(entireProcessTree: true);
+				if (!compiler.WaitForExit(milliseconds: 2_000))
+				throw new TimeoutException("The terminfo compiler did not terminate.");
+				throw new TimeoutException("The terminfo compiler timed out.");
+			}
+
+			Task.WaitAll(standardOutput, standardError);
+			if (compiler.ExitCode != 0)
+			{
+				throw new InvalidOperationException(
+					$"The terminfo compiler exited with code {compiler.ExitCode}: " +
+					standardError.Result.Trim());
+			}
+		}
+		catch (Exception exception)
+			when (exception is InvalidOperationException or
+			      System.ComponentModel.Win32Exception or
+			      IOException or
+			      UnauthorizedAccessException or
+			      AggregateException)
+		{
+			throw new InvalidOperationException(
+				"Unable to prepare the private xterm-noapp PTY fixture.",
+				exception);
+		}
+
+		environment["TERMINFO"] = termInfoRoot;
 	}
 
 	internal static string BuildUnixShellCommand(
 		string invocation,
-		bool writeShellCompletionMarker)
+		bool writeShellCompletionMarker,
+		bool disableSignalGeneration = false,
+		bool configureDarwinControlCharacters = false)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(invocation);
-		return writeShellCompletionMarker
+		var setup = string.Concat(
+			configureDarwinControlCharacters
+				? "stty intr '^C' stop '^S' discard '^O' kill '^U'; "
+				: string.Empty,
+			disableSignalGeneration
+				? "stty -isig; "
+				: string.Empty);
+		return setup + (writeShellCompletionMarker
 			? $"dpx_stty_before=$(stty -g 2>/dev/null || true); " +
 			  $"{invocation}; dpx_exit=$?; " +
 			  "dpx_stty_after=$(stty -g 2>/dev/null || true); " +
@@ -234,7 +356,59 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			  "printf '%s%s\\n' " +
 			  $"{SplitMarkerForPosixShell(ShellCompletionMarker)}; " +
 			  "IFS= read -r dpx_release; exit \"$dpx_exit\""
-			: "exec " + invocation;
+			: "exec " + invocation);
+	}
+
+	internal static string BuildUnixJobControlShellCommand(
+		string invocation,
+		string resumePath,
+		bool disableSignalGeneration = false,
+		bool configureDarwinControlCharacters = false)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(invocation);
+		ArgumentException.ThrowIfNullOrWhiteSpace(resumePath);
+		var setup = string.Concat(
+			configureDarwinControlCharacters
+				? "stty intr '^C' stop '^S' discard '^O' kill '^U'; "
+				: string.Empty,
+			disableSignalGeneration
+				? "stty -isig; "
+				: string.Empty);
+		return setup +
+		       "dpx_stty_before=$(stty -g 2>/dev/null || true); " +
+		       "set -m; " +
+		       $"{invocation} & " +
+		       "fg %1; dpx_suspend_exit=$?; " +
+		       "if ! jobs -s -p %1 >/dev/null 2>&1; then " +
+		       $"printf '%s%s exit=%s\\n' " +
+		       $"{SplitMarkerForPosixShell(SuspendedJobMissingMarker)} " +
+		       "\"$dpx_suspend_exit\"; exit 96; fi; " +
+		       "dpx_stty_suspended=$(stty -g 2>/dev/null || true); " +
+		       "if [ -n \"$dpx_stty_before\" ] && " +
+		       "[ \"$dpx_stty_before\" = \"$dpx_stty_suspended\" ]; then " +
+		       $"printf '%s%s\\n' " +
+		       $"{SplitMarkerForPosixShell(SuspendedShellTerminalStateRestoredMarker)}; " +
+		       "else " +
+		       $"printf '%s%s before=%s suspended=%s\\n' " +
+		       $"{SplitMarkerForPosixShell(SuspendedShellTerminalStateMismatchMarker)} " +
+		       "\"$dpx_stty_before\" \"$dpx_stty_suspended\"; " +
+		       "fi; " +
+		       $"while [ ! -e {QuoteForPosixShell(resumePath)} ]; do sleep 0.02; done; " +
+		       "fg %1; dpx_exit=$?; set +m; " +
+		       "dpx_stty_after=$(stty -g 2>/dev/null || true); " +
+		       "if [ -n \"$dpx_stty_before\" ] && " +
+		       "[ \"$dpx_stty_before\" = \"$dpx_stty_after\" ]; then " +
+		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalStateRestoredMarker)}; " +
+		       "else " +
+		       $"printf '%s%s before=%s after=%s\\n' " +
+		       $"{SplitMarkerForPosixShell(ShellTerminalStateMismatchMarker)} " +
+		       "\"$dpx_stty_before\" \"$dpx_stty_after\"; " +
+		       "fi; " +
+		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellHandshakeMarker)}; " +
+		       "IFS= read -r dpx_sync; " +
+		       $"[ \"$dpx_sync\" = {QuoteForPosixShell(ShellInputSentinel)} ] || exit 97; " +
+		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellCompletionMarker)}; " +
+		       "IFS= read -r dpx_release; exit \"$dpx_exit\"";
 	}
 
 	private static string QuoteForCommandPrompt(string value) =>
@@ -286,7 +460,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			var validationCommand =
 				$"if \"%dpx_sync%\"==\"{ShellInputSentinel}\" (" +
 				$"echo {EscapeMarkerForCommandPrompt(ShellCompletionMarker)}" +
-				" & set /p \"dpx_release=\" & exit /b %dpx_exit%) else exit /b 97";
+				" & set /p \"dpx_release=\" & exit %dpx_exit%) else exit 97";
 			await SendAsync(
 					validationCommand + "\r",
 					cancellationToken)
@@ -534,28 +708,50 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			$"Terminal responses: {CaptureTerminalResponseLog()}");
 	}
 
-	private async Task WaitForRawOutputAsync(
+	public async Task WaitForRawOutputAsync(
 		string expected,
 		TimeSpan? timeout = null,
 		CancellationToken cancellationToken = default)
 	{
+		await WaitForRawOutputAfterAsync(
+				expected,
+				startIndex: 0,
+				timeout,
+				cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	public async Task WaitForRawOutputAfterAsync(
+		string expected,
+		int startIndex,
+		TimeSpan? timeout = null,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(startIndex);
 		var stopwatch = Stopwatch.StartNew();
 		var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(15);
 		while (stopwatch.Elapsed < effectiveTimeout)
 		{
-			if (CaptureRawOutput().Contains(expected, StringComparison.Ordinal))
+			var output = CaptureRawOutput();
+			if (output.Length >= startIndex &&
+			    output.AsSpan(startIndex).Contains(
+				    expected,
+				    StringComparison.Ordinal))
+			{
 				return;
+			}
 			if (HasExited)
 			{
 				throw new Xunit.Sdk.XunitException(
 					$"Terminal process exited with code {_process.ExitCode} before " +
-					$"'{expected}' appeared.\nRaw output:\n{CaptureRawOutput()}");
+					$"'{expected}' appeared after offset {startIndex}.\n" +
+					$"Raw output:\n{output}");
 			}
 			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
 		}
 
 		throw new TimeoutException(
-			$"Timed out waiting for '{expected}'.\n" +
+			$"Timed out waiting for '{expected}' after offset {startIndex}.\n" +
 			$"Raw output tail:\n{CaptureRawOutputTail()}");
 	}
 

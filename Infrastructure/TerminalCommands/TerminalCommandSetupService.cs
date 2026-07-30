@@ -1395,6 +1395,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			process = new Process { StartInfo = startInfo };
 			if (!process.Start())
 				return new TerminalCommandValidationResult(false, "The terminal launcher process could not be started.");
+			process.StandardInput.Close();
 
 			var standardOutput = process.StandardOutput.ReadToEndAsync();
 			var standardError = process.StandardError.ReadToEndAsync();
@@ -1677,12 +1678,13 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		Unreadable
 	}
 
-	private static ProcessStartInfo CreateLauncherValidationStartInfo(string commandPath)
+	internal static ProcessStartInfo CreateLauncherValidationStartInfo(string commandPath)
 	{
 		var startInfo = new ProcessStartInfo
 		{
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
