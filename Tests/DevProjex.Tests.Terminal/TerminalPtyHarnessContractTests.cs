@@ -64,6 +64,15 @@ public sealed class TerminalPtyHarnessContractTests
 				..(TerminalPtyHarness.ShellSettledTerminalStateRestoredMarker.Length / 2)],
 			command,
 			StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.ShellSettledTerminalStateMismatchMarker[
+				..(TerminalPtyHarness.ShellSettledTerminalStateMismatchMarker.Length / 2)],
+			command,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"\"$dpx_stty_before\" \"$dpx_stty_settled\"; exit",
+			command,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

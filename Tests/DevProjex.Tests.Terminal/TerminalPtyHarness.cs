@@ -301,7 +301,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		       "else " +
 		       $"printf '%s%s before=%s settled=%s\\n' " +
 		       $"{SplitMarkerForPosixShell(ShellSettledTerminalStateMismatchMarker)} " +
-		       "\"$dpx_stty_before\" \"$dpx_stty_settled\"; exit 98; " +
+		       "\"$dpx_stty_before\" \"$dpx_stty_settled\"; " +
 		       "fi; " +
 		       extendedProbe +
 		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellUsabilityVerifiedMarker)}; " +
