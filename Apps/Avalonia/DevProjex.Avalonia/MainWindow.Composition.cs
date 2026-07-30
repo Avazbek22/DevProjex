@@ -145,6 +145,7 @@ public partial class MainWindow
     private Border? _settingsContainer;
     private Border? _settingsIsland;
     private SettingsPanelView? _settingsPanel;
+    private Task _projectLoadFinalizationTask = Task.CompletedTask;
     private Task _postLoadVisualReadyTask = Task.CompletedTask;
     private static readonly TimeSpan SettingsPanelAnimationDuration =
         WorkspacePresentationController.SettingsPanelAnimationDuration;

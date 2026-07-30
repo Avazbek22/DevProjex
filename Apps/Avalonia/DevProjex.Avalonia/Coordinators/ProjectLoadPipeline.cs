@@ -44,7 +44,7 @@ internal sealed class ProjectLoadPipeline(
 
             await host.ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
             if (recordRecentFolder)
-                host.RecordRecentFolder(path);
+                await host.RecordRecentFolderAsync(path, cancellationToken);
 
             if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))
             {

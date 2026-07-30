@@ -383,6 +383,45 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public async Task ProjectLoadPipeline_AwaitsRecentProjectsPersistenceBeforeFinalizingLoad()
+    {
+        var viewModel = CreateViewModel();
+        var persistenceStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePersistence = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingProjectLoadHost(viewModel)
+        {
+            RecordRecentFolderHandler = async cancellationToken =>
+            {
+                persistenceStarted.SetResult();
+                await releasePersistence.Task.WaitAsync(cancellationToken);
+            }
+        };
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+        using var pipeline = new ProjectLoadPipeline(host, status);
+
+        var loadTask = pipeline.OpenFolderAsync(
+            @"C:\Project",
+            fromDialog: false,
+            recordRecentFolder: true);
+        await persistenceStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(loadTask.IsCompleted);
+        Assert.True(viewModel.StatusBusy);
+        Assert.DoesNotContain(ProjectLoadHostCall.ClearProjectLoadCancellation, host.Calls);
+        Assert.DoesNotContain(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
+
+        releasePersistence.SetResult();
+        await loadTask;
+
+        Assert.False(viewModel.StatusBusy);
+        Assert.Contains(ProjectLoadHostCall.ClearProjectLoadCancellation, host.Calls);
+        Assert.Contains(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
+    }
+
+    [Fact]
     public async Task ProjectLoadPipeline_OpenFolderAsync_CancellationAppliesFallbackWithoutSuccessSideEffects()
     {
         var viewModel = CreateViewModel();
@@ -1498,6 +1537,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public Func<CancellationToken, Task>? ReloadHandler { get; set; }
 
+        public Func<CancellationToken, Task>? RecordRecentFolderHandler { get; set; }
+
         public Func<CancellationToken, Task>? DeleteRepositoryDirectoryHandler { get; set; }
 
         public void CaptureProjectLoadCancellationSnapshot() =>
@@ -1549,10 +1590,12 @@ public sealed class MainWindowCoordinatorRefactorTests
                 await ReloadHandler(cancellationToken);
         }
 
-        public void RecordRecentFolder(string path)
+        public async Task RecordRecentFolderAsync(string path, CancellationToken cancellationToken)
         {
             _ = path;
             Calls.Add(ProjectLoadHostCall.RecordRecentFolder);
+            if (RecordRecentFolderHandler is not null)
+                await RecordRecentFolderHandler(cancellationToken);
         }
 
         public async Task DeleteRepositoryDirectoryAsync(string path, CancellationToken cancellationToken)

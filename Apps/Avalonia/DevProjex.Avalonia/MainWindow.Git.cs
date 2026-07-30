@@ -222,7 +222,9 @@ public partial class MainWindow
         if (!opened || !PathComparer.Default.Equals(_currentPath, result.LocalPath))
             return;
 
-        RecordRecentRepository(string.IsNullOrWhiteSpace(result.RepositoryUrl) ? requestedUrl : result.RepositoryUrl);
+        await RecordRecentRepositoryAsync(
+            string.IsNullOrWhiteSpace(result.RepositoryUrl) ? requestedUrl : result.RepositoryUrl,
+            cancellationToken);
 
         // Clone-only branch discovery stays behind the shared post-reveal stability gate. Waiting
         // only for transition completion can still compete with the island's final layout pass.

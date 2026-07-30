@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
@@ -68,6 +70,15 @@ public sealed class MainWindowKeyboardAndSettingsUiTests(UiWorkspaceFixture work
                 window,
                 () => UiTestDriver.GetActualWidth(settingsContainer) > 0.5,
                 "initial settings animation to begin");
+
+            var finalizationField = typeof(MainWindow).GetField(
+                "_projectLoadFinalizationTask",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var projectLoadFinalization = Assert.IsAssignableFrom<Task>(
+                finalizationField?.GetValue(window));
+            Assert.True(
+                projectLoadFinalization.IsCompletedSuccessfully,
+                "Initial settings reveal started before project-load finalization completed.");
 
             var minimumObservedTreeWidth = double.PositiveInfinity;
             for (var frame = 0; frame < 18; frame++)
