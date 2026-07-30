@@ -56,7 +56,8 @@ public sealed class TerminalPtyJourneyTests
 			workspace.Path,
 			["--language", "en"],
 			cancellationToken: TestContext.Current.CancellationToken,
-			writeShellCompletionMarker: true);
+			writeShellCompletionMarker: true,
+			verifyExtendedShellUsability: true);
 
 		await terminal.WaitForScreenAsync(
 			"> Open current directory",
@@ -71,6 +72,27 @@ public sealed class TerminalPtyJourneyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("PROJECT TREE", workspaceScreen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
+
+		await terminal.SendF6Async(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
+		var compactPreview = await terminal.WaitForStableScreenAsync(
+			required: "> CONTEXT PREVIEW",
+			forbidden: "PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Equal(80, terminal.Columns);
+		Assert.Equal(24, terminal.Rows);
+		Assert.DoesNotContain("PROJECT TREE", compactPreview, StringComparison.Ordinal);
+		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendShiftF6Async(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(

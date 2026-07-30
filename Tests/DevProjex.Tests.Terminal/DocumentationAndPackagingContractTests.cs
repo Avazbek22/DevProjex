@@ -274,10 +274,7 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("env -u CI \"$2\"", workflow, StringComparison.Ordinal);
 		Assert.Contains("Portable Launcher ConPTY TUI Smoke", workflow, StringComparison.Ordinal);
-		Assert.Contains(
-			"Published TUI and Native Lifecycle PTY Smoke (Unix)",
-			workflow,
-			StringComparison.Ordinal);
+		Assert.Contains("Published Native PTY TUI Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Published Single-File Extraction Contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"PublishedSingleFileExtractionProcessTests",

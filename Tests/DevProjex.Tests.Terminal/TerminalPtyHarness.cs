@@ -16,16 +16,25 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		"__DEVPROJEX_TERMIOS_RESTORED__";
 	public const string ShellTerminalStateMismatchMarker =
 		"__DEVPROJEX_TERMIOS_MISMATCH__";
-	public const string SuspendedShellTerminalStateRestoredMarker =
-		"__DEVPROJEX_SUSPENDED_TERMIOS_RESTORED__";
-	public const string SuspendedShellTerminalStateMismatchMarker =
-		"__DEVPROJEX_SUSPENDED_TERMIOS_MISMATCH__";
-	public const string SuspendedJobMissingMarker =
-		"__DEVPROJEX_SUSPENDED_JOB_MISSING__";
-	internal const string JobControlResumeFileName =
-		"resume-suspended-devprojex";
+	public const string ShellSettledTerminalStateRestoredMarker =
+		"__DEVPROJEX_SETTLED_TERMIOS_RESTORED__";
+	public const string ShellSettledTerminalStateMismatchMarker =
+		"__DEVPROJEX_SETTLED_TERMIOS_MISMATCH__";
+	public const string ShellTerminalPropertiesRestoredMarker =
+		"__DEVPROJEX_SHELL_PROPERTIES_RESTORED__";
+	public const string ShellLineInputAcceptedMarker =
+		"__DEVPROJEX_SHELL_LINE_INPUT_ACCEPTED__";
+	public const string ShellInterruptReadyMarker =
+		"__DEVPROJEX_SHELL_INTERRUPT_READY__";
+	public const string ShellInterruptHandledMarker =
+		"__DEVPROJEX_SHELL_INTERRUPT_HANDLED__";
+	public const string ShellVersionProbeMarker =
+		"__DEVPROJEX_SHELL_VERSION_OK__";
+	public const string ShellUsabilityVerifiedMarker =
+		"__DEVPROJEX_SHELL_USABLE__";
 	internal const string ShellInputSentinel =
 		"__DEVPROJEX_FRESH_SHELL_INPUT__";
+	internal const string ShellEchoProbe = "terminal-ok";
 	private const string ShellHandshakeMarker = "__DEVPROJEX_SHELL_HANDSHAKE__";
 	private const string WindowSizeQuery = "\u001b[18t";
 	private readonly Hex1bTerminalChildProcess _process;
@@ -49,15 +58,18 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	private readonly Task _exitMonitorTask;
 	private readonly Task _terminalResponseTask;
 	private readonly string _dataRoot;
+	private readonly bool _verifyExtendedShellUsability;
 
 	private TerminalPtyHarness(
 		Hex1bTerminalChildProcess process,
 		XTermTerminal terminal,
-		string dataRoot)
+		string dataRoot,
+		bool verifyExtendedShellUsability)
 	{
 		_process = process;
 		_terminal = terminal;
 		_dataRoot = dataRoot;
+		_verifyExtendedShellUsability = verifyExtendedShellUsability;
 		_terminal.DataReceived += (_, args) =>
 		{
 			if (!string.IsNullOrEmpty(args.Data))
@@ -98,9 +110,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		Action<string>? initializeDataRoot = null,
 		bool writeShellCompletionMarker = false,
 		bool useProgressCheckpointHost = false,
-		bool disableUnixSignalGeneration = false,
-		bool configureDarwinControlCharacters = false,
-		bool gateUnixJobControlSuspend = false)
+		bool verifyExtendedShellUsability = false)
 	{
 		var binary = useProgressCheckpointHost
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
@@ -142,16 +152,13 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			foreach (var pair in environment)
 				variables[pair.Key] = pair.Value;
 		}
-		InstallPrivateTermInfoFixture(dataRoot, variables);
 		initializeDataRoot?.Invoke(variables["DEVPROJEX_INTERNAL_DATA_ROOT"]);
 		var (host, commandLine, startupInput) = CreateShellCommand(
 			binary,
 			launchArguments,
 			variables,
 			writeShellCompletionMarker,
-			disableUnixSignalGeneration,
-			configureDarwinControlCharacters,
-			gateUnixJobControlSuspend);
+			verifyExtendedShellUsability && !useProgressCheckpointHost);
 
 		var process = new Hex1bTerminalChildProcess(
 			host,
@@ -170,7 +177,11 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				Scrollback = 200,
 				TermName = "xterm-256color"
 			});
-		var harness = new TerminalPtyHarness(process, terminal, dataRoot);
+		var harness = new TerminalPtyHarness(
+			process,
+			terminal,
+			dataRoot,
+			verifyExtendedShellUsability && !OperatingSystem.IsWindows());
 		if (startupInput is not null)
 			await harness.SendAsync(startupInput + "\r", cancellationToken).ConfigureAwait(false);
 		return harness;
@@ -181,9 +192,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		IReadOnlyList<string> arguments,
 		IReadOnlyDictionary<string, string> environment,
 		bool writeShellCompletionMarker,
-		bool disableUnixSignalGeneration,
-		bool configureDarwinControlCharacters,
-		bool gateUnixJobControlSuspend)
+		bool verifyExtendedShellUsability)
 	{
 		if (OperatingSystem.IsWindows())
 		{
@@ -216,185 +225,56 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		// inside the child shell so parallel journeys retain isolated production stores.
 		var environmentArguments = environment
 			.OrderBy(static pair => pair.Key, StringComparer.Ordinal)
-			.Select(static pair => QuoteForPosixShell($"{pair.Key}={pair.Value}"));
+			.Select(static pair => QuoteForPosixShell($"{pair.Key}={pair.Value}"))
+			.ToArray();
 		var unixNoColorArguments = environment.ContainsKey("NO_COLOR")
 			? string.Empty
 			: "-u NO_COLOR ";
-		var invocation = "env " + unixNoColorArguments + string.Join(
+		var invocationPrefix = "env " + unixNoColorArguments + string.Join(
 			' ',
-			environmentArguments
-				.Append(QuoteForPosixShell(binary))
-				.Concat(arguments.Select(QuoteForPosixShell)));
-		var shellCommand = gateUnixJobControlSuspend
-			? BuildUnixJobControlShellCommand(
-				invocation,
-				Path.Combine(
-					environment["DEVPROJEX_INTERNAL_DATA_ROOT"],
-					JobControlResumeFileName),
-				disableUnixSignalGeneration,
-				configureDarwinControlCharacters)
-			: BuildUnixShellCommand(
-				invocation,
-				writeShellCompletionMarker,
-				disableUnixSignalGeneration,
-				configureDarwinControlCharacters);
+			environmentArguments.Append(QuoteForPosixShell(binary)));
+		var invocation = string.Join(
+			' ',
+			new[] { invocationPrefix }.Concat(arguments.Select(QuoteForPosixShell)));
+		var versionProbeInvocation = verifyExtendedShellUsability
+			? invocationPrefix + " --version"
+			: null;
+		var shellCommand = BuildUnixShellCommand(
+			invocation,
+			writeShellCompletionMarker,
+			versionProbeInvocation);
 		return (
 			"/bin/sh",
 			["-c", shellCommand],
 			null);
 	}
 
-	private static void InstallPrivateTermInfoFixture(
-		string dataRoot,
-		IDictionary<string, string> environment)
-	{
-		if (!OperatingSystem.IsMacOS() ||
-		    !environment.TryGetValue("TERM", out var terminalIdentity) ||
-		    !string.Equals(
-			    terminalIdentity,
-			    "xterm-noapp",
-			    StringComparison.Ordinal))
-		{
-			return;
-		}
-
-		const string termInfoCompilerPath = "/usr/bin/tic";
-		var termInfoRoot = Path.Combine(dataRoot, "terminfo");
-		var sourcePath = Path.Combine(dataRoot, "xterm-noapp.info");
-		Directory.CreateDirectory(termInfoRoot);
-		File.WriteAllText(
-			sourcePath,
-			"""
-			xterm-noapp|DevProjex PTY fixture without application cursor controls,
-				smkx=\E=,
-				rmkx=\E>,
-				use=xterm-256color,
-			""",
-			new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-
-		var startInfo = new ProcessStartInfo
-		{
-			FileName = termInfoCompilerPath,
-			RedirectStandardInput = true,
-			RedirectStandardOutput = true,
-			RedirectStandardError = true,
-			UseShellExecute = false,
-			CreateNoWindow = true
-		};
-		startInfo.ArgumentList.Add("-o");
-		startInfo.ArgumentList.Add(termInfoRoot);
-		startInfo.ArgumentList.Add(sourcePath);
-
-		using var compiler = new Process { StartInfo = startInfo };
-		try
-		{
-			compiler.Start();
-			compiler.StandardInput.Close();
-			var standardOutput = compiler.StandardOutput.ReadToEndAsync();
-			var standardError = compiler.StandardError.ReadToEndAsync();
-			if (!compiler.WaitForExit(milliseconds: 5_000))
-			{
-				compiler.Kill(entireProcessTree: true);
-				if (!compiler.WaitForExit(milliseconds: 2_000))
-				throw new TimeoutException("The terminfo compiler did not terminate.");
-				throw new TimeoutException("The terminfo compiler timed out.");
-			}
-
-			Task.WaitAll(standardOutput, standardError);
-			if (compiler.ExitCode != 0)
-			{
-				throw new InvalidOperationException(
-					$"The terminfo compiler exited with code {compiler.ExitCode}: " +
-					standardError.Result.Trim());
-			}
-		}
-		catch (Exception exception)
-			when (exception is InvalidOperationException or
-			      System.ComponentModel.Win32Exception or
-			      IOException or
-			      UnauthorizedAccessException or
-			      AggregateException)
-		{
-			throw new InvalidOperationException(
-				"Unable to prepare the private xterm-noapp PTY fixture.",
-				exception);
-		}
-
-		environment["TERMINFO"] = termInfoRoot;
-	}
-
 	internal static string BuildUnixShellCommand(
 		string invocation,
 		bool writeShellCompletionMarker,
-		bool disableSignalGeneration = false,
-		bool configureDarwinControlCharacters = false)
+		string? versionProbeInvocation = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(invocation);
-		var setup = string.Concat(
-			configureDarwinControlCharacters
-				? "stty intr '^C' stop '^S' discard '^O' kill '^U'; "
-				: string.Empty,
-			disableSignalGeneration
-				? "stty -isig; "
-				: string.Empty);
-		return setup + (writeShellCompletionMarker
-			? $"dpx_stty_before=$(stty -g 2>/dev/null || true); " +
-			  $"{invocation}; dpx_exit=$?; " +
-			  "dpx_stty_after=$(stty -g 2>/dev/null || true); " +
-			  "if [ -n \"$dpx_stty_before\" ] && " +
-			  "[ \"$dpx_stty_before\" = \"$dpx_stty_after\" ]; then " +
-			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalStateRestoredMarker)}; " +
-			  "else " +
-			  $"printf '%s%s before=%s after=%s\\n' " +
-			  $"{SplitMarkerForPosixShell(ShellTerminalStateMismatchMarker)} " +
-			  "\"$dpx_stty_before\" \"$dpx_stty_after\"; " +
-			  "fi; " +
-			  $"printf '%s%s\\n' " +
-			  $"{SplitMarkerForPosixShell(ShellHandshakeMarker)}; " +
-			  "IFS= read -r dpx_sync; " +
-			  $"[ \"$dpx_sync\" = {QuoteForPosixShell(ShellInputSentinel)} ] || exit 97; " +
-			  "printf '%s%s\\n' " +
-			  $"{SplitMarkerForPosixShell(ShellCompletionMarker)}; " +
-			  "IFS= read -r dpx_release; exit \"$dpx_exit\""
-			: "exec " + invocation);
-	}
+		if (!writeShellCompletionMarker)
+			return "exec " + invocation;
+		if (versionProbeInvocation is not null)
+			ArgumentException.ThrowIfNullOrWhiteSpace(versionProbeInvocation);
 
-	internal static string BuildUnixJobControlShellCommand(
-		string invocation,
-		string resumePath,
-		bool disableSignalGeneration = false,
-		bool configureDarwinControlCharacters = false)
-	{
-		ArgumentException.ThrowIfNullOrWhiteSpace(invocation);
-		ArgumentException.ThrowIfNullOrWhiteSpace(resumePath);
-		var setup = string.Concat(
-			configureDarwinControlCharacters
-				? "stty intr '^C' stop '^S' discard '^O' kill '^U'; "
-				: string.Empty,
-			disableSignalGeneration
-				? "stty -isig; "
-				: string.Empty);
-		return setup +
-		       "dpx_stty_before=$(stty -g 2>/dev/null || true); " +
-		       "set -m; " +
-		       $"{invocation} & " +
-		       "fg %1; dpx_suspend_exit=$?; " +
-		       "if ! jobs -s -p %1 >/dev/null 2>&1; then " +
-		       $"printf '%s%s exit=%s\\n' " +
-		       $"{SplitMarkerForPosixShell(SuspendedJobMissingMarker)} " +
-		       "\"$dpx_suspend_exit\"; exit 96; fi; " +
-		       "dpx_stty_suspended=$(stty -g 2>/dev/null || true); " +
-		       "if [ -n \"$dpx_stty_before\" ] && " +
-		       "[ \"$dpx_stty_before\" = \"$dpx_stty_suspended\" ]; then " +
-		       $"printf '%s%s\\n' " +
-		       $"{SplitMarkerForPosixShell(SuspendedShellTerminalStateRestoredMarker)}; " +
-		       "else " +
-		       $"printf '%s%s before=%s suspended=%s\\n' " +
-		       $"{SplitMarkerForPosixShell(SuspendedShellTerminalStateMismatchMarker)} " +
-		       "\"$dpx_stty_before\" \"$dpx_stty_suspended\"; " +
-		       "fi; " +
-		       $"while [ ! -e {QuoteForPosixShell(resumePath)} ]; do sleep 0.02; done; " +
-		       "fg %1; dpx_exit=$?; set +m; " +
+		var extendedProbe = versionProbeInvocation is null
+			? string.Empty
+			: "dpx_interrupted=0; " +
+			  "trap 'dpx_interrupted=1' INT; " +
+			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellInterruptReadyMarker)}; " +
+			  "while [ \"$dpx_interrupted\" -eq 0 ]; do " +
+			  "IFS= read -r dpx_interrupt_probe || true; done; " +
+			  "trap - INT; " +
+			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellInterruptHandledMarker)}; " +
+			  $"{versionProbeInvocation} >/dev/null 2>&1; " +
+			  "[ \"$?\" -eq 0 ] || exit 99; " +
+			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellVersionProbeMarker)}; ";
+
+		return $"dpx_stty_before=$(stty -g 2>/dev/null || true); " +
+		       $"{invocation}; dpx_exit=$?; " +
 		       "dpx_stty_after=$(stty -g 2>/dev/null || true); " +
 		       "if [ -n \"$dpx_stty_before\" ] && " +
 		       "[ \"$dpx_stty_before\" = \"$dpx_stty_after\" ]; then " +
@@ -404,9 +284,27 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		       $"{SplitMarkerForPosixShell(ShellTerminalStateMismatchMarker)} " +
 		       "\"$dpx_stty_before\" \"$dpx_stty_after\"; " +
 		       "fi; " +
+		       "dpx_stty_flags=$(stty -a 2>/dev/null | tr ';\\n' '  '); " +
+		       "[ -n \"$dpx_stty_flags\" ] || exit 98; " +
+		       "case \" $dpx_stty_flags \" in " +
+		       "*\" -icanon \"*|*\" -echo \"*|*\" -isig \"*) exit 98 ;; esac; " +
+		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalPropertiesRestoredMarker)}; " +
+		       $"echo {QuoteForPosixShell(ShellEchoProbe)}; " +
 		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellHandshakeMarker)}; " +
 		       "IFS= read -r dpx_sync; " +
 		       $"[ \"$dpx_sync\" = {QuoteForPosixShell(ShellInputSentinel)} ] || exit 97; " +
+		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellLineInputAcceptedMarker)}; " +
+		       "dpx_stty_settled=$(stty -g 2>/dev/null || true); " +
+		       "if [ -n \"$dpx_stty_before\" ] && " +
+		       "[ \"$dpx_stty_before\" = \"$dpx_stty_settled\" ]; then " +
+		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellSettledTerminalStateRestoredMarker)}; " +
+		       "else " +
+		       $"printf '%s%s before=%s settled=%s\\n' " +
+		       $"{SplitMarkerForPosixShell(ShellSettledTerminalStateMismatchMarker)} " +
+		       "\"$dpx_stty_before\" \"$dpx_stty_settled\"; exit 98; " +
+		       "fi; " +
+		       extendedProbe +
+		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellUsabilityVerifiedMarker)}; " +
 		       $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellCompletionMarker)}; " +
 		       "IFS= read -r dpx_release; exit \"$dpx_exit\"";
 	}
@@ -447,10 +345,13 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	public async Task CompleteShellRestorationHandshakeAsync(
 		CancellationToken cancellationToken = default)
 	{
-			await WaitForRawOutputAsync(
+		await WaitForRawOutputAsync(
 				ShellHandshakeMarker,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
+		var echoProbeStart = CaptureRawOutput().LastIndexOf(
+			ShellHandshakeMarker,
+			StringComparison.Ordinal);
 		await SendAsync(
 				ShellInputSentinel + "\r",
 				cancellationToken)
@@ -464,6 +365,40 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			await SendAsync(
 					validationCommand + "\r",
 					cancellationToken)
+				.ConfigureAwait(false);
+		}
+		else
+		{
+			await WaitForRawOutputAsync(
+					ShellLineInputAcceptedMarker,
+					cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+			var lineInputOutput = CaptureRawOutput()[echoProbeStart..];
+			Assert.Contains(
+				ShellInputSentinel,
+				lineInputOutput,
+				StringComparison.Ordinal);
+
+			if (_verifyExtendedShellUsability)
+			{
+				await WaitForRawOutputAsync(
+						ShellInterruptReadyMarker,
+						cancellationToken: cancellationToken)
+					.ConfigureAwait(false);
+				await SendAsync("\u0003", cancellationToken).ConfigureAwait(false);
+				await WaitForRawOutputAsync(
+						ShellInterruptHandledMarker,
+						cancellationToken: cancellationToken)
+					.ConfigureAwait(false);
+				await WaitForRawOutputAsync(
+						ShellVersionProbeMarker,
+						cancellationToken: cancellationToken)
+					.ConfigureAwait(false);
+			}
+
+			await WaitForRawOutputAsync(
+					ShellUsabilityVerifiedMarker,
+					cancellationToken: cancellationToken)
 				.ConfigureAwait(false);
 		}
 		await WaitForRawOutputAsync(
@@ -708,50 +643,30 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			$"Terminal responses: {CaptureTerminalResponseLog()}");
 	}
 
-	public async Task WaitForRawOutputAsync(
+	private async Task WaitForRawOutputAsync(
 		string expected,
 		TimeSpan? timeout = null,
 		CancellationToken cancellationToken = default)
 	{
-		await WaitForRawOutputAfterAsync(
-				expected,
-				startIndex: 0,
-				timeout,
-				cancellationToken)
-			.ConfigureAwait(false);
-	}
-
-	public async Task WaitForRawOutputAfterAsync(
-		string expected,
-		int startIndex,
-		TimeSpan? timeout = null,
-		CancellationToken cancellationToken = default)
-	{
-		ArgumentOutOfRangeException.ThrowIfNegative(startIndex);
 		var stopwatch = Stopwatch.StartNew();
 		var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(15);
 		while (stopwatch.Elapsed < effectiveTimeout)
 		{
 			var output = CaptureRawOutput();
-			if (output.Length >= startIndex &&
-			    output.AsSpan(startIndex).Contains(
-				    expected,
-				    StringComparison.Ordinal))
-			{
+			if (output.Contains(expected, StringComparison.Ordinal))
 				return;
-			}
 			if (HasExited)
 			{
 				throw new Xunit.Sdk.XunitException(
 					$"Terminal process exited with code {_process.ExitCode} before " +
-					$"'{expected}' appeared after offset {startIndex}.\n" +
+					$"'{expected}' appeared.\n" +
 					$"Raw output:\n{output}");
 			}
 			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
 		}
 
 		throw new TimeoutException(
-			$"Timed out waiting for '{expected}' after offset {startIndex}.\n" +
+			$"Timed out waiting for '{expected}'.\n" +
 			$"Raw output tail:\n{CaptureRawOutputTail()}");
 	}
 

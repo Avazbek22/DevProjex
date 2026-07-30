@@ -7,6 +7,19 @@ namespace DevProjex.Tests.Unit;
 public sealed class TerminalCommandSetupServiceTests
 {
 	[Fact]
+	public void LauncherValidationDoesNotAcquireTheParentTerminal()
+	{
+		var startInfo =
+			TerminalCommandSetupService.CreateLauncherValidationStartInfo(
+				"dotnet");
+
+		Assert.False(startInfo.UseShellExecute);
+		Assert.True(startInfo.RedirectStandardInput);
+		Assert.True(startInfo.RedirectStandardOutput);
+		Assert.True(startInfo.RedirectStandardError);
+	}
+
+	[Fact]
 	public void Probe_WindowsPackagedApp_ReportsOperatingSystemManagedAlias()
 	{
 		var service = CreateService(

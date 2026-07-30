@@ -73,8 +73,7 @@ public sealed class TerminalWorkspace
 		// disposal, so bracket its teardown with idempotent visibility restoration.
 		using var postApplicationCursorRestoration =
 			new TerminalCursorRestoration(environment.Output);
-		using var applicationContext = TerminalGuiApplicationFactory.Create();
-		var application = applicationContext.Application;
+		using IApplication application = global::Terminal.Gui.App.Application.Create();
 		using var preDisposeCursorRestoration = new TerminalCursorRestoration(environment.Output);
 		application.Mouse.IsMouseDisabled = !mouseEnabled;
 		var initialized = false;
@@ -119,10 +118,6 @@ public sealed class TerminalWorkspace
 				BorderStyle = LineStyle.None,
 				SchemeName = TerminalWorkspaceTheme.Base
 			};
-			using var runCancellation =
-				CancellationTokenSource.CreateLinkedTokenSource(
-					cancellationToken,
-					applicationContext.InputFailureToken);
 			using var session = new TerminalWorkspaceSession(
 				application,
 				root,
@@ -131,28 +126,16 @@ public sealed class TerminalWorkspace
 				options,
 				this,
 				operationObserver,
-				runCancellation.Token);
+				cancellationToken);
 			session.Start();
 			try
 			{
-				try
-				{
-					await application.RunAsync(root, runCancellation.Token)
-						.ConfigureAwait(false);
-				}
-				catch (OperationCanceledException)
-					when (applicationContext.InputFailureToken
-						.IsCancellationRequested)
-				{
-					// The compatibility backend reports the typed terminal
-					// failure after the session has completed its own cleanup.
-				}
+				await application.RunAsync(root, cancellationToken).ConfigureAwait(false);
 			}
 			finally
 			{
 				await session.CompleteAsync().ConfigureAwait(false);
 			}
-			applicationContext.ThrowIfInputFailed();
 
 			return cancellationToken.IsCancellationRequested && !session.ExitRequested
 				? CommandLineExitCodes.Canceled

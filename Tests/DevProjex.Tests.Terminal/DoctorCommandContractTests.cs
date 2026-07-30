@@ -6,6 +6,18 @@ namespace DevProjex.Tests.Terminal;
 public sealed class DoctorCommandContractTests
 {
 	[Fact]
+	public void GitProbeDoesNotAcquireTheParentTerminal()
+	{
+		var startInfo = DoctorCommandHandler.CreateGitVersionStartInfo();
+
+		Assert.False(startInfo.UseShellExecute);
+		Assert.True(startInfo.RedirectStandardInput);
+		Assert.True(startInfo.RedirectStandardOutput);
+		Assert.True(startInfo.RedirectStandardError);
+		Assert.Equal("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
+	}
+
+	[Fact]
 	public async Task JsonDoctorDocumentContainsStableOperationalChecks()
 	{
 		using var workspace = new TemporaryDirectory();

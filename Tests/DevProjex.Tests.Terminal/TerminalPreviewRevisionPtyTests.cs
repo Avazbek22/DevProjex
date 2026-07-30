@@ -7,7 +7,9 @@ public sealed class TerminalPreviewRevisionPtyTests
 	public async Task LatestViewFormatAndSelectionWinDuringRapidInput()
 	{
 		using var project = new TemporaryDirectory();
-		project.WriteFile("global.json", "{}");
+		project.WriteFile(
+			"global.json",
+			"{\"SelectionWinner\":\"LatestSelectionMarker\"}");
 		project.WriteFile(
 			"src/App.cs",
 			"internal sealed class LatestContentMarker { }");
@@ -58,16 +60,34 @@ public sealed class TerminalPreviewRevisionPtyTests
 		Assert.DoesNotContain("LatestContentMarker", latestView, StringComparison.Ordinal);
 
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[x]",
+			"Files 1",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await Task.Delay(650, TestContext.Current.CancellationToken);
-		var final = terminal.CaptureScreen();
+		var final = await terminal.WaitForStableScreenAsync(
+			required: "<d n=",
+			forbidden: "DPX-TUI-PREVIEW-FAILED",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("CONTEXT PREVIEW · Tree · XML", final, StringComparison.Ordinal);
 		Assert.Contains("<d n=", final, StringComparison.Ordinal);
-		Assert.Contains("Files 2", final, StringComparison.Ordinal);
+		Assert.Contains("[x]", final, StringComparison.Ordinal);
+		Assert.Contains("Files 1", final, StringComparison.Ordinal);
 		Assert.DoesNotContain("DPX-TUI-PREVIEW-FAILED", final, StringComparison.Ordinal);
+
+		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+		var selectedContent = await terminal.WaitForStableScreenAsync(
+			required: "LatestContentMarker",
+			forbidden: "LatestSelectionMarker",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(
+			"CONTEXT PREVIEW · Tree + content · XML",
+			selectedContent,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"LatestSelectionMarker",
+			selectedContent,
+			StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);

@@ -1,6 +1,5 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
-using DevProjex.Terminal.Tui;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -87,25 +86,6 @@ internal static class CommandExecution
 				ExitCode: CommandLineExitCodes.RuntimeError,
 				Exception: exception));
 		}
-		catch (MacOsTerminalRestoreException exception)
-		{
-			return WriteMacOsTerminalRestoreError(
-				environment,
-				outputOptions,
-				text,
-				exception);
-		}
-		catch (AggregateException exception)
-			when (TryGetSingleMacOsTerminalRestoreFailure(
-				exception,
-				out var restoreFailure))
-		{
-			return WriteMacOsTerminalRestoreError(
-				environment,
-				outputOptions,
-				text,
-				restoreFailure);
-		}
 		catch (Exception exception) when (exception is IOException or DirectoryNotFoundException or FileNotFoundException)
 		{
 			return WriteError(environment, outputOptions, text, new TerminalError(
@@ -132,33 +112,6 @@ internal static class CommandExecution
 	{
 		new ErrorRenderer(environment, outputOptions, localization).Write(error);
 		return error.ExitCode;
-	}
-
-	private static int WriteMacOsTerminalRestoreError(
-		ITerminalEnvironment environment,
-		TerminalOutputOptions outputOptions,
-		LocalizationService localization,
-		MacOsTerminalRestoreException exception) =>
-		WriteError(environment, outputOptions, localization, new TerminalError(
-			"DPX-TUI-MACOS-TERMINAL-RESTORE",
-			localization["Terminal.Error.TerminalRestoreFailed"],
-			ExitCode: CommandLineExitCodes.RuntimeError,
-			Exception: exception));
-
-	private static bool TryGetSingleMacOsTerminalRestoreFailure(
-		AggregateException exception,
-		out MacOsTerminalRestoreException restoreFailure)
-	{
-		var innerExceptions = exception.Flatten().InnerExceptions;
-		if (innerExceptions.Count == 1 &&
-		    innerExceptions[0] is MacOsTerminalRestoreException failure)
-		{
-			restoreFailure = failure;
-			return true;
-		}
-
-		restoreFailure = null!;
-		return false;
 	}
 
 	private static string SafeMessageFor(string code, LocalizationService localization) => code switch

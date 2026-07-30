@@ -113,15 +113,17 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			welcomeDirectory.Path);
 
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		var repositoryList = await terminal.WaitForScreenAsync(
-			RepositoryUrl,
+		var repositoryList = await terminal.WaitForStableScreenAsync(
+			required: "Last opened:",
+			forbidden: "network clone is required",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(RepositoryUrl, repositoryList, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			RepositoryUrl,
+		await terminal.WaitForStableScreenAsync(
+			required: "Choose a workspace action",
+			forbidden: RepositoryUrl,
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(
 			"Choose a workspace action",

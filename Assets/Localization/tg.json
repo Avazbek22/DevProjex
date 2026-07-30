@@ -350,7 +350,6 @@
   "Terminal.Error.ParserRejected": "Фармон, параметр ё қимат нодуруст аст.",
   "Terminal.Error.Canceled": "Амалиёт бекор карда шуд.",
   "Terminal.Error.Unexpected": "DevProjex фармонро анҷом дода натавонист.",
-  "Terminal.Error.TerminalRestoreFailed": "DevProjex ҳолати терминалро пурра барқарор карда натавонист.",
   "Terminal.Error.DestinationExists": "Ҷойи таъинот аллакай мавҷуд аст.",
   "Terminal.Error.AccessDenied": "Ҳангоми хондани лоиҳа ё навиштани натиҷа дастрасӣ рад карда шуд.",
   "Terminal.Error.IoFailure": "Амалиёт бо сабаби хатои низоми файлӣ анҷом дода нашуд.",

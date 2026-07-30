@@ -368,7 +368,6 @@
   "Terminal.Error.ParserRejected": "Der Befehl, die Option oder der Wert ist ungültig.",
   "Terminal.Error.Canceled": "Der Vorgang wurde abgebrochen.",
   "Terminal.Error.Unexpected": "DevProjex konnte den Befehl nicht abschließen.",
-  "Terminal.Error.TerminalRestoreFailed": "DevProjex konnte den Terminalzustand nicht vollständig wiederherstellen.",
   "Terminal.Error.DestinationExists": "Das Ziel ist bereits vorhanden.",
   "Terminal.Error.AccessDenied": "Der Zugriff beim Lesen des Projekts oder Schreiben des Ergebnisses wurde verweigert.",
   "Terminal.Error.IoFailure": "Der Vorgang konnte wegen eines Dateisystemfehlers nicht abgeschlossen werden.",

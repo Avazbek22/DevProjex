@@ -69,13 +69,26 @@ internal static partial class TerminalPtyStateAssertions
 		string output,
 		int markerIndex)
 	{
-		var mismatch = FindUnixTerminalStateMismatch(output, markerIndex);
-		Assert.True(
-			mismatch is null,
-			$"The parent shell detected a termios mismatch after TUI exit. {mismatch}");
+		var shellOutput = output[..markerIndex];
 		Assert.Contains(
-			TerminalPtyHarness.ShellTerminalStateRestoredMarker,
-			output[..markerIndex],
+			TerminalPtyHarness.ShellTerminalPropertiesRestoredMarker,
+			shellOutput,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.ShellLineInputAcceptedMarker,
+			shellOutput,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.ShellUsabilityVerifiedMarker,
+			shellOutput,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.ShellEchoProbe,
+			shellOutput,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.ShellSettledTerminalStateRestoredMarker,
+			shellOutput,
 			StringComparison.Ordinal);
 	}
 

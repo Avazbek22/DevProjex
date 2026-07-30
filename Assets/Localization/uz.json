@@ -350,7 +350,6 @@
   "Terminal.Error.ParserRejected": "Buyruq, parametr yoki qiymat noto‘g‘ri.",
   "Terminal.Error.Canceled": "Amaliyot bekor qilindi.",
   "Terminal.Error.Unexpected": "DevProjex buyruqni yakunlay olmadi.",
-  "Terminal.Error.TerminalRestoreFailed": "DevProjex terminal holatini to'liq tiklay olmadi.",
   "Terminal.Error.DestinationExists": "Manzil allaqachon mavjud.",
   "Terminal.Error.AccessDenied": "Loyihani o'qish yoki natijani yozishda ruxsat rad etildi.",
   "Terminal.Error.IoFailure": "Fayl tizimi xatosi sababli amaliyotni yakunlab bo'lmadi.",

@@ -368,7 +368,6 @@
   "Terminal.Error.ParserRejected": "La sintassi del comando, dell’opzione o del valore non è valida.",
   "Terminal.Error.Canceled": "L’operazione è stata annullata.",
   "Terminal.Error.Unexpected": "DevProjex non ha potuto completare il comando.",
-  "Terminal.Error.TerminalRestoreFailed": "DevProjex non è riuscito a ripristinare completamente lo stato del terminale.",
   "Terminal.Error.DestinationExists": "La destinazione esiste già.",
   "Terminal.Error.AccessDenied": "Accesso negato durante la lettura del progetto o la scrittura del risultato.",
   "Terminal.Error.IoFailure": "Operazione non completata per un errore del file system.",

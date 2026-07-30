@@ -1,7 +1,22 @@
+using DevProjex.Infrastructure.FileSystem;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class GitTrackedPathIndexTests
 {
+	[Fact]
+	public void TrackedIndexCommandsDoNotAcquireTheParentTerminal()
+	{
+		var startInfo = GitTrackedPathIndexCache.CreateStartInfo(
+			Path.GetTempPath());
+
+		Assert.False(startInfo.UseShellExecute);
+		Assert.True(startInfo.RedirectStandardInput);
+		Assert.True(startInfo.RedirectStandardOutput);
+		Assert.True(startInfo.RedirectStandardError);
+		Assert.Equal("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
+	}
+
 	[Fact]
 	public void ExactAndDescendantLookups_NormalizeSeparatorsDeduplicateAndStayInsideRepository()
 	{

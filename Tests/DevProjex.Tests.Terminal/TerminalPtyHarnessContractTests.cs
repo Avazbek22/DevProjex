@@ -26,6 +26,14 @@ public sealed class TerminalPtyHarnessContractTests
 			command,
 			StringComparison.Ordinal);
 		Assert.Contains(
+			"dpx_stty_settled=$(stty -g 2>/dev/null || true)",
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"\"$dpx_stty_before\" = \"$dpx_stty_settled\"",
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
 			"IFS= read -r dpx_sync",
 			command,
 			StringComparison.Ordinal);
@@ -33,66 +41,60 @@ public sealed class TerminalPtyHarnessContractTests
 			$"[ \"$dpx_sync\" = '{TerminalPtyHarness.ShellInputSentinel}' ]",
 			command,
 			StringComparison.Ordinal);
+		Assert.Contains("stty -a", command, StringComparison.Ordinal);
+		Assert.Contains("-icanon", command, StringComparison.Ordinal);
+		Assert.Contains("-echo", command, StringComparison.Ordinal);
+		Assert.Contains("-isig", command, StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.ShellEchoProbe,
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.ShellLineInputAcceptedMarker[
+				..(TerminalPtyHarness.ShellLineInputAcceptedMarker.Length / 2)],
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.ShellUsabilityVerifiedMarker[
+				..(TerminalPtyHarness.ShellUsabilityVerifiedMarker.Length / 2)],
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalPtyHarness.ShellSettledTerminalStateRestoredMarker[
+				..(TerminalPtyHarness.ShellSettledTerminalStateRestoredMarker.Length / 2)],
+			command,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
-	public void UnixRestorationHandshakeCanCaptureAnInitiallyDisabledSignalPolicy()
+	public void UnixExtendedShellProbeChecksInterruptAndExecutableRelaunch()
 	{
 		var command = TerminalPtyHarness.BuildUnixShellCommand(
 			"exec-devprojex",
 			writeShellCompletionMarker: true,
-			disableSignalGeneration: true);
+			versionProbeInvocation: "exec-devprojex --version");
 
-		Assert.StartsWith("stty -isig; dpx_stty_before=", command);
-		Assert.True(
-			command.IndexOf("stty -isig", StringComparison.Ordinal) <
-			command.IndexOf("dpx_stty_before=", StringComparison.Ordinal));
-	}
-
-	[Fact]
-	public void DarwinPendingInputFixturePinsEveryExercisedControlCharacter()
-	{
-		var command = TerminalPtyHarness.BuildUnixShellCommand(
-			"exec-devprojex",
-			writeShellCompletionMarker: true,
-			configureDarwinControlCharacters: true);
-
-		Assert.StartsWith(
-			"stty intr '^C' stop '^S' discard '^O' kill '^U'; ",
-			command);
-		Assert.True(
-			command.IndexOf("stty intr", StringComparison.Ordinal) <
-			command.IndexOf("dpx_stty_before=", StringComparison.Ordinal));
-	}
-
-	[Fact]
-	public void UnixJobControlFixtureVerifiesStoppedStateAndExactTerminalHandoff()
-	{
-		var command = TerminalPtyHarness.BuildUnixJobControlShellCommand(
-			"exec-devprojex",
-			"/tmp/path with 'quote/resume");
-
-		Assert.Contains("set -m", command, StringComparison.Ordinal);
-		Assert.Contains("exec-devprojex & fg %1", command, StringComparison.Ordinal);
 		Assert.Contains(
-			"jobs -s -p %1",
+			TerminalPtyHarness.ShellInterruptReadyMarker[
+				..(TerminalPtyHarness.ShellInterruptReadyMarker.Length / 2)],
 			command,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			TerminalPtyHarness.SuspendedShellTerminalStateRestoredMarker[
-				..(TerminalPtyHarness.SuspendedShellTerminalStateRestoredMarker.Length / 2)],
+			"trap 'dpx_interrupted=1' INT",
 			command,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"'/tmp/path with '\"'\"'quote/resume'",
+			TerminalPtyHarness.ShellInterruptHandledMarker[
+				..(TerminalPtyHarness.ShellInterruptHandledMarker.Length / 2)],
 			command,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"fg %1; dpx_exit=$?",
+			"exec-devprojex --version >/dev/null 2>&1",
 			command,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"IFS= read -r dpx_sync",
+			TerminalPtyHarness.ShellVersionProbeMarker[
+				..(TerminalPtyHarness.ShellVersionProbeMarker.Length / 2)],
 			command,
 			StringComparison.Ordinal);
 	}

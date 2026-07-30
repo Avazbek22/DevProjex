@@ -344,7 +344,6 @@
     "Terminal.Error.ParserRejected": "O comando, a opção ou o valor não são válidos.",
     "Terminal.Error.Canceled": "A operação foi cancelada.",
     "Terminal.Error.Unexpected": "O DevProjex não conseguiu concluir o comando.",
-    "Terminal.Error.TerminalRestoreFailed": "O DevProjex não conseguiu restaurar completamente o estado do terminal.",
     "Terminal.Error.DestinationExists": "O destino já existe.",
     "Terminal.Error.AccessDenied": "O acesso foi recusado ao ler o projeto ou escrever o resultado.",
     "Terminal.Error.IoFailure": "Não foi possível concluir a operação devido a um erro do sistema de ficheiros.",

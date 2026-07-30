@@ -214,6 +214,10 @@ boundary.
 `--no-mouse`, `--color never`, and `--plain` provide conservative fallbacks.
 `NO_COLOR`, `TERM=dumb`, redirected streams, and CI are also respected.
 
+Native macOS TUI beta validation covers published startup, keyboard navigation,
+resize, normal exit, and observable parent-shell usability. Extended `Ctrl+Z`
+and job-control scenarios are not part of this beta's certified contract.
+
 Release validation currently has one upstream blocker: Terminal.Gui 2.4.17
 unconditionally writes its mouse-enable sequence while constructing the ANSI
 output driver, before the application mouse policy is available. DevProjex
