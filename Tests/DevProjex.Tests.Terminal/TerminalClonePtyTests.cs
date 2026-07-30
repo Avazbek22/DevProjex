@@ -101,7 +101,9 @@ public sealed class TerminalClonePtyTests
 			"internal sealed class PublishedCloneMarker {}",
 			new UTF8Encoding(false));
 		InitializeGitRepository(origin);
-		var sourceFingerprint = ComputeTreeFingerprint(origin);
+		var sourceFingerprint = ComputeWorkingTreeFingerprint(origin);
+		var sourceHead = RunGit(origin, "rev-parse", "HEAD");
+		Assert.Empty(RunGit(origin, "status", "--porcelain=v1", "--untracked-files=all"));
 		using var welcomeDirectory = new TemporaryDirectory();
 		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
 
@@ -144,7 +146,9 @@ public sealed class TerminalClonePtyTests
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
 				cancellationToken: TestContext.Current.CancellationToken));
-		Assert.Equal(sourceFingerprint, ComputeTreeFingerprint(origin));
+		Assert.Equal(sourceFingerprint, ComputeWorkingTreeFingerprint(origin));
+		Assert.Equal(sourceHead, RunGit(origin, "rev-parse", "HEAD"));
+		Assert.Empty(RunGit(origin, "status", "--porcelain=v1", "--untracked-files=all"));
 	}
 
 	[Fact(Timeout = 120_000)]
@@ -387,7 +391,7 @@ public sealed class TerminalClonePtyTests
 		RunGit(repository, "commit", "-m", "Initial test project");
 	}
 
-	private static void RunGit(string workingDirectory, params string[] arguments)
+	private static string RunGit(string workingDirectory, params string[] arguments)
 	{
 		var startInfo = new ProcessStartInfo
 		{
@@ -409,9 +413,10 @@ public sealed class TerminalClonePtyTests
 			process.ExitCode == 0,
 			$"git {string.Join(' ', arguments)} failed with exit code {process.ExitCode}.\n" +
 			$"{standardOutput}\n{standardError}");
+		return standardOutput.Trim();
 	}
 
-	private static string ComputeTreeFingerprint(string root)
+	private static string ComputeWorkingTreeFingerprint(string root)
 	{
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		foreach (var path in Directory
@@ -423,6 +428,11 @@ public sealed class TerminalClonePtyTests
 			var relativePath = Path
 				.GetRelativePath(root, path)
 				.Replace('\\', '/');
+			if (relativePath.Equals(".git", StringComparison.Ordinal) ||
+			    relativePath.StartsWith(".git/", StringComparison.Ordinal))
+			{
+				continue;
+			}
 			hash.AppendData(
 				Directory.Exists(path)
 					? [(byte)'D']

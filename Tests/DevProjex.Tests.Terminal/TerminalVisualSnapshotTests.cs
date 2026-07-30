@@ -306,6 +306,9 @@ public sealed class TerminalVisualSnapshotTests
 		Assert.DoesNotContain("[[", selector, StringComparison.Ordinal);
 		Verify("workspace-format-selector-ru-160x40", terminal, project.Path);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Выберите ASCII, JSON, XML или Markdown для дерева.",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
