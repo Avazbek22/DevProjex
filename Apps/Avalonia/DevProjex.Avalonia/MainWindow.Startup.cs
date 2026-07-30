@@ -292,6 +292,7 @@ public partial class MainWindow
         try
         {
             _taskbarProgress.Attach(this);
+            await EnsureDesktopControlServerAsync(cancellationToken);
 
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
 
@@ -301,9 +302,9 @@ public partial class MainWindow
             _themeBrushCoordinator.ScheduleActualEffectSynchronization();
             StartDeferredAppStateBootstrap(cancellationToken);
 
-            if (_startupCommandLineErrors.Count > 0)
+            if (_startupErrors.Count > 0)
             {
-                await ShowErrorAsync(string.Join(Environment.NewLine, _startupCommandLineErrors.Select(static error => error.Message)));
+                await ShowErrorAsync(string.Join(Environment.NewLine, _startupErrors));
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
@@ -318,14 +319,18 @@ public partial class MainWindow
                 if (opened)
                 {
                     await TryApplyStartupSelectionOverridesAsync();
-                    await TryWriteStartupReportAsync(startupLoadStopwatch.Elapsed);
                     await TryApplyStartupUiOptionsAsync();
                     if (await TryRunStartupUiBenchmarkScriptAsync())
                         return;
                 }
+                else if (_desktopStartupRequest is not null)
+                {
+                    _desktopStartupErrorCode = "DPX-DESKTOP-PROJECT-OPEN-FAILED";
+                }
             }
-            else if (_startupOptions.Ui.OpenLastProject)
+            else if (_desktopStartupRequest?.UseLastProject == true)
             {
+                _desktopStartupErrorCode = "DPX-DESKTOP-NO-RECENT-PROJECT";
                 await ShowInfoAsync(_viewModel.MenuFileRecentEmpty);
             }
             else
@@ -343,8 +348,15 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
+            if (_desktopStartupRequest is not null)
+                _desktopStartupErrorCode = "DPX-DESKTOP-STARTUP-FAILED";
             if (!cancellationToken.IsCancellationRequested && IsVisible)
                 await ShowErrorAsync(ex.Message);
+        }
+        finally
+        {
+            if (!cancellationToken.IsCancellationRequested)
+                _desktopStartupReady = true;
         }
     }
 
@@ -357,13 +369,13 @@ public partial class MainWindow
 
     private string? ResolveStartupProjectPath()
     {
-        if (_startupOptions.SessionMetrics.Enabled)
-            return _startupOptions.SessionMetrics.Path;
+        if (_startupOptions.EffectiveSessionMetrics.Enabled)
+            return _startupOptions.EffectiveSessionMetrics.ProjectPath;
 
-        if (!string.IsNullOrWhiteSpace(_startupOptions.Path))
-            return _startupOptions.Path;
+        if (!string.IsNullOrWhiteSpace(_desktopStartupRequest?.ProjectPath))
+            return _desktopStartupRequest.ProjectPath;
 
-        if (!_startupOptions.Ui.OpenLastProject)
+        if (_desktopStartupRequest?.UseLastProject != true)
             return null;
 
         foreach (var recentFolder in _recentProjectsDb.RecentFolders)

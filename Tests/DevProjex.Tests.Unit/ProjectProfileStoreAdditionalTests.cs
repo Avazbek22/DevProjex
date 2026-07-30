@@ -592,6 +592,80 @@ public sealed class ProjectProfileStoreAdditionalTests
 		}
 	}
 
+	[Fact]
+	public void LookupProfile_CorruptPrimaryRecoversValidProfileFromBackup()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RecoveredProfile");
+			store.SaveProfile(projectPath, CreateProfile());
+			File.WriteAllText(store.GetPath(), "{ invalid");
+
+			var result = store.LookupProfile(projectPath, TimeSpan.Zero);
+
+			Assert.Equal(ProjectProfileLookupStatus.Found, result.Status);
+			Assert.NotNull(result.Profile);
+			Assert.Contains(".cs", result.Profile.SelectedExtensions);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void LookupProfile_CorruptPrimaryAndBackupReportsInvalidStorage()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			Assert.True(store.EnsureStorageExists());
+			File.WriteAllText(store.GetPath(), "{ invalid-primary");
+			File.WriteAllText(store.GetPath() + ".bak", "{ invalid-backup");
+
+			var result = store.LookupProfile(
+				Path.Combine(tempRoot, "InvalidProfile"),
+				TimeSpan.Zero);
+
+			Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, result.Status);
+			Assert.Null(result.Profile);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void LookupProfile_HeldStoreLockReportsTemporaryUnavailability()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			Assert.True(store.EnsureStorageExists());
+			using var heldLock = new FileStream(
+				store.GetPath() + ".lock",
+				FileMode.OpenOrCreate,
+				FileAccess.ReadWrite,
+				FileShare.None);
+
+			var result = store.LookupProfile(
+				Path.Combine(tempRoot, "LockedProfile"),
+				TimeSpan.Zero);
+
+			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, result.Status);
+			Assert.Null(result.Profile);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
 	private static ProjectSelectionProfile CreateProfile()
 	{
 		return new ProjectSelectionProfile(

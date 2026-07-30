@@ -448,6 +448,9 @@ public sealed class MetricsPipelineWarmupTests
                 return _metricsCalls.GetValueOrDefault(path);
         }
 
+        public FileContentClassification? ClassifyWithoutReading(string path) =>
+            inner.ClassifyWithoutReading(path);
+
         public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
             inner.IsTextFileAsync(path, cancellationToken);
 
@@ -484,6 +487,9 @@ public sealed class MetricsPipelineWarmupTests
         public Task Started => _started.Task;
 
         public void Release() => _release.TrySetResult();
+
+        public FileContentClassification? ClassifyWithoutReading(string path) =>
+            inner.ClassifyWithoutReading(path);
 
         public ValueTask<bool> IsTextFileAsync(
             string path,
@@ -532,6 +538,9 @@ public sealed class MetricsPipelineWarmupTests
 
         public void ReleaseFirstCall() =>
             _releaseFirstCall.TrySetResult();
+
+        public FileContentClassification? ClassifyWithoutReading(string path) =>
+            inner.ClassifyWithoutReading(path);
 
         public ValueTask<bool> IsTextFileAsync(
             string path,

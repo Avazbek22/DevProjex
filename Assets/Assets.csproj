@@ -8,7 +8,6 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Localization\*.json" />
-    <EmbeddedResource Include="CommandLineHelp\**\*.txt" WithCulture="false" />
     <EmbeddedResource Include="HelpContent\**\*.txt" WithCulture="false" />
     <EmbeddedResource Include="IgnoreProfiles\*.json" />
     <EmbeddedResource Include="IconPacks\**\*.*" />

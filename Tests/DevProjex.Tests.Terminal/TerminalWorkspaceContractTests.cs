@@ -1,0 +1,894 @@
+using System.Diagnostics;
+using System.Xml.Linq;
+using DevProjex.Application.Preview;
+
+namespace DevProjex.Tests.Terminal;
+
+public sealed class TerminalWorkspaceContractTests
+{
+	[Fact]
+	public void CanceledTextDialogNeverReturnsItsSuggestedValue()
+	{
+		Assert.Null(TerminalWorkspace.CompletePrompt(
+			accepted: false,
+			"C:\\Exports\\project.zip"));
+		Assert.Equal(
+			"C:\\Exports\\project.zip",
+			TerminalWorkspace.CompletePrompt(
+				accepted: true,
+				"C:\\Exports\\project.zip"));
+	}
+
+	[Fact]
+	public void DefaultExportPathMovesOutsideTheSourceWhenTuiRunsFromTheProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("Project");
+
+		Assert.Equal(
+			Path.Combine(workspace.Path, "Project-context.txt"),
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				source,
+				"Project-context.txt"));
+		Assert.Equal(
+			Path.Combine(workspace.Path, "Project.zip"),
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				source,
+				"Project.zip"));
+		Assert.Equal(
+			Path.Combine(workspace.Path, "devprojex-profile.json"),
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				source,
+				"devprojex-profile.json"));
+
+		var externalCurrentDirectory = workspace.CreateDirectory("external");
+		Assert.Equal(
+			Path.Combine(externalCurrentDirectory, "devprojex-profile.json"),
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				externalCurrentDirectory,
+				"devprojex-profile.json"));
+	}
+
+	[Fact]
+	public void DefaultExportPathIsEmptyWhenSourceSafetyCannotBeEstablished()
+	{
+		using var workspace = new TemporaryDirectory();
+		var missingParent = Path.Combine(workspace.Path, "missing");
+		var source = Path.Combine(missingParent, "Project");
+
+		Assert.Empty(
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				source,
+				"Project-context.txt"));
+	}
+
+	[Fact]
+	public void DefaultExportPathValidatesAliasesAndKeepsAStableRequestedLocation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("Project");
+		var safeTarget = workspace.CreateDirectory("safe-target");
+		var sourceAlias = Path.Combine(workspace.Path, "source-alias");
+		var safeAlias = Path.Combine(workspace.Path, "safe-alias");
+		CreateDirectoryAliasOrSkip(sourceAlias, source);
+		CreateDirectoryAliasOrSkip(safeAlias, safeTarget);
+
+		try
+		{
+			Assert.Equal(
+				Path.Combine(workspace.Path, "devprojex-profile.json"),
+				TerminalWorkspaceSession.BuildDefaultExportPath(
+					source,
+					sourceAlias,
+					"devprojex-profile.json"));
+			Assert.Equal(
+				Path.Combine(safeAlias, "devprojex-profile.json"),
+				TerminalWorkspaceSession.BuildDefaultExportPath(
+					source,
+					safeAlias,
+					"devprojex-profile.json"));
+		}
+		finally
+		{
+			DeleteDirectoryAlias(sourceAlias);
+			DeleteDirectoryAlias(safeAlias);
+		}
+	}
+
+	[Fact]
+	public void WelcomeNeverOffersFilesystemRootOrUserHomeForImplicitScanning()
+	{
+		var root = Path.GetPathRoot(Path.GetFullPath(Environment.CurrentDirectory))!;
+		var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+		Assert.False(TerminalWelcomePolicy.IsSafeProjectWorkspace(root));
+		if (!string.IsNullOrWhiteSpace(home))
+			Assert.False(TerminalWelcomePolicy.IsSafeProjectWorkspace(home));
+	}
+
+	private static void CreateDirectoryAliasOrSkip(string aliasPath, string targetPath)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			try
+			{
+				Directory.CreateSymbolicLink(aliasPath, targetPath);
+				return;
+			}
+			catch (Exception exception) when (exception is
+				       UnauthorizedAccessException or
+				       IOException or
+				       PlatformNotSupportedException)
+			{
+				Assert.Skip(
+					$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		using var process = new Process
+		{
+			StartInfo = new ProcessStartInfo("cmd.exe")
+			{
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			}
+		};
+		process.StartInfo.ArgumentList.Add("/c");
+		process.StartInfo.ArgumentList.Add("mklink");
+		process.StartInfo.ArgumentList.Add("/J");
+		process.StartInfo.ArgumentList.Add(aliasPath);
+		process.StartInfo.ArgumentList.Add(targetPath);
+
+		try
+		{
+			process.Start();
+			process.WaitForExit();
+			if (process.ExitCode != 0 || !Directory.Exists(aliasPath))
+				Assert.Skip("The test environment did not allow creating a Windows junction.");
+		}
+		catch (Exception exception) when (exception is
+			       InvalidOperationException or
+			       IOException or
+			       System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip($"Windows junction creation is unavailable: {exception.GetType().Name}.");
+		}
+	}
+
+	private static void DeleteDirectoryAlias(string aliasPath)
+	{
+		try
+		{
+			if (Directory.Exists(aliasPath))
+				Directory.Delete(aliasPath);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			// The temporary workspace performs final best-effort cleanup.
+		}
+	}
+
+	[Fact]
+	public void WelcomeRecognizesProjectMarkerAndRetainsUnavailableRecentEntries()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("package.json", "{}");
+		workspace.WriteFile("nested/deep/file.cs", "class C {}");
+		var unavailable = Path.Combine(workspace.Path, "not-a-directory");
+
+		var context = TerminalWelcomePolicy.Create(
+			workspace.Path,
+			[workspace.Path, Path.Combine(workspace.Path, "."), unavailable]);
+
+		Assert.True(context.CanOpenCurrentDirectory);
+		Assert.Equal([Path.GetFullPath(unavailable)], context.RecentProjects);
+	}
+
+	[Fact]
+	public void MarkerlessReadableDirectoryIsAcceptedAsCurrentWorkspace()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "plain directory");
+
+		Assert.True(TerminalWelcomePolicy.IsSafeProjectWorkspace(workspace.Path));
+	}
+
+	[Fact]
+	public async Task WorkspaceControllerRejectsUnknownPreviewChoicesInsteadOfUsingDefaults()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var formatException = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+			controller.BuildPreviewDocumentAsync(
+				state,
+				ProjectContextView.Tree,
+				(ProjectContextDocumentFormat)int.MaxValue,
+				TestContext.Current.CancellationToken));
+		var viewException = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+			controller.BuildPreviewDocumentAsync(
+				state,
+				(ProjectContextView)int.MaxValue,
+				ProjectContextDocumentFormat.Text,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("format", formatException.ParamName);
+		Assert.Equal("view", viewException.ParamName);
+	}
+
+	[Fact]
+	public async Task WorkspaceControllerAppliesSourceSafetyToPortableProfileExport()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(
+			services,
+			new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			source,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var insideDestination = Path.Combine(source, "portable.json");
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+			controller.SavePortableProfileAsync(
+				state,
+				insideDestination,
+				overwrite: false,
+				TestContext.Current.CancellationToken));
+
+		Assert.Contains(
+			exception.Error,
+			new[]
+			{
+				ProjectCopyExportError.DestinationInsideSource,
+				ProjectCopyExportError.UnsafeDestinationPath
+			});
+		Assert.False(File.Exists(insideDestination));
+
+		var outputDirectory = workspace.CreateDirectory("profiles");
+		var externalDestination = Path.Combine(outputDirectory, "portable.json");
+		var result = await controller.SavePortableProfileAsync(
+			state,
+			externalDestination,
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(Path.GetFullPath(externalDestination), result);
+		Assert.True(File.Exists(externalDestination));
+		Assert.Empty(Directory.EnumerateFiles(
+			outputDirectory,
+			".portable.json.*.tmp"));
+	}
+
+	[Fact]
+	public async Task EquivalentProjectCommandRejectsUnknownOutputKind()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+			TerminalWorkspaceController.BuildEquivalentProjectCommand(
+				state,
+				(ProjectCopyExportFormat)int.MaxValue,
+				Path.Combine(workspace.Path, "output")));
+
+		Assert.Equal("format", exception.ParamName);
+	}
+
+	[Theory]
+	[InlineData(TerminalScreenMode.Inline, false, false, TerminalScreenMode.Inline)]
+	[InlineData(TerminalScreenMode.Alternate, true, true, TerminalScreenMode.Alternate)]
+	[InlineData(TerminalScreenMode.Auto, true, false, TerminalScreenMode.Inline)]
+	[InlineData(TerminalScreenMode.Auto, false, true, TerminalScreenMode.Inline)]
+	[InlineData(TerminalScreenMode.Auto, false, false, TerminalScreenMode.Alternate)]
+	public void ScreenModeUsesExplicitChoiceAndSafeMultiplexerFallback(
+		TerminalScreenMode requested,
+		bool tmux,
+		bool ci,
+		TerminalScreenMode expected)
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			IsCi = ci,
+			Variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["TMUX"] = tmux ? "session" : null
+			}
+		};
+
+		Assert.Equal(expected, TerminalScreenModeResolver.Resolve(requested, environment));
+	}
+
+	[Fact]
+	public async Task TuiPreviewIsBoundedWhileDirectDocumentRemainsComplete()
+	{
+		using var workspace = new TemporaryDirectory();
+		for (var index = 0; index < 100; index++)
+			workspace.WriteFile($"src/file-{index:D3}.txt", new string('x', 64));
+
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.RefreshPreviewAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Json,
+			TestContext.Current.CancellationToken);
+		using var bounded = JsonDocument.Parse(state.PreviewText);
+		Assert.True(bounded.RootElement.GetProperty("truncated").GetBoolean());
+		Assert.Equal(80, bounded.RootElement.GetProperty("files").GetArrayLength());
+
+		var completePayload = await CompleteContextDocumentTestHelper.BuildAsync(
+			services.ContextDocumentService,
+			state.Plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Json,
+			TestContext.Current.CancellationToken);
+		using var complete = JsonDocument.Parse(completePayload);
+		Assert.Equal(100, complete.RootElement.GetProperty("files").GetArrayLength());
+		Assert.False(complete.RootElement.TryGetProperty("truncated", out _));
+	}
+
+	[Fact]
+	public async Task PreviewViewAndFormatChangesProduceValidIndependentDocuments()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.RefreshPreviewAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Json,
+			TestContext.Current.CancellationToken);
+		using (var tree = JsonDocument.Parse(state.PreviewText))
+		{
+			Assert.NotEqual(JsonValueKind.Null, tree.RootElement.GetProperty("tree").ValueKind);
+			Assert.Equal(0, tree.RootElement.GetProperty("files").GetArrayLength());
+		}
+
+		await controller.RefreshPreviewAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Xml,
+			TestContext.Current.CancellationToken);
+		var content = XDocument.Parse(state.PreviewText);
+		Assert.Empty(content.Descendants("tree").Elements());
+		Assert.Single(content.Descendants("file"));
+	}
+
+	[Fact]
+	public async Task InteractiveLargePreviewIsFileBackedAndIndexesFirstMiddleAndFinalFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		const int fileCount = 120;
+		for (var index = 0; index < fileCount; index++)
+		{
+			workspace.WriteFile(
+				$"src/file-{index:D3}.txt",
+				$"marker-{index:D3}\n{new string((char)('a' + index % 26), 6_000)}");
+		}
+
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var preview = await controller.BuildPreviewDocumentAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken);
+		state.SetPreviewDocument(preview);
+
+		var document = Assert.IsType<FileBackedPreviewTextDocument>(state.PreviewDocument);
+		Assert.Equal(fileCount, document.Sections.Count);
+		Assert.True(document.CharacterCount > 500_000);
+		Assert.Contains(
+			"marker-000",
+			document.GetLineRangeText(
+				document.Sections[0].ContentStartLine,
+				document.Sections[0].EndLine),
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"marker-060",
+			document.GetLineRangeText(
+				document.Sections[60].ContentStartLine,
+				document.Sections[60].EndLine),
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"marker-119",
+			document.GetLineRangeText(
+				document.Sections[^1].ContentStartLine,
+				document.Sections[^1].EndLine),
+			StringComparison.Ordinal);
+
+		var view = new TerminalVirtualizedPreviewView();
+		try
+		{
+			view.SetDocument(document, preserveViewport: false);
+			var match = view.FindNext("marker-119", startLine: 0);
+			Assert.True(match >= document.Sections[^1].ContentStartLine - 1);
+		}
+		finally
+		{
+			view.Dispose();
+		}
+	}
+
+	[Fact]
+	public async Task InteractivePreviewDistinguishesBinaryAndOversizedText()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/large.txt", new string('x', 10 * 1024 * 1024 + 1));
+		var binaryPath = Path.Combine(workspace.Path, "src", "binary.dat");
+		Directory.CreateDirectory(Path.GetDirectoryName(binaryPath)!);
+		File.WriteAllBytes(binaryPath, [0, 1, 2, 3]);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var preview = await controller.BuildPreviewDocumentAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken);
+		state.SetPreviewDocument(preview);
+
+		Assert.Equal(2, state.PreviewDocument.Sections.Count);
+		Assert.Contains(
+			"[Binary file; content omitted.]",
+			state.PreviewText,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[File is too large for interactive preview; export to inspect complete content.]",
+			state.PreviewText,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task InteractivePreviewLocalizesDistinctContentOmissionReasons()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/large.txt", new string('x', 10 * 1024 * 1024 + 1));
+		var binaryPath = Path.Combine(workspace.Path, "src", "binary.dat");
+		Directory.CreateDirectory(Path.GetDirectoryName(binaryPath)!);
+		File.WriteAllBytes(binaryPath, [0, 1, 2, 3]);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.Ru);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		state.SetPreviewDocument(await controller.BuildPreviewDocumentAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken));
+
+		Assert.Contains(
+			"[Двоичный файл — содержимое пропущено.]",
+			state.PreviewText,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Файл слишком большой для интерактивного предпросмотра; экспортируйте его для полного просмотра.]",
+			state.PreviewText,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("Binary file", state.PreviewText, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Text)]
+	[InlineData(ProjectContextDocumentFormat.Markdown)]
+	[InlineData(ProjectContextDocumentFormat.Json)]
+	[InlineData(ProjectContextDocumentFormat.Xml)]
+	public async Task ExactExportDocumentMatchesCompleteExportPayload(
+		ProjectContextDocumentFormat format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		workspace.WriteFile("README.md", "# App");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var preview = await controller.BuildExactExportDocumentAsync(
+			state,
+			ProjectContextView.TreeContent,
+			format,
+			TestContext.Current.CancellationToken);
+		state.SetPreviewDocument(preview);
+		var exported = await CompleteContextDocumentTestHelper.BuildAsync(
+			services.ContextDocumentService,
+			state.Plan,
+			ProjectContextView.TreeContent,
+			format,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(exported, state.PreviewText);
+	}
+
+	[Fact]
+	public async Task LargeExactExportDocumentStreamsToFileAndKeepsFinalFileReachable()
+	{
+		using var workspace = new TemporaryDirectory();
+		const int fileCount = 120;
+		for (var index = 0; index < fileCount; index++)
+		{
+			workspace.WriteFile(
+				$"src/raw-{index:D3}.txt",
+				$"raw-marker-{index:D3}\n{new string((char)('a' + index % 26), 6_000)}");
+		}
+
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var preview = await controller.BuildExactExportDocumentAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken);
+		state.SetPreviewDocument(preview);
+
+		var document = Assert.IsType<FileBackedPreviewTextDocument>(state.PreviewDocument);
+		Assert.True(document.CharacterCount > 500_000);
+		Assert.Contains(
+			"raw-marker-119",
+			document.GetLineRangeText(
+				Math.Max(1, document.LineCount - 8),
+				document.LineCount),
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task TuiContextExportRejectsDestinationInsideProjectBeforeCreatingPayload()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var destination = Path.Combine(workspace.Path, "context.md");
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+			controller.ExportContextAsync(
+				state,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Markdown,
+				destination,
+				overwrite: false,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(ProjectCopyExportError.DestinationInsideSource, exception.Error);
+		Assert.False(File.Exists(destination));
+		Assert.Empty(Directory.EnumerateFiles(workspace.Path, ".*.tmp"));
+	}
+
+	[Fact]
+	public async Task TuiContextExportUsesExactConflictPolicy()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var destination = workspace.WriteFile("output/context.md", "existing");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await Assert.ThrowsAsync<OutputDestinationConflictException>(() =>
+			controller.ExportContextAsync(
+				state,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Markdown,
+				destination,
+				overwrite: false,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("existing", File.ReadAllText(destination));
+	}
+
+	[Fact]
+	public async Task AtomicOutputWriterReportsStableAliasForFirstRevalidationConflict()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var physicalOutput = workspace.CreateDirectory("physical-output");
+		var alias = Path.Combine(workspace.Path, "output-alias");
+		CreateDirectoryAliasOrSkip(alias, physicalOutput);
+		var requestedDestination = Path.Combine(alias, "context.md");
+		var physicalDestination = Path.Combine(physicalOutput, "context.md");
+		var validationCount = 0;
+		var writeInvoked = false;
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<OutputDestinationConflictException>(
+				() => AtomicOutputWriter.WriteAsync(
+					requestedDestination,
+					overwrite: false,
+					(_, _) =>
+					{
+						writeInvoked = true;
+						return Task.CompletedTask;
+					},
+					TestContext.Current.CancellationToken,
+					path =>
+					{
+						validationCount++;
+						if (validationCount == 2)
+							File.WriteAllText(physicalDestination, "EXISTING");
+
+						return ExactOutputDestinationValidator.ValidateContext(
+							source,
+							path,
+							overwrite: false);
+					}));
+
+			Assert.Equal(2, validationCount);
+			Assert.False(writeInvoked);
+			Assert.Equal(Path.GetFullPath(requestedDestination), exception.Path);
+			Assert.Equal("EXISTING", File.ReadAllText(physicalDestination));
+			Assert.Empty(Directory.EnumerateFiles(physicalOutput, ".*.tmp"));
+		}
+		finally
+		{
+			DeleteDirectoryAlias(alias);
+		}
+	}
+
+	[Fact]
+	public async Task TuiContextExportReportsStableRequestedAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var outputDirectory = workspace.CreateDirectory("output");
+		var alias = Path.Combine(workspace.Path, "output-alias");
+		try
+		{
+			Directory.CreateSymbolicLink(alias, outputDirectory);
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip(
+				$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		try
+		{
+			var destination = Path.Combine(alias, "context.md");
+			var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+				.Create(AppLanguage.En);
+			var controller = new TerminalWorkspaceController(
+				services,
+				new TestTerminalEnvironment());
+			using var state = await controller.OpenAsync(
+				project,
+				ProjectProfileReference.Standard,
+				TestContext.Current.CancellationToken);
+
+			var result = await controller.ExportContextAsync(
+				state,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Markdown,
+				destination,
+				overwrite: false,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(Path.GetFullPath(destination), result);
+			Assert.True(File.Exists(Path.Combine(outputDirectory, "context.md")));
+		}
+		finally
+		{
+			Directory.Delete(alias);
+		}
+	}
+
+	[Fact]
+	public async Task PlainTuiContextExportUsesAsciiTreePresentation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var destination = Path.Combine(workspace.Path, "context.txt");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.ExportContextAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken,
+			plain: true);
+
+		var payload = await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("|--", payload, StringComparison.Ordinal);
+		Assert.Contains("src", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("├", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("└", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("│", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("─", payload, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PreparedContextExportSummarizesCurrentSelectionWithoutWriting()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		workspace.WriteFile("project/README.md", "# App");
+		var destination = Path.Combine(workspace.CreateDirectory("output"), "context.json");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var summary = await controller.PrepareContextExportAsync(
+			state,
+			ProjectContextView.TreeContent,
+			ProjectContextDocumentFormat.Json,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(TerminalExportKind.Context, summary.Kind);
+		Assert.Equal(ProjectContextView.TreeContent, summary.View);
+		Assert.Equal(ProjectContextDocumentFormat.Json, summary.DocumentFormat);
+		Assert.Equal(TerminalExportDestinationState.Ready, summary.DestinationState);
+		Assert.Equal(2, summary.FileCount);
+		Assert.True(summary.FolderCount >= 2);
+		Assert.Equal(
+			new FileInfo(Path.Combine(project, "src", "app.cs")).Length +
+			new FileInfo(Path.Combine(project, "README.md")).Length,
+			summary.Bytes);
+		Assert.True(summary.Characters > 0);
+		Assert.True(summary.EstimatedTokens > 0);
+		Assert.False(File.Exists(destination));
+	}
+
+	[Fact]
+	public async Task PreparedExportReportsConflictAndLocalizedSummaryWithoutOverwriting()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "class App {}");
+		var destination = workspace.WriteFile("output/context.md", "existing");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.Ru);
+		var environment = new TestTerminalEnvironment();
+		var controller = new TerminalWorkspaceController(services, environment);
+		var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var summary = await controller.PrepareContextExportAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Markdown,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+		var text = new TerminalWorkspace(services, environment).BuildExportSummaryText(summary);
+
+		Assert.Equal(TerminalExportDestinationState.Conflict, summary.DestinationState);
+		Assert.Contains("Сводка", services.Localization["Terminal.Tui.ExportSummary"], StringComparison.Ordinal);
+		Assert.Contains("Конфликт", text, StringComparison.Ordinal);
+		Assert.Contains(Path.GetFullPath(destination), text, StringComparison.Ordinal);
+		Assert.Equal("existing", File.ReadAllText(destination));
+	}
+
+	[Fact]
+	public async Task TuiProjectExportReportsMeasuredEntryProgress()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		workspace.WriteFile("project/README.md", "# App");
+		var destination = Path.Combine(workspace.CreateDirectory("output"), "project.zip");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var updates = new List<ProjectCopyExportProgress>();
+		var progress = new SynchronousProgress<ProjectCopyExportProgress>(updates.Add);
+
+		var result = await controller.ExportProjectAsync(
+			state,
+			ProjectCopyExportFormat.Zip,
+			destination,
+			TestContext.Current.CancellationToken,
+			progress);
+
+		Assert.Equal(Path.GetFullPath(destination), result);
+		Assert.NotEmpty(updates);
+		Assert.Equal(updates[^1].TotalEntryCount, updates[^1].ProcessedEntryCount);
+		Assert.True(updates[^1].BytesWritten > 0);
+	}
+
+	private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
+	{
+		public void Report(T value) => report(value);
+	}
+}

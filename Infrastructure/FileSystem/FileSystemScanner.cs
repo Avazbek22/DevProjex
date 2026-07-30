@@ -3496,7 +3496,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				// A repository boundary always ends ownership by an ancestor index. An
 				// empty projection keeps tracked-only mode fail-closed when the nested
 				// index is missing, unreadable, or being replaced concurrently.
-				var unavailableBoundaryIndex = new GitTrackedPathIndex(directoryPath, []);
+				var unavailableBoundaryIndex = GitTrackedPathIndex.Unavailable(directoryPath);
 				discoveredTrackedPathIndexes?.Add(unavailableBoundaryIndex);
 				activeContext = activeContext.WithTrackedPathIndex(unavailableBoundaryIndex);
 				candidateContext = candidateContext.WithTrackedPathIndex(unavailableBoundaryIndex);

@@ -4,6 +4,7 @@ using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.AppInstances;
+using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.Reports;
@@ -13,15 +14,25 @@ namespace DevProjex.Avalonia.Services;
 
 public static class AvaloniaCompositionRoot
 {
-    public static AvaloniaAppServices CreateDefault(CommandLineOptions options)
+    public static AvaloniaAppServices CreateDefault(DesktopStartupOptions options)
         => CreateDefault(options, appDataPathProvider: null);
 
     public static AvaloniaAppServices CreateDefault(
-        CommandLineOptions options,
+        DesktopStartupOptions options,
+        Func<string>? appDataPathProvider)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var language = options.OpenRequest?.Language ?? AppLanguageUtility.DetectSystemLanguage();
+        return CreateDefaultCore(language, options.EffectiveSessionMetrics, appDataPathProvider);
+    }
+
+    private static AvaloniaAppServices CreateDefaultCore(
+        AppLanguage language,
+        SessionMetricsOptions sessionMetrics,
         Func<string>? appDataPathProvider)
     {
         var localizationCatalog = new JsonLocalizationCatalog();
-        var localization = new LocalizationService(localizationCatalog, options.Language ?? CommandLineOptions.DetectSystemLanguage());
+        var localization = new LocalizationService(localizationCatalog, language);
         var helpContentProvider = new HelpContentProvider();
         var iconStore = new EmbeddedIconStore();
         var iconMapper = new IconMapper();
@@ -51,7 +62,6 @@ public static class AvaloniaCompositionRoot
         var fileContentAnalyzer = new FileContentAnalyzer();
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
-        var projectExportService = new ProjectExportService(treeExportService, contentExportService, treeAndContentExportService);
         var projectCopyExportService = new ProjectCopyExportService(new ProjectCopyExportPlanBuilder());
         var projectAnalysisService = new ProjectAnalysisService(
             scanOptionsUseCase,
@@ -61,14 +71,15 @@ public static class AvaloniaCompositionRoot
             ignoreRulesService,
             treeExportService,
             fileContentAnalyzer);
-        var reportPathResolver = new ReportPathResolver();
-        var projectAnalysisReportWriter = new ProjectAnalysisReportWriter();
         var terminalCommandSetupService = new TerminalCommandSetupService();
-        var localAppDataProvider = appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-        var sessionMetricsRecorder = options.SessionMetrics.Enabled
-            ? new SessionMetricsRecorder(options.SessionMetrics, localAppDataProvider)
+        var localAppDataProvider = appDataPathProvider ?? UserDataPathResolver.GetStateRoot;
+        var sessionMetricsRecorder = sessionMetrics.Enabled
+            ? new SessionMetricsRecorder(sessionMetrics, localAppDataProvider)
             : SessionMetricsRecorder.Disabled;
-        var previewDocumentBuilder = new PreviewDocumentBuilder(fileContentAnalyzer);
+        var previewDocumentBuilder = new PreviewDocumentBuilder(
+            fileContentAnalyzer,
+            classification => localization[
+                FileContentClassificationCatalog.Get(classification).LabelKey]);
         var repositoryWebPathPresentationService = new RepositoryWebPathPresentationService();
         var textFileExportService = new TextFileExportService();
         var toastService = new ToastService();
@@ -95,6 +106,7 @@ public static class AvaloniaCompositionRoot
             UserSettingsStore: userSettingsStore,
             ThemeSettingsStore: themeSettingsStore,
             RecentProjectsStore: recentProjectsStore,
+            RecentWorkspacesService: new RecentWorkspacesService(),
             RecentFolderAvailabilityService: recentFolderAvailabilityService,
             ProjectProfileStore: projectProfileStore,
             AppInstanceLauncher: appInstanceLauncher,
@@ -108,7 +120,6 @@ public static class AvaloniaCompositionRoot
             TreeExportService: treeExportService,
             ContentExportService: contentExportService,
             TreeAndContentExportService: treeAndContentExportService,
-            ProjectExportService: projectExportService,
             ProjectCopyExportService: projectCopyExportService,
             PreviewDocumentBuilder: previewDocumentBuilder,
             RepositoryWebPathPresentationService: repositoryWebPathPresentationService,
@@ -120,8 +131,6 @@ public static class AvaloniaCompositionRoot
             ZipDownloadService: zipDownloadService,
             FileContentAnalyzer: fileContentAnalyzer,
             ProjectAnalysisService: projectAnalysisService,
-            ReportPathResolver: reportPathResolver,
-            ProjectAnalysisReportWriter: projectAnalysisReportWriter,
             TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService,
             SessionMetricsRecorder: sessionMetricsRecorder);

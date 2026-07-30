@@ -1,0 +1,30 @@
+ DevProjex Terminal · <PROJECT>
+ <PROJECT_ROOT>
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
+│v [x] <PROJECT>                   ││<PROJECT>                                  ▲│
+│  > [x] src                                          ││├── src                                                       ┃│
+│    [x] global.json                                  │││   ├── File0001.bin                                          ┃│
+│                                                     │││   ├── File0002.bin                                          ┃│
+│                                                     │││   ├── File0003.bin                                          ┃│
+│                                                     │││   ├── File0004.bin                                          ·│
+│                                                     │││   ├── File0005.bin                                          ·│
+│                                                     │││   ├── File0006.bin                                          ·│
+│                                                     │││   ├── File0007.bin                                          ·│
+│                                                     │││   ├── File0008.bin                                          ·│
+│                                                     │││   ├── File0009.bin                                          ·│
+│                                                     │││   ├── File0010.bin                                          ·│
+│                                                     │││   ├── File0011.bin                                          ·│
+│                                                     │││   ├── File0012.bin                                          ·│
+│                                                     │││   ├── File0013.bin                                          ·│
+│                                                     │││   ├── File0014.bin                                          ·│
+│                                                     │││   ├── File0015.bin                                          ·│
+│                                                     │││   ├── File0016.bin                                          ·│
+│                                                     │││   ├── File0017.bin                                          ·│
+│                                                     │││   ├── File0018.bin                                          ·│
+│                                                     │││   ├── File0019.bin                                          ·│
+│                                                     │││   ├── File0020.bin                                          ▼│
+│                                                     ││ Files 101  |  Lines 1-22/104                                  │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Operation canceled
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

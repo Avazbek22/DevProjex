@@ -13,10 +13,8 @@ public sealed class ProjectExportServiceStructuredFormatTests
 
 		var result = await service.BuildAsync(
 			project,
-			new StartupExportOptions(
-				Enabled: true,
-				Mode: StartupExportMode.Tree,
-				Path: Path.Combine(temp.Path, $"tree.{GetExtension(format)}"),
+			new ProjectTextExportRequest(
+				Mode: ProjectTextExportMode.Tree,
 				Format: format),
 			TestContext.Current.CancellationToken);
 
@@ -35,10 +33,8 @@ public sealed class ProjectExportServiceStructuredFormatTests
 
 		var result = await service.BuildAsync(
 			project,
-			new StartupExportOptions(
-				Enabled: true,
-				Mode: StartupExportMode.TreeContent,
-				Path: Path.Combine(temp.Path, $"context.{GetExtension(format)}"),
+			new ProjectTextExportRequest(
+				Mode: ProjectTextExportMode.TreeContent,
 				Format: format),
 			TestContext.Current.CancellationToken);
 
@@ -114,9 +110,6 @@ public sealed class ProjectExportServiceStructuredFormatTests
 		Assert.True(separatorIndex > 0, "Structured tree-content export must contain the NBSP separator.");
 		return (export[..separatorIndex].TrimEnd('\r', '\n'), export[separatorIndex..]);
 	}
-
-	private static string GetExtension(TreeTextFormat format)
-		=> format == TreeTextFormat.Xml ? "xml" : "md";
 
 	private static string[] SortPaths(IEnumerable<string> paths)
 		=> paths.OrderBy(static path => path, StringComparer.Ordinal).ToArray();

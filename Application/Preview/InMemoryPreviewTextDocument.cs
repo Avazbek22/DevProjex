@@ -22,6 +22,8 @@ public sealed class InMemoryPreviewTextDocument : IPreviewTextDocument
 
     public IReadOnlyList<PreviewDocumentSection> Sections { get; }
 
+    public string GetFullText() => _text;
+
     public string GetLineText(int lineNumber)
     {
         if (_text.Length == 0)

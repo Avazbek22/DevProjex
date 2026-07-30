@@ -1,0 +1,24 @@
+ DevProjex Terminal · <PROJECT>
+ <PROJECT_ROOT>
+┌┤> PROJECT TREE├──────────────────────────────────────────────────────────────┐
+│v [x] <PROJECT>                                        │
+│  > [x] src                                                                   │
+│    [x] global.json                                                           │
+│    [x] readme.md                                                             │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Up/Down Move  Enter Open  Space Toggle  Tab/F6 Preview  Ctrl+P Actions

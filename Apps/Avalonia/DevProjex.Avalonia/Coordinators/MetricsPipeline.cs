@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using DevProjex.Avalonia.Services;
 using DevProjex.Kernel;
@@ -58,19 +57,6 @@ internal sealed class MetricsPipeline(
         bool HasMetrics);
 
     private const double CompactStatusMetricsThresholdWidth = 1050;
-
-    private static readonly FrozenSet<string> MetricsWarmupBinaryExtensions =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
-            ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
-            ".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",
-            ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz",
-            ".exe", ".dll", ".so", ".dylib", ".pdb", ".ilk",
-            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-            ".ttf", ".otf", ".woff", ".woff2", ".eot",
-            ".bin", ".dat", ".db", ".sqlite", ".mdb"
-        }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private static async Task YieldUiAsync(DispatcherPriority priority)
         => await DispatcherTaskSchedulerProvider.YieldAsync(priority);
@@ -439,18 +425,6 @@ internal sealed class MetricsPipeline(
                 return;
             }
 
-            if (AreAllFilesDefinitelyBinaryForMetricsWarmup(filePaths))
-            {
-                _isBackgroundMetricsActive = false;
-                _hasCompleteMetricsBaseline = true;
-                if (statusOperations.IsActive(statusOperationId))
-                    viewModel.StatusProgressValue = 100;
-                Recalculate();
-                viewModel.StatusMetricsVisible = true;
-                statusOperations.Complete(statusOperationId);
-                return;
-            }
-
             await ScanFileMetricsAsync(
                 filePaths,
                 stagedResults,
@@ -521,17 +495,6 @@ internal sealed class MetricsPipeline(
         }
     }
 
-    private static bool AreAllFilesDefinitelyBinaryForMetricsWarmup(IReadOnlyList<string> filePaths)
-    {
-        for (var index = 0; index < filePaths.Count; index++)
-        {
-            if (!IsDefinitelyBinaryByExtensionForMetricsWarmup(filePaths[index]))
-                return false;
-        }
-
-        return true;
-    }
-
     private void MergeStagedMetricsIntoCache(
         IReadOnlyList<string> filePaths,
         IReadOnlyList<FileMetricsScanResult> results,
@@ -586,7 +549,8 @@ internal sealed class MetricsPipeline(
             var filePath = filePaths[index];
             try
             {
-                if (IsDefinitelyBinaryByExtensionForMetricsWarmup(filePath))
+                if (fileContentAnalyzer.ClassifyWithoutReading(filePath) ==
+                    FileContentClassification.Binary)
                 {
                     stagedResults[index] = new FileMetricsScanResult(
                         Metrics: default,
@@ -595,8 +559,9 @@ internal sealed class MetricsPipeline(
                     return;
                 }
 
-                var metrics = await fileContentAnalyzer.GetTextFileMetricsAsync(filePath, ct)
+                var result = await fileContentAnalyzer.GetClassifiedMetricsAsync(filePath, ct)
                     .ConfigureAwait(false);
+                var metrics = result.IsText ? result.Metrics : null;
 
                 if (metrics is not null)
                 {
@@ -1221,18 +1186,6 @@ internal sealed class MetricsPipeline(
         IReadOnlySet<string> selectedPaths,
         bool ensureExists = true) =>
         PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, treeRoot, ensureExists);
-
-    private static bool IsDefinitelyBinaryByExtensionForMetricsWarmup(string path)
-    {
-        var extension = Path.GetExtension(path.AsSpan());
-        if (extension.IsWhiteSpace())
-            return false;
-
-        if (MetricsWarmupBinaryExtensions.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup))
-            return lookup.Contains(extension);
-
-        return MetricsWarmupBinaryExtensions.Contains(extension.ToString());
-    }
 
     private static string MapExportDisplayPath(string filePath, Func<string, string>? mapFilePath)
     {

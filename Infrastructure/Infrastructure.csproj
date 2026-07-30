@@ -13,6 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Application\Application.csproj" />
     <ProjectReference Include="..\Kernel\Kernel.csproj" />
     <ProjectReference Include="..\Assets\Assets.csproj" />
   </ItemGroup>

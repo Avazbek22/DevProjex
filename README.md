@@ -32,7 +32,7 @@ It’s built for real projects where terminal output is noisy, IDE integrations 
 
 DevProjex is not an autonomous coding agent. It gives you a manual, fully controlled way to prepare project context when agents, IDE plugins, or remote indexing cannot be used.
 
-> 🔒 Read-only & without telemetry by design — DevProjex never modifies your files.
+> 🔒 Source-project read-only & without telemetry by design — opening, analyzing, or exporting from a project never modifies that source tree. Explicit file, folder, ZIP, and portable-profile destinations are accepted only outside it; application-owned settings, local profiles, clones, caches, and runtime state are stored outside the source tree.
 
 ---
 
@@ -185,7 +185,7 @@ Use **File → Export Project → To Folder…** or **To ZIP Archive…** to cre
 
 Project copies respect the selected root folders, file types, ignore rules, and checked items. If nothing is checked, the entire current tree is exported. Directory structure, binary files, and included empty folders are preserved.
 
-The source project is not modified, and the result cannot be written inside it. The same workflow is available from the terminal through `--copy folder` and `--copy zip`.
+The source project is not modified, and the result cannot be written inside it. The same workflow is available through `devprojex export project`.
 
 ---
 
@@ -194,30 +194,29 @@ The source project is not modified, and the result cannot be written inside it. 
 DevProjex is not only a desktop context builder. The same app can run from the terminal for repeatable, script-friendly project analysis and AI-context export.
 
 ```bash
-devprojex "/path/to/project" --preview-mode tree-content --tree-format md
-devprojex --last --preview
-devprojex "/path/to/project" --export tree-content -o ./context.txt --roots src --ext cs
-devprojex "/path/to/project" --copy folder -o ./submissions
-devprojex "/path/to/project" --copy zip -o ./submissions/project-copy.zip
-devprojex --path "/path/to/project" --no-ui --report -
-devprojex --path "/path/to/project" --no-ui --report ./devprojex-report.json --strict
-devprojex --benchmark-ui "/path/to/project"
-devprojex --session-metrics "/path/to/project" --preview --tree-format md
+devprojex
+devprojex open . --preview
+devprojex analyze . --format json
+devprojex export context . --format markdown -o ../devprojex-context.md
+devprojex export project . --as folder -o ../devprojex-submission
+devprojex export project . --as zip -o ../devprojex-submission.zip
+devprojex analyze . --git-mode tracked --exclude smart-ignore
 ```
 
 Use it to:
 
-* open the desktop app directly in preview/filter/search states;
+* work interactively in the Terminal Workspace without starting Avalonia;
+* reopen local folders or cached Git repositories from one shared Recent Workspaces history;
+* inspect Tree, Content, or Tree + Content in ASCII, JSON, XML, or Markdown through Tree, Preview, and Parameters;
+* discover every important workflow through the searchable Action Palette;
+* open or control the desktop app through semantic local IPC;
 * generate clean AI-ready context without opening the UI;
-* export selected tree/content payloads directly to files or stdout;
-* create selection-, filter-, and ignore-aware project copies as folders or ZIP archives;
-* produce machine-readable JSON analysis reports;
-* benchmark the headless report pipeline or a repeatable desktop UI workflow;
-* record interactive UI session metrics for practical CPU/RAM diagnostics;
-* fail CI when selected roots/extensions produce diagnostics;
-* reuse the same ignore logic as the desktop app.
+* export selected context to stdout or deterministic files;
+* create exact folder or ZIP project copies;
+* produce stable machine-readable JSON analysis;
+* share the same Git filtering, Exclusions, profiles, and project engine as Desktop.
 
-See [Docs/CommandLine.md](Docs/CommandLine.md) for the full CLI contract, supported options, export modes, exit codes, and report behavior.
+See [Docs/CommandLine.md](Docs/CommandLine.md) for commands and examples, and [Docs/TerminalWorkspace.md](Docs/TerminalWorkspace.md) for the interactive terminal interface.
 
 ---
 

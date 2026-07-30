@@ -6,6 +6,18 @@ public enum ProjectCopyExportFormat
 	Zip = 1
 }
 
+public enum ProjectCopyDestinationMode
+{
+	AutomaticName = 0,
+	Exact = 1
+}
+
+public enum ProjectCopyConflictPolicy
+{
+	Fail = 0,
+	ReplaceAtomically = 1
+}
+
 public enum ProjectCopyExportError
 {
 	InvalidRequest = 0,
@@ -17,7 +29,8 @@ public enum ProjectCopyExportError
 	AccessDenied = 6,
 	IoFailure = 7,
 	UnsafeDestinationPath = 8,
-	UnexpectedFailure = 9
+	UnexpectedFailure = 9,
+	DestinationConflict = 10
 }
 
 public sealed record ProjectCopyExportRequest(
@@ -26,7 +39,9 @@ public sealed record ProjectCopyExportRequest(
 	TreeNodeDescriptor TreeRoot,
 	IReadOnlySet<string> SelectedPaths,
 	string DestinationPath,
-	ProjectCopyExportFormat Format);
+	ProjectCopyExportFormat Format,
+	ProjectCopyDestinationMode DestinationMode = ProjectCopyDestinationMode.AutomaticName,
+	ProjectCopyConflictPolicy ConflictPolicy = ProjectCopyConflictPolicy.Fail);
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,
@@ -57,8 +72,10 @@ public sealed record ProjectCopyExportPlan(
 public sealed class ProjectCopyExportException(
 	ProjectCopyExportError error,
 	string message,
-	Exception? innerException = null)
+	Exception? innerException = null,
+	string? pathContext = null)
 	: Exception(message, innerException)
 {
 	public ProjectCopyExportError Error { get; } = error;
+	public string? PathContext { get; } = pathContext;
 }

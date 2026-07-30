@@ -1,3 +1,5 @@
+using DevProjex.Application.DesktopControl;
+
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowArchitectureContractTests
@@ -116,15 +118,15 @@ public sealed class MainWindowArchitectureContractTests
     }
 
     [Theory]
-    [InlineData(StartupPreviewMode.Tree, PreviewContentMode.Tree)]
+    [InlineData(DesktopPreviewView.Tree, PreviewContentMode.Tree)]
     [InlineData(
-        StartupPreviewMode.Content,
+        DesktopPreviewView.Content,
         PreviewContentMode.Content)]
     [InlineData(
-        StartupPreviewMode.TreeContent,
+        DesktopPreviewView.TreeContent,
         PreviewContentMode.TreeAndContent)]
     public void StartupInteractionController_MapsEveryPreviewMode(
-        StartupPreviewMode source,
+        DesktopPreviewView source,
         PreviewContentMode expected)
     {
         Assert.Equal(

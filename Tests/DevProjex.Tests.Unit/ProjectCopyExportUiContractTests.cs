@@ -109,6 +109,10 @@ public sealed class ProjectCopyExportUiContractTests
             "Avalonia",
             "DevProjex.Avalonia",
             "MainWindow.TextOutput.cs");
+        Assert.Contains(
+            "result.Content,\n                snapshot.RootPath,",
+            source.ReplaceLineEndings("\n"),
+            StringComparison.Ordinal);
         var methodStart = source.IndexOf(
             "private async Task<bool> TryExportTextToFileAsync",
             StringComparison.Ordinal);
@@ -117,15 +121,81 @@ public sealed class ProjectCopyExportUiContractTests
             methodStart,
             StringComparison.Ordinal);
         Assert.True(methodStart >= 0 && methodEnd > methodStart);
-        var method = source[methodStart..methodEnd];
-        var guardIndex = method.IndexOf(
-            "ProjectCopyExportService.EnsureDestinationOutsideProject",
-            StringComparison.Ordinal);
-        var streamOpenIndex = method.IndexOf("file.OpenWriteAsync()", StringComparison.Ordinal);
+		var method = source[methodStart..methodEnd];
+		var guardIndex = method.IndexOf(
+			"ProjectCopyExportService.ResolveDestinationOutsideProject",
+			StringComparison.Ordinal);
+		var streamOpenIndex = method.IndexOf("file.OpenWriteAsync()", StringComparison.Ordinal);
 
-        Assert.Contains("file.TryGetLocalPath()", method, StringComparison.Ordinal);
-        Assert.Contains("Error.ProjectCopy.UnsafeDestinationPath", method, StringComparison.Ordinal);
-        Assert.True(guardIndex >= 0 && guardIndex < streamOpenIndex);
+		Assert.Contains("file.TryGetLocalPath()", method, StringComparison.Ordinal);
+		Assert.Contains("await Task.Run", method, StringComparison.Ordinal);
+		Assert.Contains("AtomicFileOutput.WriteAsync(", method, StringComparison.Ordinal);
+		Assert.DoesNotContain("FileMode.Create", method, StringComparison.Ordinal);
+		Assert.DoesNotContain("file.OpenWriteAsync()", method, StringComparison.Ordinal);
+		Assert.Contains("string sourceRootPath", method, StringComparison.Ordinal);
+		Assert.DoesNotContain("_currentPath", method, StringComparison.Ordinal);
+		Assert.Contains(
+			"Path.GetFullPath(destinationPath)",
+			method,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"path => ProjectCopyExportService.ResolveDestinationOutsideProject(",
+			method,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"_localization[\"Error.ProjectCopy.UnsafeDestinationPath\"]",
+			method,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"ProjectCopyExportErrorPresentation.ResolveLocalizationKey",
+			method,
+			StringComparison.Ordinal);
+		Assert.True(guardIndex >= 0);
+		Assert.Equal(-1, streamOpenIndex);
+    }
+
+    [Fact]
+    public void TextFileExport_CapturesWindowLifetimeBeforePickerAndUsesItForEveryWrite()
+    {
+        var source = ReadRepositoryFile(
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia",
+            "MainWindow.TextOutput.cs");
+        var methodStart = source.IndexOf(
+            "private async Task<bool> TryExportTextToFileAsync",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "private static IReadOnlyList<FilePickerFileType>",
+            methodStart,
+            StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart);
+        var method = source[methodStart..methodEnd].ReplaceLineEndings("\n");
+        var lifetimeCaptureIndex = method.IndexOf(
+            "var windowLifetime = _windowLifetimeCts;",
+            StringComparison.Ordinal);
+        var lifetimeTokenIndex = method.IndexOf(
+            "var cancellationToken = windowLifetime.Token;",
+            StringComparison.Ordinal);
+        var pickerIndex = method.IndexOf(
+            "await StorageProvider.SaveFilePickerAsync(options)",
+            StringComparison.Ordinal);
+        var postPickerCancellationIndex = method.IndexOf(
+            "cancellationToken.ThrowIfCancellationRequested();",
+            pickerIndex,
+            StringComparison.Ordinal);
+
+        Assert.True(lifetimeCaptureIndex >= 0 && lifetimeCaptureIndex < pickerIndex);
+        Assert.True(lifetimeTokenIndex > lifetimeCaptureIndex && lifetimeTokenIndex < pickerIndex);
+        Assert.True(postPickerCancellationIndex > pickerIndex);
+        Assert.Contains(
+            "writeCancellationToken)",
+            method,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "_textFileExport.WriteAsync(stream, content, cancellationToken)",
+            method,
+            StringComparison.Ordinal);
     }
 
     [Fact]

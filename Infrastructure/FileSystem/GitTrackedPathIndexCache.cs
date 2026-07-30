@@ -161,6 +161,7 @@ internal static class GitTrackedPathIndexCache
 		{
 			if (!process.Start())
 				return null;
+			process.StandardInput.Close();
 			Volatile.Write(ref _gitAvailability, 1);
 		}
 		catch (Win32Exception)
@@ -216,7 +217,7 @@ internal static class GitTrackedPathIndexCache
 		return estimatedBytes;
 	}
 
-	private static ProcessStartInfo CreateStartInfo(string repositoryRootPath)
+	internal static ProcessStartInfo CreateStartInfo(string repositoryRootPath)
 	{
 		var startInfo = new ProcessStartInfo
 		{
@@ -224,6 +225,7 @@ internal static class GitTrackedPathIndexCache
 			WorkingDirectory = repositoryRootPath,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
 			StandardOutputEncoding = new UTF8Encoding(

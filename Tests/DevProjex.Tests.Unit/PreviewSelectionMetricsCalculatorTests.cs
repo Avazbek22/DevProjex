@@ -90,6 +90,9 @@ public sealed class PreviewSelectionMetricsCalculatorTests
 
         public IReadOnlyList<PreviewDocumentSection> Sections => [];
 
+        public string GetFullText() =>
+            throw new NotSupportedException("This synthetic document intentionally exceeds in-memory string limits.");
+
         public string GetLineText(int lineNumber) => _line;
 
         public string GetLineRangeText(int firstLine, int lastLine) =>

@@ -1,0 +1,35 @@
+
+  DevProjex Terminal                                                                                                                            v<VERSION>
+  Choose a workspace action. No folder is scanned until you open it.
+
+  Current directory                                                                                                          Current folder is ready
+  <WELCOME_ROOT>
+
+  ┌┤Actions├───────────────────────────────┐  ┌┤Details├───────────────────────────────────────────────────────────────────────────────────────────┐
+  │  Open current directory                │  │ Open a recent local folder or Git repository from one shared history.                              │
+  │> Recent workspaces┌┤Recent workspaces├────────────────────────────────────────────────────────────────────────────────────┐                    │
+  │  Browse folder    │ Open a recent local folder or Git repository from one shared history.                                 │                    │
+  │  Clone repository │                                                                                                       │                    │
+  │  Open Desktop     │ > Git        DevProjex                    Today                                                       │                    │
+  │  Help             │                                                                                                       │                    │
+  │  Exit             │                                                                                                       │                    │
+  └───────────────────│ Git · DevProjex                                                                                       │────────────────────┘
+                      │ https://github.com/Avazbek22/DevProjex                                                                │
+  Direct automation: d│ Last opened: <TIMESTAMP>│
+                      │                                                                                                       │
+                      │                                                                                                       │
+                      │                                                                                                       │
+                      │                                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                                │
+                      │                                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                                │
+                      └───────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

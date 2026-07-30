@@ -1,0 +1,1232 @@
+using System.Buffers;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Unicode;
+using System.Runtime.InteropServices;
+using System.Xml;
+
+namespace DevProjex.Application.Context;
+
+public enum ProjectContextView
+{
+	Tree,
+	Content,
+	TreeContent
+}
+
+public enum ProjectContextDocumentFormat
+{
+	Text,
+	Markdown,
+	Json,
+	Xml
+}
+
+public sealed record ProjectContextDocumentLimits(
+	int MaximumTreeNodes = 2_000,
+	int MaximumFiles = 80,
+	int MaximumCharacters = 256 * 1024,
+	long MaximumFileBytes = 256 * 1024);
+
+public sealed class ProjectContextDocumentService(
+	TreeExportService treeExportService,
+	IFileContentAnalyzer contentAnalyzer,
+	Func<FileContentClassification, string>? omissionMessageProvider = null)
+{
+	private const int SchemaVersion = 1;
+	private const string Kind = "devprojex-context";
+	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+
+	public async Task<string> BuildAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		ProjectContextDocumentLimits limits,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentNullException.ThrowIfNull(limits);
+		ValidateView(view);
+		ValidateDocumentFormat(format);
+
+		var (renderedTree, treeTruncated) = IncludesTree(view)
+			? BuildBoundedTree(plan.ProjectedTree, limits.MaximumTreeNodes)
+			: (plan.ProjectedTree, false);
+		var fileResult = IncludesContent(view)
+			? await ReadFilesAsync(plan, limits, cancellationToken).ConfigureAwait(false)
+			: new ContextFileReadResult([], false);
+		var renderedPlan = ReferenceEquals(renderedTree, plan.ProjectedTree)
+			? plan
+			: plan with { ProjectedTree = renderedTree };
+		var truncated = treeTruncated || fileResult.IsTruncated;
+
+		return format switch
+		{
+			ProjectContextDocumentFormat.Text => BuildText(renderedPlan, view, fileResult.Files, truncated),
+			ProjectContextDocumentFormat.Markdown => BuildMarkdown(renderedPlan, view, fileResult.Files, truncated),
+			ProjectContextDocumentFormat.Json => BuildJson(renderedPlan, view, fileResult.Files, truncated),
+			ProjectContextDocumentFormat.Xml => BuildXml(renderedPlan, view, fileResult.Files, truncated),
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+		};
+	}
+
+	public async Task WriteCompleteAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		Stream destination,
+		CancellationToken cancellationToken = default,
+		bool plain = false)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentNullException.ThrowIfNull(destination);
+		ValidateView(view);
+		ValidateDocumentFormat(format);
+		if (!destination.CanWrite)
+			throw new ArgumentException("Destination must be writable.", nameof(destination));
+		using var cancellationDestination = new CancellationBoundWriteStream(
+			destination,
+			cancellationToken);
+
+		switch (format)
+		{
+			case ProjectContextDocumentFormat.Text:
+				await WriteCompleteTextAsync(
+						plan,
+						view,
+						cancellationDestination,
+						plain,
+						cancellationToken)
+					.ConfigureAwait(false);
+				break;
+			case ProjectContextDocumentFormat.Markdown:
+				await WriteCompleteMarkdownAsync(
+						plan,
+						view,
+						cancellationDestination,
+						plain,
+						cancellationToken)
+					.ConfigureAwait(false);
+				break;
+			case ProjectContextDocumentFormat.Json:
+				await WriteCompleteJsonAsync(
+						plan,
+						view,
+						cancellationDestination,
+						cancellationToken)
+					.ConfigureAwait(false);
+				break;
+			case ProjectContextDocumentFormat.Xml:
+				await WriteCompleteXmlAsync(
+						plan,
+						view,
+						cancellationDestination,
+						cancellationToken)
+					.ConfigureAwait(false);
+				break;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(format), format, null);
+		}
+	}
+
+	private async Task WriteCompleteTextAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		Stream destination,
+		bool plain,
+		CancellationToken cancellationToken)
+	{
+		await using var writer = CreateStreamWriter(destination);
+		var hasOutput = false;
+		var includesContent = IncludesContent(view) && plan.IncludedFiles.Count > 0;
+		if (IncludesTree(view))
+		{
+			await WriteCompleteTreeAsync(
+					writer,
+					plan,
+					plain,
+					includeFinalLineEnding: includesContent,
+					cancellationToken)
+				.ConfigureAwait(false);
+			hasOutput = true;
+		}
+
+		if (includesContent)
+		{
+			for (var index = 0; index < plan.IncludedFiles.Count; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var path = plan.IncludedFiles[index];
+				await using var snapshot = await contentAnalyzer
+					.OpenCompleteSnapshotAsync(path, cancellationToken)
+					.ConfigureAwait(false);
+				var file = CreateCompleteFileDocument(
+					plan.SourceRoot,
+					path,
+					snapshot.Result);
+				if (hasOutput)
+				{
+					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+				}
+
+				await writer.WriteAsync(file.Path.AsMemory(), cancellationToken).ConfigureAwait(false);
+				await writer.WriteAsync(":".AsMemory(), cancellationToken).ConfigureAwait(false);
+				var isLast = index == plan.IncludedFiles.Count - 1;
+				var charactersToWrite = file.Classification == FileContentClassification.Text
+					? Math.Max(
+						0,
+						(file.Metrics?.CharCount ?? 0) -
+						(isLast ? file.Metrics?.TrailingNewlineChars ?? 0 : 0))
+					: GetTextContent(file).Length;
+				if (charactersToWrite > 0 || !isLast)
+				{
+					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+					if (file.Classification == FileContentClassification.Text)
+					{
+						await snapshot.CopyTextToAsync(
+								charactersToWrite,
+								(chunk, token) => new ValueTask(
+									writer.WriteAsync(chunk, token)),
+								cancellationToken)
+							.ConfigureAwait(false);
+					}
+					else
+					{
+						await writer.WriteAsync(
+								GetTextContent(file).AsMemory(),
+								cancellationToken)
+							.ConfigureAwait(false);
+					}
+				}
+				hasOutput = true;
+			}
+		}
+
+		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task WriteCompleteMarkdownAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		Stream destination,
+		bool plain,
+		CancellationToken cancellationToken)
+	{
+		await using var writer = CreateStreamWriter(destination);
+		await writer.WriteAsync("# ".AsMemory(), cancellationToken).ConfigureAwait(false);
+		await writer.WriteAsync(EscapeMarkdownHeading(GetProjectName(plan)).AsMemory(), cancellationToken)
+			.ConfigureAwait(false);
+
+		if (IncludesTree(view))
+		{
+			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+			await WriteLineAsync(writer, "## Project tree", cancellationToken).ConfigureAwait(false);
+			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+			await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+			var fence = new string(
+				'`',
+				Math.Max(
+					3,
+					treeExportService.CalculateFullTreeLongestBacktickRun(
+						plan.SourceRoot,
+						plan.ProjectedTree,
+						GetDocumentRoot(plan),
+						GetProjectName(plan),
+						cancellationToken: cancellationToken) + 1));
+			await writer.WriteAsync(fence.AsMemory(), cancellationToken).ConfigureAwait(false);
+			await WriteLineAsync(writer, "text", cancellationToken).ConfigureAwait(false);
+			await WriteCompleteTreeAsync(
+					writer,
+					plan,
+					plain,
+					includeFinalLineEnding: false,
+					cancellationToken)
+				.ConfigureAwait(false);
+			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+			await writer.WriteAsync(fence.AsMemory(), cancellationToken).ConfigureAwait(false);
+		}
+
+		if (IncludesContent(view))
+		{
+			foreach (var path in plan.IncludedFiles)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				await using var snapshot = await contentAnalyzer
+					.OpenCompleteSnapshotAsync(path, cancellationToken)
+					.ConfigureAwait(false);
+				var file = CreateCompleteFileDocument(
+					plan.SourceRoot,
+					path,
+					snapshot.Result);
+				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+				await writer.WriteAsync("## ".AsMemory(), cancellationToken).ConfigureAwait(false);
+				await WriteLineAsync(writer, BuildMarkdownCodeSpan(file.Path), cancellationToken)
+					.ConfigureAwait(false);
+				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+				if (file.Classification != FileContentClassification.Text)
+				{
+					await writer.WriteAsync(
+							$"_{GetOmissionText(file.Classification)}_".AsMemory(),
+							cancellationToken)
+						.ConfigureAwait(false);
+				}
+				else
+				{
+					var fence = new string(
+						'`',
+						Math.Max(3, (file.Metrics?.LongestBacktickRun ?? 0) + 1));
+					await writer.WriteAsync(fence.AsMemory(), cancellationToken).ConfigureAwait(false);
+					await WriteLineAsync(
+							writer,
+							ResolveFenceLanguage(file.Path),
+							cancellationToken)
+						.ConfigureAwait(false);
+					await snapshot.CopyTextToAsync(
+							file.Metrics?.CharCount ?? 0,
+							(chunk, token) => new ValueTask(
+								writer.WriteAsync(chunk, token)),
+							cancellationToken)
+						.ConfigureAwait(false);
+					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+					await writer.WriteAsync(fence.AsMemory(), cancellationToken).ConfigureAwait(false);
+				}
+			}
+		}
+
+		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task WriteCompleteJsonAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		Stream destination,
+		CancellationToken cancellationToken)
+	{
+		using var writer = new Utf8JsonWriter(destination, new JsonWriterOptions
+		{
+			Indented = true,
+			Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+		});
+
+		writer.WriteStartObject();
+		writer.WriteNumber("schemaVersion", SchemaVersion);
+		writer.WriteString("kind", Kind);
+		writer.WriteStartObject("project");
+		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan)));
+		writer.WriteString("name", GetProjectName(plan));
+		WriteRepositorySource(writer, plan.SourceIdentity);
+		writer.WriteEndObject();
+		WriteSelection(writer, plan);
+		WriteMetrics(writer, plan);
+		writer.WritePropertyName("tree");
+		if (IncludesTree(view))
+			WriteTreeNode(writer, plan.ProjectedTree, plan.SourceRoot);
+		else
+			writer.WriteNullValue();
+		writer.WriteStartArray("files");
+		if (IncludesContent(view))
+		{
+			foreach (var path in plan.IncludedFiles)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				await using var snapshot = await contentAnalyzer
+					.OpenCompleteSnapshotAsync(path, cancellationToken)
+					.ConfigureAwait(false);
+				var file = CreateCompleteFileDocument(
+					plan.SourceRoot,
+					path,
+					snapshot.Result);
+				writer.WriteStartObject();
+				writer.WriteString("path", file.Path);
+				writer.WriteBoolean("isBinary", file.IsBinary);
+				writer.WriteString("classification", ToToken(file.Classification));
+				if (file.Classification != FileContentClassification.Text)
+				{
+					writer.WriteNull("content");
+				}
+				else
+				{
+					writer.WritePropertyName("content");
+					await snapshot.CopyTextToAsync(
+							file.Metrics?.CharCount ?? 0,
+							async (chunk, token) =>
+							{
+								writer.WriteStringValueSegment(
+									chunk.Span,
+									isFinalSegment: false);
+								await writer.FlushAsync(token).ConfigureAwait(false);
+							},
+							cancellationToken)
+						.ConfigureAwait(false);
+					writer.WriteStringValueSegment(
+						ReadOnlySpan<char>.Empty,
+						isFinalSegment: true);
+				}
+				writer.WriteEndObject();
+			}
+		}
+		writer.WriteEndArray();
+		WriteDiagnostics(writer, plan.Diagnostics);
+		writer.WriteString("fingerprint", plan.Fingerprint);
+		writer.WriteEndObject();
+		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task WriteCompleteXmlAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		Stream destination,
+		CancellationToken cancellationToken)
+	{
+		using var writer = XmlWriter.Create(destination, new XmlWriterSettings
+		{
+			Indent = true,
+			OmitXmlDeclaration = false,
+			Encoding = Utf8WithoutBom,
+			CloseOutput = false,
+			Async = true
+		});
+
+		writer.WriteStartDocument();
+		writer.WriteStartElement("devprojexContext");
+		writer.WriteAttributeString("schemaVersion", XmlConvert.ToString(SchemaVersion));
+		writer.WriteAttributeString("kind", Kind);
+		writer.WriteStartElement("project");
+		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan)));
+		writer.WriteElementString("name", GetProjectName(plan));
+		WriteRepositorySourceXml(writer, plan.SourceIdentity);
+		writer.WriteEndElement();
+		WriteSelectionXml(writer, plan);
+		WriteMetricsXml(writer, plan);
+		writer.WriteStartElement("tree");
+		if (IncludesTree(view))
+			WriteTreeNodeXml(writer, plan.ProjectedTree, plan.SourceRoot);
+		writer.WriteEndElement();
+		writer.WriteStartElement("files");
+		if (IncludesContent(view))
+		{
+			foreach (var path in plan.IncludedFiles)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				await using var snapshot = await contentAnalyzer
+					.OpenCompleteSnapshotAsync(path, cancellationToken)
+					.ConfigureAwait(false);
+				var file = CreateCompleteFileDocument(
+					plan.SourceRoot,
+					path,
+					snapshot.Result);
+				writer.WriteStartElement("file");
+				writer.WriteAttributeString("path", file.Path);
+				writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
+				writer.WriteAttributeString("classification", ToToken(file.Classification));
+				if (file.Classification == FileContentClassification.Text)
+				{
+					writer.WriteStartElement("content");
+					await snapshot.CopyTextToAsync(
+							file.Metrics?.CharCount ?? 0,
+							async (chunk, _) =>
+							{
+								if (MemoryMarshal.TryGetArray(chunk, out var segment))
+								{
+									await writer.WriteCharsAsync(
+											segment.Array!,
+											segment.Offset,
+											segment.Count)
+										.ConfigureAwait(false);
+								}
+								else
+								{
+									await writer.WriteStringAsync(chunk.ToString())
+										.ConfigureAwait(false);
+								}
+							},
+							cancellationToken)
+						.ConfigureAwait(false);
+					writer.WriteEndElement();
+				}
+				writer.WriteEndElement();
+			}
+		}
+		writer.WriteEndElement();
+		writer.WriteStartElement("diagnostics");
+		foreach (var diagnostic in plan.Diagnostics)
+		{
+			writer.WriteStartElement("diagnostic");
+			writer.WriteAttributeString("code", diagnostic.Code);
+			writer.WriteAttributeString("severity", ToToken(diagnostic.Severity));
+			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
+				writer.WriteAttributeString("path", NormalizePath(diagnostic.Path));
+			writer.WriteString(diagnostic.Message);
+			writer.WriteEndElement();
+		}
+		writer.WriteEndElement();
+		writer.WriteElementString("fingerprint", plan.Fingerprint);
+		writer.WriteEndElement();
+		writer.WriteEndDocument();
+		await writer.FlushAsync()
+			.ConfigureAwait(false);
+	}
+
+	private static ContextFileDocument CreateCompleteFileDocument(
+		string sourceRoot,
+		string path,
+		FileContentMetricsResult result)
+	{
+		var relativePath = NormalizeRelativePath(sourceRoot, path);
+		return new ContextFileDocument(
+			relativePath,
+			result.Classification,
+			Content: null,
+			Metrics: result.Metrics);
+	}
+
+	private static StreamWriter CreateStreamWriter(Stream destination) =>
+		new(destination, Utf8WithoutBom, bufferSize: 8192, leaveOpen: true);
+
+	private Task WriteCompleteTreeAsync(
+		TextWriter writer,
+		ProjectContextPlan plan,
+		bool plain,
+		bool includeFinalLineEnding,
+		CancellationToken cancellationToken) =>
+		plain
+			? treeExportService.WriteFullTreePlainAsync(
+				writer,
+				plan.SourceRoot,
+				plan.ProjectedTree,
+				GetDocumentRoot(plan),
+				GetProjectName(plan),
+				includeFinalLineEnding: includeFinalLineEnding,
+				cancellationToken: cancellationToken)
+			: treeExportService.WriteFullTreeAsync(
+				writer,
+				plan.SourceRoot,
+				plan.ProjectedTree,
+				GetDocumentRoot(plan),
+				GetProjectName(plan),
+				includeFinalLineEnding: includeFinalLineEnding,
+				cancellationToken: cancellationToken);
+
+	private static async Task WriteLineAsync(
+		TextWriter writer,
+		string? value,
+		CancellationToken cancellationToken)
+	{
+		if (value is not null)
+			await writer.WriteAsync(value.AsMemory(), cancellationToken).ConfigureAwait(false);
+		await writer.WriteAsync(Environment.NewLine.AsMemory(), cancellationToken).ConfigureAwait(false);
+	}
+
+	private string GetTextContent(ContextFileDocument file) =>
+		file.Classification == FileContentClassification.Text
+			? file.Content ?? string.Empty
+			: $"[{GetOmissionText(file.Classification)}]";
+
+	private static void WriteContextFileJson(Utf8JsonWriter writer, ContextFileDocument file)
+	{
+		writer.WriteStartObject();
+		writer.WriteString("path", file.Path);
+		writer.WriteBoolean("isBinary", file.IsBinary);
+		writer.WriteString("classification", ToToken(file.Classification));
+		if (file.Classification != FileContentClassification.Text)
+			writer.WriteNull("content");
+		else
+			writer.WriteString("content", file.Content);
+		writer.WriteEndObject();
+	}
+
+	private static void WriteContextFileXml(XmlWriter writer, ContextFileDocument file)
+	{
+		writer.WriteStartElement("file");
+		writer.WriteAttributeString("path", file.Path);
+		writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
+		writer.WriteAttributeString("classification", ToToken(file.Classification));
+		if (file.Classification == FileContentClassification.Text)
+			writer.WriteElementString("content", file.Content ?? string.Empty);
+		writer.WriteEndElement();
+	}
+
+	private async Task<ContextFileReadResult> ReadFilesAsync(
+		ProjectContextPlan plan,
+		ProjectContextDocumentLimits limits,
+		CancellationToken cancellationToken)
+	{
+		var maximumFiles = Math.Max(0, limits.MaximumFiles);
+		var maximumCharacters = Math.Max(0, limits.MaximumCharacters);
+		var maximumFileBytes = Math.Max(0, limits.MaximumFileBytes);
+		var files = new List<ContextFileDocument>(
+			Math.Min(plan.IncludedFiles.Count, maximumFiles));
+		var remainingCharacters = maximumCharacters;
+		var isTruncated = plan.IncludedFiles.Count > maximumFiles;
+		foreach (var path in plan.IncludedFiles.Take(maximumFiles))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var relativePath = NormalizeRelativePath(plan.SourceRoot, path);
+			var result = await contentAnalyzer
+				.ReadClassifiedAsync(path, maximumFileBytes, cancellationToken)
+				.ConfigureAwait(false);
+			var content = result.Content;
+			if (!result.IsText || content is null)
+			{
+				files.Add(new ContextFileDocument(
+					relativePath,
+					result.Classification,
+					Content: null));
+				continue;
+			}
+
+			if (content.IsEstimated)
+			{
+				files.Add(new ContextFileDocument(
+					relativePath,
+					FileContentClassification.TooLarge,
+					Content: null,
+					IsOmitted: true));
+				isTruncated = true;
+				continue;
+			}
+
+			var fileContent = content.Content;
+			if (fileContent.Length > remainingCharacters)
+			{
+				fileContent = fileContent[..remainingCharacters];
+				isTruncated = true;
+			}
+			files.Add(new ContextFileDocument(
+				relativePath,
+				FileContentClassification.Text,
+				fileContent,
+				IsTruncated: fileContent.Length != content.Content.Length));
+			remainingCharacters -= fileContent.Length;
+			if (remainingCharacters == 0 &&
+			    files.Count < Math.Min(plan.IncludedFiles.Count, maximumFiles))
+			{
+				isTruncated = true;
+				break;
+			}
+		}
+
+		return new ContextFileReadResult(files, isTruncated);
+	}
+
+	private string BuildText(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		IReadOnlyList<ContextFileDocument> files,
+		bool truncated)
+	{
+		var output = new StringBuilder();
+		if (IncludesTree(view))
+		{
+			output.Append(treeExportService.BuildFullTree(
+				plan.SourceRoot,
+				plan.ProjectedTree,
+				TreeTextFormat.Ascii,
+				GetDocumentRoot(plan),
+				GetProjectName(plan)));
+		}
+
+		AppendTextFiles(output, files);
+		AppendTruncationNotice(output, truncated);
+		return output.ToString().TrimEnd('\r', '\n');
+	}
+
+	private string BuildMarkdown(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		IReadOnlyList<ContextFileDocument> files,
+		bool truncated)
+	{
+		var output = new StringBuilder();
+		output.Append("# ").AppendLine(EscapeMarkdownHeading(GetProjectName(plan)));
+		output.AppendLine();
+		if (IncludesTree(view))
+		{
+			output.AppendLine("## Project tree");
+			output.AppendLine();
+			var tree = treeExportService.BuildFullTree(
+				plan.SourceRoot,
+				plan.ProjectedTree,
+				TreeTextFormat.Ascii,
+				GetDocumentRoot(plan),
+				GetProjectName(plan)).TrimEnd('\r', '\n');
+			AppendMarkdownFence(output, tree, "text");
+		}
+
+		foreach (var file in files)
+		{
+			output.AppendLine();
+			output.Append("## ").AppendLine(BuildMarkdownCodeSpan(file.Path));
+			output.AppendLine();
+			if (file.Classification != FileContentClassification.Text &&
+			    !file.IsOmitted)
+			{
+				output.Append('_')
+					.Append(GetOmissionText(file.Classification))
+					.AppendLine("_");
+				continue;
+			}
+			if (file.IsOmitted)
+			{
+				output.AppendLine("_Large text file; content omitted from bounded preview._");
+				continue;
+			}
+
+			AppendMarkdownFence(output, file.Content ?? string.Empty, ResolveFenceLanguage(file.Path));
+			if (file.IsTruncated)
+				output.AppendLine("_File preview truncated._");
+		}
+
+		if (truncated)
+			output.AppendLine().AppendLine("_Preview truncated._");
+		return output.ToString().TrimEnd('\r', '\n');
+	}
+
+	private static string BuildJson(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		IReadOnlyList<ContextFileDocument> files,
+		bool truncated)
+	{
+		var buffer = new ArrayBufferWriter<byte>();
+		using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
+		{
+			Indented = true,
+			Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+		});
+
+		writer.WriteStartObject();
+		writer.WriteNumber("schemaVersion", SchemaVersion);
+		writer.WriteString("kind", Kind);
+		writer.WriteStartObject("project");
+		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan)));
+		writer.WriteString("name", GetProjectName(plan));
+		WriteRepositorySource(writer, plan.SourceIdentity);
+		writer.WriteEndObject();
+		WriteSelection(writer, plan);
+		WriteMetrics(writer, plan);
+		writer.WritePropertyName("tree");
+		if (IncludesTree(view))
+			WriteTreeNode(writer, plan.ProjectedTree, plan.SourceRoot);
+		else
+			writer.WriteNullValue();
+		writer.WriteStartArray("files");
+		foreach (var file in files)
+		{
+			writer.WriteStartObject();
+			writer.WriteString("path", file.Path);
+			writer.WriteBoolean("isBinary", file.IsBinary);
+			writer.WriteString("classification", ToToken(file.Classification));
+			if (file.Classification != FileContentClassification.Text || file.IsOmitted)
+				writer.WriteNull("content");
+			else
+				writer.WriteString("content", file.Content);
+			if (file.IsOmitted)
+				writer.WriteBoolean("omitted", true);
+			if (file.IsTruncated)
+				writer.WriteBoolean("truncated", true);
+			writer.WriteEndObject();
+		}
+		writer.WriteEndArray();
+		WriteDiagnostics(writer, plan.Diagnostics);
+		if (truncated)
+			writer.WriteBoolean("truncated", true);
+		writer.WriteString("fingerprint", plan.Fingerprint);
+		writer.WriteEndObject();
+		writer.Flush();
+		return Encoding.UTF8.GetString(buffer.WrittenSpan);
+	}
+
+	private static string BuildXml(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		IReadOnlyList<ContextFileDocument> files,
+		bool truncated)
+	{
+		var output = new StringBuilder();
+		using var stringWriter = new StringWriter(
+			output,
+			System.Globalization.CultureInfo.InvariantCulture);
+		using var encodingWriter = new EncodingReportingTextWriter(
+			stringWriter,
+			Utf8WithoutBom);
+		using var writer = XmlWriter.Create(encodingWriter, new XmlWriterSettings
+		{
+			Indent = true,
+			OmitXmlDeclaration = false,
+			Encoding = Utf8WithoutBom
+		});
+
+		writer.WriteStartDocument();
+		writer.WriteStartElement("devprojexContext");
+		writer.WriteAttributeString("schemaVersion", XmlConvert.ToString(SchemaVersion));
+		writer.WriteAttributeString("kind", Kind);
+		writer.WriteStartElement("project");
+		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan)));
+		writer.WriteElementString("name", GetProjectName(plan));
+		WriteRepositorySourceXml(writer, plan.SourceIdentity);
+		writer.WriteEndElement();
+		WriteSelectionXml(writer, plan);
+		WriteMetricsXml(writer, plan);
+		writer.WriteStartElement("tree");
+		if (IncludesTree(view))
+			WriteTreeNodeXml(writer, plan.ProjectedTree, plan.SourceRoot);
+		writer.WriteEndElement();
+		writer.WriteStartElement("files");
+		foreach (var file in files)
+		{
+			writer.WriteStartElement("file");
+			writer.WriteAttributeString("path", file.Path);
+			writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
+			writer.WriteAttributeString("classification", ToToken(file.Classification));
+			if (file.IsOmitted)
+				writer.WriteAttributeString("omitted", XmlConvert.ToString(true));
+			if (file.IsTruncated)
+				writer.WriteAttributeString("truncated", XmlConvert.ToString(true));
+			if (file.Classification == FileContentClassification.Text && !file.IsOmitted)
+				writer.WriteElementString("content", file.Content ?? string.Empty);
+			writer.WriteEndElement();
+		}
+		writer.WriteEndElement();
+		writer.WriteStartElement("diagnostics");
+		foreach (var diagnostic in plan.Diagnostics)
+		{
+			writer.WriteStartElement("diagnostic");
+			writer.WriteAttributeString("code", diagnostic.Code);
+			writer.WriteAttributeString("severity", ToToken(diagnostic.Severity));
+			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
+				writer.WriteAttributeString("path", NormalizePath(diagnostic.Path));
+			writer.WriteString(diagnostic.Message);
+			writer.WriteEndElement();
+		}
+		writer.WriteEndElement();
+		if (truncated)
+			writer.WriteElementString("truncated", XmlConvert.ToString(true));
+		writer.WriteElementString("fingerprint", plan.Fingerprint);
+		writer.WriteEndElement();
+		writer.WriteEndDocument();
+		writer.Flush();
+		return output.ToString();
+	}
+
+	private void AppendTextFiles(
+		StringBuilder output,
+		IReadOnlyList<ContextFileDocument> files)
+	{
+		foreach (var file in files)
+		{
+			if (output.Length > 0)
+				output.AppendLine().AppendLine();
+
+			output.Append(file.Path).AppendLine(":");
+			output.AppendLine();
+			output.Append(file.IsOmitted
+					? "[Large text file; content omitted from bounded preview]"
+					: file.Classification == FileContentClassification.Text
+						? file.Content
+						: $"[{GetOmissionText(file.Classification)}]");
+			if (file.IsTruncated)
+				output.AppendLine().Append("[File preview truncated]");
+		}
+	}
+
+	private static void AppendTruncationNotice(StringBuilder output, bool truncated)
+	{
+		if (!truncated)
+			return;
+		if (output.Length > 0)
+			output.AppendLine().AppendLine();
+		output.Append("[Preview truncated]");
+	}
+
+	private static (TreeNodeDescriptor Tree, bool IsTruncated) BuildBoundedTree(
+		TreeNodeDescriptor root,
+		int maximumNodes)
+	{
+		var remaining = Math.Max(1, maximumNodes);
+		var truncated = false;
+		var tree = Clone(root);
+		return (tree, truncated);
+
+		TreeNodeDescriptor Clone(TreeNodeDescriptor node)
+		{
+			remaining--;
+			if (!node.IsDirectory || node.Children.Count == 0)
+				return node;
+
+			var children = new List<TreeNodeDescriptor>();
+			foreach (var child in node.Children)
+			{
+				if (remaining <= 0)
+				{
+					truncated = true;
+					break;
+				}
+				children.Add(Clone(child));
+			}
+			return node with { Children = children };
+		}
+	}
+
+	private static void AppendMarkdownFence(StringBuilder output, string content, string language)
+	{
+		var fence = new string('`', Math.Max(3, FindLongestBacktickRun(content) + 1));
+		output.Append(fence).AppendLine(language);
+		output.AppendLine(content);
+		output.AppendLine(fence);
+	}
+
+	private static int FindLongestBacktickRun(string value)
+	{
+		var longest = 0;
+		var current = 0;
+		foreach (var character in value)
+		{
+			if (character == '`')
+			{
+				current++;
+				longest = Math.Max(longest, current);
+			}
+			else
+			{
+				current = 0;
+			}
+		}
+
+		return longest;
+	}
+
+	private static void WriteSelection(Utf8JsonWriter writer, ProjectContextPlan plan)
+	{
+		writer.WriteStartObject("selection");
+		writer.WriteString("gitMode", ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value));
+		WriteStringArray(
+			writer,
+			"exclusions",
+			plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken));
+		WriteStringArray(writer, "roots", plan.SelectedRoots);
+		WriteStringArray(writer, "extensions", plan.SelectedExtensions);
+		WriteStringArray(writer, "selectedPaths", plan.Selection.SelectedPaths ?? []);
+		writer.WriteEndObject();
+	}
+
+	private static void WriteRepositorySource(
+		Utf8JsonWriter writer,
+		ProjectSourceIdentity? identity)
+	{
+		if (identity is not
+		    {
+			    SourceType: ProjectSourceType.GitClone,
+			    RepositoryUrl.Length: > 0
+		    })
+		{
+			return;
+		}
+
+		writer.WriteStartObject("source");
+		writer.WriteString("type", "git");
+		writer.WriteString("repositoryUrl", identity.RepositoryUrl);
+		if (!string.IsNullOrWhiteSpace(identity.Branch))
+			writer.WriteString("branch", identity.Branch);
+		if (!string.IsNullOrWhiteSpace(identity.CommitHash))
+			writer.WriteString("commit", identity.CommitHash);
+		writer.WriteEndObject();
+	}
+
+	private static void WriteMetrics(Utf8JsonWriter writer, ProjectContextPlan plan)
+	{
+		var tree = plan.Analysis.Inventory.Tree;
+		var content = plan.Analysis.Metrics.Content;
+		writer.WriteStartObject("metrics");
+		writer.WriteNumber("files", tree.FileCount);
+		writer.WriteNumber("folders", tree.DirectoryCount);
+		writer.WriteNumber("bytes", plan.IncludedBytes);
+		writer.WriteNumber("characters", content.Chars);
+		writer.WriteNumber("estimatedTokens", content.Tokens);
+		writer.WriteEndObject();
+	}
+
+	private static void WriteTreeNode(
+		Utf8JsonWriter writer,
+		TreeNodeDescriptor node,
+		string sourceRoot)
+	{
+		writer.WriteStartObject();
+		writer.WriteString("path", NormalizeRelativePath(sourceRoot, node.FullPath));
+		writer.WriteString("name", node.DisplayName);
+		writer.WriteString("type", node.IsDirectory ? "directory" : "file");
+		if (node.IsDirectory)
+		{
+			writer.WriteStartArray("children");
+			foreach (var child in node.Children)
+				WriteTreeNode(writer, child, sourceRoot);
+			writer.WriteEndArray();
+		}
+		writer.WriteEndObject();
+	}
+
+	private static void WriteDiagnostics(
+		Utf8JsonWriter writer,
+		IReadOnlyList<ContextDiagnostic> diagnostics)
+	{
+		writer.WriteStartArray("diagnostics");
+		foreach (var diagnostic in diagnostics)
+		{
+			writer.WriteStartObject();
+			writer.WriteString("code", diagnostic.Code);
+			writer.WriteString("severity", ToToken(diagnostic.Severity));
+			writer.WriteString("message", diagnostic.Message);
+			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
+				writer.WriteString("path", NormalizePath(diagnostic.Path));
+			writer.WriteEndObject();
+		}
+		writer.WriteEndArray();
+	}
+
+	private static void WriteStringArray(
+		Utf8JsonWriter writer,
+		string propertyName,
+		IEnumerable<string> values)
+	{
+		writer.WriteStartArray(propertyName);
+		foreach (var value in values)
+			writer.WriteStringValue(value);
+		writer.WriteEndArray();
+	}
+
+	private static void WriteSelectionXml(XmlWriter writer, ProjectContextPlan plan)
+	{
+		writer.WriteStartElement("selection");
+		writer.WriteElementString("gitMode", ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value));
+		WriteStringCollectionXml(
+			writer,
+			"exclusions",
+			"exclusion",
+			plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken));
+		WriteStringCollectionXml(writer, "roots", "root", plan.SelectedRoots);
+		WriteStringCollectionXml(writer, "extensions", "extension", plan.SelectedExtensions);
+		WriteStringCollectionXml(writer, "selectedPaths", "path", plan.Selection.SelectedPaths ?? []);
+		writer.WriteEndElement();
+	}
+
+	private static void WriteRepositorySourceXml(
+		XmlWriter writer,
+		ProjectSourceIdentity? identity)
+	{
+		if (identity is not
+		    {
+			    SourceType: ProjectSourceType.GitClone,
+			    RepositoryUrl.Length: > 0
+		    })
+		{
+			return;
+		}
+
+		writer.WriteStartElement("source");
+		writer.WriteAttributeString("type", "git");
+		writer.WriteElementString("repositoryUrl", identity.RepositoryUrl);
+		if (!string.IsNullOrWhiteSpace(identity.Branch))
+			writer.WriteElementString("branch", identity.Branch);
+		if (!string.IsNullOrWhiteSpace(identity.CommitHash))
+			writer.WriteElementString("commit", identity.CommitHash);
+		writer.WriteEndElement();
+	}
+
+	private static void WriteMetricsXml(XmlWriter writer, ProjectContextPlan plan)
+	{
+		var tree = plan.Analysis.Inventory.Tree;
+		var content = plan.Analysis.Metrics.Content;
+		writer.WriteStartElement("metrics");
+		writer.WriteElementString("files", XmlConvert.ToString(tree.FileCount));
+		writer.WriteElementString("folders", XmlConvert.ToString(tree.DirectoryCount));
+		writer.WriteElementString("bytes", XmlConvert.ToString(plan.IncludedBytes));
+		writer.WriteElementString("characters", XmlConvert.ToString(content.Chars));
+		writer.WriteElementString("estimatedTokens", XmlConvert.ToString(content.Tokens));
+		writer.WriteEndElement();
+	}
+
+	private static void WriteTreeNodeXml(
+		XmlWriter writer,
+		TreeNodeDescriptor node,
+		string sourceRoot)
+	{
+		writer.WriteStartElement(node.IsDirectory ? "directory" : "file");
+		writer.WriteAttributeString("path", NormalizeRelativePath(sourceRoot, node.FullPath));
+		writer.WriteAttributeString("name", node.DisplayName);
+		foreach (var child in node.Children)
+			WriteTreeNodeXml(writer, child, sourceRoot);
+		writer.WriteEndElement();
+	}
+
+	private static void WriteStringCollectionXml(
+		XmlWriter writer,
+		string containerName,
+		string itemName,
+		IEnumerable<string> values)
+	{
+		writer.WriteStartElement(containerName);
+		foreach (var value in values)
+			writer.WriteElementString(itemName, value);
+		writer.WriteEndElement();
+	}
+
+	private static bool IncludesTree(ProjectContextView view) =>
+		view is ProjectContextView.Tree or ProjectContextView.TreeContent;
+
+	private static bool IncludesContent(ProjectContextView view) =>
+		view is ProjectContextView.Content or ProjectContextView.TreeContent;
+
+	private static void ValidateView(ProjectContextView view)
+	{
+		if (view is not (
+			    ProjectContextView.Tree or
+			    ProjectContextView.Content or
+			    ProjectContextView.TreeContent))
+		{
+			throw new ArgumentOutOfRangeException(nameof(view), view, null);
+		}
+	}
+
+	private static void ValidateDocumentFormat(ProjectContextDocumentFormat format)
+	{
+		if (format is not (
+			    ProjectContextDocumentFormat.Text or
+			    ProjectContextDocumentFormat.Markdown or
+			    ProjectContextDocumentFormat.Json or
+			    ProjectContextDocumentFormat.Xml))
+		{
+			throw new ArgumentOutOfRangeException(nameof(format), format, null);
+		}
+	}
+
+	private static string NormalizeRelativePath(string root, string path)
+	{
+		var relative = Path.GetRelativePath(root, path);
+		return relative == "." ? "." : NormalizePath(relative);
+	}
+
+	private static string NormalizePath(string path) => path.Replace('\\', '/');
+
+	private static string GetProjectName(ProjectContextPlan plan) =>
+		plan.SourceIdentity?.DisplayName is { Length: > 0 } displayName
+			? displayName
+			: Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)) is { Length: > 0 } name
+			? name
+			: "project";
+
+	private static string GetDocumentRoot(ProjectContextPlan plan) =>
+		plan.SourceIdentity is
+		{
+			SourceType: ProjectSourceType.GitClone,
+			SourceReference.Length: > 0
+		} identity
+			? identity.SourceReference
+			: plan.SourceRoot;
+
+	private static string EscapeMarkdownHeading(string value) =>
+		value.Replace("\\", "\\\\").Replace("#", "\\#").Replace("\r", " ").Replace("\n", " ");
+
+	private static string BuildMarkdownCodeSpan(string value)
+	{
+		var normalized = value.Replace("\r", "\\r").Replace("\n", "\\n");
+		var delimiter = new string('`', Math.Max(1, FindLongestBacktickRun(normalized) + 1));
+		var needsPadding =
+			normalized.StartsWith('`') ||
+			normalized.EndsWith('`') ||
+			(normalized.StartsWith(' ') && normalized.EndsWith(' '));
+		return needsPadding
+			? $"{delimiter} {normalized} {delimiter}"
+			: $"{delimiter}{normalized}{delimiter}";
+	}
+
+	private static string ResolveFenceLanguage(string path)
+	{
+		var extension = Path.GetExtension(path).TrimStart('.');
+		return extension.All(static character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
+			? extension
+			: string.Empty;
+	}
+
+	private static string ToToken(ContextDiagnosticSeverity severity) =>
+		severity switch
+		{
+			ContextDiagnosticSeverity.Information => "information",
+			ContextDiagnosticSeverity.Warning => "warning",
+			ContextDiagnosticSeverity.Error => "error",
+			_ => throw new ArgumentOutOfRangeException(nameof(severity), severity, null)
+		};
+
+	private static string ToToken(FileContentClassification classification) =>
+		classification switch
+		{
+			FileContentClassification.Text => "text",
+			FileContentClassification.Binary => "binary",
+			FileContentClassification.TooLarge => "too-large",
+			FileContentClassification.Unreadable => "unreadable",
+			FileContentClassification.AccessDenied => "access-denied",
+			FileContentClassification.Missing => "missing",
+			FileContentClassification.UnsupportedEncoding => "unsupported-encoding",
+			_ => throw new ArgumentOutOfRangeException(
+				nameof(classification),
+				classification,
+				null)
+		};
+
+	private string GetOmissionText(FileContentClassification classification)
+	{
+		if (classification is FileContentClassification.Text)
+			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
+		if (!Enum.IsDefined(classification))
+			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
+
+		return omissionMessageProvider?.Invoke(classification) ??
+		       classification switch
+		{
+			FileContentClassification.Binary => "Binary file; content omitted.",
+			FileContentClassification.TooLarge => "File is too large for interactive preview.",
+			FileContentClassification.Unreadable => "File could not be read.",
+			FileContentClassification.AccessDenied => "Access denied while reading file.",
+			FileContentClassification.Missing => "File disappeared while it was being read.",
+			FileContentClassification.UnsupportedEncoding => "Text encoding is unsupported.",
+			_ => throw new ArgumentOutOfRangeException(
+				nameof(classification),
+				classification,
+				null)
+		};
+	}
+
+	private sealed record ContextFileReadResult(
+		IReadOnlyList<ContextFileDocument> Files,
+		bool IsTruncated);
+
+	private sealed record ContextFileDocument(
+		string Path,
+		FileContentClassification Classification,
+		string? Content,
+		bool IsOmitted = false,
+		bool IsTruncated = false,
+		TextFileMetrics? Metrics = null)
+	{
+		public bool IsBinary => Classification == FileContentClassification.Binary;
+	}
+
+	private sealed class EncodingReportingTextWriter(
+		TextWriter inner,
+		Encoding encoding) : TextWriter
+	{
+		public override Encoding Encoding => encoding;
+
+		public override void Flush() => inner.Flush();
+
+		public override void Write(char value) => inner.Write(value);
+
+		public override void Write(char[] buffer, int index, int count) =>
+			inner.Write(buffer, index, count);
+
+		public override void Write(string? value) => inner.Write(value);
+	}
+}

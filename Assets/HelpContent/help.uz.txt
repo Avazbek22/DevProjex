@@ -69,7 +69,7 @@ Qoidalar:
 Har bir elementda yuqori jild va loyiha nomi ko‘rsatiladi, masalan `Projects / App`.
 
 ## 4) Terminaldan ishga tushirish
-DevProjex-ni terminaldan ishga tushirish mumkin.
+DevProjex interaktiv terminal ish maydoni hamda skriptlar va CI uchun to‘g‘ridan-to‘g‘ri buyruqlarni taqdim etadi.
 
 Agar buyruq allaqachon sozlangan bo‘lsa, terminalni ochib bajaring:
 `devprojex --help`
@@ -77,21 +77,20 @@ Agar buyruq allaqachon sozlangan bo‘lsa, terminalni ochib bajaring:
 Shunda barcha mavjud buyruqlar, parametrlar va misollarni ko‘rasiz.
 
 Misollar:
-* `devprojex .` — joriy papkani ochish.
-* `devprojex "C:\Projects\App"` — ko‘rsatilgan papkani ochish.
-* `devprojex . --export tree` — loyiha daraxtini terminalga chiqarish.
-* `devprojex . --export content` — fayllar mazmunini terminalga chiqarish.
-* `devprojex . --export tree-content` — daraxt va mazmunni terminalga chiqarish.
-* `devprojex . --export tree-content -o context.txt` — natijani faylga saqlash.
-* `devprojex --benchmark "C:\Projects\App"` — standart loyiha hisoboti workflow’ini o‘lchash.
-* `devprojex --last --preview` — oxirgi loyihani darhol preview rejimida ochish.
-* `devprojex --benchmark-ui "C:\Projects\App"` — standart UI ssenariysini o‘lchash.
-* `devprojex --session-metrics "C:\Projects\App"` — oyna yopilguncha UI sessiyasi metrikalarini yozib borish.
+* `devprojex` — interaktiv terminal ish maydonini ochish.
+* `devprojex open . --preview` — joriy papkani Desktop ko‘rib chiqish rejimida ochish.
+* `devprojex analyze . --format json` — joriy loyihani JSON sifatida tahlil qilish.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — AI uchun tayyor kontekstni manba loyihasidan tashqarida saqlash.
+* `devprojex export project . --as folder -o ../devprojex-submission` — samarali loyiha daraxtini aniq papkaga eksport qilish.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — samarali loyiha daraxtini ZIP arxiviga eksport qilish.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — Git kuzatuvidagi fayllarni Smart Ignore bilan tahlil qilish.
 
 Xususiyatlar:
 * `.` terminaldagi joriy papkani bildiradi;
 * bo‘sh joyli yo‘llar qo‘shtirnoqqa olinishi kerak;
-* chiqish fayli ko‘rsatilmasa, natija bevosita terminalga chiqariladi;
+* `--git-mode` Git filtrlashsiz, `.gitignore` yoki faqat Git kuzatuvidagi fayllarni tanlaydi;
+* `--exclude` oddiy istisnolarni Git filtrlashdan alohida boshqaradi;
+* to‘g‘ridan-to‘g‘ri buyruqlar deterministik va Desktop interfeysini ochmaydi;
 * buyruq loyiha fayllarini o‘zgartirmaydi — DevProjex read-only rejimida ishlaydi.
 
 Agar `devprojex` buyrug‘i ishlamasa, DevProjex ichida oching:

@@ -25,7 +25,7 @@ public sealed class MainWindowLifecycleUiTests
 		var appDataPath = Path.Combine(Path.GetTempPath(), "DevProjexTests", Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(appDataPath);
 
-		var options = CommandLineOptions.Empty;
+		var options = DesktopStartupOptions.Default;
 		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
 		var window = new MainWindow(options, services)
 		{

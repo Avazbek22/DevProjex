@@ -14,6 +14,47 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void StartupMigratesLegacyConfigurationStateWithoutDeletingLegacyData()
+	{
+		using var temp = new TemporaryDirectory();
+		var stateRoot = temp.CreateFolder("state");
+		var legacyConfigurationRoot = temp.CreateFolder("config");
+		var workspace = temp.CreateFolder("workspace");
+		var legacyStore = new RecentProjectsStore(() => legacyConfigurationRoot);
+		legacyStore.AddFolder(null, workspace);
+		var legacyPath = legacyStore.GetPath();
+		var store = new RecentProjectsStore(
+			() => stateRoot,
+			() => legacyConfigurationRoot);
+
+		var beforeStartup = store.Load();
+
+		Assert.Equal(PathUtility.Normalize(workspace), Assert.Single(beforeStartup.RecentFolders).Path);
+		Assert.False(File.Exists(store.GetPath()));
+
+		var migrated = store.LoadForStartup(TimeSpan.Zero);
+
+		Assert.Equal(PathUtility.Normalize(workspace), Assert.Single(migrated.RecentFolders).Path);
+		Assert.True(File.Exists(store.GetPath()));
+		Assert.True(File.Exists(store.GetPath() + ".bak"));
+		Assert.True(File.Exists(legacyPath));
+	}
+
+	[Fact]
+	public void Load_PropagatesUnexpectedLegacyPathProviderFailure()
+	{
+		using var temp = new TemporaryDirectory();
+		var expected = new ApplicationException("unexpected provider failure");
+		var store = new RecentProjectsStore(
+			() => temp.CreateFolder("state"),
+			() => throw expected);
+
+		var actual = Assert.Throws<ApplicationException>(() => store.Load());
+
+		Assert.Same(expected, actual);
+	}
+
+	[Fact]
 	public void AddFolder_MovesDuplicateToFront_AndPersists()
 	{
 		using var temp = new TemporaryDirectory();
@@ -327,7 +368,7 @@ public sealed class RecentProjectsStoreTests
 
 		var loaded = store.Load();
 
-		Assert.Equal(2, loaded.SchemaVersion);
+		Assert.Equal(3, loaded.SchemaVersion);
 		Assert.Empty(loaded.RecentFolders);
 		Assert.Empty(loaded.RecentRepositories);
 		Assert.Equal(invalidJson, File.ReadAllText(filePath));
@@ -411,13 +452,14 @@ public sealed class RecentProjectsStoreTests
 		});
 
 		Assert.NotNull(persisted);
-		Assert.Equal(2, loaded.SchemaVersion);
+		Assert.Equal(3, loaded.SchemaVersion);
 		Assert.Empty(loaded.RecentFolders);
 		Assert.Empty(loaded.RecentRepositories);
-		Assert.Equal(2, persisted!.SchemaVersion);
+		Assert.Equal(3, persisted!.SchemaVersion);
 		Assert.Empty(persisted.RecentFolders);
 		Assert.Empty(persisted.RecentFolderRemovals);
 		Assert.Empty(persisted.RecentRepositories);
+		Assert.Empty(persisted.RecentRepositoryRemovals);
 	}
 
 	[Fact]
@@ -481,6 +523,82 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void RemoveRepository_RemovesEquivalentUrlAndPersistsTombstone()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var state = store.AddRepository(
+			store.Load(),
+			"https://github.com/example/repository.git");
+		state = store.AddRepository(
+			state,
+			"https://github.com/example/retained");
+
+		state = store.RemoveRepository(
+			state,
+			"git@github.com:example/repository.git");
+		var reloaded = store.Load();
+
+		Assert.DoesNotContain(
+			state.RecentRepositories,
+			entry => RepositoryUrlUtility.AreEquivalent(
+				entry.Url,
+				"https://github.com/example/repository"));
+		Assert.Single(reloaded.RecentRepositories);
+		Assert.Equal(
+			"https://github.com/example/retained",
+			reloaded.RecentRepositories[0].Url);
+		var removal = Assert.Single(reloaded.RecentRepositoryRemovals);
+		Assert.True(RepositoryUrlUtility.AreEquivalent(
+			removal.Url,
+			"https://github.com/example/repository"));
+	}
+
+	[Fact]
+	public void TryPersist_StaleSnapshot_DoesNotResurrectExplicitlyRemovedRepository()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var repositoryUrl = "https://github.com/example/repository";
+		var current = store.AddRepository(store.Load(), repositoryUrl);
+		var stale = new RecentProjectsDb
+		{
+			SchemaVersion = current.SchemaVersion,
+			RecentRepositories = current.RecentRepositories
+				.Select(static entry => entry with { })
+				.ToList()
+		};
+
+		store.RemoveRepository(current, repositoryUrl);
+		Assert.True(store.TryPersist(stale));
+
+		var reloaded = store.Load();
+		Assert.Empty(reloaded.RecentRepositories);
+		Assert.Single(reloaded.RecentRepositoryRemovals);
+	}
+
+	[Fact]
+	public void AddRepository_AfterExplicitRemoval_RestoresItAsNewerHistory()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var repositoryUrl = "https://github.com/example/repository";
+		var state = store.AddRepository(store.Load(), repositoryUrl);
+		state = store.RemoveRepository(state, repositoryUrl);
+
+		state = store.AddRepository(
+			state,
+			"git@github.com:example/repository.git");
+		var reloaded = store.Load();
+
+		Assert.Single(state.RecentRepositories);
+		Assert.Single(reloaded.RecentRepositories);
+		Assert.Equal(
+			"git@github.com:example/repository.git",
+			reloaded.RecentRepositories[0].Url);
+	}
+
+	[Fact]
 	public void TryPersist_ExcessRemovalHistory_IsBoundedToNewestSixtyFourEntries()
 	{
 		using var temp = new TemporaryDirectory();
@@ -502,5 +620,53 @@ public sealed class RecentProjectsStoreTests
 		Assert.Equal(64, reloaded.RecentFolderRemovals.Count);
 		Assert.Contains(reloaded.RecentFolderRemovals, entry => entry.Path.EndsWith("Removed69", StringComparison.Ordinal));
 		Assert.DoesNotContain(reloaded.RecentFolderRemovals, entry => entry.Path.EndsWith("Removed0", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void LoadForStartupWithStatus_CorruptPrimaryRecoversFromBackup()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var folder = temp.CreateFolder("Recovered");
+		store.AddFolder(null, folder);
+		File.WriteAllText(store.GetPath(), "{ invalid");
+
+		var result = store.LoadForStartupWithStatus(TimeSpan.Zero);
+
+		Assert.Equal(RecentProjectsLoadStatus.Success, result.Status);
+		Assert.Equal(PathUtility.Normalize(folder), Assert.Single(result.Database.RecentFolders).Path);
+	}
+
+	[Fact]
+	public void LoadForStartupWithStatus_CorruptPrimaryAndBackupReportsInvalidStorage()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		Assert.True(store.EnsureStorageExists());
+		File.WriteAllText(store.GetPath(), "{ invalid-primary");
+		File.WriteAllText(store.GetPath() + ".bak", "{ invalid-backup");
+
+		var result = store.LoadForStartupWithStatus(TimeSpan.Zero);
+
+		Assert.Equal(RecentProjectsLoadStatus.InvalidStorage, result.Status);
+		Assert.Empty(result.Database.RecentFolders);
+	}
+
+	[Fact]
+	public void LoadForStartupWithStatus_HeldStoreLockReportsTemporaryUnavailability()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		Assert.True(store.EnsureStorageExists());
+		using var heldLock = new FileStream(
+			store.GetPath() + ".lock",
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+
+		var result = store.LoadForStartupWithStatus(TimeSpan.Zero);
+
+		Assert.Equal(RecentProjectsLoadStatus.TemporarilyUnavailable, result.Status);
+		Assert.Empty(result.Database.RecentFolders);
 	}
 }

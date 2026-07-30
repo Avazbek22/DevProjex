@@ -53,6 +53,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const string WindowsLauncherMarker = "rem DevProjex terminal command wrapper";
 	private const string UnixTargetPrefix = "# target: ";
 	private const string WindowsTargetPrefix = "rem target: ";
+	private const string WindowsEncodedTargetPrefix = "rem target-base64: ";
 	private const string WindowsPathHint =
 		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
 	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
@@ -340,6 +341,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			"#!/bin/sh",
 			UnixWrapperMarker,
 			UnixTargetPrefix + targetPath,
+			"export DEVPROJEX_TERMINAL_HOST=1",
 			"exec " + ShellQuote(targetPath) + " \"$@\"",
 			string.Empty);
 
@@ -352,24 +354,29 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		var escapedTargetPath = EscapeWindowsBatchValue(targetPath);
 		var escapedManagedAssemblyPath = EscapeWindowsBatchValue(BuildWindowsManagedAssemblyPath(targetPath));
+		var encodedTargetPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(targetPath));
 		return string.Join(
 			"\r\n",
 			"@echo off",
 			"setlocal DisableDelayedExpansion",
 			WindowsLauncherMarker,
-			WindowsTargetPrefix + targetPath,
+			WindowsEncodedTargetPrefix + encodedTargetPath,
+			"for /f \"tokens=2 delims=:\" %%C in ('chcp') do set \"DEVPROJEX_ORIGINAL_CODE_PAGE=%%C\"",
+			"chcp 65001 >nul",
 			"set \"DEVPROJEX_EXE=" + escapedTargetPath + "\"",
 			"set \"DEVPROJEX_DLL=" + escapedManagedAssemblyPath + "\"",
-			"if \"%~1\"==\"\" (",
-			"  start \"\" \"%DEVPROJEX_EXE%\"",
-			"  exit /b 0",
-			")",
-			"if exist \"%DEVPROJEX_DLL%\" (",
-			"  dotnet \"%DEVPROJEX_DLL%\" %*",
-			"  exit /b %ERRORLEVEL%",
-			")",
+			"set \"DEVPROJEX_TERMINAL_HOST=1\"",
+			"chcp %DEVPROJEX_ORIGINAL_CODE_PAGE% >nul",
+			"if not exist \"%DEVPROJEX_DLL%\" goto :run-native",
+			"dotnet \"%DEVPROJEX_DLL%\" %*",
+			"set \"DEVPROJEX_EXIT_CODE=%ERRORLEVEL%\"",
+			"goto :restore-code-page",
+			":run-native",
 			"\"%DEVPROJEX_EXE%\" %*",
-			"exit /b %ERRORLEVEL%",
+			"set \"DEVPROJEX_EXIT_CODE=%ERRORLEVEL%\"",
+			":restore-code-page",
+			"chcp %DEVPROJEX_ORIGINAL_CODE_PAGE% >nul",
+			"exit /b %DEVPROJEX_EXIT_CODE%",
 			string.Empty);
 	}
 
@@ -831,12 +838,37 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			if (string.Equals(marker, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase))
 				targetPrefix = WindowsTargetPrefix;
 
-			if (!IsManagedWrapperMarker(marker) ||
-			    target is null ||
-			    !target.StartsWith(targetPrefix, StringComparison.OrdinalIgnoreCase))
+			if (!IsManagedWrapperMarker(marker) || target is null)
 				return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
 
-			return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Managed, target[targetPrefix.Length..]);
+			if (string.Equals(marker, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase) &&
+			    target.StartsWith(WindowsEncodedTargetPrefix, StringComparison.OrdinalIgnoreCase))
+			{
+				try
+				{
+					var encoded = target[WindowsEncodedTargetPrefix.Length..];
+					var decoded = new UTF8Encoding(
+						encoderShouldEmitUTF8Identifier: false,
+						throwOnInvalidBytes: true).GetString(Convert.FromBase64String(encoded));
+					return string.IsNullOrWhiteSpace(decoded)
+						? new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null)
+						: new ManagedWrapperReadResult(ManagedWrapperReadStatus.Managed, decoded);
+				}
+				catch (FormatException)
+				{
+					return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
+				}
+				catch (DecoderFallbackException)
+				{
+					return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
+				}
+			}
+
+			if (!target.StartsWith(targetPrefix, StringComparison.OrdinalIgnoreCase))
+				return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
+			return new ManagedWrapperReadResult(
+				ManagedWrapperReadStatus.Managed,
+				target[targetPrefix.Length..]);
 		}
 		catch (UnauthorizedAccessException)
 		{
@@ -1363,6 +1395,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			process = new Process { StartInfo = startInfo };
 			if (!process.Start())
 				return new TerminalCommandValidationResult(false, "The terminal launcher process could not be started.");
+			process.StandardInput.Close();
 
 			var standardOutput = process.StandardOutput.ReadToEndAsync();
 			var standardError = process.StandardError.ReadToEndAsync();
@@ -1645,12 +1678,13 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		Unreadable
 	}
 
-	private static ProcessStartInfo CreateLauncherValidationStartInfo(string commandPath)
+	internal static ProcessStartInfo CreateLauncherValidationStartInfo(string commandPath)
 	{
 		var startInfo = new ProcessStartInfo
 		{
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};

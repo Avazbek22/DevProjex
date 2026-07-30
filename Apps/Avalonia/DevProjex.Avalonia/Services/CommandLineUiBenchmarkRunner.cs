@@ -26,16 +26,18 @@ internal sealed class CommandLineUiBenchmarkRunner(CommandLineUiBenchmarkContext
 		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
 	};
 
-	public async Task<int> RunAsync(CommandLineOptions options, CancellationToken cancellationToken)
+	public async Task<int> RunAsync(
+		string projectPath,
+		string? explicitOutputPath,
+		CancellationToken cancellationToken)
 	{
-		var benchmark = options.UiBenchmark;
-		if (!benchmark.Enabled || string.IsNullOrWhiteSpace(benchmark.Path))
+		if (string.IsNullOrWhiteSpace(projectPath))
 		{
-			WriteError("UI benchmark requires --benchmark-ui <folder>.");
+			WriteError("UI benchmark requires a project folder.");
 			return CommandLineExitCodes.UsageError;
 		}
 
-		var targetPath = Path.GetFullPath(benchmark.Path);
+		var targetPath = Path.GetFullPath(projectPath);
 		if (!Directory.Exists(targetPath))
 		{
 			WriteError($"UI benchmark target folder was not found: {targetPath}");
@@ -44,7 +46,7 @@ internal sealed class CommandLineUiBenchmarkRunner(CommandLineUiBenchmarkContext
 
 		var configuration = ResolveRunConfiguration();
 		var createdAt = DateTimeOffset.Now;
-		var outputPath = ResolveOutputPath(benchmark.OutputPath, createdAt);
+		var outputPath = ResolveOutputPath(explicitOutputPath, createdAt);
 		var runReportsDirectory = ResolveRunReportsDirectory(outputPath);
 
 		try
@@ -406,34 +408,10 @@ internal sealed class CommandLineUiBenchmarkRunner(CommandLineUiBenchmarkContext
 	}
 
 	private static CommandLineBenchmarkProcessRequest BuildUiProcessRequest(string targetPath, string sessionReportPath)
-	{
-		var processPath = Environment.ProcessPath;
-		var assemblyPath = typeof(CommandLineUiBenchmarkRunner).Assembly.Location;
-		var arguments = new List<string>();
-		var fileName = processPath;
-		if (string.IsNullOrWhiteSpace(fileName))
-		{
-			fileName = "dotnet";
-			arguments.Add(assemblyPath);
-		}
-		else if (IsDotnetHost(fileName) && !string.IsNullOrWhiteSpace(assemblyPath))
-		{
-			arguments.Add(assemblyPath);
-		}
-
-		arguments.Add(CommandLineOptionTokens.SessionMetrics);
-		arguments.Add(targetPath);
-		arguments.Add(CommandLineOptionTokens.SessionMetricsOutput);
-		arguments.Add(sessionReportPath);
-		arguments.Add(CommandLineOptionTokens.UiBenchmarkScript);
-		arguments.Add("standard");
-
-		return new CommandLineBenchmarkProcessRequest(
-			FileName: fileName,
-			Arguments: arguments.ToArray(),
-			WorkingDirectory: Directory.GetCurrentDirectory(),
-			CommandLine: BuildCommandLine(fileName, arguments));
-	}
+		=> DesktopDiagnosticProcessRequestFactory.Create(
+			targetPath,
+			sessionReportPath,
+			"standard");
 
 	private static bool IsDotnetHost(string processPath)
 	{

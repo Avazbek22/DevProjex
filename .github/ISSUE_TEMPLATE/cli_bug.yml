@@ -1,0 +1,89 @@
+name: CLI bug
+description: Report a deterministic command, output, exit-code, or filesystem defect.
+title: "[CLI] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private source content, or security vulnerabilities.
+        For security issues, follow SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: DevProjex version
+      description: Paste the output of `devprojex --version`.
+      placeholder: "4.x.x"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: architecture
+    attributes:
+      label: Architecture
+      placeholder: "x64, arm64"
+    validations:
+      required: true
+  - type: input
+    id: shell
+    attributes:
+      label: Shell and version
+      placeholder: "PowerShell 7.5, bash 5.2, zsh 5.9, fish 4.0"
+    validations:
+      required: true
+  - type: input
+    id: invocation
+    attributes:
+      label: Exact command
+      description: Redact sensitive paths and values without changing argument boundaries.
+      placeholder: "devprojex analyze ./project --format json -o - --plain"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include cwd, redirected streams, environment variables, and setup steps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include stdout, stderr, exit code, and filesystem effects separately.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor JSON
+      description: Paste redacted output from `devprojex doctor --format json`.
+      render: json
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I reproduced this with an official DevProjex binary.
+          required: true
+        - label: I removed credentials and private project content.
+          required: true
+        - label: I searched existing issues and discussions.
+          required: true

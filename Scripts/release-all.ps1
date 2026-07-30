@@ -776,12 +776,22 @@ function Build-GitHubArtifactsInWorkspace([string]$version, [string]$configurati
         Invoke-ExternalCommand -filePath "dotnet" -arguments $publishArgs -failureMessage "dotnet publish failed for RID: $rid" -workingDirectory $script:IsolatedRepoRoot
 
         $sourcePath = Join-Path $ridOutDir ([string]$target.Binary)
-        if (-not (Test-Path $sourcePath)) {
-            throw "Single-file artifact not found: $sourcePath"
+        $publishedFiles = @(Get-ChildItem -LiteralPath $ridOutDir -File -Recurse)
+        $relativePublishedFiles = @(
+            $publishedFiles | ForEach-Object {
+                [System.IO.Path]::GetRelativePath($ridOutDir, $_.FullName)
+            }
+        )
+        if ($publishedFiles.Count -ne 1 -or
+            -not [System.StringComparer]::Ordinal.Equals(
+                $relativePublishedFiles[0],
+                [string]$target.Binary)) {
+            $actualFiles = $relativePublishedFiles -join ", "
+            throw "Expected exactly one published file named '$($target.Binary)' for $rid. Found: $actualFiles"
         }
 
         $destinationPath = Join-Path $releaseDir ([string]$target.Name)
-        Copy-Item -Path $sourcePath -Destination $destinationPath -Force
+        Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
 
         if ($rid.StartsWith("win-", [System.StringComparison]::OrdinalIgnoreCase)) {
             Assert-WindowsArtifactVersion -artifactPath $destinationPath -displayVersion $version -storePackageVersion ([string]$defaultReleaseVersionInfo.StorePackageVersion)

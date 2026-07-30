@@ -2,9 +2,12 @@ using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
+using DevProjex.Application.Context;
+using DevProjex.Application.DesktopControl;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.Reports;
 using DevProjex.Kernel;
+using DevProjex.Terminal.DesktopControl;
 using ThemeSettingsStore =
     DevProjex.Infrastructure.ThemePresets.ThemeSettingsStore;
 using UserSettingsStore =
@@ -15,11 +18,12 @@ namespace DevProjex.Avalonia;
 public partial class MainWindow
 {
     public MainWindow()
-        : this(CommandLineOptions.Empty, AvaloniaCompositionRoot.CreateDefault(CommandLineOptions.Empty))
+        : this(DesktopStartupOptions.Default, AvaloniaCompositionRoot.CreateDefault(DesktopStartupOptions.Default))
     {
     }
 
-    private readonly CommandLineOptions _startupOptions;
+    private readonly DesktopStartupOptions _startupOptions;
+    private readonly DesktopOpenRequest? _desktopStartupRequest;
     private readonly LocalizationService _localization;
     private readonly ScanOptionsUseCase _scanOptions;
     private readonly BuildTreeUseCase _buildTree;
@@ -42,6 +46,7 @@ public partial class MainWindow
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
     private readonly RecentProjectsStore _recentProjectsStore;
+    private readonly RecentWorkspacesService _recentWorkspacesService;
     private readonly RecentFolderAvailabilityService _recentFolderAvailabilityService;
     private readonly HashSet<string> _unavailableRecentFolderPaths = new(PathComparer.Default);
 
@@ -67,6 +72,10 @@ public partial class MainWindow
     private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
     private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
     private readonly TaskbarProgressCoordinator _taskbarProgress;
+    private readonly SemaphoreSlim _desktopInteractionGate = new(1, 1);
+    private DesktopControlServer? _desktopControlServer;
+    private bool _desktopStartupReady;
+    private string? _desktopStartupErrorCode;
 
     private BuildTreeResult? _currentTree;
     private BuildTreeResult? _filterBaseTree;
@@ -166,22 +175,20 @@ public partial class MainWindow
     private EventHandler? _themeChangedHandler;
     private PropertyChangedEventHandler? _viewModelPropertyChangedHandler;
 
-    private readonly IReadOnlyList<CommandLineParseError> _startupCommandLineErrors;
-    private readonly ProjectAnalysisService _projectAnalysisService;
-    private readonly ReportPathResolver _reportPathResolver;
-    private readonly ProjectAnalysisReportWriter _projectAnalysisReportWriter;
+    private readonly IReadOnlyList<string> _startupErrors;
     private readonly ITerminalCommandSetupService _terminalCommandSetupService;
     private readonly SessionMetricsRecorder _sessionMetrics;
 
     public MainWindow(
-        CommandLineOptions startupOptions,
+        DesktopStartupOptions startupOptions,
         AvaloniaAppServices services,
-        IReadOnlyList<CommandLineParseError>? startupCommandLineErrors = null)
+        IReadOnlyList<string>? startupErrors = null)
     {
         PrepareStartupRevealGate();
 
         _startupOptions = startupOptions;
-        _startupCommandLineErrors = startupCommandLineErrors ?? [];
+        _desktopStartupRequest = startupOptions.OpenRequest;
+        _startupErrors = startupErrors ?? [];
         _localization = services.Localization;
         _scanOptions = services.ScanOptionsUseCase;
         _buildTree = services.BuildTreeUseCase;
@@ -203,12 +210,10 @@ public partial class MainWindow
         _gitService = services.GitRepositoryService;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
-        _projectAnalysisService = services.ProjectAnalysisService;
-        _reportPathResolver = services.ReportPathResolver;
-        _projectAnalysisReportWriter = services.ProjectAnalysisReportWriter;
         _terminalCommandSetupService = services.TerminalCommandSetupService;
         _sessionMetrics = services.SessionMetricsRecorder;
         _recentProjectsStore = services.RecentProjectsStore;
+        _recentWorkspacesService = services.RecentWorkspacesService;
         _recentFolderAvailabilityService = services.RecentFolderAvailabilityService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
@@ -259,7 +264,7 @@ public partial class MainWindow
             services.TaskbarProgressService);
         _viewModel.SetToastItems(_toastService.Items);
         _sessionMetrics.SetIdleStateProvider(IsSessionMetricsIdle);
-        _sessionMetrics.Start(_startupOptions.SessionMetrics.Path, GetApplicationVersion());
+        _sessionMetrics.Start(_startupOptions.EffectiveSessionMetrics.ProjectPath, GetApplicationVersion());
         LoadRecentProjects();
         DataContext = _viewModel;
 
@@ -459,22 +464,9 @@ public partial class MainWindow
             SchedulePreviewMemoryCleanup,
             CancelAllMemoryCleanup,
             UpdateCompactModeVisualState);
-        _startupInteractions = new StartupInteractionController(
-            _startupOptions,
-            _viewModel,
-            _selectionCoordinator,
-            _searchFilterController,
-            _previewWorkspaceController,
-            _workspacePresentation,
-            _sessionMetrics,
-            () => _currentPath,
-            () => _currentTree?.Root,
-            () => RefreshTreeAsync(),
-            path => TryOpenFolderAsync(
-                path,
-                fromDialog: false,
-                recordRecentFolder: false),
-            Close);
+        _startupInteractions = CreateStartupInteractionController(
+            _desktopStartupRequest,
+            _startupOptions.DiagnosticScenario);
         _memoryCleanup = new MemoryCleanupCoordinator(
             _sessionMetrics,
             () => IsVisible &&
@@ -520,7 +512,7 @@ public partial class MainWindow
             _workspacePresentation,
             RefreshThemeHighlightsForActiveQuery,
             _isMicaSupported,
-            _startupOptions.Language);
+            _desktopStartupRequest?.Language);
         _appearanceSettings.Initialize();
         RefreshLanguageMenuChecks();
         // Publish builds can reach the first native frame much faster than local debug runs.
@@ -532,7 +524,8 @@ public partial class MainWindow
         Activated += OnActivated;
         Deactivated += OnDeactivated;
 
-        _elevationAttempted = startupOptions.ElevationAttempted;
+        _elevationAttempted = startupOptions.ElevationAttempted ||
+                              _desktopStartupRequest?.ElevationAttempted == true;
 
         // Store event handlers for proper unsubscription
         _languageChangedHandler = (_, _) => ApplyLocalization();
@@ -634,4 +627,26 @@ public partial class MainWindow
         AddHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened, RoutingStrategies.Bubble);
         AddHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened, RoutingStrategies.Bubble);
     }
+
+    private StartupInteractionController CreateStartupInteractionController(
+        DesktopOpenRequest? request,
+        DesktopDiagnosticScenario? diagnosticScenario) =>
+        new(
+            request,
+            diagnosticScenario,
+            _viewModel,
+            _selectionCoordinator,
+            _searchFilterController,
+            _previewWorkspaceController,
+            _workspacePresentation,
+            _sessionMetrics,
+            () => _currentPath,
+            () => _currentTree?.Root,
+            () => RefreshTreeAsync(),
+            path => TryOpenFolderAsync(
+                path,
+                fromDialog: false,
+                recordRecentFolder: false),
+            Close);
+
 }

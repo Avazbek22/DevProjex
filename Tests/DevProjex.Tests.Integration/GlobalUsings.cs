@@ -14,6 +14,8 @@ global using DevProjex.Kernel.Abstractions;
 global using DevProjex.Kernel.Models;
 global using DevProjex.Tests.Integration.Helpers;
 global using DevProjex.Tests.Shared.ProjectLoadWorkflow;
+global using DevProjex.Terminal.CommandLine;
+global using DevProjex.Terminal.Execution;
 global using System.Diagnostics;
 global using System.Reflection;
 global using System.Text;

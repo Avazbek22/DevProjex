@@ -148,6 +148,9 @@ public partial class MainWindow : Window
     private void SetLanguageAndPersist(AppLanguage language)
         => _appearanceSettings.SetLanguage(language);
 
+    private void SetLanguageForCurrentSession(AppLanguage language)
+        => _appearanceSettings.SetLanguageForCurrentSession(language);
+
     private void InitializeFonts()
     {
         // Only use predefined fonts like WinForms
@@ -770,6 +773,8 @@ public partial class MainWindow : Window
         try
         {
             await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
+            if (_desktopControlServer is not null)
+                await _desktopControlServer.UpdateProjectAsync(normalizedPath);
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: true);
             return true;
         }
@@ -789,47 +794,6 @@ public partial class MainWindow : Window
     private Task<bool> TryRunStartupUiBenchmarkScriptAsync()
         => _startupInteractions.RunBenchmarkScriptAsync();
 
-    private async Task TryWriteStartupReportAsync(TimeSpan loadingElapsed)
-    {
-        if (!_startupOptions.Report.Enabled ||
-            string.IsNullOrWhiteSpace(_currentPath) ||
-            _currentTree is null)
-        {
-            return;
-        }
-
-        var reportInput = new LoadedProjectAnalysisRequest(
-            RootPath: _currentPath,
-            Tree: _currentTree,
-            AvailableRootFolders: _viewModel.RootFolders.Select(static option => option.Name).ToArray(),
-            AvailableExtensions: _viewModel.Extensions.Select(static option => option.Name).ToArray(),
-            SelectedRootFolders: _viewModel.RootFolders
-                .Where(static option => option.IsChecked)
-                .Select(static option => option.Name)
-                .ToArray(),
-            SelectedExtensions: _viewModel.Extensions
-                .Where(static option => option.IsChecked)
-                .Select(static option => option.Name)
-                .ToArray(),
-            SelectedIgnoreOptions: _selectionCoordinator.GetSelectedIgnoreOptionIds().ToArray(),
-            RootAccessDenied: _currentTree.RootAccessDenied,
-            HadAccessDenied: _currentTree.HadAccessDenied,
-            KnownLoadingElapsed: loadingElapsed);
-
-        try
-        {
-            var report = await Task.Run(
-                () => _projectAnalysisService.BuildReportFromTreeAsync(reportInput),
-                CancellationToken.None);
-            var reportPath = _reportPathResolver.Resolve(_startupOptions.Report);
-            await _projectAnalysisReportWriter.WriteAsync(report, reportPath);
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync(ex.Message);
-        }
-    }
-
     private async Task TryShowAutomaticTerminalCommandPromptAsync(CancellationToken cancellationToken)
     {
         try
@@ -841,7 +805,7 @@ public partial class MainWindow : Window
             var action = ResolveAutomaticTerminalCommandStartupAction(
                 _appearanceSettings.ViewSettings,
                 snapshot,
-                !string.IsNullOrWhiteSpace(_startupOptions.Path));
+                !string.IsNullOrWhiteSpace(_desktopStartupRequest?.ProjectPath));
 
             if (action == AutomaticTerminalCommandStartupAction.RepairSilently)
             {
@@ -852,7 +816,7 @@ public partial class MainWindow : Window
                     TerminalCommandPromptPolicy.ShouldOfferAutomaticPrompt(
                         _appearanceSettings.ViewSettings,
                         repairResult.Snapshot,
-                        !string.IsNullOrWhiteSpace(_startupOptions.Path)))
+                        !string.IsNullOrWhiteSpace(_desktopStartupRequest?.ProjectPath)))
                 {
                     await ShowTerminalCommandSetupAsync(
                         repairResult.Snapshot,
@@ -932,14 +896,17 @@ public partial class MainWindow : Window
 
         _elevationAttempted = true;
 
-        var opts = _startupOptions with
+        var arguments = new[]
         {
-            Path = path,
-            Language = _localization.CurrentLanguage,
-            ElevationAttempted = true
+            "open",
+            path,
+            "--new-window",
+            "--language",
+            AppLanguageUtility.ToCode(_localization.CurrentLanguage),
+            "--internal-elevation-attempted"
         };
 
-        bool started = _elevation.TryRelaunchAsAdministrator(opts);
+        bool started = _elevation.TryRelaunchAsAdministrator(arguments);
         if (started)
         {
             Close();

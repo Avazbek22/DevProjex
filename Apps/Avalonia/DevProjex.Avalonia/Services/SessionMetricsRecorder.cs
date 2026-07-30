@@ -19,7 +19,7 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
     };
 
     private readonly object _sync = new();
-    private readonly StartupSessionMetricsOptions _options;
+    private readonly SessionMetricsOptions _options;
     private readonly Func<string> _localAppDataProvider;
     private readonly ISessionMetricsProcessSampler _sampler;
     private readonly TimeProvider _timeProvider;
@@ -43,7 +43,7 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
     private bool _disposed;
 
     public SessionMetricsRecorder(
-        StartupSessionMetricsOptions options,
+        SessionMetricsOptions options,
         Func<string> localAppDataProvider)
         : this(
             options,
@@ -55,7 +55,7 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
     }
 
     internal SessionMetricsRecorder(
-        StartupSessionMetricsOptions options,
+        SessionMetricsOptions options,
         Func<string> localAppDataProvider,
         ISessionMetricsProcessSampler sampler,
         TimeProvider timeProvider,
@@ -69,7 +69,7 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
     }
 
     public static SessionMetricsRecorder Disabled { get; } = new(
-        StartupSessionMetricsOptions.Disabled,
+        SessionMetricsOptions.Disabled,
         static () => string.Empty,
         new NoopSessionMetricsProcessSampler(),
         TimeProvider.System,
@@ -97,7 +97,7 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
 
             _started = true;
             _startedAt = _timeProvider.GetUtcNow();
-            _targetPath = NormalizePathForReport(targetPath ?? _options.Path ?? string.Empty);
+            _targetPath = NormalizePathForReport(targetPath ?? _options.ProjectPath ?? string.Empty);
             _outputPath = ResolveOutputPath(_options.OutputPath);
         }
 
@@ -477,7 +477,7 @@ public sealed class SessionMetricsRecorder : ITreeSearchMetricsSink, IDisposable
         {
             SchemaVersion = SchemaVersion,
             Kind = "interactive-session",
-            TargetPath = _targetPath ?? NormalizePathForReport(_options.Path ?? string.Empty),
+            TargetPath = _targetPath ?? NormalizePathForReport(_options.ProjectPath ?? string.Empty),
             OutputPath = NormalizePathForReport(outputPath),
             StartedAt = _startedAt,
             EndedAt = endedAt,

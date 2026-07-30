@@ -30,6 +30,12 @@ internal sealed class MemoryCleanupCoordinator(
         ProcessWorkingSetTrimmer.TrimCurrentProcess;
     private readonly Func<TimeSpan, CancellationToken, Task> _deferCleanup =
         Task.Delay;
+    private readonly Func<CancellationToken, Task> _waitForRenderPasses =
+        WaitForRenderPassesAsync;
+    private readonly Func<CancellationToken, Task<bool>> _queryUiReadiness =
+        cancellationToken => QueryUiReadinessAsync(
+            uiReady,
+            cancellationToken);
     private readonly TimeSpan _uiReadinessTimeout = UiReadinessTimeout;
     private readonly TimeSpan _uiReadinessPollInterval =
         UiReadinessPollInterval;
@@ -43,10 +49,12 @@ internal sealed class MemoryCleanupCoordinator(
     private int _cleanupInProgress;
     private int _disposed;
 
+    // SchedulePreview publishes the background operation before clearing its preview gate.
+    // Reading in the same direction prevents a false idle state during that handoff.
     internal bool IsCleanupPendingOrRunning =>
-        Volatile.Read(ref _cleanupInProgress) != 0 ||
+        Volatile.Read(ref _previewCleanupCts) is not null ||
         Volatile.Read(ref _backgroundCleanupCts) is not null ||
-        Volatile.Read(ref _previewCleanupCts) is not null;
+        Volatile.Read(ref _cleanupInProgress) != 0;
 
     internal MemoryCleanupCoordinator(
         SessionMetricsRecorder sessionMetrics,
@@ -58,7 +66,9 @@ internal sealed class MemoryCleanupCoordinator(
         TimeSpan? uiReadinessPollInterval = null,
         int uiReadinessMaximumAttempts = UiReadinessMaximumAttempts,
         Action? trimWorkingSet = null,
-        Func<TimeSpan, CancellationToken, Task>? deferCleanup = null)
+        Func<TimeSpan, CancellationToken, Task>? deferCleanup = null,
+        Func<CancellationToken, Task>? waitForRenderPasses = null,
+        Func<CancellationToken, Task<bool>>? queryUiReadiness = null)
         : this(sessionMetrics, uiReady, animationDuration)
     {
         _captureMemorySnapshot = captureMemorySnapshot;
@@ -73,6 +83,13 @@ internal sealed class MemoryCleanupCoordinator(
             UiReadinessRequiredStableSamples,
             uiReadinessMaximumAttempts);
         _deferCleanup = deferCleanup ?? Task.Delay;
+        _waitForRenderPasses =
+            waitForRenderPasses ?? WaitForRenderPassesAsync;
+        _queryUiReadiness =
+            queryUiReadiness ??
+            (cancellationToken => QueryUiReadinessAsync(
+                uiReady,
+                cancellationToken));
     }
 
     public void Schedule(
@@ -111,7 +128,7 @@ internal sealed class MemoryCleanupCoordinator(
         {
             try
             {
-                await WaitForRenderPassesAsync(cleanupToken);
+                await _waitForRenderPasses(cleanupToken);
                 if (cleanupVersion != Volatile.Read(ref _previewCleanupVersion))
                     return;
 
@@ -386,10 +403,7 @@ internal sealed class MemoryCleanupCoordinator(
                  attempt++)
             {
                 readinessToken.ThrowIfCancellationRequested();
-                var isUiReady = await Dispatcher.UIThread.InvokeAsync(
-                    uiReady,
-                    DispatcherPriority.Background,
-                    readinessToken);
+                var isUiReady = await _queryUiReadiness(readinessToken);
                 stableSamples = isUiReady ? stableSamples + 1 : 0;
                 if (stableSamples >= UiReadinessRequiredStableSamples)
                     return true;
@@ -412,14 +426,24 @@ internal sealed class MemoryCleanupCoordinator(
     {
         await Dispatcher.UIThread.InvokeAsync(
             static () => { },
-            DispatcherPriority.Render);
+            DispatcherPriority.Render,
+            cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
         await Dispatcher.UIThread.InvokeAsync(
             static () => { },
-            DispatcherPriority.Render);
+            DispatcherPriority.Render,
+            cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
     }
+
+    private static async Task<bool> QueryUiReadinessAsync(
+        Func<bool> uiReady,
+        CancellationToken cancellationToken) =>
+        await Dispatcher.UIThread.InvokeAsync(
+            uiReady,
+            DispatcherPriority.Background,
+            cancellationToken);
 
     private static void CollectMemory(MemoryCleanupCollectionMode mode)
     {

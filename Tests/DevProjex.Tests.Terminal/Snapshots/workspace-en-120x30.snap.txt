@@ -1,0 +1,30 @@
+ DevProjex Terminal · <PROJECT>
+ <PROJECT_ROOT>
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
+│v [x] <PROJECT>               ││<PROJECT>                               │
+│  > [x] src                                          ││├── src                                                        │
+│    [x] global.json                                  │││   ├── Feature                                                │
+│    [x] readme.md                                    │││   │   └── Handler.cs                                         │
+│                                                     │││   └── App.cs                                                 │
+│                                                     ││├── global.json                                                │
+│                                                     ││└── readme.md                                                  │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││ Files 4  |  Lines 1-8/8                                       │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

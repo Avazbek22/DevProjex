@@ -238,7 +238,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
     }
 
     [Fact]
-    public void CacheService_CleanupStaleCache_RemovesOldDirectories()
+    public void CacheService_CleanupStaleCache_PreservesOldPublishedRepositories()
     {
         // Arrange - create old directory
         var oldDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
@@ -256,7 +256,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
             _cacheService.CleanupStaleCacheOnStartup();
 
             // Assert
-            Assert.False(Directory.Exists(oldDir), "Old directory should be cleaned up");
+            Assert.True(Directory.Exists(oldDir), "Published repositories must not expire by age");
             Assert.True(Directory.Exists(recentDir), "Recent directory should remain");
         }
         finally

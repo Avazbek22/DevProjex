@@ -1,10 +1,13 @@
 using DevProjex.Avalonia.Services;
+using DevProjex.Application.Context;
+using DevProjex.Application.DesktopControl;
 using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed class StartupInteractionController(
-    CommandLineOptions options,
+    DesktopOpenRequest? desktopRequest,
+    DesktopDiagnosticScenario? diagnosticScenario,
     MainWindowViewModel viewModel,
     SelectionSyncCoordinator selection,
     SearchFilterInteractionController searchFilter,
@@ -30,26 +33,27 @@ internal sealed class StartupInteractionController(
 
     public async Task ApplySelectionOverridesAsync()
     {
-        if (!options.HasSelectionOverrides ||
+        var selectionSpec = desktopRequest?.Selection;
+        if (selectionSpec is null ||
             !viewModel.IsProjectLoaded ||
             string.IsNullOrWhiteSpace(projectPathProvider()))
         {
             return;
         }
 
-        if (options.HasRootFolderOverrides)
+        if (selectionSpec.Roots is not null)
         {
             var selectedRoots = new HashSet<string>(
-                options.IncludeRootFolders,
+                selectionSpec.Roots,
                 PathComparer.Default);
             foreach (var option in viewModel.RootFolders)
                 option.IsChecked = selectedRoots.Contains(option.Name);
         }
 
-        if (options.HasExtensionOverrides)
+        if (selectionSpec.Extensions is not null)
         {
             var selectedExtensions = new HashSet<string>(
-                options.IncludeExtensions,
+                selectionSpec.Extensions,
                 StringComparer.OrdinalIgnoreCase);
             foreach (var option in viewModel.Extensions)
             {
@@ -58,10 +62,16 @@ internal sealed class StartupInteractionController(
             }
         }
 
-        if (options.HasIgnoreOverrides)
+        if (selectionSpec.GitMode is not null ||
+            selectionSpec.Exclusions is not null)
         {
             var selectedIgnoreOptions = new HashSet<IgnoreOptionId>(
-                options.IgnoreOptions);
+                ProjectSelectionAdapter.ToIgnoreOptions(
+                    selectionSpec with
+                    {
+                        GitMode = selectionSpec.GitMode ?? GitFilteringMode.None,
+                        Exclusions = selectionSpec.Exclusions ?? []
+                    }));
             foreach (var option in viewModel.IgnoreOptions)
             {
                 option.IsChecked =
@@ -76,46 +86,42 @@ internal sealed class StartupInteractionController(
         await selection.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
             currentPath);
         await selection.WaitForPendingRefreshesAsync();
+
+        if (selectionSpec.SelectedPaths is { Count: > 0 })
+            ApplySelectedPaths(selectionSpec.SelectedPaths);
     }
 
     public async Task ApplyUiOptionsAsync()
     {
-        var ui = options.Ui;
-        if (!ui.HasStartupActions || !viewModel.IsProjectLoaded)
+        if (desktopRequest is null || !viewModel.IsProjectLoaded)
             return;
 
-        if (ui.TreeFormat is { } treeFormat)
-        {
-            viewModel.SelectedExportFormat =
-                MapTreeFormat(treeFormat);
-        }
+        if (desktopRequest.TreeFormat is { } treeFormat)
+            viewModel.SelectedExportFormat = MapTreeFormat(treeFormat);
 
-        if (ui.PreviewMode is { } previewMode)
-        {
+        if (desktopRequest.OpenPreview)
             viewModel.SelectedPreviewContentMode =
-                MapPreviewMode(previewMode);
-        }
+                MapPreviewMode(desktopRequest.PreviewView);
 
-        if (!string.IsNullOrWhiteSpace(ui.TreeFilter))
-            await searchFilter.ApplyStartupFilterAsync(ui.TreeFilter);
+        if (!string.IsNullOrWhiteSpace(desktopRequest.Filter))
+            await searchFilter.ApplyStartupFilterAsync(desktopRequest.Filter);
 
         var shouldOpenPreview =
-            ui.OpenPreview ||
-            ui.PreviewMode is not null ||
-            !string.IsNullOrWhiteSpace(ui.PreviewSearch);
+            desktopRequest.OpenPreview ||
+            !string.IsNullOrWhiteSpace(desktopRequest.Search);
         if (shouldOpenPreview && !viewModel.IsPreviewMode)
             await preview.OpenAsync();
 
-        if (!string.IsNullOrWhiteSpace(ui.PreviewSearch))
+        if (!string.IsNullOrWhiteSpace(desktopRequest.Search))
         {
             await searchFilter.ApplyStartupSearchAsync(
-                ui.PreviewSearch);
+                desktopRequest.Search);
         }
     }
 
     public async Task<bool> RunBenchmarkScriptAsync()
     {
-        if (!options.UiBenchmarkScript.Enabled ||
+        if (diagnosticScenario is null ||
             !viewModel.IsProjectLoaded)
         {
             return false;
@@ -123,18 +129,18 @@ internal sealed class StartupInteractionController(
 
         try
         {
-            if (options.UiBenchmarkScript.Script ==
-                StartupUiBenchmarkScript.Standard)
+            if (diagnosticScenario ==
+                DesktopDiagnosticScenario.Standard)
             {
                 await RunStandardBenchmarkScriptAsync();
             }
-            else if (options.UiBenchmarkScript.Script ==
-                     StartupUiBenchmarkScript.PreviewSearchRetention)
+            else if (diagnosticScenario ==
+                     DesktopDiagnosticScenario.PreviewSearchRetention)
             {
                 await RunPreviewSearchRetentionBenchmarkScriptAsync();
             }
-            else if (options.UiBenchmarkScript.Script ==
-                     StartupUiBenchmarkScript.ProjectMemoryLifecycle)
+            else if (diagnosticScenario ==
+                     DesktopDiagnosticScenario.ProjectMemoryLifecycle)
             {
                 await RunProjectMemoryLifecycleBenchmarkScriptAsync();
             }
@@ -168,14 +174,51 @@ internal sealed class StartupInteractionController(
         };
 
     internal static PreviewContentMode MapPreviewMode(
-        StartupPreviewMode mode)
+        DesktopPreviewView mode)
         => mode switch
         {
-            StartupPreviewMode.Content => PreviewContentMode.Content,
-            StartupPreviewMode.TreeContent =>
+            DesktopPreviewView.Content => PreviewContentMode.Content,
+            DesktopPreviewView.TreeContent =>
                 PreviewContentMode.TreeAndContent,
             _ => PreviewContentMode.Tree
         };
+
+    private void ApplySelectedPaths(IReadOnlyCollection<string> selectedPaths)
+    {
+        var rootPath = projectPathProvider();
+        if (string.IsNullOrWhiteSpace(rootPath))
+            return;
+
+        var selectedFullPaths = selectedPaths
+            .Select(path => ResolveSelectedPath(rootPath, path))
+            .ToHashSet(PathComparer.Default);
+        TreeNodeViewModel.ForEachDescendant(
+            viewModel.TreeNodes,
+            node => node.IsChecked = selectedFullPaths.Any(selectedPath =>
+                PathComparer.Default.Equals(selectedPath, node.FullPath) ||
+                Directory.Exists(selectedPath) &&
+                PathUtility.IsPathInside(node.FullPath, selectedPath)));
+    }
+
+    private static string ResolveSelectedPath(string rootPath, string relativePath)
+    {
+        if (Path.IsPathRooted(relativePath))
+        {
+            throw new ProjectContextValidationException(
+                "DPX-SELECTION-PATH-INVALID",
+                "Selected paths must be relative to the project root.");
+        }
+
+        var fullPath = Path.GetFullPath(relativePath, rootPath);
+        if (!PathComparer.Default.Equals(fullPath, rootPath) &&
+            !PathUtility.IsPathInside(fullPath, rootPath))
+        {
+            throw new ProjectContextValidationException(
+                "DPX-SELECTION-PATH-INVALID",
+                "Selected paths cannot leave the project root.");
+        }
+        return fullPath;
+    }
 
     private async Task RunStandardBenchmarkScriptAsync()
     {

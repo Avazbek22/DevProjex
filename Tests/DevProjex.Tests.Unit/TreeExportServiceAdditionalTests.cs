@@ -93,6 +93,40 @@ public sealed class TreeExportServiceAdditionalTests
 		Assert.DoesNotContain("Epsilon", output);
 	}
 
+	[Fact]
+	public void FormatBearingOperationsRejectUnknownTypedValueEvenForEmptySelection()
+	{
+		var service = new TreeExportService();
+		var root = BuildTree();
+		var invalidFormat = (TreeTextFormat)int.MaxValue;
+		var emptySelection = new HashSet<string>();
+
+		Assert.Equal(
+			"format",
+			Assert.Throws<ArgumentOutOfRangeException>(() =>
+				service.BuildFullTree("/root", root, invalidFormat)).ParamName);
+		Assert.Equal(
+			"format",
+			Assert.Throws<ArgumentOutOfRangeException>(() =>
+				service.CalculateFullTreeMetrics("/root", root, invalidFormat)).ParamName);
+		Assert.Equal(
+			"format",
+			Assert.Throws<ArgumentOutOfRangeException>(() =>
+				service.BuildSelectedTree(
+					"/root",
+					root,
+					emptySelection,
+					invalidFormat)).ParamName);
+		Assert.Equal(
+			"format",
+			Assert.Throws<ArgumentOutOfRangeException>(() =>
+				service.CalculateSelectedTreeMetrics(
+					"/root",
+					root,
+					emptySelection,
+					invalidFormat)).ParamName);
+	}
+
 	private static TreeNodeDescriptor BuildTree()
 	{
 		var delta = new TreeNodeDescriptor("Delta", "/root/beta/delta", false, false, "file", new List<TreeNodeDescriptor>());

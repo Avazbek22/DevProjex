@@ -1,0 +1,30 @@
+
+  DevProjex Terminal
+
+
+  <SPINNER>   Loading project
+
+      <PROJECTS_ROOT>/Beta Project
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Esc Cancel operation   ? Help

@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "master" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "v4.9.5" ]
   workflow_dispatch:
 
 permissions:
@@ -51,7 +51,8 @@ jobs:
               @{ runner = 'ubuntu-latest'; rid = 'linux-x64'; binary = 'DevProjex' },
               @{ runner = 'ubuntu-24.04-arm'; rid = 'linux-arm64'; binary = 'DevProjex' },
               @{ runner = 'macos-15-intel'; rid = 'osx-x64'; binary = 'DevProjex' },
-              @{ runner = 'macos-latest'; rid = 'osx-arm64'; binary = 'DevProjex' }
+              # Keep native PTY validation on a stable GA image instead of a moving latest alias.
+              @{ runner = 'macos-15'; rid = 'osx-arm64'; binary = 'DevProjex' }
             )
           }
 
@@ -74,15 +75,13 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Install Linux UI smoke dependencies
+      - name: Install Linux release-smoke dependencies
         if: ${{ startsWith(matrix.rid, 'linux-') }}
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v xvfb-run >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y xvfb
-          fi
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb zsh fish
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -168,6 +167,26 @@ jobs:
           /p:DebugSymbols=false
           -o artifacts/publish/${{ matrix.rid }}
 
+      - name: Validate Single-File Output
+        shell: pwsh
+        run: |
+          $publishDirectory = "artifacts/publish/${{ matrix.rid }}"
+          $files = @(Get-ChildItem -LiteralPath $publishDirectory -File -Recurse)
+          $relativeFiles = @(
+            $files | ForEach-Object {
+              [System.IO.Path]::GetRelativePath($publishDirectory, $_.FullName)
+            }
+          )
+          if ($files.Count -ne 1 -or
+              -not [System.StringComparer]::Ordinal.Equals(
+                $relativeFiles[0],
+                "${{ matrix.binary }}")) {
+            $actualFiles = $relativeFiles -join ", "
+            throw "Expected exactly one published file named '${{ matrix.binary }}' for ${{ matrix.rid }}. Found: $actualFiles"
+          }
+
+          Write-Host "Validated $($relativeFiles[0]) for ${{ matrix.rid }}: $($files[0].Length) bytes."
+
       - name: Startup Smoke (Windows)
         if: ${{ startsWith(matrix.rid, 'win-') }}
         shell: pwsh
@@ -205,7 +224,7 @@ jobs:
           xvfb-run -a bash -c '
             set -euo pipefail
             cd "$1"
-            "$2" &
+            env -u CI "$2" &
             pid=$!
             trap "kill $pid 2>/dev/null || true" EXIT
             sleep 5
@@ -222,6 +241,37 @@ jobs:
           ' _ "$work_dir" "$exe_path"
 
           echo "Linux X11 startup smoke passed. Process stayed alive for 5 seconds."
+
+      - name: Startup Smoke (macOS)
+        if: ${{ startsWith(matrix.rid, 'osx-') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe_path="$(realpath "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}")"
+          work_dir="$(dirname "$exe_path")"
+          chmod +x "$exe_path"
+
+          (
+            cd "$work_dir"
+            env -u CI "$exe_path" &
+            pid=$!
+            trap 'kill "$pid" 2>/dev/null || true' EXIT
+            sleep 5
+
+            if ! kill -0 "$pid" 2>/dev/null; then
+              set +e
+              wait "$pid"
+              exit_code=$?
+              set -e
+              echo "Published macOS app exited too early during startup smoke. ExitCode=$exit_code"
+              exit 1
+            fi
+
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          )
+
+          echo "macOS startup smoke passed. Process stayed alive for 5 seconds."
 
       - name: Command-line Smoke (Native Published Artifact)
         shell: pwsh
@@ -240,6 +290,55 @@ jobs:
             chmod +x $exePath
           }
 
+          function Invoke-NativeCommand {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string] $Name,
+              [Parameter(Mandatory = $true)]
+              [string[]] $Arguments,
+              [hashtable] $Environment = @{}
+            )
+
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $exePath
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $Arguments) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+            foreach ($entry in $Environment.GetEnumerator()) {
+              if ($null -eq $entry.Value) {
+                $startInfo.Environment.Remove([string] $entry.Key)
+              }
+              else {
+                $startInfo.Environment[[string] $entry.Key] = [string] $entry.Value
+              }
+            }
+
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+              throw "Could not start published command '$Name'."
+            }
+
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit(60000)) {
+              $process.Kill($true)
+              throw "Published command '$Name' timed out."
+            }
+
+            $result = [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              StdOut = $stdoutTask.GetAwaiter().GetResult()
+              StdErr = $stderrTask.GetAwaiter().GetResult()
+            }
+            $process.Dispose()
+            return $result
+          }
+
           foreach ($helpArgument in $helpArguments) {
             $safeName = $helpArgument -replace "[^A-Za-z0-9]+", "_"
             $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-native-help-$safeName-stdout.txt"
@@ -250,7 +349,7 @@ jobs:
             if ($env:RUNNER_OS -eq "Windows") {
               $process = Start-Process `
                 -FilePath $exePath `
-                -ArgumentList @($helpArgument) `
+                -ArgumentList @($helpArgument, "--language", "en") `
                 -RedirectStandardOutput $stdoutPath `
                 -RedirectStandardError $stderrPath `
                 -NoNewWindow `
@@ -259,7 +358,7 @@ jobs:
               $exitCode = $process.ExitCode
             }
             else {
-              & $exePath $helpArgument > $stdoutPath 2> $stderrPath
+              & $exePath $helpArgument "--language" "en" > $stdoutPath 2> $stderrPath
               $exitCode = $LASTEXITCODE
             }
 
@@ -270,7 +369,7 @@ jobs:
               throw "Published $helpArgument smoke failed for ${{ matrix.rid }}. ExitCode=$exitCode. StdErr=$stderr"
             }
 
-            if ($stdout -notmatch "Usage:") {
+            if ($stdout -notmatch "(?m)^USAGE\r?$") {
               throw "Published $helpArgument smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
             }
           }
@@ -320,11 +419,15 @@ jobs:
           $exportStderrPath = Join-Path $env:RUNNER_TEMP "devprojex-native-export-stderr.txt"
           Remove-Item -LiteralPath $exportStdoutPath, $exportStderrPath -ErrorAction SilentlyContinue
           $exportArguments = @(
-            "--path", $projectDirectory,
-            "--export", "tree",
-            "--include-root", "src",
-            "--include-extension", "cs",
-            "--ignore", "none")
+            "export", "context", $projectDirectory,
+            "--view", "tree",
+            "--format", "text",
+            "--root", "src",
+            "--extension", "cs",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--language", "en",
+            "-o", "-")
 
           if ($env:RUNNER_OS -eq "Windows") {
             $process = Start-Process `
@@ -357,7 +460,488 @@ jobs:
             throw "Published export smoke did not print the expected tree for ${{ matrix.rid }}. StdOut=$exportStdout"
           }
 
+          $sourceBytesBeforeProjectExport =
+            [System.IO.File]::ReadAllBytes((Join-Path $sourceDirectory "App.cs"))
+          $folderDestination = Join-Path `
+            $env:RUNNER_TEMP `
+            "devprojex-native-project-folder-${{ matrix.rid }}"
+          Remove-Item -LiteralPath $folderDestination -Recurse -Force -ErrorAction SilentlyContinue
+          $folderExport = Invoke-NativeCommand -Name "project folder export" -Arguments @(
+            "export", "project", $projectDirectory,
+            "--as", "FoLdEr",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--progress", "never",
+            "--plain",
+            "--language", "en",
+            "-o", $folderDestination)
+          $expectedFolderPath = [System.IO.Path]::GetFullPath($folderDestination)
+          if ($folderExport.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($folderExport.StdErr) -or
+              $folderExport.StdOut.Trim() -ne $expectedFolderPath -or
+              -not (Test-Path -LiteralPath (Join-Path $folderDestination "src/App.cs") -PathType Leaf)) {
+            throw "Published folder project export violated its artifact/stdout contract. ExitCode=$($folderExport.ExitCode) StdOut=$($folderExport.StdOut) StdErr=$($folderExport.StdErr)"
+          }
+
+          $zipDestination = Join-Path `
+            $env:RUNNER_TEMP `
+            "devprojex-native-project-${{ matrix.rid }}.zip"
+          Remove-Item -LiteralPath $zipDestination -Force -ErrorAction SilentlyContinue
+          $zipExport = Invoke-NativeCommand -Name "project ZIP export" -Arguments @(
+            "export", "project", $projectDirectory,
+            "--as=ZiP",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--progress", "never",
+            "--plain",
+            "--language", "en",
+            "-o", $zipDestination)
+          $expectedZipPath = [System.IO.Path]::GetFullPath($zipDestination)
+          if ($zipExport.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($zipExport.StdErr) -or
+              $zipExport.StdOut.Trim() -ne $expectedZipPath -or
+              -not (Test-Path -LiteralPath $zipDestination -PathType Leaf)) {
+            throw "Published ZIP project export violated its artifact/stdout contract. ExitCode=$($zipExport.ExitCode) StdOut=$($zipExport.StdOut) StdErr=$($zipExport.StdErr)"
+          }
+          $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($zipDestination)
+          try {
+            if (-not ($zipArchive.Entries | Where-Object { $_.FullName -match "(^|/)src/App\.cs$" })) {
+              throw "Published ZIP project export did not contain src/App.cs."
+            }
+          }
+          finally {
+            $zipArchive.Dispose()
+          }
+
+          $sourceBytesAfterProjectExport =
+            [System.IO.File]::ReadAllBytes((Join-Path $sourceDirectory "App.cs"))
+          if ([Convert]::ToBase64String($sourceBytesBeforeProjectExport) -ne
+              [Convert]::ToBase64String($sourceBytesAfterProjectExport)) {
+            throw "Published project export modified the source file."
+          }
+
+          $analysis = Invoke-NativeCommand -Name "mixed-case analysis JSON" -Arguments @(
+            "analyze", $projectDirectory,
+            "--format=JsOn",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--plain",
+            "--language", "en")
+          if ($analysis.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($analysis.StdErr)) {
+            throw "Published mixed-case JSON analysis failed. ExitCode=$($analysis.ExitCode). StdErr=$($analysis.StdErr)"
+          }
+          try {
+            $analysisDocument = $analysis.StdOut | ConvertFrom-Json -Depth 32
+          }
+          catch {
+            throw "Published analysis stdout is not valid JSON: $($_.Exception.Message)"
+          }
+          if ($analysisDocument.kind -ne "devprojex-analysis" -or $analysis.StdOut.Contains([char] 0x1b)) {
+            throw "Published analysis JSON violated its machine-output contract."
+          }
+
+          $xmlContext = Invoke-NativeCommand -Name "mixed-case context XML" -Arguments @(
+            "export", "context", $projectDirectory,
+            "--view", "TrEe-CoNtEnT",
+            "--format", "XML",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--plain",
+            "--language", "en",
+            "-o", "-")
+          if ($xmlContext.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($xmlContext.StdErr)) {
+            throw "Published context XML failed. ExitCode=$($xmlContext.ExitCode). StdErr=$($xmlContext.StdErr)"
+          }
+          try {
+            [xml] $xmlDocument = $xmlContext.StdOut
+          }
+          catch {
+            throw "Published context stdout is not valid XML: $($_.Exception.Message)"
+          }
+          if ($xmlDocument.DocumentElement.LocalName -ne "devprojexContext" -or $xmlContext.StdOut.Contains([char] 0x1b)) {
+            throw "Published context XML violated its machine-output contract."
+          }
+
+          $plainContext = Invoke-NativeCommand -Name "plain context" -Arguments @(
+            "export", "context", $projectDirectory,
+            "--view", "tree",
+            "--format", "text",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--plain",
+            "--language", "en",
+            "-o", "-")
+          $forbiddenPlainCharacters = [char[]] @(0x1b, 0x2500, 0x2502, 0x256d, 0x256e, 0x256f, 0x2570)
+          if ($plainContext.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($plainContext.StdErr) -or
+              $plainContext.StdOut.IndexOfAny($forbiddenPlainCharacters) -ge 0) {
+            throw "Published --plain context contained terminal decoration or failed. ExitCode=$($plainContext.ExitCode)"
+          }
+
+          $noColorAnalysis = Invoke-NativeCommand `
+            -Name "NO_COLOR analysis" `
+            -Arguments @(
+              "analyze", $projectDirectory,
+              "--format", "text",
+              "--git-mode", "none",
+              "--exclude", "none",
+              "--language", "en") `
+            -Environment @{ "NO_COLOR" = "1" }
+          if ($noColorAnalysis.ExitCode -ne 0 -or $noColorAnalysis.StdOut.Contains([char] 0x1b)) {
+            throw "Published NO_COLOR invocation emitted ANSI or failed. ExitCode=$($noColorAnalysis.ExitCode)"
+          }
+
+          $dumbAnalysis = Invoke-NativeCommand `
+            -Name "TERM=dumb analysis" `
+            -Arguments @(
+              "analyze", $projectDirectory,
+              "--format", "text",
+              "--git-mode", "none",
+              "--exclude", "none",
+              "--language", "en") `
+            -Environment @{ "TERM" = "dumb" }
+          if ($dumbAnalysis.ExitCode -ne 0 -or $dumbAnalysis.StdOut.Contains([char] 0x1b)) {
+            throw "Published TERM=dumb invocation emitted ANSI or failed. ExitCode=$($dumbAnalysis.ExitCode)"
+          }
+
+          $plainColorConflict = Invoke-NativeCommand -Name "plain/color conflict" -Arguments @(
+            "analyze", $projectDirectory,
+            "--plain",
+            "--color", "always",
+            "--language", "en")
+          if ($plainColorConflict.ExitCode -ne 2 -or
+              -not [string]::IsNullOrEmpty($plainColorConflict.StdOut) -or
+              [string]::IsNullOrWhiteSpace($plainColorConflict.StdErr)) {
+            throw "Published --plain/--color always conflict did not return a clean usage error."
+          }
+
+          $dryRunDirectory = Join-Path $env:RUNNER_TEMP "devprojex-native-dry-run-${{ matrix.rid }}"
+          $dryRunDestination = Join-Path $dryRunDirectory "context.md"
+          Remove-Item -LiteralPath $dryRunDirectory -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $dryRunDirectory -Force | Out-Null
+          $dryRun = Invoke-NativeCommand -Name "context dry-run" -Arguments @(
+            "export", "context", $projectDirectory,
+            "--format", "markdown",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--dry-run",
+            "--language", "en",
+            "-o", $dryRunDestination)
+          $dryRunParentExists =
+            Test-Path -LiteralPath $dryRunDirectory -PathType Container
+          $dryRunDestinationExists =
+            Test-Path -LiteralPath $dryRunDestination
+          $dryRunArtifacts = @(
+            if ($dryRunParentExists) {
+              Get-ChildItem -LiteralPath $dryRunDirectory -Force
+            }
+          )
+          if ($dryRun.ExitCode -ne 0 -or
+              -not [string]::IsNullOrEmpty($dryRun.StdOut) -or
+              [string]::IsNullOrWhiteSpace($dryRun.StdErr) -or
+              -not $dryRunParentExists -or
+              $dryRunDestinationExists -or
+              $dryRunArtifacts.Count -ne 0) {
+            $artifactNames = @($dryRunArtifacts | ForEach-Object { $_.Name }) -join ", "
+            throw "Published dry-run violated its preflight/no-effects contract. ExitCode=$($dryRun.ExitCode) StdOut=$($dryRun.StdOut) StdErr=$($dryRun.StdErr) ParentExists=$dryRunParentExists DestinationExists=$dryRunDestinationExists Artifacts=$artifactNames"
+          }
+
+          $conflictDestination = Join-Path $env:RUNNER_TEMP "devprojex-native-conflict-${{ matrix.rid }}.md"
+          "preserve-me" | Set-Content -LiteralPath $conflictDestination -Encoding utf8NoBOM
+          $originalConflictBytes = [System.IO.File]::ReadAllBytes($conflictDestination)
+          $conflict = Invoke-NativeCommand -Name "existing destination conflict" -Arguments @(
+            "export", "context", $projectDirectory,
+            "--format", "markdown",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--language", "en",
+            "-o", $conflictDestination)
+          $actualConflictBytes = [System.IO.File]::ReadAllBytes($conflictDestination)
+          if ($conflict.ExitCode -ne 4 -or
+              -not [string]::IsNullOrEmpty($conflict.StdOut) -or
+              [string]::IsNullOrWhiteSpace($conflict.StdErr) -or
+              [Convert]::ToBase64String($originalConflictBytes) -ne
+                [Convert]::ToBase64String($actualConflictBytes)) {
+            throw "Published existing-destination conflict overwrote output or returned the wrong contract."
+          }
+
           Write-Host "Command-line smoke passed for ${{ matrix.rid }}."
+
+      - name: Published Single-File Extraction Contract
+        shell: pwsh
+        run: |
+          $env:DEVPROJEX_TUI_TEST_BINARY =
+            (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
+            -c Release `
+            --no-restore `
+            --filter "FullyQualifiedName~PublishedSingleFileExtractionProcessTests" `
+            --logger "console;verbosity=minimal"
+
+      - name: Published Completion Native Shell Integration
+        shell: pwsh
+        run: |
+          $env:DEVPROJEX_TUI_TEST_BINARY =
+            (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $env:DEVPROJEX_REQUIRED_COMPLETION_SHELLS = switch ($env:RUNNER_OS) {
+            "Linux" { "bash,zsh,fish,powershell" }
+            "macOS" { "zsh,powershell" }
+            default { "powershell" }
+          }
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
+            -c Release `
+            --no-restore `
+            --filter "FullyQualifiedName~GeneratedCompletionNativeShellIntegrationTests" `
+            --logger "console;verbosity=minimal"
+
+      - name: Enable Rootless Mount Namespace Gate (Linux x64)
+        if: ${{ matrix.rid == 'linux-x64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apparmor_userns_policy=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          apparmor_userns_state="${RUNNER_TEMP}/devprojex-apparmor-userns-original"
+          rm -f -- "$apparmor_userns_state"
+          if [[ -e "$apparmor_userns_policy" ]]; then
+            # GitHub's Ubuntu 24.04 runner blocks the rootless mount namespace used only by this safety probe.
+            cat "$apparmor_userns_policy" > "$apparmor_userns_state"
+            printf '0\n' | sudo tee "$apparmor_userns_policy" >/dev/null
+          fi
+          if ! unshare -Urnm true; then
+            echo "::error::The runner cannot create the rootless mount namespace required by the destination-safety gate."
+            exit 1
+          fi
+
+      - name: Nested-Mount Destination Safety Gate (Linux x64)
+        if: ${{ matrix.rid == 'linux-x64' }}
+        shell: pwsh
+        env:
+          DEVPROJEX_REQUIRE_ROOTLESS_MOUNT_TESTS: "1"
+        run: |
+          $filter = @(
+            "FullyQualifiedName~DestinationNestedMountProcessTests.AnalyzeRejectsAliasToFileSystemMountedInsideSource",
+            "FullyQualifiedName~DestinationNestedMountProcessTests.ContextForceRejectsFileBindAliasToMountedSourceFile"
+          ) -join "|"
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
+            -c Release `
+            --no-restore `
+            --filter $filter `
+            --logger "console;verbosity=minimal"
+
+      - name: Restore Rootless Mount Namespace Policy (Linux x64)
+        if: ${{ always() && matrix.rid == 'linux-x64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apparmor_userns_policy=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          apparmor_userns_state="${RUNNER_TEMP}/devprojex-apparmor-userns-original"
+          if [[ -f "$apparmor_userns_state" ]]; then
+            original_value="$(cat "$apparmor_userns_state")"
+            printf '%s\n' "$original_value" | sudo tee "$apparmor_userns_policy" >/dev/null
+            rm -f -- "$apparmor_userns_state"
+          fi
+
+      - name: Published Broken Pipe Smoke (Unix)
+        if: ${{ !startsWith(matrix.rid, 'win-') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe_path="$(pwd)/artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}"
+          project_dir="${RUNNER_TEMP}/devprojex-broken-pipe-${{ matrix.rid }}"
+          stderr_path="${RUNNER_TEMP}/devprojex-broken-pipe-${{ matrix.rid }}.stderr"
+          rm -rf -- "$project_dir"
+          rm -f -- "$stderr_path"
+          mkdir -p -- "$project_dir/src"
+          for index in $(seq 1 64); do
+            head -c 65536 /dev/zero | tr '\0' 'a' > "$project_dir/src/file-$index.txt"
+          done
+
+          "$exe_path" export context "$project_dir" \
+            --view content \
+            --format text \
+            --git-mode none \
+            --exclude none \
+            --plain \
+            --language en \
+            -o - \
+            2> "$stderr_path" | head -c 1 > /dev/null
+
+          if [[ -s "$stderr_path" ]]; then
+            echo "Expected a quiet broken-pipe exit; stderr was:"
+            cat "$stderr_path"
+            exit 1
+          fi
+
+      - name: Desktop IPC and Redirected EOF Smoke (Windows)
+        if: ${{ startsWith(matrix.rid, 'win-') }}
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-desktop-ipc-${{ matrix.rid }}"
+          New-Item -ItemType Directory -Force -Path $projectDirectory | Out-Null
+          "class App {}" | Set-Content -LiteralPath (Join-Path $projectDirectory "App.cs") -Encoding utf8NoBOM
+
+          function Invoke-DevProjexProcess {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string[]] $Arguments,
+              [int] $TimeoutMilliseconds = 30000
+            )
+
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $exePath
+            $startInfo.WorkingDirectory = $projectDirectory
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $Arguments) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+
+            $process = [System.Diagnostics.Process]::Start($startInfo)
+            try {
+              $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+              $stderrTask = $process.StandardError.ReadToEndAsync()
+              $outputTasks = [System.Threading.Tasks.Task]::WhenAll(
+                [System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask))
+              if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+                $process.Kill($true)
+                if (-not $process.WaitForExit(5000)) {
+                  throw "Timed-out DevProjex process did not terminate after tree kill: $($Arguments -join ' ')"
+                }
+                if (-not $outputTasks.Wait(5000)) {
+                  throw "Timed-out DevProjex process retained redirected handles: $($Arguments -join ' ')"
+                }
+                throw "DevProjex command timed out: $($Arguments -join ' ')"
+              }
+
+              if (-not $outputTasks.Wait(5000)) {
+                throw "A desktop child retained redirected CLI handles after exit: $($Arguments -join ' ')"
+              }
+
+              $stdout = $stdoutTask.GetAwaiter().GetResult()
+              $stderr = $stderrTask.GetAwaiter().GetResult()
+              if ($process.ExitCode -ne 0) {
+                throw "DevProjex command failed. ExitCode=$($process.ExitCode). Args=$($Arguments -join ' '). StdErr=$stderr"
+              }
+              if (-not [string]::IsNullOrEmpty($stderr)) {
+                throw "DevProjex command unexpectedly wrote to stderr. Args=$($Arguments -join ' '). StdErr=$stderr"
+              }
+
+              return [pscustomobject]@{
+                Stdout = $stdout
+                Stderr = $stderr
+              }
+            }
+            finally {
+              $process.Dispose()
+            }
+          }
+
+          $desktopProcessId = $null
+          $instanceId = $null
+          $expectedProjectPath = (Resolve-Path $projectDirectory).Path
+          try {
+            $open = Invoke-DevProjexProcess -Arguments @(
+              "open", $projectDirectory,
+              "--new-window",
+              "--wait",
+              "--preview",
+              "--view", "tree",
+              "--language", "en")
+            if ($open.Stdout.Trim() -ne (Resolve-Path $projectDirectory).Path) {
+              throw "Desktop open did not print the accepted project path. StdOut=$($open.Stdout)"
+            }
+
+            $list = Invoke-DevProjexProcess -Arguments @("ui", "list", "--format", "json", "--language", "en")
+            $instances = @(($list.Stdout | ConvertFrom-Json).instances)
+            $matches = @(
+              $instances |
+                Where-Object {
+                  [IO.Path]::GetFullPath([string]$_.projectPath) -eq $expectedProjectPath
+                })
+            if ($matches.Count -ne 1) {
+              throw "Expected one desktop instance for the smoke project, found $($matches.Count)."
+            }
+
+            $desktopProcessId = [int]$matches[0].processId
+            $instanceId = [string]$matches[0].instanceId
+            $status = Invoke-DevProjexProcess -Arguments @(
+              "ui", "status",
+              "--instance", $instanceId,
+              "--language", "en")
+            $statusResponse = $status.Stdout | ConvertFrom-Json
+            if (-not $statusResponse.ok -or $null -eq $statusResponse.state) {
+              throw "Desktop status returned an unsuccessful response. Response=$($status.Stdout)"
+            }
+            $state = $statusResponse.state
+            if (-not $state.startupReady -or
+                -not $state.projectLoaded -or
+                -not $state.previewOpen -or
+                $state.previewView -ne "tree") {
+              throw "Desktop did not apply the complete open --wait request. State=$($status.Stdout)"
+            }
+
+            Invoke-DevProjexProcess -Arguments @(
+              "ui", "preview", "close",
+              "--instance", $instanceId,
+              "--language", "en") | Out-Null
+          }
+          finally {
+            if ($null -eq $desktopProcessId) {
+              try {
+                $cleanupList = Invoke-DevProjexProcess -Arguments @("ui", "list", "--format", "json", "--language", "en")
+                $cleanupInstances = @(($cleanupList.Stdout | ConvertFrom-Json).instances)
+                $cleanupMatch = @(
+                  $cleanupInstances |
+                    Where-Object {
+                      [IO.Path]::GetFullPath([string]$_.projectPath) -eq $expectedProjectPath
+                    } |
+                    Select-Object -First 1)
+                if ($cleanupMatch.Count -eq 1) {
+                  $desktopProcessId = [int]$cleanupMatch[0].processId
+                }
+              }
+              catch {
+                Write-Warning "Could not resolve the desktop PID during failure cleanup: $($_.Exception.Message)"
+              }
+            }
+
+            if ($null -ne $desktopProcessId) {
+              $desktopProcess = Get-Process -Id $desktopProcessId -ErrorAction SilentlyContinue
+              if ($null -ne $desktopProcess) {
+                try {
+                  if ((Resolve-Path $desktopProcess.Path).Path -ne $exePath) {
+                    throw "Refusing to stop an unexpected process: $($desktopProcess.Path)"
+                  }
+
+                  $desktopProcess.Kill($true)
+                  if (-not $desktopProcess.WaitForExit(5000)) {
+                    throw "Desktop process $desktopProcessId did not terminate after tree kill."
+                  }
+                }
+                finally {
+                  $desktopProcess.Dispose()
+                }
+              }
+            }
+
+            $finalList = Invoke-DevProjexProcess -Arguments @("ui", "list", "--format", "json", "--language", "en")
+            $remainingInstances = @(($finalList.Stdout | ConvertFrom-Json).instances)
+            $remainingMatch = @(
+              $remainingInstances |
+                Where-Object {
+                  ($null -ne $desktopProcessId -and [int]$_.processId -eq $desktopProcessId) -or
+                  ($null -ne $instanceId -and [string]$_.instanceId -eq $instanceId) -or
+                  [IO.Path]::GetFullPath([string]$_.projectPath) -eq $expectedProjectPath
+                })
+            if ($remainingMatch.Count -ne 0) {
+              throw "Desktop registry retained the terminated smoke instance. Response=$($finalList.Stdout)"
+            }
+          }
+
+          Write-Host "Desktop IPC and redirected EOF smoke passed for ${{ matrix.rid }}."
 
       - name: PATH Wrapper Smoke (Unix)
         if: ${{ startsWith(matrix.rid, 'win-') == false }}
@@ -392,6 +976,7 @@ jobs:
             "#!/bin/sh",
             "# DevProjex terminal command wrapper",
             "# target: $exePath",
+            "export DEVPROJEX_TERMINAL_HOST=1",
             ("exec " + (ConvertTo-PosixSingleQuoted $exePath) + " " + '"$@"')
           ) | Set-Content -LiteralPath $wrapperPath -Encoding utf8NoBOM
           chmod +x $wrapperPath
@@ -446,8 +1031,8 @@ jobs:
             }
 
             foreach ($helpArgument in @("--help", "-h", "/?")) {
-              $stdout = Invoke-DevProjexPathCommand -Name "help-$($helpArgument -replace '[^A-Za-z0-9]+', '_')" -Arguments @($helpArgument)
-              if ($stdout -notmatch "Usage:") {
+              $stdout = Invoke-DevProjexPathCommand -Name "help-$($helpArgument -replace '[^A-Za-z0-9]+', '_')" -Arguments @($helpArgument, "--language", "en")
+              if ($stdout -notmatch "(?m)^USAGE\r?$") {
                 throw "PATH wrapper $helpArgument did not print usage text for ${{ matrix.rid }}. StdOut=$stdout"
               }
             }
@@ -458,38 +1043,48 @@ jobs:
               throw "PATH wrapper --version printed '$actualPathVersion' for ${{ matrix.rid }}, expected '$expectedVersion'."
             }
 
-            $reportOutput = Invoke-DevProjexPathCommand -Name "silent-report-stdout" -Arguments @(
-              "--silent",
-              "--path", $projectDirectory,
-              "--report", "-",
-              "--include-root", "src",
-              "--include-extension", "cs",
-              "--ignore", "none")
+            $reportOutput = Invoke-DevProjexPathCommand -Name "analyze-json-stdout" -Arguments @(
+              "analyze", $projectDirectory,
+              "--format", "json",
+              "--output", "-",
+              "--root", "src",
+              "--extension", "cs",
+              "--git-mode", "none",
+              "--exclude", "none",
+              "--language", "en")
 
-            if ($reportOutput -notmatch '"schemaVersion"' -or $reportOutput -notmatch '"rootPath"') {
+            if ($reportOutput -notmatch '"schemaVersion"' -or
+                $reportOutput -notmatch '"kind": "devprojex-analysis"' -or
+                $reportOutput -notmatch '"root"') {
               throw "PATH wrapper headless report did not print the expected JSON contract for ${{ matrix.rid }}. StdOut=$reportOutput"
             }
 
             $exportTreeOutput = Invoke-DevProjexPathCommand -Name "export-tree-stdout" -Arguments @(
-              "--path", $projectDirectory,
-              "--export", "tree",
+              "export", "context", $projectDirectory,
+              "--view", "tree",
               "--format", "json",
-              "--roots", "src",
-              "--ext", "cs",
-              "--ignore", "none")
+              "--output", "-",
+              "--root", "src",
+              "--extension", "cs",
+              "--git-mode", "none",
+              "--exclude", "none",
+              "--language", "en")
 
-            if ($exportTreeOutput -notmatch '"rootPath"' -or $exportTreeOutput -notmatch "App\.cs") {
+            if ($exportTreeOutput -notmatch '"kind": "devprojex-context"' -or $exportTreeOutput -notmatch "App\.cs") {
               throw "PATH wrapper export JSON tree did not print the expected payload for ${{ matrix.rid }}. StdOut=$exportTreeOutput"
             }
 
             $exportFilePath = Join-Path $workDirectory "context.txt"
             $exportFileOutput = Invoke-DevProjexPathCommand -Name "export-tree-content-file" -Arguments @(
-              $projectDirectory,
-              "--export", "tree-content",
-              "-o", $exportFilePath,
-              "--roots", "src",
-              "--ext", "cs",
-              "--ignore", "none")
+              "export", "context", $projectDirectory,
+              "--view", "tree-content",
+              "--format", "text",
+              "--output", $exportFilePath,
+              "--root", "src",
+              "--extension", "cs",
+              "--git-mode", "none",
+              "--exclude", "none",
+              "--language", "en")
 
             $expectedPathExportPath = (Resolve-Path $exportFilePath).Path
             $actualPathExportPath = $exportFileOutput.Trim()
@@ -520,32 +1115,39 @@ jobs:
           }
 
           $expectedVersion = $expectedVersionNode.InnerText.Trim()
-          $launcherPath = Join-Path $env:RUNNER_TEMP "devprojex.cmd"
+          $launcherRoot = Join-Path $env:RUNNER_TEMP "devprojex-official-launcher-${{ matrix.rid }}"
+          Remove-Item -LiteralPath $launcherRoot -Recurse -Force -ErrorAction SilentlyContinue
+          $env:DEVPROJEX_RELEASE_WINDOWS_LAUNCHER_TARGET = $exePath
+          $env:DEVPROJEX_RELEASE_WINDOWS_LAUNCHER_LOCAL_APP_DATA = $launcherRoot
+          try {
+            dotnet test Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj `
+              -c Release `
+              --no-restore `
+              --filter "FullyQualifiedName~TerminalCommandSetupCrossPlatformIntegrationTests.InstallOrRepair_ReleaseGateEnvironment_InstallsOfficialWindowsLauncherThroughPublicApi" `
+              --logger "console;verbosity=minimal"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Production terminal launcher installation failed for ${{ matrix.rid }}."
+            }
+          }
+          finally {
+            Remove-Item Env:DEVPROJEX_RELEASE_WINDOWS_LAUNCHER_TARGET -ErrorAction SilentlyContinue
+            Remove-Item Env:DEVPROJEX_RELEASE_WINDOWS_LAUNCHER_LOCAL_APP_DATA -ErrorAction SilentlyContinue
+          }
+
+          $launcherPath = [IO.Path]::Combine(
+            $launcherRoot,
+            "DevProjex",
+            "bin",
+            "devprojex.cmd")
+          if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+            throw "Production terminal launcher was not installed: $launcherPath"
+          }
           $stdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-help-stdout.txt"
           $stderrPath = Join-Path $env:RUNNER_TEMP "devprojex-launcher-help-stderr.txt"
-          $dllPath = [System.IO.Path]::ChangeExtension([string]$exePath, ".dll")
-
-          @(
-            "@echo off",
-            "rem DevProjex terminal command wrapper",
-            "rem target: $exePath",
-            "set `"DEVPROJEX_EXE=$exePath`"",
-            "set `"DEVPROJEX_DLL=$dllPath`"",
-            "if `"%~1`"==`"`" (",
-            "  start `"`" `"%DEVPROJEX_EXE%`"",
-            "  exit /b 0",
-            ")",
-            "if exist `"%DEVPROJEX_DLL%`" (",
-            "  dotnet `"%DEVPROJEX_DLL%`" %*",
-            "  exit /b %ERRORLEVEL%",
-            ")",
-            "`"%DEVPROJEX_EXE%`" %*",
-            "exit /b %ERRORLEVEL%"
-          ) | Set-Content -LiteralPath $launcherPath -Encoding ASCII
 
           foreach ($helpArgument in @("--help", "-h", "/?")) {
             Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
-            $cmdArguments = @("/d", "/c", "`"$launcherPath`"", $helpArgument)
+            $cmdArguments = @("/d", "/c", "`"$launcherPath`"", $helpArgument, "--language", "en")
             $process = Start-Process `
               -FilePath "cmd.exe" `
               -ArgumentList $cmdArguments `
@@ -562,7 +1164,7 @@ jobs:
               throw "Portable launcher $helpArgument smoke failed for ${{ matrix.rid }}. ExitCode=$($process.ExitCode). StdErr=$stderr"
             }
 
-            if ($stdout -notmatch "Usage:") {
+            if ($stdout -notmatch "(?m)^USAGE\r?$") {
               throw "Portable launcher $helpArgument smoke did not print usage text for ${{ matrix.rid }}. StdOut=$stdout StdErr=$stderr"
             }
           }
@@ -594,6 +1196,26 @@ jobs:
             throw "Portable launcher --version printed '$actualVersion' for ${{ matrix.rid }}, expected '$expectedVersion'. StdErr=$stderr"
           }
 
+          Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+          $usageArguments = @(
+            "/d", "/c", "`"$launcherPath`"",
+            "doctor", "--format", "invalid", "--language", "en")
+          $process = Start-Process `
+            -FilePath "cmd.exe" `
+            -ArgumentList $usageArguments `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -NoNewWindow `
+            -Wait `
+            -PassThru
+          $stdout = Get-Content -Raw -Path $stdoutPath -ErrorAction SilentlyContinue
+          $stderr = Get-Content -Raw -Path $stderrPath -ErrorAction SilentlyContinue
+          if ($process.ExitCode -ne 2 -or
+              -not [string]::IsNullOrEmpty($stdout) -or
+              [string]::IsNullOrWhiteSpace($stderr)) {
+            throw "Portable launcher did not preserve the real CLI usage-error contract. ExitCode=$($process.ExitCode). StdOut=$stdout StdErr=$stderr"
+          }
+
           $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-launcher-export-project-${{ matrix.rid }}"
           $sourceDirectory = Join-Path $projectDirectory "src"
           New-Item -ItemType Directory -Force -Path $sourceDirectory | Out-Null
@@ -603,12 +1225,15 @@ jobs:
           Remove-Item -LiteralPath $stdoutPath, $stderrPath, $exportPath -ErrorAction SilentlyContinue
           $cmdArguments = @(
             "/d", "/c", "`"$launcherPath`"",
-            $projectDirectory,
-            "--export", "tree-content",
-            "-o", $exportPath,
-            "--roots", "src",
-            "--ext", "cs",
-            "--ignore", "none")
+            "export", "context", $projectDirectory,
+            "--view", "tree-content",
+            "--format", "text",
+            "--output", $exportPath,
+            "--root", "src",
+            "--extension", "cs",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--language", "en")
           $process = Start-Process `
             -FilePath "cmd.exe" `
             -ArgumentList $cmdArguments `
@@ -641,3 +1266,69 @@ jobs:
           }
 
           Write-Host "Portable launcher smoke passed for ${{ matrix.rid }}."
+
+      - name: Portable Launcher ConPTY TUI Smoke (Windows x64)
+        if: ${{ matrix.rid == 'win-x64' }}
+        shell: pwsh
+        run: |
+          $launcherRoot = Join-Path $env:RUNNER_TEMP "devprojex-official-launcher-${{ matrix.rid }}"
+          $launcherPath = [IO.Path]::Combine(
+            $launcherRoot,
+            "DevProjex",
+            "bin",
+            "devprojex.cmd")
+          if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+            throw "Production terminal launcher was not installed: $launcherPath"
+          }
+
+          $env:DEVPROJEX_TUI_TEST_BINARY = $launcherPath
+          $filter = @(
+            "FullyQualifiedName~TerminalPtyJourneyTests.OpenCurrentProjectFromWelcomeReachesWorkspaceAndStaysAlive",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.SupportedTerminalSizeMatrixRemainsKeyboardUsableAndWithinViewport",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.ScreenModesExitExplicitlyAndRestoreTerminalState",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.TooSmallTerminalRecoversAfterResizeWithoutRestarting",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitMouseModeEnablesTrackingAndRestoresItOnExit",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitNoMouseModeIgnoresMouseInput",
+            "FullyQualifiedName~TerminalPlainPtyTests.PlainWorkspaceIsStableKeyboardAccessibleAndRestoresTerminal"
+          ) -join "|"
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
+            -c Release `
+            --no-restore `
+            --filter $filter `
+            --logger "console;verbosity=minimal"
+
+      - name: Published Native PTY TUI Smoke (Unix)
+        if: ${{ startsWith(matrix.rid, 'linux-') || startsWith(matrix.rid, 'osx-') }}
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -eq "macOS") {
+            # Keep the test host and forkpty child on one non-symlinked temp path.
+            $nativePtyTemp = Join-Path $env:RUNNER_TEMP "devprojex-native-pty-${{ matrix.rid }}"
+            New-Item -ItemType Directory -Path $nativePtyTemp -Force | Out-Null
+            $env:TMPDIR = $nativePtyTemp + [IO.Path]::DirectorySeparatorChar
+          }
+
+          $binaryPath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $env:DEVPROJEX_TUI_TEST_BINARY = $binaryPath
+          $env:DEVPROJEX_TUI_TEST_REPOSITORY_ROOT = (Resolve-Path ".").Path
+          $filter = @(
+            "FullyQualifiedName~TerminalPtyJourneyTests.OpenCurrentProjectFromWelcomeReachesWorkspaceAndStaysAlive",
+            "FullyQualifiedName~TerminalPtyJourneyTests.DynamicTerminalIdentityPreservesLiteralUnderscores",
+            "FullyQualifiedName~TerminalPreviewNavigationPtyTests.PreviewViewportAndFocusSurviveKeyboardNavigationOverlaysAndResize",
+            "FullyQualifiedName~TerminalRecentRepositoriesPtyTests.PopulatedCachedRepositoryOpensOfflineWithCleanIdentity",
+            "FullyQualifiedName~TerminalClonePtyTests.LocalRepositoryCloneThroughApplicationBinaryOpensWorkspaceAndPreservesSource",
+            "FullyQualifiedName~TerminalClonePtyTests.SshCloneCannotPromptThroughTheParentPty",
+            "FullyQualifiedName~TerminalLargePreviewPtyTests.FileBackedPreviewReachesFirstMiddleAndFinalSectionsWithDistinctScrollbars",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.SupportedTerminalSizeMatrixRemainsKeyboardUsableAndWithinViewport",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.ScreenModesExitExplicitlyAndRestoreTerminalState",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.TooSmallTerminalRecoversAfterResizeWithoutRestarting",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitMouseModeEnablesTrackingAndRestoresItOnExit",
+            "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitNoMouseModeIgnoresMouseInput",
+            "FullyQualifiedName~TerminalPlainPtyTests.PlainWorkspaceIsStableKeyboardAccessibleAndRestoresTerminal",
+            "FullyQualifiedName~TerminalSignalProcessRegressionTests"
+          ) -join "|"
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
+            -c Release `
+            --no-restore `
+            --filter $filter `
+            --logger "console;verbosity=minimal"

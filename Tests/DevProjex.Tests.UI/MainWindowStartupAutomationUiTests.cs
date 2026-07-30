@@ -1,13 +1,69 @@
 using System.Reflection;
 using System.Text.Json;
-using DevProjex.Infrastructure.Reports;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowStartupAutomationUiTests
 {
+	[AvaloniaFact]
+	public async Task DesktopOpenLanguage_IsSessionScopedWhileGuiLanguageActionPersistsPreference()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var settingsStore = new UserSettingsStore(() => appDataPath);
+		Assert.True(settingsStore.TrySave(new UserSettingsDb
+		{
+			ViewSettings = new AppViewSettings
+			{
+				PreferredLanguage = AppLanguage.En
+			}
+		}));
+
+		var startupOptions = new DesktopStartupOptions(
+			new DesktopOpenRequest(project.RootPath, Language: AppLanguage.En));
+		var services = AvaloniaCompositionRoot.CreateDefault(startupOptions, () => appDataPath);
+		var window = new MainWindow(startupOptions, services)
+		{
+			Width = 1500,
+			Height = 920
+		};
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"startup project to load before applying a Desktop open request");
+
+			var result = await InvokeDesktopInteractionAsync(
+				window,
+				new DesktopOpenProjectRequest(
+					new DesktopOpenRequest(project.RootPath, Language: AppLanguage.Ru)));
+
+			Assert.True(result.Success, result.ErrorCode ?? "Desktop open request failed.");
+			Assert.Equal(AppLanguage.Ru, services.Localization.CurrentLanguage);
+			Assert.Equal(
+				AppLanguage.En,
+				new UserSettingsStore(() => appDataPath).Load().ViewSettings.PreferredLanguage);
+
+			InvokeGuiLanguageAction(window, "OnLangDe");
+
+			Assert.Equal(AppLanguage.De, services.Localization.CurrentLanguage);
+			Assert.Equal(
+				AppLanguage.De,
+				new UserSettingsStore(() => appDataPath).Load().ViewSettings.PreferredLanguage);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task OpenFolder_RelativePath_NormalizesCurrentPathAndTitle()
 	{
@@ -21,7 +77,7 @@ public sealed class MainWindowStartupAutomationUiTests
 		MainWindow? window = null;
 		try
 		{
-			var options = CommandLineOptions.Empty;
+			var options = DesktopStartupOptions.Default;
 			var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
 			window = new MainWindow(options, services)
 			{
@@ -73,10 +129,8 @@ public sealed class MainWindowStartupAutomationUiTests
 		db = recentStore.AddFolder(db, firstPath);
 		db = recentStore.AddFolder(db, secondPath);
 
-		var options = CommandLineOptions.Empty with
-		{
-			Ui = StartupUiOptions.Default with { OpenLastProject = true }
-		};
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(UseLastProject: true, Language: AppLanguage.En));
 		var window = CreateStartupWindow(options, appDataPath);
 
 		try
@@ -110,7 +164,8 @@ public sealed class MainWindowStartupAutomationUiTests
 		db = recentStore.AddFolder(db, existingPath);
 		db = recentStore.AddFolder(db, missingPath);
 
-		var options = ParseValidOptions(CommandLineOptionTokens.Last);
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(UseLastProject: true, Language: AppLanguage.En));
 		var window = CreateStartupWindow(options, appDataPath);
 
 		try
@@ -135,15 +190,13 @@ public sealed class MainWindowStartupAutomationUiTests
 	{
 		using var project = UiTestProject.CreateDefault();
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
-		var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false)
-		{
-			Ui = StartupUiOptions.Default with
-			{
-				OpenPreview = true,
-				PreviewMode = StartupPreviewMode.TreeContent,
-				TreeFormat = TreeTextFormat.Markdown
-			}
-		};
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(
+				ProjectPath: project.RootPath,
+				OpenPreview: true,
+				PreviewView: DesktopPreviewView.TreeContent,
+				TreeFormat: TreeTextFormat.Markdown,
+				Language: AppLanguage.En));
 		var window = CreateStartupWindow(options, appDataPath);
 
 		try
@@ -177,10 +230,13 @@ public sealed class MainWindowStartupAutomationUiTests
 	{
 		using var project = UiTestProject.CreateDefault();
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
-		var options = ParseValidOptions(
-			$"{CommandLineOptionTokens.Path}={project.RootPath}",
-			$"{CommandLineOptionTokens.PreviewMode}=tree-and-content",
-			$"{CommandLineOptionTokens.TreeFormat}=xml");
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(
+				ProjectPath: project.RootPath,
+				OpenPreview: true,
+				PreviewView: DesktopPreviewView.TreeContent,
+				TreeFormat: TreeTextFormat.Xml,
+				Language: AppLanguage.En));
 		var window = CreateStartupWindow(options, appDataPath);
 
 		try
@@ -214,10 +270,11 @@ public sealed class MainWindowStartupAutomationUiTests
 	{
 		using var project = UiTestProject.CreateDefault();
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
-		var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false)
-		{
-			Ui = StartupUiOptions.Default with { TreeFilter = "Services" }
-		};
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(
+				ProjectPath: project.RootPath,
+				Filter: "Services",
+				Language: AppLanguage.En));
 		var window = CreateStartupWindow(options, appDataPath);
 
 		try
@@ -242,9 +299,11 @@ public sealed class MainWindowStartupAutomationUiTests
 	{
 		using var project = UiTestProject.CreateDefault();
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
-		var options = ParseValidOptions(
-			$"{CommandLineOptionTokens.Path}={project.RootPath}",
-			$"{CommandLineOptionTokens.TreeFilter}=Services");
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(
+				ProjectPath: project.RootPath,
+				Filter: "Services",
+				Language: AppLanguage.En));
 		var window = CreateStartupWindow(options, appDataPath);
 
 		try
@@ -269,10 +328,12 @@ public sealed class MainWindowStartupAutomationUiTests
 	{
 		using var project = UiTestProject.CreateDefault();
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
-		var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false)
-		{
-			Ui = StartupUiOptions.Default with { PreviewSearch = "Preview" }
-		};
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(
+				ProjectPath: project.RootPath,
+				OpenPreview: true,
+				Search: "Preview",
+				Language: AppLanguage.En));
 		var window = CreateStartupWindow(options, appDataPath);
 
 		try
@@ -304,10 +365,13 @@ public sealed class MainWindowStartupAutomationUiTests
 			TestContext.Current.CancellationToken);
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
 		var outputPath = Path.Combine(project.AppDataPath, "session-metrics", "session.json");
-		var options = ParseValidOptions(
-			CommandLineOptionTokens.SessionMetrics, project.RootPath,
-			CommandLineOptionTokens.SessionMetricsOutput, outputPath,
-			CommandLineOptionTokens.PreviewSearch, privateSearchQuery);
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(
+				ProjectPath: project.RootPath,
+				OpenPreview: true,
+				Search: privateSearchQuery,
+				Language: AppLanguage.En),
+			new SessionMetricsOptions(true, project.RootPath, outputPath));
 		var window = CreateStartupWindow(options, appDataPath);
 
 		window.Show();
@@ -341,10 +405,10 @@ public sealed class MainWindowStartupAutomationUiTests
 		using var project = UiTestProject.CreateDefault();
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
 		var outputPath = Path.Combine(project.AppDataPath, "session-metrics", "ui-benchmark-session.json");
-		var options = ParseValidOptions(
-			CommandLineOptionTokens.SessionMetrics, project.RootPath,
-			CommandLineOptionTokens.SessionMetricsOutput, outputPath,
-			CommandLineOptionTokens.UiBenchmarkScript, "standard");
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(ProjectPath: project.RootPath, Language: AppLanguage.En),
+			new SessionMetricsOptions(true, project.RootPath, outputPath),
+			DesktopDiagnosticScenario.Standard);
 		var window = CreateStartupWindow(options, appDataPath);
 
 		try
@@ -392,10 +456,10 @@ public sealed class MainWindowStartupAutomationUiTests
 		using var project = UiTestProject.CreateDefault();
 		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
 		var outputPath = Path.Combine(project.AppDataPath, "session-metrics", "search-retention-session.json");
-		var options = ParseValidOptions(
-			CommandLineOptionTokens.SessionMetrics, project.RootPath,
-			CommandLineOptionTokens.SessionMetricsOutput, outputPath,
-			CommandLineOptionTokens.UiBenchmarkScript, "preview-search-retention");
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(ProjectPath: project.RootPath, Language: AppLanguage.En),
+			new SessionMetricsOptions(true, project.RootPath, outputPath),
+			DesktopDiagnosticScenario.PreviewSearchRetention);
 		var window = CreateStartupWindow(options, appDataPath);
 
 		try
@@ -430,112 +494,7 @@ public sealed class MainWindowStartupAutomationUiTests
 		}
 	}
 
-	[AvaloniaFact]
-	public async Task StartupReport_WritesReportAfterCommandLineProjectLoad()
-	{
-		using var project = UiTestProject.CreateDefault();
-		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
-		Directory.CreateDirectory(appDataPath);
-		var reportPath = Path.Combine(project.AppDataPath, "startup-report.json");
-		var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false)
-		{
-			Report = new StartupReportOptions(true, reportPath, StartupReportFormat.Json),
-			IncludeRootFolders = ["src"],
-			IncludeExtensions = [".cs"],
-			IgnoreOptionsSpecified = true,
-			IgnoreOptions = []
-		};
-		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
-		var window = new MainWindow(options, services)
-		{
-			Width = 1500,
-			Height = 920
-		};
-		UiTestDriver.TrackTopLevelWindow(window);
-
-		try
-		{
-			window.Show();
-
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => UiTestDriver.GetViewModel(window).IsProjectLoaded && File.Exists(reportPath),
-				"startup report to be written after project load");
-
-			var json = await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken);
-			using var document = JsonDocument.Parse(json);
-			var root = document.RootElement;
-			Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
-			Assert.Equal(project.RootPath, root.GetProperty("rootPath").GetString());
-			Assert.Equal("src", root.GetProperty("selection").GetProperty("selectedRootFolders")[0].GetString());
-			Assert.Equal(".cs", root.GetProperty("selection").GetProperty("selectedExtensions")[0].GetString());
-			Assert.Empty(root.GetProperty("selection").GetProperty("selectedIgnoreOptions").EnumerateArray());
-			Assert.True(root.GetProperty("inventory").GetProperty("tree").GetProperty("fileCount").GetInt32() > 0);
-		}
-		finally
-		{
-			window.Close();
-		}
-	}
-
-	[AvaloniaFact]
-	public async Task StartupReport_WithoutExplicitPath_UsesDefaultDocumentsReportFolder()
-	{
-		using var project = UiTestProject.CreateDefault();
-		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
-		var documentsPath = Path.Combine(project.AppDataPath, "Documents");
-		Directory.CreateDirectory(appDataPath);
-		var expectedReportPath = Path.Combine(
-			documentsPath,
-			"DevProjex",
-			"reports",
-			"devprojex-report-2026-06-19_11-12-13-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json");
-		var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false)
-		{
-			Report = new StartupReportOptions(true, null, StartupReportFormat.Json),
-			IncludeRootFolders = ["src"],
-			IncludeExtensions = [".cs"],
-			IgnoreOptionsSpecified = true,
-			IgnoreOptions = []
-		};
-		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
-		{
-			ReportPathResolver = new ReportPathResolver(
-				specialFolderPathProvider: folder => folder == Environment.SpecialFolder.MyDocuments ? documentsPath : string.Empty,
-				utcNowProvider: () => new DateTimeOffset(2026, 6, 19, 11, 12, 13, TimeSpan.Zero),
-				reportIdProvider: () => Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
-		};
-		var window = new MainWindow(options, services)
-		{
-			Width = 1500,
-			Height = 920
-		};
-		UiTestDriver.TrackTopLevelWindow(window);
-
-		try
-		{
-			window.Show();
-
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => UiTestDriver.GetViewModel(window).IsProjectLoaded && File.Exists(expectedReportPath),
-				"startup report to be written to the default report folder");
-
-			var json = await File.ReadAllTextAsync(expectedReportPath, TestContext.Current.CancellationToken);
-			using var document = JsonDocument.Parse(json);
-			var root = document.RootElement;
-			Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
-			Assert.Equal(project.RootPath, root.GetProperty("rootPath").GetString());
-			Assert.Equal("src", root.GetProperty("selection").GetProperty("selectedRootFolders")[0].GetString());
-			Assert.Equal(".cs", root.GetProperty("selection").GetProperty("selectedExtensions")[0].GetString());
-		}
-		finally
-		{
-			window.Close();
-		}
-	}
-
-	private static MainWindow CreateStartupWindow(CommandLineOptions options, string appDataPath)
+	private static MainWindow CreateStartupWindow(DesktopStartupOptions options, string appDataPath)
 	{
 		Directory.CreateDirectory(appDataPath);
 		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
@@ -548,11 +507,25 @@ public sealed class MainWindowStartupAutomationUiTests
 		return window;
 	}
 
-	private static CommandLineOptions ParseValidOptions(params string[] args)
+	private static async Task<DesktopInteractionResult> InvokeDesktopInteractionAsync(
+		MainWindow window,
+		DesktopInteractionRequest request)
 	{
-		var result = CommandLineOptions.Parse(args);
-		Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors.Select(static error => error.Message)));
-		return result.Options;
+		var method = typeof(MainWindow).GetMethod(
+			"HandleDesktopInteractionAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		var invocation = method.Invoke(window, [request, CancellationToken.None]);
+		return await Assert.IsAssignableFrom<Task<DesktopInteractionResult>>(invocation);
+	}
+
+	private static void InvokeGuiLanguageAction(MainWindow window, string methodName)
+	{
+		var method = typeof(MainWindow).GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method.Invoke(window, [null, new global::Avalonia.Interactivity.RoutedEventArgs()]);
 	}
 
 	private static bool HasSuccessfulBenchmarkStep(JsonElement item, string stepName)

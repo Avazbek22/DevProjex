@@ -1,0 +1,30 @@
+ DevProjex Terminal · <PROJECT>
+ <PROJECT_ROOT>
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
+│v [x] <PROJECT>               ││<PROJECT>                               │
+│  > [x] src       ┌┤Export summary├───────────────────────────────────────────────────────────────┐                   │
+│    [x] global.jso│ Output kind: Export context                                                 ▲ │                   │
+│    [x] readme.md │ View: Tree                                                                  █ │                   │
+│                  │ Format: ASCII                                                               █ │                   │
+│                  │ Files: 4                                                                    █ │                   │
+│                  │ Folders: 3                                                                  █ │                   │
+│                  │ Size: 76 B                                                                  █ │                   │
+│                  │ Characters: 247                                                             █ │                   │
+│                  │ Estimated tokens: 62                                                        █ │                   │
+│                  │ Destination:                                                                █ │                   │
+│                  │ <OUTPUT_ROOT>\context-out█ │                   │
+│                  │ put.md                                                                      █ │                   │
+│                  │ Destination state: Ready                                                    █ │                   │
+│                  │ Git filtering: Use .gitignore                                               █ │                   │
+│                  │ Exclusions: Smart ignore, Hidden folders, Hidden files, dot folders, dot    ░ │                   │
+│                  │ files, Empty folders, Empty files, Files without extension                  ▼ │                   │
+│                  │                                                                               │                   │
+│                  │                                                                               │                   │
+│                  │                    ⟦ Cancel ⟧▖ ⟦ Dry run ⟧▖ ⟦► Export ◄⟧▖                     │                   │
+│                  │                    ▝▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▘                     │                   │
+│                  └───────────────────────────────────────────────────────────────────────────────┘                   │
+│                                                     ││ Files 4  |  Lines 1-8/8                                       │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

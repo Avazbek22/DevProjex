@@ -1,0 +1,30 @@
+
+  DevProjex Terminal                                                                                              v<VERSION>
+  Choose a workspace action. No folder is scanned until you open it.
+
+  Current directory                                                                            Current folder is ready
+  <PROJECT_ROOT>
+
+  ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
+  │  Open current directory                │  │ Select a folder without scanning anything until you confirm it.      │
+  │  Recent workspaces                     │  │                                                                      │
+  │> Browse folder                         │  │                                                                      │
+  │  Clone repository                      │  │                                                                      │
+  │  Open Desktop                          │  │                                                                      │
+  │  Help                                  │  │                                                                      │
+  │  Exit                                  │  │                                                                      │
+  └────────────────────────────────────────┘  └──────────────────────────────────────────────────────────────────────┘
+
+  Direct automation: devprojex analyze .  |  devprojex export context . -o context.md
+
+
+
+
+
+
+
+
+
+
+
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

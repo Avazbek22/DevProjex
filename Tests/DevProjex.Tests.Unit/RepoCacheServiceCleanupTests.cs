@@ -52,7 +52,7 @@ public sealed class RepoCacheServiceCleanupTests : IDisposable
     }
 
     [Fact]
-    public void CleanupStaleCache_RemovesDirectoriesOlderThan24Hours()
+    public void CleanupStaleCache_PreservesCompletedRepositoriesRegardlessOfAge()
     {
         // Arrange
         var oldDir = _service.CreateRepositoryDirectory("https://github.com/user/old-repo");
@@ -65,7 +65,19 @@ public sealed class RepoCacheServiceCleanupTests : IDisposable
         _service.CleanupStaleCacheOnStartup();
 
         // Assert
-        Assert.False(Directory.Exists(oldDir), "Directory older than 24 hours should be removed");
+        Assert.True(Directory.Exists(oldDir), "Completed repository caches must not expire by age");
+        _service.DeleteRepositoryDirectory(oldDir);
+    }
+
+    [Fact]
+    public void CleanupStaleCache_RemovesOnlyAbandonedStagingDirectories()
+    {
+        var staging = _service.CreateRepositoryStagingDirectory("https://github.com/user/staging");
+        new DirectoryInfo(staging).CreationTimeUtc = DateTime.UtcNow.AddHours(-25);
+
+        _service.CleanupStaleCacheOnStartup();
+
+        Assert.False(Directory.Exists(staging));
     }
 
     [Fact]
@@ -255,7 +267,7 @@ public sealed class RepoCacheServiceCleanupTests : IDisposable
     }
 
     [Fact]
-    public void CleanupStaleCache_WithMixedAges_OnlyRemovesOld()
+    public void CleanupStaleCache_WithMixedAges_PreservesPublishedRepositories()
     {
         // Arrange
         var recentDir = _service.CreateRepositoryDirectory("https://github.com/user/recent");
@@ -273,8 +285,8 @@ public sealed class RepoCacheServiceCleanupTests : IDisposable
 
             // Assert
             Assert.True(Directory.Exists(recentDir), "Recent directory should remain");
-            Assert.False(Directory.Exists(oldDir1), "Old directory 1 should be removed");
-            Assert.False(Directory.Exists(oldDir2), "Old directory 2 should be removed");
+            Assert.True(Directory.Exists(oldDir1), "Published repository 1 should remain");
+            Assert.True(Directory.Exists(oldDir2), "Published repository 2 should remain");
         }
         finally
         {

@@ -1,0 +1,158 @@
+name: TUI or terminal compatibility bug
+description: Report keyboard, layout, PTY, mouse, screen-mode, or terminal-restoration defects.
+title: "[TUI] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Terminal defects are environment-sensitive. Complete the fields below and
+        remove credentials, repository contents, and private URLs before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: DevProjex version
+      placeholder: "Output of: devprojex --version"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: architecture
+    attributes:
+      label: Architecture
+      placeholder: "x64, arm64"
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal emulator and version
+      placeholder: "Windows Terminal 1.x, WezTerm, Kitty, GNOME Terminal, iTerm2"
+    validations:
+      required: true
+  - type: input
+    id: shell
+    attributes:
+      label: Shell and version
+      placeholder: "PowerShell 7.5, bash 5.2, zsh 5.9, fish 4.0"
+    validations:
+      required: true
+  - type: input
+    id: term
+    attributes:
+      label: TERM
+      placeholder: "xterm-256color, screen-256color, dumb, unset"
+    validations:
+      required: true
+  - type: input
+    id: locale
+    attributes:
+      label: Locale
+      placeholder: "en_US.UTF-8, ru_RU.UTF-8"
+    validations:
+      required: true
+  - type: input
+    id: size
+    attributes:
+      label: Terminal size
+      placeholder: "80x24"
+    validations:
+      required: true
+  - type: dropdown
+    id: multiplexer
+    attributes:
+      label: Multiplexer
+      options:
+        - None
+        - tmux
+        - zellij
+        - screen
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Remote or virtualized environment
+      options:
+        - None
+        - SSH
+        - WSL
+        - Container
+        - SSH and tmux/zellij
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: mouse
+    attributes:
+      label: Mouse mode
+      options:
+        - Default
+        - "--mouse"
+        - "--no-mouse"
+    validations:
+      required: true
+  - type: dropdown
+    id: screen
+    attributes:
+      label: Screen mode
+      options:
+        - auto
+        - inline
+        - alternate
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include the exact invocation and keyboard or mouse sequence.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: State whether the cursor, colors, mouse tracking, or screen buffer remained changed.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor JSON
+      description: Paste redacted output from `devprojex doctor --format json`.
+      render: json
+  - type: textarea
+    id: recording
+    attributes:
+      label: Screenshot or recording
+      description: Attach only if it contains no sensitive project data.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: The workflow also fails without the mouse, or the report is specifically about mouse behavior.
+          required: true
+        - label: I removed credentials and private project content.
+          required: true
+        - label: I searched existing issues and discussions.
+          required: true

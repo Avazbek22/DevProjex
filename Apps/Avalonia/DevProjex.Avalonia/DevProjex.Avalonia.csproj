@@ -35,11 +35,23 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\Application\Application.csproj" />
     <ProjectReference Include="..\..\..\Infrastructure\Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Terminal\DevProjex.Terminal\DevProjex.Terminal.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <AvaloniaXaml Update="Views\FilterBarView.axaml" />
   </ItemGroup>
+
+  <Target
+    Name="RemovePackageSymbolsFromSingleFilePublish"
+    BeforeTargets="_ComputeFilesToBundle"
+    Condition="'$(PublishSingleFile)' == 'true' and '$(DebugSymbols)' != 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish
+        Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <AvaloniaResource Include="..\..\..\Assets\IconPacks\Default\UIFilter.png">

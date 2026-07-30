@@ -27,6 +27,10 @@ public sealed class TreeExportService
 	private const string IndentSpace = "    ";
 	private const string BranchMiddle = "├── ";
 	private const string BranchLast = "└── ";
+	private const string PlainIndentPipe = "|   ";
+	private const string PlainBranchMiddle = "|-- ";
+	private const string PlainBranchLast = "`-- ";
+	private const int MaximumTreeTextWriteCharacters = 4 * 1024;
 
 	public string BuildFullTree(string rootPath, TreeNodeDescriptor root)
 		=> BuildFullTree(rootPath, root, TreeTextFormat.Ascii);
@@ -36,28 +40,159 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		TreeTextFormat format,
 		string? displayRootPath = null,
-		string? displayRootName = null)
+		string? displayRootName = null,
+		bool includeRootPath = true)
 	{
+		ValidateFormat(format);
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 
 		return format switch
 		{
-			TreeTextFormat.Json => BuildFullTreeJson(outputRootPath, root),
-			TreeTextFormat.Xml => BuildFullTreeXml(outputRootPath, root),
-			TreeTextFormat.Markdown => BuildFullTreeMarkdown(outputRootPath, root),
-			_ => BuildFullTreeAscii(outputRootPath, outputRootName, root)
+			TreeTextFormat.Ascii =>
+				BuildFullTreeAscii(outputRootPath, outputRootName, root, includeRootPath),
+			TreeTextFormat.Json => includeRootPath
+				? BuildFullTreeJson(outputRootPath, root)
+				: BuildNamedTreeJson(outputRootName, root),
+			TreeTextFormat.Xml => includeRootPath
+				? BuildFullTreeXml(outputRootPath, root)
+				: BuildNamedTreeXml(outputRootName, root),
+			TreeTextFormat.Markdown => includeRootPath
+				? BuildFullTreeMarkdown(outputRootPath, root)
+				: BuildNamedTreeMarkdown(outputRootName, root),
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
 		};
 	}
 
-	private static string BuildFullTreeAscii(string outputRootPath, string outputRootName, TreeNodeDescriptor root)
+	public string BuildFullTreePlain(
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath = null,
+		string? displayRootName = null,
+		bool includeRootPath = true)
+	{
+		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
+			? rootPath
+			: displayRootPath;
+		var outputRootName = ResolveRootDisplayName(root, displayRootName);
+		var output = new StringBuilder();
+		if (includeRootPath)
+		{
+			output.Append(outputRootPath).AppendLine(":");
+			output.AppendLine();
+			output.Append(PlainBranchMiddle).AppendLine(outputRootName);
+			AppendPlain(root, PlainIndentPipe, output);
+		}
+		else
+		{
+			output.AppendLine(outputRootName);
+			AppendPlain(root, string.Empty, output);
+		}
+		return output.ToString();
+	}
+
+	public Task WriteFullTreeAsync(
+		TextWriter destination,
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath = null,
+		string? displayRootName = null,
+		bool includeRootPath = true,
+		bool includeFinalLineEnding = true,
+		CancellationToken cancellationToken = default) =>
+		WriteFullTreeTextAsync(
+			destination,
+			rootPath,
+			root,
+			displayRootPath,
+			displayRootName,
+			includeRootPath,
+			includeFinalLineEnding,
+			plain: false,
+			cancellationToken);
+
+	public Task WriteFullTreePlainAsync(
+		TextWriter destination,
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath = null,
+		string? displayRootName = null,
+		bool includeRootPath = true,
+		bool includeFinalLineEnding = true,
+		CancellationToken cancellationToken = default) =>
+		WriteFullTreeTextAsync(
+			destination,
+			rootPath,
+			root,
+			displayRootPath,
+			displayRootName,
+			includeRootPath,
+			includeFinalLineEnding,
+			plain: true,
+			cancellationToken);
+
+	public int CalculateFullTreeLongestBacktickRun(
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath = null,
+		string? displayRootName = null,
+		bool includeRootPath = true,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(root);
+		cancellationToken.ThrowIfCancellationRequested();
+
+		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
+			? rootPath
+			: displayRootPath;
+		var longest = includeRootPath
+			? FindLongestCharacterRun(outputRootPath, '`')
+			: 0;
+		longest = Math.Max(
+			longest,
+			FindLongestCharacterRun(ResolveRootDisplayName(root, displayRootName), '`'));
+
+		var frames = new List<TreeTraversalFrame> { new(root) };
+		while (frames.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var frame = frames[^1];
+			if (frame.NextChildIndex >= frame.Node.Children.Count)
+			{
+				frames.RemoveAt(frames.Count - 1);
+				continue;
+			}
+
+			var child = frame.Node.Children[frame.NextChildIndex++];
+			longest = Math.Max(
+				longest,
+				FindLongestCharacterRun(child.DisplayName, '`'));
+			if (child.Children.Count > 0)
+				frames.Add(new TreeTraversalFrame(child));
+		}
+
+		return longest;
+	}
+
+	private static string BuildFullTreeAscii(
+		string outputRootPath,
+		string outputRootName,
+		TreeNodeDescriptor root,
+		bool includeRootPath = true)
 	{
 		var sb = new StringBuilder();
-		sb.Append(outputRootPath).AppendLine(":");
-		sb.AppendLine();
-
-		sb.Append("├── ").AppendLine(outputRootName);
-		AppendAscii(root, "│   ", sb);
+		if (includeRootPath)
+		{
+			sb.Append(outputRootPath).AppendLine(":");
+			sb.AppendLine();
+			sb.Append("├── ").AppendLine(outputRootName);
+			AppendAscii(root, "│   ", sb);
+		}
+		else
+		{
+			sb.AppendLine(outputRootName);
+			AppendAscii(root, string.Empty, sb);
+		}
 
 		return sb.ToString();
 	}
@@ -69,6 +204,7 @@ public sealed class TreeExportService
 		string? displayRootPath = null,
 		string? displayRootName = null)
 	{
+		ValidateFormat(format);
 		if (format != TreeTextFormat.Ascii)
 			return ExportOutputMetricsCalculator.FromText(
 				BuildFullTree(rootPath, root, format, displayRootPath, displayRootName));
@@ -89,6 +225,7 @@ public sealed class TreeExportService
 		string? displayRootPath = null,
 		string? displayRootName = null)
 	{
+		ValidateFormat(format);
 		var includedPaths = new HashSet<string>(PathComparer.Default);
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths))
 			return string.Empty;
@@ -115,10 +252,12 @@ public sealed class TreeExportService
 
 		return format switch
 		{
+			TreeTextFormat.Ascii =>
+				BuildSelectedTreeAscii(outputRootPath, outputRootName, root, includedPaths),
 			TreeTextFormat.Json => BuildSelectedTreeJson(outputRootPath, root, includedPaths),
 			TreeTextFormat.Xml => BuildSelectedTreeXml(outputRootPath, root, includedPaths),
 			TreeTextFormat.Markdown => BuildSelectedTreeMarkdown(outputRootPath, root, includedPaths),
-			_ => BuildSelectedTreeAscii(outputRootPath, outputRootName, root, includedPaths)
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
 		};
 	}
 
@@ -146,6 +285,7 @@ public sealed class TreeExportService
 		string? displayRootPath = null,
 		string? displayRootName = null)
 	{
+		ValidateFormat(format);
 		var includedPaths = new HashSet<string>(PathComparer.Default);
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths))
 			return ExportOutputMetrics.Empty;
@@ -178,6 +318,18 @@ public sealed class TreeExportService
 		return false;
 	}
 
+	private static void ValidateFormat(TreeTextFormat format)
+	{
+		if (format is not (
+			    TreeTextFormat.Ascii or
+			    TreeTextFormat.Json or
+			    TreeTextFormat.Xml or
+			    TreeTextFormat.Markdown))
+		{
+			throw new ArgumentOutOfRangeException(nameof(format), format, null);
+		}
+	}
+
 	private static void AppendAscii(TreeNodeDescriptor node, string indent, StringBuilder sb)
 	{
 		var childCount = node.Children.Count;
@@ -199,6 +351,189 @@ public sealed class TreeExportService
 				});
 				AppendAscii(child, nextIndent, sb);
 			}
+		}
+	}
+
+	private static async Task WriteFullTreeTextAsync(
+		TextWriter destination,
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath,
+		string? displayRootName,
+		bool includeRootPath,
+		bool includeFinalLineEnding,
+		bool plain,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(destination);
+		ArgumentNullException.ThrowIfNull(root);
+		cancellationToken.ThrowIfCancellationRequested();
+
+		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
+			? rootPath
+			: displayRootPath;
+		var outputRootName = ResolveRootDisplayName(root, displayRootName);
+		var output = new TreeTextLineWriter(destination, cancellationToken);
+		var ancestorBranches = new List<bool>();
+
+		if (includeRootPath)
+		{
+			await output.BeginLineAsync().ConfigureAwait(false);
+			await output.WriteAsync(outputRootPath).ConfigureAwait(false);
+			await output.WriteAsync(":").ConfigureAwait(false);
+			await output.BeginLineAsync().ConfigureAwait(false);
+			await output.BeginLineAsync().ConfigureAwait(false);
+			await output.WriteAsync(plain ? PlainBranchMiddle : BranchMiddle)
+				.ConfigureAwait(false);
+			await output.WriteAsync(outputRootName).ConfigureAwait(false);
+			ancestorBranches.Add(false);
+		}
+		else
+		{
+			await output.BeginLineAsync().ConfigureAwait(false);
+			await output.WriteAsync(outputRootName).ConfigureAwait(false);
+		}
+
+		// Frames retain only the current directory chain, so a wide tree cannot
+		// turn traversal state into another full-document allocation.
+		var frames = new List<TreeTraversalFrame> { new(root) };
+		while (frames.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var frame = frames[^1];
+			if (frame.NextChildIndex >= frame.Node.Children.Count)
+			{
+				frames.RemoveAt(frames.Count - 1);
+				if (frames.Count > 0)
+					ancestorBranches.RemoveAt(ancestorBranches.Count - 1);
+				continue;
+			}
+
+			var childIndex = frame.NextChildIndex++;
+			var child = frame.Node.Children[childIndex];
+			var isLast = childIndex == frame.Node.Children.Count - 1;
+			await output.BeginLineAsync().ConfigureAwait(false);
+			foreach (var ancestorIsLast in ancestorBranches)
+			{
+				await output.WriteAsync(
+						ancestorIsLast
+							? IndentSpace
+							: plain
+								? PlainIndentPipe
+								: IndentPipe)
+					.ConfigureAwait(false);
+			}
+			await output.WriteAsync(
+					isLast
+						? plain ? PlainBranchLast : BranchLast
+						: plain ? PlainBranchMiddle : BranchMiddle)
+				.ConfigureAwait(false);
+			await output.WriteAsync(child.DisplayName).ConfigureAwait(false);
+
+			if (child.Children.Count == 0)
+				continue;
+
+			ancestorBranches.Add(isLast);
+			frames.Add(new TreeTraversalFrame(child));
+		}
+
+		await output.CompleteAsync(includeFinalLineEnding).ConfigureAwait(false);
+	}
+
+	private static int FindLongestCharacterRun(string value, char target)
+	{
+		var longest = 0;
+		var current = 0;
+		foreach (var character in value)
+		{
+			if (character == target)
+			{
+				current++;
+				longest = Math.Max(longest, current);
+			}
+			else
+			{
+				current = 0;
+			}
+		}
+
+		return longest;
+	}
+
+	private sealed class TreeTraversalFrame(TreeNodeDescriptor node)
+	{
+		public TreeNodeDescriptor Node { get; } = node;
+		public int NextChildIndex { get; set; }
+	}
+
+	private sealed class TreeTextLineWriter(
+		TextWriter destination,
+		CancellationToken cancellationToken)
+	{
+		private bool _hasLine;
+
+		public async ValueTask BeginLineAsync()
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (_hasLine)
+			{
+				await destination.WriteAsync(
+						Environment.NewLine.AsMemory(),
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
+			_hasLine = true;
+		}
+
+		public async ValueTask WriteAsync(string value)
+		{
+			for (var offset = 0; offset < value.Length;)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var length = Math.Min(
+					MaximumTreeTextWriteCharacters,
+					value.Length - offset);
+				await destination.WriteAsync(
+						value.AsMemory(offset, length),
+						cancellationToken)
+					.ConfigureAwait(false);
+				offset += length;
+			}
+		}
+
+		public async ValueTask CompleteAsync(bool includeFinalLineEnding)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!includeFinalLineEnding || !_hasLine)
+				return;
+
+			await destination.WriteAsync(
+					Environment.NewLine.AsMemory(),
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
+	}
+
+	private static void AppendPlain(
+		TreeNodeDescriptor node,
+		string indent,
+		StringBuilder output)
+	{
+		for (var index = 0; index < node.Children.Count; index++)
+		{
+			var child = node.Children[index];
+			var isLast = index == node.Children.Count - 1;
+			output
+				.Append(indent)
+				.Append(isLast ? PlainBranchLast : PlainBranchMiddle)
+				.AppendLine(child.DisplayName);
+			if (child.Children.Count == 0)
+				continue;
+
+			AppendPlain(
+				child,
+				indent + (isLast ? IndentSpace : PlainIndentPipe),
+				output);
 		}
 	}
 
@@ -284,6 +619,50 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root)
 	{
 		return BuildMarkdownDocument(localRootPath, root, includedPaths: null);
+	}
+
+	private static string BuildNamedTreeJson(
+		string rootName,
+		TreeNodeDescriptor root)
+	{
+		var buffer = new ArrayBufferWriter<byte>();
+		using (var writer = new Utf8JsonWriter(buffer, JsonWriterOptions))
+		{
+			writer.WriteStartObject();
+			writer.WritePropertyName(rootName);
+			WriteJsonTreeContents(writer, root, includedPaths: null);
+			writer.WriteEndObject();
+			writer.Flush();
+		}
+
+		return Encoding.UTF8.GetString(buffer.WrittenSpan);
+	}
+
+	private static string BuildNamedTreeXml(
+		string rootName,
+		TreeNodeDescriptor root)
+	{
+		var output = new StringBuilder();
+		using (var writer = XmlWriter.Create(output, XmlWriterSettings))
+		{
+			writer.WriteStartElement("d");
+			writer.WriteAttributeString("n", rootName);
+			WriteXmlTreeContents(writer, root, includedPaths: null);
+			writer.WriteEndElement();
+		}
+
+		return output.ToString();
+	}
+
+	private static string BuildNamedTreeMarkdown(
+		string rootName,
+		TreeNodeDescriptor root)
+	{
+		var output = new StringBuilder();
+		AppendMarkdownItem(output, level: 0, rootName, root.IsDirectory);
+		if (root.IsDirectory)
+			AppendMarkdownChildren(output, root.Children, includedPaths: null, level: 1);
+		return output.ToString();
 	}
 
 	private static string BuildSelectedTreeMarkdown(

@@ -13,6 +13,8 @@ public interface IPreviewTextDocument : IDisposable
 
     IReadOnlyList<PreviewDocumentSection> Sections { get; }
 
+    string GetFullText();
+
     string GetLineText(int lineNumber);
 
     string GetLineRangeText(int firstLine, int lastLine);

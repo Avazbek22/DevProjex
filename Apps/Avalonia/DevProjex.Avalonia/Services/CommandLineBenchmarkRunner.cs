@@ -2,6 +2,8 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DevProjex.Infrastructure.Reports;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -23,16 +25,18 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
 	};
 
-	public async Task<int> RunAsync(CommandLineOptions options, CancellationToken cancellationToken)
+	public async Task<int> RunAsync(
+		string projectPath,
+		string? explicitOutputPath,
+		CancellationToken cancellationToken)
 	{
-		var benchmark = options.Benchmark;
-		if (!benchmark.Enabled || string.IsNullOrWhiteSpace(benchmark.Path))
+		if (string.IsNullOrWhiteSpace(projectPath))
 		{
-			WriteError("Benchmark requires --benchmark <folder>.");
+			WriteError("Analysis benchmark requires a project folder.");
 			return CommandLineExitCodes.UsageError;
 		}
 
-		var targetPath = Path.GetFullPath(benchmark.Path);
+		var targetPath = Path.GetFullPath(projectPath);
 		if (!Directory.Exists(targetPath))
 		{
 			WriteError($"Benchmark target folder was not found: {targetPath}");
@@ -41,7 +45,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 
 		var runConfiguration = ResolveRunConfiguration();
 		var createdAt = DateTimeOffset.Now;
-		var outputPath = ResolveOutputPath(benchmark.OutputPath, createdAt);
+		var outputPath = ResolveOutputPath(explicitOutputPath, createdAt);
 		var coldRequest = BuildColdProcessRequest(targetPath);
 
 		try
@@ -100,7 +104,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		CommandLineBenchmarkRunConfiguration configuration,
 		CancellationToken cancellationToken)
 	{
-		var services = context.ServicesFactory(CommandLineOptions.Empty);
+		var services = context.ServicesFactory();
 		var runs = new List<CommandLineBenchmarkPipelineRun>(configuration.TotalRuns);
 		for (var index = 0; index < configuration.TotalRuns; index++)
 		{
@@ -113,7 +117,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 	}
 
 	private static async Task<CommandLineBenchmarkPipelineRun> RunWarmPipelineOnceAsync(
-		AvaloniaAppServices services,
+		BenchmarkAnalysisServices services,
 		string targetPath,
 		int index,
 		bool isWarmup,
@@ -135,18 +139,18 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 
 		try
 		{
-			var loadedProject = services.ProjectAnalysisService.Load(
+			var loadedProject = services.AnalysisService.Load(
 				new ProjectAnalysisRequest(
 					RootPath: targetPath,
 					SelectedRootFolders: null,
 					SelectedExtensions: null,
 					SelectedIgnoreOptions: null),
 				cancellationToken);
-			analysisReport = await services.ProjectAnalysisService
+			analysisReport = await services.AnalysisService
 				.BuildReportFromTreeAsync(loadedProject, cancellationToken)
 				.ConfigureAwait(false);
 			using var writer = new StringWriter(CultureInfo.InvariantCulture);
-			await services.ProjectAnalysisReportWriter.WriteAsync(analysisReport, writer, cancellationToken)
+			await services.ReportWriter.WriteAsync(analysisReport, writer, cancellationToken)
 				.ConfigureAwait(false);
 			stdout = writer.ToString();
 		}
@@ -224,11 +228,13 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 	private static CommandLineBenchmarkProcessRequest BuildColdProcessRequest(string targetPath)
 	{
 		var processPath = Environment.ProcessPath;
-		var assemblyPath = typeof(CommandLineBenchmarkRunner).Assembly.Location;
+		var assemblyPath = ProcessEntryPointResolver.ResolveManagedAssemblyPath();
 		var arguments = new List<string>();
 		var fileName = processPath;
 		if (string.IsNullOrWhiteSpace(fileName))
 		{
+			if (string.IsNullOrWhiteSpace(assemblyPath))
+				throw new InvalidOperationException("The current DevProjex process entry point is unavailable.");
 			fileName = "dotnet";
 			arguments.Add(assemblyPath);
 		}
@@ -237,11 +243,12 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			arguments.Add(assemblyPath);
 		}
 
-		arguments.Add(CommandLineOptionTokens.NoUi);
-		arguments.Add(CommandLineOptionTokens.Path);
+		arguments.Add("analyze");
 		arguments.Add(targetPath);
-		arguments.Add(CommandLineOptionTokens.Report);
-		arguments.Add(CommandLineOptionTokens.StandardOutputReportPath);
+		arguments.Add("--format");
+		arguments.Add("json");
+		arguments.Add("--output");
+		arguments.Add("-");
 
 		return new CommandLineBenchmarkProcessRequest(
 			FileName: fileName,
@@ -504,6 +511,24 @@ internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBen
 				ExitCode: CommandLineExitCodes.RuntimeError,
 				Error: ex.Message);
 		}
+		finally
+		{
+			DeleteConsumedInternalRequest(request);
+		}
+	}
+
+	private static void DeleteConsumedInternalRequest(CommandLineBenchmarkProcessRequest request)
+	{
+		if (request.Environment is null ||
+		    !request.Environment.TryGetValue(
+			    DesktopDiagnosticRequestStore.EnvironmentVariable,
+			    out var path) ||
+		    string.IsNullOrWhiteSpace(path))
+		{
+			return;
+		}
+
+		DesktopDiagnosticRequestStore.Delete(path);
 	}
 
 	private static ProcessStartInfo BuildStartInfo(CommandLineBenchmarkProcessRequest request)
@@ -522,6 +547,13 @@ internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBen
 
 		foreach (var argument in request.Arguments)
 			startInfo.ArgumentList.Add(argument);
+		foreach (var variable in request.Environment ?? new Dictionary<string, string?>())
+		{
+			if (variable.Value is null)
+				startInfo.Environment.Remove(variable.Key);
+			else
+				startInfo.Environment[variable.Key] = variable.Value;
+		}
 
 		return startInfo;
 	}
@@ -580,16 +612,21 @@ internal interface ICommandLineBenchmarkProcessRunner
 internal sealed record CommandLineBenchmarkContext(
 	TextWriter Output,
 	TextWriter Error,
-	Func<CommandLineOptions, AvaloniaAppServices> ServicesFactory,
+	Func<BenchmarkAnalysisServices> ServicesFactory,
 	Func<string> VersionProvider,
 	ICommandLineBenchmarkProcessRunner ProcessRunner,
 	Func<string> LocalAppDataProvider);
+
+internal sealed record BenchmarkAnalysisServices(
+	ProjectAnalysisService AnalysisService,
+	ProjectAnalysisReportWriter ReportWriter);
 
 internal sealed record CommandLineBenchmarkProcessRequest(
 	string FileName,
 	IReadOnlyList<string> Arguments,
 	string WorkingDirectory,
-	string CommandLine);
+	string CommandLine,
+	IReadOnlyDictionary<string, string?>? Environment = null);
 
 internal sealed record CommandLineBenchmarkRunConfiguration(
 	int Runs,
@@ -696,7 +733,7 @@ internal sealed record CommandLineBenchmarkExecutableInfo(
 {
 	public static CommandLineBenchmarkExecutableInfo Create(CommandLineBenchmarkProcessRequest request)
 	{
-		var assemblyPath = typeof(CommandLineBenchmarkRunner).Assembly.Location;
+		var assemblyPath = ProcessEntryPointResolver.ResolveCurrentArtifactPath();
 		return new CommandLineBenchmarkExecutableInfo(
 			FileName: request.FileName,
 			Arguments: request.Arguments,
@@ -708,7 +745,7 @@ internal sealed record CommandLineBenchmarkExecutableInfo(
 			AssemblySha256: TryGetSha256(assemblyPath));
 	}
 
-	private static string? TryGetSha256(string assemblyPath)
+	private static string? TryGetSha256(string? assemblyPath)
 	{
 		if (string.IsNullOrWhiteSpace(assemblyPath) || !File.Exists(assemblyPath))
 			return null;

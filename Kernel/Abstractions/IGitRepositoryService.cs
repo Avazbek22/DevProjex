@@ -56,4 +56,11 @@ public interface IGitRepositoryService
     Task<string?> GetCurrentBranchAsync(
         string repositoryPath,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the configured origin URL without contacting the remote repository.
+    /// </summary>
+    Task<string?> GetRemoteUrlAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken = default);
 }

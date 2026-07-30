@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Diagnostics;
 using DevProjex.Application.Services;
 using DevProjex.Tests.Integration.Helpers;
 
@@ -242,6 +243,461 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public void SharedDestinationGuardRejectsCaseAliasInsideSourceOnCaseInsensitiveVolume()
+	{
+		var testRoot = Environment.GetEnvironmentVariable(
+			"DEVPROJEX_CASE_INSENSITIVE_TEST_ROOT");
+		using var workspace = new TemporaryDirectory(testRoot);
+		var source = workspace.CreateDirectory("ProjectCaseAlias");
+		var caseAlias = Path.Combine(workspace.Path, "pROJECTcASEaLIAS");
+		if (!Directory.Exists(caseAlias))
+		{
+			Assert.Skip(
+				$"The test root is case-sensitive: {workspace.Path}. " +
+				"Set DEVPROJEX_CASE_INSENSITIVE_TEST_ROOT to validate another mounted volume.");
+		}
+
+		var destination = Path.Combine(caseAlias, "report.txt");
+		var exception = Assert.Throws<ProjectCopyExportException>(() =>
+			ProjectCopyExportService.EnsureDestinationOutsideProject(
+				source,
+				destination));
+
+		Assert.Equal(
+			ProjectCopyExportError.UnsafeDestinationPath,
+			exception.Error);
+		Assert.False(File.Exists(destination));
+	}
+
+	[Fact]
+	public void SharedDestinationGuardRejectsWindowsSubstAliasIntoSource()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows SUBST aliases are only available on Windows.");
+
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("SubstSource");
+		var driveLetter = FindAvailableDriveLetter();
+		if (driveLetter is null)
+			Assert.Skip("No free drive letter is available for the SUBST regression.");
+
+		var drive = $"{driveLetter}:";
+		var createResult = RunSubst(drive, source);
+		if (createResult != 0)
+			Assert.Skip($"SUBST is unavailable in this environment (exit {createResult}).");
+
+		var destination = Path.Combine($"{drive}\\", "report.txt");
+		try
+		{
+			var exception = Assert.Throws<ProjectCopyExportException>(() =>
+				ProjectCopyExportService.EnsureDestinationOutsideProject(
+					source,
+					destination));
+
+			Assert.Equal(
+				ProjectCopyExportError.UnsafeDestinationPath,
+				exception.Error);
+			Assert.False(File.Exists(Path.Combine(source, "report.txt")));
+		}
+		finally
+		{
+			Assert.Equal(0, RunSubst(drive, "/d"));
+		}
+	}
+
+	[Fact]
+	public void SharedDestinationGuardRejectsWindowsSubstAliasIntoSourceSubdirectory()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows SUBST aliases are only available on Windows.");
+
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("SubstSource");
+		var sourceSubdirectory = workspace.CreateDirectory("SubstSource/nested");
+		var driveLetter = FindAvailableDriveLetter();
+		if (driveLetter is null)
+			Assert.Skip("No free drive letter is available for the SUBST regression.");
+
+		var drive = $"{driveLetter}:";
+		var createResult = RunSubst(drive, sourceSubdirectory);
+		if (createResult != 0)
+			Assert.Skip($"SUBST is unavailable in this environment (exit {createResult}).");
+
+		var destination = Path.Combine($"{drive}\\", "report.txt");
+		try
+		{
+			var exception = Assert.Throws<ProjectCopyExportException>(() =>
+				ProjectCopyExportService.EnsureDestinationOutsideProject(
+					source,
+					destination));
+
+			Assert.Equal(
+				ProjectCopyExportError.UnsafeDestinationPath,
+				exception.Error);
+			Assert.False(File.Exists(Path.Combine(sourceSubdirectory, "report.txt")));
+		}
+		finally
+		{
+			Assert.Equal(0, RunSubst(drive, "/d"));
+		}
+	}
+
+	[Fact]
+	public async Task AtomicFileReplacementDoesNotFollowExistingHardLinkIntoSource()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		var sourceFile = workspace.CreateFile("source/app.cs", "ORIGINAL");
+		var outputDirectory = workspace.CreateDirectory("output");
+		var destination = Path.Combine(outputDirectory, "report.txt");
+		CreateHardLinkOrSkip(destination, sourceFile);
+
+		var resolvedDestination = ProjectCopyExportService.ResolveDestinationOutsideProject(
+			sourceRoot,
+			destination);
+		await AtomicFileOutput.WriteAsync(
+			resolvedDestination,
+			overwrite: true,
+			async (stream, cancellationToken) =>
+			{
+				var payload = Encoding.UTF8.GetBytes("EXPORTED");
+				await stream.WriteAsync(payload, cancellationToken);
+			},
+			TestContext.Current.CancellationToken,
+			path => ProjectCopyExportService.ResolveDestinationOutsideProject(
+				sourceRoot,
+				path));
+
+		Assert.Equal(
+			"ORIGINAL",
+			await File.ReadAllTextAsync(
+				sourceFile,
+				TestContext.Current.CancellationToken));
+		Assert.Equal(
+			"EXPORTED",
+			await File.ReadAllTextAsync(
+				destination,
+				TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public void ExistingDestinationFileLinkIntoSourceIsRejectedWithoutEffects()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		var sourceFile = workspace.CreateFile("source/app.cs", "ORIGINAL");
+		var destination = Path.Combine(
+			workspace.CreateDirectory("output"),
+			"report.txt");
+		CreateFileLinkOrSkip(destination, sourceFile);
+
+		var exception = Assert.Throws<ProjectCopyExportException>(() =>
+			ProjectCopyExportService.ResolveDestinationOutsideProject(
+				sourceRoot,
+				destination));
+
+		Assert.Equal(
+			ProjectCopyExportError.UnsafeDestinationPath,
+			exception.Error);
+		Assert.Equal("ORIGINAL", File.ReadAllText(sourceFile));
+		Assert.NotNull(new FileInfo(destination).LinkTarget);
+	}
+
+	[Fact]
+	public async Task AtomicFileReplacementReplacesSafeFileLinkWithoutChangingTarget()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		workspace.CreateFile("source/app.cs", "SOURCE");
+		var safeTarget = workspace.CreateFile("safe/target.txt", "TARGET");
+		var destination = Path.Combine(
+			workspace.CreateDirectory("output"),
+			"report.txt");
+		CreateFileLinkOrSkip(destination, safeTarget);
+
+		await AtomicFileOutput.WriteAsync(
+			destination,
+			overwrite: true,
+			async (stream, cancellationToken) =>
+			{
+				var payload = Encoding.UTF8.GetBytes("EXPORTED");
+				await stream.WriteAsync(payload, cancellationToken);
+			},
+			TestContext.Current.CancellationToken,
+			path => ProjectCopyExportService.ResolveDestinationOutsideProject(
+				sourceRoot,
+				path));
+
+		Assert.Equal(
+			"TARGET",
+			await File.ReadAllTextAsync(
+				safeTarget,
+				TestContext.Current.CancellationToken));
+		Assert.Equal(
+			"EXPORTED",
+			await File.ReadAllTextAsync(
+				destination,
+				TestContext.Current.CancellationToken));
+		Assert.Null(new FileInfo(destination).LinkTarget);
+	}
+
+	[Fact]
+	public async Task AtomicFileForceRaceWithDirectoryReturnsConflictAndCleansStaging()
+	{
+		using var workspace = new TemporaryDirectory();
+		var outputDirectory = workspace.CreateDirectory("output");
+		var destination = Path.Combine(outputDirectory, "report.txt");
+		var validationCount = 0;
+
+		var exception = await Assert.ThrowsAsync<AtomicFileOutputConflictException>(
+			() => AtomicFileOutput.WriteAsync(
+				destination,
+				overwrite: true,
+				async (stream, cancellationToken) =>
+				{
+					await stream.WriteAsync(
+						"payload"u8.ToArray(),
+						cancellationToken);
+				},
+				TestContext.Current.CancellationToken,
+				path =>
+				{
+					validationCount++;
+					if (validationCount == 3)
+						Directory.CreateDirectory(destination);
+					return path;
+				}));
+
+		Assert.Equal(destination, exception.Path);
+		Assert.Equal(3, validationCount);
+		Assert.True(Directory.Exists(destination));
+		Assert.Empty(Directory.EnumerateFiles(outputDirectory, ".*.tmp"));
+	}
+
+	[Fact]
+	public async Task AtomicFileConflictDuringFirstRevalidationReportsStableRequestedAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		workspace.CreateFile("source/app.cs", "SOURCE");
+		var externalTarget = workspace.CreateDirectory("external-target");
+		var alias = Path.Combine(workspace.Path, "stable-alias");
+		if (OperatingSystem.IsWindows())
+			CreateWindowsJunctionOrSkip(alias, externalTarget);
+		else
+			CreateDirectoryLinkOrSkip(alias, externalTarget);
+
+		var requestedDestination = Path.Combine(alias, "report.txt");
+		var physicalDestination = Path.Combine(externalTarget, "report.txt");
+		var validationCount = 0;
+		var writeInvoked = false;
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<AtomicFileOutputConflictException>(
+				() => AtomicFileOutput.WriteAsync(
+					requestedDestination,
+					overwrite: false,
+					(_, _) =>
+					{
+						writeInvoked = true;
+						return Task.CompletedTask;
+					},
+					TestContext.Current.CancellationToken,
+					path =>
+					{
+						validationCount++;
+						if (validationCount == 2)
+							File.WriteAllText(physicalDestination, "EXISTING");
+
+						return ExactFileOutputDestinationPolicy.Resolve(
+							sourceRoot,
+							path,
+							overwrite: false);
+					}));
+
+			Assert.Equal(2, validationCount);
+			Assert.False(writeInvoked);
+			Assert.Equal(Path.GetFullPath(requestedDestination), exception.Path);
+			Assert.Equal("EXISTING", File.ReadAllText(physicalDestination));
+			Assert.Empty(Directory.EnumerateFiles(externalTarget, ".*.tmp"));
+		}
+		finally
+		{
+			DeleteDirectoryLink(alias);
+		}
+	}
+
+	[Fact]
+	public async Task AtomicFileCleanupRetriesTransientWindowsDeleteLock()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows file-sharing semantics are required.");
+
+		using var workspace = new TemporaryDirectory();
+		var outputDirectory = workspace.CreateDirectory("output");
+		var destination = Path.Combine(outputDirectory, "report.txt");
+		var validationCount = 0;
+		FileStream? heldStagingFile = null;
+		Thread? releaseThread = null;
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<IOException>(
+				() => AtomicFileOutput.WriteAsync(
+					destination,
+					overwrite: false,
+					async (stream, cancellationToken) =>
+					{
+						await stream.WriteAsync(
+							"payload"u8.ToArray(),
+							cancellationToken);
+					},
+					TestContext.Current.CancellationToken,
+					path =>
+					{
+						validationCount++;
+						if (validationCount != 3)
+							return path;
+
+						var stagingPath = Assert.Single(
+							Directory.EnumerateFiles(outputDirectory, ".*.tmp"));
+						heldStagingFile = new FileStream(
+							stagingPath,
+							FileMode.Open,
+							FileAccess.Read,
+							FileShare.Read);
+						releaseThread = new Thread(() =>
+						{
+							Thread.Sleep(175);
+							heldStagingFile.Dispose();
+						}) { IsBackground = true };
+						releaseThread.Start();
+						return path;
+					}));
+
+			Assert.IsNotType<AtomicFileOutputCleanupException>(exception);
+			Assert.NotNull(releaseThread);
+			Assert.True(releaseThread.Join(TimeSpan.FromSeconds(5)));
+			Assert.False(File.Exists(destination));
+			Assert.Empty(Directory.EnumerateFiles(outputDirectory, ".*.tmp"));
+		}
+		finally
+		{
+			heldStagingFile?.Dispose();
+		}
+	}
+
+	[Fact]
+	public async Task AtomicFileCleanupReportsPermanentWindowsDeleteLock()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows file-sharing semantics are required.");
+
+		using var workspace = new TemporaryDirectory();
+		var outputDirectory = workspace.CreateDirectory("output");
+		var destination = Path.Combine(outputDirectory, "report.txt");
+		var validationCount = 0;
+		FileStream? heldStagingFile = null;
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<AtomicFileOutputCleanupException>(
+				() => AtomicFileOutput.WriteAsync(
+					destination,
+					overwrite: false,
+					async (stream, cancellationToken) =>
+					{
+						await stream.WriteAsync(
+							"payload"u8.ToArray(),
+							cancellationToken);
+					},
+					TestContext.Current.CancellationToken,
+					path =>
+					{
+						validationCount++;
+						if (validationCount != 3)
+							return path;
+
+						var stagingPath = Assert.Single(
+							Directory.EnumerateFiles(outputDirectory, ".*.tmp"));
+						heldStagingFile = new FileStream(
+							stagingPath,
+							FileMode.Open,
+							FileAccess.Read,
+							FileShare.Read);
+						return path;
+					}));
+
+			Assert.Equal(destination, exception.OutputPath);
+			Assert.Equal(heldStagingFile!.Name, exception.TemporaryPath);
+			Assert.IsType<IOException>(exception.OperationException);
+			Assert.IsAssignableFrom<IOException>(exception.CleanupException);
+			Assert.True(File.Exists(exception.TemporaryPath));
+			Assert.False(File.Exists(destination));
+		}
+		finally
+		{
+			var stagingPath = heldStagingFile?.Name;
+			heldStagingFile?.Dispose();
+			if (stagingPath is not null)
+				File.Delete(stagingPath);
+		}
+	}
+
+	[Fact]
+	public void SharedDestinationGuardAllowsCaseDistinctSiblingOnCaseSensitiveVolume()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("ProjectCaseDistinct");
+		var distinctSibling = Path.Combine(workspace.Path, "pROJECTcASEdISTINCT");
+		if (Directory.Exists(distinctSibling))
+		{
+			Assert.Skip($"The test root is case-insensitive: {workspace.Path}.");
+		}
+		Directory.CreateDirectory(distinctSibling);
+		var destination = Path.Combine(distinctSibling, "report.txt");
+
+		ProjectCopyExportService.EnsureDestinationOutsideProject(
+			source,
+			destination);
+
+		Assert.False(File.Exists(destination));
+	}
+
+	[Fact]
+	public void SharedDestinationGuardSupportsUnixExecuteOnlyAncestorTraversal()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("POSIX execute-only directory traversal is unavailable on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var restrictedParent = workspace.CreateDirectory("traverse-only");
+		var source = workspace.CreateDirectory("traverse-only/project");
+		var destination = Path.Combine(workspace.Path, "output", "report.txt");
+		var originalMode = File.GetUnixFileMode(restrictedParent);
+		try
+		{
+			File.SetUnixFileMode(
+				restrictedParent,
+				UnixFileMode.UserExecute);
+
+			ProjectCopyExportService.EnsureDestinationOutsideProject(
+				source,
+				destination);
+		}
+		finally
+		{
+			File.SetUnixFileMode(restrictedParent, originalMode);
+		}
+
+		Assert.False(File.Exists(destination));
+	}
+
+	[Fact]
 	public async Task FolderDestinationSymlinkIntoSourceIsRejectedBeforeStaging()
 	{
 		using var workspace = ProjectCopyWorkspace.Create();
@@ -321,6 +777,63 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder, "submission")]
+	[InlineData(ProjectCopyExportFormat.Zip, "submission.zip")]
+	public async Task StableExternalDestinationAliasIsReportedForSuccessAndConflict(
+		ProjectCopyExportFormat format,
+		string outputName)
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var externalTarget = Directory.CreateDirectory(
+			Path.Combine(workspace.DestinationParent, "stable-target")).FullName;
+		var alias = Path.Combine(workspace.DestinationParent, "stable-alias");
+		CreateDirectoryLinkOrSkip(alias, externalTarget);
+		var requestedDestination = Path.Combine(alias, outputName);
+		var physicalDestination = Path.Combine(externalTarget, outputName);
+		var request = new ProjectCopyExportRequest(
+			workspace.SourceRoot,
+			"Sample",
+			workspace.Root,
+			new HashSet<string>(PathComparer.Default),
+			requestedDestination,
+			format,
+			ProjectCopyDestinationMode.Exact,
+			ProjectCopyConflictPolicy.Fail);
+
+		try
+		{
+			var service = new ProjectCopyExportService(new ProjectCopyExportPlanBuilder());
+
+			var result = await service.ExportAsync(
+				request,
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			var authoritativePhysicalDestination =
+				ProjectCopyExportService.ResolveDestinationOutsideProject(
+					workspace.SourceRoot,
+					physicalDestination);
+			Assert.Equal(Path.GetFullPath(requestedDestination), result.DestinationPath);
+			Assert.NotEqual(authoritativePhysicalDestination, result.DestinationPath);
+			Assert.True(format == ProjectCopyExportFormat.Folder
+				? File.Exists(Path.Combine(physicalDestination, "README.md"))
+				: File.Exists(physicalDestination));
+
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				service.ExportAsync(
+					request,
+					cancellationToken: TestContext.Current.CancellationToken));
+
+			Assert.Equal(ProjectCopyExportError.DestinationConflict, exception.Error);
+			Assert.Equal(Path.GetFullPath(requestedDestination), exception.PathContext);
+			Assert.Empty(FindStagingArtifacts(externalTarget));
+		}
+		finally
+		{
+			DeleteDirectoryLink(alias);
+		}
+	}
+
+	[Theory]
 	[InlineData(ProjectCopyExportFormat.Folder)]
 	[InlineData(ProjectCopyExportFormat.Zip)]
 	public async Task DestinationSymlinkRetargetedDuringExportCannotRedirectWritesIntoSource(
@@ -360,9 +873,23 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 			Assert.True(format == ProjectCopyExportFormat.Folder
 				? File.Exists(Path.Combine(externalTarget, "Sample-copy", "README.md"))
 				: File.Exists(Path.Combine(externalTarget, "retargeted.zip")));
+			var physicalDestination = format == ProjectCopyExportFormat.Folder
+				? Path.Combine(externalTarget, "Sample-copy")
+				: Path.Combine(externalTarget, "retargeted.zip");
+			var requestedReportedDestination = format == ProjectCopyExportFormat.Folder
+				? Path.Combine(linkPath, "Sample-copy")
+				: destination;
+			var authoritativePhysicalDestination =
+				ProjectCopyExportService.ResolveDestinationOutsideProject(
+					workspace.SourceRoot,
+					physicalDestination);
+			Assert.Equal(authoritativePhysicalDestination, result.DestinationPath);
+			Assert.NotEqual(
+				Path.GetFullPath(requestedReportedDestination),
+				result.DestinationPath);
 			Assert.True(format == ProjectCopyExportFormat.Folder
-				? Directory.Exists(result.DestinationPath)
-				: File.Exists(result.DestinationPath));
+				? Directory.Exists(physicalDestination)
+				: File.Exists(physicalDestination));
 			Assert.False(Directory.Exists(Path.Combine(workspace.SourceRoot, "Sample-copy")));
 			Assert.False(File.Exists(Path.Combine(workspace.SourceRoot, "retargeted.zip")));
 			Assert.Empty(FindStagingArtifacts(workspace.SourceRoot));
@@ -444,6 +971,12 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				[],
 				cancellationToken: TestContext.Current.CancellationToken);
 
+			Assert.Equal(
+				Path.Combine(junctionPath, "Sample-copy"),
+				result.DestinationPath);
+			Assert.NotEqual(
+				Path.Combine(externalTarget, "Sample-copy"),
+				result.DestinationPath);
 			Assert.True(Directory.Exists(result.DestinationPath));
 			Assert.True(File.Exists(Path.Combine(externalTarget, "Sample-copy", "README.md")));
 			Assert.Empty(FindStagingArtifacts(externalTarget));
@@ -560,6 +1093,71 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		finally
 		{
 			heldFile?.Dispose();
+		}
+	}
+
+	[Fact]
+	public async Task CancellationReportsPermanentWindowsStagingCleanupFailure()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows file deletion semantics are required.");
+
+		using var workspace = ProjectCopyWorkspace.Create();
+		using var cancellation = new CancellationTokenSource();
+		FileStream? heldFile = null;
+		string? stagingPath = null;
+		var firstFileProgress = CountDirectories(workspace.Root) + 1;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(value =>
+		{
+			if (heldFile is not null || value.ProcessedEntryCount != firstFileProgress)
+				return;
+
+			stagingPath = Assert.Single(FindStagingArtifacts(workspace.DestinationParent));
+			var copiedFile = Assert.Single(
+				Directory.EnumerateFiles(stagingPath, "*", SearchOption.AllDirectories));
+			heldFile = new FileStream(
+				copiedFile,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.Read);
+			cancellation.Cancel();
+		});
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(
+				() => workspace.ExportAsync(
+					ProjectCopyExportFormat.Folder,
+					workspace.DestinationParent,
+					[],
+					progress: progress,
+					cancellationToken: cancellation.Token));
+
+			Assert.Equal(
+				ProjectCopyExportError.DestinationUnavailable,
+				exception.Error);
+			var aggregate = Assert.IsType<AggregateException>(
+				exception.InnerException);
+			Assert.Contains(
+				aggregate.InnerExceptions,
+				static inner => inner is OperationCanceledException);
+			Assert.Contains(
+				aggregate.InnerExceptions,
+				static inner => inner is ProjectCopyExportException
+				{
+					Error: ProjectCopyExportError.DestinationUnavailable
+				});
+			Assert.NotNull(stagingPath);
+			Assert.True(Directory.Exists(stagingPath));
+			Assert.False(
+				Directory.Exists(
+					Path.Combine(workspace.DestinationParent, "Sample-copy")));
+		}
+		finally
+		{
+			heldFile?.Dispose();
+			if (stagingPath is not null && Directory.Exists(stagingPath))
+				Directory.Delete(stagingPath, recursive: true);
 		}
 	}
 
@@ -750,6 +1348,109 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 			node.IsAccessDenied,
 			node.IsDirectory ? "folder" : "file",
 			node.Children.Select(ToDescriptor).ToArray());
+
+	private static char? FindAvailableDriveLetter()
+	{
+		for (var driveLetter = 'Z'; driveLetter >= 'D'; driveLetter--)
+		{
+			if (!Directory.Exists($"{driveLetter}:\\"))
+				return driveLetter;
+		}
+
+		return null;
+	}
+
+	private static int RunSubst(string drive, string target)
+	{
+		try
+		{
+			using var process = Process.Start(new ProcessStartInfo("subst.exe")
+			{
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				ArgumentList = { drive, target }
+			});
+			if (process is null || !process.WaitForExit(TimeSpan.FromSeconds(10)))
+			{
+				try
+				{
+					process?.Kill(entireProcessTree: true);
+				}
+				catch (InvalidOperationException)
+				{
+				}
+
+				return -1;
+			}
+
+			return process.ExitCode;
+		}
+		catch (System.ComponentModel.Win32Exception)
+		{
+			return -1;
+		}
+	}
+
+	private static void CreateFileLinkOrSkip(string linkPath, string targetPath)
+	{
+		try
+		{
+			File.CreateSymbolicLink(linkPath, targetPath);
+			if (new FileInfo(linkPath).LinkTarget is null)
+				Assert.Skip("The filesystem did not preserve the symbolic link.");
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+	}
+
+	private static void CreateHardLinkOrSkip(string linkPath, string targetPath)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		if (OperatingSystem.IsWindows())
+		{
+			startInfo.FileName = "fsutil.exe";
+			startInfo.ArgumentList.Add("hardlink");
+			startInfo.ArgumentList.Add("create");
+			startInfo.ArgumentList.Add(linkPath);
+			startInfo.ArgumentList.Add(targetPath);
+		}
+		else
+		{
+			startInfo.FileName = "ln";
+			startInfo.ArgumentList.Add(targetPath);
+			startInfo.ArgumentList.Add(linkPath);
+		}
+
+		try
+		{
+			using var process = Process.Start(startInfo);
+			if (process is null ||
+			    !process.WaitForExit(TimeSpan.FromSeconds(10)) ||
+			    process.ExitCode != 0 ||
+			    !File.Exists(linkPath))
+			{
+				Assert.Skip("The test environment did not allow creating a hard link.");
+			}
+		}
+		catch (Exception exception) when (exception is
+			       InvalidOperationException or
+			       IOException or
+			       System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip($"Hard-link creation is unavailable: {exception.GetType().Name}.");
+		}
+	}
 
 	private sealed class CallbackProgress<T>(Action<T> callback) : IProgress<T>
 	{

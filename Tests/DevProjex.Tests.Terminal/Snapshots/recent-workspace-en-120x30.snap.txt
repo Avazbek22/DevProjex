@@ -1,0 +1,30 @@
+ DevProjex Terminal · Beta Project
+ <PROJECTS_ROOT>/Beta Project
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
+│v [x] Beta Project                                   ││Beta Project                                                   │
+│  > [x] src                                          ││├── src                                                        │
+│    [x] global.json                                  │││   └── BetaMarker.cs                                          │
+│                                                     ││└── global.json                                                │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││ Files 2  |  Lines 1-5/5                                       │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 2 · Folders 2 · 33 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

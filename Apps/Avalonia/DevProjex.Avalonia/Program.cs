@@ -1,4 +1,6 @@
 using DevProjex.Avalonia.Services;
+using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Avalonia;
 
@@ -10,24 +12,30 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        var parseResult = CommandLineOptions.Parse(args);
-        if (CommandLineAutomationRunner.ShouldRunBeforeAvalonia(parseResult))
+        args = DesktopLaunchRequestStore.PromoteInternalInvocation(args);
+        var hasConsole = WindowsConsoleBridge.EnsureAttached();
+        var environment = new InvocationEnvironment(hasConsole);
+        var route = ProcessInvocationRouter.Resolve(
+            args,
+            environment,
+            DesktopLaunchRequestStore.HasPendingRequest ||
+            DesktopDiagnosticRequestStore.HasPendingRequest,
+            isFrameworkDependentLaunch: !ProcessEntryPointResolver.IsSingleFile());
+        if (route == ProcessInvocationMode.Terminal)
         {
-            ConfigureCommandLineEncoding();
-            WindowsParentConsole.AttachForCommandLine();
-            return CommandLineAutomationRunner.RunUtilityOrHeadlessAsync(parseResult)
+            using var cancellation = TerminalCancellationCoordinator.Register();
+            return new TerminalApplication(
+                    environment,
+                    developerCommandRunner: new AvaloniaDeveloperCommandRunner(
+                        environment.Output,
+                        environment.Error))
+                .RunAsync(args, cancellation.Token)
                 .GetAwaiter()
                 .GetResult();
         }
 
-        if (parseResult.Options.SessionMetrics.Enabled)
-        {
-            ConfigureCommandLineEncoding();
-            WindowsParentConsole.AttachForCommandLine();
-        }
-
         return BuildAvaloniaApp()
-            .StartWithClassicDesktopLifetime(args);
+            .StartWithClassicDesktopLifetime([]);
     }
 
     public static AppBuilder BuildAvaloniaApp()
@@ -47,23 +55,6 @@ internal static class Program
 #endif
 
         return builder;
-    }
-
-    private static void ConfigureCommandLineEncoding()
-    {
-        try
-        {
-            // Headless export can be piped or redirected on Windows runners whose active
-            // code page is not UTF-8. Pin stdout/stderr to UTF-8 so Unicode paths remain
-            // machine-readable instead of being downgraded to question marks.
-            var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-            Console.OutputEncoding = utf8NoBom;
-        }
-        catch
-        {
-            // Some hosts do not allow changing console encoding. Export still continues;
-            // process-level smoke tests cover the normal redirected stdout path.
-        }
     }
 
     private static Win32PlatformOptions CreateWin32PlatformOptions()

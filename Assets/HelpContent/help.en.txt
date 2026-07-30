@@ -69,7 +69,7 @@ Rules:
 Each item shows the parent folder and project name, for example `Projects / App`.
 
 ## 4) Launch from terminal
-DevProjex can be launched from the terminal.
+DevProjex provides an interactive Terminal Workspace and direct commands for scripts and CI.
 
 If the command is already set up, open a terminal and run:
 `devprojex --help`
@@ -77,21 +77,20 @@ If the command is already set up, open a terminal and run:
 This shows all available commands, options, and examples.
 
 Examples:
-* `devprojex .` — open the current folder.
-* `devprojex "C:\Projects\App"` — open the specified folder.
-* `devprojex . --export tree` — print the project tree in the terminal.
-* `devprojex . --export content` — print file contents in the terminal.
-* `devprojex . --export tree-content` — print the tree and contents in the terminal.
-* `devprojex . --export tree-content -o context.txt` — save the result to a file.
-* `devprojex --benchmark "C:\Projects\App"` — measure the standard project report workflow.
-* `devprojex --last --preview` — open the most recent project directly in Preview mode.
-* `devprojex --benchmark-ui "C:\Projects\App"` — measure the standard UI workflow.
-* `devprojex --session-metrics "C:\Projects\App"` — record UI session metrics until the window closes.
+* `devprojex` — open the interactive Terminal Workspace.
+* `devprojex open . --preview` — open the current folder in Desktop Preview.
+* `devprojex analyze . --format json` — analyze the current project as JSON.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — save AI-ready context outside the source project.
+* `devprojex export project . --as folder -o ../devprojex-submission` — export the effective project tree to an exact folder.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — export the effective project tree to a ZIP archive.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analyze tracked Git files with Smart Ignore.
 
 Notes:
 * `.` means the current terminal folder;
 * paths with spaces must be wrapped in quotes;
-* if no output file is specified, the result is printed directly to the terminal;
+* `--git-mode` selects no Git filtering, `.gitignore`, or tracked Git files;
+* `--exclude` controls ordinary exclusions separately from Git filtering;
+* direct commands are deterministic and do not open the desktop interface;
 * the command does not modify project files — DevProjex works in read-only mode.
 
 If the `devprojex` command does not work, open in DevProjex:
