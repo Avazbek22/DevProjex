@@ -204,11 +204,10 @@ internal sealed class PreviewWorkspaceController : IDisposable
 
         var initialTreeWidth = Math.Max(
             WorkspacePresentationController.SplitTreePaneMinimumWidth,
-            ResolvePreviewTreePaneVisibleWidth());
+            ResolvePreviewTreePaneVisibleWidth() -
+            WorkspacePresentationController.TreePreviewSplitterWidth);
         var targetTreeWidth = _workspace.GetClampedPreviewTreePaneWidth(
             WorkspacePresentationController.SplitTreePaneMinimumWidth);
-        var targetPreviewWidth =
-            _workspace.ResolveDesiredPreviewPaneWidth(targetTreeWidth);
         _workspace.SetCurrentPreviewTreePaneWidth(targetTreeWidth);
 
         var openCanceled = false;
@@ -223,9 +222,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
             openAnimationStarted = true;
             try
             {
-                await AnimatePreviewPaneOpenAsync(
-                    targetTreeWidth,
-                    targetPreviewWidth);
+                await AnimatePreviewPaneOpenAsync(targetTreeWidth);
             }
             catch (OperationCanceledException)
                 when (_closeRequestedDuringOpen || _disposed)
@@ -315,9 +312,6 @@ internal sealed class PreviewWorkspaceController : IDisposable
         try
         {
             var startedFromPreviewOnly = _viewModel.IsPreviewOnlyMode;
-            var currentPreviewWidth = ResolveRenderedPaneWidth(
-                _controls.PreviewPaneContainer,
-                _workspace.ResolvePreviewPaneVisibleWidth());
             var currentTreeWidth = _viewModel.IsPreviewTreeVisible
                 ? ResolveRenderedPaneWidth(
                     _controls.TreePaneContainer,
@@ -338,9 +332,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
                 UpdatePreviewSegmentThumbPosition(animate: false);
             }
 
-            PreparePreviewPaneCloseLayout(
-                currentTreeWidth,
-                currentPreviewWidth);
+            PreparePreviewPaneCloseLayout(currentTreeWidth);
             await AnimatePreviewPaneCloseAsync();
 
             _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.Off;
@@ -524,7 +516,8 @@ internal sealed class PreviewWorkspaceController : IDisposable
         _controls.TreePaneColumn.MinWidth = 0;
         _controls.TreePaneColumn.Width = GridLength.Auto;
         _controls.PreviewPaneColumn.MinWidth = 0;
-        _controls.PreviewPaneColumn.Width = GridLength.Auto;
+        _controls.PreviewPaneColumn.Width =
+            new GridLength(1, GridUnitType.Star);
         _controls.TreePreviewSplitterColumn.Width =
             new GridLength(
                 WorkspacePresentationController.TreePreviewSplitterWidth);
@@ -534,19 +527,18 @@ internal sealed class PreviewWorkspaceController : IDisposable
         _workspace.ApplyPreviewTreePaneWidth(
             initialTreeWidth,
             animate: false);
-        _workspace.ApplyPreviewPaneWidth(0, animate: false);
+        _workspace.ApplyPreviewPaneWidth(double.NaN, animate: false);
         ResetPreviewPaneSnapshotVisualState();
     }
 
-    private void PreparePreviewPaneCloseLayout(
-        double currentTreeWidth,
-        double currentPreviewWidth)
+    private void PreparePreviewPaneCloseLayout(double currentTreeWidth)
     {
         var showSplitter = currentTreeWidth > 0.5;
         _controls.TreePaneColumn.MinWidth = 0;
         _controls.TreePaneColumn.Width = GridLength.Auto;
         _controls.PreviewPaneColumn.MinWidth = 0;
-        _controls.PreviewPaneColumn.Width = GridLength.Auto;
+        _controls.PreviewPaneColumn.Width =
+            new GridLength(1, GridUnitType.Star);
         _controls.TreePreviewSplitterColumn.Width = new GridLength(
             showSplitter
                 ? WorkspacePresentationController.TreePreviewSplitterWidth
@@ -557,15 +549,11 @@ internal sealed class PreviewWorkspaceController : IDisposable
         _workspace.ApplyPreviewTreePaneWidth(
             currentTreeWidth,
             animate: false);
-        _workspace.ApplyPreviewPaneWidth(
-            currentPreviewWidth,
-            animate: false);
+        _workspace.ApplyPreviewPaneWidth(double.NaN, animate: false);
         ResetPreviewPaneSnapshotVisualState();
     }
 
-    private async Task AnimatePreviewPaneOpenAsync(
-        double targetTreeWidth,
-        double targetPreviewWidth)
+    private async Task AnimatePreviewPaneOpenAsync(double targetTreeWidth)
     {
         if (_workspace.IsPreviewPaneAnimating)
             return;
@@ -580,9 +568,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
 
             EnsurePreviewTreePaneTransitions();
-            _workspace.EnsurePreviewPaneTransitions();
             _controls.TreePaneContainer.Width = targetTreeWidth;
-            _controls.PreviewPaneContainer.Width = targetPreviewWidth;
             await WaitForPanelAnimationAsync(
                 PaneAnimationDuration,
                 cancellationToken);
@@ -590,9 +576,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
             _workspace.ApplyPreviewTreePaneWidth(
                 targetTreeWidth,
                 animate: false);
-            _workspace.ApplyPreviewPaneWidth(
-                targetPreviewWidth,
-                animate: false);
+            _workspace.ApplyPreviewPaneWidth(double.NaN, animate: false);
             await DispatcherTaskSchedulerProvider.YieldAsync(
                 DispatcherPriority.Render);
         }
@@ -622,12 +606,17 @@ internal sealed class PreviewWorkspaceController : IDisposable
             ResetPreviewTreePaneSnapshotVisualState();
             TryPreparePreviewPaneSnapshot();
             EnsurePreviewTreePaneTransitions();
-            _workspace.EnsurePreviewPaneTransitions();
 
+            var treePreviewSplitterWidth =
+                _controls.TreePreviewSplitter.IsVisible
+                    ? WorkspacePresentationController.TreePreviewSplitterWidth
+                    : 0.0;
             var targetTreeWidth =
-                _workspace.GetAvailableTreeOnlyWorkspaceWidth();
+                Math.Max(
+                    WorkspacePresentationController.SplitTreePaneMinimumWidth,
+                    _workspace.GetAvailableTreeOnlyWorkspaceWidth() -
+                    treePreviewSplitterWidth);
             _controls.TreePaneContainer.Width = targetTreeWidth;
-            _controls.PreviewPaneContainer.Width = 0;
             await WaitForPanelAnimationAsync(
                 PaneAnimationDuration,
                 cancellationToken);
@@ -635,7 +624,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
             _workspace.ApplyPreviewTreePaneWidth(
                 targetTreeWidth,
                 animate: false);
-            _workspace.ApplyPreviewPaneWidth(0, animate: false);
+            _workspace.ApplyPreviewPaneWidth(double.NaN, animate: false);
             await DispatcherTaskSchedulerProvider.YieldAsync(
                 DispatcherPriority.Render);
         }

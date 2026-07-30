@@ -1,4 +1,5 @@
 using Avalonia.Layout;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Services;
 using System.ComponentModel;
 using System.Text.Json;
@@ -462,10 +463,10 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
         {
             var viewModel = UiTestDriver.GetViewModel(window);
             var previewController = GetPreviewWorkspaceController(window);
-            var previewPaneContainer =
+            var treePaneContainer =
                 UiTestDriver.GetRequiredControl<Border>(
                     window,
-                    "PreviewPaneContainer");
+                    "TreePaneContainer");
             viewModel.SelectedPreviewContentMode = mode;
             Assert.Null(viewModel.PreviewDocument);
             var animationStarted =
@@ -473,26 +474,28 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
                     TaskCreationOptions.RunContinuationsAsynchronously);
             var contentWasDeferred = false;
 
-            void OnPreviewPanePropertyChanged(
+            void OnTreePanePropertyChanged(
                 object? sender,
                 AvaloniaPropertyChangedEventArgs args)
             {
                 if (args.Property != Layoutable.WidthProperty ||
-                    previewPaneContainer.Width <= 0.5)
+                    treePaneContainer.Width >
+                    WorkspacePresentationController
+                        .SplitTreePaneMinimumWidth + 1.0)
                 {
                     return;
                 }
 
-                previewPaneContainer.PropertyChanged -=
-                    OnPreviewPanePropertyChanged;
+                treePaneContainer.PropertyChanged -=
+                    OnTreePanePropertyChanged;
                 contentWasDeferred =
                     viewModel.PreviewDocument is null &&
                     !viewModel.IsPreviewLoading;
                 animationStarted.TrySetResult();
             }
 
-            previewPaneContainer.PropertyChanged +=
-                OnPreviewPanePropertyChanged;
+            treePaneContainer.PropertyChanged +=
+                OnTreePanePropertyChanged;
             try
             {
                 var openTask = previewController.OpenAsync();
@@ -502,8 +505,8 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             }
             finally
             {
-                previewPaneContainer.PropertyChanged -=
-                    OnPreviewPanePropertyChanged;
+                treePaneContainer.PropertyChanged -=
+                    OnTreePanePropertyChanged;
             }
 
             Assert.NotNull(viewModel.PreviewDocument);
@@ -557,34 +560,36 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
         {
             var viewModel = UiTestDriver.GetViewModel(window);
             var previewController = GetPreviewWorkspaceController(window);
-            var previewPaneContainer =
+            var treePaneContainer =
                 UiTestDriver.GetRequiredControl<Border>(
                     window,
-                    "PreviewPaneContainer");
+                    "TreePaneContainer");
             var animationTargetApplied =
                 new TaskCompletionSource(
                     TaskCreationOptions.RunContinuationsAsynchronously);
             Task? closeRequestTask = null;
 
-            void OnPreviewPanePropertyChanged(
+            void OnTreePanePropertyChanged(
                 object? sender,
                 AvaloniaPropertyChangedEventArgs args)
             {
                 if (args.Property != Layoutable.WidthProperty ||
-                    previewPaneContainer.Width <= 0.5)
+                    treePaneContainer.Width >
+                    WorkspacePresentationController
+                        .SplitTreePaneMinimumWidth + 1.0)
                 {
                     return;
                 }
 
-                previewPaneContainer.PropertyChanged -=
-                    OnPreviewPanePropertyChanged;
+                treePaneContainer.PropertyChanged -=
+                    OnTreePanePropertyChanged;
                 closeRequestTask = previewController.CloseAsync();
                 animationTargetApplied.TrySetResult();
             }
 
             viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
-            previewPaneContainer.PropertyChanged +=
-                OnPreviewPanePropertyChanged;
+            treePaneContainer.PropertyChanged +=
+                OnTreePanePropertyChanged;
 
             try
             {
@@ -596,8 +601,8 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             }
             finally
             {
-                previewPaneContainer.PropertyChanged -=
-                    OnPreviewPanePropertyChanged;
+                treePaneContainer.PropertyChanged -=
+                    OnTreePanePropertyChanged;
             }
 
             var treeSnapshotHost =

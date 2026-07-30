@@ -62,6 +62,36 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task PreviewOpenClose_KeepsSettingsIslandHorizontallyStationary()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var settingsIsland =
+                UiTestDriver.GetRequiredControl<Border>(
+                    window,
+                    "SettingsIsland");
+
+            var openLeftEdges = await ObserveHorizontalPositionsAsync(
+                window,
+                settingsIsland,
+                () => UiTestDriver.OpenPreviewAsync(window));
+            var closeLeftEdges = await ObserveHorizontalPositionsAsync(
+                window,
+                settingsIsland,
+                () => UiTestDriver.ClosePreviewAsync(window));
+
+            AssertHorizontalPositionIsStable(openLeftEdges, "open");
+            AssertHorizontalPositionIsStable(closeLeftEdges, "close");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PreviewTreePane_DefaultsToMinimumWidth_PreservesManualResizeUntilNextOpen()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -205,5 +235,48 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    private static async Task<IReadOnlyList<double>> ObserveHorizontalPositionsAsync(
+        MainWindow window,
+        Control control,
+        Func<Task> transition)
+    {
+        var positions = new List<double>();
+
+        void CapturePosition(object? sender, EventArgs args)
+        {
+            _ = sender;
+            _ = args;
+            positions.Add(
+                UiTestDriver.GetBoundsInWindow(control, window).Left);
+        }
+
+        CapturePosition(null, EventArgs.Empty);
+        window.LayoutUpdated += CapturePosition;
+        try
+        {
+            await transition();
+            CapturePosition(null, EventArgs.Empty);
+        }
+        finally
+        {
+            window.LayoutUpdated -= CapturePosition;
+        }
+
+        return positions;
+    }
+
+    private static void AssertHorizontalPositionIsStable(
+        IReadOnlyList<double> positions,
+        string transitionName)
+    {
+        Assert.NotEmpty(positions);
+        var minimum = positions.Min();
+        var maximum = positions.Max();
+        Assert.True(
+            maximum - minimum <= 0.01,
+            $"Settings island moved during preview {transitionName}: " +
+            $"min={minimum:F2}, max={maximum:F2}, delta={maximum - minimum:F2}.");
     }
 }
