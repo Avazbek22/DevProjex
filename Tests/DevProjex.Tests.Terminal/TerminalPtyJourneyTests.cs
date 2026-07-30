@@ -187,9 +187,13 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.WaitForScreenAsync(
 			"Repository URL",
 			cancellationToken: TestContext.Current.CancellationToken);
+		var sourceUri = new Uri(source.Path).AbsoluteUri;
 		await terminal.SendAsync(
-			new Uri(source.Path).AbsoluteUri,
+			sourceUri,
 			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			Path.GetFileName(source.Path),
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 
 		await terminal.WaitForScreenAsync(

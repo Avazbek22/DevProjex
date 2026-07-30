@@ -32,7 +32,7 @@ It’s built for real projects where terminal output is noisy, IDE integrations 
 
 DevProjex is not an autonomous coding agent. It gives you a manual, fully controlled way to prepare project context when agents, IDE plugins, or remote indexing cannot be used.
 
-> 🔒 Source-project read-only & without telemetry by design — DevProjex never modifies the opened source project. Explicit export destinations, profiles, settings, clones, and caches are intentional writes outside that source-read-only guarantee.
+> 🔒 Source-project read-only & without telemetry by design — opening, analyzing, or exporting from a project never modifies that source tree. Explicit file, folder, ZIP, and portable-profile destinations are accepted only outside it; application-owned settings, local profiles, clones, caches, and runtime state are stored outside the source tree.
 
 ---
 

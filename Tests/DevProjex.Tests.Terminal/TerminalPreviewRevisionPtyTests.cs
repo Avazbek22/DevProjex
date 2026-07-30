@@ -43,12 +43,17 @@ public sealed class TerminalPreviewRevisionPtyTests
 		Assert.DoesNotContain("\"children\"", xml, StringComparison.Ordinal);
 
 		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
-		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
-		var latestView = await terminal.WaitForScreenAsync(
-			"CONTEXT PREVIEW · Tree · XML",
+		await terminal.WaitForScreenAsync(
+			"LatestContentMarker",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await Task.Delay(400, TestContext.Current.CancellationToken);
-		latestView = terminal.CaptureScreen();
+		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"LatestContentMarker",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var latestView = await terminal.WaitForScreenAsync(
+			"<d n=",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("CONTEXT PREVIEW · Tree · XML", latestView, StringComparison.Ordinal);
 		Assert.Contains("<d n=", latestView, StringComparison.Ordinal);
 		Assert.DoesNotContain("LatestContentMarker", latestView, StringComparison.Ordinal);
 

@@ -7,7 +7,7 @@ internal static partial class TerminalPtyStateAssertions
 	private static readonly int[] AlternateScreenModes = [47, 1047, 1049];
 	private static readonly int[] MouseModes = [1000, 1001, 1002, 1003, 1005, 1006, 1015];
 
-	public static void AssertRestoredBeforeShellMarker(
+	public static void AssertRestoredAtShellCompletion(
 		string output,
 		string screenMode)
 	{
@@ -22,6 +22,7 @@ internal static partial class TerminalPtyStateAssertions
 			.ToArray();
 		var diagnosticContext =
 			$"Marker={markerIndex}; complete trace: {DescribeTransitions(allTransitions)}";
+
 		AssertFinalState(
 			transitions,
 			mode: 25,
@@ -39,6 +40,18 @@ internal static partial class TerminalPtyStateAssertions
 
 		AssertAlternateScreenState(transitions, screenMode, diagnosticContext);
 		AssertMouseState(transitions, diagnosticContext);
+		AssertSgrStateRestored(output, markerIndex, diagnosticContext);
+		if (!OperatingSystem.IsWindows())
+		{
+			Assert.Contains(
+				TerminalPtyHarness.ShellTerminalStateRestoredMarker,
+				output[..markerIndex],
+				StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				TerminalPtyHarness.ShellTerminalStateMismatchMarker,
+				output[..markerIndex],
+				StringComparison.Ordinal);
+		}
 	}
 
 	public static bool MatchesKnownTerminalGuiNoMouseInitialization(string output)
@@ -148,7 +161,9 @@ internal static partial class TerminalPtyStateAssertions
 		var modeTransitions = transitions
 			.Where(transition => transition.Mode == mode)
 			.ToArray();
-		Assert.NotEmpty(modeTransitions);
+		Assert.True(
+			modeTransitions.Length > 0,
+			$"{failureMessage} No transitions for mode {mode}. {diagnosticContext}");
 		if (requiredOppositeState)
 		{
 			Assert.Contains(
@@ -181,6 +196,125 @@ internal static partial class TerminalPtyStateAssertions
 		return transitions;
 	}
 
+	private static void AssertSgrStateRestored(
+		string output,
+		int markerIndex,
+		string diagnosticContext)
+	{
+		var state = new SgrState();
+		foreach (Match match in SgrPattern().Matches(output[..markerIndex]))
+		{
+			var parameters = match.Groups["parameters"].Value;
+			var codes = string.IsNullOrEmpty(parameters)
+				? [0]
+				: parameters
+					.Split(';', StringSplitOptions.None)
+					.Select(static token => int.TryParse(token, out var code) ? code : 0)
+					.ToArray();
+			for (var index = 0; index < codes.Length; index++)
+			{
+				var code = codes[index];
+				switch (code)
+				{
+					case 0:
+						state = new SgrState();
+						break;
+					case 1:
+					case 2:
+						state.BoldOrDim = true;
+						break;
+					case 3:
+						state.Italic = true;
+						break;
+					case 4:
+						state.Underline = true;
+						break;
+					case 5:
+					case 6:
+						state.Blink = true;
+						break;
+					case 7:
+						state.Inverse = true;
+						break;
+					case 8:
+						state.Conceal = true;
+						break;
+					case 9:
+						state.Strike = true;
+						break;
+					case 22:
+						state.BoldOrDim = false;
+						break;
+					case 23:
+						state.Italic = false;
+						break;
+					case 24:
+						state.Underline = false;
+						break;
+					case 25:
+						state.Blink = false;
+						break;
+					case 27:
+						state.Inverse = false;
+						break;
+					case 28:
+						state.Conceal = false;
+						break;
+					case 29:
+						state.Strike = false;
+						break;
+					case >= 30 and <= 37:
+					case >= 90 and <= 97:
+						state.ForegroundDefault = false;
+						break;
+					case 38:
+						state.ForegroundDefault = false;
+						index += ExtendedColorParameterCount(codes, index);
+						break;
+					case 39:
+						state.ForegroundDefault = true;
+						break;
+					case >= 40 and <= 47:
+					case >= 100 and <= 107:
+						state.BackgroundDefault = false;
+						break;
+					case 48:
+						state.BackgroundDefault = false;
+						index += ExtendedColorParameterCount(codes, index);
+						break;
+					case 49:
+						state.BackgroundDefault = true;
+						break;
+				}
+			}
+		}
+
+		Assert.True(
+			state is
+			{
+				DecorationActive: false,
+				ForegroundDefault: true,
+				BackgroundDefault: true
+			},
+			$"SGR color/style state was not reset before the shell resumed. " +
+			$"State={state}. {diagnosticContext}");
+	}
+
+	private static int ExtendedColorParameterCount(
+		IReadOnlyList<int> codes,
+		int colorCodeIndex)
+	{
+		if (colorCodeIndex + 1 >= codes.Count)
+			return 0;
+
+		return codes[colorCodeIndex + 1] switch
+		{
+			5 when colorCodeIndex + 2 < codes.Count => 2,
+			2 when colorCodeIndex + 4 < codes.Count => 4,
+			_ => 0
+		};
+	}
+
 	private static string DescribeTransitions(
 		IReadOnlyList<TerminalModeTransition> transitions) =>
 		string.Join(", ", transitions.Select(static transition => transition.Describe()));
@@ -189,6 +323,31 @@ internal static partial class TerminalPtyStateAssertions
 		"\u001b\\[\\?(?<modes>[0-9]+(?:;[0-9]+)*)(?<state>[hl])",
 		RegexOptions.CultureInvariant)]
 	private static partial Regex PrivateModeTransitionPattern();
+
+	[GeneratedRegex(
+		"\u001b\\[(?<parameters>[0-9;]*)m",
+		RegexOptions.CultureInvariant)]
+	private static partial Regex SgrPattern();
+
+	private sealed class SgrState
+	{
+		public bool BoldOrDim { get; set; }
+		public bool Italic { get; set; }
+		public bool Underline { get; set; }
+		public bool Blink { get; set; }
+		public bool Inverse { get; set; }
+		public bool Conceal { get; set; }
+		public bool Strike { get; set; }
+		public bool DecorationActive =>
+			BoldOrDim || Italic || Underline || Blink || Inverse || Conceal || Strike;
+		public bool ForegroundDefault { get; set; } = true;
+		public bool BackgroundDefault { get; set; } = true;
+
+		public override string ToString() =>
+			$"DecorationActive={DecorationActive}, " +
+			$"ForegroundDefault={ForegroundDefault}, " +
+			$"BackgroundDefault={BackgroundDefault}";
+	}
 
 	private sealed record TerminalModeTransition(
 		int Index,

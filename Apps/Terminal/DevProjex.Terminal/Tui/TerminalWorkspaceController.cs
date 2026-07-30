@@ -517,10 +517,14 @@ public sealed class TerminalWorkspaceController(
 		CancellationToken cancellationToken)
 	{
 		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
-		await services.PortableProfileService
-			.SaveAsync(destination, plan.Selection, overwrite, cancellationToken)
+		return await services.PortableProfileService
+			.SaveAsync(
+				plan.SourceRoot,
+				destination,
+				plan.Selection,
+				overwrite,
+				cancellationToken)
 			.ConfigureAwait(false);
-		return Path.GetFullPath(destination);
 	}
 
 	public Task<int> OpenDesktopAsync(

@@ -956,8 +956,13 @@ public sealed class DevProjexCommandTree
 		{
 			Hidden = true
 		};
+		var workingDirectoryBase64 = new Option<string?>("--working-directory-base64")
+		{
+			Hidden = true
+		};
 		complete.Options.Add(position);
 		complete.Options.Add(base64);
+		complete.Options.Add(workingDirectoryBase64);
 		complete.Arguments.Add(commandLine);
 		complete.SetAction(parseResult =>
 		{
@@ -973,10 +978,23 @@ public sealed class DevProjexCommandTree
 				return CommandLineExitCodes.UsageError;
 			}
 
+			string? completionWorkingDirectory = null;
+			var encodedWorkingDirectory = parseResult.GetValue(workingDirectoryBase64);
+			if (encodedWorkingDirectory is not null &&
+			    !CompletionCommandLineTransport.TryDecodeBase64(
+				    encodedWorkingDirectory,
+				    out completionWorkingDirectory))
+			{
+				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
+				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
+				return CommandLineExitCodes.UsageError;
+			}
+
 			foreach (var candidate in ContextAwareCompletionEngine.Complete(
 				         root,
 				         completionCommandLine,
-				         parseResult.GetValue(position)))
+				         parseResult.GetValue(position),
+				         completionWorkingDirectory))
 			{
 				environment.Output.WriteLine(candidate);
 			}

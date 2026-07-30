@@ -1,6 +1,7 @@
 using System.Text.Encodings.Web;
 using System.Text.Json.Serialization;
 using DevProjex.Application.Context;
+using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.ProjectProfiles;
@@ -20,7 +21,6 @@ public sealed class PortableProjectProfileService
 {
 	public const int CurrentSchemaVersion = 1;
 	public const string DocumentKind = "devprojex-profile";
-	private readonly Action<string, string, bool> moveFile;
 
 	private static readonly JsonSerializerOptions ReadOptions = new()
 	{
@@ -36,17 +36,6 @@ public sealed class PortableProjectProfileService
 		WriteIndented = true,
 		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 	};
-
-	public PortableProjectProfileService()
-		: this(static (sourcePath, destinationPath, overwrite) =>
-			File.Move(sourcePath, destinationPath, overwrite))
-	{
-	}
-
-	internal PortableProjectProfileService(Action<string, string, bool> moveFile)
-	{
-		this.moveFile = moveFile ?? throw new ArgumentNullException(nameof(moveFile));
-	}
 
 	public async Task<ProjectSelectionSpec> LoadAsync(
 		string path,
@@ -88,59 +77,51 @@ public sealed class PortableProjectProfileService
 		}
 	}
 
-	public async Task SaveAsync(
+	public async Task<string> SaveAsync(
+		string sourceRoot,
 		string path,
 		ProjectSelectionSpec selection,
 		bool overwrite,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(selection);
-		var fullPath = NormalizeProfilePath(path);
 		var document = ToDocument(selection);
-		var directory = Path.GetDirectoryName(fullPath);
-		if (!string.IsNullOrWhiteSpace(directory))
-			Directory.CreateDirectory(directory);
-		if (!overwrite && File.Exists(fullPath))
-		{
-			throw new PortableProjectProfileException(
-				"DPX-PROFILE-DESTINATION-EXISTS",
-				"The portable profile destination already exists.");
-		}
-
-		var tempPath = Path.Combine(
-			directory ?? Directory.GetCurrentDirectory(),
-			$".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
 		try
 		{
-			await using (var stream = new FileStream(
-				             tempPath,
-				             FileMode.CreateNew,
-				             FileAccess.Write,
-				             FileShare.None,
-				             16 * 1024,
-				             FileOptions.Asynchronous | FileOptions.SequentialScan))
-			{
-				await JsonSerializer.SerializeAsync(stream, document, WriteOptions, cancellationToken)
-					.ConfigureAwait(false);
-				await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-			}
-
-			moveFile(tempPath, fullPath, overwrite);
+			var exactPath = ExactFileOutputDestinationPolicy.Resolve(
+				sourceRoot,
+				NormalizeProfilePath(path),
+				overwrite);
+			return await AtomicFileOutput.WriteAsync(
+					exactPath,
+					overwrite,
+					(stream, token) =>
+						JsonSerializer.SerializeAsync(
+							stream,
+							document,
+							WriteOptions,
+							token),
+					cancellationToken,
+					candidate => ExactFileOutputDestinationPolicy.Resolve(
+						sourceRoot,
+						candidate,
+						overwrite))
+				.ConfigureAwait(false);
 		}
 		catch (PortableProjectProfileException)
 		{
 			throw;
 		}
-		catch (OperationCanceledException)
-		{
-			throw;
-		}
-		catch (IOException exception) when (!overwrite && File.Exists(fullPath))
+		catch (AtomicFileOutputConflictException exception)
 		{
 			throw new PortableProjectProfileException(
 				"DPX-PROFILE-DESTINATION-EXISTS",
 				"The portable profile destination already exists.",
 				exception);
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
@@ -148,10 +129,6 @@ public sealed class PortableProjectProfileService
 				"DPX-CLI-PROFILE-WRITE-FAILED",
 				"The portable profile could not be written.",
 				exception);
-		}
-		finally
-		{
-			TryDelete(tempPath);
 		}
 	}
 
@@ -300,19 +277,6 @@ public sealed class PortableProjectProfileService
 		.Distinct(PathComparer.Default)
 		.OrderBy(static value => value, PathComparer.Default)
 		.ToArray();
-
-	private static void TryDelete(string path)
-	{
-		try
-		{
-			if (File.Exists(path))
-				File.Delete(path);
-		}
-		catch
-		{
-			// A unique sibling temp file is harmless if the platform keeps a transient handle.
-		}
-	}
 
 	private sealed class PortableProfileDocument
 	{

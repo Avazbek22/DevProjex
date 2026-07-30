@@ -11,6 +11,11 @@ namespace DevProjex.Tests.Terminal;
 internal sealed class TerminalPtyHarness : IAsyncDisposable
 {
 	public const string ShellCompletionMarker = "__DEVPROJEX_SHELL_RESTORED__";
+	public const string ShellTerminalStateRestoredMarker =
+		"__DEVPROJEX_TERMIOS_RESTORED__";
+	public const string ShellTerminalStateMismatchMarker =
+		"__DEVPROJEX_TERMIOS_MISMATCH__";
+	private const string ShellHandshakeMarker = "__DEVPROJEX_SHELL_HANDSHAKE__";
 	private const string WindowSizeQuery = "\u001b[18t";
 	private readonly Hex1bTerminalChildProcess _process;
 	private readonly XTermTerminal _terminal;
@@ -174,7 +179,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				? string.Empty
 				: "set NO_COLOR=&& ";
 			var completion = writeShellCompletionMarker
-				? $" & set \"dpx_exit=!errorlevel!\" & echo({ShellCompletionMarker} & exit /b !dpx_exit!"
+				? $" & set \"dpx_exit=!errorlevel!\" & echo({EscapeMarkerForCommandPrompt(ShellHandshakeMarker)}" +
+				  $" & set /p \"dpx_sync=\" & echo({EscapeMarkerForCommandPrompt(ShellCompletionMarker)}" +
+				  $" & set /p \"dpx_release=\" & exit /b !dpx_exit!"
 				: " & exit /b !errorlevel!";
 			return (
 				host,
@@ -199,8 +206,20 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				.Append(QuoteForPosixShell(binary))
 				.Concat(arguments.Select(QuoteForPosixShell)));
 		var shellCommand = writeShellCompletionMarker
-			? $"{invocation}; dpx_exit=$?; printf '%s\\n' " +
-			  $"{QuoteForPosixShell(ShellCompletionMarker)}; exit \"$dpx_exit\""
+			? $"dpx_stty_before=$(stty -g 2>/dev/null || true); " +
+			  $"{invocation}; dpx_exit=$?; " +
+			  "dpx_stty_after=$(stty -g 2>/dev/null || true); " +
+			  "if [ -n \"$dpx_stty_before\" ] && " +
+			  "[ \"$dpx_stty_before\" = \"$dpx_stty_after\" ]; then " +
+			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalStateRestoredMarker)}; " +
+			  "else " +
+			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalStateMismatchMarker)}; " +
+			  "fi; " +
+			  $"printf '%s%s\\n' " +
+			  $"{SplitMarkerForPosixShell(ShellHandshakeMarker)}; " +
+			  "IFS= read -r dpx_sync; printf '%s%s\\n' " +
+			  $"{SplitMarkerForPosixShell(ShellCompletionMarker)}; " +
+			  "IFS= read -r dpx_release; exit \"$dpx_exit\""
 			: "exec " + invocation;
 		return ("/bin/sh", ["-c", shellCommand], null);
 	}
@@ -208,8 +227,18 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	private static string QuoteForCommandPrompt(string value) =>
 		$"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
 
+	private static string EscapeMarkerForCommandPrompt(string marker) =>
+		marker.Insert(marker.Length / 2, "^");
+
 	private static string QuoteForPosixShell(string value) =>
 		$"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
+
+	private static string SplitMarkerForPosixShell(string marker)
+	{
+		var split = marker.Length / 2;
+		return QuoteForPosixShell(marker[..split]) + " " +
+		       QuoteForPosixShell(marker[split..]);
+	}
 
 	public async Task SendAsync(string input, CancellationToken cancellationToken = default)
 	{
@@ -227,6 +256,23 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 
 	public Task SendEnterAsync(CancellationToken cancellationToken = default) =>
 		SendAsync("\r", cancellationToken);
+
+	public async Task CompleteShellRestorationHandshakeAsync(
+		CancellationToken cancellationToken = default)
+	{
+		await WaitForRawOutputAsync(
+				ShellHandshakeMarker,
+				cancellationToken: cancellationToken)
+			.ConfigureAwait(false);
+		await SendAsync("continue\r", cancellationToken).ConfigureAwait(false);
+		await WaitForRawOutputAsync(
+				ShellCompletionMarker,
+				cancellationToken: cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	public Task ReleaseParentShellAsync(CancellationToken cancellationToken = default) =>
+		SendAsync("exit\r", cancellationToken);
 
 	public async Task SendEscapeAsync(CancellationToken cancellationToken = default)
 	{
@@ -409,6 +455,31 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			$"Timed out waiting for '{unexpected}' to disappear.\n{CaptureScreen()}\n" +
 			$"Raw output tail:\n{CaptureRawOutputTail()}\n" +
 			$"Terminal responses: {CaptureTerminalResponseLog()}");
+	}
+
+	private async Task WaitForRawOutputAsync(
+		string expected,
+		TimeSpan? timeout = null,
+		CancellationToken cancellationToken = default)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(15);
+		while (stopwatch.Elapsed < effectiveTimeout)
+		{
+			if (CaptureRawOutput().Contains(expected, StringComparison.Ordinal))
+				return;
+			if (HasExited)
+			{
+				throw new Xunit.Sdk.XunitException(
+					$"Terminal process exited with code {_process.ExitCode} before " +
+					$"'{expected}' appeared.\nRaw output:\n{CaptureRawOutput()}");
+			}
+			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+		}
+
+		throw new TimeoutException(
+			$"Timed out waiting for '{expected}'.\n" +
+			$"Raw output tail:\n{CaptureRawOutputTail()}");
 	}
 
 	public async Task<int> WaitForExitAsync(

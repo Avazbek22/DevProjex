@@ -23,7 +23,9 @@ public sealed class ReleaseHardeningOutputRegressionTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/src/app.cs", "class App {}\n");
-		var destination = Path.Combine(workspace.Path, "output", "analysis.txt");
+		var destination = Path.Combine(
+			workspace.CreateDirectory("output"),
+			"analysis.txt");
 		var appData = workspace.CreateDirectory("app-data");
 
 		var stdoutEnvironment = new TestTerminalEnvironment();
@@ -95,6 +97,253 @@ public sealed class ReleaseHardeningOutputRegressionTests
 			StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("analyze")]
+	[InlineData("context")]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	public async Task MissingDestinationParentIsRejectedWithoutEffects(
+		string operation)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = workspace.WriteFile("project/app.cs", "class App {}\n");
+		var missingParent = Path.Combine(workspace.Path, "missing-output");
+		var destination = Path.Combine(
+			missingParent,
+			operation == "zip" ? "submission.zip" : "result");
+		var environment = new TestTerminalEnvironment();
+		string[] arguments = operation switch
+		{
+			"analyze" =>
+			[
+				"analyze", project,
+				"--format", "text",
+				"--plain",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", destination
+			],
+			"context" =>
+			[
+				"export", "context", project,
+				"--format", "text",
+				"--plain",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", destination
+			],
+			"folder" =>
+			[
+				"export", "project", project,
+				"--as", "folder",
+				"--plain",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", destination
+			],
+			_ =>
+			[
+				"export", "project", project,
+				"--as", "zip",
+				"--plain",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", destination
+			]
+		};
+
+		var exitCode = await RunAsync(
+			workspace.CreateDirectory("app-data"),
+			environment,
+			arguments);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			"DPX-EXPORT-DESTINATION-UNAVAILABLE",
+			environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.False(Directory.Exists(missingParent));
+		Assert.Equal(
+			"class App {}\n",
+			await File.ReadAllTextAsync(
+				source,
+				TestContext.Current.CancellationToken));
+	}
+
+	[Theory]
+	[InlineData("context")]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	public async Task DryRunRejectsMissingDestinationParentWithoutCreatingIt(
+		string operation)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = workspace.WriteFile("project/app.cs", "class App {}\n");
+		var missingParent = Path.Combine(workspace.Path, "missing-output");
+		var destination = Path.Combine(
+			missingParent,
+			operation == "zip" ? "submission.zip" : "result");
+		var environment = new TestTerminalEnvironment();
+		string[] arguments = operation switch
+		{
+			"context" =>
+			[
+				"export", "context", project,
+				"--format", "text",
+				"--plain",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--dry-run",
+				"-o", destination
+			],
+			"folder" =>
+			[
+				"export", "project", project,
+				"--as", "folder",
+				"--plain",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--dry-run",
+				"-o", destination
+			],
+			_ =>
+			[
+				"export", "project", project,
+				"--as", "zip",
+				"--plain",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--dry-run",
+				"-o", destination
+			]
+		};
+
+		var exitCode = await RunAsync(
+			workspace.CreateDirectory("app-data"),
+			environment,
+			arguments);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			"DPX-EXPORT-DESTINATION-UNAVAILABLE",
+			environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.False(Directory.Exists(missingParent));
+		Assert.Equal(
+			"class App {}\n",
+			await File.ReadAllTextAsync(
+				source,
+				TestContext.Current.CancellationToken));
+	}
+
+	[Theory]
+	[InlineData("analyze")]
+	[InlineData("context")]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	[InlineData("profile")]
+	public async Task DanglingDestinationLinkReturnsConflictWithoutEffects(
+		string operation)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = workspace.WriteFile("project/app.cs", "class App {}\n");
+		var outputParent = workspace.CreateDirectory("output");
+		var destination = Path.Combine(
+			outputParent,
+			operation switch
+			{
+				"zip" => "submission.zip",
+				"profile" => "profile.json",
+				_ => "result"
+			});
+		var missingTarget = Path.Combine(workspace.Path, "missing", "target");
+		CreateDanglingFileLinkOrSkip(destination, missingTarget);
+		var environment = new TestTerminalEnvironment();
+		string[] arguments = operation switch
+		{
+			"analyze" =>
+			[
+				"analyze", project,
+				"--format", "text",
+				"--plain",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", destination
+			],
+			"context" =>
+			[
+				"export", "context", project,
+				"--format", "text",
+				"--plain",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", destination
+			],
+			"folder" or "zip" =>
+			[
+				"export", "project", project,
+				"--as", operation,
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--progress", "never",
+				"-o", destination
+			],
+			"profile" =>
+			[
+				"profile", "export", project,
+				"--profile", "standard",
+				"-o", destination
+			],
+			_ => throw new ArgumentOutOfRangeException(nameof(operation))
+		};
+
+		try
+		{
+			var exitCode = await RunAsync(
+				workspace.CreateDirectory("app-data"),
+				environment,
+				arguments);
+
+			Assert.Equal(CommandLineExitCodes.DestinationConflict, exitCode);
+			Assert.Empty(environment.StandardOutput);
+			Assert.Contains(
+				operation == "profile"
+					? "DPX-PROFILE-DESTINATION-EXISTS"
+					: "DPX-EXPORT-DESTINATION-EXISTS",
+				environment.StandardError,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				"DPX-IO-FAILURE",
+				environment.StandardError,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				"DPX-CLI-UNEXPECTED",
+				environment.StandardError,
+				StringComparison.Ordinal);
+			Assert.Equal(
+				missingTarget,
+				new FileInfo(destination).LinkTarget);
+			Assert.False(Path.Exists(missingTarget));
+			Assert.Equal(
+				"class App {}\n",
+				await File.ReadAllTextAsync(
+					source,
+					TestContext.Current.CancellationToken));
+			Assert.Empty(Directory.EnumerateFileSystemEntries(
+				outputParent,
+				".*.tmp"));
+		}
+		finally
+		{
+			File.Delete(destination);
+		}
+	}
+
 	[Fact]
 	public async Task AnalyzeDestinationInsideSourceReturnsPolicyFailureWithoutEffects()
 	{
@@ -128,12 +377,56 @@ public sealed class ReleaseHardeningOutputRegressionTests
 	}
 
 	[Fact]
+	public async Task AnalyzeDestinationCaseAliasInsideSourceReturnsPolicyFailureWithoutEffects()
+	{
+		var testRoot = Environment.GetEnvironmentVariable(
+			"DEVPROJEX_CASE_INSENSITIVE_TEST_ROOT");
+		using var workspace = new TemporaryDirectory(testRoot);
+		var project = workspace.CreateDirectory("ProjectCaseAlias");
+		var source = workspace.WriteFile("ProjectCaseAlias/app.cs", "class App {}\n");
+		var caseAlias = Path.Combine(workspace.Path, "pROJECTcASEaLIAS");
+		if (!Directory.Exists(caseAlias))
+		{
+			Assert.Skip(
+				$"The test root is case-sensitive: {workspace.Path}. " +
+				"Set DEVPROJEX_CASE_INSENSITIVE_TEST_ROOT to validate another mounted volume.");
+		}
+		var destination = Path.Combine(caseAlias, "generated", "analysis.txt");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace.CreateDirectory("app-data"),
+			environment,
+			"analyze", project,
+			"--format", "text",
+			"--plain",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"-o", destination);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Equal(
+			"class App {}\n",
+			await File.ReadAllTextAsync(
+				source,
+				TestContext.Current.CancellationToken));
+		Assert.False(File.Exists(destination));
+		Assert.False(Directory.Exists(Path.GetDirectoryName(destination)!));
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			"DPX-EXPORT-UNSAFE-DESTINATION",
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task ContextFileDryRunWritesPlanOnlyToStderrAndCreatesNothing()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		var source = workspace.WriteFile("project/app.cs", "class App {}\n");
-		var destination = Path.Combine(workspace.Path, "output", "context.md");
+		var outputParent = workspace.CreateDirectory("output");
+		var destination = Path.Combine(outputParent, "context.md");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(
@@ -153,7 +446,7 @@ public sealed class ReleaseHardeningOutputRegressionTests
 			environment.StandardError,
 			StringComparison.Ordinal);
 		Assert.False(File.Exists(destination));
-		Assert.False(Directory.Exists(Path.GetDirectoryName(destination)!));
+		Assert.Empty(Directory.EnumerateFileSystemEntries(outputParent));
 		Assert.Equal("class App {}\n", await File.ReadAllTextAsync(
 			source,
 			TestContext.Current.CancellationToken));
@@ -195,7 +488,8 @@ public sealed class ReleaseHardeningOutputRegressionTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		var source = workspace.WriteFile("project/app.cs", "class App {}\n");
-		var destination = Path.Combine(workspace.Path, "output", destinationName);
+		var outputParent = workspace.CreateDirectory("output");
+		var destination = Path.Combine(outputParent, destinationName);
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(
@@ -216,7 +510,7 @@ public sealed class ReleaseHardeningOutputRegressionTests
 			StringComparison.Ordinal);
 		Assert.False(File.Exists(destination));
 		Assert.False(Directory.Exists(destination));
-		Assert.False(Directory.Exists(Path.GetDirectoryName(destination)!));
+		Assert.Empty(Directory.EnumerateFileSystemEntries(outputParent));
 		Assert.Equal("class App {}\n", await File.ReadAllTextAsync(
 			source,
 			TestContext.Current.CancellationToken));
@@ -230,9 +524,10 @@ public sealed class ReleaseHardeningOutputRegressionTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/app.cs", "class App {}\n");
+		var outputParent = workspace.CreateDirectory("output");
 		var destination = command == "context"
-			? Path.Combine(workspace.Path, "output", "context.md")
-			: Path.Combine(workspace.Path, "output", "submission");
+			? Path.Combine(outputParent, "context.md")
+			: Path.Combine(outputParent, "submission");
 		var environment = new TestTerminalEnvironment();
 		var arguments = command == "context"
 			? new[]
@@ -273,6 +568,7 @@ public sealed class ReleaseHardeningOutputRegressionTests
 		Assert.Contains(Path.GetFullPath(destination), line, StringComparison.Ordinal);
 		Assert.False(File.Exists(destination));
 		Assert.False(Directory.Exists(destination));
+		Assert.Empty(Directory.EnumerateFileSystemEntries(outputParent));
 	}
 
 	[Theory]
@@ -291,7 +587,9 @@ public sealed class ReleaseHardeningOutputRegressionTests
 				$"project/src/file-{index:D2}.txt",
 				new string((char)('a' + index % 26), 16 * 1024));
 		}
-		var destination = Path.Combine(workspace.Path, "output", "submission");
+		var destination = Path.Combine(
+			workspace.CreateDirectory("output"),
+			"submission");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(
@@ -454,8 +752,7 @@ public sealed class ReleaseHardeningOutputRegressionTests
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/src/nested/app.cs", "class App {}\n");
 		var destination = Path.Combine(
-			workspace.Path,
-			"output",
+			workspace.CreateDirectory("output"),
 			format == "text" ? "context.txt" : "context.md");
 		var environment = new TestTerminalEnvironment();
 
@@ -566,6 +863,26 @@ public sealed class ReleaseHardeningOutputRegressionTests
 				environment,
 				new TerminalServiceFactory(() => appData))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
+
+	private static void CreateDanglingFileLinkOrSkip(
+		string linkPath,
+		string missingTarget)
+	{
+		try
+		{
+			File.CreateSymbolicLink(linkPath, missingTarget);
+			if (new FileInfo(linkPath).LinkTarget is null)
+				Assert.Skip("The filesystem did not preserve the dangling symbolic link.");
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip(
+				$"Dangling symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+	}
 
 	private static string NormalizeFinalNewline(string value) =>
 		value.TrimEnd('\r', '\n');

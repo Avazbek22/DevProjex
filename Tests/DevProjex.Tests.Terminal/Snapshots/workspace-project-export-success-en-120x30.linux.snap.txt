@@ -3,25 +3,25 @@
 ┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
 │v [x] <PROJECT>               ││+ <PROJECT>                             │
 │  > [x] src                                          ││  + src                                                        │
-│    [x] global.json                                  ││    + Feature                                                  │
-│    [x] readme.md                                    ││      - Handler.cs                                             │
-│     ┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐      │
-│     │ Destination: <OUTPUT_ROOT>/project-export                                          │      │
-│     │ Files: 4  |  Folders: 3  |  Size: 76 B                                                                  │      │
-│     │ Elapsed: <ELAPSED>                                                                                           │      │
-│     │                                                                                                         │      │
-│     │ Equivalent command:                                                                                     │      │
-│     │ devprojex export project <PROJECT_ROOT> --as folder -o │      │
-│     │ <OUTPUT_ROOT>/project-export --profile standard --git-mode gitignore --exclude     │      │
-│     │ smart-ignore --exclude hidden-folders --exclude hidden-files --exclude dot-folders --exclude dot-files  │      │
-│     │ --exclude empty-folders --exclude empty-files --exclude extensionless-files                             │      │
+│    [┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐      │
+│    [│ Destination: <OUTPUT_ROOT>/project-export                                        ▲ │      │
+│     │ Files: 4  |  Folders: 3  |  Size: 76 B                                                                █ │      │
+│     │ Elapsed: <ELAPSED>                                                                                         █ │      │
+│     │                                                                                                       █ │      │
+│     │ Equivalent command:                                                                                   █ │      │
+│     │ argv[0] = "devprojex"                                                                                 ░ │      │
+│     │ argv[1] = "export"                                                                                    ░ │      │
+│     │ argv[2] = "project"                                                                                   ░ │      │
+│     │ argv[3] = "<PROJECT_ROOT>"                            ░ │      │
+│     │ argv[4] = "--as"                                                                                      ░ │      │
+│     │ argv[5] = "folder"                                                                                    ░ │      │
+│     │ argv[6] = "-o"                                                                                        ░ │      │
+│     │ argv[7] = "<OUTPUT_ROOT>/project-export"                                         ▼ │      │
 │     │                                                                                                         │      │
 │     │                                                                                                         │      │
 │     │                                              ⟦► Close ◄⟧▖                                               │      │
 │     │                                              ▝▀▀▀▀▀▀▀▀▀▀▘                                               │      │
 │     └─────────────────────────────────────────────────────────────────────────────────────────────────────────┘      │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││ Files 4  |  Lines 1-7/7                                       │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘

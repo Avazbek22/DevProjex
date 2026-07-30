@@ -18,12 +18,17 @@ internal static class ExactOutputDestinationValidator
 		string destination,
 		bool overwrite)
 	{
-		var fullPath = Path.GetFullPath(destination);
-		ProjectCopyExportService.EnsureDestinationOutsideProject(sourceRoot, fullPath);
-		if (Directory.Exists(fullPath) || (!overwrite && File.Exists(fullPath)))
-			throw new OutputDestinationConflictException(fullPath);
-
-		return fullPath;
+		try
+		{
+			return ExactFileOutputDestinationPolicy.Resolve(
+				sourceRoot,
+				destination,
+				overwrite);
+		}
+		catch (AtomicFileOutputConflictException exception)
+		{
+			throw new OutputDestinationConflictException(exception.Path);
+		}
 	}
 
 	public static string ValidateProject(
@@ -32,15 +37,17 @@ internal static class ExactOutputDestinationValidator
 		ProjectCopyExportFormat format,
 		bool overwrite)
 	{
-		var fullPath = Path.GetFullPath(destination);
-		ProjectCopyExportService.EnsureDestinationOutsideProject(sourceRoot, fullPath);
-		if (Directory.Exists(fullPath) ||
-		    (File.Exists(fullPath) &&
-		     !(format == ProjectCopyExportFormat.Zip && overwrite)))
+		var replacementAllowed = format == ProjectCopyExportFormat.Zip && overwrite;
+		try
 		{
-			throw new OutputDestinationConflictException(fullPath);
+			return ExactFileOutputDestinationPolicy.Resolve(
+				sourceRoot,
+				destination,
+				replacementAllowed);
 		}
-
-		return fullPath;
+		catch (AtomicFileOutputConflictException exception)
+		{
+			throw new OutputDestinationConflictException(exception.Path);
+		}
 	}
 }

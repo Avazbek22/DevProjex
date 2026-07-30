@@ -132,6 +132,9 @@ public sealed class TerminalPtyRecoveryTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("(*) Use .gitignore", recoveredMode, StringComparison.Ordinal);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Tracked Git files only",
+			cancellationToken: TestContext.Current.CancellationToken);
 		var recovered = await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);

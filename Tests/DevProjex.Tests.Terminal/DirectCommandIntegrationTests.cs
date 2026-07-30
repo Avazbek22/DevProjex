@@ -77,7 +77,9 @@ public sealed class DirectCommandIntegrationTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/src/app.cs", "class App {}\n");
-		var reportPath = Path.Combine(workspace.Path, "output", "analysis.json");
+		var reportPath = Path.Combine(
+			workspace.CreateDirectory("output"),
+			"analysis.json");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await new TerminalApplication(
@@ -256,7 +258,8 @@ public sealed class DirectCommandIntegrationTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/app.cs", "class App {}\n");
-		var destination = System.IO.Path.Combine(workspace.Path, "output", "context.md");
+		var outputParent = workspace.CreateDirectory("output");
+		var destination = System.IO.Path.Combine(outputParent, "context.md");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await new TerminalApplication(
@@ -279,6 +282,7 @@ public sealed class DirectCommandIntegrationTests
 			System.IO.Path.GetFullPath(destination),
 			environment.StandardError,
 			StringComparison.Ordinal);
+		Assert.Empty(Directory.EnumerateFileSystemEntries(outputParent));
 	}
 
 	[Fact]

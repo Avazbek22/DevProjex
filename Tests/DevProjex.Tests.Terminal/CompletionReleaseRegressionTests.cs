@@ -304,6 +304,172 @@ public sealed class CompletionReleaseRegressionTests
 	}
 
 	[Fact]
+	public async Task EncodedCompletionWorkingDirectoryControlsRelativePathCandidates()
+	{
+		using var workspace = new TemporaryDirectory();
+		var completionDirectory = workspace.CreateDirectory("completion cwd");
+		var project = Directory.CreateDirectory(
+			Path.Combine(completionDirectory, "Проект O'Brien & $draft")).FullName;
+		var line =
+			$"devprojex analyze \".{Path.DirectorySeparatorChar}Проект O";
+		var encodedLine = Convert.ToBase64String(Encoding.UTF8.GetBytes(line));
+		var encodedWorkingDirectory = Convert.ToBase64String(
+			Encoding.UTF8.GetBytes(completionDirectory));
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			[
+				"dev",
+				"complete",
+				"--position",
+				line.Length.ToString(CultureInfo.InvariantCulture),
+				"--base64",
+				"--working-directory-base64",
+				encodedWorkingDirectory,
+				encodedLine
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		Assert.Contains(
+			$".{Path.DirectorySeparatorChar}{Path.GetFileName(project)}{Path.DirectorySeparatorChar}",
+			environment.StandardOutput.Split(
+				Environment.NewLine,
+				StringSplitOptions.RemoveEmptyEntries));
+		Assert.DoesNotContain(
+			environment.StandardOutput.Split(
+				Environment.NewLine,
+				StringSplitOptions.RemoveEmptyEntries),
+			candidate =>
+				candidate.Equals(
+					$"Apps{Path.DirectorySeparatorChar}",
+					StringComparison.Ordinal) ||
+				candidate.Equals(
+					$"Application{Path.DirectorySeparatorChar}",
+					StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void ExplicitCompletionWorkingDirectoryAppliesToOptionAndProjectRelativeSources()
+	{
+		using var workspace = new TemporaryDirectory();
+		var completionDirectory = workspace.CreateDirectory("completion cwd");
+		var outputDirectory = Directory.CreateDirectory(
+			Path.Combine(completionDirectory, "reports")).FullName;
+		var projectDirectory = Directory.CreateDirectory(
+			Path.Combine(completionDirectory, "project")).FullName;
+		var selectedDirectory = Directory.CreateDirectory(
+			Path.Combine(projectDirectory, "src")).FullName;
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var separator = Path.DirectorySeparatorChar;
+
+		var outputCandidates = ContextAwareCompletionEngine.Complete(
+			root,
+			$"devprojex analyze . -o .{separator}rep",
+			$"devprojex analyze . -o .{separator}rep".Length,
+			completionDirectory);
+		var selectedCandidates = ContextAwareCompletionEngine.Complete(
+			root,
+			$"devprojex analyze .{separator}project --select s",
+			$"devprojex analyze .{separator}project --select s".Length,
+			completionDirectory);
+
+		Assert.Equal(
+			[$".{separator}{Path.GetFileName(outputDirectory)}{separator}"],
+			outputCandidates);
+		Assert.Equal(
+			[$"{Path.GetFileName(selectedDirectory)}{separator}"],
+			selectedCandidates);
+	}
+
+	[Fact]
+	public async Task CompletionBaseDirectoryScopesAreNestedAndConcurrentFlowSafe()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstBase = workspace.CreateDirectory("first");
+		var secondBase = workspace.CreateDirectory("second");
+		Directory.CreateDirectory(Path.Combine(firstBase, "first-only"));
+		Directory.CreateDirectory(Path.Combine(secondBase, "second-only"));
+		var separator = Path.DirectorySeparatorChar;
+
+		using (FileSystemCompletionSource.UseBaseDirectory(firstBase))
+		{
+			Assert.Equal(
+				[$"first-only{separator}"],
+				FileSystemCompletionSource.Complete(
+					string.Empty,
+					FileSystemCompletionKind.Directories));
+			using (FileSystemCompletionSource.UseBaseDirectory(secondBase))
+			{
+				Assert.Equal(
+					[$"second-only{separator}"],
+					FileSystemCompletionSource.Complete(
+						string.Empty,
+						FileSystemCompletionKind.Directories));
+			}
+			Assert.Equal(
+				[$"first-only{separator}"],
+				FileSystemCompletionSource.Complete(
+					string.Empty,
+					FileSystemCompletionKind.Directories));
+		}
+
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var barrier = new Barrier(participantCount: 2);
+		var first = CompleteConcurrentlyAsync(firstBase);
+		var second = CompleteConcurrentlyAsync(secondBase);
+		var results = await Task.WhenAll(first, second);
+
+		Assert.Equal([$"first-only{separator}"], results[0]);
+		Assert.Equal([$"second-only{separator}"], results[1]);
+
+		Task<string[]> CompleteConcurrentlyAsync(string baseDirectory) =>
+			Task.Run(
+				() =>
+				{
+					using var scope =
+						FileSystemCompletionSource.UseBaseDirectory(baseDirectory);
+					Assert.True(
+						barrier.SignalAndWait(
+							TimeSpan.FromSeconds(10),
+							cancellationToken),
+						"The completion scopes were not active concurrently.");
+					return FileSystemCompletionSource
+						.Complete(
+							string.Empty,
+							FileSystemCompletionKind.Directories)
+						.ToArray();
+				},
+				cancellationToken);
+	}
+
+	[Fact]
+	public async Task InvalidEncodedCompletionWorkingDirectoryFailsWithoutCandidates()
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			[
+				"dev",
+				"complete",
+				"--position",
+				"1",
+				"--working-directory-base64",
+				"not-base64!",
+				"x"
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-INVALID-SYNTAX]",
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void IncompleteQuotedProjectPathUsesTheCompleteLexicalPrefix()
 	{
 		using var workspace = new TemporaryDirectory();

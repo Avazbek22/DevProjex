@@ -59,16 +59,24 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		var firstSearchMarker = GetMaximumVisibleMarker(firstSearchMatch);
 		await terminal.SendAsync("nnnnnnnn", TestContext.Current.CancellationToken);
-		var nextSearchMatch = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"9/60",
 			cancellationToken: TestContext.Current.CancellationToken);
+		var nextSearchMatch = await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("9/60", nextSearchMatch, StringComparison.Ordinal);
 		Assert.True(
 			GetMaximumVisibleMarker(nextSearchMatch) > firstSearchMarker,
 			"Preview Search next did not move the visible viewport.");
 		await terminal.SendAsync("N", TestContext.Current.CancellationToken);
-		var previousSearchMatch = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"8/60",
 			cancellationToken: TestContext.Current.CancellationToken);
+		var previousSearchMatch = await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("8/60", previousSearchMatch, StringComparison.Ordinal);
 		Assert.True(
 			GetMaximumVisibleMarker(previousSearchMatch) <=
 			GetMaximumVisibleMarker(nextSearchMatch),

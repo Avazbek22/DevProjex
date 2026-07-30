@@ -21,6 +21,7 @@ public sealed class DocumentationExecutionRegressionTests
 		Assert.Contains(examples, static example => example.Source == "README.md");
 		Assert.Contains(examples, static example => example.Source == "Docs/CommandLine.md");
 		Assert.Contains(examples, static example => example.Source == "Docs/CLI-Migration.md");
+		Assert.Contains(examples, static example => example.Source == "Docs/CLI-Profiles.md");
 		Assert.Contains(examples, static example => example.Source.StartsWith(
 			"Assets/HelpContent/",
 			StringComparison.Ordinal));
@@ -28,7 +29,7 @@ public sealed class DocumentationExecutionRegressionTests
 			.Select(static example => example.Command)
 			.Distinct(StringComparer.Ordinal)
 			.ToArray();
-		Assert.True(uniqueCommands.Length >= 12);
+		Assert.True(uniqueCommands.Length >= 18);
 
 		for (var index = 0; index < uniqueCommands.Length; index++)
 		{
@@ -44,9 +45,10 @@ public sealed class DocumentationExecutionRegressionTests
 					new TerminalServiceFactory(() => workspace.CreateDirectory($"app-data-{index}")))
 				.RunAsync(arguments, TestContext.Current.CancellationToken);
 
-			Assert.Equal(
-				CommandLineExitCodes.Success,
-				exitCode);
+			Assert.True(
+				exitCode == CommandLineExitCodes.Success,
+				$"Documented command failed with exit code {exitCode}: " +
+				$"{uniqueCommands[index]}{Environment.NewLine}{environment.StandardError}");
 			Assert.Empty(environment.StandardError);
 			Assert.NotEmpty(environment.StandardOutput);
 			Assert.Equal(before, ComputeTreeFingerprint(project));
@@ -73,7 +75,7 @@ public sealed class DocumentationExecutionRegressionTests
 			"README.md",
 			readme[sectionStart..sectionEnd]);
 
-		foreach (var fileName in new[] { "CommandLine.md", "CLI-Migration.md" })
+		foreach (var fileName in new[] { "CommandLine.md", "CLI-Migration.md", "CLI-Profiles.md" })
 		{
 			var content = await File.ReadAllTextAsync(
 				Path.Combine(repositoryRoot, "Docs", fileName),
@@ -117,9 +119,11 @@ public sealed class DocumentationExecutionRegressionTests
 	private static bool IsConcreteDirectCommand(string line) =>
 		(line.StartsWith("devprojex analyze ", StringComparison.Ordinal) ||
 		 line.StartsWith("devprojex export context ", StringComparison.Ordinal) ||
-		 line.StartsWith("devprojex export project ", StringComparison.Ordinal)) &&
+		 line.StartsWith("devprojex export project ", StringComparison.Ordinal) ||
+		 line.StartsWith("devprojex profile ", StringComparison.Ordinal)) &&
 		!line.Contains('[') &&
-		!line.Contains('<');
+		!line.Contains('<') &&
+		!line.Contains(" FILE", StringComparison.Ordinal);
 
 	private static string[] PrepareArguments(
 		string example,
@@ -131,20 +135,67 @@ public sealed class DocumentationExecutionRegressionTests
 			.Split(' ', StringSplitOptions.RemoveEmptyEntries)
 			.Skip(1)
 			.ToArray();
-		var projectIndex = arguments[0] == "analyze" ? 1 : 2;
-		Assert.True(arguments.Length > projectIndex);
-		arguments[projectIndex] = project;
+		if (arguments[0] == "profile")
+			PrepareProfileArguments(arguments, project, workspace);
+		else
+		{
+			var projectIndex = arguments[0] == "analyze" ? 1 : 2;
+			Assert.True(arguments.Length > projectIndex);
+			arguments[projectIndex] = project;
+		}
+
 		var outputIndex = FindOutputOption(arguments);
 		if (outputIndex >= 0 && arguments[outputIndex + 1] != "-")
 		{
-			var extension = ResolveOutputExtension(arguments);
-			arguments[outputIndex + 1] = Path.Combine(
-				workspace,
-				$"documented-output-{index}{extension}");
+			arguments[outputIndex + 1] = arguments[0] == "profile"
+				? DocumentedProfilePath(workspace)
+				: Path.Combine(
+					workspace,
+					$"documented-output-{index}{ResolveOutputExtension(arguments)}");
 		}
 
 		return [.. arguments, "--language", "en"];
 	}
+
+	private static void PrepareProfileArguments(
+		string[] arguments,
+		string project,
+		string workspace)
+	{
+		Assert.True(arguments.Length >= 3);
+		var profilePath = DocumentedProfilePath(workspace);
+		switch (arguments[1])
+		{
+			case "show":
+			case "export":
+			case "reset":
+				arguments[2] = project;
+				break;
+			case "validate":
+				arguments[2] = profilePath;
+				break;
+			case "import":
+				Assert.True(arguments.Length >= 4);
+				arguments[2] = profilePath;
+				arguments[3] = project;
+				break;
+			default:
+				throw new InvalidOperationException(
+					$"Unsupported documented profile command: {arguments[1]}");
+		}
+
+		for (var index = 0; index < arguments.Length - 1; index++)
+		{
+			if (arguments[index] == "--profile" &&
+			    arguments[index + 1] is not ("standard" or "local"))
+			{
+				arguments[index + 1] = profilePath;
+			}
+		}
+	}
+
+	private static string DocumentedProfilePath(string workspace) =>
+		Path.Combine(workspace, "documented-profile.json");
 
 	private static void AssertObservableResult(
 		IReadOnlyList<string> arguments,
@@ -185,6 +236,8 @@ public sealed class DocumentationExecutionRegressionTests
 				using (JsonDocument.Parse(content)) { }
 			else if (arguments.Contains("xml", StringComparer.Ordinal))
 				_ = System.Xml.Linq.XDocument.Parse(content);
+			else if (arguments[0] == "profile" && arguments[1] == "export")
+				using (JsonDocument.Parse(content)) { }
 		}
 
 		Assert.False(PathUtility.IsPathInside(destination, project));

@@ -27,6 +27,27 @@ public sealed class CommandExecutionTests
 		Assert.DoesNotContain(secretTechnicalMessage, environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("DPX-CLI-PROFILE-INVALID", CommandLineExitCodes.UsageError)]
+	[InlineData("DPX-CLI-PROFILE-WRITE-FAILED", CommandLineExitCodes.RuntimeError)]
+	[InlineData("DPX-PROFILE-DESTINATION-EXISTS", CommandLineExitCodes.DestinationConflict)]
+	public async Task PortableProfileFailuresUseContractExitCode(
+		string code,
+		int expectedExitCode)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await CommandExecution.RunAsync(
+			environment,
+			new TerminalOutputOptions(),
+			() => throw new PortableProjectProfileException(code, "technical detail"));
+
+		Assert.Equal(expectedExitCode, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(code, environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("technical detail", environment.StandardError, StringComparison.Ordinal);
+	}
+
 	public static TheoryData<ProjectCopyExportError, string> ProjectCopyErrors => new()
 	{
 		{ ProjectCopyExportError.InvalidRequest, "DPX-CLI-INVALID-REQUEST" },

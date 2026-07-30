@@ -101,7 +101,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		var destinationParent = ResolveSafeDestinationOutsideSource(
 			plan.ProjectRootPath,
 			requestedDestinationParent);
-		Directory.CreateDirectory(destinationParent);
+		EnsureDestinationDirectoryExists(destinationParent);
 		destinationParent = ResolveSafeDestinationOutsideSource(plan.ProjectRootPath, destinationParent);
 		var preferredPath = destinationMode == ProjectCopyDestinationMode.Exact
 			? Path.Combine(destinationParent, Path.GetFileName(requestedPath))
@@ -116,6 +116,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		var processedEntries = 0;
 		var processedFiles = 0;
 		long bytesWritten = 0;
+		Exception? operationException = null;
 
 		try
 		{
@@ -152,23 +153,39 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				? MoveStagingDirectoryToExactPath(
 					stagingPath,
 					preferredPath,
-					plan.ProjectRootPath)
+					plan.ProjectRootPath,
+					cancellationToken)
 				: MoveStagingDirectoryToAvailablePath(
 					stagingPath,
 					destinationParent,
 					preferredPath,
 					plan.ProjectName,
-					plan.ProjectRootPath);
+					plan.ProjectRootPath,
+					cancellationToken);
 			var requestedFinalPath = destinationMode == ProjectCopyDestinationMode.Exact
 				? requestedPath
 				: Path.Combine(requestedDestinationParent, Path.GetFileName(finalPath));
 			var reportedPath = ResolveReportedDestinationPath(requestedFinalPath, finalPath);
 			return new ProjectCopyExportResult(reportedPath, processedFiles, plan.DirectoryCount, bytesWritten);
 		}
+		catch (Exception exception)
+		{
+			operationException = exception;
+			throw;
+		}
 		finally
 		{
 			ArrayPool<byte>.Shared.Return(buffer);
-			await TryDeleteDirectoryAsync(stagingPath).ConfigureAwait(false);
+			try
+			{
+				await DeleteStagingDirectoryAsync(stagingPath).ConfigureAwait(false);
+			}
+			catch (ProjectCopyExportException cleanupException) when (operationException is not null)
+			{
+				throw DestinationUnavailable(
+					cleanupException.Message,
+					new AggregateException(operationException, cleanupException));
+			}
 		}
 	}
 
@@ -200,7 +217,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		var destinationDirectory = ResolveSafeDestinationOutsideSource(
 			plan.ProjectRootPath,
 			requestedDestinationDirectory);
-		Directory.CreateDirectory(destinationDirectory);
+		EnsureDestinationDirectoryExists(destinationDirectory);
 		destinationDirectory = ResolveSafeDestinationOutsideSource(plan.ProjectRootPath, destinationDirectory);
 		var destinationPath = Path.Combine(destinationDirectory, Path.GetFileName(requestedDestinationPath));
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
@@ -216,6 +233,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		var processedEntries = 0;
 		var processedFiles = 0;
 		long bytesWritten = 0;
+		Exception? operationException = null;
 
 		try
 		{
@@ -254,23 +272,38 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			cancellationToken.ThrowIfCancellationRequested();
 			ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 			ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
+			cancellationToken.ThrowIfCancellationRequested();
 			try
 			{
 				var overwrite = destinationMode == ProjectCopyDestinationMode.AutomaticName ||
 				                conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically;
 				File.Move(stagingPath, destinationPath, overwrite);
 			}
-			catch (IOException exception) when (File.Exists(destinationPath) || Directory.Exists(destinationPath))
+			catch (IOException exception) when (Path.Exists(destinationPath))
 			{
 				throw DestinationConflict(destinationPath, exception);
 			}
 			var reportedPath = ResolveReportedDestinationPath(requestedDestinationPath, destinationPath);
 			return new ProjectCopyExportResult(reportedPath, processedFiles, plan.DirectoryCount, bytesWritten);
 		}
+		catch (Exception exception)
+		{
+			operationException = exception;
+			throw;
+		}
 		finally
 		{
 			ArrayPool<byte>.Shared.Return(buffer);
-			await TryDeleteFileAsync(stagingPath).ConfigureAwait(false);
+			try
+			{
+				await DeleteStagingFileAsync(stagingPath).ConfigureAwait(false);
+			}
+			catch (ProjectCopyExportException cleanupException) when (operationException is not null)
+			{
+				throw DestinationUnavailable(
+					cleanupException.Message,
+					new AggregateException(operationException, cleanupException));
+			}
 		}
 	}
 
@@ -358,8 +391,17 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 
 	private static void EnsureDestinationDoesNotExist(string path)
 	{
-		if (Directory.Exists(path) || File.Exists(path))
+		if (Path.Exists(path))
 			throw DestinationConflict(path);
+	}
+
+	private static void EnsureDestinationDirectoryExists(string path)
+	{
+		if (!Directory.Exists(path))
+		{
+			throw DestinationUnavailable(
+				$"The destination parent directory does not exist: {path}");
+		}
 	}
 
 	private static void ValidateDestinationOutsideSource(string rootPath, string path)
@@ -371,7 +413,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 	{
 		var normalizedRoot = PathUtility.Normalize(rootPath);
 		var normalizedDestination = PathUtility.Normalize(path);
-		if (PathUtility.IsPathInside(normalizedDestination, normalizedRoot))
+		if (IsPathInsideOrdinal(normalizedDestination, normalizedRoot))
 		{
 			throw new ProjectCopyExportException(
 				ProjectCopyExportError.DestinationInsideSource,
@@ -383,11 +425,15 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 
 		var canonicalRoot = ResolveCanonicalPath(normalizedRoot);
 		var canonicalDestination = ResolveCanonicalPath(normalizedDestination);
-		if (PathUtility.IsPathInside(canonicalDestination, canonicalRoot))
+		if (IsPathInsideOrdinal(canonicalDestination, canonicalRoot))
 		{
 			throw UnsafeDestination(
 				$"The destination resolves to the source project or a path inside it: {normalizedDestination}");
 		}
+		EnsureDestinationIdentityOutsideSource(
+			canonicalRoot,
+			canonicalDestination,
+			normalizedDestination);
 
 		return canonicalDestination;
 	}
@@ -448,7 +494,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			if (target is null)
 				throw UnsafeDestination($"The destination link cannot be resolved safely: {lexicalPath}");
 
-			var normalizedLinkPath = PathUtility.Normalize(lexicalPath);
+			var normalizedLinkPath = PathUtility.Normalize(canonicalPath);
 			if (!resolvingLinks.Add(normalizedLinkPath))
 				throw UnsafeDestination($"The destination path contains a symbolic-link cycle: {lexicalPath}");
 
@@ -476,6 +522,297 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		{
 			throw UnsafeDestination($"The destination path cannot be resolved safely: {lexicalPath}", exception);
 		}
+	}
+
+	public static string ResolveDestinationOutsideProject(
+		string projectRootPath,
+		string destinationPath)
+	{
+		try
+		{
+			var normalizedDestination = PathUtility.Normalize(destinationPath);
+			_ = ResolveSafeDestinationOutsideSource(
+				projectRootPath,
+				normalizedDestination);
+			var destinationParent = Path.GetDirectoryName(normalizedDestination);
+			if (string.IsNullOrWhiteSpace(destinationParent))
+				throw UnsafeDestination($"The destination parent is unavailable: {normalizedDestination}");
+
+			var resolvedParent = ResolveSafeDestinationOutsideSource(
+				projectRootPath,
+				destinationParent);
+			EnsureDestinationDirectoryExists(resolvedParent);
+			return Path.Combine(
+				resolvedParent,
+				Path.GetFileName(normalizedDestination));
+		}
+		catch (ProjectCopyExportException)
+		{
+			throw;
+		}
+		catch (Exception exception) when (exception is
+			       ArgumentException or
+			       IOException or
+			       UnauthorizedAccessException or
+			       NotSupportedException)
+		{
+			throw UnsafeDestination(
+				$"The destination path cannot be resolved safely: {destinationPath}",
+				exception);
+		}
+	}
+
+	private static bool IsPathInsideOrdinal(
+		string candidatePath,
+		string rootPath)
+	{
+		var normalizedCandidate = PathUtility.Normalize(candidatePath);
+		var normalizedRoot = PathUtility.Normalize(rootPath);
+		if (normalizedCandidate.Equals(normalizedRoot, StringComparison.Ordinal))
+			return true;
+
+		var rootPrefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
+			? normalizedRoot
+			: normalizedRoot + Path.DirectorySeparatorChar;
+		return normalizedCandidate.StartsWith(rootPrefix, StringComparison.Ordinal);
+	}
+
+	private static void EnsureDestinationIdentityOutsideSource(
+		string canonicalRoot,
+		string canonicalDestination,
+		string requestedDestination)
+	{
+		if (!OperatingSystem.IsWindows() &&
+		    !OperatingSystem.IsLinux() &&
+		    !OperatingSystem.IsMacOS())
+		{
+			return;
+		}
+
+		if (!FileSystemPathIdentity.TryEnumerateMountPointsInside(
+			    canonicalRoot,
+			    out var nestedMountPoints))
+		{
+			throw UnsafeDestination(
+				$"The source filesystem boundaries cannot be established safely: {canonicalRoot}");
+		}
+
+		var protectedPaths = new List<string>(nestedMountPoints.Count + 1)
+		{
+			canonicalRoot
+		};
+		protectedPaths.AddRange(nestedMountPoints);
+		var protectedBoundaries = new List<ProtectedSourceBoundary>(
+			protectedPaths.Count);
+		foreach (var protectedPath in protectedPaths)
+		{
+			if (!FileSystemPathIdentity.TryRead(
+				    protectedPath,
+				    out var protectedIdentity))
+			{
+				throw UnsafeDestination(
+					$"The source path identity cannot be established safely: {protectedPath}");
+			}
+			if (!FileSystemPathIdentity.TryReadLocation(
+				    protectedPath,
+				    out var protectedLocation))
+			{
+				throw UnsafeDestination(
+					$"The source filesystem location cannot be established safely: {protectedPath}");
+			}
+
+			protectedBoundaries.Add(new ProtectedSourceBoundary(
+				protectedPath,
+				protectedIdentity,
+				protectedLocation));
+		}
+
+		var current = ResolveNearestExistingPath(canonicalDestination);
+		if (current is not null)
+		{
+			if (!FileSystemPathIdentity.TryReadLocation(current, out var destinationLocation))
+			{
+				throw UnsafeDestination(
+					$"The destination filesystem location cannot be established safely: {current}");
+			}
+			if (protectedBoundaries.Any(boundary =>
+				    boundary.Location.NamespaceId.Equals(
+					    destinationLocation.NamespaceId,
+					    StringComparison.Ordinal) &&
+				    IsLocationInsideOrdinal(
+					    destinationLocation.CanonicalPath,
+					    boundary.Location.CanonicalPath)))
+			{
+				throw UnsafeDestination(
+					$"The destination resolves to the source project or a path inside it: {requestedDestination}");
+			}
+
+			if (!FileSystemPathIdentity.TryRead(
+				    current,
+				    out var destinationIdentity))
+			{
+				throw UnsafeDestination(
+					$"The destination path identity cannot be established safely: {current}");
+			}
+			foreach (var boundary in protectedBoundaries)
+			{
+				if (!TryResolveEquivalentSourcePath(
+					    boundary.Location,
+					    destinationLocation,
+					    boundary.Path,
+					    out var equivalentSourcePath) ||
+				    !FileSystemPathIdentity.TryRead(
+					    equivalentSourcePath,
+					    out var equivalentSourceIdentity) ||
+				    equivalentSourceIdentity != destinationIdentity)
+				{
+					continue;
+				}
+
+				throw UnsafeDestination(
+					$"The destination resolves to the source project or a path inside it: {requestedDestination}");
+			}
+		}
+
+		while (current is not null)
+		{
+			if (!FileSystemPathIdentity.TryRead(current, out var currentIdentity))
+			{
+				throw UnsafeDestination(
+					$"The destination path identity cannot be established safely: {current}");
+			}
+			if (protectedBoundaries.Any(boundary =>
+				    currentIdentity == boundary.Identity))
+			{
+				throw UnsafeDestination(
+					$"The destination resolves to the source project or a path inside it: {requestedDestination}");
+			}
+
+			current = GetParentPath(current);
+		}
+	}
+
+	private readonly record struct ProtectedSourceBoundary(
+		string Path,
+		FileSystemPathIdentity Identity,
+		FileSystemPathLocation Location);
+
+	private static bool IsLocationInsideOrdinal(
+		string candidatePath,
+		string rootPath)
+	{
+		var normalizedCandidate = candidatePath.TrimEnd(
+			Path.DirectorySeparatorChar,
+			Path.AltDirectorySeparatorChar,
+			'\\',
+			'/');
+		var normalizedRoot = rootPath.TrimEnd(
+			Path.DirectorySeparatorChar,
+			Path.AltDirectorySeparatorChar,
+			'\\',
+			'/');
+		if (normalizedCandidate.Equals(normalizedRoot, StringComparison.Ordinal))
+			return true;
+		if (!normalizedCandidate.StartsWith(normalizedRoot, StringComparison.Ordinal) ||
+		    normalizedCandidate.Length <= normalizedRoot.Length)
+		{
+			return false;
+		}
+
+		var next = normalizedCandidate[normalizedRoot.Length];
+		return next is '\\' or '/';
+	}
+
+	private static bool TryResolveEquivalentSourcePath(
+		FileSystemPathLocation sourceLocation,
+		FileSystemPathLocation destinationLocation,
+		string canonicalRoot,
+		out string equivalentSourcePath)
+	{
+		equivalentSourcePath = string.Empty;
+		if (!sourceLocation.NamespaceId.Equals(
+			    destinationLocation.NamespaceId,
+			    StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		var separators = new[]
+		{
+			Path.DirectorySeparatorChar,
+			Path.AltDirectorySeparatorChar
+		};
+		var sourceSegments = sourceLocation.CanonicalPath.Split(
+			separators,
+			StringSplitOptions.RemoveEmptyEntries);
+		var destinationSegments = destinationLocation.CanonicalPath.Split(
+			separators,
+			StringSplitOptions.RemoveEmptyEntries);
+		if (destinationSegments.Length < sourceSegments.Length)
+			return false;
+
+		for (var index = 0; index < sourceSegments.Length; index++)
+		{
+			var sourceSegment = sourceSegments[index].Normalize(NormalizationForm.FormC);
+			var destinationSegment = destinationSegments[index].Normalize(NormalizationForm.FormC);
+			if (!sourceSegment.Equals(
+				    destinationSegment,
+				    StringComparison.OrdinalIgnoreCase))
+			{
+				return false;
+			}
+		}
+
+		equivalentSourcePath = canonicalRoot;
+		for (var index = sourceSegments.Length;
+		     index < destinationSegments.Length;
+		     index++)
+		{
+			equivalentSourcePath = Path.Combine(
+				equivalentSourcePath,
+				destinationSegments[index]);
+		}
+
+		return true;
+	}
+
+	private static string? ResolveNearestExistingPath(string path)
+	{
+		string? current = path;
+		while (current is not null)
+		{
+			try
+			{
+				_ = File.GetAttributes(current);
+				return current;
+			}
+			catch (Exception exception) when (exception is
+				       FileNotFoundException or
+				       DirectoryNotFoundException)
+			{
+			}
+			catch (Exception exception) when (exception is
+				       UnauthorizedAccessException or
+				       IOException or
+				       NotSupportedException)
+			{
+				throw UnsafeDestination(
+					$"The destination path cannot be inspected safely: {current}",
+					exception);
+			}
+
+			current = GetParentPath(current);
+		}
+
+		return null;
+	}
+
+	private static string? GetParentPath(string path)
+	{
+		var parent = Directory.GetParent(path)?.FullName;
+		return parent is null || parent.Equals(path, StringComparison.Ordinal)
+			? null
+			: parent;
 	}
 
 	private static bool PathExists(string path)
@@ -529,7 +866,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		{
 			var name = suffix == 1 ? baseName : $"{baseName} ({suffix})";
 			var candidate = Path.Combine(parentPath, name);
-			if (!Directory.Exists(candidate) && !File.Exists(candidate))
+			if (!Path.Exists(candidate))
 				return candidate;
 		}
 	}
@@ -539,19 +876,21 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		string destinationParent,
 		string preferredPath,
 		string projectName,
-		string projectRootPath)
+		string projectRootPath,
+		CancellationToken cancellationToken)
 	{
 		var candidate = preferredPath;
 		while (true)
 		{
 			ValidateDestinationOutsideSource(projectRootPath, stagingPath);
 			ValidateDestinationOutsideSource(projectRootPath, candidate);
+			cancellationToken.ThrowIfCancellationRequested();
 			try
 			{
 				Directory.Move(stagingPath, candidate);
 				return candidate;
 			}
-			catch (IOException) when (Directory.Exists(candidate) || File.Exists(candidate))
+			catch (IOException) when (Path.Exists(candidate))
 			{
 				candidate = ResolveAvailableDirectoryPath(destinationParent, $"{projectName}-copy");
 			}
@@ -561,17 +900,19 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 	private static string MoveStagingDirectoryToExactPath(
 		string stagingPath,
 		string destinationPath,
-		string projectRootPath)
+		string projectRootPath,
+		CancellationToken cancellationToken)
 	{
 		ValidateDestinationOutsideSource(projectRootPath, stagingPath);
 		ValidateDestinationOutsideSource(projectRootPath, destinationPath);
 		EnsureDestinationDoesNotExist(destinationPath);
+		cancellationToken.ThrowIfCancellationRequested();
 		try
 		{
 			Directory.Move(stagingPath, destinationPath);
 			return destinationPath;
 		}
-		catch (IOException exception) when (Directory.Exists(destinationPath) || File.Exists(destinationPath))
+		catch (IOException exception) when (Path.Exists(destinationPath))
 		{
 			throw DestinationConflict(destinationPath, exception);
 		}
@@ -668,45 +1009,59 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		}
 	}
 
-	private static async Task TryDeleteDirectoryAsync(string path)
+	private static async Task DeleteStagingDirectoryAsync(string path)
 	{
+		Exception? cleanupException = null;
 		for (var attempt = 1; attempt <= CleanupAttemptCount; attempt++)
 		{
 			try
 			{
-				if (Directory.Exists(path))
-					Directory.Delete(path, recursive: true);
+				Directory.Delete(path, recursive: true);
+				return;
+			}
+			catch (DirectoryNotFoundException)
+			{
 				return;
 			}
 			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 			{
+				cleanupException = exception;
 				if (attempt == CleanupAttemptCount)
-					return;
+					break;
 
 				// Windows scanners can briefly retain a handle after the export stream closes.
 				await Task.Delay(CleanupInitialDelayMilliseconds * attempt).ConfigureAwait(false);
 			}
 		}
+
+		throw DestinationUnavailable(
+			$"The temporary project export directory could not be removed: {path}",
+			cleanupException);
 	}
 
-	private static async Task TryDeleteFileAsync(string path)
+	private static async Task DeleteStagingFileAsync(string path)
 	{
+		Exception? cleanupException = null;
 		for (var attempt = 1; attempt <= CleanupAttemptCount; attempt++)
 		{
 			try
 			{
-				if (File.Exists(path))
-					File.Delete(path);
+				File.Delete(path);
 				return;
 			}
 			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 			{
+				cleanupException = exception;
 				if (attempt == CleanupAttemptCount)
-					return;
+					break;
 
 				await Task.Delay(CleanupInitialDelayMilliseconds * attempt).ConfigureAwait(false);
 			}
 		}
+
+		throw DestinationUnavailable(
+			$"The temporary project export file could not be removed: {path}",
+			cleanupException);
 	}
 
 	private static ProjectCopyExportException SourceUnavailable(string message, Exception? innerException = null) =>

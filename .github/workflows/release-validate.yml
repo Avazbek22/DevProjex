@@ -75,15 +75,13 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Install Linux UI smoke dependencies
+      - name: Install Linux release-smoke dependencies
         if: ${{ startsWith(matrix.rid, 'linux-') }}
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v xvfb-run >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y xvfb
-          fi
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y xvfb zsh fish
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -460,6 +458,66 @@ jobs:
             throw "Published export smoke did not print the expected tree for ${{ matrix.rid }}. StdOut=$exportStdout"
           }
 
+          $sourceBytesBeforeProjectExport =
+            [System.IO.File]::ReadAllBytes((Join-Path $sourceDirectory "App.cs"))
+          $folderDestination = Join-Path `
+            $env:RUNNER_TEMP `
+            "devprojex-native-project-folder-${{ matrix.rid }}"
+          Remove-Item -LiteralPath $folderDestination -Recurse -Force -ErrorAction SilentlyContinue
+          $folderExport = Invoke-NativeCommand -Name "project folder export" -Arguments @(
+            "export", "project", $projectDirectory,
+            "--as", "FoLdEr",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--progress", "never",
+            "--plain",
+            "--language", "en",
+            "-o", $folderDestination)
+          $expectedFolderPath = [System.IO.Path]::GetFullPath($folderDestination)
+          if ($folderExport.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($folderExport.StdErr) -or
+              $folderExport.StdOut.Trim() -ne $expectedFolderPath -or
+              -not (Test-Path -LiteralPath (Join-Path $folderDestination "src/App.cs") -PathType Leaf)) {
+            throw "Published folder project export violated its artifact/stdout contract. ExitCode=$($folderExport.ExitCode) StdOut=$($folderExport.StdOut) StdErr=$($folderExport.StdErr)"
+          }
+
+          $zipDestination = Join-Path `
+            $env:RUNNER_TEMP `
+            "devprojex-native-project-${{ matrix.rid }}.zip"
+          Remove-Item -LiteralPath $zipDestination -Force -ErrorAction SilentlyContinue
+          $zipExport = Invoke-NativeCommand -Name "project ZIP export" -Arguments @(
+            "export", "project", $projectDirectory,
+            "--as=ZiP",
+            "--git-mode", "none",
+            "--exclude", "none",
+            "--progress", "never",
+            "--plain",
+            "--language", "en",
+            "-o", $zipDestination)
+          $expectedZipPath = [System.IO.Path]::GetFullPath($zipDestination)
+          if ($zipExport.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($zipExport.StdErr) -or
+              $zipExport.StdOut.Trim() -ne $expectedZipPath -or
+              -not (Test-Path -LiteralPath $zipDestination -PathType Leaf)) {
+            throw "Published ZIP project export violated its artifact/stdout contract. ExitCode=$($zipExport.ExitCode) StdOut=$($zipExport.StdOut) StdErr=$($zipExport.StdErr)"
+          }
+          $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($zipDestination)
+          try {
+            if (-not ($zipArchive.Entries | Where-Object { $_.FullName -match "(^|/)src/App\.cs$" })) {
+              throw "Published ZIP project export did not contain src/App.cs."
+            }
+          }
+          finally {
+            $zipArchive.Dispose()
+          }
+
+          $sourceBytesAfterProjectExport =
+            [System.IO.File]::ReadAllBytes((Join-Path $sourceDirectory "App.cs"))
+          if ([Convert]::ToBase64String($sourceBytesBeforeProjectExport) -ne
+              [Convert]::ToBase64String($sourceBytesAfterProjectExport)) {
+            throw "Published project export modified the source file."
+          }
+
           $analysis = Invoke-NativeCommand -Name "mixed-case analysis JSON" -Arguments @(
             "analyze", $projectDirectory,
             "--format=JsOn",
@@ -610,12 +668,31 @@ jobs:
         run: |
           $env:DEVPROJEX_TUI_TEST_BINARY =
             (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
-          # The test suite capability-checks each real shell. Missing zsh or fish
-          # remains an explicit test skip instead of an assumed runner dependency.
+          $env:DEVPROJEX_REQUIRED_COMPLETION_SHELLS = switch ($env:RUNNER_OS) {
+            "Linux" { "bash,zsh,fish,powershell" }
+            "macOS" { "zsh,powershell" }
+            default { "powershell" }
+          }
           dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
             -c Release `
             --no-restore `
             --filter "FullyQualifiedName~GeneratedCompletionNativeShellIntegrationTests" `
+            --logger "console;verbosity=minimal"
+
+      - name: Nested-Mount Destination Safety Gate (Linux x64)
+        if: ${{ matrix.rid == 'linux-x64' }}
+        shell: pwsh
+        env:
+          DEVPROJEX_REQUIRE_ROOTLESS_MOUNT_TESTS: "1"
+        run: |
+          $filter = @(
+            "FullyQualifiedName~DestinationNestedMountProcessTests.AnalyzeRejectsAliasToFileSystemMountedInsideSource",
+            "FullyQualifiedName~DestinationNestedMountProcessTests.ContextForceRejectsFileBindAliasToMountedSourceFile"
+          ) -join "|"
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
+            -c Release `
+            --no-restore `
+            --filter $filter `
             --logger "console;verbosity=minimal"
 
       - name: Published Broken Pipe Smoke (Unix)

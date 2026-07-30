@@ -89,12 +89,14 @@ public sealed class ExportContextDocumentContractTests
 	}
 
 	[Fact]
-	public async Task FileOutputCreatesParentsAndDoesNotModifySourceFiles()
+	public async Task FileOutputUsesExistingParentAndDoesNotModifySourceFiles()
 	{
 		using var workspace = new TemporaryDirectory();
 		var source = workspace.WriteFile("project/src/app.cs", "class App {}\n");
 		var before = await HashAsync(source);
-		var destination = Path.Combine(workspace.Path, "output", "nested", "context.json");
+		var destination = Path.Combine(
+			workspace.CreateDirectory("output/nested"),
+			"context.json");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(
@@ -122,7 +124,9 @@ public sealed class ExportContextDocumentContractTests
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("app.cs", "class App {}");
-		var destination = Path.Combine(workspace.Path, "output", "context.md");
+		var destination = Path.Combine(
+			workspace.CreateDirectory("output"),
+			"context.md");
 		var environment = new TestTerminalEnvironment();
 		using var cancellationSource = new CancellationTokenSource();
 		cancellationSource.Cancel();

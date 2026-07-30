@@ -20,6 +20,8 @@ public sealed class CompletionCommandContractTests
 		Assert.Contains(shellMarker, script, StringComparison.Ordinal);
 		Assert.Contains("dev complete", script, StringComparison.Ordinal);
 		Assert.Contains("--position", script, StringComparison.Ordinal);
+		if (shell == "powershell")
+			Assert.Contains("--working-directory-base64", script, StringComparison.Ordinal);
 		Assert.DoesNotContain("analyze", script, StringComparison.Ordinal);
 		Assert.DoesNotContain("--git-mode", script, StringComparison.Ordinal);
 		Assert.DoesNotContain("--exclude", script, StringComparison.Ordinal);
@@ -92,8 +94,21 @@ public sealed class CompletionCommandContractTests
 		process.Start();
 		await process.StandardInput.WriteAsync(script);
 		process.StandardInput.Close();
-		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-		await process.WaitForExitAsync(timeout.Token);
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(30));
+		try
+		{
+			await process.WaitForExitAsync(timeout.Token);
+		}
+		catch (OperationCanceledException)
+			when (!TestContext.Current.CancellationToken.IsCancellationRequested)
+		{
+			if (!process.HasExited)
+				process.Kill(entireProcessTree: true);
+			throw new TimeoutException(
+				$"{shell} syntax check did not finish within 30 seconds.");
+		}
 		var standardError = await process.StandardError.ReadToEndAsync(timeout.Token);
 
 		Assert.Equal(0, process.ExitCode);

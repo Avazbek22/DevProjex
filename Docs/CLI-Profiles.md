@@ -66,19 +66,25 @@ invalid selected path is a validation failure.
 
 ```shell
 devprojex profile show .
-devprojex profile show . --profile local
-devprojex profile show . --profile ./profile.json --format json
+devprojex profile show . --profile standard --format json
 
-devprojex profile export . --profile local -o ../devprojex-profile.json
-devprojex profile import ./profile.json . --apply
-devprojex profile validate ./profile.json
+devprojex profile export . --profile standard -o ../devprojex-profile.json
+devprojex profile show . --profile ../devprojex-profile.json --format json
+devprojex profile validate ../devprojex-profile.json
+devprojex profile import ../devprojex-profile.json .
 devprojex profile reset .
 ```
 
-Writing a portable profile is atomic. Existing output returns exit code `4` and
-requires `--force` for replacement.
+Writing a portable profile uses the canonical file-output safety policy. The
+destination must resolve outside the source project, including filesystem
+aliases, and its parent directory must already exist. Source-safety failures are
+reported before destination conflicts. Existing output returns exit code `4`;
+`--force` atomically replaces an external file but never a directory. Success
+prints the absolute committed path. A profile-store or file-write failure is a
+runtime error with exit code `1`, not a syntax error.
 `profile import` validates without modifying local state unless `--apply` is
-present.
+present. Use `--profile local` only after Desktop or TUI has created valid local
+settings for that project; an absent local profile is a usage error.
 
 Legacy local state with both Git options enabled is normalized by the existing
 security-first profile logic before conversion. The v1 portable schema cannot

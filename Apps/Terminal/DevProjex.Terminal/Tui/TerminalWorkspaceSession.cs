@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using DevProjex.Application.Services;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
@@ -2215,24 +2216,55 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		var normalizedSource = PathUtility.Normalize(sourceRoot);
 		var normalizedCurrent = PathUtility.Normalize(currentDirectory);
-		if (!PathUtility.IsPathInside(normalizedCurrent, normalizedSource))
-			return Path.Combine(normalizedCurrent, fileName);
+		if (TryResolveSafeDefaultExportPath(
+			    normalizedSource,
+			    Path.Combine(normalizedCurrent, fileName),
+			    out var currentDirectoryCandidate))
+		{
+			return currentDirectoryCandidate;
+		}
 
 		var parent = Directory.GetParent(normalizedSource)?.FullName;
 		return parent is not null &&
-		       !PathUtility.IsPathInside(parent, normalizedSource)
-			? Path.Combine(parent, fileName)
+		       TryResolveSafeDefaultExportPath(
+			       normalizedSource,
+			       Path.Combine(parent, fileName),
+			       out var siblingCandidate)
+			? siblingCandidate
 			: string.Empty;
+	}
+
+	private static bool TryResolveSafeDefaultExportPath(
+		string sourceRoot,
+		string candidate,
+		out string resolvedCandidate)
+	{
+		try
+		{
+			resolvedCandidate = ProjectCopyExportService.ResolveDestinationOutsideProject(
+				sourceRoot,
+				candidate);
+			return true;
+		}
+		catch (ProjectCopyExportException)
+		{
+			resolvedCandidate = string.Empty;
+			return false;
+		}
 	}
 
 	private void SaveProfile()
 	{
 		if (_state is null)
 			return;
+		var defaultPath = BuildDefaultExportPath(
+			_state.Plan.SourceRoot,
+			Directory.GetCurrentDirectory(),
+			"devprojex-profile.json");
 		var destination = Prompt(
 			L("Terminal.Tui.SaveProfile"),
 			L("Terminal.Tui.ProfileDestination"),
-			Path.Combine(Directory.GetCurrentDirectory(), "devprojex-profile.json"));
+			defaultPath);
 		if (string.IsNullOrWhiteSpace(destination))
 			return;
 		_activeOperationTask = RunOperationAsync(
@@ -2365,6 +2397,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			await ShowFailureAsync(
 				exception.Code,
 				ResolveValidationErrorMessage(exception.Code)).ConfigureAwait(false);
+		}
+		catch (PortableProjectProfileException exception)
+		{
+			var message = exception.Code == "DPX-PROFILE-DESTINATION-EXISTS"
+				? L("Terminal.Error.ProfileDestinationExists")
+				: L("Terminal.Error.ProfileWriteFailed");
+			await ShowFailureAsync(exception.Code, message).ConfigureAwait(false);
 		}
 		catch
 		{

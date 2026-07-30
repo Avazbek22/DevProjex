@@ -80,7 +80,14 @@ public sealed class ExportProjectCommandContractTests
 		Assert.Equal("old zip bytes", await File.ReadAllTextAsync(
 			output,
 			TestContext.Current.CancellationToken));
-		Assert.Contains(Path.GetFullPath(output), conflictEnvironment.StandardError, StringComparison.Ordinal);
+		Assert.Contains(
+			TerminalScreenSnapshot.NormalizeMacOsSystemPathAliases(
+				Path.GetFullPath(output),
+				OperatingSystem.IsMacOS()),
+			TerminalScreenSnapshot.NormalizeMacOsSystemPathAliases(
+				conflictEnvironment.StandardError,
+				OperatingSystem.IsMacOS()),
+			StringComparison.Ordinal);
 
 		var forceEnvironment = new TestTerminalEnvironment();
 		var success = await RunAsync(project, output, "zip", forceEnvironment, "--force");

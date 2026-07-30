@@ -1,5 +1,6 @@
 using Avalonia.Platform.Storage;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia;
 
@@ -109,6 +110,7 @@ public partial class MainWindow
 
             var saved = await TryExportTextToFileAsync(
                 result.Content,
+                snapshot.RootPath,
                 suggestedFileName,
                 dialogTitle,
                 defaultExtension,
@@ -230,6 +232,7 @@ public partial class MainWindow
 
     private async Task<bool> TryExportTextToFileAsync(
         string content,
+        string sourceRootPath,
         string suggestedFileName,
         string dialogTitle,
         string defaultExtension,
@@ -237,6 +240,11 @@ public partial class MainWindow
     {
         if (StorageProvider is null || string.IsNullOrWhiteSpace(content))
             return false;
+
+        var windowLifetime = _windowLifetimeCts;
+        if (windowLifetime is null)
+            return false;
+        var cancellationToken = windowLifetime.Token;
 
         var options = new FilePickerSaveOptions
         {
@@ -248,28 +256,74 @@ public partial class MainWindow
         };
 
         var file = await StorageProvider.SaveFilePickerAsync(options);
+        cancellationToken.ThrowIfCancellationRequested();
         if (file is null)
             return false;
 
         var destinationPath = file.TryGetLocalPath();
-        if (!string.IsNullOrWhiteSpace(destinationPath) &&
-            !string.IsNullOrWhiteSpace(_currentPath))
+        if (string.IsNullOrWhiteSpace(destinationPath) ||
+            string.IsNullOrWhiteSpace(sourceRootPath))
         {
-            try
-            {
-                // Text and physical exports share the same canonical guard so an aliased path
-                // cannot bypass the read-only boundary of the loaded project.
-                ProjectCopyExportService.EnsureDestinationOutsideProject(_currentPath, destinationPath);
-            }
-            catch (ProjectCopyExportException)
-            {
-                _toastService.Show(_localization["Error.ProjectCopy.UnsafeDestinationPath"]);
-                return false;
-            }
+            // An opaque provider handle cannot be proven distinct from a loaded source file.
+            _toastService.Show(_localization["Error.ProjectCopy.UnsafeDestinationPath"]);
+            return false;
         }
 
-        await using var stream = await file.OpenWriteAsync();
-        await _textFileExport.WriteAsync(stream, content);
+        string resolvedDestinationPath;
+        try
+        {
+            // Text and physical exports share the same canonical guard so an aliased path
+            // cannot bypass the read-only boundary of the loaded project.
+            resolvedDestinationPath = await Task.Run(
+                () => ProjectCopyExportService.ResolveDestinationOutsideProject(
+                    sourceRootPath,
+                    destinationPath),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is
+                   ProjectCopyExportException or
+                   UnauthorizedAccessException or
+                   IOException)
+        {
+            _toastService.Show(_localization[
+                ProjectCopyExportErrorPresentation.ResolveLocalizationKey(exception)]);
+            return false;
+        }
+
+        try
+        {
+            await Task.Run(
+                () => AtomicFileOutput.WriteAsync(
+                    resolvedDestinationPath,
+                    overwrite: true,
+                    (stream, writeCancellationToken) =>
+                        _textFileExport.WriteAsync(
+                            stream,
+                            content,
+                            writeCancellationToken),
+                    cancellationToken,
+                    path => ProjectCopyExportService.ResolveDestinationOutsideProject(
+                        sourceRootPath,
+                        path)),
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is
+                   ProjectCopyExportException or
+                   UnauthorizedAccessException or
+                   IOException)
+        {
+            _toastService.Show(_localization[
+                ProjectCopyExportErrorPresentation.ResolveLocalizationKey(exception)]);
+            return false;
+        }
 
         return true;
     }

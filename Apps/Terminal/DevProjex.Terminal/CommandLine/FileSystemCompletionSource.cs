@@ -12,6 +12,14 @@ internal enum FileSystemCompletionKind
 internal static class FileSystemCompletionSource
 {
 	private const int MaximumCandidateCount = 200;
+	private static readonly AsyncLocal<string?> ScopedBaseDirectory = new();
+
+	public static IDisposable UseBaseDirectory(string? baseDirectory)
+	{
+		var previous = ScopedBaseDirectory.Value;
+		ScopedBaseDirectory.Value = baseDirectory;
+		return new BaseDirectoryScope(previous);
+	}
 
 	public static IEnumerable<string> Complete(
 		CompletionContext context,
@@ -88,11 +96,10 @@ internal static class FileSystemCompletionSource
 			: displayPrefix;
 		try
 		{
+			var effectiveBaseDirectory = ResolveBaseDirectory(baseDirectory);
 			var directoryPath = Path.GetFullPath(
 				directoryText,
-				string.IsNullOrWhiteSpace(baseDirectory)
-					? Directory.GetCurrentDirectory()
-					: Path.GetFullPath(baseDirectory));
+				Path.GetFullPath(effectiveBaseDirectory));
 			var separator = displayPrefix.EndsWith(Path.AltDirectorySeparatorChar)
 				? Path.AltDirectorySeparatorChar
 				: Path.DirectorySeparatorChar;
@@ -124,9 +131,10 @@ internal static class FileSystemCompletionSource
 			: context.ParseResult.GetResult(project)?.Tokens.FirstOrDefault()?.Value;
 		try
 		{
+			var baseDirectory = Path.GetFullPath(ResolveBaseDirectory(null));
 			return string.IsNullOrWhiteSpace(token)
-				? Directory.GetCurrentDirectory()
-				: Path.GetFullPath(token);
+				? baseDirectory
+				: Path.GetFullPath(token, baseDirectory);
 		}
 		catch (Exception exception) when (exception is
 			ArgumentException or
@@ -134,13 +142,31 @@ internal static class FileSystemCompletionSource
 			PathTooLongException or
 			SecurityException)
 		{
-			return Directory.GetCurrentDirectory();
+			return string.Empty;
 		}
 	}
+
+	private static string ResolveBaseDirectory(string? baseDirectory) =>
+		string.IsNullOrWhiteSpace(baseDirectory)
+			? ScopedBaseDirectory.Value ?? Directory.GetCurrentDirectory()
+			: baseDirectory;
 
 	private readonly record struct CompletionSearch(
 		string DirectoryPath,
 		string DisplayPrefix,
 		string NamePrefix,
 		char Separator);
+
+	private sealed class BaseDirectoryScope(string? previous) : IDisposable
+	{
+		private bool _disposed;
+
+		public void Dispose()
+		{
+			if (_disposed)
+				return;
+			ScopedBaseDirectory.Value = previous;
+			_disposed = true;
+		}
+	}
 }

@@ -230,6 +230,13 @@ The export dialog reports output kind, view/format, destination, selected counts
 estimated metrics, Git mode, Exclusions, conflicts, and warnings. After a
 successful interactive operation it shows an equivalent direct command.
 
+Context, project-copy, ZIP, and portable-profile destinations use the same
+canonical outside-source and existing-parent policy as direct commands. The
+suggested export path uses the external current directory only after the same
+canonical source-safety check; otherwise it uses a separately validated sibling
+of the source. If neither location can be established safely, no default is
+suggested. A filesystem alias into the source is never suggested.
+
 Folder and ZIP exports use measured progress from the shared copy engine:
 processed entries, total entries, percentage, written bytes, elapsed time, and
 the real operation phase. Context preparation and document writing use an

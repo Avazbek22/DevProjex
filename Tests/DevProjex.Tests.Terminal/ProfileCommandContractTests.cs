@@ -231,16 +231,72 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task LocalProfilePersistenceFailuresReturnRuntimeErrorAtCommandBoundary()
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "roots": null,
+			    "extensions": [".cs"],
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var invalidAppDataRoot = workspace.WriteFile(
+			"blocked-app-data",
+			"this path is a file");
+		var commands = new[]
+		{
+			new[] { "profile", "import", profile, workspace.Path, "--apply" },
+			new[] { "profile", "reset", workspace.Path }
+		};
+
+		foreach (var command in commands)
+		{
+			var environment = new TestTerminalEnvironment();
+			var exitCode = await new TerminalApplication(
+					environment,
+					new TerminalServiceFactory(() => invalidAppDataRoot))
+				.RunAsync(
+					[.. command, "--language", "en"],
+					TestContext.Current.CancellationToken);
+
+			Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+			Assert.Empty(environment.StandardOutput);
+			Assert.Contains(
+				"DPX-CLI-PROFILE-WRITE-FAILED",
+				environment.StandardError,
+				StringComparison.Ordinal);
+			Assert.Contains(
+				"The profile could not be saved.",
+				environment.StandardError,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				invalidAppDataRoot,
+				environment.StandardError,
+				StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public async Task ExportProfileUsesAtomicConflictPolicy()
 	{
 		using var workspace = CreateWorkspace();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}\n");
 		var destination = workspace.WriteFile("profiles/portable.json", "unchanged");
 		var conflictEnvironment = new TestTerminalEnvironment();
 
 		var conflict = await RunAsync(
 			workspace,
 			conflictEnvironment,
-			"profile", "export", workspace.Path,
+			"profile", "export", project,
 			"--profile", "standard",
 			"-o", destination);
 
@@ -253,7 +309,7 @@ public sealed class ProfileCommandContractTests
 		var success = await RunAsync(
 			workspace,
 			forceEnvironment,
-			"profile", "export", workspace.Path,
+			"profile", "export", project,
 			"--profile", "standard",
 			"-o", destination,
 			"--force");
@@ -262,6 +318,91 @@ public sealed class ProfileCommandContractTests
 		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("devprojex-profile", document.RootElement.GetProperty("kind").GetString());
 		Assert.Equal(Path.GetFullPath(destination) + Environment.NewLine, forceEnvironment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task ExportProfileRejectsSourceDestinationAndMissingExternalParentWithoutEffects()
+	{
+		using var workspace = CreateWorkspace();
+		var project = workspace.CreateDirectory("project");
+		var source = workspace.WriteFile("project/src/app.cs", "class App {}\n");
+		var insideParent = Path.Combine(project, "generated");
+		var insideDestination = Path.Combine(insideParent, "portable.json");
+		var insideEnvironment = new TestTerminalEnvironment();
+
+		var insideExit = await RunAsync(
+			workspace,
+			insideEnvironment,
+			"profile", "export", project,
+			"--profile", "standard",
+			"-o", insideDestination);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, insideExit);
+		Assert.Contains(
+			"DPX-EXPORT-UNSAFE-DESTINATION",
+			insideEnvironment.StandardError,
+			StringComparison.Ordinal);
+		Assert.Empty(insideEnvironment.StandardOutput);
+		Assert.False(Directory.Exists(insideParent));
+
+		var missingParent = Path.Combine(workspace.Path, "missing");
+		var missingDestination = Path.Combine(missingParent, "portable.json");
+		var missingEnvironment = new TestTerminalEnvironment();
+		var missingExit = await RunAsync(
+			workspace,
+			missingEnvironment,
+			"profile", "export", project,
+			"--profile", "standard",
+			"-o", missingDestination);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, missingExit);
+		Assert.Contains(
+			"DPX-EXPORT-DESTINATION-UNAVAILABLE",
+			missingEnvironment.StandardError,
+			StringComparison.Ordinal);
+		Assert.Empty(missingEnvironment.StandardOutput);
+		Assert.False(Directory.Exists(missingParent));
+		Assert.Equal(
+			"class App {}\n",
+			await File.ReadAllTextAsync(
+				source,
+				TestContext.Current.CancellationToken));
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ExportProfileTreatsExistingDirectoryAsConflict(bool force)
+	{
+		using var workspace = CreateWorkspace();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}\n");
+		var destination = workspace.CreateDirectory("profiles/existing");
+		var environment = new TestTerminalEnvironment();
+		var arguments = new List<string>
+		{
+			"profile", "export", project,
+			"--profile", "standard",
+			"-o", destination
+		};
+		if (force)
+			arguments.Add("--force");
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			arguments.ToArray());
+
+		Assert.Equal(CommandLineExitCodes.DestinationConflict, exitCode);
+		Assert.Contains(
+			"DPX-PROFILE-DESTINATION-EXISTS",
+			environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Empty(Directory.EnumerateFileSystemEntries(destination));
+		Assert.Empty(Directory.EnumerateFiles(
+			Path.GetDirectoryName(destination)!,
+			$".{Path.GetFileName(destination)}.*.tmp"));
 	}
 
 	[Fact]

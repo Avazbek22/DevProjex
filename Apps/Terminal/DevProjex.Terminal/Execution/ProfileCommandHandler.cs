@@ -42,10 +42,15 @@ public sealed class ProfileCommandHandler(
 				new ProjectSelectionSpec(),
 				cancellationToken)
 			.ConfigureAwait(false);
-		await services.PortableProfileService
-			.SaveAsync(outputPath, selection, force, cancellationToken)
+		var writtenPath = await services.PortableProfileService
+			.SaveAsync(
+				projectPath,
+				outputPath,
+				selection,
+				force,
+				cancellationToken)
 			.ConfigureAwait(false);
-		environment.Output.WriteLine(Path.GetFullPath(outputPath));
+		environment.Output.WriteLine(writtenPath);
 		return CommandLineExitCodes.Success;
 	}
 

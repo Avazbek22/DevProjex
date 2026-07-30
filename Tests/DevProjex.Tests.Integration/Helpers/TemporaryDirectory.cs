@@ -2,9 +2,17 @@ namespace DevProjex.Tests.Integration.Helpers;
 
 internal sealed class TemporaryDirectory : IDisposable
 {
-	public TemporaryDirectory()
+	public TemporaryDirectory(string? baseDirectory = null)
 	{
-		Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "DevProjex", "Tests", "Temp", Guid.NewGuid().ToString("N"));
+		var root = string.IsNullOrWhiteSpace(baseDirectory)
+			? System.IO.Path.GetTempPath()
+			: System.IO.Path.GetFullPath(baseDirectory);
+		Path = System.IO.Path.Combine(
+			root,
+			"DevProjex",
+			"Tests",
+			"Temp",
+			Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(Path);
 	}
 

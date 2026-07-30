@@ -101,9 +101,10 @@ Generated completion scripts query a hidden `dev complete` endpoint backed by
 the same command tree. Bash, Zsh, and Fish pass the current command line after
 `--`. Windows PowerShell 5.1 cannot preserve an unfinished quoted command line
 through its native argument binder, so the generated PowerShell script sends
-that one internal argument as strict UTF-8 Base64 with `--base64`. The endpoint
-decodes it before requesting completions. This transport flag is hidden,
-produces no user-facing contract, and never appears in normal help or
+the unfinished command line as strict UTF-8 Base64 with `--base64` and the
+working directory with `--working-directory-base64`. The endpoint decodes both
+values before requesting path-aware completions. These transport flags are
+hidden, produce no user-facing contract, and never appear in normal help or
 completion.
 
 ## Output and Failures

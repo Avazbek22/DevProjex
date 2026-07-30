@@ -5,22 +5,19 @@ namespace DevProjex.Tests.Unit;
 public sealed class PortableProjectProfileServiceTests
 {
 	[Fact]
-	public async Task SaveAsyncClassifiesMoveTimeDestinationRaceAsConflict()
+	public async Task SaveAsyncMapsSharedDestinationConflictToProfileContract()
 	{
 		using var workspace = new TemporaryDirectory();
-		var profileDirectory = Path.Combine(workspace.Path, "profiles");
+		var sourceRoot = workspace.CreateFolder("project");
+		var profileDirectory = workspace.CreateFolder("profiles");
 		var destination = Path.Combine(profileDirectory, "portable.json");
 		const string competingContent = "created by another process";
-		var service = new PortableProjectProfileService(
-			(sourcePath, destinationPath, overwrite) =>
-			{
-				Assert.False(overwrite);
-				File.WriteAllText(destinationPath, competingContent);
-				File.Move(sourcePath, destinationPath, overwrite);
-			});
+		File.WriteAllText(destination, competingContent);
+		var service = new PortableProjectProfileService();
 
 		var exception = await Assert.ThrowsAsync<PortableProjectProfileException>(() =>
 			service.SaveAsync(
+				sourceRoot,
 				destination,
 				new ProjectSelectionSpec(
 					GitMode: GitFilteringMode.None,

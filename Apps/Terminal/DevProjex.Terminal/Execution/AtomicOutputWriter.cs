@@ -13,7 +13,7 @@ internal static class AtomicOutputWriter
 		string content,
 		bool overwrite,
 		CancellationToken cancellationToken,
-		Action<string>? validateDestination = null) =>
+		Func<string, string>? validateDestination = null) =>
 		WriteAsync(
 			path,
 			overwrite,
@@ -35,57 +35,21 @@ internal static class AtomicOutputWriter
 		bool overwrite,
 		Func<Stream, CancellationToken, Task> write,
 		CancellationToken cancellationToken,
-		Action<string>? validateDestination = null)
+		Func<string, string>? validateDestination = null)
 	{
-		ArgumentNullException.ThrowIfNull(write);
-		var fullPath = Path.GetFullPath(path);
-		cancellationToken.ThrowIfCancellationRequested();
-		validateDestination?.Invoke(fullPath);
-		var directory = Path.GetDirectoryName(fullPath);
-		if (!string.IsNullOrWhiteSpace(directory))
-			Directory.CreateDirectory(directory);
-		validateDestination?.Invoke(fullPath);
-		if (!overwrite && (File.Exists(fullPath) || Directory.Exists(fullPath)))
-			throw new OutputDestinationConflictException(fullPath);
-
-		var tempPath = Path.Combine(
-			directory ?? Directory.GetCurrentDirectory(),
-			$".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
 		try
 		{
-			await using (var destination = new FileStream(
-				             tempPath,
-				             FileMode.CreateNew,
-				             FileAccess.Write,
-				             FileShare.None,
-				             bufferSize: 64 * 1024,
-				             FileOptions.Asynchronous | FileOptions.SequentialScan))
-			{
-				await write(destination, cancellationToken).ConfigureAwait(false);
-				await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
-			}
-			cancellationToken.ThrowIfCancellationRequested();
-			validateDestination?.Invoke(fullPath);
-			File.Move(tempPath, fullPath, overwrite);
-			return fullPath;
+			return await AtomicFileOutput.WriteAsync(
+					path,
+					overwrite,
+					write,
+					cancellationToken,
+					validateDestination)
+				.ConfigureAwait(false);
 		}
-		catch (IOException) when (!overwrite && (File.Exists(fullPath) || Directory.Exists(fullPath)))
+		catch (AtomicFileOutputConflictException exception)
 		{
-			throw new OutputDestinationConflictException(fullPath);
-		}
-		finally
-		{
-			try
-			{
-				if (File.Exists(tempPath))
-					File.Delete(tempPath);
-			}
-			catch (Exception exception) when (
-				exception is IOException or UnauthorizedAccessException)
-			{
-				// Preserve the primary write/cancellation failure. A later invocation
-				// uses a unique sibling staging path and never treats this file as output.
-			}
+			throw new OutputDestinationConflictException(exception.Path);
 		}
 	}
 }

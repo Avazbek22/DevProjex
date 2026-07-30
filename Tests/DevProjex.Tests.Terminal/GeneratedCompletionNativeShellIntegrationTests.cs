@@ -7,6 +7,8 @@ namespace DevProjex.Tests.Terminal;
 public sealed class GeneratedCompletionNativeShellIntegrationTests
 {
 	private const string CompletionLine = "devprojex analyze . --format ";
+	private const string RequiredShellsVariable =
+		"DEVPROJEX_REQUIRED_COMPLETION_SHELLS";
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
 	[Theory]
@@ -366,6 +368,10 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 				break;
 			case "fish":
 				startInfo.ArgumentList.Add("--no-config");
+				startInfo.ArgumentList.Add("--interactive");
+				if (!startInfo.Environment.TryGetValue("TERM", out var term) ||
+				    string.IsNullOrWhiteSpace(term))
+					startInfo.Environment["TERM"] = "xterm-256color";
 				break;
 			case "powershell":
 				startInfo.ArgumentList.Add("-NoLogo");
@@ -426,6 +432,16 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 				{pathSetup}
 				chmod +x "$wrapper_path"
 				set -gx PATH "$integration_root" $PATH
+				# Fish 3.7 does not expose the simulated cursor to commandline -C without a reader.
+				function commandline
+				    if test (count $argv) -eq 1
+				        if test "$argv[1]" = "-C"
+				            string length -- (builtin commandline)
+				            return
+				        end
+				    end
+				    builtin commandline $argv
+				end
 				source "$completion_script"
 				complete -C '{CompletionLine}'
 				""",
@@ -665,8 +681,25 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 				return executable;
 		}
 
+		if (IsRequiredCompletionShell(shell))
+		{
+			Assert.Fail(
+				$"{shell} is required by {RequiredShellsVariable} but is not installed " +
+				"or cannot be resolved through PATH.");
+		}
 		Assert.Skip($"{shell} is not installed on this test host.");
 		return string.Empty;
+	}
+
+	private static bool IsRequiredCompletionShell(string shell)
+	{
+		var required = Environment.GetEnvironmentVariable(RequiredShellsVariable);
+		return !string.IsNullOrWhiteSpace(required) &&
+		       required.Split(
+				       [',', ';'],
+				       StringSplitOptions.RemoveEmptyEntries |
+				       StringSplitOptions.TrimEntries)
+			       .Contains(shell, StringComparer.OrdinalIgnoreCase);
 	}
 
 	private static bool TryResolveExecutable(

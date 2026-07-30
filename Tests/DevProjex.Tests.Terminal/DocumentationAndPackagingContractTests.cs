@@ -119,7 +119,7 @@ public sealed class DocumentationAndPackagingContractTests
 			commandLine,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"outside that source-read-only guarantee",
+			"portable-profile destinations are accepted only outside it",
 			readme,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain(
@@ -235,7 +235,9 @@ public sealed class DocumentationAndPackagingContractTests
 			referencedProjects,
 			StringComparer.OrdinalIgnoreCase);
 
-		var workflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "release-validate.yml"));
+		var workflow = File
+			.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "release-validate.yml"))
+			.ReplaceLineEndings("\n");
 		foreach (var rid in new[] { "win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64" })
 			Assert.Contains(rid, workflow, StringComparison.Ordinal);
 		Assert.Contains(
@@ -306,6 +308,36 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains(
 			"FullyQualifiedName~GeneratedCompletionNativeShellIntegrationTests",
 			completionStep,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"DEVPROJEX_REQUIRED_COMPLETION_SHELLS",
+			completionStep,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"apt-get install -y xvfb zsh fish",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Nested-Mount Destination Safety Gate (Linux x64)",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"DEVPROJEX_REQUIRE_ROOTLESS_MOUNT_TESTS",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"DestinationNestedMountProcessTests.AnalyzeRejectsAliasToFileSystemMountedInsideSource",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"DestinationNestedMountProcessTests.ContextForceRejectsFileBindAliasToMountedSourceFile",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains("project folder export", workflow, StringComparison.Ordinal);
+		Assert.Contains("project ZIP export", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"[System.IO.Compression.ZipFile]::OpenRead",
+			workflow,
 			StringComparison.Ordinal);
 		Assert.Contains("Published Broken Pipe Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Startup Smoke (macOS)", workflow, StringComparison.Ordinal);

@@ -33,6 +33,7 @@ internal static class CommandExecution
 		catch (PortableProjectProfileException exception)
 		{
 			var isDestinationConflict = exception.Code == "DPX-PROFILE-DESTINATION-EXISTS";
+			var isRuntimeFailure = exception.Code == "DPX-CLI-PROFILE-WRITE-FAILED";
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
 				SafeMessageFor(exception.Code, text),
@@ -41,7 +42,9 @@ internal static class CommandExecution
 					: null,
 				ExitCode: isDestinationConflict
 					? CommandLineExitCodes.DestinationConflict
-					: CommandLineExitCodes.UsageError,
+					: isRuntimeFailure
+						? CommandLineExitCodes.RuntimeError
+						: CommandLineExitCodes.UsageError,
 				Exception: exception));
 		}
 		catch (ProjectContextValidationException exception)

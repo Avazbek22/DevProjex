@@ -107,7 +107,8 @@ public sealed class TerminalCommandSetupServiceTests
 			StringComparison.Ordinal);
 		Assert.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", launcher, StringComparison.Ordinal);
 		Assert.Contains("\"%DEVPROJEX_EXE%\" %*", launcher, StringComparison.Ordinal);
-		Assert.Contains("exit /b %ERRORLEVEL%", launcher, StringComparison.Ordinal);
+		Assert.Contains("set \"DEVPROJEX_EXIT_CODE=%ERRORLEVEL%\"", launcher, StringComparison.Ordinal);
+		Assert.Contains("exit /b %DEVPROJEX_EXIT_CODE%", launcher, StringComparison.Ordinal);
 		Assert.DoesNotContain("if exist \"%DEVPROJEX_DLL%\" (", launcher, StringComparison.Ordinal);
 		Assert.DoesNotContain("start /wait", launcher, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains(Path.GetDirectoryName(commandPath)!, userPath, StringComparison.OrdinalIgnoreCase);
@@ -149,10 +150,33 @@ public sealed class TerminalCommandSetupServiceTests
 
 		var launcher = TerminalCommandSetupService.BuildWindowsLauncherContent(target);
 
+		Assert.Contains(
+			"for /f \"tokens=2 delims=:\" %%C in ('chcp') do set \"DEVPROJEX_ORIGINAL_CODE_PAGE=%%C\"",
+			launcher,
+			StringComparison.Ordinal);
+		Assert.Contains("chcp 65001 >nul", launcher, StringComparison.Ordinal);
 		Assert.Contains("set \"DEVPROJEX_TERMINAL_HOST=1\"", launcher, StringComparison.Ordinal);
 		Assert.Contains("dotnet \"%DEVPROJEX_DLL%\" %*", launcher, StringComparison.Ordinal);
 		Assert.Contains("\"%DEVPROJEX_EXE%\" %*", launcher, StringComparison.Ordinal);
-		Assert.Contains("exit /b %ERRORLEVEL%", launcher, StringComparison.Ordinal);
+		Assert.Contains("set \"DEVPROJEX_EXIT_CODE=%ERRORLEVEL%\"", launcher, StringComparison.Ordinal);
+		Assert.Contains("chcp %DEVPROJEX_ORIGINAL_CODE_PAGE% >nul", launcher, StringComparison.Ordinal);
+		Assert.Contains("exit /b %DEVPROJEX_EXIT_CODE%", launcher, StringComparison.Ordinal);
+		Assert.True(
+			launcher.IndexOf(
+				"chcp %DEVPROJEX_ORIGINAL_CODE_PAGE% >nul",
+				StringComparison.Ordinal) <
+			launcher.IndexOf(
+				"dotnet \"%DEVPROJEX_DLL%\" %*",
+				StringComparison.Ordinal),
+			"The launcher must restore the caller code page before the product runs.");
+		Assert.True(
+			launcher.LastIndexOf(
+				"chcp %DEVPROJEX_ORIGINAL_CODE_PAGE% >nul",
+				StringComparison.Ordinal) >
+			launcher.IndexOf(
+				"dotnet \"%DEVPROJEX_DLL%\" %*",
+				StringComparison.Ordinal),
+			"The launcher must restore any code-page change made while the product ran.");
 		Assert.DoesNotContain("if \"%~1\"==\"\"", launcher, StringComparison.Ordinal);
 		Assert.DoesNotContain("start \"\"", launcher, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("start /wait", launcher, StringComparison.OrdinalIgnoreCase);

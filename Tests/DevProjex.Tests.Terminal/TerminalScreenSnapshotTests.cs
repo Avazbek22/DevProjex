@@ -28,6 +28,11 @@ public sealed class TerminalScreenSnapshotTests
 		"/private/var/folders/session/project-identifier",
 		"<PROJECT_ROOT>",
 		"│ <PROJECT_ROOT> │")]
+	[InlineData(
+		"│ /private/var/folders/session/project-ident │",
+		"/var/folders/session/project-identifier",
+		"<PROJECT_ROOT>",
+		"│ <PROJECT_ROOT> │")]
 	public void ReplacePathForSnapshot_NormalizesDarwinAliasesBeforeReplacement(
 		string screen,
 		string source,
@@ -40,6 +45,20 @@ public sealed class TerminalScreenSnapshotTests
 				screen,
 				source,
 				replacement,
+				isMacOs: true));
+	}
+
+	[Theory]
+	[InlineData("/private/var", "/var")]
+	[InlineData("/private/tmp", "/tmp")]
+	public void NormalizeMacOsSystemPathAliases_NormalizesClippedAliasRoots(
+		string actual,
+		string expected)
+	{
+		Assert.Equal(
+			expected,
+			TerminalScreenSnapshot.NormalizeMacOsSystemPathAliases(
+				actual,
 				isMacOs: true));
 	}
 

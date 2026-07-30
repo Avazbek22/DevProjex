@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Xml.Linq;
 using DevProjex.Application.Preview;
 
@@ -34,8 +35,69 @@ public sealed class TerminalWorkspaceContractTests
 			Path.Combine(workspace.Path, "Project.zip"),
 			TerminalWorkspaceSession.BuildDefaultExportPath(
 				source,
-				workspace.Path,
+				source,
 				"Project.zip"));
+		Assert.Equal(
+			Path.Combine(workspace.Path, "devprojex-profile.json"),
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				source,
+				"devprojex-profile.json"));
+
+		var externalCurrentDirectory = workspace.CreateDirectory("external");
+		Assert.Equal(
+			Path.Combine(externalCurrentDirectory, "devprojex-profile.json"),
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				externalCurrentDirectory,
+				"devprojex-profile.json"));
+	}
+
+	[Fact]
+	public void DefaultExportPathIsEmptyWhenSourceSafetyCannotBeEstablished()
+	{
+		using var workspace = new TemporaryDirectory();
+		var missingParent = Path.Combine(workspace.Path, "missing");
+		var source = Path.Combine(missingParent, "Project");
+
+		Assert.Empty(
+			TerminalWorkspaceSession.BuildDefaultExportPath(
+				source,
+				source,
+				"Project-context.txt"));
+	}
+
+	[Fact]
+	public void DefaultExportPathResolvesDirectoryAliasesBeforeChoosingItsLocation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("Project");
+		var safeTarget = workspace.CreateDirectory("safe-target");
+		var sourceAlias = Path.Combine(workspace.Path, "source-alias");
+		var safeAlias = Path.Combine(workspace.Path, "safe-alias");
+		CreateDirectoryAliasOrSkip(sourceAlias, source);
+		CreateDirectoryAliasOrSkip(safeAlias, safeTarget);
+
+		try
+		{
+			Assert.Equal(
+				Path.Combine(workspace.Path, "devprojex-profile.json"),
+				TerminalWorkspaceSession.BuildDefaultExportPath(
+					source,
+					sourceAlias,
+					"devprojex-profile.json"));
+			Assert.Equal(
+				Path.Combine(safeTarget, "devprojex-profile.json"),
+				TerminalWorkspaceSession.BuildDefaultExportPath(
+					source,
+					safeAlias,
+					"devprojex-profile.json"));
+		}
+		finally
+		{
+			DeleteDirectoryAlias(sourceAlias);
+			DeleteDirectoryAlias(safeAlias);
+		}
 	}
 
 	[Fact]
@@ -47,6 +109,70 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.False(TerminalWelcomePolicy.IsSafeProjectWorkspace(root));
 		if (!string.IsNullOrWhiteSpace(home))
 			Assert.False(TerminalWelcomePolicy.IsSafeProjectWorkspace(home));
+	}
+
+	private static void CreateDirectoryAliasOrSkip(string aliasPath, string targetPath)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			try
+			{
+				Directory.CreateSymbolicLink(aliasPath, targetPath);
+				return;
+			}
+			catch (Exception exception) when (exception is
+				       UnauthorizedAccessException or
+				       IOException or
+				       PlatformNotSupportedException)
+			{
+				Assert.Skip(
+					$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		using var process = new Process
+		{
+			StartInfo = new ProcessStartInfo("cmd.exe")
+			{
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			}
+		};
+		process.StartInfo.ArgumentList.Add("/c");
+		process.StartInfo.ArgumentList.Add("mklink");
+		process.StartInfo.ArgumentList.Add("/J");
+		process.StartInfo.ArgumentList.Add(aliasPath);
+		process.StartInfo.ArgumentList.Add(targetPath);
+
+		try
+		{
+			process.Start();
+			process.WaitForExit();
+			if (process.ExitCode != 0 || !Directory.Exists(aliasPath))
+				Assert.Skip("The test environment did not allow creating a Windows junction.");
+		}
+		catch (Exception exception) when (exception is
+			       InvalidOperationException or
+			       IOException or
+			       System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip($"Windows junction creation is unavailable: {exception.GetType().Name}.");
+		}
+	}
+
+	private static void DeleteDirectoryAlias(string aliasPath)
+	{
+		try
+		{
+			if (Directory.Exists(aliasPath))
+				Directory.Delete(aliasPath);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			// The temporary workspace performs final best-effort cleanup.
+		}
 	}
 
 	[Fact]
@@ -102,6 +228,54 @@ public sealed class TerminalWorkspaceContractTests
 
 		Assert.Equal("format", formatException.ParamName);
 		Assert.Equal("view", viewException.ParamName);
+	}
+
+	[Fact]
+	public async Task WorkspaceControllerAppliesSourceSafetyToPortableProfileExport()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(
+			services,
+			new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			source,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var insideDestination = Path.Combine(source, "portable.json");
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+			controller.SavePortableProfileAsync(
+				state,
+				insideDestination,
+				overwrite: false,
+				TestContext.Current.CancellationToken));
+
+		Assert.Contains(
+			exception.Error,
+			new[]
+			{
+				ProjectCopyExportError.DestinationInsideSource,
+				ProjectCopyExportError.UnsafeDestinationPath
+			});
+		Assert.False(File.Exists(insideDestination));
+
+		var outputDirectory = workspace.CreateDirectory("profiles");
+		var externalDestination = Path.Combine(outputDirectory, "portable.json");
+		var result = await controller.SavePortableProfileAsync(
+			state,
+			externalDestination,
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(Path.GetFullPath(externalDestination), result);
+		Assert.True(File.Exists(externalDestination));
+		Assert.Empty(Directory.EnumerateFiles(
+			outputDirectory,
+			".portable.json.*.tmp"));
 	}
 
 	[Fact]

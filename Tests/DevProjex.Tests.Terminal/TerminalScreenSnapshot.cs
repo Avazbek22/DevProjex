@@ -98,9 +98,6 @@ internal static partial class TerminalScreenSnapshot
 		var normalized = value
 			.Replace("\r\n", "\n", StringComparison.Ordinal)
 			.Replace('\u00A0', ' ');
-		normalized = NormalizeMacOsSystemPathAliases(
-			normalized,
-			OperatingSystem.IsMacOS());
 		normalized = GroupedNumberSeparatorPattern().Replace(normalized, " ");
 		normalized = ByteSizeDecimalSeparatorPattern().Replace(normalized, ".");
 		normalized = EstimatedTokenCountPattern().Replace(normalized, "<TOKENS>");
@@ -115,6 +112,9 @@ internal static partial class TerminalScreenSnapshot
 					OperatingSystem.IsMacOS());
 			}
 		}
+		normalized = NormalizeMacOsSystemPathAliases(
+			normalized,
+			OperatingSystem.IsMacOS());
 
 		normalized = VersionPattern().Replace(normalized, "v<VERSION>");
 		normalized = IdentifierPattern().Replace(normalized, "<ID>");
@@ -154,8 +154,21 @@ internal static partial class TerminalScreenSnapshot
 		string replacement,
 		bool isMacOs)
 	{
-		value = NormalizeMacOsSystemPathAliases(value, isMacOs);
-		source = NormalizeMacOsSystemPathAliases(source, isMacOs);
+		foreach (var variant in ExpandMacOsSystemPathAliases(source, isMacOs)
+			         .OrderByDescending(static path => path.Length))
+		{
+			value = ReplacePathVariant(value, variant, replacement, isMacOs);
+		}
+
+		return NormalizeMacOsSystemPathAliases(value, isMacOs);
+	}
+
+	private static string ReplacePathVariant(
+		string value,
+		string source,
+		string replacement,
+		bool isMacOs)
+	{
 		var isFullyQualified =
 			(isMacOs && source.StartsWith("/", StringComparison.Ordinal)) ||
 			Path.IsPathFullyQualified(source);
@@ -241,6 +254,30 @@ internal static partial class TerminalScreenSnapshot
 		return value;
 	}
 
+	private static IReadOnlyCollection<string> ExpandMacOsSystemPathAliases(
+		string source,
+		bool isMacOs)
+	{
+		var variants = new HashSet<string>(StringComparer.Ordinal)
+		{
+			source
+		};
+		if (!isMacOs)
+			return variants;
+
+		if (source.StartsWith("/private/var/", StringComparison.Ordinal))
+			variants.Add(source["/private".Length..]);
+		else if (source.StartsWith("/var/", StringComparison.Ordinal))
+			variants.Add("/private" + source);
+
+		if (source.StartsWith("/private/tmp/", StringComparison.Ordinal))
+			variants.Add(source["/private".Length..]);
+		else if (source.StartsWith("/tmp/", StringComparison.Ordinal))
+			variants.Add("/private" + source);
+
+		return variants;
+	}
+
 	internal static string NormalizeMacOsSystemPathAliases(
 		string value,
 		bool isMacOs)
@@ -248,9 +285,12 @@ internal static partial class TerminalScreenSnapshot
 		if (!isMacOs)
 			return value;
 
-		return value
+		var normalized = value
 			.Replace("/private/var/", "/var/", StringComparison.Ordinal)
 			.Replace("/private/tmp/", "/tmp/", StringComparison.Ordinal);
+		return MacOsClippedAliasPattern().Replace(
+			normalized,
+			static match => "/" + match.Groups["root"].Value);
 	}
 
 	private static string ReplaceBoundedPathFragment(
@@ -276,7 +316,8 @@ internal static partial class TerminalScreenSnapshot
 			"<PROJECTS_ROOT>",
 			"<TEMP_ROOT>",
 			"<ORIGIN_ROOT>",
-			"<WELCOME_ROOT>"
+			"<WELCOME_ROOT>",
+			"<OUTPUT_ROOT>"
 		};
 		var normalizedLines = string.Join(
 			'\n',
@@ -335,6 +376,9 @@ internal static partial class TerminalScreenSnapshot
 
 	[GeneratedRegex(@"(?<=\d)[,.](?=\d{2}\s(?:B|KB|MB|GB|TB)\b)")]
 	private static partial Regex ByteSizeDecimalSeparatorPattern();
+
+	[GeneratedRegex(@"/private/(?<root>var|tmp)(?=$|[\s\u2500-\u257F])")]
+	private static partial Regex MacOsClippedAliasPattern();
 
 	[GeneratedRegex(@"(?<=~)\d[\d ,.]*?(?=\s+\p{L})")]
 	private static partial Regex EstimatedTokenCountPattern();

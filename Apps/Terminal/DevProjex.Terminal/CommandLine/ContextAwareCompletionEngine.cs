@@ -8,10 +8,13 @@ internal static class ContextAwareCompletionEngine
 	public static IReadOnlyList<string> Complete(
 		RootCommand root,
 		string commandLine,
-		int cursorPosition)
+		int cursorPosition,
+		string? baseDirectory = null)
 	{
 		ArgumentNullException.ThrowIfNull(root);
 		ArgumentNullException.ThrowIfNull(commandLine);
+		using var baseDirectoryScope =
+			FileSystemCompletionSource.UseBaseDirectory(baseDirectory);
 		var normalized = NormalizeInvocation(commandLine, cursorPosition);
 		if (normalized is null)
 			return [];
@@ -86,7 +89,8 @@ internal static class ContextAwareCompletionEngine
 					ReadCurrentValuePrefix(
 						normalized.Value.CommandLine,
 						normalized.Value.CursorPosition),
-					fileSystemKind));
+					fileSystemKind,
+					baseDirectory));
 		}
 
 		var candidates = completionValues
@@ -138,7 +142,8 @@ internal static class ContextAwareCompletionEngine
 				candidates = candidates
 					.Concat(FileSystemCompletionSource.Complete(
 						valuePrefix.Value,
-						FileSystemCompletionKind.FilesAndDirectories))
+						FileSystemCompletionKind.FilesAndDirectories,
+						baseDirectory))
 					.Distinct(StringComparer.Ordinal)
 					.ToArray();
 			}

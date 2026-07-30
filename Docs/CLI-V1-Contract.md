@@ -21,9 +21,15 @@ inspect -> select -> verify -> export
   implementation pipeline.
 - Terminal Workspace and direct CLI share terminal planning and document
   services. Desktop keeps its established presentation and export orchestration.
-- Opening or analyzing a source project never modifies that project.
-- The source-project read-only promise does not cover explicit export
-  destinations, profiles, settings, clone/cache storage, or runtime state.
+- Opening, analyzing, or exporting from an existing source project never
+  modifies that source tree. Explicit file, folder, ZIP, and portable-profile
+  destinations are accepted only outside it.
+- Application-owned settings, local profiles, clone/cache storage, and runtime
+  state are intentional writes outside the source tree.
+- "Source tree" means the physical files and directories rooted at the opened
+  project. DevProjex does not follow a source-side symlink or junction to an
+  external target; that external target does not become part of the source merely
+  because the user created a reverse alias to it.
 - DevProjex has no telemetry.
 
 `DevProjex.Terminal` remains a class library inside the primary application. Every
@@ -304,11 +310,14 @@ devprojex profile validate <FILE>
 devprojex profile reset [PROJECT]
 ```
 
-Profile export is an explicit profile-file write and is not constrained by the
-source-project destination policy. It is atomic and conflicts unless `--force` is
-present. An existing profile destination returns destination-conflict exit code
-`4`. Import validates without modifying local state unless `--apply` is
-present.
+Portable profile export uses the same canonical source-safety and existing-parent
+policy as analysis and context file output. The destination must resolve outside
+the source project, including filesystem aliases, and its parent must already
+exist. Source-safety failures return `3`. After safety validation, an existing
+file, directory, or dangling link is a destination conflict (`4`); `--force`
+permits atomic replacement of an external file destination, but never replaces a
+directory. On success stdout contains the absolute committed path. Import
+validates without modifying local state unless `--apply` is present.
 
 ### Desktop control
 
@@ -371,8 +380,9 @@ The generated script queries completion from the same command tree and current
 cursor context. It does not expose hidden commands. It scopes subcommands and
 options, completes choice values and paths, and does not suggest a non-repeatable
 option already present. Hidden completion transport details, including the
-UTF-8 Base64 argument used to preserve unfinished quoted input in Windows
-PowerShell 5.1, are internal and are not part of the public v1 syntax.
+UTF-8 Base64 arguments used to preserve unfinished quoted input and the
+completion working directory in Windows PowerShell 5.1, are internal and are
+not part of the public v1 syntax.
 
 ## Shared Output Options
 
@@ -439,8 +449,8 @@ that prevents an accepted option from becoming a no-op.
 | `export project` | `--force` | off | atomically replaces an existing ZIP | invalid for folder output | success path on stdout; invalid combination exits `2` | parser, destination, integration |
 | `export project` | `--dry-run` | off | validates plan, kind, and exact destination without copying | creates no folder, ZIP, parent, or staging | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
 | `profile show` | `--profile`, `--format` | `standard`, `text` | resolves a profile and selects text or profile JSON | `auto` is not accepted | document on stdout; invalid/unresolved value exits `2` | parser, profile handler |
-| `profile export` | `--profile`, `-o`/`--output`, `--force` | `local`, required, off | resolves and atomically writes the exact portable profile file | existing file needs force | real absolute path on stdout; conflict exits `4` | parser, profile handler, filesystem effects |
-| `profile import` | `--apply` | off | persists the validated imported profile as local state | absent means validation-only | status/path contract on stdout; invalid profile exits `2` | profile handler, persistence |
+| `profile export` | `--profile`, `-o`/`--output`, `--force` | `local`, required, off | resolves and atomically writes an exact portable profile outside the source; parent must exist | source safety precedes conflict; existing file needs force; directories always conflict | real committed absolute path on stdout; runtime write failure exits `1`, safety exits `3`, conflict exits `4` | parser, profile handler, filesystem effects |
+| `profile import` | `--apply` | off | persists the validated imported profile as local state | absent means validation-only | status/path contract on stdout; invalid profile exits `2`; local-store write failure exits `1` | profile handler, persistence |
 | `ui list` | `--format` | `text` | selects text or versioned instance JSON | none | requested list on stdout; invalid value exits `2` | parser, schema, IPC |
 | targetable `ui` actions | `--instance`, `--project` | automatic single target | selects a Desktop target by stable id or project path | ambiguous/unavailable target fails rather than guessing | requested action payload on stdout; target failure exits `5` | parser, completion, IPC |
 | targetable `ui` actions | `--timeout` | `10s` | bounds local IPC connection/request time | finite positive duration within parser limits | timeout diagnostic on stderr and exit `5`; invalid duration exits `2` | parser, completion, IPC |
@@ -503,8 +513,9 @@ control sequences. In TUI `--plain` disables color styling, motion, decorated
 frames, Unicode box-drawing, emoji, and ornamental glyphs; the visible layout is
 monochrome and uses ASCII structure. Localized text, project content, and file
 names remain Unicode and are never transliterated or corrupted merely to satisfy
-plain mode. PTY restoration tests validate that all terminal-control modes are
-undone before the parent shell resumes.
+plain mode. PTY restoration tests validate cursor visibility, alternate-screen,
+bracketed-paste, and mouse-mode restoration before a live parent shell accepts
+fresh input.
 
 JSON and XML schemas do not change in plain mode. Text and Markdown tree sections
 use ASCII tree glyphs when plain mode is requested.
@@ -529,24 +540,38 @@ even when `always` is requested.
 
 ## Destination and Atomicity
 
-Analysis reports, context files, project folders, and project ZIP files use one
-canonical destination-safety policy:
+Analysis reports, context files, portable profile files, project folders, and
+project ZIP files use one canonical destination-safety policy:
 
 - destination equal to or inside the canonical source is rejected;
 - a symlink or junction resolving into the source is rejected;
+- case-only aliases resolving into the source on a case-insensitive volume are
+  rejected without imposing case-insensitive semantics on case-sensitive volumes;
+- filesystem aliases such as a substituted drive, bind mount, or macOS firmlink
+  are compared in their physical filesystem namespace; on Linux, mounted
+  filesystems visible below the source root are protected boundaries as well;
 - an existing destination conflicts with exit code `4` unless replacement is
-  explicitly allowed;
+  explicitly allowed; an existing dangling symbolic link is also a conflict;
+- the destination parent must already exist;
 - staging is adjacent to the destination;
+- file outputs resolve and revalidate the destination parent before staging and
+  before the final move;
 - a successful replacement is atomic where the platform filesystem supports it;
-- cancellation or failure removes staging and partial output;
+- cancellation or failure performs bounded staging cleanup; if the operating
+  system continues to deny deletion, the command returns a runtime failure that
+  identifies cleanup as incomplete instead of reporting clean cancellation;
 - the source tree is unchanged.
 
-Context and analysis file output may create a missing parent directory only during
-real execution. Dry-run creates nothing.
+Stable aliases, hard links, case aliases, and observed destination retargets are
+validated fail-closed. v1 does not claim atomic protection against a privileged or
+hostile process that mutates the already validated filesystem namespace in the
+remaining interval before a path-based platform commit.
+
+Context, analysis, and portable-profile file outputs never create a missing
+parent directory. Dry-run creates nothing.
 
 Folder export creates exactly the requested directory and requires it to be
-absent. ZIP and context replacement require `--force`. Profile export follows its
-separate explicit-file policy.
+absent. ZIP, context, and portable-profile replacement require `--force`.
 
 ## Streaming Context Documents
 

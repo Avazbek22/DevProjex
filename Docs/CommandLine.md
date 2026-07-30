@@ -212,7 +212,7 @@ Text is a human-readable project summary. JSON is a stable machine document with
 `schemaVersion`. `--strict` still writes the report, then returns exit code `3`
 when policy diagnostics exist. Analysis is already read-only and therefore has
 no `--dry-run` option. A file destination must be outside the source project and
-must not already exist.
+must not already exist. Its parent directory must already exist.
 
 Examples:
 
@@ -253,7 +253,8 @@ mark binary entries with metadata.
 
 When output is stdout, stdout contains only the context document. When output is a
 file, stdout contains one absolute result path. Existing files are conflicts
-unless `--force` is used; replacement is atomic.
+unless `--force` is used; replacement is atomic. The destination parent directory
+must already exist.
 
 `--force` is valid only for a file destination, never for stdout. `--dry-run`
 performs planning and destination preflight but does not generate a document,
@@ -285,7 +286,8 @@ devprojex export project . --as zip -o ../devprojex-submission.zip
 The first command creates exactly `../devprojex-submission`; it does not create an
 additional project-name child or `(2)` suffix. The folder must not exist. A ZIP path must end
 in `.zip` and must not exist unless `--force` is supplied. `--force` is not valid
-for folder exports.
+for folder exports. In both cases the destination parent directory must already
+exist.
 
 Folder and ZIP exports preserve selected binary bytes, timestamps, directory
 structure, and included empty directories. Staging is cleaned after cancellation
@@ -299,7 +301,7 @@ warnings use stderr.
 
 ```shell
 devprojex profile show [PROJECT] [--profile standard|local|FILE] [--format text|json]
-devprojex profile export [PROJECT] --profile local -o FILE [--force]
+devprojex profile export [PROJECT] [--profile standard|local|FILE] -o FILE [--force]
 devprojex profile import FILE [PROJECT] [--apply]
 devprojex profile validate FILE
 devprojex profile reset [PROJECT]
@@ -308,6 +310,12 @@ devprojex profile reset [PROJECT]
 Direct commands default to `standard`. Terminal Workspace uses `local` when
 available, then `standard`. Explicit CLI selection options override profile
 fields. See [CLI-Profiles.md](CLI-Profiles.md).
+
+Portable profile output must resolve outside the source project, including
+filesystem aliases, and its parent directory must already exist. Source safety is
+validated before conflicts. An existing file requires `--force` for atomic
+replacement; an existing directory is always a destination conflict. On success
+stdout contains one absolute committed path. Errors and diagnostics use stderr.
 
 ## Desktop Control
 

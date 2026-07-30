@@ -64,14 +64,17 @@ public sealed partial class TerminalPlainPtyTests
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.CompleteShellRestorationHandshakeAsync(
+			TestContext.Current.CancellationToken);
 
+		var output = terminal.RawOutput;
+		AssertPlainRawOutput(output);
+		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(output, "inline");
+		await terminal.ReleaseParentShellAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
 				cancellationToken: TestContext.Current.CancellationToken));
-		var output = terminal.RawOutput;
-		AssertPlainRawOutput(output);
-		TerminalPtyStateAssertions.AssertRestoredBeforeShellMarker(output, "inline");
 	}
 
 	[Fact(Timeout = 120_000)]
@@ -246,6 +249,13 @@ public sealed partial class TerminalPlainPtyTests
 		Assert.True(
 			styles.Count <= 1,
 			$"Plain TUI used multiple color pairs: {string.Join(", ", styles)}");
+		Assert.All(
+			styles,
+			style =>
+			{
+				Assert.Equal(0, style.FgMode);
+				Assert.Equal(0, style.BgMode);
+			});
 	}
 
 	private static void Verify(

@@ -31,7 +31,8 @@ public sealed class TerminalProgressPtyTests
 			},
 			initializeDataRoot: path => dataRoot = path,
 			useProgressCheckpointHost: true,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			writeShellCompletionMarker: true);
 
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
@@ -64,8 +65,11 @@ public sealed class TerminalProgressPtyTests
 				TerminalProgressCheckpointProtocol.DirectoryName,
 				TerminalProgressCheckpointProtocol.GetReachedFileName("25")),
 			TestContext.Current.CancellationToken);
-		var active = await terminal.WaitForScreenAsync(
+		await terminal.WaitForScreenAsync(
 			"25%",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var active = await terminal.WaitForScreenAsync(
+			"Esc or Ctrl+C",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Copying files", active, StringComparison.Ordinal);
 		Assert.Contains("25%", active, StringComparison.Ordinal);
@@ -114,6 +118,12 @@ public sealed class TerminalProgressPtyTests
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.CompleteShellRestorationHandshakeAsync(
+			TestContext.Current.CancellationToken);
+		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(
+			terminal.RawOutput,
+			"inline");
+		await terminal.ReleaseParentShellAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

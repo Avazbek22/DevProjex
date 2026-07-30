@@ -669,6 +669,103 @@ public sealed class ProjectContextStreamingRegressionTests
 	}
 
 	[Fact]
+	public async Task AtomicOutputRemainsBoundToResolvedParentWhenAliasIsRetargeted()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("This deterministic symbolic-link race test runs on Unix hosts.");
+
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("source");
+		var safeTarget = workspace.CreateDirectory("safe-target");
+		var alias = Path.Combine(workspace.Path, "output-alias");
+		try
+		{
+			Directory.CreateSymbolicLink(alias, safeTarget);
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip(
+				$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		var requestedDestination = Path.Combine(alias, "report.txt");
+		var resolvedDestination = ExactOutputDestinationValidator.ValidateContext(
+			source,
+			requestedDestination,
+			overwrite: false);
+		var payload = Encoding.UTF8.GetBytes("safe payload");
+		try
+		{
+			var writtenPath = await AtomicOutputWriter.WriteAsync(
+				resolvedDestination,
+				overwrite: false,
+				async (stream, cancellationToken) =>
+				{
+					Directory.Delete(alias);
+					Directory.CreateSymbolicLink(alias, source);
+					await stream.WriteAsync(payload, cancellationToken);
+				},
+				TestContext.Current.CancellationToken,
+				path => ExactOutputDestinationValidator.ValidateContext(
+					source,
+					path,
+					overwrite: false));
+
+			var safeDestination = Path.Combine(safeTarget, "report.txt");
+			Assert.Equal(safeDestination, writtenPath);
+			Assert.Equal(
+				"safe payload",
+				await File.ReadAllTextAsync(
+					safeDestination,
+					TestContext.Current.CancellationToken));
+			Assert.False(File.Exists(Path.Combine(source, "report.txt")));
+			Assert.Empty(Directory.EnumerateFiles(safeTarget, ".*.tmp"));
+			Assert.Empty(Directory.EnumerateFiles(source, ".*.tmp"));
+		}
+		finally
+		{
+			Directory.Delete(alias);
+		}
+	}
+
+	[Fact]
+	public async Task AtomicOutputCancellationDuringFinalRevalidationDoesNotCommit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var outputDirectory = workspace.CreateDirectory("output");
+		var destination = Path.Combine(outputDirectory, "context.txt");
+		using var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var validationCount = 0;
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+			AtomicOutputWriter.WriteAsync(
+				destination,
+				overwrite: false,
+				async (stream, cancellationToken) =>
+				{
+					await stream.WriteAsync(
+						"payload"u8.ToArray(),
+						cancellationToken);
+				},
+				cancellationSource.Token,
+				path =>
+				{
+					validationCount++;
+					if (validationCount == 3)
+						cancellationSource.Cancel();
+					return path;
+				}));
+
+		Assert.Equal(3, validationCount);
+		Assert.False(File.Exists(destination));
+		Assert.Empty(Directory.EnumerateFiles(outputDirectory, ".*.tmp"));
+	}
+
+	[Fact]
 	public async Task LargeContextProcessKeepsMemoryGrowthBelowTheSourceFileSizeEnvelope()
 	{
 		using var workspace = new TemporaryDirectory();

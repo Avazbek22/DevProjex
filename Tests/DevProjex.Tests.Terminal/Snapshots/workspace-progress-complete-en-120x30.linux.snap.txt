@@ -3,25 +3,25 @@
 ┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
 │v [x] <PROJECT>                 ││+ <PROJECT>                              ▲│
 │  > [x] src                                          ││  + src                                                       ┃│
-│    [x] global.json                                  ││    - File0001.bin                                            ┃│
-│     ┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐     ┃│
-│     │ Destination: <OUTPUT_ROOT>/project-export                                          │     ┃│
-│     │ Files: 101  |  Folders: 2  |  Size: 100 KB                                                              │     ·│
-│     │ Elapsed: <ELAPSED>                                                                                           │     ·│
-│     │                                                                                                         │     ·│
-│     │ Equivalent command:                                                                                     │     ·│
-│     │ devprojex export project                                                                                │     ·│
-│     │ <PROJECT_ROOT> --as │     ·│
-│     │ folder -o <OUTPUT_ROOT>/project-export --profile standard --git-mode gitignore     │     ·│
-│     │ --exclude smart-ignore --exclude hidden-folders --exclude hidden-files --exclude dot-folders --exclude  │     ·│
-│     │ dot-files --exclude empty-folders --exclude empty-files --exclude extensionless-files                   │     ·│
+│    [┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐     ┃│
+│     │ Destination: <OUTPUT_ROOT>/project-export                                        ▲ │     ┃│
+│     │ Files: 101  |  Folders: 2  |  Size: 100 KB                                                            █ │     ┃│
+│     │ Elapsed: <ELAPSED>                                                                                         █ │     ·│
+│     │                                                                                                       █ │     ·│
+│     │ Equivalent command:                                                                                   █ │     ·│
+│     │ argv[0] = "devprojex"                                                                                 ░ │     ·│
+│     │ argv[1] = "export"                                                                                    ░ │     ·│
+│     │ argv[2] = "project"                                                                                   ░ │     ·│
+│     │ argv[3] =                                                                                             ░ │     ·│
+│     │ "<PROJECT_ROOT>"       ░ │     ·│
+│     │ argv[4] = "--as"                                                                                      ░ │     ·│
+│     │ argv[5] = "folder"                                                                                    ░ │     ·│
+│     │ argv[6] = "-o"                                                                                        ▼ │     ·│
 │     │                                                                                                         │     ·│
 │     │                                                                                                         │     ·│
 │     │                                              ⟦► Close ◄⟧▖                                               │     ·│
 │     │                                              ▝▀▀▀▀▀▀▀▀▀▀▘                                               │     ·│
 │     └─────────────────────────────────────────────────────────────────────────────────────────────────────────┘     ·│
-│                                                     ││    - File0018.bin                                            ·│
-│                                                     ││    - File0019.bin                                            ·│
 │                                                     ││    - File0020.bin                                            ▼│
 │                                                     ││ Files 101  |  Lines 1-22/103                                  │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘

@@ -32,39 +32,47 @@ public sealed class ProgressRenderer(
 			});
 		var progress = new CallbackProgress<ProjectCopyExportProgress>(
 			value => channel.Writer.TryWrite(value));
-		var operationTask = operation(progress);
 		var console = AnsiConsoleFactory.Create(environment.Error, capabilities);
+		Task<T>? operationTask = null;
 
-		await console.Progress()
-			.AutoClear(false)
-			.HideCompleted(false)
-			.Columns(
-				new TaskDescriptionColumn(),
-				new ProgressBarColumn(),
-				new PercentageColumn(),
-				new ElapsedTimeColumn())
-			.StartAsync(async context =>
-			{
-				var task = context.AddTask(
-					localization["Terminal.Progress.PreparingProjectExport"],
-					maxValue: 1);
-				task.IsIndeterminate = true;
-				while (!operationTask.IsCompleted)
+		try
+		{
+			await console.Progress()
+				.AutoClear(false)
+				.HideCompleted(false)
+				.Columns(
+					new TaskDescriptionColumn(),
+					new ProgressBarColumn(),
+					new PercentageColumn(),
+					new ElapsedTimeColumn())
+				.StartAsync(async context =>
 				{
+					var task = context.AddTask(
+						localization["Terminal.Progress.PreparingProjectExport"],
+						maxValue: 1);
+					task.IsIndeterminate = true;
+					operationTask = operation(progress);
+					while (!operationTask.IsCompleted)
+					{
+						while (channel.Reader.TryRead(out var update))
+							ApplyUpdate(task, update);
+
+						await Task.WhenAny(operationTask, Task.Delay(40)).ConfigureAwait(false);
+					}
+
 					while (channel.Reader.TryRead(out var update))
 						ApplyUpdate(task, update);
 
-					await Task.WhenAny(operationTask, Task.Delay(40)).ConfigureAwait(false);
-				}
+					_ = await operationTask.ConfigureAwait(false);
+					context.Refresh();
+				}).ConfigureAwait(false);
 
-				while (channel.Reader.TryRead(out var update))
-					ApplyUpdate(task, update);
-				task.IsIndeterminate = false;
-				task.Value = task.MaxValue;
-			}).ConfigureAwait(false);
-
-		channel.Writer.TryComplete();
-		return await operationTask.ConfigureAwait(false);
+			return await operationTask!.ConfigureAwait(false);
+		}
+		finally
+		{
+			channel.Writer.TryComplete();
+		}
 	}
 
 	private bool ShouldRenderStaticProgress() =>

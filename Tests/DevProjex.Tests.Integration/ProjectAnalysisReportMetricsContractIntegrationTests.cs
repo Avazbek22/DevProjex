@@ -56,7 +56,9 @@ public sealed class ProjectAnalysisReportMetricsContractIntegrationTests
 	{
 		using var temp = new TemporaryDirectory();
 		var projectPath = SeedMetricsWorkspace(temp);
-		var reportPath = Path.Combine(temp.Path, "reports", "metrics.json");
+		var reportPath = Path.Combine(
+			temp.CreateDirectory("reports"),
+			"metrics.json");
 
 		using var stdoutReport = await RunReportToStdoutAsync(
 			projectPath,

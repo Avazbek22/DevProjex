@@ -72,20 +72,12 @@ public sealed class TerminalPathPickerModelTests
 	public void MissingInitialPathFallsBackToCurrentDirectory()
 	{
 		using var workspace = new TemporaryDirectory();
-		var previous = Directory.GetCurrentDirectory();
-		try
-		{
-			Directory.SetCurrentDirectory(workspace.Path);
-			var model = new TerminalPathPickerModel(
-				TerminalPathPickerMode.Directory,
-				Path.Combine(workspace.Path, "missing"));
+		var expectedCurrentDirectory = Directory.GetCurrentDirectory();
+		var model = new TerminalPathPickerModel(
+			TerminalPathPickerMode.Directory,
+			Path.Combine(workspace.Path, "missing"));
 
-			Assert.Equal(workspace.Path, model.CurrentDirectory);
-			Assert.Equal(TerminalPathPickerError.None, model.Error);
-		}
-		finally
-		{
-			Directory.SetCurrentDirectory(previous);
-		}
+		Assert.Equal(expectedCurrentDirectory, model.CurrentDirectory);
+		Assert.Equal(TerminalPathPickerError.None, model.Error);
 	}
 }

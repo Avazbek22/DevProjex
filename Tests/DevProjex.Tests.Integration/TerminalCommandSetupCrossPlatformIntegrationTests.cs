@@ -365,16 +365,22 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 		Assert.True(install.Success, install.ErrorMessage);
 		var launcherPath = install.Snapshot.CommandPath;
 		Assert.False(string.IsNullOrWhiteSpace(launcherPath));
+		const string scriptPathVariable = "%DPX_SCRIPT_PATH%";
+		const string unicodeArgumentVariable = "%DPX_UNICODE_ARGUMENT%";
 		var command = string.Join(
 			" ",
-			new[] { QuoteForCmd(launcherPath!), "//nologo", QuoteForCmd(scriptPath) }
-				.Concat(expectedArguments.Select(QuoteForCmd)));
+			new[] { QuoteForCmd(launcherPath!), "//nologo", "\"" + scriptPathVariable + "\"" }
+				.Concat(expectedArguments.Select(argument =>
+					string.Equals(argument, "кириллица", StringComparison.Ordinal)
+						? "\"" + unicodeArgumentVariable + "\""
+						: QuoteForCmd(argument))));
 		var callerPath = workspace.CreateFile(
 			"caller folder/run-launcher.cmd",
 			string.Join(
 				"\r\n",
 				"@echo off",
 				"setlocal DisableDelayedExpansion",
+				"chcp 437 >nul",
 				command,
 				string.Empty));
 		var startInfo = new ProcessStartInfo
@@ -386,6 +392,8 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 			CreateNoWindow = true
 		};
 		startInfo.Environment["DPX_CAPTURE"] = capturePath;
+		startInfo.Environment["DPX_SCRIPT_PATH"] = scriptPath;
+		startInfo.Environment["DPX_UNICODE_ARGUMENT"] = "кириллица";
 		startInfo.ArgumentList.Add("/d");
 		startInfo.ArgumentList.Add("/c");
 		startInfo.ArgumentList.Add(callerPath);
@@ -433,14 +441,18 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 		var install = service.InstallOrRepair();
 		Assert.True(install.Success, install.ErrorMessage);
 		var launcherPath = Assert.IsType<string>(install.Snapshot.CommandPath);
+		var codePageCapturePath = Path.Combine(workspace.Path, "caller-code-page.txt");
 		var callerPath = workspace.CreateFile(
 			"caller/run-framework-launcher.cmd",
 			string.Join(
 				"\r\n",
 				"@echo off",
 				"setlocal DisableDelayedExpansion",
+				"chcp 437 >nul",
 				"call " + QuoteForCmd(launcherPath) + " --definitely-unknown --language en",
-				"exit /b %ERRORLEVEL%",
+				"set \"DPX_LAUNCHER_EXIT_CODE=%ERRORLEVEL%\"",
+				"chcp > \"%DPX_CODE_PAGE_CAPTURE%\"",
+				"exit /b %DPX_LAUNCHER_EXIT_CODE%",
 				string.Empty));
 		var startInfo = new ProcessStartInfo
 		{
@@ -451,6 +463,7 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 			CreateNoWindow = true,
 			WorkingDirectory = workspace.Path
 		};
+		startInfo.Environment["DPX_CODE_PAGE_CAPTURE"] = codePageCapturePath;
 		startInfo.ArgumentList.Add("/d");
 		startInfo.ArgumentList.Add("/c");
 		startInfo.ArgumentList.Add(callerPath);
@@ -467,6 +480,7 @@ public sealed class TerminalCommandSetupCrossPlatformIntegrationTests
 			"error[DPX-CLI-UNKNOWN-OPTION]",
 			await stderr,
 			StringComparison.Ordinal);
+		Assert.EndsWith("437", File.ReadAllText(codePageCapturePath).Trim(), StringComparison.Ordinal);
 	}
 
 	private static TerminalCommandSetupService CreateWindowsPortableService(

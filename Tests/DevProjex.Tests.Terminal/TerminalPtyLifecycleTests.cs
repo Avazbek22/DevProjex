@@ -282,16 +282,19 @@ public sealed class TerminalPtyLifecycleTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
-		Assert.Equal(
-			CommandLineExitCodes.Success,
-			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+		await terminal.CompleteShellRestorationHandshakeAsync(
+			TestContext.Current.CancellationToken);
 
 		var output = terminal.RawOutput;
-		TerminalPtyStateAssertions.AssertRestoredBeforeShellMarker(output, screenMode);
+		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(output, screenMode);
 		Assert.Contains("\u001b[?25l", output, StringComparison.Ordinal);
 		Assert.Contains("\u001b[?25h", output, StringComparison.Ordinal);
 		Assert.Contains("\u001b[?2004h", output, StringComparison.Ordinal);
 		Assert.Contains("\u001b[?2004l", output, StringComparison.Ordinal);
+		await terminal.ReleaseParentShellAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact(Timeout = 90_000)]
@@ -366,13 +369,16 @@ public sealed class TerminalPtyLifecycleTests
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
-		Assert.Equal(
-			CommandLineExitCodes.Success,
-			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+		await terminal.CompleteShellRestorationHandshakeAsync(
+			TestContext.Current.CancellationToken);
 
 		var output = terminal.RawOutput;
 		Assert.True(MouseTrackingWasEnabled(output), "Mouse tracking was not enabled.");
-		TerminalPtyStateAssertions.AssertRestoredBeforeShellMarker(output, "inline");
+		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(output, "inline");
+		await terminal.ReleaseParentShellAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact(Timeout = 90_000)]
