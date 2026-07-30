@@ -19,8 +19,13 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 	public async Task GeneratedScriptLoadsAndCompletesAgainstUnifiedHost(string shell)
 	{
 		var shellExecutable = ResolveShellOrSkip(shell);
-		var unifiedHost = PublishedApplicationLocator.FindExecutable();
 		using var workspace = new TemporaryDirectory();
+		await EnsureShellCanExecuteWindowsHostOrSkipAsync(
+			shell,
+			shellExecutable,
+			workspace,
+			TestContext.Current.CancellationToken);
+		var unifiedHost = PublishedApplicationLocator.FindExecutable();
 		var integrationRoot = workspace.CreateDirectory("completion host Юникод space");
 		var wrapper = CreatePathWrapper(integrationRoot, unifiedHost, shell);
 		var generated = await RunUnifiedHostAsync(
@@ -272,17 +277,22 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		                                Environment.GetEnvironmentVariable("PATH") ??
 		                                string.Empty);
 		startInfo.Environment["DPX_COMPLETION_SCRIPT"] = completionScript;
-		startInfo.Environment["DPX_COMPLETION_LINE"] = line;
-		startInfo.Environment["DPX_EXPECTED_RAW"] = expectedRawCandidate;
+		startInfo.Environment["DPX_COMPLETION_LINE_BASE64"] =
+			Convert.ToBase64String(Encoding.UTF8.GetBytes(line));
+		startInfo.Environment["DPX_EXPECTED_RAW_BASE64"] =
+			Convert.ToBase64String(Encoding.UTF8.GetBytes(expectedRawCandidate));
 		var driver =
 			"""
 			$ErrorActionPreference = 'Stop'
 			. $env:DPX_COMPLETION_SCRIPT
-			$line = $env:DPX_COMPLETION_LINE
+			$line = [System.Text.Encoding]::UTF8.GetString(
+			    [Convert]::FromBase64String($env:DPX_COMPLETION_LINE_BASE64))
+			$expectedRaw = [System.Text.Encoding]::UTF8.GetString(
+			    [Convert]::FromBase64String($env:DPX_EXPECTED_RAW_BASE64))
 			$completion = TabExpansion2 -inputScript $line -cursorColumn $line.Length
 			$candidates = @($completion.CompletionMatches)
 			$match = $candidates |
-			    Where-Object { $_.ListItemText -eq $env:DPX_EXPECTED_RAW } |
+			    Where-Object { $_.ListItemText -eq $expectedRaw } |
 			    Select-Object -First 1
 			if ($null -eq $match) {
 			    $candidateSummary = $candidates |
@@ -396,6 +406,79 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		}
 
 		return startInfo;
+	}
+
+	private static async Task EnsureShellCanExecuteWindowsHostOrSkipAsync(
+		string shell,
+		string shellExecutable,
+		TemporaryDirectory workspace,
+		CancellationToken cancellationToken)
+	{
+		if (!OperatingSystem.IsWindows() || shell == "powershell")
+			return;
+
+		var windowsHost = Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+			"System32",
+			"cmd.exe");
+		if (!File.Exists(windowsHost))
+		{
+			ReportUnavailableShellCapability(
+				shell,
+				$"{shell} resolved to '{shellExecutable}', but the Windows-host " +
+				$"interop probe executable '{windowsHost}' does not exist.");
+			return;
+		}
+
+		var startInfo = CreateShellStartInfo(shell, shellExecutable);
+		var probe = string.Join(
+			"\n",
+			BuildPosixPathAssignment(
+				"windows_host_probe",
+				windowsHost,
+				shell),
+			"\"$windows_host_probe\" /d /c exit 0");
+		var probePath = workspace.WriteFile(
+			$"{shell} Windows host interop probe",
+			probe.ReplaceLineEndings("\n"));
+		startInfo.ArgumentList.Add(ConvertDriverPathForShell(
+			probePath,
+			shellExecutable));
+
+		var result = await RunProcessAsync(startInfo, cancellationToken);
+		if (result.ExitCode == 0)
+			return;
+
+		var diagnostic = FormatCapabilityDiagnostic(result);
+		var reason =
+			$"{shell} resolved to '{shellExecutable}', but its Windows-host " +
+			$"interop probe exited with code {result.ExitCode}{diagnostic}. " +
+			"Native completion integration requires the shell to execute the " +
+			"Windows DevProjex host.";
+		ReportUnavailableShellCapability(shell, reason);
+	}
+
+	private static void ReportUnavailableShellCapability(
+		string shell,
+		string reason)
+	{
+		if (IsRequiredCompletionShell(shell))
+			Assert.Fail($"{reason} The shell is required by {RequiredShellsVariable}.");
+		Assert.Skip(reason);
+	}
+
+	private static string FormatCapabilityDiagnostic(ShellProcessResult result)
+	{
+		var detail = string.IsNullOrWhiteSpace(result.StandardError)
+			? result.StandardOutput
+			: result.StandardError;
+		detail = detail.Trim().ReplaceLineEndings(" ");
+		if (detail.Length == 0)
+			return string.Empty;
+		const int maximumLength = 300;
+		if (detail.Length > maximumLength)
+			detail = detail[..maximumLength] + "...";
+		return $": {detail}";
 	}
 
 	private static string BuildPosixDriver(

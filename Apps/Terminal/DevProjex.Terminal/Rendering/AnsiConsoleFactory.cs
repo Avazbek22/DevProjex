@@ -13,6 +13,8 @@ internal static class AnsiConsoleFactory
 			Interactive = capabilities.UseInteractiveProgress
 				? InteractionSupport.Yes
 				: InteractionSupport.No,
+			// DevProjex resolves CI, redirection, color, and interactivity before creating the console.
+			Enrichment = new ProfileEnrichment { UseDefaultEnrichers = false },
 			Out = new AnsiConsoleOutput(writer)
 		};
 		var console = AnsiConsole.Create(settings);
