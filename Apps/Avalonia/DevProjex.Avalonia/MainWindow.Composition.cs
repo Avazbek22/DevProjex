@@ -147,7 +147,7 @@ public partial class MainWindow
     private SettingsPanelView? _settingsPanel;
     private Task _postLoadVisualReadyTask = Task.CompletedTask;
     private static readonly TimeSpan SettingsPanelAnimationDuration =
-        WorkspacePresentationController.PanelAnimationDuration;
+        WorkspacePresentationController.SettingsPanelAnimationDuration;
 
     private Border? _previewBarContainer;
     private Border? _previewBar;

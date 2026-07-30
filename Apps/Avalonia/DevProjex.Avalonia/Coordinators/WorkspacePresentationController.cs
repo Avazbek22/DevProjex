@@ -40,6 +40,8 @@ internal sealed class WorkspacePresentationController : IDisposable
     internal const double PreviewSettingsSplitterWidth = 4.0;
     internal static readonly TimeSpan PanelAnimationDuration =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(300));
+    internal static readonly TimeSpan SettingsPanelAnimationDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(260));
 
     private const double DefaultWindowMinimumWidth = 850.0;
     private const double WindowMinimumWidthSafetyPadding = 32.0;
@@ -917,7 +919,9 @@ internal sealed class WorkspacePresentationController : IDisposable
 
     private void EnsureSettingsPanelTransitions()
     {
-        EnsureWidthTransition(_controls.SettingsContainer, PanelAnimationDuration);
+        EnsureWidthTransition(
+            _controls.SettingsContainer,
+            SettingsPanelAnimationDuration);
 
         if (_controls.SettingsIsland.Transitions is null)
         {
@@ -926,7 +930,7 @@ internal sealed class WorkspacePresentationController : IDisposable
                 new DoubleTransition
                 {
                     Property = Visual.OpacityProperty,
-                    Duration = PanelAnimationDuration,
+                    Duration = SettingsPanelAnimationDuration,
                     Easing = new CubicEaseOut()
                 }
             ];
@@ -1035,7 +1039,9 @@ internal sealed class WorkspacePresentationController : IDisposable
     }
 
     private static Task WaitForPanelAnimationAsync()
-        => Task.Delay(PanelAnimationDuration + UiTimingProfile.AnimationSettleBuffer);
+        => Task.Delay(
+            SettingsPanelAnimationDuration +
+            UiTimingProfile.AnimationSettleBuffer);
 
     private enum WorkspaceDisplayMode
     {
