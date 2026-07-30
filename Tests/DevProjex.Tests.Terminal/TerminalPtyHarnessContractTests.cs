@@ -29,6 +29,10 @@ public sealed class TerminalPtyHarnessContractTests
 			"IFS= read -r dpx_sync",
 			command,
 			StringComparison.Ordinal);
+		Assert.Contains(
+			$"[ \"$dpx_sync\" = '{TerminalPtyHarness.ShellInputSentinel}' ]",
+			command,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -16,6 +16,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		"__DEVPROJEX_TERMIOS_RESTORED__";
 	public const string ShellTerminalStateMismatchMarker =
 		"__DEVPROJEX_TERMIOS_MISMATCH__";
+	internal const string ShellInputSentinel =
+		"__DEVPROJEX_FRESH_SHELL_INPUT__";
 	private const string ShellHandshakeMarker = "__DEVPROJEX_SHELL_HANDSHAKE__";
 	private const string WindowSizeQuery = "\u001b[18t";
 	private readonly Hex1bTerminalChildProcess _process;
@@ -181,8 +183,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				: "set NO_COLOR=&& ";
 			var completion = writeShellCompletionMarker
 				? $" & set \"dpx_exit=!errorlevel!\" & echo({EscapeMarkerForCommandPrompt(ShellHandshakeMarker)}" +
-				  $" & set /p \"dpx_sync=\" & echo({EscapeMarkerForCommandPrompt(ShellCompletionMarker)}" +
-				  $" & set /p \"dpx_release=\" & exit /b !dpx_exit!"
+				  " & set /p \"dpx_sync=\""
 				: " & exit /b !errorlevel!";
 			return (
 				host,
@@ -228,7 +229,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			  "fi; " +
 			  $"printf '%s%s\\n' " +
 			  $"{SplitMarkerForPosixShell(ShellHandshakeMarker)}; " +
-			  "IFS= read -r dpx_sync; printf '%s%s\\n' " +
+			  "IFS= read -r dpx_sync; " +
+			  $"[ \"$dpx_sync\" = {QuoteForPosixShell(ShellInputSentinel)} ] || exit 97; " +
+			  "printf '%s%s\\n' " +
 			  $"{SplitMarkerForPosixShell(ShellCompletionMarker)}; " +
 			  "IFS= read -r dpx_release; exit \"$dpx_exit\""
 			: "exec " + invocation;
@@ -270,11 +273,25 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	public async Task CompleteShellRestorationHandshakeAsync(
 		CancellationToken cancellationToken = default)
 	{
-		await WaitForRawOutputAsync(
+			await WaitForRawOutputAsync(
 				ShellHandshakeMarker,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
-		await SendAsync("continue\r", cancellationToken).ConfigureAwait(false);
+		await SendAsync(
+				ShellInputSentinel + "\r",
+				cancellationToken)
+			.ConfigureAwait(false);
+		if (OperatingSystem.IsWindows())
+		{
+			var validationCommand =
+				$"if \"%dpx_sync%\"==\"{ShellInputSentinel}\" (" +
+				$"echo {EscapeMarkerForCommandPrompt(ShellCompletionMarker)}" +
+				" & set /p \"dpx_release=\" & exit /b %dpx_exit%) else exit /b 97";
+			await SendAsync(
+					validationCommand + "\r",
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
 		await WaitForRawOutputAsync(
 				ShellCompletionMarker,
 				cancellationToken: cancellationToken)
@@ -463,6 +480,56 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 
 		throw new TimeoutException(
 			$"Timed out waiting for '{unexpected}' to disappear.\n{CaptureScreen()}\n" +
+			$"Raw output tail:\n{CaptureRawOutputTail()}\n" +
+			$"Terminal responses: {CaptureTerminalResponseLog()}");
+	}
+
+	public async Task<string> WaitForStableScreenAsync(
+		string required,
+		string? forbidden = null,
+		TimeSpan? timeout = null,
+		CancellationToken cancellationToken = default)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(15);
+		var previous = string.Empty;
+		var stableSamples = 0;
+		while (stopwatch.Elapsed < effectiveTimeout)
+		{
+			var screen = CaptureScreen();
+			if (HasExited)
+			{
+				throw new Xunit.Sdk.XunitException(
+					$"Terminal process exited with code {_process.ExitCode} before the screen " +
+					$"stabilized for '{required}'.\nScreen:\n{screen}\nRaw output:\n{CaptureRawOutput()}");
+			}
+
+			var matches =
+				screen.Contains(required, StringComparison.Ordinal) &&
+				(forbidden is null ||
+				 !screen.Contains(forbidden, StringComparison.Ordinal));
+			if (matches &&
+			    string.Equals(previous, screen, StringComparison.Ordinal))
+			{
+				stableSamples++;
+				if (stableSamples >= 3)
+					return screen;
+			}
+			else
+			{
+				stableSamples = 0;
+			}
+
+			previous = screen;
+			await Task.Delay(80, cancellationToken).ConfigureAwait(false);
+		}
+
+		var forbiddenCondition = forbidden is null
+			? string.Empty
+			: $" without '{forbidden}'";
+		throw new TimeoutException(
+			$"Timed out waiting for a stable screen containing '{required}'" +
+			$"{forbiddenCondition}.\n{CaptureScreen()}\n" +
 			$"Raw output tail:\n{CaptureRawOutputTail()}\n" +
 			$"Terminal responses: {CaptureTerminalResponseLog()}");
 	}

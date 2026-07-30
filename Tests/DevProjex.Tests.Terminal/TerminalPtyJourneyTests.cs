@@ -281,19 +281,42 @@ public sealed class TerminalPtyJourneyTests
 			"Browse folder",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Browse folder",
-			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.False(terminal.HasExited);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Open selects the current folder",
-			cancellationToken: TestContext.Current.CancellationToken);
-
-		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
+		var browseDialog = await terminal.WaitForStableScreenAsync(
+			"Open selects the current folder; Esc cancels.",
 			"Filter actions:",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(
+			"Open selects the current folder; Esc cancels.",
+			browseDialog,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"Filter actions:",
+			browseDialog,
+			StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		var restoredWelcome = await terminal.WaitForStableScreenAsync(
+			"Choose a workspace action",
+			"Open selects the current folder",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(
+			"Choose a workspace action",
+			restoredWelcome,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"Open selects the current folder",
+			restoredWelcome,
+			StringComparison.Ordinal);
+
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		var actionPalette = await terminal.WaitForStableScreenAsync(
+			"Filter actions:",
+			"Open selects the current folder",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(
+			"Open selects the current folder",
+			actionPalette,
+			StringComparison.Ordinal);
 		await terminal.SendAsync(
 			"Open project with settings file",
 			TestContext.Current.CancellationToken);

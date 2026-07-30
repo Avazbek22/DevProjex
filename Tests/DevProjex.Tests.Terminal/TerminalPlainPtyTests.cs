@@ -129,11 +129,19 @@ public sealed partial class TerminalPlainPtyTests
 		AssertPlainScreen(settled);
 		ReleaseCheckpoint(checkpointRoot, "writing-context");
 
-		await terminal.WaitForScreenAsync(
+		await terminal.WaitForStableScreenAsync(
 			"Equivalent command:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.True(File.Exists(destination));
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		var restoredWorkspace = await terminal.WaitForStableScreenAsync(
+			"> PROJECT TREE",
+			"Equivalent command:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(
+			"Equivalent command:",
+			restoredWorkspace,
+			StringComparison.Ordinal);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
