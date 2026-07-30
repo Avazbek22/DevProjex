@@ -27,6 +27,7 @@ internal readonly record struct FileSystemPathIdentity(
 	private const int DarwinOpenReadOnly = 0;
 	private const int DarwinOpenCloseOnExec = 0x01000000;
 	private const int DarwinGetPathWithoutFirmlink = 102;
+	private const int DarwinPathBufferLength = 1024;
 
 	public static bool TryRead(string path, out FileSystemPathIdentity identity)
 	{
@@ -493,7 +494,6 @@ internal readonly record struct FileSystemPathIdentity(
 		out FileSystemPathLocation location)
 	{
 		var fileDescriptor = -1;
-		var buffer = IntPtr.Zero;
 		try
 		{
 			fileDescriptor = DarwinOpen(
@@ -506,18 +506,26 @@ internal readonly record struct FileSystemPathIdentity(
 				return false;
 			}
 
-			buffer = Marshal.AllocHGlobal(4096);
-			if (DarwinFcntl(
-				    fileDescriptor,
-				    DarwinGetPathWithoutFirmlink,
-				    buffer) != 0)
+			var pathBuffer = new byte[DarwinPathBufferLength];
+			var pathBufferHandle = GCHandle.Alloc(
+				pathBuffer,
+				GCHandleType.Pinned);
+			int readResult;
+			try
 			{
-				location = default;
-				return false;
+				readResult = ReadDarwinPath(
+					fileDescriptor,
+					pathBufferHandle.AddrOfPinnedObject());
+			}
+			finally
+			{
+				pathBufferHandle.Free();
 			}
 
-			var canonicalPath = Marshal.PtrToStringUTF8(buffer);
-			if (string.IsNullOrWhiteSpace(canonicalPath))
+			if (readResult != 0 ||
+			    !TryDecodeDarwinPathBuffer(
+				    pathBuffer,
+				    out var canonicalPath))
 			{
 				location = default;
 				return false;
@@ -537,11 +545,60 @@ internal readonly record struct FileSystemPathIdentity(
 		}
 		finally
 		{
-			if (buffer != IntPtr.Zero)
-				Marshal.FreeHGlobal(buffer);
 			if (fileDescriptor >= 0)
 				_ = DarwinClose(fileDescriptor);
 		}
+	}
+
+	private static int ReadDarwinPath(
+		int fileDescriptor,
+		IntPtr pathBuffer)
+	{
+		if (RequiresDarwinArm64VarArgFcntl(
+			    OperatingSystem.IsMacOS(),
+			    RuntimeInformation.ProcessArchitecture))
+		{
+			// Darwin ARM64 passes variadic arguments on the stack. Fill x2-x7 so
+			// the path pointer reaches fcntl's first ABI-defined vararg slot.
+			return DarwinFcntlArm64(
+				fileDescriptor,
+				DarwinGetPathWithoutFirmlink,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				pathBuffer);
+		}
+
+		return DarwinFcntl(
+			fileDescriptor,
+			DarwinGetPathWithoutFirmlink,
+			pathBuffer);
+	}
+
+	private static bool RequiresDarwinArm64VarArgFcntl(
+		bool isMacOs,
+		Architecture processArchitecture) =>
+		isMacOs && processArchitecture == Architecture.Arm64;
+
+	private static bool TryDecodeDarwinPathBuffer(
+		byte[] pathBuffer,
+		out string canonicalPath)
+	{
+		var terminatorIndex = Array.IndexOf(pathBuffer, (byte)0);
+		if (terminatorIndex <= 0)
+		{
+			canonicalPath = string.Empty;
+			return false;
+		}
+
+		canonicalPath = Encoding.UTF8.GetString(
+			pathBuffer,
+			0,
+			terminatorIndex);
+		return !string.IsNullOrWhiteSpace(canonicalPath);
 	}
 
 	private static bool IsPathInsideOrdinal(string candidate, string root)
@@ -681,6 +738,18 @@ internal readonly record struct FileSystemPathIdentity(
 	private static extern int DarwinFcntl(
 		int fileDescriptor,
 		int command,
+		IntPtr buffer);
+
+	[DllImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+	private static extern int DarwinFcntlArm64(
+		int fileDescriptor,
+		int command,
+		nint register2,
+		nint register3,
+		nint register4,
+		nint register5,
+		nint register6,
+		nint register7,
 		IntPtr buffer);
 
 	[DllImport("libc", EntryPoint = "close", SetLastError = true)]

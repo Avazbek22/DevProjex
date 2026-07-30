@@ -280,11 +280,19 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 			. $env:DPX_COMPLETION_SCRIPT
 			$line = $env:DPX_COMPLETION_LINE
 			$completion = TabExpansion2 -inputScript $line -cursorColumn $line.Length
-			$match = $completion.CompletionMatches |
+			$candidates = @($completion.CompletionMatches)
+			$match = $candidates |
 			    Where-Object { $_.ListItemText -eq $env:DPX_EXPECTED_RAW } |
 			    Select-Object -First 1
 			if ($null -eq $match) {
-			    throw "Expected completion candidate was not returned."
+			    $candidateSummary = $candidates |
+			        ForEach-Object { "$($_.CompletionText)|$($_.ListItemText)" }
+			    throw (
+			        "Expected completion candidate was not returned. " +
+			        "line=[$line] cursor=$($line.Length) " +
+			        "replacementIndex=$($completion.ReplacementIndex) " +
+			        "replacementLength=$($completion.ReplacementLength) " +
+			        "candidates=[$($candidateSummary -join '; ')]")
 			}
 			$completedLine = $line.Remove(
 			    $completion.ReplacementIndex,

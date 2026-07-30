@@ -5,6 +5,9 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalVisualSnapshotTests
 {
+	private const int WindowsSnapshotTemporaryRootLength = 33;
+	private const int WindowsSnapshotProjectPathLength = 91;
+
 	[Fact(Timeout = 60_000)]
 	public async Task WelcomeWideSnapshotsCoverEnglishSelectionHelpAndRecentWorkspaces()
 	{
@@ -436,20 +439,50 @@ public sealed class TerminalVisualSnapshotTests
 		return workspace;
 	}
 
-	private static TemporaryDirectory CreateProject()
+	private static OwnedProject CreateProject()
 	{
-		var project = new TemporaryDirectory();
-		project.WriteFile("global.json", "{}");
-		project.WriteFile("src/App.cs", "internal sealed class App {}");
-		project.WriteFile("src/Feature/Handler.cs", "internal sealed class Handler {}");
-		project.WriteFile("readme.md", "# Test project");
-		return project;
+		IDisposable owner;
+		string projectPath;
+		if (OperatingSystem.IsWindows())
+		{
+			var fixedDirectory = new FixedLengthWindowsDirectory(
+				WindowsSnapshotProjectPathLength,
+				Guid.NewGuid().ToString("N"));
+			owner = fixedDirectory;
+			projectPath = fixedDirectory.Path;
+		}
+		else
+		{
+			var temporary = new TemporaryDirectory();
+			owner = temporary;
+			projectPath = temporary.Path;
+		}
+
+		WriteProjectFile(projectPath, "global.json", "{}");
+		WriteProjectFile(projectPath, "src/App.cs", "internal sealed class App {}");
+		WriteProjectFile(
+			projectPath,
+			"src/Feature/Handler.cs",
+			"internal sealed class Handler {}");
+		WriteProjectFile(projectPath, "readme.md", "# Test project");
+		return new OwnedProject(owner, projectPath);
 	}
 
 	private sealed class FixedTemporaryDirectory : IDisposable
 	{
+		private readonly IDisposable? _owner;
+
 		public FixedTemporaryDirectory(string name)
 		{
+			if (OperatingSystem.IsWindows())
+			{
+				var fixedDirectory = new FixedLengthWindowsDirectory(
+					WindowsSnapshotTemporaryRootLength + 1 + name.Length);
+				_owner = fixedDirectory;
+				Path = fixedDirectory.Path;
+				return;
+			}
+
 			Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), name);
 			Delete();
 			Directory.CreateDirectory(Path);
@@ -457,12 +490,37 @@ public sealed class TerminalVisualSnapshotTests
 
 		public string Path { get; }
 
-		public void Dispose() => Delete();
+		public void Dispose()
+		{
+			if (_owner is not null)
+				_owner.Dispose();
+			else
+				Delete();
+		}
 
 		private void Delete()
 		{
 			if (Directory.Exists(Path))
 				Directory.Delete(Path, recursive: true);
 		}
+	}
+
+	private sealed class OwnedProject(
+		IDisposable owner,
+		string path) : IDisposable
+	{
+		public string Path { get; } = path;
+
+		public void Dispose() => owner.Dispose();
+	}
+
+	private static void WriteProjectFile(
+		string projectPath,
+		string relativePath,
+		string content)
+	{
+		var path = System.IO.Path.Combine(projectPath, relativePath);
+		Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+		File.WriteAllText(path, content, new UTF8Encoding(false));
 	}
 }

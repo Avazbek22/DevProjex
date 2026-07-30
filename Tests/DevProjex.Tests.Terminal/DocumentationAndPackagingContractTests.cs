@@ -344,6 +344,42 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("mixed-case analysis JSON", workflow, StringComparison.Ordinal);
 		Assert.Contains("NO_COLOR analysis", workflow, StringComparison.Ordinal);
 		Assert.Contains("context dry-run", workflow, StringComparison.Ordinal);
+		var dryRunSectionStart = workflow.IndexOf(
+			"$dryRunDirectory =",
+			StringComparison.Ordinal);
+		Assert.True(
+			dryRunSectionStart >= 0,
+			"The release workflow must define a context dry-run destination.");
+		var dryRunSectionEnd = workflow.IndexOf(
+			"$conflictDestination =",
+			dryRunSectionStart,
+			StringComparison.Ordinal);
+		Assert.True(
+			dryRunSectionEnd > dryRunSectionStart,
+			"The release workflow must contain a bounded context dry-run smoke.");
+		var dryRunSection = workflow[dryRunSectionStart..dryRunSectionEnd];
+		var dryRunParentCreationIndex = dryRunSection.IndexOf(
+			"New-Item -ItemType Directory -Path $dryRunDirectory -Force",
+			StringComparison.Ordinal);
+		var dryRunInvocationIndex = dryRunSection.IndexOf(
+			"Invoke-NativeCommand -Name \"context dry-run\"",
+			StringComparison.Ordinal);
+		Assert.True(
+			dryRunParentCreationIndex >= 0 &&
+			dryRunInvocationIndex > dryRunParentCreationIndex,
+			"The dry-run destination parent must exist before preflight.");
+		Assert.Contains(
+			"Test-Path -LiteralPath $dryRunDirectory -PathType Container",
+			dryRunSection,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Test-Path -LiteralPath $dryRunDestination",
+			dryRunSection,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Get-ChildItem -LiteralPath $dryRunDirectory -Force",
+			dryRunSection,
+			StringComparison.Ordinal);
 		Assert.Contains("existing destination conflict", workflow, StringComparison.Ordinal);
 		Assert.Contains("real CLI usage-error contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(

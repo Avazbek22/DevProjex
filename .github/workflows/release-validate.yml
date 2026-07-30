@@ -185,6 +185,8 @@ jobs:
             throw "Expected exactly one published file named '${{ matrix.binary }}' for ${{ matrix.rid }}. Found: $actualFiles"
           }
 
+          Write-Host "Validated $($relativeFiles[0]) for ${{ matrix.rid }}: $($files[0].Length) bytes."
+
       - name: Startup Smoke (Windows)
         if: ${{ startsWith(matrix.rid, 'win-') }}
         shell: pwsh
@@ -616,6 +618,7 @@ jobs:
           $dryRunDirectory = Join-Path $env:RUNNER_TEMP "devprojex-native-dry-run-${{ matrix.rid }}"
           $dryRunDestination = Join-Path $dryRunDirectory "context.md"
           Remove-Item -LiteralPath $dryRunDirectory -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $dryRunDirectory -Force | Out-Null
           $dryRun = Invoke-NativeCommand -Name "context dry-run" -Arguments @(
             "export", "context", $projectDirectory,
             "--format", "markdown",
@@ -624,11 +627,23 @@ jobs:
             "--dry-run",
             "--language", "en",
             "-o", $dryRunDestination)
+          $dryRunParentExists =
+            Test-Path -LiteralPath $dryRunDirectory -PathType Container
+          $dryRunDestinationExists =
+            Test-Path -LiteralPath $dryRunDestination
+          $dryRunArtifacts = @(
+            if ($dryRunParentExists) {
+              Get-ChildItem -LiteralPath $dryRunDirectory -Force
+            }
+          )
           if ($dryRun.ExitCode -ne 0 -or
               -not [string]::IsNullOrEmpty($dryRun.StdOut) -or
               [string]::IsNullOrWhiteSpace($dryRun.StdErr) -or
-              (Test-Path -LiteralPath $dryRunDirectory)) {
-            throw "Published dry-run created an artifact or violated stdout/stderr policy."
+              -not $dryRunParentExists -or
+              $dryRunDestinationExists -or
+              $dryRunArtifacts.Count -ne 0) {
+            $artifactNames = @($dryRunArtifacts | ForEach-Object { $_.Name }) -join ", "
+            throw "Published dry-run violated its preflight/no-effects contract. ExitCode=$($dryRun.ExitCode) StdOut=$($dryRun.StdOut) StdErr=$($dryRun.StdErr) ParentExists=$dryRunParentExists DestinationExists=$dryRunDestinationExists Artifacts=$artifactNames"
           }
 
           $conflictDestination = Join-Path $env:RUNNER_TEMP "devprojex-native-conflict-${{ matrix.rid }}.md"

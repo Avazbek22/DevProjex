@@ -38,6 +38,7 @@ public sealed class ProgressRenderer(
 		try
 		{
 			await console.Progress()
+				.AutoRefresh(false)
 				.AutoClear(false)
 				.HideCompleted(false)
 				.Columns(
@@ -51,20 +52,32 @@ public sealed class ProgressRenderer(
 						localization["Terminal.Progress.PreparingProjectExport"],
 						maxValue: 1);
 					task.IsIndeterminate = true;
+					context.Refresh();
 					operationTask = operation(progress);
 					while (!operationTask.IsCompleted)
 					{
+						var hasUpdate = false;
 						while (channel.Reader.TryRead(out var update))
+						{
 							ApplyUpdate(task, update);
+							hasUpdate = true;
+						}
+						if (hasUpdate)
+							context.Refresh();
 
 						await Task.WhenAny(operationTask, Task.Delay(40)).ConfigureAwait(false);
 					}
 
+					var hasFinalUpdate = false;
 					while (channel.Reader.TryRead(out var update))
+					{
 						ApplyUpdate(task, update);
+						hasFinalUpdate = true;
+					}
+					if (hasFinalUpdate)
+						context.Refresh();
 
 					_ = await operationTask.ConfigureAwait(false);
-					context.Refresh();
 				}).ConfigureAwait(false);
 
 			return await operationTask!.ConfigureAwait(false);

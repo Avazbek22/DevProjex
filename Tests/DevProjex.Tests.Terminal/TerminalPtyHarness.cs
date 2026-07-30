@@ -10,6 +10,7 @@ namespace DevProjex.Tests.Terminal;
 
 internal sealed class TerminalPtyHarness : IAsyncDisposable
 {
+	internal const string DataRootDirectoryName = "dpx-pty";
 	public const string ShellCompletionMarker = "__DEVPROJEX_SHELL_RESTORED__";
 	public const string ShellTerminalStateRestoredMarker =
 		"__DEVPROJEX_TERMIOS_RESTORED__";
@@ -106,7 +107,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 		var dataRoot = Path.Combine(
 			Path.GetTempPath(),
-			"DevProjex.Tests.Terminal.Pty",
+			DataRootDirectoryName,
 			Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(dataRoot);
 		var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -535,7 +536,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		try
 		{
 			var parent = Path.GetFullPath(
-				Path.Combine(Path.GetTempPath(), "DevProjex.Tests.Terminal.Pty"));
+				Path.Combine(Path.GetTempPath(), DataRootDirectoryName));
 			var candidate = Path.GetFullPath(dataRoot);
 			if (!PathUtility.IsPathInside(candidate, parent))
 				return;
