@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.Terminal;
@@ -30,16 +29,17 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			RepositoryUrl,
+		const string staleInspectionStatus =
+			"Inspecting the local DevProjex repository cache.";
+		var repositoryList = await terminal.WaitForStableScreenAsync(
+			required: "Remove entry",
+			forbidden: staleInspectionStatus,
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Inspecting the local DevProjex repository cache.",
-			cancellationToken: TestContext.Current.CancellationToken);
-		var repositoryList = terminal.CaptureScreen();
 		Assert.Contains("DevProjex", repositoryList, StringComparison.Ordinal);
 		Assert.Contains("Git", repositoryList, StringComparison.Ordinal);
 		Assert.Contains("Recent workspaces", repositoryList, StringComparison.Ordinal);
+		Assert.Contains(RepositoryUrl, repositoryList, StringComparison.Ordinal);
+		Assert.DoesNotContain(staleInspectionStatus, repositoryList, StringComparison.Ordinal);
 		Assert.DoesNotContain("Cached and ready", repositoryList, StringComparison.Ordinal);
 		Assert.DoesNotContain("Not cached", repositoryList, StringComparison.Ordinal);
 		Assert.DoesNotContain(CacheFolderName, repositoryList, StringComparison.Ordinal);
@@ -49,15 +49,10 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			welcomeDirectory.Path);
 
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"RepositoryMarker.cs",
+		var workspace = await terminal.WaitForStableScreenAsync(
+			required: "RepositoryMarker.cs",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(
-			terminal,
-			"RepositoryMarker.cs",
-			TestContext.Current.CancellationToken);
-		var workspace = terminal.CaptureScreen();
 
 		Assert.Contains("DevProjex Terminal · DevProjex", workspace, StringComparison.Ordinal);
 		Assert.Contains(RepositoryUrl, workspace, StringComparison.Ordinal);
@@ -100,19 +95,17 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(
-			terminal,
-			RepositoryUrl,
-			TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: RepositoryUrl,
+			cancellationToken: TestContext.Current.CancellationToken);
 		Verify(
 			"recent-repositories-missing-en-120x30",
 			terminal,
 			welcomeDirectory.Path);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(
-			terminal,
-			"network clone is required",
-			TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: "network clone is required",
+			cancellationToken: TestContext.Current.CancellationToken);
 		Verify(
 			"recent-repositories-recovery-en-120x30",
 			terminal,
@@ -152,37 +145,6 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			(welcomeDirectory, "<WELCOME_ROOT>"),
 			(Path.GetDirectoryName(welcomeDirectory) ?? string.Empty, "<TEMP_ROOT>"));
 		TerminalVisualArtifactWriter.WriteIfRequested(name, terminal);
-	}
-
-	private static async Task WaitForStableScreenAsync(
-		TerminalPtyHarness terminal,
-		string expected,
-		CancellationToken cancellationToken)
-	{
-		var previous = string.Empty;
-		var stableSamples = 0;
-		var timeout = Stopwatch.StartNew();
-		while (timeout.Elapsed < TimeSpan.FromSeconds(10))
-		{
-			var current = terminal.CaptureScreen();
-			if (current.Contains(expected, StringComparison.Ordinal) &&
-			    string.Equals(previous, current, StringComparison.Ordinal))
-			{
-				stableSamples++;
-				if (stableSamples >= 3)
-					return;
-			}
-			else
-			{
-				stableSamples = 0;
-			}
-
-			previous = current;
-			await Task.Delay(80, cancellationToken);
-		}
-
-		throw new TimeoutException(
-			$"Screen did not stabilize for '{expected}'.\n{terminal.CaptureScreen()}");
 	}
 
 	private static void SeedCachedRepository(string dataRoot)
