@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.Terminal;
@@ -186,7 +187,11 @@ public sealed class TerminalRecentRepositoriesPtyTests
 		string action,
 		CancellationToken cancellationToken)
 	{
-		for (var attempt = 0; attempt < 20; attempt++)
+		await terminal.WaitForScreenAsync(
+			action,
+			cancellationToken: cancellationToken);
+		var timeout = Stopwatch.StartNew();
+		while (timeout.Elapsed < TimeSpan.FromSeconds(10))
 		{
 			var lines = terminal.CaptureScreen().Split('\n');
 			var targetRow = Array.FindIndex(
@@ -196,7 +201,10 @@ public sealed class TerminalRecentRepositoriesPtyTests
 				lines,
 				line => line.Contains("│> ", StringComparison.Ordinal));
 			if (targetRow < 0 || selectedRow < 0)
-				break;
+			{
+				await Task.Delay(25, cancellationToken);
+				continue;
+			}
 			if (targetRow == selectedRow)
 			{
 				await Task.Delay(150, cancellationToken);

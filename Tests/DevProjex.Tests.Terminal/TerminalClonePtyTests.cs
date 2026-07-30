@@ -79,6 +79,11 @@ public sealed class TerminalClonePtyTests
 			terminal.RawOutput,
 			StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"The repository could not be cloned.",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
