@@ -225,6 +225,56 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void PreviewTextCursor_IsStableWhileScrollbarRetainsArrowCursor()
+	{
+		var repositoryRoot = FindRepositoryRoot();
+		var styleDocument = XDocument.Load(Path.Combine(
+			repositoryRoot,
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"Styles",
+			"Theme.axaml"));
+		var styleRoot = Assert.IsType<XElement>(styleDocument.Root);
+		var avaloniaNamespace = styleRoot.Name.Namespace;
+		var styles = styleRoot
+			.Descendants(avaloniaNamespace + "Style")
+			.ToArray();
+
+		AssertCursorSetter(
+			styles,
+			"ScrollViewer.preview-scroll",
+			"Ibeam",
+			avaloniaNamespace);
+		foreach (var selector in new[]
+		         {
+			         "ScrollViewer.preview-scroll ScrollBar",
+			         "ScrollViewer.preview-scroll RepeatButton",
+			         "ScrollViewer.preview-scroll Thumb"
+		         })
+		{
+			AssertCursorSetter(
+				styles,
+				selector,
+				"Arrow",
+				avaloniaNamespace);
+		}
+
+		var windowDocument = XDocument.Load(Path.Combine(
+			repositoryRoot,
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"MainWindow.axaml"));
+		var windowRoot = Assert.IsType<XElement>(windowDocument.Root);
+		var previewScrollViewer = Assert.Single(
+			windowRoot.Descendants(avaloniaNamespace + "ScrollViewer"),
+			element => element.Attribute("Name")?.Value ==
+			           "PreviewTextScrollViewer");
+		Assert.Null(previewScrollViewer.Attribute("Cursor"));
+	}
+
+	[Fact]
 	public void MainWindow_StartsWithoutSpeculativeBackdropBeforePresetLoading()
 	{
 		var viewFile = Path.Combine(
@@ -334,6 +384,21 @@ public sealed class AvaloniaCompiledBindingContractTests
 			element => element.Attribute("Property")?.Value == "Background");
 
 		Assert.Contains(brushKey, backgroundSetter.Attribute("Value")?.Value, StringComparison.Ordinal);
+	}
+
+	private static void AssertCursorSetter(
+		IEnumerable<XElement> styles,
+		string selector,
+		string expectedCursor,
+		XNamespace avaloniaNamespace)
+	{
+		var style = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value == selector);
+		var cursorSetter = Assert.Single(
+			style.Elements(avaloniaNamespace + "Setter"),
+			element => element.Attribute("Property")?.Value == "Cursor");
+		Assert.Equal(expectedCursor, cursorSetter.Attribute("Value")?.Value);
 	}
 
 	private static string[] GetAnimationValues(

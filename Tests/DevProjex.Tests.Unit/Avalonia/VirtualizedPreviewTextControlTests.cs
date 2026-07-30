@@ -1,3 +1,6 @@
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Input.Raw;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using DevProjex.Application.Preview;
@@ -15,6 +18,65 @@ public sealed class VirtualizedPreviewTextControlTests
 
         Assert.True(control.Focusable);
         Assert.Null(control.Cursor);
+    }
+
+    [AvaloniaFact]
+    public void PointerCursor_RemainsIBeamAcrossTrailingAreaAndSelectionPress()
+    {
+        var control = new VirtualizedPreviewTextControl
+        {
+            Text = "short\nlonger preview line",
+            Width = 480,
+            Height = 160,
+            TextFontSize = 15
+        };
+        var window = new Window
+        {
+            Width = 520,
+            Height = 220,
+            WindowDecorations = WindowDecorations.None,
+            Content = control
+        };
+
+        try
+        {
+            window.Show();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            var origin = Assert.IsType<Point>(
+                control.TranslatePoint(default, window));
+            var lineHeight = InvokeResolveLineHeight(control);
+            var textPoint = new Point(
+                origin.X + control.LeftPadding + 2,
+                origin.Y + control.TopPadding + (lineHeight / 2));
+            var trailingAreaPoint = new Point(
+                origin.X + 360,
+                textPoint.Y);
+
+            window.MouseMove(textPoint, RawInputModifiers.None);
+            var textCursor = Assert.IsType<Cursor>(control.Cursor);
+
+            window.MouseMove(trailingAreaPoint, RawInputModifiers.None);
+            Assert.Same(textCursor, control.Cursor);
+
+            window.MouseDown(
+                trailingAreaPoint,
+                MouseButton.Left,
+                RawInputModifiers.LeftMouseButton);
+            Assert.Same(textCursor, control.Cursor);
+
+            window.MouseMove(
+                new Point(trailingAreaPoint.X, trailingAreaPoint.Y + lineHeight),
+                RawInputModifiers.LeftMouseButton);
+            Assert.Same(textCursor, control.Cursor);
+            window.MouseUp(
+                trailingAreaPoint,
+                MouseButton.Left,
+                RawInputModifiers.None);
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     [AvaloniaFact]

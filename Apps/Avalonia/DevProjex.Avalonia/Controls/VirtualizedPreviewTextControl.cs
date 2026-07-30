@@ -345,7 +345,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        Cursor = PreviewMenuCursor;
+        Cursor = PreviewTextCursor;
     }
 
     public void ClearSelection()
@@ -634,28 +634,13 @@ public sealed class VirtualizedPreviewTextControl : Control
         base.OnPointerMoved(e);
 
         if (!_isSelecting || e.Pointer.Captured != this)
-        {
-            UpdatePointerCursor(e.GetPosition(this));
             return;
-        }
 
         CaptureSelectionPointer(e);
         UpdateSelectionActivePosition(HitTestSelectionPosition(e.GetPosition(this)));
         UpdateSelectionAutoScrollState();
         Cursor = PreviewTextCursor;
         e.Handled = true;
-    }
-
-    protected override void OnPointerEntered(PointerEventArgs e)
-    {
-        base.OnPointerEntered(e);
-        UpdatePointerCursor(e.GetPosition(this));
-    }
-
-    protected override void OnPointerExited(PointerEventArgs e)
-    {
-        base.OnPointerExited(e);
-        Cursor = PreviewMenuCursor;
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -1020,20 +1005,6 @@ public sealed class VirtualizedPreviewTextControl : Control
             x > lineWidth + 1.0
                 ? SelectionHitKind.TrailingArea
                 : SelectionHitKind.Text);
-    }
-
-    private void UpdatePointerCursor(Point point)
-    {
-        if (_isSelecting)
-        {
-            Cursor = PreviewTextCursor;
-            return;
-        }
-
-        var hit = HitTestSelection(point);
-        Cursor = hit.Kind == SelectionHitKind.Text
-            ? PreviewTextCursor
-            : PreviewMenuCursor;
     }
 
     private int ResolveColumnFromDistance(string lineText, double distance, Typeface typeface)

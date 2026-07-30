@@ -30,15 +30,11 @@ public sealed class ElevationService : IElevationService
 			var exePath = Environment.ProcessPath;
 			if (string.IsNullOrWhiteSpace(exePath)) return false;
 
-			var psi = new ProcessStartInfo
-			{
-				FileName = exePath,
-				UseShellExecute = true,
-				Verb = "runas"
-			};
-			foreach (var argument in arguments)
-				psi.ArgumentList.Add(argument);
-
+			var psi = CreateRelaunchStartInfo(
+				arguments,
+				exePath,
+				ProcessEntryPointResolver.ResolveManagedAssemblyPath(),
+				ProcessEntryPointResolver.ResolveCurrentAppHostPath());
 			Process.Start(psi);
 			return true;
 		}
@@ -47,5 +43,38 @@ public sealed class ElevationService : IElevationService
 			return false;
 		}
 #endif
+	}
+
+	internal static ProcessStartInfo CreateRelaunchStartInfo(
+		IReadOnlyList<string> arguments,
+		string processPath,
+		string? managedAssemblyPath,
+		string? appHostPath)
+	{
+		var fileName = !string.IsNullOrWhiteSpace(appHostPath)
+			? appHostPath
+			: processPath;
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = fileName,
+			UseShellExecute = true,
+			Verb = "runas"
+		};
+
+		if (ProcessEntryPointResolver.IsDotnetHost(fileName))
+		{
+			if (string.IsNullOrWhiteSpace(managedAssemblyPath))
+			{
+				throw new InvalidOperationException(
+					"The managed DevProjex entry point is unavailable.");
+			}
+
+			startInfo.ArgumentList.Add(managedAssemblyPath);
+		}
+
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+
+		return startInfo;
 	}
 }
