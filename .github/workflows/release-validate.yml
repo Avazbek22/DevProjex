@@ -694,6 +694,24 @@ jobs:
             --filter "FullyQualifiedName~GeneratedCompletionNativeShellIntegrationTests" `
             --logger "console;verbosity=minimal"
 
+      - name: Enable Rootless Mount Namespace Gate (Linux x64)
+        if: ${{ matrix.rid == 'linux-x64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apparmor_userns_policy=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          apparmor_userns_state="${RUNNER_TEMP}/devprojex-apparmor-userns-original"
+          rm -f -- "$apparmor_userns_state"
+          if [[ -e "$apparmor_userns_policy" ]]; then
+            # GitHub's Ubuntu 24.04 runner blocks the rootless mount namespace used only by this safety probe.
+            cat "$apparmor_userns_policy" > "$apparmor_userns_state"
+            printf '0\n' | sudo tee "$apparmor_userns_policy" >/dev/null
+          fi
+          if ! unshare -Urnm true; then
+            echo "::error::The runner cannot create the rootless mount namespace required by the destination-safety gate."
+            exit 1
+          fi
+
       - name: Nested-Mount Destination Safety Gate (Linux x64)
         if: ${{ matrix.rid == 'linux-x64' }}
         shell: pwsh
@@ -709,6 +727,19 @@ jobs:
             --no-restore `
             --filter $filter `
             --logger "console;verbosity=minimal"
+
+      - name: Restore Rootless Mount Namespace Policy (Linux x64)
+        if: ${{ always() && matrix.rid == 'linux-x64' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apparmor_userns_policy=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          apparmor_userns_state="${RUNNER_TEMP}/devprojex-apparmor-userns-original"
+          if [[ -f "$apparmor_userns_state" ]]; then
+            original_value="$(cat "$apparmor_userns_state")"
+            printf '%s\n' "$original_value" | sudo tee "$apparmor_userns_policy" >/dev/null
+            rm -f -- "$apparmor_userns_state"
+          fi
 
       - name: Published Broken Pipe Smoke (Unix)
         if: ${{ !startsWith(matrix.rid, 'win-') }}

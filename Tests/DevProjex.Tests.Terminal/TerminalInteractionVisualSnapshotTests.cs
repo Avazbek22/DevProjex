@@ -6,18 +6,27 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalInteractionVisualSnapshotTests
 {
+	private const int SnapshotProjectPathLength = 91;
+	private const int SnapshotIdentifierLength = 32;
+	private const int SnapshotOwnerPathLength =
+		SnapshotProjectPathLength - SnapshotIdentifierLength - 1;
+
 	[Fact(Timeout = 90_000)]
 	public async Task PopulatedRecentProjectSnapshotsCoverSelectionLoadingAndWorkspace()
 	{
-		using var projects = new TemporaryDirectory();
+		using var snapshotOwner = new FixedLengthSnapshotDirectory(
+			SnapshotOwnerPathLength);
+		var projects = Directory.CreateDirectory(
+			Path.Combine(snapshotOwner.Path, Guid.NewGuid().ToString("N"))).FullName;
 		var firstProject = CreateProject(projects, "AlphaProject", "AlphaMarker.cs");
 		var secondProject = CreateProject(projects, "Beta Project", "BetaMarker.cs");
-		using var welcomeDirectory = new TemporaryDirectory();
-		welcomeDirectory.WriteFile("notes.txt", "not a project");
+		var welcomeDirectory = Directory.CreateDirectory(
+			Path.Combine(snapshotOwner.Path, Guid.NewGuid().ToString("N"))).FullName;
+		WriteFile(welcomeDirectory, "notes.txt", "not a project");
 		string? dataRoot = null;
 
 		await using var terminal = await TerminalPtyHarness.StartAsync(
-			welcomeDirectory.Path,
+			welcomeDirectory,
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
@@ -47,8 +56,8 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		Verify(
 			"recent-populated-en-120x30",
 			terminal,
-			projects.Path,
-			welcomeDirectory.Path);
+			projects,
+			welcomeDirectory);
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "Beta Project");
@@ -59,8 +68,8 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		Verify(
 			"recent-selected-en-120x30",
 			terminal,
-			projects.Path,
-			welcomeDirectory.Path);
+			projects,
+			welcomeDirectory);
 
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		Assert.NotNull(dataRoot);
@@ -75,16 +84,16 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		Verify(
 			"recent-loading-en-120x30",
 			terminal,
-			projects.Path,
-			welcomeDirectory.Path);
+			projects,
+			welcomeDirectory);
 		ReleaseCheckpoint(checkpointRoot, "project-loading");
 
 		await WaitForStableScreenAsync(terminal, "BetaMarker.cs");
 		Verify(
 			"recent-workspace-en-120x30",
 			terminal,
-			projects.Path,
-			welcomeDirectory.Path);
+			projects,
+			welcomeDirectory);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -151,21 +160,27 @@ public sealed class TerminalInteractionVisualSnapshotTests
 	}
 
 	private static string CreateProject(
-		TemporaryDirectory owner,
+		string owner,
 		string directoryName,
 		string markerFile)
 	{
-		var project = owner.CreateDirectory(directoryName);
-		File.WriteAllText(
-			Path.Combine(project, "global.json"),
-			"{}",
-			new UTF8Encoding(false));
-		Directory.CreateDirectory(Path.Combine(project, "src"));
-		File.WriteAllText(
-			Path.Combine(project, "src", markerFile),
-			"internal sealed class Marker {}",
-			new UTF8Encoding(false));
+		var project = Path.Combine(owner, directoryName);
+		WriteFile(project, "global.json", "{}");
+		WriteFile(
+			project,
+			Path.Combine("src", markerFile),
+			"internal sealed class Marker {}");
 		return project;
+	}
+
+	private static void WriteFile(
+		string root,
+		string relativePath,
+		string content)
+	{
+		var path = Path.Combine(root, relativePath);
+		Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+		File.WriteAllText(path, content, new UTF8Encoding(false));
 	}
 
 	private static TemporaryDirectory CreateScrollableProject()

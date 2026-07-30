@@ -206,7 +206,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			environmentArguments
 				.Append(QuoteForPosixShell(binary))
 				.Concat(arguments.Select(QuoteForPosixShell)));
-		var shellCommand = writeShellCompletionMarker
+		return ("/bin/sh", ["-c", BuildUnixShellCommand(invocation, writeShellCompletionMarker)], null);
+	}
+
+	internal static string BuildUnixShellCommand(
+		string invocation,
+		bool writeShellCompletionMarker)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(invocation);
+		return writeShellCompletionMarker
 			? $"dpx_stty_before=$(stty -g 2>/dev/null || true); " +
 			  $"{invocation}; dpx_exit=$?; " +
 			  "dpx_stty_after=$(stty -g 2>/dev/null || true); " +
@@ -214,7 +222,9 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			  "[ \"$dpx_stty_before\" = \"$dpx_stty_after\" ]; then " +
 			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalStateRestoredMarker)}; " +
 			  "else " +
-			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellTerminalStateMismatchMarker)}; " +
+			  $"printf '%s%s before=%s after=%s\\n' " +
+			  $"{SplitMarkerForPosixShell(ShellTerminalStateMismatchMarker)} " +
+			  "\"$dpx_stty_before\" \"$dpx_stty_after\"; " +
 			  "fi; " +
 			  $"printf '%s%s\\n' " +
 			  $"{SplitMarkerForPosixShell(ShellHandshakeMarker)}; " +
@@ -222,7 +232,6 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			  $"{SplitMarkerForPosixShell(ShellCompletionMarker)}; " +
 			  "IFS= read -r dpx_release; exit \"$dpx_exit\""
 			: "exec " + invocation;
-		return ("/bin/sh", ["-c", shellCommand], null);
 	}
 
 	private static string QuoteForCommandPrompt(string value) =>

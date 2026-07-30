@@ -15,6 +15,8 @@ internal static partial class TerminalPtyStateAssertions
 			TerminalPtyHarness.ShellCompletionMarker,
 			StringComparison.Ordinal);
 		Assert.True(markerIndex >= 0, "The parent shell did not emit its completion marker.");
+		if (!OperatingSystem.IsWindows())
+			AssertUnixTerminalStateRestored(output, markerIndex);
 
 		var allTransitions = ParseTransitions(output);
 		var transitions = allTransitions
@@ -41,17 +43,40 @@ internal static partial class TerminalPtyStateAssertions
 		AssertAlternateScreenState(transitions, screenMode, diagnosticContext);
 		AssertMouseState(transitions, diagnosticContext);
 		AssertSgrStateRestored(output, markerIndex, diagnosticContext);
-		if (!OperatingSystem.IsWindows())
-		{
-			Assert.Contains(
-				TerminalPtyHarness.ShellTerminalStateRestoredMarker,
-				output[..markerIndex],
-				StringComparison.Ordinal);
-			Assert.DoesNotContain(
-				TerminalPtyHarness.ShellTerminalStateMismatchMarker,
-				output[..markerIndex],
-				StringComparison.Ordinal);
-		}
+	}
+
+	internal static string? FindUnixTerminalStateMismatch(
+		string output,
+		int markerIndex)
+	{
+		ArgumentNullException.ThrowIfNull(output);
+		if (markerIndex < 0 || markerIndex > output.Length)
+			throw new ArgumentOutOfRangeException(nameof(markerIndex));
+
+		var beforeShellCompletion = output.AsSpan(0, markerIndex);
+		var mismatchIndex = beforeShellCompletion.LastIndexOf(
+			TerminalPtyHarness.ShellTerminalStateMismatchMarker,
+			StringComparison.Ordinal);
+		if (mismatchIndex < 0)
+			return null;
+
+		var mismatch = beforeShellCompletion[mismatchIndex..];
+		var lineEnd = mismatch.IndexOfAny('\r', '\n');
+		return (lineEnd < 0 ? mismatch : mismatch[..lineEnd]).ToString();
+	}
+
+	private static void AssertUnixTerminalStateRestored(
+		string output,
+		int markerIndex)
+	{
+		var mismatch = FindUnixTerminalStateMismatch(output, markerIndex);
+		Assert.True(
+			mismatch is null,
+			$"The parent shell detected a termios mismatch after TUI exit. {mismatch}");
+		Assert.Contains(
+			TerminalPtyHarness.ShellTerminalStateRestoredMarker,
+			output[..markerIndex],
+			StringComparison.Ordinal);
 	}
 
 	public static bool MatchesKnownTerminalGuiNoMouseInitialization(string output)

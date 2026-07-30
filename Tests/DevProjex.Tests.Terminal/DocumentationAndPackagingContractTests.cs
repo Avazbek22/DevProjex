@@ -322,6 +322,26 @@ public sealed class DocumentationAndPackagingContractTests
 			workflow,
 			StringComparison.Ordinal);
 		Assert.Contains(
+			"Enable Rootless Mount Namespace Gate (Linux x64)",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"apparmor_restrict_unprivileged_userns",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"unshare -Urnm true",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Restore Rootless Mount Namespace Policy (Linux x64)",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"always() && matrix.rid == 'linux-x64'",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
 			"DEVPROJEX_REQUIRE_ROOTLESS_MOUNT_TESTS",
 			workflow,
 			StringComparison.Ordinal);

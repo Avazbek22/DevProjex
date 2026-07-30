@@ -1,18 +1,15 @@
 namespace DevProjex.Tests.Terminal;
 
-internal sealed class FixedLengthWindowsDirectory : IDisposable
+internal sealed class FixedLengthSnapshotDirectory : IDisposable
 {
 	private readonly string _ownedRoot;
 
-	public FixedLengthWindowsDirectory(
+	public FixedLengthSnapshotDirectory(
 		int totalPathLength,
 		string? preservedLeafName = null)
 	{
-		if (!OperatingSystem.IsWindows())
-			throw new PlatformNotSupportedException();
-
 		var (path, ownedRoot) = BuildPath(
-			System.IO.Path.GetTempPath(),
+			ResolveTemporaryRoot(),
 			totalPathLength,
 			preservedLeafName,
 			Guid.NewGuid().ToString("N"));
@@ -23,6 +20,16 @@ internal sealed class FixedLengthWindowsDirectory : IDisposable
 	}
 
 	public string Path { get; }
+
+	internal static string ResolveTemporaryRoot()
+	{
+		// Use physical Unix roots so macOS aliases cannot change rendered path geometry.
+		if (OperatingSystem.IsMacOS())
+			return "/private/tmp";
+		if (OperatingSystem.IsLinux())
+			return "/tmp";
+		return System.IO.Path.GetTempPath();
+	}
 
 	internal static (string Path, string OwnedRoot) BuildPath(
 		string temporaryRoot,

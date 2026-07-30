@@ -3,6 +3,73 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalPtyHarnessContractTests
 {
 	[Fact]
+	public void UnixRestorationHandshakeReportsBothOpaqueTermiosSnapshotsOnMismatch()
+	{
+		var command = TerminalPtyHarness.BuildUnixShellCommand(
+			"exec-devprojex",
+			writeShellCompletionMarker: true);
+
+		Assert.Contains(
+			"dpx_stty_before=$(stty -g 2>/dev/null || true)",
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"dpx_stty_after=$(stty -g 2>/dev/null || true)",
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"printf '%s%s before=%s after=%s\\n'",
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"\"$dpx_stty_before\" \"$dpx_stty_after\"",
+			command,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"IFS= read -r dpx_sync",
+			command,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void TermiosMismatchDiagnosticRetainsOpaqueBeforeAndAfterSnapshots()
+	{
+		var output =
+			$"{TerminalPtyHarness.ShellTerminalStateMismatchMarker} " +
+			"before=aaa:bbb after=ccc:ddd\r\n" +
+			TerminalPtyHarness.ShellCompletionMarker;
+		var markerIndex = output.IndexOf(
+			TerminalPtyHarness.ShellCompletionMarker,
+			StringComparison.Ordinal);
+
+		var diagnostic = TerminalPtyStateAssertions.FindUnixTerminalStateMismatch(
+			output,
+			markerIndex);
+
+		Assert.Equal(
+			$"{TerminalPtyHarness.ShellTerminalStateMismatchMarker} " +
+			"before=aaa:bbb after=ccc:ddd",
+			diagnostic);
+	}
+
+	[Fact]
+	public void TermiosMismatchAfterShellCompletionIsIgnored()
+	{
+		var output =
+			TerminalPtyHarness.ShellTerminalStateRestoredMarker + "\n" +
+			TerminalPtyHarness.ShellCompletionMarker + "\n" +
+			TerminalPtyHarness.ShellTerminalStateMismatchMarker;
+		var markerIndex = output.IndexOf(
+			TerminalPtyHarness.ShellCompletionMarker,
+			StringComparison.Ordinal);
+
+		Assert.Null(
+			TerminalPtyStateAssertions.FindUnixTerminalStateMismatch(
+				output,
+				markerIndex));
+	}
+
+	[Fact]
 	public void DataRootKeepsGitObjectFilesBelowTheLegacyWindowsPathLimit()
 	{
 		const int legacyWindowsPathLimit = 260;

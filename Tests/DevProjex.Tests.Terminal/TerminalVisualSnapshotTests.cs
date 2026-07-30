@@ -5,8 +5,8 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalVisualSnapshotTests
 {
-	private const int WindowsSnapshotTemporaryRootLength = 33;
-	private const int WindowsSnapshotProjectPathLength = 91;
+	private const int SnapshotTemporaryRootLength = 33;
+	private const int SnapshotProjectPathLength = 91;
 
 	[Fact(Timeout = 60_000)]
 	public async Task WelcomeWideSnapshotsCoverEnglishSelectionHelpAndRecentWorkspaces()
@@ -432,31 +432,21 @@ public sealed class TerminalVisualSnapshotTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
-	private static TemporaryDirectory CreateMarkerlessWorkspace()
+	private static OwnedProject CreateMarkerlessWorkspace()
 	{
-		var workspace = new TemporaryDirectory();
-		workspace.WriteFile("notes.txt", "not a project marker");
-		return workspace;
+		var workspace = new FixedLengthSnapshotDirectory(
+			SnapshotProjectPathLength,
+			Guid.NewGuid().ToString("N"));
+		WriteProjectFile(workspace.Path, "notes.txt", "not a project marker");
+		return new OwnedProject(workspace, workspace.Path);
 	}
 
 	private static OwnedProject CreateProject()
 	{
-		IDisposable owner;
-		string projectPath;
-		if (OperatingSystem.IsWindows())
-		{
-			var fixedDirectory = new FixedLengthWindowsDirectory(
-				WindowsSnapshotProjectPathLength,
-				Guid.NewGuid().ToString("N"));
-			owner = fixedDirectory;
-			projectPath = fixedDirectory.Path;
-		}
-		else
-		{
-			var temporary = new TemporaryDirectory();
-			owner = temporary;
-			projectPath = temporary.Path;
-		}
+		var owner = new FixedLengthSnapshotDirectory(
+			SnapshotProjectPathLength,
+			Guid.NewGuid().ToString("N"));
+		var projectPath = owner.Path;
 
 		WriteProjectFile(projectPath, "global.json", "{}");
 		WriteProjectFile(projectPath, "src/App.cs", "internal sealed class App {}");
@@ -470,39 +460,18 @@ public sealed class TerminalVisualSnapshotTests
 
 	private sealed class FixedTemporaryDirectory : IDisposable
 	{
-		private readonly IDisposable? _owner;
+		private readonly FixedLengthSnapshotDirectory _owner;
 
 		public FixedTemporaryDirectory(string name)
 		{
-			if (OperatingSystem.IsWindows())
-			{
-				var fixedDirectory = new FixedLengthWindowsDirectory(
-					WindowsSnapshotTemporaryRootLength + 1 + name.Length);
-				_owner = fixedDirectory;
-				Path = fixedDirectory.Path;
-				return;
-			}
-
-			Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), name);
-			Delete();
-			Directory.CreateDirectory(Path);
+			_owner = new FixedLengthSnapshotDirectory(
+				SnapshotTemporaryRootLength + 1 + name.Length);
+			Path = _owner.Path;
 		}
 
 		public string Path { get; }
 
-		public void Dispose()
-		{
-			if (_owner is not null)
-				_owner.Dispose();
-			else
-				Delete();
-		}
-
-		private void Delete()
-		{
-			if (Directory.Exists(Path))
-				Directory.Delete(Path, recursive: true);
-		}
+		public void Dispose() => _owner.Dispose();
 	}
 
 	private sealed class OwnedProject(

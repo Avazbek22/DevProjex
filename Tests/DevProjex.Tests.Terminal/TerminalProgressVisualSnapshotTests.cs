@@ -5,8 +5,8 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalProgressVisualSnapshotTests
 {
-	private const int WindowsSnapshotTemporaryRootLength = 33;
-	private const int WindowsSnapshotProjectOwnerPathLength = 91;
+	private const int SnapshotTemporaryRootLength = 33;
+	private const int SnapshotProjectOwnerPathLength = 91;
 
 	[Fact(Timeout = 120_000)]
 	public async Task MeasuredExportSnapshotsCoverPreparationProgressCompactAndCompletion()
@@ -426,23 +426,11 @@ public sealed class TerminalProgressVisualSnapshotTests
 
 	private static OwnedProject CreateProject(string name)
 	{
-		IDisposable owner;
-		string projectPath;
-		if (OperatingSystem.IsWindows())
-		{
-			var ownerName = Guid.NewGuid().ToString("N");
-			var fixedDirectory = new FixedLengthWindowsDirectory(
-				WindowsSnapshotProjectOwnerPathLength + 1 + name.Length,
-				Path.Combine(ownerName, name));
-			owner = fixedDirectory;
-			projectPath = fixedDirectory.Path;
-		}
-		else
-		{
-			var temporary = new TemporaryDirectory();
-			owner = temporary;
-			projectPath = temporary.CreateDirectory(name);
-		}
+		var ownerName = Guid.NewGuid().ToString("N");
+		var owner = new FixedLengthSnapshotDirectory(
+			SnapshotProjectOwnerPathLength + 1 + name.Length,
+			Path.Combine(ownerName, name));
+		var projectPath = owner.Path;
 		File.WriteAllText(
 			Path.Combine(projectPath, "global.json"),
 			"{}",
@@ -580,39 +568,18 @@ public sealed class TerminalProgressVisualSnapshotTests
 
 	private sealed class FixedTemporaryDirectory : IDisposable
 	{
-		private readonly IDisposable? _owner;
+		private readonly FixedLengthSnapshotDirectory _owner;
 
 		public FixedTemporaryDirectory(string name)
 		{
-			if (OperatingSystem.IsWindows())
-			{
-				var fixedDirectory = new FixedLengthWindowsDirectory(
-					WindowsSnapshotTemporaryRootLength + 1 + name.Length);
-				_owner = fixedDirectory;
-				Path = fixedDirectory.Path;
-				return;
-			}
-
-			Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), name);
-			Delete();
-			Directory.CreateDirectory(Path);
+			_owner = new FixedLengthSnapshotDirectory(
+				SnapshotTemporaryRootLength + 1 + name.Length);
+			Path = _owner.Path;
 		}
 
 		public string Path { get; }
 
-		public void Dispose()
-		{
-			if (_owner is not null)
-				_owner.Dispose();
-			else
-				Delete();
-		}
-
-		private void Delete()
-		{
-			if (Directory.Exists(Path))
-				Directory.Delete(Path, recursive: true);
-		}
+		public void Dispose() => _owner.Dispose();
 	}
 
 	private sealed class OwnedProject(

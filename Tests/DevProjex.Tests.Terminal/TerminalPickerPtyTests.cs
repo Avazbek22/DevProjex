@@ -3,12 +3,20 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalPickerPtyTests
 {
+	private const int SnapshotProjectPathLength = 91;
+	private const int ClippedWelcomePathLength = 6;
+
 	[Fact(Timeout = 60_000)]
 	public async Task RussianFolderPickerUsesDevProjexLocalizationAndReturnsToWelcome()
 	{
-		using var workspace = new TemporaryDirectory();
-		workspace.WriteFile("notes.txt", "not a project marker");
-		workspace.CreateDirectory("Проект с пробелами");
+		using var workspace = new FixedLengthSnapshotDirectory(
+			SnapshotProjectPathLength,
+			Guid.NewGuid().ToString("N"));
+		File.WriteAllText(
+			Path.Combine(workspace.Path, "notes.txt"),
+			"not a project marker",
+			new UTF8Encoding(false));
+		Directory.CreateDirectory(Path.Combine(workspace.Path, "Проект с пробелами"));
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			workspace.Path,
 			["--language", "ru"],
@@ -52,7 +60,8 @@ public sealed class TerminalPickerPtyTests
 			"picker-folder-ru-120x30",
 			picker,
 			(workspace.Path, "<PROJECT_ROOT>"),
-			(Path.GetDirectoryName(workspace.Path) ?? string.Empty, "<TEMP_ROOT>"));
+			(Path.GetDirectoryName(workspace.Path) ?? string.Empty, "<TEMP_ROOT>"),
+			(workspace.Path[..ClippedWelcomePathLength], "<PATH>"));
 		TerminalVisualArtifactWriter.WriteIfRequested(
 			"picker-folder-ru-120x30",
 			terminal);
