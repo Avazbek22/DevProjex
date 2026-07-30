@@ -164,6 +164,8 @@ public partial class MainWindow
     private bool _startupRevealCompleted;
     private CancellationTokenSource? _windowLifetimeCts = new();
     private int _startupSequenceStarted;
+    private Rect _pendingWindowBounds;
+    private bool _windowBoundsFramePending;
 
     private static readonly int TreeViewModelBuildParallelism =
         Math.Clamp(Environment.ProcessorCount, min: 2, max: 12);

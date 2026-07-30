@@ -41,7 +41,7 @@ internal sealed class WorkspacePresentationController : IDisposable
     internal static readonly TimeSpan PanelAnimationDuration =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(300));
     internal static readonly TimeSpan SettingsPanelAnimationDuration =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(260));
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250));
 
     private const double DefaultWindowMinimumWidth = 850.0;
     private const double WindowMinimumWidthSafetyPadding = 32.0;

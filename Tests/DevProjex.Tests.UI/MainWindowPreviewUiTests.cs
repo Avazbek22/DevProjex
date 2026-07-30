@@ -560,49 +560,41 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
         {
             var viewModel = UiTestDriver.GetViewModel(window);
             var previewController = GetPreviewWorkspaceController(window);
-            var treePaneContainer =
-                UiTestDriver.GetRequiredControl<Border>(
-                    window,
-                    "TreePaneContainer");
-            var animationTargetApplied =
+            var previewModeEntered =
                 new TaskCompletionSource(
                     TaskCreationOptions.RunContinuationsAsynchronously);
             Task? closeRequestTask = null;
 
-            void OnTreePanePropertyChanged(
+            void OnViewModelPropertyChanged(
                 object? sender,
-                AvaloniaPropertyChangedEventArgs args)
+                PropertyChangedEventArgs args)
             {
-                if (args.Property != Layoutable.WidthProperty ||
-                    treePaneContainer.Width >
-                    WorkspacePresentationController
-                        .SplitTreePaneMinimumWidth + 1.0)
+                if (args.PropertyName !=
+                        nameof(MainWindowViewModel.PreviewWorkspaceMode) ||
+                    !viewModel.IsPreviewMode)
                 {
                     return;
                 }
 
-                treePaneContainer.PropertyChanged -=
-                    OnTreePanePropertyChanged;
+                viewModel.PropertyChanged -= OnViewModelPropertyChanged;
                 closeRequestTask = previewController.CloseAsync();
-                animationTargetApplied.TrySetResult();
+                previewModeEntered.TrySetResult();
             }
 
             viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
-            treePaneContainer.PropertyChanged +=
-                OnTreePanePropertyChanged;
+            viewModel.PropertyChanged += OnViewModelPropertyChanged;
 
             try
             {
                 var openTask = previewController.OpenAsync();
-                await animationTargetApplied.Task.WaitAsync(
+                await previewModeEntered.Task.WaitAsync(
                     TimeSpan.FromSeconds(5));
                 await Assert.IsAssignableFrom<Task>(closeRequestTask);
                 await openTask;
             }
             finally
             {
-                treePaneContainer.PropertyChanged -=
-                    OnTreePanePropertyChanged;
+                viewModel.PropertyChanged -= OnViewModelPropertyChanged;
             }
 
             var treeSnapshotHost =

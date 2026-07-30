@@ -213,16 +213,22 @@ internal sealed class PreviewWorkspaceController : IDisposable
         var openCanceled = false;
         var openAnimationStarted = false;
         var openAnimationInterrupted = false;
+        var animationCts = ReplacePaneAnimationCancellation();
+        var cancellationToken = animationCts.Token;
         _isOpeningPreview = true;
         try
         {
-            _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
-            PreparePreviewPaneOpenLayout(initialTreeWidth);
-            UpdatePreviewSegmentThumbPosition(animate: false);
-            openAnimationStarted = true;
             try
             {
-                await AnimatePreviewPaneOpenAsync(targetTreeWidth);
+                _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+                cancellationToken.ThrowIfCancellationRequested();
+                PreparePreviewPaneOpenLayout(initialTreeWidth);
+                UpdatePreviewSegmentThumbPosition(animate: false);
+                cancellationToken.ThrowIfCancellationRequested();
+                openAnimationStarted = true;
+                await AnimatePreviewPaneOpenAsync(
+                    targetTreeWidth,
+                    cancellationToken);
             }
             catch (OperationCanceledException)
                 when (_closeRequestedDuringOpen || _disposed)
@@ -257,6 +263,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
         }
         finally
         {
+            CompletePaneAnimationCancellation(animationCts);
             _isOpeningPreview = false;
         }
 
@@ -553,13 +560,13 @@ internal sealed class PreviewWorkspaceController : IDisposable
         ResetPreviewPaneSnapshotVisualState();
     }
 
-    private async Task AnimatePreviewPaneOpenAsync(double targetTreeWidth)
+    private async Task AnimatePreviewPaneOpenAsync(
+        double targetTreeWidth,
+        CancellationToken cancellationToken)
     {
         if (_workspace.IsPreviewPaneAnimating)
             return;
 
-        var animationCts = ReplacePaneAnimationCancellation();
-        var cancellationToken = animationCts.Token;
         _workspace.IsPreviewPaneAnimating = true;
         try
         {
@@ -582,7 +589,6 @@ internal sealed class PreviewWorkspaceController : IDisposable
         }
         finally
         {
-            CompletePaneAnimationCancellation(animationCts);
             _workspace.IsPreviewPaneAnimating = false;
             _controls.TreePreviewSplitter.IsHitTestVisible =
                 _viewModel.IsPreviewTreeVisible;

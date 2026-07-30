@@ -88,7 +88,7 @@ internal sealed class StartupInteractionController(
         await selection.WaitForPendingRefreshesAsync();
 
         if (selectionSpec.SelectedPaths is { Count: > 0 })
-            ApplySelectedPaths(selectionSpec.SelectedPaths);
+            await ApplySelectedPathsAsync(selectionSpec.SelectedPaths);
     }
 
     public async Task ApplyUiOptionsAsync()
@@ -183,7 +183,8 @@ internal sealed class StartupInteractionController(
             _ => PreviewContentMode.Tree
         };
 
-    private void ApplySelectedPaths(IReadOnlyCollection<string> selectedPaths)
+    private async Task ApplySelectedPathsAsync(
+        IReadOnlyCollection<string> selectedPaths)
     {
         var rootPath = projectPathProvider();
         if (string.IsNullOrWhiteSpace(rootPath))
@@ -192,12 +193,33 @@ internal sealed class StartupInteractionController(
         var selectedFullPaths = selectedPaths
             .Select(path => ResolveSelectedPath(rootPath, path))
             .ToHashSet(PathComparer.Default);
+        var nodes = new List<TreeNodeViewModel>();
         TreeNodeViewModel.ForEachDescendant(
             viewModel.TreeNodes,
-            node => node.IsChecked = selectedFullPaths.Any(selectedPath =>
-                PathComparer.Default.Equals(selectedPath, node.FullPath) ||
-                Directory.Exists(selectedPath) &&
-                PathUtility.IsPathInside(node.FullPath, selectedPath)));
+            nodes.Add);
+
+        var nodePaths = nodes
+            .Select(static node => node.FullPath)
+            .ToArray();
+        var checkedStates = await Task.Run(
+            () =>
+            {
+                var selectedDirectories = selectedFullPaths
+                    .Where(Directory.Exists)
+                    .ToArray();
+
+                return nodePaths
+                    .Select(nodePath =>
+                        selectedFullPaths.Contains(nodePath) ||
+                        selectedDirectories.Any(selectedDirectory =>
+                            PathUtility.IsPathInside(
+                                nodePath,
+                                selectedDirectory)))
+                    .ToArray();
+            });
+
+        for (var index = 0; index < nodes.Count; index++)
+            nodes[index].IsChecked = checkedStates[index];
     }
 
     private static string ResolveSelectedPath(string rootPath, string relativePath)

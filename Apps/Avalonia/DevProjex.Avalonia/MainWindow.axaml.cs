@@ -517,9 +517,17 @@ public partial class MainWindow : Window
             return;
 
         if (_viewModel.IsPreviewMode)
-            ClosePreviewMode();
+        {
+            ObserveDetachedTask(
+                _previewWorkspaceController.CloseAsync(),
+                "ClosePreviewMode");
+        }
         else
-            OpenPreviewMode();
+        {
+            ObserveDetachedTask(
+                _previewWorkspaceController.OpenAsync(),
+                "OpenPreviewMode");
+        }
     }
 
     private void OnPreviewClose(object? sender, RoutedEventArgs e)
@@ -527,7 +535,9 @@ public partial class MainWindow : Window
         if (!_viewModel.CanTogglePreview || !_viewModel.IsPreviewMode)
             return;
 
-        ClosePreviewMode();
+        ObserveDetachedTask(
+            _previewWorkspaceController.CloseAsync(),
+            "ClosePreviewMode");
     }
 
     private async void OnPreviewCopyCurrentMode(object? sender, RoutedEventArgs e)
@@ -543,7 +553,9 @@ public partial class MainWindow : Window
         if (!_viewModel.CanUseProjectWorkspaceActions || !_viewModel.IsPreviewTreeVisible)
             return;
 
-        HidePreviewTreePane();
+        ObserveDetachedTask(
+            _previewWorkspaceController.HideTreePaneAsync(),
+            "HidePreviewTreePane");
     }
 
     private async void OnPreviewTreeModeClick(object? sender, RoutedEventArgs e)
@@ -566,18 +578,6 @@ public partial class MainWindow : Window
 
     private void UpdatePreviewSegmentThumbPosition(bool animate)
         => _previewWorkspaceController.UpdatePreviewSegmentThumbPosition(animate);
-
-    private async void OpenPreviewMode()
-        => await OpenPreviewModeAsync();
-
-    private async Task OpenPreviewModeAsync()
-        => await _previewWorkspaceController.OpenAsync();
-
-    private async void ClosePreviewMode()
-        => await _previewWorkspaceController.CloseAsync();
-
-    private async void HidePreviewTreePane()
-        => await _previewWorkspaceController.HideTreePaneAsync();
 
     private void ClearPreviewMemory()
     {
@@ -614,24 +614,10 @@ public partial class MainWindow : Window
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        await Dispatcher.UIThread.InvokeAsync(
-            static () => { },
-            DispatcherPriority.Render);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        await Dispatcher.UIThread.InvokeAsync(
-            static () => { },
-            DispatcherPriority.Render);
-        cancellationToken.ThrowIfCancellationRequested();
-
         if (_workspaceGrid is null || _treePaneContainer is null || _settingsContainer is null)
-        {
-            await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(140)), cancellationToken);
             return;
-        }
 
         var readinessTimeout = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(700));
-        var frameDelay = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(16));
         var stopwatch = Stopwatch.StartNew();
         var previousWorkspaceWidth = 0.0;
         var previousTreeWidth = 0.0;
@@ -641,9 +627,15 @@ public partial class MainWindow : Window
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            await Dispatcher.UIThread.InvokeAsync(
-                static () => { },
-                DispatcherPriority.Render);
+            var remaining = readinessTimeout - stopwatch.Elapsed;
+            if (remaining <= TimeSpan.Zero ||
+                !await TryWaitForNextAnimationFrameAsync(
+                    remaining,
+                    cancellationToken))
+            {
+                break;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
 
             var workspaceWidth = _workspaceGrid.Bounds.Width;
@@ -687,7 +679,6 @@ public partial class MainWindow : Window
 
             previousWorkspaceWidth = workspaceWidth;
             previousTreeWidth = treeWidth;
-            await Task.Delay(frameDelay, cancellationToken);
         }
     }
 
@@ -1296,7 +1287,31 @@ public partial class MainWindow : Window
     private static string? ResolveDropFolderPath(IEnumerable<string?> localPaths)
     {
         return localPaths.FirstOrDefault(path =>
-            !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
+            !string.IsNullOrWhiteSpace(path));
+    }
+
+    private static Task<string?> FindFirstExistingDirectoryAsync(
+        IEnumerable<string?> candidatePaths,
+        CancellationToken cancellationToken)
+    {
+        var paths = candidatePaths
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .ToArray();
+
+        return Task.Run(
+            () =>
+            {
+                foreach (var path in paths)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (Directory.Exists(path))
+                        return path;
+                }
+
+                return null;
+            },
+            cancellationToken);
     }
 
     private static DragDropEffects ResolveDropEffect(bool hasFolder)

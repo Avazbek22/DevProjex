@@ -150,6 +150,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			foreach (var pair in environment)
 				variables[pair.Key] = pair.Value;
 		}
+		if (OperatingSystem.IsWindows() && !variables.ContainsKey("NO_COLOR"))
+			variables["NO_COLOR"] = string.Empty;
 		initializeDataRoot?.Invoke(variables["DEVPROJEX_INTERNAL_DATA_ROOT"]);
 		var (host, commandLine, startupInput) = CreateShellCommand(
 			binary,
@@ -196,6 +198,14 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	{
 		if (OperatingSystem.IsWindows())
 		{
+			if (ShouldLaunchWindowsDotNetHostDirectly(
+				    writeShellCompletionMarker,
+				    verifyExecutableRelaunch,
+				    launchesThroughDotNetHost))
+			{
+				return (binary, arguments.ToArray(), null);
+			}
+
 			var host = Environment.GetEnvironmentVariable("COMSPEC") ??
 			           Path.Combine(Environment.SystemDirectory, "cmd.exe");
 			var launch = BuildWindowsLaunchCommand(
@@ -245,6 +255,14 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			["-c", shellCommand],
 			null);
 	}
+
+	internal static bool ShouldLaunchWindowsDotNetHostDirectly(
+		bool writeShellCompletionMarker,
+		bool verifyExecutableRelaunch,
+		bool launchesThroughDotNetHost) =>
+		launchesThroughDotNetHost &&
+		!writeShellCompletionMarker &&
+		!verifyExecutableRelaunch;
 
 	internal static string BuildWindowsLaunchCommand(
 		string binary,
