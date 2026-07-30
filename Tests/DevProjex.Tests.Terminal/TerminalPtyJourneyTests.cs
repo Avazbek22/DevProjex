@@ -127,6 +127,9 @@ public sealed class TerminalPtyJourneyTests
 			TerminalWorkspaceSession.FitPathToWidth(
 				welcomePath,
 				terminalColumns - 4);
+		await welcome.WaitForStableScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
 		var welcomeScreen = await welcome.WaitForStableScreenAsync(
 			expectedWelcomePath,
 			cancellationToken: TestContext.Current.CancellationToken);
