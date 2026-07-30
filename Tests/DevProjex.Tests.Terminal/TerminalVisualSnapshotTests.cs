@@ -76,7 +76,7 @@ public sealed class TerminalVisualSnapshotTests
 	[Fact(Timeout = 90_000)]
 	public async Task WorkspaceSnapshotsCoverWideCompactAndCoreOverlays()
 	{
-		using var project = CreateProject();
+		using var project = CreateProjectForPhysicalPathSnapshots();
 		await using var terminal = await StartProjectAsync(project.Path);
 
 		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
@@ -131,7 +131,7 @@ public sealed class TerminalVisualSnapshotTests
 	[Fact(Timeout = 90_000)]
 	public async Task WorkspaceSnapshotsCoverRecoverableErrorAndProjectExportCompletion()
 	{
-		using var project = CreateProject();
+		using var project = CreateProjectForEquivalentCommandSnapshot();
 		using var output = new FixedTemporaryDirectory("DevProjex-Tui-Snapshot-Export");
 		await using var terminal = await StartProjectAsync(project.Path);
 
@@ -179,7 +179,7 @@ public sealed class TerminalVisualSnapshotTests
 	[Fact(Timeout = 90_000)]
 	public async Task WideWorkspaceSnapshotsCoverParametersActionPaletteAndAllFormats()
 	{
-		using var project = CreateProject();
+		using var project = CreateProjectForPhysicalPathSnapshots();
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			project.Path,
 			[
@@ -262,7 +262,7 @@ public sealed class TerminalVisualSnapshotTests
 	[Fact(Timeout = 60_000)]
 	public async Task RussianWideWorkspaceLocalizesParametersAndCompleteFormatSelector()
 	{
-		using var project = CreateProject();
+		using var project = CreateProjectForPhysicalPathSnapshots();
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			project.Path,
 			[
@@ -443,11 +443,29 @@ public sealed class TerminalVisualSnapshotTests
 		return new OwnedProject(workspace, workspace.Path);
 	}
 
-	private static OwnedProject CreateProject()
+	[Fact]
+	public void PhysicalPathSnapshotFixtureKeepsTreeMetricInputLengthStable()
 	{
-		var owner = FixedLengthSnapshotDirectory.CreateForArgumentJsonLength(
+		using var project = CreateProjectForPhysicalPathSnapshots();
+
+		Assert.Equal(SnapshotProjectPathLength, project.Path.Length);
+	}
+
+	private static OwnedProject CreateProjectForPhysicalPathSnapshots() =>
+		// Tree export metrics include the source root length, so this fixture must
+		// stabilize the physical path rather than its platform-specific JSON form.
+		CreateProject(new FixedLengthSnapshotDirectory(
+			SnapshotProjectPathLength,
+			Guid.NewGuid().ToString("N")));
+
+	private static OwnedProject CreateProjectForEquivalentCommandSnapshot() =>
+		// Equivalent-command wrapping observes JSON-escaped argv cell width.
+		CreateProject(FixedLengthSnapshotDirectory.CreateForArgumentJsonLength(
 			SnapshotProjectArgumentJsonLength,
-			Guid.NewGuid().ToString("N"));
+			Guid.NewGuid().ToString("N")));
+
+	private static OwnedProject CreateProject(FixedLengthSnapshotDirectory owner)
+	{
 		var projectPath = owner.Path;
 
 		WriteProjectFile(projectPath, "global.json", "{}");
