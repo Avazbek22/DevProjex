@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Terminal.Gui.App;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
@@ -151,7 +152,7 @@ public sealed class MacOsTerminalGuiCompatibilityTests
 	}
 
 	[Fact]
-	public void ConsoleInputPreservesPendingTypeAheadWhenRestoringControlC()
+	public void ConsoleInputDisposeDoesNotExplicitlyDrainUnreadKeys()
 	{
 		var keySource = new TestConsoleKeySource(
 			treatControlCAsInput: false,
@@ -161,7 +162,11 @@ public sealed class MacOsTerminalGuiCompatibilityTests
 				shift: false,
 				alt: false,
 				control: false));
-		using var input = new MacOsConsoleInput(keySource);
+		var terminalLifecycle =
+			new TestMacOsTerminalLifecycle(keySource.Operations);
+		using var input = new MacOsConsoleInput(
+			keySource,
+			terminalLifecycle);
 
 		Assert.True(keySource.TreatControlCAsInput);
 		input.Dispose();
@@ -169,7 +174,10 @@ public sealed class MacOsTerminalGuiCompatibilityTests
 		Assert.False(keySource.TreatControlCAsInput);
 		Assert.True(keySource.KeyAvailable);
 		Assert.Empty(keySource.InterceptValues);
-		Assert.Equal("control:False", keySource.Operations[^1]);
+		Assert.Equal(
+			["control:True", "control:False", "terminal:restore"],
+			keySource.Operations);
+		Assert.Equal(1, terminalLifecycle.RestoreCount);
 		var operationCountAfterFirstDispose = keySource.Operations.Count;
 
 		input.Dispose();
@@ -177,6 +185,155 @@ public sealed class MacOsTerminalGuiCompatibilityTests
 		Assert.Equal(
 			operationCountAfterFirstDispose,
 			keySource.Operations.Count);
+		Assert.Equal(1, terminalLifecycle.RestoreCount);
+	}
+
+	[Fact]
+	public void DarwinPollDescriptorMatchesBothSupportedMacOsArchitectures()
+	{
+		Assert.Equal(
+			8,
+			Marshal.SizeOf<
+				MacOsConsoleNative.PollFileDescriptor>());
+		Assert.Equal(
+			0,
+			Marshal.OffsetOf<
+				MacOsConsoleNative.PollFileDescriptor>(
+				nameof(MacOsConsoleNative.PollFileDescriptor.Descriptor))
+				.ToInt32());
+		Assert.Equal(
+			4,
+			Marshal.OffsetOf<
+				MacOsConsoleNative.PollFileDescriptor>(
+				nameof(MacOsConsoleNative.PollFileDescriptor.Events))
+				.ToInt32());
+		Assert.Equal(
+			6,
+			Marshal.OffsetOf<
+				MacOsConsoleNative.PollFileDescriptor>(
+				nameof(MacOsConsoleNative.PollFileDescriptor.ResultEvents))
+				.ToInt32());
+	}
+
+	[Fact]
+	public void TerminalLifecycleRestoresBeforePollingAndSupportsReentry()
+	{
+		var native = new TestMacOsConsoleNative(
+			(0, 0),
+			(0, 0));
+		var lifecycle = new MacOsConsoleTerminalLifecycle(native);
+
+		lifecycle.RestoreForShell();
+		lifecycle.RestoreForShell();
+
+		Assert.Equal(
+			["terminal:configure", "terminal:poll", "terminal:configure", "terminal:poll"],
+			native.Operations);
+	}
+
+	[Fact]
+	public void TerminalLifecycleRetriesInterruptedPoll()
+	{
+		var native = new TestMacOsConsoleNative(
+			(-1, MacOsConsoleTerminalLifecycle.InterruptedSystemCall),
+			(-1, MacOsConsoleTerminalLifecycle.InterruptedSystemCall),
+			(0, 0));
+		var lifecycle = new MacOsConsoleTerminalLifecycle(native);
+
+		lifecycle.RestoreForShell();
+
+		Assert.Equal(
+			["terminal:configure", "terminal:poll", "terminal:poll", "terminal:poll"],
+			native.Operations);
+	}
+
+	[Fact]
+	public void TerminalLifecycleReportsNonInterruptedPollFailure()
+	{
+		const int nativeError = 9;
+		var native = new TestMacOsConsoleNative((-1, nativeError));
+		var lifecycle = new MacOsConsoleTerminalLifecycle(native);
+
+		var exception = Assert.Throws<MacOsTerminalRestoreException>(
+			lifecycle.RestoreForShell);
+
+		Assert.Equal(nativeError, exception.NativeError);
+		Assert.Equal(
+			["terminal:configure", "terminal:poll"],
+			native.Operations);
+	}
+
+	[Fact]
+	public void TerminalLifecycleBoundsPersistentInterruptRetries()
+	{
+		var interruptedResults = Enumerable
+			.Repeat(
+				(-1, MacOsConsoleTerminalLifecycle.InterruptedSystemCall),
+				MacOsConsoleTerminalLifecycle.MaximumPollAttempts)
+			.ToArray();
+		var native = new TestMacOsConsoleNative(interruptedResults);
+		var lifecycle = new MacOsConsoleTerminalLifecycle(native);
+
+		var exception = Assert.Throws<MacOsTerminalRestoreException>(
+			lifecycle.RestoreForShell);
+
+		Assert.Equal(
+			MacOsConsoleTerminalLifecycle.InterruptedSystemCall,
+			exception.NativeError);
+		Assert.Equal(
+			MacOsConsoleTerminalLifecycle.MaximumPollAttempts,
+			native.Operations.Count(
+				static operation => operation == "terminal:poll"));
+	}
+
+	[Fact]
+	public void TerminalLifecycleTypesConfigureInteropFailure()
+	{
+		const string rawMessage = "RAW_CONFIGURE_INTEROP_FAILURE";
+		var cause = new DllNotFoundException(rawMessage);
+		var native = new TestMacOsConsoleNative
+		{
+			ConfigureException = cause
+		};
+		var lifecycle = new MacOsConsoleTerminalLifecycle(native);
+
+		var exception = Assert.Throws<MacOsTerminalRestoreException>(
+			lifecycle.RestoreForShell);
+
+		Assert.Same(cause, exception.InnerException);
+		Assert.Null(exception.NativeError);
+		Assert.Equal(
+			["terminal:configure"],
+			native.Operations);
+		Assert.DoesNotContain(
+			rawMessage,
+			exception.Message,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void TerminalLifecycleTypesPollInteropFailure()
+	{
+		const string rawMessage = "RAW_POLL_INTEROP_FAILURE";
+		var cause = new EntryPointNotFoundException(rawMessage);
+		var native = new TestMacOsConsoleNative
+		{
+			PollException = cause
+		};
+		var lifecycle = new MacOsConsoleTerminalLifecycle(native);
+
+		var exception = Assert.Throws<MacOsTerminalRestoreException>(
+			lifecycle.RestoreForShell);
+
+		Assert.Same(cause, exception.InnerException);
+		Assert.Null(exception.NativeError);
+		Assert.Equal(
+			["terminal:configure", "terminal:poll"],
+			native.Operations);
+		Assert.DoesNotContain(
+			rawMessage,
+			exception.Message,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -208,6 +365,22 @@ public sealed class MacOsTerminalGuiCompatibilityTests
 			source);
 		Assert.DoesNotContain(
 			"Console.Out",
+			source,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"SystemNative_ConfigureTerminalForChildProcess",
+			source,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"poll(",
+			source,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"SystemNative_UninitializeTerminal",
+			source,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"tcsetattr",
 			source,
 			StringComparison.Ordinal);
 	}
@@ -267,6 +440,49 @@ public sealed class MacOsTerminalGuiCompatibilityTests
 			InterceptValues.Add(intercept);
 			Operations.Add("read");
 			return _keys.Dequeue();
+		}
+	}
+
+	private sealed class TestMacOsTerminalLifecycle(
+		List<string> operations) : IMacOsTerminalLifecycle
+	{
+		public int RestoreCount { get; private set; }
+
+		public void RestoreForShell()
+		{
+			RestoreCount++;
+			operations.Add("terminal:restore");
+		}
+	}
+
+	private sealed class TestMacOsConsoleNative(
+		params (int Result, int NativeError)[] pollResults) :
+		IMacOsConsoleNative
+	{
+		private readonly Queue<(int Result, int NativeError)> _pollResults =
+			new(pollResults);
+
+		public List<string> Operations { get; } = [];
+		public Exception? ConfigureException { get; init; }
+		public Exception? PollException { get; init; }
+
+		public void ConfigureTerminalForShell()
+		{
+			Operations.Add("terminal:configure");
+			if (ConfigureException is not null)
+				throw ConfigureException;
+		}
+
+		public int PollStandardInput(out int nativeError)
+		{
+			Operations.Add("terminal:poll");
+			if (PollException is not null)
+				throw PollException;
+			var pollResult = _pollResults.Count == 0
+				? (Result: 0, NativeError: 0)
+				: _pollResults.Dequeue();
+			nativeError = pollResult.NativeError;
+			return pollResult.Result;
 		}
 	}
 }

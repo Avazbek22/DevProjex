@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Terminal.Gui.App;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
@@ -175,16 +176,28 @@ internal sealed class MacOsConsoleInput : InputImpl<ConsoleKeyInfo>
 {
 	private readonly IConsoleKeySource _console;
 	private readonly ConsoleControlCPolicy _controlCPolicy;
+	private readonly IMacOsTerminalLifecycle _terminalLifecycle;
 	private int _disposed;
 
 	public MacOsConsoleInput()
-		: this(SystemConsoleKeySource.Instance)
+		: this(
+			SystemConsoleKeySource.Instance,
+			MacOsConsoleTerminalLifecycle.Instance)
 	{
 	}
 
 	internal MacOsConsoleInput(IConsoleKeySource console)
+		: this(console, NullMacOsTerminalLifecycle.Instance)
+	{
+	}
+
+	internal MacOsConsoleInput(
+		IConsoleKeySource console,
+		IMacOsTerminalLifecycle terminalLifecycle)
 	{
 		_console = console ?? throw new ArgumentNullException(nameof(console));
+		_terminalLifecycle = terminalLifecycle ??
+			throw new ArgumentNullException(nameof(terminalLifecycle));
 		_controlCPolicy = new ConsoleControlCPolicy(console);
 	}
 
@@ -215,8 +228,15 @@ internal sealed class MacOsConsoleInput : InputImpl<ConsoleKeyInfo>
 		if (Interlocked.Exchange(ref _disposed, 1) != 0)
 			return;
 
-		_controlCPolicy.Dispose();
-		base.Dispose();
+		try
+		{
+			_controlCPolicy.Dispose();
+			base.Dispose();
+		}
+		finally
+		{
+			_terminalLifecycle.RestoreForShell();
+		}
 	}
 
 	private bool TryRead(out ConsoleKeyInfo keyInfo)
@@ -238,6 +258,161 @@ internal sealed class MacOsConsoleInput : InputImpl<ConsoleKeyInfo>
 		{
 			return false;
 		}
+	}
+}
+
+internal interface IMacOsTerminalLifecycle
+{
+	void RestoreForShell();
+}
+
+internal sealed class MacOsConsoleTerminalLifecycle : IMacOsTerminalLifecycle
+{
+	internal const int InterruptedSystemCall = 4;
+	internal const int MaximumPollAttempts = 8;
+
+	private readonly IMacOsConsoleNative _native;
+
+	public static MacOsConsoleTerminalLifecycle Instance { get; } =
+		new(MacOsConsoleNative.Instance);
+
+	internal MacOsConsoleTerminalLifecycle(IMacOsConsoleNative native)
+	{
+		_native = native ?? throw new ArgumentNullException(nameof(native));
+	}
+
+	public void RestoreForShell()
+	{
+		try
+		{
+			// System.Console owns the active raw mode and its captured baseline.
+			// Darwin sets PENDIN when raw input becomes canonical. poll(POLLIN)
+			// enters ttyselect/ttnread, which reprocesses the remaining kernel
+			// queue in place without reading or explicitly flushing it.
+			_native.ConfigureTerminalForShell();
+			for (var attempt = 0; attempt < MaximumPollAttempts; attempt++)
+			{
+				var result = _native.PollStandardInput(out var nativeError);
+				if (result >= 0)
+					return;
+				if (nativeError != InterruptedSystemCall)
+					throw new MacOsTerminalRestoreException(nativeError);
+			}
+
+			throw new MacOsTerminalRestoreException(InterruptedSystemCall);
+		}
+		catch (Exception exception)
+			when (exception is DllNotFoundException or
+			      EntryPointNotFoundException or
+			      BadImageFormatException)
+		{
+			throw new MacOsTerminalRestoreException(exception);
+		}
+	}
+}
+
+internal interface IMacOsConsoleNative
+{
+	void ConfigureTerminalForShell();
+
+	int PollStandardInput(out int nativeError);
+}
+
+internal sealed class MacOsConsoleNative : IMacOsConsoleNative
+{
+	private const int StandardInputDescriptor = 0;
+	private const short PollInput = 0x0001;
+	private const short PollInvalid = 0x0020;
+	private const int BadFileDescriptor = 9;
+
+	public static MacOsConsoleNative Instance { get; } = new();
+
+	private MacOsConsoleNative()
+	{
+	}
+
+	public void ConfigureTerminalForShell() =>
+		SystemNative_ConfigureTerminalForChildProcess(childUsesTerminal: 1);
+
+	public int PollStandardInput(out int nativeError)
+	{
+		var descriptor = new PollFileDescriptor(
+			StandardInputDescriptor,
+			PollInput);
+		var result = poll(
+			ref descriptor,
+			descriptorCount: 1,
+			timeoutMilliseconds: 0);
+		if (result < 0)
+		{
+			nativeError = Marshal.GetLastPInvokeError();
+			return result;
+		}
+
+		if ((descriptor.ResultEvents & PollInvalid) != 0)
+		{
+			nativeError = BadFileDescriptor;
+			return -1;
+		}
+
+		nativeError = 0;
+		return result;
+	}
+
+	[DllImport(
+		"System.Native",
+		EntryPoint = "SystemNative_ConfigureTerminalForChildProcess")]
+	private static extern void SystemNative_ConfigureTerminalForChildProcess(
+		int childUsesTerminal);
+
+	[DllImport("libc", EntryPoint = "poll", SetLastError = true)]
+	private static extern int poll(
+		ref PollFileDescriptor descriptor,
+		uint descriptorCount,
+		int timeoutMilliseconds);
+
+	[StructLayout(LayoutKind.Sequential)]
+	internal struct PollFileDescriptor(
+		int descriptor,
+		short events)
+	{
+		internal int Descriptor = descriptor;
+		internal short Events = events;
+		internal short ResultEvents;
+	}
+}
+
+internal sealed class MacOsTerminalRestoreException : IOException
+{
+	private const string ErrorCode = "DPX-TUI-MACOS-TERMINAL-RESTORE";
+
+	internal MacOsTerminalRestoreException(int nativeError)
+		: base(ErrorCode)
+	{
+		NativeError = nativeError;
+	}
+
+	internal MacOsTerminalRestoreException(Exception innerException)
+		: base(
+			ErrorCode,
+			innerException ??
+			throw new ArgumentNullException(nameof(innerException)))
+	{
+	}
+
+	public int? NativeError { get; }
+}
+
+internal sealed class NullMacOsTerminalLifecycle : IMacOsTerminalLifecycle
+{
+	public static NullMacOsTerminalLifecycle Instance { get; } = new();
+
+	private NullMacOsTerminalLifecycle()
+	{
+	}
+
+	public void RestoreForShell()
+	{
 	}
 }
 

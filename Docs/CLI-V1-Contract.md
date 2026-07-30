@@ -608,7 +608,16 @@ documents.
 - Child Git processes receive cancellation and are not intentionally orphaned.
 
 Terminal restoration is protected by `finally` paths on normal exit, cancellation,
-and unhandled failure.
+and unhandled failure. A detected macOS terminal-restore failure writes
+`DPX-TUI-MACOS-TERMINAL-RESTORE` to stderr and returns runtime exit code `1`;
+it is never reported as an unexpected CLI parser failure.
+
+Input delivered before the TUI process has completed belongs to the active TUI
+session; it may be consumed and is not guaranteed to be preserved or replayed
+to the parent shell. DevProjex does not explicitly flush unread operating-system
+input during teardown. The restoration guarantee starts when the parent shell
+resumes: subsequent input must remain usable, and PTY release gates verify that
+boundary after normal exit, cancellation, and failure.
 
 ## Legacy Migration
 

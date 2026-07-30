@@ -350,6 +350,7 @@
   "Terminal.Error.ParserRejected": "Пәрмен, параметр немесе мән жарамсыз.",
   "Terminal.Error.Canceled": "Операциядан бас тартылды.",
   "Terminal.Error.Unexpected": "DevProjex пәрменді аяқтай алмады.",
+  "Terminal.Error.TerminalRestoreFailed": "DevProjex терминал күйін толық қалпына келтіре алмады.",
   "Terminal.Error.DestinationExists": "Межелі нысан бұрыннан бар.",
   "Terminal.Error.AccessDenied": "Жобаны оқу немесе нәтижені жазу кезінде қатынауға тыйым салынды.",
   "Terminal.Error.IoFailure": "Файлдық жүйе қатесіне байланысты операцияны аяқтау мүмкін болмады.",

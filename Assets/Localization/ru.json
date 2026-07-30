@@ -368,6 +368,7 @@
   "Terminal.Error.ParserRejected": "Команда, параметр или значение указаны неверно.",
   "Terminal.Error.Canceled": "Операция отменена.",
   "Terminal.Error.Unexpected": "DevProjex не удалось выполнить команду.",
+  "Terminal.Error.TerminalRestoreFailed": "DevProjex не удалось полностью восстановить состояние терминала.",
   "Terminal.Error.DestinationExists": "Путь назначения уже существует.",
   "Terminal.Error.AccessDenied": "Недостаточно прав для чтения проекта или записи результата.",
   "Terminal.Error.IoFailure": "Операцию не удалось завершить из-за ошибки файловой системы.",
