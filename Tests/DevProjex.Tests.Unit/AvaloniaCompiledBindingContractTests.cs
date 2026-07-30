@@ -239,6 +239,71 @@ public sealed class AvaloniaCompiledBindingContractTests
 		Assert.Equal("None", root.Attribute("TransparencyLevelHint")?.Value);
 	}
 
+	[Fact]
+	public void MainWindow_DropZoneAnimationsUseSmoothIdleSafeContract()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var styles = root
+			.Descendants(avaloniaNamespace + "Style")
+			.ToArray();
+
+		var borderStyle = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Border.drop-zone-animating Rectangle.drop-zone-border");
+		var borderAnimation = Assert.Single(
+			borderStyle.Descendants(avaloniaNamespace + "Animation"));
+		Assert.Equal("0:0:0.8", borderAnimation.Attribute("Duration")?.Value);
+		Assert.Equal("INFINITE", borderAnimation.Attribute("IterationCount")?.Value);
+		Assert.Equal("OnlyIfVisible", borderAnimation.Attribute("PlaybackBehavior")?.Value);
+		Assert.Equal("LinearEasing", borderAnimation.Attribute("Easing")?.Value);
+		Assert.Equal(
+			["0", "-14"],
+			GetAnimationValues(
+				borderAnimation,
+				"StrokeDashOffset",
+				avaloniaNamespace));
+
+		var border = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Rectangle"),
+			element => element.Attribute("Classes")?.Value == "drop-zone-border");
+		Assert.Equal("8,6", border.Attribute("StrokeDashArray")?.Value);
+
+		var iconStyle = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Border.drop-zone-animating Viewbox.drop-zone-icon");
+		var iconAnimation = Assert.Single(
+			iconStyle.Descendants(avaloniaNamespace + "Animation"));
+		Assert.Equal("0:0:2.1", iconAnimation.Attribute("Duration")?.Value);
+		Assert.Equal("INFINITE", iconAnimation.Attribute("IterationCount")?.Value);
+		Assert.Equal("OnlyIfVisible", iconAnimation.Attribute("PlaybackBehavior")?.Value);
+
+		var iconKeyFrames = iconAnimation
+			.Elements(avaloniaNamespace + "KeyFrame")
+			.ToArray();
+		Assert.Equal(["0%", "25%", "75%", "100%"], iconKeyFrames
+			.Select(element => element.Attribute("Cue")?.Value ?? string.Empty)
+			.ToArray());
+		Assert.Equal(["", "0,0,0.58,1", "0.42,0,0.58,1", "0.42,0,1,1"], iconKeyFrames
+			.Select(element => element.Attribute("KeySpline")?.Value ?? string.Empty)
+			.ToArray());
+		Assert.Equal(
+			["5", "10.5", "-0.5", "5"],
+			GetAnimationValues(
+				iconAnimation,
+				"TranslateTransform.Y",
+				avaloniaNamespace));
+	}
+
 	private static string FindRepositoryRoot()
 	{
 		var directory = AppContext.BaseDirectory;
@@ -270,4 +335,14 @@ public sealed class AvaloniaCompiledBindingContractTests
 
 		Assert.Contains(brushKey, backgroundSetter.Attribute("Value")?.Value, StringComparison.Ordinal);
 	}
+
+	private static string[] GetAnimationValues(
+		XElement animation,
+		string propertyName,
+		XNamespace avaloniaNamespace)
+		=> animation
+			.Descendants(avaloniaNamespace + "Setter")
+			.Where(element => element.Attribute("Property")?.Value == propertyName)
+			.Select(element => element.Attribute("Value")?.Value ?? string.Empty)
+			.ToArray();
 }

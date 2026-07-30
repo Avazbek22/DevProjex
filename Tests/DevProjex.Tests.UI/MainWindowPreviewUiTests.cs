@@ -452,7 +452,7 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
     [InlineData(PreviewContentMode.Tree)]
     [InlineData(PreviewContentMode.Content)]
     [InlineData(PreviewContentMode.TreeAndContent)]
-    public async Task PreviewOpen_PublishesFirstContentBeforePaneAnimationStarts(
+    public async Task PreviewOpen_AnimatesPaneBeforePublishingContent(
         PreviewContentMode mode)
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -461,13 +461,50 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
         {
             var viewModel = UiTestDriver.GetViewModel(window);
             var previewController = GetPreviewWorkspaceController(window);
+            var previewPaneContainer =
+                UiTestDriver.GetRequiredControl<Border>(
+                    window,
+                    "PreviewPaneContainer");
             viewModel.SelectedPreviewContentMode = mode;
             Assert.Null(viewModel.PreviewDocument);
+            var animationStarted =
+                new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+            var contentWasDeferred = false;
 
-            var openTask = previewController.OpenAsync();
-            await openTask;
+            void OnPreviewPanePropertyChanged(
+                object? sender,
+                AvaloniaPropertyChangedEventArgs args)
+            {
+                if (args.Property != Layoutable.WidthProperty ||
+                    previewPaneContainer.Width <= 0.5)
+                {
+                    return;
+                }
 
-            Assert.True(previewController.WasFirstContentReadyBeforeLastOpenAnimation);
+                previewPaneContainer.PropertyChanged -=
+                    OnPreviewPanePropertyChanged;
+                contentWasDeferred =
+                    viewModel.PreviewDocument is null &&
+                    !viewModel.IsPreviewLoading;
+                animationStarted.TrySetResult();
+            }
+
+            previewPaneContainer.PropertyChanged +=
+                OnPreviewPanePropertyChanged;
+            try
+            {
+                var openTask = previewController.OpenAsync();
+                await animationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.True(contentWasDeferred);
+                await openTask;
+            }
+            finally
+            {
+                previewPaneContainer.PropertyChanged -=
+                    OnPreviewPanePropertyChanged;
+            }
+
             Assert.NotNull(viewModel.PreviewDocument);
         }
         finally
@@ -503,6 +540,88 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.True(viewModel.IsPreviewMode);
             Assert.NotNull(viewModel.PreviewDocument);
             Assert.False(viewModel.IsPreviewLoading);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewCloseDuringOpenAnimation_InterruptsTransitionAndCleansSnapshots()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var previewController = GetPreviewWorkspaceController(window);
+            var previewPaneContainer =
+                UiTestDriver.GetRequiredControl<Border>(
+                    window,
+                    "PreviewPaneContainer");
+            var animationTargetApplied =
+                new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+            Task? closeRequestTask = null;
+
+            void OnPreviewPanePropertyChanged(
+                object? sender,
+                AvaloniaPropertyChangedEventArgs args)
+            {
+                if (args.Property != Layoutable.WidthProperty ||
+                    previewPaneContainer.Width <= 0.5)
+                {
+                    return;
+                }
+
+                previewPaneContainer.PropertyChanged -=
+                    OnPreviewPanePropertyChanged;
+                closeRequestTask = previewController.CloseAsync();
+                animationTargetApplied.TrySetResult();
+            }
+
+            viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+            previewPaneContainer.PropertyChanged +=
+                OnPreviewPanePropertyChanged;
+
+            try
+            {
+                var openTask = previewController.OpenAsync();
+                await animationTargetApplied.Task.WaitAsync(
+                    TimeSpan.FromSeconds(5));
+                await Assert.IsAssignableFrom<Task>(closeRequestTask);
+                await openTask;
+            }
+            finally
+            {
+                previewPaneContainer.PropertyChanged -=
+                    OnPreviewPanePropertyChanged;
+            }
+
+            var treeSnapshotHost =
+                UiTestDriver.GetRequiredControl<Border>(
+                    window,
+                    "TreePaneAnimationSnapshotHost");
+            var previewSnapshotHost =
+                UiTestDriver.GetRequiredControl<Border>(
+                    window,
+                    "PreviewPaneAnimationSnapshotHost");
+            var treeSnapshotImage =
+                UiTestDriver.GetRequiredControl<Image>(
+                    window,
+                    "TreePaneAnimationSnapshotImage");
+            var previewSnapshotImage =
+                UiTestDriver.GetRequiredControl<Image>(
+                    window,
+                    "PreviewPaneAnimationSnapshotImage");
+
+            Assert.True(previewController.WasLastOpenAnimationInterruptedByClose);
+            Assert.False(viewModel.IsPreviewMode);
+            Assert.False(treeSnapshotHost.IsVisible);
+            Assert.False(previewSnapshotHost.IsVisible);
+            Assert.Null(treeSnapshotImage.Source);
+            Assert.Null(previewSnapshotImage.Source);
         }
         finally
         {
