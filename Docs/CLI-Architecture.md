@@ -103,9 +103,11 @@ the same command tree. Bash, Zsh, and Fish pass the current command line after
 through its native argument binder, so the generated PowerShell script sends
 the unfinished command line as strict UTF-8 Base64 with `--base64` and the
 working directory with `--working-directory-base64`. The endpoint decodes both
-values before requesting path-aware completions. These transport flags are
-hidden, produce no user-facing contract, and never appear in normal help or
-completion.
+values before requesting path-aware completions and returns each candidate as
+UTF-8 Base64. The script decodes those ASCII-safe records before constructing
+PowerShell completion results, avoiding the host console code page at both
+native-process boundaries. These transport flags are hidden, produce no
+user-facing contract, and never appear in normal help or completion.
 
 ## Output and Failures
 

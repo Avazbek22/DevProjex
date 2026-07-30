@@ -68,10 +68,12 @@ public static class CompletionScriptGenerator
 		        [System.Text.Encoding]::UTF8.GetBytes($commandLine))
 		    $encodedWorkingDirectory = [Convert]::ToBase64String(
 		        [System.Text.Encoding]::UTF8.GetBytes($PWD.Path))
+		    $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
 		    & $commandPath dev complete --position $cursorPosition --base64 `
 		        --working-directory-base64 $encodedWorkingDirectory -- $encodedCommandLine |
 		        ForEach-Object {
-		            $value = [string]$_
+		            $value = $strictUtf8.GetString(
+		                [Convert]::FromBase64String([string]$_))
 		            $completionText = if ($value -notmatch '^[\p{L}\p{N}_./:\\=-]+$') {
 		                "'" + $value.Replace("'", "''") + "'"
 		            } else {

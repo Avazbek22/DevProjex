@@ -21,7 +21,11 @@ public sealed class CompletionCommandContractTests
 		Assert.Contains("dev complete", script, StringComparison.Ordinal);
 		Assert.Contains("--position", script, StringComparison.Ordinal);
 		if (shell == "powershell")
+		{
 			Assert.Contains("--working-directory-base64", script, StringComparison.Ordinal);
+			Assert.Contains("FromBase64String", script, StringComparison.Ordinal);
+			Assert.Contains("UTF8Encoding", script, StringComparison.Ordinal);
+		}
 		Assert.DoesNotContain("analyze", script, StringComparison.Ordinal);
 		Assert.DoesNotContain("--git-mode", script, StringComparison.Ordinal);
 		Assert.DoesNotContain("--exclude", script, StringComparison.Ordinal);

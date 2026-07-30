@@ -966,9 +966,10 @@ public sealed class DevProjexCommandTree
 		complete.Arguments.Add(commandLine);
 		complete.SetAction(parseResult =>
 		{
+			var useBase64Transport = parseResult.GetValue(base64);
 			var completionCommandLine =
 				parseResult.GetValue(commandLine) ?? string.Empty;
-			if (parseResult.GetValue(base64) &&
+			if (useBase64Transport &&
 			    !CompletionCommandLineTransport.TryDecodeBase64(
 				    completionCommandLine,
 				    out completionCommandLine))
@@ -996,7 +997,10 @@ public sealed class DevProjexCommandTree
 				         parseResult.GetValue(position),
 				         completionWorkingDirectory))
 			{
-				environment.Output.WriteLine(candidate);
+				environment.Output.WriteLine(
+					useBase64Transport
+						? CompletionCommandLineTransport.EncodeBase64(candidate)
+						: candidate);
 			}
 			return CommandLineExitCodes.Success;
 		});

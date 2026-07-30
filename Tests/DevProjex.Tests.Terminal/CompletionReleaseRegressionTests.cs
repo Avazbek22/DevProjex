@@ -281,8 +281,7 @@ public sealed class CompletionReleaseRegressionTests
 		Assert.Empty(environment.StandardError);
 		Assert.Equal(
 			["json", "text"],
-			environment.StandardOutput
-				.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+			DecodeBase64Candidates(environment.StandardOutput)
 				.Order(StringComparer.Ordinal));
 	}
 
@@ -334,13 +333,9 @@ public sealed class CompletionReleaseRegressionTests
 		Assert.Empty(environment.StandardError);
 		Assert.Contains(
 			$".{Path.DirectorySeparatorChar}{Path.GetFileName(project)}{Path.DirectorySeparatorChar}",
-			environment.StandardOutput.Split(
-				Environment.NewLine,
-				StringSplitOptions.RemoveEmptyEntries));
+			DecodeBase64Candidates(environment.StandardOutput));
 		Assert.DoesNotContain(
-			environment.StandardOutput.Split(
-				Environment.NewLine,
-				StringSplitOptions.RemoveEmptyEntries),
+			DecodeBase64Candidates(environment.StandardOutput),
 			candidate =>
 				candidate.Equals(
 					$"Apps{Path.DirectorySeparatorChar}",
@@ -349,6 +344,13 @@ public sealed class CompletionReleaseRegressionTests
 					$"Application{Path.DirectorySeparatorChar}",
 					StringComparison.Ordinal));
 	}
+
+	private static string[] DecodeBase64Candidates(string output) =>
+		output
+			.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+			.Select(static candidate =>
+				Encoding.UTF8.GetString(Convert.FromBase64String(candidate)))
+			.ToArray();
 
 	[Fact]
 	public void ExplicitCompletionWorkingDirectoryAppliesToOptionAndProjectRelativeSources()
