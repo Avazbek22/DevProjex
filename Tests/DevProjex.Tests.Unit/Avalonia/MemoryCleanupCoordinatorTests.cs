@@ -181,16 +181,29 @@ public sealed class MemoryCleanupCoordinatorTests
     {
         var modes = new ConcurrentQueue<MemoryCleanupCollectionMode>();
         var completion = NewCompletionSource();
+        var backgroundDelayEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var pendingBackgroundDelay = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var deferInvocationCount = 0;
         using var coordinator = CreateCoordinator(
             captureMemorySnapshot: static () => EmptySnapshot(),
             collect: mode =>
             {
                 modes.Enqueue(mode);
                 completion.TrySetResult(mode);
+            },
+            deferCleanup: (_, cancellationToken) =>
+            {
+                if (Interlocked.Increment(ref deferInvocationCount) != 1)
+                    return Task.CompletedTask;
+
+                backgroundDelayEntered.TrySetResult();
+                return pendingBackgroundDelay.Task.WaitAsync(cancellationToken);
             });
 
         coordinator.Schedule(MemoryCleanupReason.PreviewRebuildCompleted);
-        await Task.Delay(50);
+        await backgroundDelayEntered.Task.WaitAsync(CompletionTimeout);
         coordinator.Schedule(MemoryCleanupReason.SearchClose);
 
         var mode = await completion.Task.WaitAsync(CompletionTimeout);

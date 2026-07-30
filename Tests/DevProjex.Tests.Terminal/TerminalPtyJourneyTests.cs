@@ -123,11 +123,19 @@ public sealed class TerminalPtyJourneyTests
 			columns: terminalColumns,
 			rows: 35,
 			cancellationToken: TestContext.Current.CancellationToken);
-		var welcomeScreen = await welcome.WaitForScreenAsync(
-			"Choose a workspace action",
+		var expectedWelcomePath =
+			TerminalWorkspaceSession.FitPathToWidth(
+				welcomePath,
+				terminalColumns - 4);
+		var welcomeScreen = await welcome.WaitForStableScreenAsync(
+			expectedWelcomePath,
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(
-			TerminalWorkspaceSession.FitPathToWidth(welcomePath, terminalColumns - 4),
+			"Choose a workspace action",
+			welcomeScreen,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			expectedWelcomePath,
 			welcomeScreen,
 			StringComparison.Ordinal);
 		TerminalVisualArtifactWriter.WriteIfRequested(
