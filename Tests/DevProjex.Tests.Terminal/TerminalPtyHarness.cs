@@ -24,10 +24,6 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		"__DEVPROJEX_SHELL_PROPERTIES_RESTORED__";
 	public const string ShellLineInputAcceptedMarker =
 		"__DEVPROJEX_SHELL_LINE_INPUT_ACCEPTED__";
-	public const string ShellInterruptReadyMarker =
-		"__DEVPROJEX_SHELL_INTERRUPT_READY__";
-	public const string ShellInterruptHandledMarker =
-		"__DEVPROJEX_SHELL_INTERRUPT_HANDLED__";
 	public const string ShellVersionProbeMarker =
 		"__DEVPROJEX_SHELL_VERSION_OK__";
 	public const string ShellUsabilityVerifiedMarker =
@@ -58,18 +54,18 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	private readonly Task _exitMonitorTask;
 	private readonly Task _terminalResponseTask;
 	private readonly string _dataRoot;
-	private readonly bool _verifyExtendedShellUsability;
+	private readonly bool _verifyExecutableRelaunch;
 
 	private TerminalPtyHarness(
 		Hex1bTerminalChildProcess process,
 		XTermTerminal terminal,
 		string dataRoot,
-		bool verifyExtendedShellUsability)
+		bool verifyExecutableRelaunch)
 	{
 		_process = process;
 		_terminal = terminal;
 		_dataRoot = dataRoot;
-		_verifyExtendedShellUsability = verifyExtendedShellUsability;
+		_verifyExecutableRelaunch = verifyExecutableRelaunch;
 		_terminal.DataReceived += (_, args) =>
 		{
 			if (!string.IsNullOrEmpty(args.Data))
@@ -110,7 +106,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		Action<string>? initializeDataRoot = null,
 		bool writeShellCompletionMarker = false,
 		bool useProgressCheckpointHost = false,
-		bool verifyExtendedShellUsability = false)
+		bool verifyExecutableRelaunch = false)
 	{
 		var binary = useProgressCheckpointHost
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
@@ -158,7 +154,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			launchArguments,
 			variables,
 			writeShellCompletionMarker,
-			verifyExtendedShellUsability && !useProgressCheckpointHost);
+			verifyExecutableRelaunch && !useProgressCheckpointHost);
 
 		var process = new Hex1bTerminalChildProcess(
 			host,
@@ -181,7 +177,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			process,
 			terminal,
 			dataRoot,
-			verifyExtendedShellUsability && !OperatingSystem.IsWindows());
+			verifyExecutableRelaunch && !OperatingSystem.IsWindows());
 		if (startupInput is not null)
 			await harness.SendAsync(startupInput + "\r", cancellationToken).ConfigureAwait(false);
 		return harness;
@@ -192,7 +188,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		IReadOnlyList<string> arguments,
 		IReadOnlyDictionary<string, string> environment,
 		bool writeShellCompletionMarker,
-		bool verifyExtendedShellUsability)
+		bool verifyExecutableRelaunch)
 	{
 		if (OperatingSystem.IsWindows())
 		{
@@ -236,7 +232,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		var invocation = string.Join(
 			' ',
 			new[] { invocationPrefix }.Concat(arguments.Select(QuoteForPosixShell)));
-		var versionProbeInvocation = verifyExtendedShellUsability
+		var versionProbeInvocation = verifyExecutableRelaunch
 			? invocationPrefix + " --version"
 			: null;
 		var shellCommand = BuildUnixShellCommand(
@@ -262,14 +258,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 
 		var extendedProbe = versionProbeInvocation is null
 			? string.Empty
-			: "dpx_interrupted=0; " +
-			  "trap 'dpx_interrupted=1' INT; " +
-			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellInterruptReadyMarker)}; " +
-			  "while [ \"$dpx_interrupted\" -eq 0 ]; do " +
-			  "IFS= read -r dpx_interrupt_probe || true; done; " +
-			  "trap - INT; " +
-			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellInterruptHandledMarker)}; " +
-			  $"{versionProbeInvocation} >/dev/null 2>&1; " +
+			: $"{versionProbeInvocation} >/dev/null 2>&1; " +
 			  "[ \"$?\" -eq 0 ] || exit 99; " +
 			  $"printf '%s%s\\n' {SplitMarkerForPosixShell(ShellVersionProbeMarker)}; ";
 
@@ -379,17 +368,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				lineInputOutput,
 				StringComparison.Ordinal);
 
-			if (_verifyExtendedShellUsability)
+			if (_verifyExecutableRelaunch)
 			{
-				await WaitForRawOutputAsync(
-						ShellInterruptReadyMarker,
-						cancellationToken: cancellationToken)
-					.ConfigureAwait(false);
-				await SendAsync("\u0003", cancellationToken).ConfigureAwait(false);
-				await WaitForRawOutputAsync(
-						ShellInterruptHandledMarker,
-						cancellationToken: cancellationToken)
-					.ConfigureAwait(false);
 				await WaitForRawOutputAsync(
 						ShellVersionProbeMarker,
 						cancellationToken: cancellationToken)

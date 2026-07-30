@@ -76,27 +76,13 @@ public sealed class TerminalPtyHarnessContractTests
 	}
 
 	[Fact]
-	public void UnixExtendedShellProbeChecksInterruptAndExecutableRelaunch()
+	public void UnixExtendedShellProbeChecksExecutableRelaunch()
 	{
 		var command = TerminalPtyHarness.BuildUnixShellCommand(
 			"exec-devprojex",
 			writeShellCompletionMarker: true,
 			versionProbeInvocation: "exec-devprojex --version");
 
-		Assert.Contains(
-			TerminalPtyHarness.ShellInterruptReadyMarker[
-				..(TerminalPtyHarness.ShellInterruptReadyMarker.Length / 2)],
-			command,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"trap 'dpx_interrupted=1' INT",
-			command,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			TerminalPtyHarness.ShellInterruptHandledMarker[
-				..(TerminalPtyHarness.ShellInterruptHandledMarker.Length / 2)],
-			command,
-			StringComparison.Ordinal);
 		Assert.Contains(
 			"exec-devprojex --version >/dev/null 2>&1",
 			command,

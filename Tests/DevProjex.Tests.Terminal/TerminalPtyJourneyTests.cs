@@ -57,7 +57,7 @@ public sealed class TerminalPtyJourneyTests
 			["--language", "en"],
 			cancellationToken: TestContext.Current.CancellationToken,
 			writeShellCompletionMarker: true,
-			verifyExtendedShellUsability: true);
+			verifyExecutableRelaunch: true);
 
 		await terminal.WaitForScreenAsync(
 			"> Open current directory",
