@@ -3,6 +3,35 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalPtyHarnessContractTests
 {
 	[Fact]
+	public void WindowsDotNetHostRunsDirectlyInsideTheWaitableParentShell()
+	{
+		var command = TerminalPtyHarness.BuildWindowsLaunchCommand(
+			@"C:\Program Files\dotnet\dotnet.exe",
+			[@"C:\DevProjex\DevProjex.dll", "--language", "ru"],
+			launchesThroughDotNetHost: true);
+
+		Assert.Equal(
+			"\"C:\\Program Files\\dotnet\\dotnet.exe\" " +
+			"\"C:\\DevProjex\\DevProjex.dll\" \"--language\" \"ru\"",
+			command);
+		Assert.DoesNotContain("start ", command, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public void WindowsGuiExecutableUsesStartWaitForProcessCompletion()
+	{
+		var command = TerminalPtyHarness.BuildWindowsLaunchCommand(
+			@"C:\Program Files\DevProjex\DevProjex.exe",
+			["tui"],
+			launchesThroughDotNetHost: false);
+
+		Assert.Equal(
+			"start \"\" /wait /b " +
+			"\"C:\\Program Files\\DevProjex\\DevProjex.exe\" \"tui\"",
+			command);
+	}
+
+	[Fact]
 	public void UnixRestorationHandshakeReportsBothOpaqueTermiosSnapshotsOnMismatch()
 	{
 		var command = TerminalPtyHarness.BuildUnixShellCommand(

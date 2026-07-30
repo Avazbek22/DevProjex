@@ -112,6 +112,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
 			: PublishedApplicationLocator.FindExecutable();
 		var launchArguments = arguments?.ToArray() ?? [];
+		var launchesThroughDotNetHost = false;
 		if (OperatingSystem.IsWindows() &&
 		    (useProgressCheckpointHost ||
 		     Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY") is null) &&
@@ -123,6 +124,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				.. launchArguments
 			];
 			binary = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+			launchesThroughDotNetHost = true;
 		}
 		var dataRoot = Path.Combine(
 			Path.GetTempPath(),
@@ -154,7 +156,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			launchArguments,
 			variables,
 			writeShellCompletionMarker,
-			verifyExecutableRelaunch && !useProgressCheckpointHost);
+			verifyExecutableRelaunch && !useProgressCheckpointHost,
+			launchesThroughDotNetHost);
 
 		var process = new Hex1bTerminalChildProcess(
 			host,
@@ -188,19 +191,17 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		IReadOnlyList<string> arguments,
 		IReadOnlyDictionary<string, string> environment,
 		bool writeShellCompletionMarker,
-		bool verifyExecutableRelaunch)
+		bool verifyExecutableRelaunch,
+		bool launchesThroughDotNetHost)
 	{
 		if (OperatingSystem.IsWindows())
 		{
 			var host = Environment.GetEnvironmentVariable("COMSPEC") ??
 			           Path.Combine(Environment.SystemDirectory, "cmd.exe");
-			var command = string.Join(
-				' ',
-				new[] { QuoteForCommandPrompt(binary) }
-					.Concat(arguments.Select(QuoteForCommandPrompt)));
-			var launch = binary.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)
-				? $"call {command}"
-				: $"start \"\" /wait /b {command}";
+			var launch = BuildWindowsLaunchCommand(
+				binary,
+				arguments,
+				launchesThroughDotNetHost);
 			var clearInheritedNoColor = environment.ContainsKey("NO_COLOR")
 				? string.Empty
 				: "set NO_COLOR=&& ";
@@ -243,6 +244,23 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			"/bin/sh",
 			["-c", shellCommand],
 			null);
+	}
+
+	internal static string BuildWindowsLaunchCommand(
+		string binary,
+		IReadOnlyList<string> arguments,
+		bool launchesThroughDotNetHost)
+	{
+		var command = string.Join(
+			' ',
+			new[] { QuoteForCommandPrompt(binary) }
+				.Concat(arguments.Select(QuoteForCommandPrompt)));
+		if (binary.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
+			return $"call {command}";
+
+		return launchesThroughDotNetHost
+			? command
+			: $"start \"\" /wait /b {command}";
 	}
 
 	internal static string BuildUnixShellCommand(
