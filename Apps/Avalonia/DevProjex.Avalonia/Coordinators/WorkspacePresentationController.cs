@@ -52,8 +52,6 @@ internal sealed class WorkspacePresentationController : IDisposable
     private readonly Window _window;
     private readonly MainWindowViewModel _viewModel;
     private readonly WorkspacePresentationControls _controls;
-    private readonly TranslateTransform _settingsTransform;
-
     private GridLength _savedSplitTreeColumnWidth = new(5, GridUnitType.Star);
     private GridLength _savedSplitPreviewColumnWidth = new(6, GridUnitType.Star);
     private double _currentPreviewTreePaneWidth;
@@ -78,11 +76,8 @@ internal sealed class WorkspacePresentationController : IDisposable
         _viewModel = viewModel;
         _controls = controls;
 
-        _settingsTransform = controls.SettingsIsland.RenderTransform as TranslateTransform
-                             ?? new TranslateTransform();
-        controls.SettingsIsland.RenderTransform = _settingsTransform;
         controls.SettingsContainer.Width = 0;
-        _settingsTransform.X = SettingsPanelDefaultWidth;
+        controls.SettingsIsland.Width = SettingsPanelDefaultWidth;
         controls.SettingsIsland.Opacity = 0;
         controls.PreviewPaneContainer.Width = 0;
 
@@ -721,92 +716,6 @@ internal sealed class WorkspacePresentationController : IDisposable
         return Math.Max(0, availableWorkspaceWidth - TreePreviewSplitterWidth);
     }
 
-    private double GetAvailableWorkspaceWidthForSettingsAnimation(
-        double settingsPanelWidth,
-        bool includeSplitter)
-    {
-        var workspaceWidth = _controls.WorkspaceGrid.Bounds.Width;
-        if (workspaceWidth <= 0.5)
-            return 0;
-
-        var reservedSettingsWidth = settingsPanelWidth > 0.5
-            ? settingsPanelWidth + (includeSplitter ? PreviewSettingsSplitterWidth : 0.0)
-            : 0.0;
-        return Math.Max(0, workspaceWidth - reservedSettingsWidth);
-    }
-
-    private double ResolveTreeModeTargetWidthForSettingsAnimation(
-        double settingsPanelWidth,
-        bool includeSplitter)
-    {
-        var availableWidth = GetAvailableWorkspaceWidthForSettingsAnimation(
-            settingsPanelWidth,
-            includeSplitter);
-        return availableWidth <= 0.5
-            ? SplitTreePaneMinimumWidth
-            : Math.Max(SplitTreePaneMinimumWidth, availableWidth);
-    }
-
-    private double ResolvePreviewOnlyTargetWidthForSettingsAnimation(
-        double settingsPanelWidth,
-        bool includeSplitter)
-    {
-        var availableWidth = GetAvailableWorkspaceWidthForSettingsAnimation(
-            settingsPanelWidth,
-            includeSplitter);
-        return availableWidth <= 0.5
-            ? SplitPreviewPaneMinimumWidth
-            : Math.Max(SplitPreviewPaneMinimumWidth, availableWidth);
-    }
-
-    private double ResolvePreviewPaneTargetWidthForSettingsAnimation(
-        double treePaneWidth,
-        double settingsPanelWidth,
-        bool includeSplitter)
-    {
-        var availableWorkspaceWidth = GetAvailableWorkspaceWidthForSettingsAnimation(
-            settingsPanelWidth,
-            includeSplitter);
-        var availableSplitWidth = Math.Max(
-            0,
-            availableWorkspaceWidth - TreePreviewSplitterWidth);
-        return availableSplitWidth <= 0.5
-            ? SplitPreviewPaneMinimumWidth
-            : Math.Max(SplitPreviewPaneMinimumWidth, availableSplitWidth - treePaneWidth);
-    }
-
-    private void SetSettingsAnimationPaneAnchors(
-        WorkspaceDisplayMode displayMode,
-        bool anchoredToLeftEdge)
-    {
-        switch (displayMode)
-        {
-            case WorkspaceDisplayMode.Tree:
-                SetSettingsAnimationPaneAnchor(
-                    _controls.TreePaneContainer,
-                    anchoredToLeftEdge);
-                break;
-
-            case WorkspaceDisplayMode.PreviewOnly:
-            case WorkspaceDisplayMode.PreviewWithTree:
-                SetSettingsAnimationPaneAnchor(
-                    _controls.PreviewPaneContainer,
-                    anchoredToLeftEdge);
-                break;
-        }
-    }
-
-    private static void SetSettingsAnimationPaneAnchor(
-        Border pane,
-        bool anchoredToLeftEdge)
-    {
-        // Explicit Width stops Stretch from controlling layout while the settings
-        // island and the neighboring pane animate as one visual transaction.
-        pane.HorizontalAlignment = anchoredToLeftEdge
-            ? HorizontalAlignment.Left
-            : HorizontalAlignment.Stretch;
-    }
-
     public bool HasVisibleSettingsPanelWidth()
         => _controls.SettingsContainer.Width > 0.5 ||
            _controls.SettingsContainer.Bounds.Width > 0.5;
@@ -838,6 +747,9 @@ internal sealed class WorkspacePresentationController : IDisposable
 
     private void ApplySettingsPanelWidth(double width, bool animate)
     {
+        if (width > 0.5)
+            SetWidthWithoutTransition(_controls.SettingsIsland, width);
+
         if (animate)
         {
             EnsureSettingsPanelTransitions();
@@ -947,7 +859,6 @@ internal sealed class WorkspacePresentationController : IDisposable
 
     private async Task RunSettingsPanelAnimationAsync(bool show)
     {
-        var displayMode = GetCurrentDisplayMode();
         IsSettingsAnimating = true;
         try
         {
@@ -957,143 +868,21 @@ internal sealed class WorkspacePresentationController : IDisposable
             _currentSettingsPanelWidth =
                 GetClampedSettingsPanelWidth(_currentSettingsPanelWidth);
             var targetVisibleWidth = _currentSettingsPanelWidth;
-            var currentTreeWidth = Math.Max(
-                SplitTreePaneMinimumWidth,
-                ResolvePreviewTreePaneVisibleWidth());
-            var currentPreviewWidth = Math.Max(
-                SplitPreviewPaneMinimumWidth,
-                ResolvePreviewPaneVisibleWidth());
-
-            SetSettingsAnimationPaneAnchors(displayMode, anchoredToLeftEdge: true);
 
             if (show)
-            {
                 SetPreviewSettingsSplitterVisibility(true);
-                AnimateLeadingPaneForSettingsOpen(
-                    displayMode,
-                    currentTreeWidth,
-                    currentPreviewWidth,
-                    targetVisibleWidth);
-            }
             else
-            {
                 SetPreviewSettingsSplitterVisibility(false);
-                AnimateLeadingPaneForSettingsClose(
-                    displayMode,
-                    currentTreeWidth,
-                    currentPreviewWidth);
-            }
 
             ApplySettingsPanelWidth(show ? targetVisibleWidth : 0.0, animate: true);
-            _settingsTransform.X = show ? 0.0 : targetVisibleWidth;
             _controls.SettingsIsland.Opacity = show ? 1.0 : 0.0;
             await WaitForPanelAnimationAsync();
-            RestoreAutomaticLeadingPaneWidth(displayMode);
         }
         finally
         {
-            SetSettingsAnimationPaneAnchors(displayMode, anchoredToLeftEdge: false);
             IsSettingsAnimating = false;
             UpdatePreviewSettingsSplitterState();
             UpdateAdaptiveWorkspaceChrome();
-        }
-    }
-
-    private void AnimateLeadingPaneForSettingsOpen(
-        WorkspaceDisplayMode displayMode,
-        double currentTreeWidth,
-        double currentPreviewWidth,
-        double targetSettingsWidth)
-    {
-        switch (displayMode)
-        {
-            case WorkspaceDisplayMode.Tree:
-                ApplyPreviewTreePaneWidth(currentTreeWidth, animate: false);
-                ApplyPreviewTreePaneWidth(
-                    ResolveTreeModeTargetWidthForSettingsAnimation(
-                        targetSettingsWidth,
-                        includeSplitter: true),
-                    animate: true);
-                break;
-
-            case WorkspaceDisplayMode.PreviewOnly:
-                ApplyPreviewPaneWidth(currentPreviewWidth, animate: false);
-                ApplyPreviewPaneWidth(
-                    ResolvePreviewOnlyTargetWidthForSettingsAnimation(
-                        targetSettingsWidth,
-                        includeSplitter: true),
-                    animate: true);
-                break;
-
-            case WorkspaceDisplayMode.PreviewWithTree:
-                ApplyPreviewTreePaneWidth(currentTreeWidth, animate: false);
-                ApplyPreviewPaneWidth(currentPreviewWidth, animate: false);
-                ApplyPreviewPaneWidth(
-                    ResolvePreviewPaneTargetWidthForSettingsAnimation(
-                        currentTreeWidth,
-                        targetSettingsWidth,
-                        includeSplitter: true),
-                    animate: true);
-                break;
-        }
-    }
-
-    private void AnimateLeadingPaneForSettingsClose(
-        WorkspaceDisplayMode displayMode,
-        double currentTreeWidth,
-        double currentPreviewWidth)
-    {
-        switch (displayMode)
-        {
-            case WorkspaceDisplayMode.Tree:
-                ApplyPreviewTreePaneWidth(currentTreeWidth, animate: false);
-                ApplyPreviewTreePaneWidth(
-                    ResolveTreeModeTargetWidthForSettingsAnimation(
-                        settingsPanelWidth: 0,
-                        includeSplitter: false),
-                    animate: true);
-                break;
-
-            case WorkspaceDisplayMode.PreviewOnly:
-                ApplyPreviewPaneWidth(currentPreviewWidth, animate: false);
-                ApplyPreviewPaneWidth(
-                    ResolvePreviewOnlyTargetWidthForSettingsAnimation(
-                        settingsPanelWidth: 0,
-                        includeSplitter: false),
-                    animate: true);
-                break;
-
-            case WorkspaceDisplayMode.PreviewWithTree:
-                ApplyPreviewTreePaneWidth(currentTreeWidth, animate: false);
-                ApplyPreviewPaneWidth(currentPreviewWidth, animate: false);
-                ApplyPreviewPaneWidth(
-                    ResolvePreviewPaneTargetWidthForSettingsAnimation(
-                        currentTreeWidth,
-                        settingsPanelWidth: 0,
-                        includeSplitter: false),
-                    animate: true);
-                break;
-        }
-    }
-
-    private void RestoreAutomaticLeadingPaneWidth(WorkspaceDisplayMode displayMode)
-    {
-        switch (displayMode)
-        {
-            case WorkspaceDisplayMode.Tree:
-                ApplyPreviewTreePaneWidth(double.NaN, animate: false);
-                break;
-
-            case WorkspaceDisplayMode.PreviewOnly:
-                ApplyPreviewPaneWidth(double.NaN, animate: false);
-                break;
-
-            case WorkspaceDisplayMode.PreviewWithTree:
-                ApplyPreviewTreePaneWidth(
-                    ResolveDesiredPreviewTreePaneWidth(),
-                    animate: false);
-                ApplyPreviewPaneWidth(double.NaN, animate: false);
-                break;
         }
     }
 
@@ -1137,19 +926,6 @@ internal sealed class WorkspacePresentationController : IDisposable
                 new DoubleTransition
                 {
                     Property = Visual.OpacityProperty,
-                    Duration = PanelAnimationDuration,
-                    Easing = new CubicEaseOut()
-                }
-            ];
-        }
-
-        if (_settingsTransform.Transitions is null)
-        {
-            _settingsTransform.Transitions =
-            [
-                new DoubleTransition
-                {
-                    Property = TranslateTransform.XProperty,
                     Duration = PanelAnimationDuration,
                     Easing = new CubicEaseOut()
                 }

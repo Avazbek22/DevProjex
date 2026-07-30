@@ -902,10 +902,7 @@
                 IsVisible="{Binding IsProjectLoaded}">
           <Border Classes="island-panel settings-island"
                   Name="SettingsIsland"
-                  RenderTransformOrigin="100%,50%">
-            <Border.RenderTransform>
-              <TranslateTransform X="0" />
-            </Border.RenderTransform>
+                  HorizontalAlignment="Left">
             <!-- Settings panel -->
             <views:SettingsPanelView Name="SettingsPanel"
                                      ApplySettingsRequested="OnApplySettings"

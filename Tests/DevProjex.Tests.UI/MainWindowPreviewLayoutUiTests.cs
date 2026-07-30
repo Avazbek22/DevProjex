@@ -1,6 +1,7 @@
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.VisualTree;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Controls;
 
 namespace DevProjex.Tests.UI;
@@ -84,6 +85,53 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
 
             AssertHorizontalPositionIsStable(openLeftEdges, "open");
             AssertHorizontalPositionIsStable(closeLeftEdges, "close");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task SettingsOpenClose_KeepsNeighborBoundarySynchronized(
+        bool previewVisible,
+        bool previewOnly)
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            if (previewVisible)
+                await UiTestDriver.OpenPreviewAsync(window);
+            if (previewOnly)
+                await UiTestDriver.HidePreviewTreeAsync(window);
+
+            var leadingPane = UiTestDriver.GetRequiredControl<Border>(
+                window,
+                previewVisible ? "PreviewPaneContainer" : "TreePaneContainer");
+
+            var closeErrors = await ObserveSettingsBoundaryErrorsAsync(
+                window,
+                leadingPane,
+                async () =>
+                {
+                    await UiTestDriver.PressKeyAsync(window, Key.P, RawInputModifiers.Control);
+                    await UiTestDriver.WaitForSettingsVisibilityAsync(window, visible: false);
+                });
+            var openErrors = await ObserveSettingsBoundaryErrorsAsync(
+                window,
+                leadingPane,
+                async () =>
+                {
+                    await UiTestDriver.PressKeyAsync(window, Key.P, RawInputModifiers.Control);
+                    await UiTestDriver.WaitForSettingsVisibilityAsync(window, visible: true);
+                });
+
+            AssertSettingsBoundaryIsSynchronized(closeErrors, "close", previewVisible);
+            AssertSettingsBoundaryIsSynchronized(openErrors, "open", previewVisible);
         }
         finally
         {
@@ -265,6 +313,72 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
         }
 
         return positions;
+    }
+
+    private static async Task<IReadOnlyList<double>> ObserveSettingsBoundaryErrorsAsync(
+        MainWindow window,
+        Control leadingPane,
+        Func<Task> transition)
+    {
+        var settingsContainer =
+            UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+        var settingsIsland =
+            UiTestDriver.GetRequiredControl<Border>(window, "SettingsIsland");
+        var settingsSplitter =
+            UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
+        var errors = new List<double>();
+
+        void CaptureBoundary(object? sender, EventArgs args)
+        {
+            _ = sender;
+            _ = args;
+            var leadingBounds =
+                UiTestDriver.GetBoundsInWindow(leadingPane, window);
+            var settingsBounds =
+                UiTestDriver.GetBoundsInWindow(settingsContainer, window);
+            var settingsIslandBounds =
+                UiTestDriver.GetBoundsInWindow(settingsIsland, window);
+            var expectedGap = settingsSplitter.IsVisible
+                ? WorkspacePresentationController.PreviewSettingsSplitterWidth
+                : 0.0;
+            var layoutBoundaryError =
+                Math.Abs(settingsBounds.Left - leadingBounds.Right - expectedGap);
+            var visibleIslandBoundaryError =
+                Math.Abs(settingsIslandBounds.Left - settingsBounds.Left);
+            errors.Add(Math.Max(layoutBoundaryError, visibleIslandBoundaryError));
+        }
+
+        CaptureBoundary(null, EventArgs.Empty);
+        window.LayoutUpdated += CaptureBoundary;
+        try
+        {
+            await transition();
+            CaptureBoundary(null, EventArgs.Empty);
+        }
+        finally
+        {
+            window.LayoutUpdated -= CaptureBoundary;
+        }
+
+        return errors;
+    }
+
+    private static void AssertSettingsBoundaryIsSynchronized(
+        IReadOnlyList<double> errors,
+        string transitionName,
+        bool previewVisible)
+    {
+        Assert.NotEmpty(errors);
+        var maximumError = errors.Max();
+        Assert.True(
+            maximumError <= 0.01,
+            $"Settings {transitionName} lost synchronization with the " +
+            $"{(previewVisible ? "preview" : "tree")} pane: " +
+            $"maximum boundary error={maximumError:F2}.");
+        Assert.True(
+            errors[^1] <= 0.01,
+            $"Settings {transitionName} finished with a boundary error of " +
+            $"{errors[^1]:F2}.");
     }
 
     private static void AssertHorizontalPositionIsStable(
