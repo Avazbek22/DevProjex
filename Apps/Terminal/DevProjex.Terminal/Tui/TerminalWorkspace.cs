@@ -73,7 +73,7 @@ public sealed class TerminalWorkspace
 		// disposal, so bracket its teardown with idempotent visibility restoration.
 		using var postApplicationCursorRestoration =
 			new TerminalCursorRestoration(environment.Output);
-		using IApplication application = global::Terminal.Gui.App.Application.Create();
+		using IApplication application = TerminalGuiApplicationFactory.Create();
 		using var preDisposeCursorRestoration = new TerminalCursorRestoration(environment.Output);
 		application.Mouse.IsMouseDisabled = !mouseEnabled;
 		var initialized = false;
