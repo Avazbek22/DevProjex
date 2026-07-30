@@ -2241,9 +2241,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		try
 		{
-			resolvedCandidate = ProjectCopyExportService.ResolveDestinationOutsideProject(
+			var requestedCandidate = Path.GetFullPath(candidate);
+			var physicalCandidate = ProjectCopyExportService.ResolveDestinationOutsideProject(
 				sourceRoot,
-				candidate);
+				requestedCandidate);
+			resolvedCandidate = ProjectCopyExportService.ResolveReportedDestinationPath(
+				requestedCandidate,
+				physicalCandidate);
 			return true;
 		}
 		catch (ProjectCopyExportException)

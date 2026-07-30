@@ -31,13 +31,16 @@ public sealed class ExportContextCommandHandler(
 				request.OutputPath,
 				request.Force)
 			: null;
+		var requestedOutputPath = outputPath is not null
+			? Path.GetFullPath(request.OutputPath!)
+			: null;
 
 		if (request.DryRun)
 		{
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,
-				outputPath ?? "-");
+				requestedOutputPath ?? "-");
 			return CommandLineExitCodes.Success;
 		}
 
@@ -69,7 +72,7 @@ public sealed class ExportContextCommandHandler(
 		var writtenPath = await status.RunAsync(
 				services.Localization["Terminal.Status.BuildingContext"],
 				() => AtomicOutputWriter.WriteAsync(
-					outputPath!,
+					requestedOutputPath!,
 					request.Force,
 					(destination, token) =>
 						services.ContextDocumentService.WriteCompleteAsync(

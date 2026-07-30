@@ -567,6 +567,13 @@ validated fail-closed. v1 does not claim atomic protection against a privileged 
 hostile process that mutates the already validated filesystem namespace in the
 remaining interval before a path-based platform commit.
 
+After a successful commit, DevProjex reports the absolute destination spelling
+requested by the user while it still resolves to the committed physical entry.
+If an alias was retargeted during the operation, the validated physical path is
+reported instead. Physical paths remain an internal safety boundary and do not
+replace stable user-visible paths merely because the operating system exposes an
+equivalent alias such as macOS `/var` → `/private/var`.
+
 Context, analysis, and portable-profile file outputs never create a missing
 parent directory. Dry-run creates nothing.
 

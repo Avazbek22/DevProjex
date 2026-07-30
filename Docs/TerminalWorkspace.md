@@ -236,6 +236,9 @@ suggested export path uses the external current directory only after the same
 canonical source-safety check; otherwise it uses a separately validated sibling
 of the source. If neither location can be established safely, no default is
 suggested. A filesystem alias into the source is never suggested.
+When an external alias remains stable after canonical safety validation, the
+suggestion keeps the user's absolute path spelling instead of exposing an
+equivalent physical-system alias.
 
 Folder and ZIP exports use measured progress from the shared copy engine:
 processed entries, total entries, percentage, written bytes, elapsed time, and

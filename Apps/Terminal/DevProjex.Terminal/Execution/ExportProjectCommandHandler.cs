@@ -39,17 +39,18 @@ public sealed class ExportProjectCommandHandler(
 		if (plan.HasErrors)
 			return CommandLineExitCodes.PolicyFailure;
 
-		var exactOutput = ExactOutputDestinationValidator.ValidateProject(
+		_ = ExactOutputDestinationValidator.ValidateProject(
 			plan.SourceRoot,
 			request.OutputPath,
 			request.Format,
 			request.Force);
+		var requestedOutput = Path.GetFullPath(request.OutputPath);
 		if (request.DryRun)
 		{
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,
-				exactOutput);
+				requestedOutput);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -59,7 +60,7 @@ public sealed class ExportProjectCommandHandler(
 			             Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
 			TreeRoot: plan.ProjectedTree,
 			SelectedPaths: new HashSet<string>(PathComparer.Default),
-			DestinationPath: exactOutput,
+			DestinationPath: requestedOutput,
 			Format: request.Format,
 			DestinationMode: ProjectCopyDestinationMode.Exact,
 			ConflictPolicy: request.Force

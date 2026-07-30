@@ -27,6 +27,9 @@ public sealed class AnalyzeCommandHandler(
 				plan.SourceRoot,
 				request.OutputPath)
 			: null;
+		var requestedOutputPath = outputPath is not null
+			? Path.GetFullPath(request.OutputPath!)
+			: null;
 
 		if (request.OutputPath is null or "-")
 		{
@@ -61,7 +64,7 @@ public sealed class AnalyzeCommandHandler(
 				: AnalysisTextFormatter.Build(plan, services.Localization);
 			var writtenPath = await AtomicOutputWriter
 				.WriteTextAsync(
-					outputPath!,
+					requestedOutputPath!,
 					payload,
 					overwrite: false,
 					cancellationToken,

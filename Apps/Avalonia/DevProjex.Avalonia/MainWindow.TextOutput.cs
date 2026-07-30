@@ -269,12 +269,11 @@ public partial class MainWindow
             return false;
         }
 
-        string resolvedDestinationPath;
         try
         {
             // Text and physical exports share the same canonical guard so an aliased path
             // cannot bypass the read-only boundary of the loaded project.
-            resolvedDestinationPath = await Task.Run(
+            _ = await Task.Run(
                 () => ProjectCopyExportService.ResolveDestinationOutsideProject(
                     sourceRootPath,
                     destinationPath),
@@ -298,7 +297,7 @@ public partial class MainWindow
         {
             await Task.Run(
                 () => AtomicFileOutput.WriteAsync(
-                    resolvedDestinationPath,
+                    Path.GetFullPath(destinationPath),
                     overwrite: true,
                     (stream, writeCancellationToken) =>
                         _textFileExport.WriteAsync(

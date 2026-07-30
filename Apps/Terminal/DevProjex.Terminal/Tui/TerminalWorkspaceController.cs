@@ -282,9 +282,10 @@ public sealed class TerminalWorkspaceController(
 			plan.SourceRoot,
 			destination,
 			overwrite);
+		var requestedDestination = Path.GetFullPath(destination);
 		return await AtomicOutputWriter
 			.WriteAsync(
-				exactDestination,
+				requestedDestination,
 				overwrite,
 				(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
 					plan,
@@ -342,11 +343,12 @@ public sealed class TerminalWorkspaceController(
 
 		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
 		EnsureExportable(plan);
-		var exactDestination = ExactOutputDestinationValidator.ValidateProject(
+		_ = ExactOutputDestinationValidator.ValidateProject(
 			plan.SourceRoot,
 			destination,
 			format,
 			overwrite: false);
+		var requestedDestination = Path.GetFullPath(destination);
 		var result = await services.ProjectCopyExportService.ExportAsync(
 				new ProjectCopyExportRequest(
 					ProjectRootPath: plan.SourceRoot,
@@ -354,7 +356,7 @@ public sealed class TerminalWorkspaceController(
 					             Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
 					TreeRoot: plan.ProjectedTree,
 					SelectedPaths: new HashSet<string>(PathComparer.Default),
-					DestinationPath: exactDestination,
+					DestinationPath: requestedDestination,
 					Format: format,
 					DestinationMode: ProjectCopyDestinationMode.Exact,
 					ConflictPolicy: ProjectCopyConflictPolicy.Fail),
@@ -458,7 +460,8 @@ public sealed class TerminalWorkspaceController(
 		var exactDestination = Path.GetFullPath(destination);
 		try
 		{
-			return (validate(exactDestination), TerminalExportDestinationState.Ready);
+			_ = validate(exactDestination);
+			return (exactDestination, TerminalExportDestinationState.Ready);
 		}
 		catch (OutputDestinationConflictException exception)
 		{

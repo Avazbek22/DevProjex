@@ -34,4 +34,47 @@ public sealed class PortableProjectProfileServiceTests
 			".portable.json.*.tmp",
 			SearchOption.TopDirectoryOnly));
 	}
+
+	[Fact]
+	public async Task SaveAsyncReportsStableRequestedAliasAfterPhysicalCommit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var profileDirectory = workspace.CreateFolder("profiles");
+		var alias = Path.Combine(workspace.Path, "profile-alias");
+		try
+		{
+			Directory.CreateSymbolicLink(alias, profileDirectory);
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip(
+				$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		try
+		{
+			var requestedPath = Path.Combine(alias, "portable.json");
+			var service = new PortableProjectProfileService();
+
+			var writtenPath = await service.SaveAsync(
+				sourceRoot,
+				requestedPath,
+				new ProjectSelectionSpec(
+					GitMode: GitFilteringMode.None,
+					Exclusions: []),
+				overwrite: false,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(Path.GetFullPath(requestedPath), writtenPath);
+			Assert.True(File.Exists(Path.Combine(profileDirectory, "portable.json")));
+		}
+		finally
+		{
+			Directory.Delete(alias);
+		}
+	}
 }

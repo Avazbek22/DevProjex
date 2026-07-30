@@ -108,7 +108,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			: ResolveAvailableDirectoryPath(destinationParent, $"{plan.ProjectName}-copy");
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, preferredPath);
 		if (destinationMode == ProjectCopyDestinationMode.Exact)
-			EnsureDestinationDoesNotExist(preferredPath);
+			EnsureDestinationDoesNotExist(preferredPath, requestedPath);
 
 		// A sibling staging directory keeps the final rename atomic and prevents partial results from becoming visible.
 		var stagingPath = Path.Combine(destinationParent, $".devprojex-{Guid.NewGuid():N}.tmp");
@@ -153,6 +153,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				? MoveStagingDirectoryToExactPath(
 					stagingPath,
 					preferredPath,
+					requestedPath,
 					plan.ProjectRootPath,
 					cancellationToken)
 				: MoveStagingDirectoryToAvailablePath(
@@ -224,7 +225,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		if (destinationMode == ProjectCopyDestinationMode.Exact &&
 		    conflictPolicy == ProjectCopyConflictPolicy.Fail)
 		{
-			EnsureDestinationDoesNotExist(destinationPath);
+			EnsureDestinationDoesNotExist(destinationPath, requestedDestinationPath);
 		}
 
 		var stagingPath = Path.Combine(destinationDirectory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
@@ -281,7 +282,11 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			}
 			catch (IOException exception) when (Path.Exists(destinationPath))
 			{
-				throw DestinationConflict(destinationPath, exception);
+				throw DestinationConflict(
+					ResolveReportedDestinationPath(
+						requestedDestinationPath,
+						destinationPath),
+					exception);
 			}
 			var reportedPath = ResolveReportedDestinationPath(requestedDestinationPath, destinationPath);
 			return new ProjectCopyExportResult(reportedPath, processedFiles, plan.DirectoryCount, bytesWritten);
@@ -389,10 +394,17 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		ValidateDestinationOutsideSource(rootPath, normalizedDestination);
 	}
 
-	private static void EnsureDestinationDoesNotExist(string path)
+	private static void EnsureDestinationDoesNotExist(
+		string path,
+		string? requestedPath = null)
 	{
 		if (Path.Exists(path))
-			throw DestinationConflict(path);
+		{
+			throw DestinationConflict(
+				requestedPath is null
+					? path
+					: ResolveReportedDestinationPath(requestedPath, path));
+		}
 	}
 
 	private static void EnsureDestinationDirectoryExists(string path)
@@ -843,7 +855,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		return destination;
 	}
 
-	private static string ResolveReportedDestinationPath(string requestedPath, string physicalPath)
+	public static string ResolveReportedDestinationPath(string requestedPath, string physicalPath)
 	{
 		try
 		{
@@ -900,12 +912,13 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 	private static string MoveStagingDirectoryToExactPath(
 		string stagingPath,
 		string destinationPath,
+		string requestedDestinationPath,
 		string projectRootPath,
 		CancellationToken cancellationToken)
 	{
 		ValidateDestinationOutsideSource(projectRootPath, stagingPath);
 		ValidateDestinationOutsideSource(projectRootPath, destinationPath);
-		EnsureDestinationDoesNotExist(destinationPath);
+		EnsureDestinationDoesNotExist(destinationPath, requestedDestinationPath);
 		cancellationToken.ThrowIfCancellationRequested();
 		try
 		{
@@ -914,7 +927,11 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		}
 		catch (IOException exception) when (Path.Exists(destinationPath))
 		{
-			throw DestinationConflict(destinationPath, exception);
+			throw DestinationConflict(
+				ResolveReportedDestinationPath(
+					requestedDestinationPath,
+					destinationPath),
+				exception);
 		}
 	}
 

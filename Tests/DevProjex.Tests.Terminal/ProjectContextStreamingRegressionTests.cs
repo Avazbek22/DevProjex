@@ -692,7 +692,7 @@ public sealed class ProjectContextStreamingRegressionTests
 		}
 
 		var requestedDestination = Path.Combine(alias, "report.txt");
-		var resolvedDestination = ExactOutputDestinationValidator.ValidateContext(
+		_ = ExactOutputDestinationValidator.ValidateContext(
 			source,
 			requestedDestination,
 			overwrite: false);
@@ -700,7 +700,7 @@ public sealed class ProjectContextStreamingRegressionTests
 		try
 		{
 			var writtenPath = await AtomicOutputWriter.WriteAsync(
-				resolvedDestination,
+				requestedDestination,
 				overwrite: false,
 				async (stream, cancellationToken) =>
 				{
@@ -715,7 +715,12 @@ public sealed class ProjectContextStreamingRegressionTests
 					overwrite: false));
 
 			var safeDestination = Path.Combine(safeTarget, "report.txt");
-			Assert.Equal(safeDestination, writtenPath);
+			var physicalSafeDestination =
+				ProjectCopyExportService.ResolveDestinationOutsideProject(
+					source,
+					safeDestination);
+			Assert.Equal(physicalSafeDestination, writtenPath);
+			Assert.NotEqual(Path.GetFullPath(requestedDestination), writtenPath);
 			Assert.Equal(
 				"safe payload",
 				await File.ReadAllTextAsync(
@@ -724,6 +729,56 @@ public sealed class ProjectContextStreamingRegressionTests
 			Assert.False(File.Exists(Path.Combine(source, "report.txt")));
 			Assert.Empty(Directory.EnumerateFiles(safeTarget, ".*.tmp"));
 			Assert.Empty(Directory.EnumerateFiles(source, ".*.tmp"));
+		}
+		finally
+		{
+			Directory.Delete(alias);
+		}
+	}
+
+	[Fact]
+	public async Task AtomicOutputReportsStableRequestedAliasAfterPhysicalCommit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("source");
+		var safeTarget = workspace.CreateDirectory("safe-target");
+		var alias = Path.Combine(workspace.Path, "output-alias");
+		try
+		{
+			Directory.CreateSymbolicLink(alias, safeTarget);
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip(
+				$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		try
+		{
+			var requestedDestination = Path.Combine(alias, "report.txt");
+			var payload = Encoding.UTF8.GetBytes("safe payload");
+
+			var writtenPath = await AtomicOutputWriter.WriteAsync(
+				requestedDestination,
+				overwrite: false,
+				(stream, cancellationToken) =>
+					stream.WriteAsync(payload, cancellationToken).AsTask(),
+				TestContext.Current.CancellationToken,
+				path => ExactOutputDestinationValidator.ValidateContext(
+					source,
+					path,
+					overwrite: false));
+
+			Assert.Equal(Path.GetFullPath(requestedDestination), writtenPath);
+			Assert.Equal(
+				"safe payload",
+				await File.ReadAllTextAsync(
+					Path.Combine(safeTarget, "report.txt"),
+					TestContext.Current.CancellationToken));
+			Assert.Empty(Directory.EnumerateFiles(safeTarget, ".*.tmp"));
 		}
 		finally
 		{

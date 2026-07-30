@@ -39,17 +39,38 @@ internal static class AtomicOutputWriter
 	{
 		try
 		{
+			var applicationValidator = AdaptDestinationValidator(
+				validateDestination);
 			return await AtomicFileOutput.WriteAsync(
 					path,
 					overwrite,
 					write,
 					cancellationToken,
-					validateDestination)
+					applicationValidator)
 				.ConfigureAwait(false);
 		}
 		catch (AtomicFileOutputConflictException exception)
 		{
 			throw new OutputDestinationConflictException(exception.Path);
 		}
+	}
+
+	private static Func<string, string>? AdaptDestinationValidator(
+		Func<string, string>? validateDestination)
+	{
+		if (validateDestination is null)
+			return null;
+
+		return path =>
+		{
+			try
+			{
+				return validateDestination(path);
+			}
+			catch (OutputDestinationConflictException exception)
+			{
+				throw new AtomicFileOutputConflictException(exception.Path);
+			}
+		};
 	}
 }

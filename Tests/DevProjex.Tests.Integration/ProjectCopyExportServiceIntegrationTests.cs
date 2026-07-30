@@ -475,6 +475,60 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task AtomicFileConflictDuringFirstRevalidationReportsStableRequestedAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		workspace.CreateFile("source/app.cs", "SOURCE");
+		var externalTarget = workspace.CreateDirectory("external-target");
+		var alias = Path.Combine(workspace.Path, "stable-alias");
+		if (OperatingSystem.IsWindows())
+			CreateWindowsJunctionOrSkip(alias, externalTarget);
+		else
+			CreateDirectoryLinkOrSkip(alias, externalTarget);
+
+		var requestedDestination = Path.Combine(alias, "report.txt");
+		var physicalDestination = Path.Combine(externalTarget, "report.txt");
+		var validationCount = 0;
+		var writeInvoked = false;
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<AtomicFileOutputConflictException>(
+				() => AtomicFileOutput.WriteAsync(
+					requestedDestination,
+					overwrite: false,
+					(_, _) =>
+					{
+						writeInvoked = true;
+						return Task.CompletedTask;
+					},
+					TestContext.Current.CancellationToken,
+					path =>
+					{
+						validationCount++;
+						if (validationCount == 2)
+							File.WriteAllText(physicalDestination, "EXISTING");
+
+						return ExactFileOutputDestinationPolicy.Resolve(
+							sourceRoot,
+							path,
+							overwrite: false);
+					}));
+
+			Assert.Equal(2, validationCount);
+			Assert.False(writeInvoked);
+			Assert.Equal(Path.GetFullPath(requestedDestination), exception.Path);
+			Assert.Equal("EXISTING", File.ReadAllText(physicalDestination));
+			Assert.Empty(Directory.EnumerateFiles(externalTarget, ".*.tmp"));
+		}
+		finally
+		{
+			DeleteDirectoryLink(alias);
+		}
+	}
+
+	[Fact]
 	public async Task AtomicFileCleanupRetriesTransientWindowsDeleteLock()
 	{
 		if (!OperatingSystem.IsWindows())
@@ -723,6 +777,63 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder, "submission")]
+	[InlineData(ProjectCopyExportFormat.Zip, "submission.zip")]
+	public async Task StableExternalDestinationAliasIsReportedForSuccessAndConflict(
+		ProjectCopyExportFormat format,
+		string outputName)
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var externalTarget = Directory.CreateDirectory(
+			Path.Combine(workspace.DestinationParent, "stable-target")).FullName;
+		var alias = Path.Combine(workspace.DestinationParent, "stable-alias");
+		CreateDirectoryLinkOrSkip(alias, externalTarget);
+		var requestedDestination = Path.Combine(alias, outputName);
+		var physicalDestination = Path.Combine(externalTarget, outputName);
+		var request = new ProjectCopyExportRequest(
+			workspace.SourceRoot,
+			"Sample",
+			workspace.Root,
+			new HashSet<string>(PathComparer.Default),
+			requestedDestination,
+			format,
+			ProjectCopyDestinationMode.Exact,
+			ProjectCopyConflictPolicy.Fail);
+
+		try
+		{
+			var service = new ProjectCopyExportService(new ProjectCopyExportPlanBuilder());
+
+			var result = await service.ExportAsync(
+				request,
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			var authoritativePhysicalDestination =
+				ProjectCopyExportService.ResolveDestinationOutsideProject(
+					workspace.SourceRoot,
+					physicalDestination);
+			Assert.Equal(Path.GetFullPath(requestedDestination), result.DestinationPath);
+			Assert.NotEqual(authoritativePhysicalDestination, result.DestinationPath);
+			Assert.True(format == ProjectCopyExportFormat.Folder
+				? File.Exists(Path.Combine(physicalDestination, "README.md"))
+				: File.Exists(physicalDestination));
+
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				service.ExportAsync(
+					request,
+					cancellationToken: TestContext.Current.CancellationToken));
+
+			Assert.Equal(ProjectCopyExportError.DestinationConflict, exception.Error);
+			Assert.Equal(Path.GetFullPath(requestedDestination), exception.PathContext);
+			Assert.Empty(FindStagingArtifacts(externalTarget));
+		}
+		finally
+		{
+			DeleteDirectoryLink(alias);
+		}
+	}
+
+	[Theory]
 	[InlineData(ProjectCopyExportFormat.Folder)]
 	[InlineData(ProjectCopyExportFormat.Zip)]
 	public async Task DestinationSymlinkRetargetedDuringExportCannotRedirectWritesIntoSource(
@@ -762,9 +873,23 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 			Assert.True(format == ProjectCopyExportFormat.Folder
 				? File.Exists(Path.Combine(externalTarget, "Sample-copy", "README.md"))
 				: File.Exists(Path.Combine(externalTarget, "retargeted.zip")));
+			var physicalDestination = format == ProjectCopyExportFormat.Folder
+				? Path.Combine(externalTarget, "Sample-copy")
+				: Path.Combine(externalTarget, "retargeted.zip");
+			var requestedReportedDestination = format == ProjectCopyExportFormat.Folder
+				? Path.Combine(linkPath, "Sample-copy")
+				: destination;
+			var authoritativePhysicalDestination =
+				ProjectCopyExportService.ResolveDestinationOutsideProject(
+					workspace.SourceRoot,
+					physicalDestination);
+			Assert.Equal(authoritativePhysicalDestination, result.DestinationPath);
+			Assert.NotEqual(
+				Path.GetFullPath(requestedReportedDestination),
+				result.DestinationPath);
 			Assert.True(format == ProjectCopyExportFormat.Folder
-				? Directory.Exists(result.DestinationPath)
-				: File.Exists(result.DestinationPath));
+				? Directory.Exists(physicalDestination)
+				: File.Exists(physicalDestination));
 			Assert.False(Directory.Exists(Path.Combine(workspace.SourceRoot, "Sample-copy")));
 			Assert.False(File.Exists(Path.Combine(workspace.SourceRoot, "retargeted.zip")));
 			Assert.Empty(FindStagingArtifacts(workspace.SourceRoot));
@@ -846,6 +971,12 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				[],
 				cancellationToken: TestContext.Current.CancellationToken);
 
+			Assert.Equal(
+				Path.Combine(junctionPath, "Sample-copy"),
+				result.DestinationPath);
+			Assert.NotEqual(
+				Path.Combine(externalTarget, "Sample-copy"),
+				result.DestinationPath);
 			Assert.True(Directory.Exists(result.DestinationPath));
 			Assert.True(File.Exists(Path.Combine(externalTarget, "Sample-copy", "README.md")));
 			Assert.Empty(FindStagingArtifacts(externalTarget));

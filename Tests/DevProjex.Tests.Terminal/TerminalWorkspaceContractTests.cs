@@ -68,7 +68,7 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
-	public void DefaultExportPathResolvesDirectoryAliasesBeforeChoosingItsLocation()
+	public void DefaultExportPathValidatesAliasesAndKeepsAStableRequestedLocation()
 	{
 		using var workspace = new TemporaryDirectory();
 		var source = workspace.CreateDirectory("Project");
@@ -87,7 +87,7 @@ public sealed class TerminalWorkspaceContractTests
 					sourceAlias,
 					"devprojex-profile.json"));
 			Assert.Equal(
-				Path.Combine(safeTarget, "devprojex-profile.json"),
+				Path.Combine(safeAlias, "devprojex-profile.json"),
 				TerminalWorkspaceSession.BuildDefaultExportPath(
 					source,
 					safeAlias,
@@ -647,6 +647,107 @@ public sealed class TerminalWorkspaceContractTests
 				TestContext.Current.CancellationToken));
 
 		Assert.Equal("existing", File.ReadAllText(destination));
+	}
+
+	[Fact]
+	public async Task AtomicOutputWriterReportsStableAliasForFirstRevalidationConflict()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var physicalOutput = workspace.CreateDirectory("physical-output");
+		var alias = Path.Combine(workspace.Path, "output-alias");
+		CreateDirectoryAliasOrSkip(alias, physicalOutput);
+		var requestedDestination = Path.Combine(alias, "context.md");
+		var physicalDestination = Path.Combine(physicalOutput, "context.md");
+		var validationCount = 0;
+		var writeInvoked = false;
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<OutputDestinationConflictException>(
+				() => AtomicOutputWriter.WriteAsync(
+					requestedDestination,
+					overwrite: false,
+					(_, _) =>
+					{
+						writeInvoked = true;
+						return Task.CompletedTask;
+					},
+					TestContext.Current.CancellationToken,
+					path =>
+					{
+						validationCount++;
+						if (validationCount == 2)
+							File.WriteAllText(physicalDestination, "EXISTING");
+
+						return ExactOutputDestinationValidator.ValidateContext(
+							source,
+							path,
+							overwrite: false);
+					}));
+
+			Assert.Equal(2, validationCount);
+			Assert.False(writeInvoked);
+			Assert.Equal(Path.GetFullPath(requestedDestination), exception.Path);
+			Assert.Equal("EXISTING", File.ReadAllText(physicalDestination));
+			Assert.Empty(Directory.EnumerateFiles(physicalOutput, ".*.tmp"));
+		}
+		finally
+		{
+			DeleteDirectoryAlias(alias);
+		}
+	}
+
+	[Fact]
+	public async Task TuiContextExportReportsStableRequestedAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var outputDirectory = workspace.CreateDirectory("output");
+		var alias = Path.Combine(workspace.Path, "output-alias");
+		try
+		{
+			Directory.CreateSymbolicLink(alias, outputDirectory);
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip(
+				$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		try
+		{
+			var destination = Path.Combine(alias, "context.md");
+			var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+				.Create(AppLanguage.En);
+			var controller = new TerminalWorkspaceController(
+				services,
+				new TestTerminalEnvironment());
+			using var state = await controller.OpenAsync(
+				project,
+				ProjectProfileReference.Standard,
+				TestContext.Current.CancellationToken);
+
+			var result = await controller.ExportContextAsync(
+				state,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Markdown,
+				destination,
+				overwrite: false,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(Path.GetFullPath(destination), result);
+			Assert.True(File.Exists(Path.Combine(outputDirectory, "context.md")));
+		}
+		finally
+		{
+			Directory.Delete(alias);
+		}
 	}
 
 	[Fact]

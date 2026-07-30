@@ -103,6 +103,67 @@ public sealed class ExportProjectCommandContractTests
 	}
 
 	[Theory]
+	[InlineData("folder", "submission")]
+	[InlineData("zip", "submission.zip")]
+	public async Task StableExternalDestinationAliasIsReportedForSuccessAndConflict(
+		string kind,
+		string outputName)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var externalTarget = workspace.CreateDirectory("external-target");
+		var alias = Path.Combine(workspace.Path, "external-alias");
+		CreateDirectoryAliasOrSkip(alias, externalTarget);
+		var requestedDestination = Path.Combine(alias, outputName);
+		var physicalDestination = Path.Combine(externalTarget, outputName);
+
+		try
+		{
+			var successEnvironment = new TestTerminalEnvironment();
+			var success = await RunAsync(
+				project,
+				requestedDestination,
+				kind,
+				successEnvironment);
+
+			Assert.Equal(CommandLineExitCodes.Success, success);
+			Assert.Equal(
+				Path.GetFullPath(requestedDestination) + Environment.NewLine,
+				successEnvironment.StandardOutput);
+			Assert.True(kind == "folder"
+				? File.Exists(Path.Combine(physicalDestination, "src", "app.cs"))
+				: File.Exists(physicalDestination));
+
+			var conflictEnvironment = new TestTerminalEnvironment();
+			var conflict = await RunAsync(
+				project,
+				requestedDestination,
+				kind,
+				conflictEnvironment);
+
+			Assert.Equal(CommandLineExitCodes.DestinationConflict, conflict);
+			Assert.Empty(conflictEnvironment.StandardOutput);
+			Assert.Contains(
+				Path.GetFullPath(requestedDestination),
+				conflictEnvironment.StandardError,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				Path.GetFullPath(physicalDestination),
+				conflictEnvironment.StandardError,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				Directory.EnumerateFileSystemEntries(externalTarget),
+				static path => Path.GetFileName(path).StartsWith(".", StringComparison.Ordinal) &&
+				               Path.GetFileName(path).EndsWith(".tmp", StringComparison.Ordinal));
+		}
+		finally
+		{
+			Directory.Delete(alias);
+		}
+	}
+
+	[Theory]
 	[InlineData("folder", "--force", "DPX-CLI-FORCE-NOT-SUPPORTED")]
 	[InlineData("zip", null, "DPX-CLI-ZIP-EXTENSION-REQUIRED")]
 	public async Task InvalidKindSpecificOptionsFailBeforeWriting(
@@ -240,5 +301,21 @@ public sealed class ExportProjectCommandContractTests
 		arguments.AddRange(additionalArguments);
 		return new TerminalApplication(environment, new TerminalServiceFactory())
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
+	}
+
+	private static void CreateDirectoryAliasOrSkip(string alias, string target)
+	{
+		try
+		{
+			Directory.CreateSymbolicLink(alias, target);
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip(
+				$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
 	}
 }

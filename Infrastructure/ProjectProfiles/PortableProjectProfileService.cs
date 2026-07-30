@@ -88,12 +88,13 @@ public sealed class PortableProjectProfileService
 		var document = ToDocument(selection);
 		try
 		{
-			var exactPath = ExactFileOutputDestinationPolicy.Resolve(
+			var requestedPath = NormalizeProfilePath(path);
+			_ = ExactFileOutputDestinationPolicy.Resolve(
 				sourceRoot,
-				NormalizeProfilePath(path),
+				requestedPath,
 				overwrite);
 			return await AtomicFileOutput.WriteAsync(
-					exactPath,
+					requestedPath,
 					overwrite,
 					(stream, token) =>
 						JsonSerializer.SerializeAsync(

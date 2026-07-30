@@ -61,7 +61,8 @@ public static class AtomicFileOutput
 		Func<string, string>? validateDestination = null)
 	{
 		ArgumentNullException.ThrowIfNull(write);
-		var fullPath = Path.GetFullPath(path);
+		var requestedPath = Path.GetFullPath(path);
+		var fullPath = requestedPath;
 		cancellationToken.ThrowIfCancellationRequested();
 		fullPath = validateDestination?.Invoke(fullPath) ?? fullPath;
 		var directory = Path.GetDirectoryName(fullPath);
@@ -71,9 +72,19 @@ public static class AtomicFileOutput
 			throw new DirectoryNotFoundException(
 				"The output destination parent directory does not exist.");
 		}
-		RevalidateResolvedPath(fullPath, validateDestination);
-		if (!overwrite && Path.Exists(fullPath))
-			throw new AtomicFileOutputConflictException(fullPath);
+		try
+		{
+			RevalidateResolvedPath(fullPath, validateDestination);
+			if (!overwrite && Path.Exists(fullPath))
+				throw new AtomicFileOutputConflictException(fullPath);
+		}
+		catch (AtomicFileOutputConflictException exception)
+		{
+			throw new AtomicFileOutputConflictException(
+				ProjectCopyExportService.ResolveReportedDestinationPath(
+					requestedPath,
+					exception.Path));
+		}
 
 		var tempPath = Path.Combine(
 			directory,
@@ -101,7 +112,10 @@ public static class AtomicFileOutput
 			(exception is IOException or UnauthorizedAccessException) &&
 			CommitFailureIsDestinationConflict(fullPath, overwrite))
 		{
-			operationException = new AtomicFileOutputConflictException(fullPath);
+			operationException = new AtomicFileOutputConflictException(
+				ProjectCopyExportService.ResolveReportedDestinationPath(
+					requestedPath,
+					fullPath));
 		}
 		catch (Exception exception)
 		{
@@ -122,7 +136,11 @@ public static class AtomicFileOutput
 		if (operationException is not null)
 			ExceptionDispatchInfo.Capture(operationException).Throw();
 
-		return fullPath;
+		return PathComparer.Default.Equals(requestedPath, fullPath)
+			? requestedPath
+			: ProjectCopyExportService.ResolveReportedDestinationPath(
+				requestedPath,
+				fullPath);
 	}
 
 	private static bool CommitFailureIsDestinationConflict(
