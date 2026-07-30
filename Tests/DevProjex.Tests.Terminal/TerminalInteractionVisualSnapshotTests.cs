@@ -60,11 +60,12 @@ public sealed class TerminalInteractionVisualSnapshotTests
 			welcomeDirectory);
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Beta Project");
-		Assert.Contains(
-			terminal.CaptureScreen().Split('\n'),
-			line => line.Contains("> Folder", StringComparison.Ordinal) &&
-			        line.Contains("Beta Project", StringComparison.Ordinal));
+		await WaitForStableScreenAsync(
+			terminal,
+			screen => screen.Split('\n').Any(
+				line => line.Contains("> Folder", StringComparison.Ordinal) &&
+				        line.Contains("Beta Project", StringComparison.Ordinal)),
+			"selected recent workspace 'Beta Project'");
 		Verify(
 			"recent-selected-en-120x30",
 			terminal,
@@ -238,9 +239,18 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		throw new TimeoutException("Preview viewport did not move.");
 	}
 
+	private static Task WaitForStableScreenAsync(
+		TerminalPtyHarness terminal,
+		string expected) =>
+		WaitForStableScreenAsync(
+			terminal,
+			screen => screen.Contains(expected, StringComparison.Ordinal),
+			$"'{expected}'");
+
 	private static async Task WaitForStableScreenAsync(
 		TerminalPtyHarness terminal,
-		string expected)
+		Func<string, bool> matches,
+		string expectation)
 	{
 		var stableSamples = 0;
 		var timeout = Stopwatch.StartNew();
@@ -248,7 +258,7 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		{
 			var screen = terminal.CaptureScreen();
 			if (!string.IsNullOrWhiteSpace(screen) &&
-			    screen.Contains(expected, StringComparison.Ordinal))
+			    matches(screen))
 			{
 				stableSamples++;
 				if (stableSamples >= 3)
@@ -263,7 +273,7 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		}
 
 		throw new TimeoutException(
-			$"Terminal screen did not remain visibly stable for '{expected}'.\n" +
+			$"Terminal screen did not remain visibly stable for {expectation}.\n" +
 			terminal.CaptureScreen());
 	}
 
