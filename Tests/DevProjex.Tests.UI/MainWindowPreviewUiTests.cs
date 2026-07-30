@@ -1,5 +1,6 @@
 using Avalonia.Layout;
 using DevProjex.Application.Services;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Xml.Linq;
 
@@ -1109,6 +1110,69 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
             await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Tree);
             Assert.True(UiTestDriver.GetViewModel(window).IsPreviewTreeSelected);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewModeSwitch_PreparesContentDuringAnimationAndPublishesAfterIt()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(
+                window,
+                PreviewContentMode.TreeAndContent);
+
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var previewController = GetPreviewWorkspaceController(window);
+            var previousDocument = viewModel.PreviewDocument;
+            Assert.NotNull(previousDocument);
+            var publicationObserved = false;
+            var publicationObservedDuringAnimation = false;
+
+            void OnViewModelPropertyChanged(
+                object? sender,
+                PropertyChangedEventArgs args)
+            {
+                if (args.PropertyName !=
+                        nameof(MainWindowViewModel.PreviewDocument) ||
+                    ReferenceEquals(previousDocument, viewModel.PreviewDocument))
+                {
+                    return;
+                }
+
+                publicationObserved = true;
+                publicationObservedDuringAnimation |=
+                    previewController.IsModeSwitchInProgress;
+            }
+
+            viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            try
+            {
+                var switchTask =
+                    previewController.SwitchModeAsync(PreviewContentMode.Tree);
+
+                Assert.True(previewController.IsModeSwitchInProgress);
+                Assert.True(viewModel.IsPreviewLoading);
+                Assert.Same(previousDocument, viewModel.PreviewDocument);
+
+                await switchTask;
+            }
+            finally
+            {
+                viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            }
+
+            Assert.True(publicationObserved);
+            Assert.False(publicationObservedDuringAnimation);
+            Assert.NotSame(previousDocument, viewModel.PreviewDocument);
+            Assert.True(viewModel.IsPreviewTreeSelected);
         }
         finally
         {

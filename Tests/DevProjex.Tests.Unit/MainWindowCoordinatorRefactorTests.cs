@@ -541,7 +541,7 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
-    public async Task PreviewWorkspacePipeline_ModeSwitchBuildKeepsCurrentDocumentUntilReplacementIsReady()
+    public async Task PreviewWorkspacePipeline_ModeSwitchBuildPreparesReplacementBeforePublicationGate()
     {
         var viewModel = CreateViewModel();
         viewModel.IsProjectLoaded = true;
@@ -553,6 +553,10 @@ public sealed class MainWindowCoordinatorRefactorTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseBuild = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var buildCompleted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var publicationReady = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         var host = new RecordingPreviewWorkspaceHost(viewModel)
         {
             IsPreviewModeSwitchInProgress = true,
@@ -561,8 +565,10 @@ public sealed class MainWindowCoordinatorRefactorTests
             {
                 buildStarted.TrySetResult();
                 releaseBuild.Task.Wait(cancellationToken);
-                return new PreviewBuildResult(
+                var result = new PreviewBuildResult(
                     new InMemoryPreviewTextDocument("replacement"));
+                buildCompleted.TrySetResult();
+                return result;
             }
         };
         using var pipeline = new PreviewWorkspacePipeline(
@@ -570,7 +576,8 @@ public sealed class MainWindowCoordinatorRefactorTests
             TimeSpan.FromMilliseconds(1));
 
         var refreshOperation = pipeline.RefreshNowAsync(
-            allowDuringModeSwitch: true);
+            allowDuringModeSwitch: true,
+            publicationReady: publicationReady.Task);
         await buildStarted.Task.WaitAsync(
             TimeSpan.FromSeconds(5),
             TestContext.Current.CancellationToken);
@@ -581,6 +588,15 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.False(refreshOperation.Completion.IsCompleted);
 
         releaseBuild.TrySetResult();
+        await buildCompleted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.Same(currentDocument, viewModel.PreviewDocument);
+        Assert.Equal(0, host.ApplyDocumentCount);
+        Assert.False(refreshOperation.Completion.IsCompleted);
+
+        publicationReady.TrySetResult();
         await refreshOperation.Completion;
 
         Assert.NotNull(viewModel.PreviewDocument);

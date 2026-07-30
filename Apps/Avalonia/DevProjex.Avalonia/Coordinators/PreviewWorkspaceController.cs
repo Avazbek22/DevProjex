@@ -136,6 +136,8 @@ internal sealed class PreviewWorkspaceController : IDisposable
         _cancelPendingMemoryCleanup();
         var switchCts = ReplaceModeSwitchCancellation();
         var switchVersion = Interlocked.Increment(ref _modeSwitchVersion);
+        var publicationReady = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         IsModeSwitchInProgress = true;
 
         try
@@ -144,7 +146,9 @@ internal sealed class PreviewWorkspaceController : IDisposable
             _viewModel.SelectedPreviewContentMode = targetMode;
             UpdatePreviewSegmentThumbPosition(animate: true);
             var previewRefreshOperation =
-                _previewPipeline.RefreshNowAsync(allowDuringModeSwitch: true);
+                _previewPipeline.RefreshNowAsync(
+                    allowDuringModeSwitch: true,
+                    publicationReady: publicationReady.Task);
 
             await WaitForPanelAnimationAsync(
                 PreviewSegmentThumbAnimationDuration,
@@ -154,6 +158,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
                 return;
 
             IsModeSwitchInProgress = false;
+            publicationReady.TrySetResult();
             await previewRefreshOperation.Completion;
             _window.Dispatcher.Post(FocusPreviewSurface, DispatcherPriority.Background);
         }
@@ -163,6 +168,8 @@ internal sealed class PreviewWorkspaceController : IDisposable
         }
         finally
         {
+            publicationReady.TrySetResult();
+
             if (switchVersion == Volatile.Read(ref _modeSwitchVersion))
                 IsModeSwitchInProgress = false;
 

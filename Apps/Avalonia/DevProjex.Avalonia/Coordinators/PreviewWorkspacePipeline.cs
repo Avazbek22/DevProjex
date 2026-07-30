@@ -40,7 +40,8 @@ internal sealed class PreviewWorkspacePipeline(
                 allowDuringModeSwitch: false,
                 requestVersion,
                 Volatile.Read(ref _firstContentReady),
-                cancelSignalOnEarlyExit: false);
+                cancelSignalOnEarlyExit: false,
+                publicationReady: null);
             return;
         }
 
@@ -49,7 +50,9 @@ internal sealed class PreviewWorkspacePipeline(
         _previewDebounceTimer.Start();
     }
 
-    public PreviewRefreshOperation RefreshNowAsync(bool allowDuringModeSwitch = false)
+    public PreviewRefreshOperation RefreshNowAsync(
+        bool allowDuringModeSwitch = false,
+        Task? publicationReady = null)
     {
         var requestVersion = RequestRefresh();
         var firstContentReady = new FirstContentReadySignal();
@@ -61,7 +64,8 @@ internal sealed class PreviewWorkspacePipeline(
             allowDuringModeSwitch,
             requestVersion,
             firstContentReady,
-            cancelSignalOnEarlyExit: true);
+            cancelSignalOnEarlyExit: true,
+            publicationReady);
         return new PreviewRefreshOperation(
             firstContentReady.Ready,
             completion);
@@ -101,13 +105,15 @@ internal sealed class PreviewWorkspacePipeline(
             allowDuringModeSwitch,
             Volatile.Read(ref _requestedRefreshVersion),
             Volatile.Read(ref _firstContentReady),
-            cancelSignalOnEarlyExit: false);
+            cancelSignalOnEarlyExit: false,
+            publicationReady: null);
 
     private async Task RefreshAsync(
         bool allowDuringModeSwitch,
         long requestVersion,
         FirstContentReadySignal? firstContentReady,
-        bool cancelSignalOnEarlyExit)
+        bool cancelSignalOnEarlyExit,
+        Task? publicationReady)
     {
         if (!IsCurrentRefreshRequest(requestVersion) ||
             !host.ViewModel.IsProjectLoaded ||
@@ -127,13 +133,49 @@ internal sealed class PreviewWorkspacePipeline(
         if (!host.EnsurePreviewTreeReady())
         {
             var noDataBuildVersion = BeginBuildGeneration(firstContentReady);
-            _previewBuildCts?.Cancel();
+            var noDataCts = ReplaceCancellationSource(ref _previewBuildCts);
+            var noDataCancellationToken = noDataCts.Token;
             CompleteActiveBuildStatusOperation();
-            host.ApplyPreviewNoDataText();
-            CompleteFirstContentReady(firstContentReady, noDataBuildVersion);
-            CompleteRefreshRequest(requestVersion);
-            host.ViewModel.IsPreviewLoading = false;
-            host.SchedulePreviewMemoryCleanup();
+            try
+            {
+                await WaitForPublicationAsync(
+                    publicationReady,
+                    noDataCancellationToken);
+                if (!IsCurrentBuild(noDataBuildVersion) ||
+                    !IsCurrentRefreshRequest(requestVersion))
+                {
+                    CancelFirstContentReady(
+                        firstContentReady,
+                        noDataBuildVersion,
+                        noDataCancellationToken);
+                    return;
+                }
+
+                host.ApplyPreviewNoDataText();
+                CompleteFirstContentReady(
+                    firstContentReady,
+                    noDataBuildVersion);
+                CompleteRefreshRequest(requestVersion);
+                host.SchedulePreviewMemoryCleanup();
+            }
+            catch (OperationCanceledException)
+                when (noDataCancellationToken.IsCancellationRequested)
+            {
+                CancelFirstContentReady(
+                    firstContentReady,
+                    noDataBuildVersion,
+                    noDataCancellationToken);
+            }
+            finally
+            {
+                if (IsCurrentBuild(noDataBuildVersion) &&
+                    IsLatestRefreshRequest(requestVersion))
+                {
+                    host.ViewModel.IsPreviewLoading = false;
+                }
+
+                DisposeIfCurrent(ref _previewBuildCts, noDataCts);
+            }
             return;
         }
 
@@ -177,12 +219,18 @@ internal sealed class PreviewWorkspacePipeline(
             return;
         }
 
+        Task<PreviewBuildResult>? previewBuildTask = null;
+        IPreviewTextDocument? unpublishedDocument = null;
+        var buildResultObserved = false;
         try
         {
             var input = host.CapturePreviewRefreshInput();
             if (host.IsCurrentPreviewCacheHit(input.CacheKey) &&
                 host.CurrentPreviewDocument is { } currentPreviewDocument)
             {
+                await WaitForPublicationAsync(
+                    publicationReady,
+                    cancellationToken);
                 if (IsCurrentBuild(buildVersion) &&
                     IsCurrentRefreshRequest(requestVersion))
                 {
@@ -195,27 +243,50 @@ internal sealed class PreviewWorkspacePipeline(
             }
 
             var warmupSnapshot = await host.TryBuildPreviewWarmupSnapshotAsync(input, cancellationToken);
-            if (warmupSnapshot is { } warmup &&
+            previewBuildTask = Task.Run(
+                () => host.BuildPreviewDocument(input, cancellationToken),
+                cancellationToken);
+
+            if (publicationReady is null &&
+                warmupSnapshot is { } immediateWarmup &&
                 IsCurrentBuild(buildVersion) &&
                 IsCurrentRefreshRequest(requestVersion))
             {
-                host.ApplyPreviewText(warmup.Text, warmup.LineCount);
+                host.ApplyPreviewText(
+                    immediateWarmup.Text,
+                    immediateWarmup.LineCount);
                 CompleteFirstContentReady(firstContentReady, buildVersion);
             }
 
-            var previewResult = await Task.Run(
-                () => host.BuildPreviewDocument(input, cancellationToken),
+            await WaitForPublicationAsync(
+                publicationReady,
                 cancellationToken);
+
+            if (publicationReady is not null &&
+                !previewBuildTask.IsCompleted &&
+                warmupSnapshot is { } deferredWarmup &&
+                IsCurrentBuild(buildVersion) &&
+                IsCurrentRefreshRequest(requestVersion))
+            {
+                host.ApplyPreviewText(
+                    deferredWarmup.Text,
+                    deferredWarmup.LineCount);
+                CompleteFirstContentReady(firstContentReady, buildVersion);
+            }
+
+            var previewResult = await previewBuildTask;
+            buildResultObserved = true;
+            unpublishedDocument = previewResult.Document;
 
             if (!IsCurrentBuild(buildVersion) ||
                 !IsCurrentRefreshRequest(requestVersion))
             {
-                previewResult.Document.Dispose();
                 return;
             }
 
             CachePreview(input.CacheKey);
             host.ApplyPreviewDocument(previewResult.Document);
+            unpublishedDocument = null;
             CompleteFirstContentReady(firstContentReady, buildVersion);
             CompleteRefreshRequest(requestVersion);
             host.SchedulePreviewRebuildMemoryCleanup();
@@ -230,6 +301,9 @@ internal sealed class PreviewWorkspacePipeline(
         }
         catch (Exception ex)
         {
+            await WaitForPublicationAsync(
+                publicationReady,
+                cancellationToken);
             if (IsCurrentBuild(buildVersion) &&
                 IsCurrentRefreshRequest(requestVersion))
             {
@@ -249,6 +323,10 @@ internal sealed class PreviewWorkspacePipeline(
         }
         finally
         {
+            unpublishedDocument?.Dispose();
+            if (previewBuildTask is not null && !buildResultObserved)
+                _ = DisposeUnpublishedResultAsync(previewBuildTask);
+
             if (IsCurrentRefreshRequest(requestVersion))
             {
                 CancelFirstContentReady(
@@ -374,7 +452,8 @@ internal sealed class PreviewWorkspacePipeline(
             allowDuringModeSwitch: false,
             Volatile.Read(ref _requestedRefreshVersion),
             Volatile.Read(ref _firstContentReady),
-            cancelSignalOnEarlyExit: false);
+            cancelSignalOnEarlyExit: false,
+            publicationReady: null);
     }
 
     private long RequestRefresh() =>
@@ -400,6 +479,31 @@ internal sealed class PreviewWorkspacePipeline(
                 return;
 
             completedVersion = observed;
+        }
+    }
+
+    private static Task WaitForPublicationAsync(
+        Task? publicationReady,
+        CancellationToken cancellationToken) =>
+        publicationReady is null
+            ? Task.CompletedTask
+            : publicationReady.WaitAsync(cancellationToken);
+
+    private static async Task DisposeUnpublishedResultAsync(
+        Task<PreviewBuildResult> previewBuildTask)
+    {
+        try
+        {
+            var previewResult = await previewBuildTask.ConfigureAwait(false);
+            previewResult.Document.Dispose();
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation means no document was produced.
+        }
+        catch (Exception)
+        {
+            // A stale build failure is observed here after its owner was canceled.
         }
     }
 
