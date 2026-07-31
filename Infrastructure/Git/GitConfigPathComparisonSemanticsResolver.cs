@@ -25,8 +25,13 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 
 	public GitPathComparisonSemantics Resolve(string scopeRootPath)
 	{
-		if (!TryFindNearestRepositoryBoundary(scopeRootPath, out var repositoryRoot, out _))
+		if (!TryFindNearestRepositoryBoundary(
+			    scopeRootPath,
+			    out var repositoryRoot,
+			    out var gitMetadataPath))
+		{
 			return ResolveFileSystemFallback(scopeRootPath, gitMetadataPath: null);
+		}
 
 		lock (_cacheSync)
 		{
@@ -34,7 +39,7 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 				return cached;
 		}
 
-		var resolved = ResolveRepositorySemantics(repositoryRoot);
+		var resolved = ResolveRepositorySemantics(repositoryRoot, gitMetadataPath);
 		lock (_cacheSync)
 		{
 			if (_repositoryCache.Count >= CacheLimit)
@@ -60,8 +65,18 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		}
 	}
 
-	private static GitPathComparisonSemantics ResolveRepositorySemantics(string repositoryRoot)
+	private static GitPathComparisonSemantics ResolveRepositorySemantics(
+		string repositoryRoot,
+		string gitMetadataPath)
 	{
+		if (GitLocalConfigSemanticsReader.TryRead(
+			    repositoryRoot,
+			    gitMetadataPath,
+			    out var localSemantics))
+		{
+			return localSemantics;
+		}
+
 		return TryReadEffectiveSemantics(repositoryRoot, out var semantics)
 			? semantics
 			: UnavailableRepositorySemantics;

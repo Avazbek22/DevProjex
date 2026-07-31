@@ -10,6 +10,7 @@ internal static class GitTrackedPathIndexCache
 	private const int CacheEntryLimit = 128;
 	private const long CacheByteLimit = 16L * 1024 * 1024;
 	private const long MaximumSingleEntryBytes = 64L * 1024 * 1024;
+	private const long EstimatedEmptyIndexBytes = 64;
 	private const int GitFileMaximumLength = 64 * 1024;
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
 	private static readonly string GitExecutable = OperatingSystem.IsWindows() ? "git.exe" : "git";
@@ -31,14 +32,23 @@ internal static class GitTrackedPathIndexCache
 		trackedPathIndex = null!;
 		cancellationToken.ThrowIfCancellationRequested();
 
-		if (Volatile.Read(ref _gitAvailability) < 0 ||
-		    !TryCreateIndexSignature(repositoryRootPath, gitMetadataPath, out var signature))
+		if (!TryCreateIndexSignature(repositoryRootPath, gitMetadataPath, out var signature))
 		{
 			return false;
 		}
-
 		if (TryGetCached(signature, out trackedPathIndex))
 			return true;
+		if (!signature.HasPhysicalIndex)
+		{
+			trackedPathIndex = new GitTrackedPathIndex(
+				signature.RepositoryRootPath,
+				[],
+				signature.ComparisonSemantics);
+			Store(signature, new LoadedGitTrackedPathIndex(trackedPathIndex, EstimatedEmptyIndexBytes));
+			return true;
+		}
+		if (Volatile.Read(ref _gitAvailability) < 0)
+			return false;
 
 		var loadKey = signature.CreateLoadKey();
 		var lazyLoad = InFlightLoads.GetOrAdd(
@@ -380,6 +390,7 @@ internal static class GitTrackedPathIndexCache
 					PathUtility.Normalize(gitMetadataPath),
 					PathUtility.Normalize(indexPath),
 					comparisonSemantics,
+					HasPhysicalIndex: false,
 					LastWriteTicksUtc: 0,
 					LengthBytes: 0,
 					ContentFingerprint: 0);
@@ -406,6 +417,7 @@ internal static class GitTrackedPathIndexCache
 					PathUtility.Normalize(gitMetadataPath),
 					PathUtility.Normalize(indexInfo.FullName),
 					comparisonSemantics,
+					HasPhysicalIndex: true,
 					lastWriteTicksUtc,
 					lengthBytes,
 					contentFingerprint);
@@ -600,6 +612,7 @@ internal static class GitTrackedPathIndexCache
 		string GitMetadataPath,
 		string IndexPath,
 		GitPathComparisonSemantics ComparisonSemantics,
+		bool HasPhysicalIndex,
 		long LastWriteTicksUtc,
 		long LengthBytes,
 		ulong ContentFingerprint)
@@ -608,6 +621,7 @@ internal static class GitTrackedPathIndexCache
 			$"{RepositoryRootPath}\0{GitMetadataPath}\0{IndexPath}\0" +
 			$"{ComparisonSemantics.IgnoreCase}\0{ComparisonSemantics.NormalizeUnicode}\0" +
 			$"{ComparisonSemantics.IsAuthoritative}\0" +
+			$"{HasPhysicalIndex}\0" +
 			$"{LastWriteTicksUtc}\0{LengthBytes}\0{ContentFingerprint}";
 	}
 
