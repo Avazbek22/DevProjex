@@ -163,8 +163,11 @@ public partial class SettingsPanelView : UserControl
 
     private void AttachMinimumWidthSubscriptions()
     {
-        if (_minimumWidthSizeSubscriptionsAttached)
+        if (_minimumWidthSizeSubscriptionsAttached ||
+            _panelRoot?.MinWidth is > 0)
+        {
             return;
+        }
 
         ToggleMinimumWidthAffectingSizeChanges(_ignoreHeaderText, subscribe: true);
         ToggleMinimumWidthAffectingSizeChanges(_ignoreAllCheckBox, subscribe: true);

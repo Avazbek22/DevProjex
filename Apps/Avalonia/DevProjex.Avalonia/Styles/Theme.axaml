@@ -802,7 +802,7 @@
 
     <Style Selector="ScrollViewer.preview-scroll">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Cursor" Value="Arrow" />
+        <Setter Property="Cursor" Value="Ibeam" />
     </Style>
 
     <Style Selector="ScrollViewer.preview-scroll ScrollBar">

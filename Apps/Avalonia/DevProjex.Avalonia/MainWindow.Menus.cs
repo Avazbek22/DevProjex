@@ -133,7 +133,7 @@ public partial class MainWindow
                 height: 180);
 
             if (shouldRemove)
-                RemoveRecentFolder(path);
+                await RemoveRecentFolderAsync(path, lifetimeToken);
             return;
         }
 
@@ -207,25 +207,45 @@ public partial class MainWindow
             item.Classes.Add(unavailableClass);
     }
 
-    private void RemoveRecentFolder(string path)
+    private async Task RemoveRecentFolderAsync(string path, CancellationToken cancellationToken)
     {
-        _recentProjectsDb = _recentProjectsStore.RemoveFolder(_recentProjectsDb, path);
+        var recentProjectsSnapshot = _recentProjectsDb;
+        var updatedRecentProjects = await Task.Run(
+            () => _recentProjectsStore.RemoveFolder(recentProjectsSnapshot, path),
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _recentProjectsDb = updatedRecentProjects;
         _unavailableRecentFolderPaths.Remove(path);
         SyncRecentProjectsToViewModel();
         RefreshRecentFoldersMenu();
     }
 
-    private void RecordRecentFolder(string path)
+    private async Task RecordRecentFolderAsync(string path, CancellationToken cancellationToken)
     {
-        _recentProjectsDb = _recentProjectsStore.AddFolder(_recentProjectsDb, path);
+        var recentProjectsSnapshot = _recentProjectsDb;
+        var updatedRecentProjects = await Task.Run(
+            () => _recentProjectsStore.AddFolder(recentProjectsSnapshot, path),
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _recentProjectsDb = updatedRecentProjects;
         _unavailableRecentFolderPaths.Remove(path);
         SyncRecentProjectsToViewModel();
         RefreshRecentFoldersMenu();
     }
 
-    private void RecordRecentRepository(string repositoryUrl)
+    private async Task RecordRecentRepositoryAsync(
+        string repositoryUrl,
+        CancellationToken cancellationToken)
     {
-        _recentProjectsDb = _recentProjectsStore.AddRepository(_recentProjectsDb, repositoryUrl);
+        var recentProjectsSnapshot = _recentProjectsDb;
+        var updatedRecentProjects = await Task.Run(
+            () => _recentProjectsStore.AddRepository(recentProjectsSnapshot, repositoryUrl),
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _recentProjectsDb = updatedRecentProjects;
         SyncRecentProjectsToViewModel();
     }
 

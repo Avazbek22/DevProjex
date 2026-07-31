@@ -65,9 +65,9 @@ public partial class MainWindow
         var projectPath = request.ProjectPath;
         if (request.UseLastProject)
         {
-            projectPath = _recentProjectsDb.RecentFolders
-                .Select(static folder => folder.Path)
-                .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
+            projectPath = await FindFirstExistingDirectoryAsync(
+                _recentProjectsDb.RecentFolders.Select(static folder => folder.Path),
+                cancellationToken);
             if (projectPath is null)
                 return Failure("DPX-DESKTOP-NO-RECENT-PROJECT");
         }

@@ -73,52 +73,13 @@
           <KeyFrame Cue="0%">
             <Setter Property="TranslateTransform.Y" Value="5" />
           </KeyFrame>
-          <KeyFrame Cue="6.25%">
-            <Setter Property="TranslateTransform.Y" Value="7.1" />
-          </KeyFrame>
-          <KeyFrame Cue="12.5%">
-            <Setter Property="TranslateTransform.Y" Value="8.89" />
-          </KeyFrame>
-          <KeyFrame Cue="18.75%">
-            <Setter Property="TranslateTransform.Y" Value="10.08" />
-          </KeyFrame>
-          <KeyFrame Cue="25%">
+          <KeyFrame Cue="25%" KeySpline="0,0,0.58,1">
             <Setter Property="TranslateTransform.Y" Value="10.5" />
           </KeyFrame>
-          <KeyFrame Cue="31.25%">
-            <Setter Property="TranslateTransform.Y" Value="10.08" />
-          </KeyFrame>
-          <KeyFrame Cue="37.5%">
-            <Setter Property="TranslateTransform.Y" Value="8.89" />
-          </KeyFrame>
-          <KeyFrame Cue="43.75%">
-            <Setter Property="TranslateTransform.Y" Value="7.1" />
-          </KeyFrame>
-          <KeyFrame Cue="50%">
-            <Setter Property="TranslateTransform.Y" Value="5" />
-          </KeyFrame>
-          <KeyFrame Cue="56.25%">
-            <Setter Property="TranslateTransform.Y" Value="2.9" />
-          </KeyFrame>
-          <KeyFrame Cue="62.5%">
-            <Setter Property="TranslateTransform.Y" Value="1.11" />
-          </KeyFrame>
-          <KeyFrame Cue="68.75%">
-            <Setter Property="TranslateTransform.Y" Value="-0.08" />
-          </KeyFrame>
-          <KeyFrame Cue="75%">
+          <KeyFrame Cue="75%" KeySpline="0.42,0,0.58,1">
             <Setter Property="TranslateTransform.Y" Value="-0.5" />
           </KeyFrame>
-          <KeyFrame Cue="81.25%">
-            <Setter Property="TranslateTransform.Y" Value="-0.08" />
-          </KeyFrame>
-          <KeyFrame Cue="87.5%">
-            <Setter Property="TranslateTransform.Y" Value="1.11" />
-          </KeyFrame>
-          <KeyFrame Cue="93.75%">
-            <Setter Property="TranslateTransform.Y" Value="2.9" />
-          </KeyFrame>
-          <KeyFrame Cue="100%">
+          <KeyFrame Cue="100%" KeySpline="0.42,0,1,1">
             <Setter Property="TranslateTransform.Y" Value="5" />
           </KeyFrame>
         </Animation>
@@ -298,7 +259,7 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     Spacing="8"
-                    IsVisible="{Binding StatusBusy}">
+                    IsVisible="{Binding StatusOperationVisible}">
           <TextBlock Text="{Binding StatusOperationText}"
                      FontSize="12"
                      Opacity="0.8"
@@ -827,7 +788,6 @@
                       ClipToBounds="True">
                   <ScrollViewer Name="PreviewTextScrollViewer"
                                 Classes="preview-scroll"
-                                Cursor="Arrow"
                                 IsScrollInertiaEnabled="True"
                                 HorizontalScrollBarVisibility="Auto"
                                 VerticalScrollBarVisibility="Auto"
@@ -941,10 +901,7 @@
                 IsVisible="{Binding IsProjectLoaded}">
           <Border Classes="island-panel settings-island"
                   Name="SettingsIsland"
-                  RenderTransformOrigin="100%,50%">
-            <Border.RenderTransform>
-              <TranslateTransform X="0" />
-            </Border.RenderTransform>
+                  HorizontalAlignment="Left">
             <!-- Settings panel -->
             <views:SettingsPanelView Name="SettingsPanel"
                                      ApplySettingsRequested="OnApplySettings"

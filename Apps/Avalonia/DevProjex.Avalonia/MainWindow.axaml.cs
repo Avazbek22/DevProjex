@@ -517,9 +517,17 @@ public partial class MainWindow : Window
             return;
 
         if (_viewModel.IsPreviewMode)
-            ClosePreviewMode();
+        {
+            ObserveDetachedTask(
+                _previewWorkspaceController.CloseAsync(),
+                "ClosePreviewMode");
+        }
         else
-            OpenPreviewMode();
+        {
+            ObserveDetachedTask(
+                _previewWorkspaceController.OpenAsync(),
+                "OpenPreviewMode");
+        }
     }
 
     private void OnPreviewClose(object? sender, RoutedEventArgs e)
@@ -527,7 +535,9 @@ public partial class MainWindow : Window
         if (!_viewModel.CanTogglePreview || !_viewModel.IsPreviewMode)
             return;
 
-        ClosePreviewMode();
+        ObserveDetachedTask(
+            _previewWorkspaceController.CloseAsync(),
+            "ClosePreviewMode");
     }
 
     private async void OnPreviewCopyCurrentMode(object? sender, RoutedEventArgs e)
@@ -543,7 +553,9 @@ public partial class MainWindow : Window
         if (!_viewModel.CanUseProjectWorkspaceActions || !_viewModel.IsPreviewTreeVisible)
             return;
 
-        HidePreviewTreePane();
+        ObserveDetachedTask(
+            _previewWorkspaceController.HideTreePaneAsync(),
+            "HidePreviewTreePane");
     }
 
     private async void OnPreviewTreeModeClick(object? sender, RoutedEventArgs e)
@@ -566,18 +578,6 @@ public partial class MainWindow : Window
 
     private void UpdatePreviewSegmentThumbPosition(bool animate)
         => _previewWorkspaceController.UpdatePreviewSegmentThumbPosition(animate);
-
-    private async void OpenPreviewMode()
-        => await OpenPreviewModeAsync();
-
-    private async Task OpenPreviewModeAsync()
-        => await _previewWorkspaceController.OpenAsync();
-
-    private async void ClosePreviewMode()
-        => await _previewWorkspaceController.CloseAsync();
-
-    private async void HidePreviewTreePane()
-        => await _previewWorkspaceController.HideTreePaneAsync();
 
     private void ClearPreviewMemory()
     {
@@ -614,24 +614,10 @@ public partial class MainWindow : Window
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        await Dispatcher.UIThread.InvokeAsync(
-            static () => { },
-            DispatcherPriority.Render);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        await Dispatcher.UIThread.InvokeAsync(
-            static () => { },
-            DispatcherPriority.Render);
-        cancellationToken.ThrowIfCancellationRequested();
-
         if (_workspaceGrid is null || _treePaneContainer is null || _settingsContainer is null)
-        {
-            await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(140)), cancellationToken);
             return;
-        }
 
         var readinessTimeout = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(700));
-        var frameDelay = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(16));
         var stopwatch = Stopwatch.StartNew();
         var previousWorkspaceWidth = 0.0;
         var previousTreeWidth = 0.0;
@@ -641,9 +627,15 @@ public partial class MainWindow : Window
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            await Dispatcher.UIThread.InvokeAsync(
-                static () => { },
-                DispatcherPriority.Render);
+            var remaining = readinessTimeout - stopwatch.Elapsed;
+            if (remaining <= TimeSpan.Zero ||
+                !await TryWaitForNextAnimationFrameAsync(
+                    remaining,
+                    cancellationToken))
+            {
+                break;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
 
             var workspaceWidth = _workspaceGrid.Bounds.Width;
@@ -662,12 +654,23 @@ public partial class MainWindow : Window
                 previewWidth <= 0.5 &&
                 settingsWidth <= 0.5 &&
                 Math.Abs(treeWidth - workspaceWidth) <= 2.0;
+            var rootNode = _viewModel.TreeNodes.FirstOrDefault();
+            // Stable column widths do not imply that TreeView generated and laid out its first
+            // container. Starting the island transition before that first materialization makes
+            // template work compete with the animation on the initial project load only.
+            var rootContainerReady =
+                rootNode is null ||
+                _treeView?.TreeContainerFromItem(rootNode) is TreeViewItem
+                {
+                    Bounds.Width: > 0.5,
+                    Bounds.Height: > 0.5
+                };
 
             var widthStable =
                 Math.Abs(workspaceWidth - previousWorkspaceWidth) <= 0.5 &&
                 Math.Abs(treeWidth - previousTreeWidth) <= 0.5;
 
-            stableSamples = treeOccupiesWorkspace && widthStable
+            stableSamples = treeOccupiesWorkspace && rootContainerReady && widthStable
                 ? stableSamples + 1
                 : 0;
 
@@ -676,10 +679,7 @@ public partial class MainWindow : Window
 
             previousWorkspaceWidth = workspaceWidth;
             previousTreeWidth = treeWidth;
-            await Task.Delay(frameDelay, cancellationToken);
         }
-
-        await Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(60)), cancellationToken);
     }
 
     private void ResetPreviewTreePaneVisualState()
@@ -752,14 +752,24 @@ public partial class MainWindow : Window
             return false;
         }
 
-        if (!Directory.Exists(normalizedPath))
+        // Local folders are usually cheap to probe, but disconnected network mounts and
+        // removable media can block enumeration. Keep both filesystem checks off the UI thread.
+        var rootAccess = await Task.Run(() =>
+        {
+            var exists = Directory.Exists(normalizedPath);
+            return (
+                Exists: exists,
+                CanRead: exists && _scanOptions.CanReadRoot(normalizedPath));
+        });
+
+        if (!rootAccess.Exists)
         {
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "folder-not-found");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
         }
 
-        if (!_scanOptions.CanReadRoot(normalizedPath))
+        if (!rootAccess.CanRead)
         {
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "access-denied");
             if (TryElevateAndRestart(normalizedPath))
@@ -770,6 +780,7 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var projectLoadFinalization = BeginProjectLoadFinalization();
         try
         {
             await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
@@ -783,6 +794,20 @@ public partial class MainWindow : Window
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-failed");
             throw;
         }
+        finally
+        {
+            projectLoadFinalization.TrySetResult();
+        }
+    }
+
+    private TaskCompletionSource BeginProjectLoadFinalization()
+    {
+        // Tree publication happens inside the reload pipeline, before recent-workspace
+        // persistence, status finalization and Desktop IPC have completed. The initial island
+        // reveal captures this boundary so those operations cannot enqueue work into its frames.
+        var finalization = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _projectLoadFinalizationTask = finalization.Task;
+        return finalization;
     }
 
     private Task TryApplyStartupSelectionOverridesAsync()
@@ -1126,7 +1151,9 @@ public partial class MainWindow : Window
     {
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
-        var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(cancellationToken);
+        var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(
+            _projectLoadFinalizationTask,
+            cancellationToken);
         // Do not fan out the raw reveal task here. All heavy post-load consumers must share the
         // same settle gate or they can wake together on the final animation frame and stall the
         // settings island. Refreshes keep their immediate path because no reveal is pending.
@@ -1192,7 +1219,9 @@ public partial class MainWindow : Window
     }
 #endif
 
-    private Task StartDeferredSettingsPanelAnimationAsync(CancellationToken cancellationToken)
+    private Task StartDeferredSettingsPanelAnimationAsync(
+        Task projectLoadFinalizationTask,
+        CancellationToken cancellationToken)
     {
         if (_workspacePresentation.IsSettingsAnimating)
             return _workspacePresentation.SettingsAnimationTask;
@@ -1207,11 +1236,14 @@ public partial class MainWindow : Window
             return Task.CompletedTask;
         }
 
-        return AnimateSettingsPanelWhenTreeReadyAsync(cancellationToken);
+        return AnimateSettingsPanelWhenTreeReadyAsync(projectLoadFinalizationTask, cancellationToken);
     }
 
-    private async Task AnimateSettingsPanelWhenTreeReadyAsync(CancellationToken cancellationToken)
+    private async Task AnimateSettingsPanelWhenTreeReadyAsync(
+        Task projectLoadFinalizationTask,
+        CancellationToken cancellationToken)
     {
+        await projectLoadFinalizationTask.WaitAsync(cancellationToken);
         await WaitForTreeRenderStabilizationAsync(cancellationToken);
         if (_viewModel.SettingsVisible)
             await AnimateSettingsPanelAsync(true);
@@ -1255,7 +1287,31 @@ public partial class MainWindow : Window
     private static string? ResolveDropFolderPath(IEnumerable<string?> localPaths)
     {
         return localPaths.FirstOrDefault(path =>
-            !string.IsNullOrWhiteSpace(path) && Directory.Exists(path));
+            !string.IsNullOrWhiteSpace(path));
+    }
+
+    private static Task<string?> FindFirstExistingDirectoryAsync(
+        IEnumerable<string?> candidatePaths,
+        CancellationToken cancellationToken)
+    {
+        var paths = candidatePaths
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .ToArray();
+
+        return Task.Run(
+            () =>
+            {
+                foreach (var path in paths)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (Directory.Exists(path))
+                        return path;
+                }
+
+                return null;
+            },
+            cancellationToken);
     }
 
     private static DragDropEffects ResolveDropEffect(bool hasFolder)

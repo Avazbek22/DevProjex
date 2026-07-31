@@ -13,13 +13,17 @@ internal static class Program
     public static int Main(string[] args)
     {
         args = DesktopLaunchRequestStore.PromoteInternalInvocation(args);
-        var hasConsole = WindowsConsoleBridge.EnsureAttached();
+        var hasPendingDesktopRequest =
+            DesktopLaunchRequestStore.HasPendingRequest ||
+            DesktopDiagnosticRequestStore.HasPendingRequest;
+        var hasConsole =
+            ShouldAttachConsoleForInvocation(hasPendingDesktopRequest) &&
+            WindowsConsoleBridge.EnsureAttached();
         var environment = new InvocationEnvironment(hasConsole);
         var route = ProcessInvocationRouter.Resolve(
             args,
             environment,
-            DesktopLaunchRequestStore.HasPendingRequest ||
-            DesktopDiagnosticRequestStore.HasPendingRequest,
+            hasPendingDesktopRequest,
             isFrameworkDependentLaunch: !ProcessEntryPointResolver.IsSingleFile());
         if (route == ProcessInvocationMode.Terminal)
         {
@@ -37,6 +41,10 @@ internal static class Program
         return BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime([]);
     }
+
+    internal static bool ShouldAttachConsoleForInvocation(
+        bool hasPendingDesktopRequest) =>
+        !hasPendingDesktopRequest;
 
     public static AppBuilder BuildAvaloniaApp()
     {

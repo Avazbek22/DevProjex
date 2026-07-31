@@ -20,6 +20,33 @@ public static class ProcessEntryPointResolver
 			: processPath;
 	}
 
+	public static string? ResolveCurrentAppHostPath()
+	{
+		var processPath = Environment.ProcessPath;
+		if (!IsDotnetHost(processPath))
+			return processPath;
+
+		var managedAssemblyPath = ResolveManagedAssemblyPath();
+		if (string.IsNullOrWhiteSpace(managedAssemblyPath))
+			return null;
+
+		var directory = Path.GetDirectoryName(managedAssemblyPath);
+		var assemblyName = Path.GetFileNameWithoutExtension(managedAssemblyPath);
+		if (string.IsNullOrWhiteSpace(directory) ||
+		    string.IsNullOrWhiteSpace(assemblyName))
+		{
+			return null;
+		}
+
+		var appHostFileName = OperatingSystem.IsWindows()
+			? $"{assemblyName}.exe"
+			: assemblyName;
+		var candidate = Path.Combine(directory, appHostFileName);
+		return File.Exists(candidate)
+			? Path.GetFullPath(candidate)
+			: null;
+	}
+
 	public static bool IsSingleFile() => ResolveManagedAssemblyPath() is null;
 
 	public static bool IsDotnetHost(string? path)

@@ -5,32 +5,29 @@ using global::Avalonia.Input;
 public sealed class MainWindowDropAndTitleBehaviorTests
 {
     [Fact]
-    public void ResolveDropFolderPath_PrefersExistingDirectory_WhenDirectoryAndFileAreProvided()
+    public void ResolveDropFolderPath_SkipsNonFolderCandidateFilteredByStorageProvider()
     {
         var method = GetPrivateStaticMethod("ResolveDropFolderPath");
         using var temp = new TemporaryDirectory();
-        var file = temp.CreateFile("docs/readme.md", "hello");
         var folder = temp.CreateFolder("project");
 
-        var result = (string?)method.Invoke(null, [new[] { file, folder }]);
+        var result = (string?)method.Invoke(null, [new string?[] { null, folder }]);
 
         Assert.Equal(folder, result);
     }
 
     [Fact]
-    public void ResolveDropFolderPath_RejectsFileInsteadOfOpeningItsParentDirectory()
+    public void ResolveDropFolderPath_ReturnsNull_WhenStorageProviderReportsNoFolder()
     {
         var method = GetPrivateStaticMethod("ResolveDropFolderPath");
-        using var temp = new TemporaryDirectory();
-        var file = temp.CreateFile("src/app.cs", "class App {}");
 
-        var result = (string?)method.Invoke(null, [new[] { file }]);
+        var result = (string?)method.Invoke(null, [Array.Empty<string?>()]);
 
         Assert.Null(result);
     }
 
     [Fact]
-    public void ResolveDropFolderPath_UsesFirstExistingDirectory_WhenSeveralAreProvided()
+    public void ResolveDropFolderPath_UsesFirstFolderPath_WhenSeveralAreProvided()
     {
         var method = GetPrivateStaticMethod("ResolveDropFolderPath");
         using var temp = new TemporaryDirectory();
@@ -43,26 +40,25 @@ public sealed class MainWindowDropAndTitleBehaviorTests
     }
 
     [Fact]
-    public void ResolveDropFolderPath_SkipsFilesAndMissingPathsBeforeExistingDirectory()
+    public void ResolveDropFolderPath_SkipsEmptyLocalPathsBeforeFolder()
     {
         var method = GetPrivateStaticMethod("ResolveDropFolderPath");
         using var temp = new TemporaryDirectory();
-        var file = temp.CreateFile("notes.txt", "notes");
-        var missingPath = Path.Combine(temp.Path, "missing");
         var folder = temp.CreateFolder("project");
 
-        var result = (string?)method.Invoke(null, [new[] { file, missingPath, folder }]);
+        var result = (string?)method.Invoke(
+            null,
+            [new string?[] { null, "", "  ", folder }]);
 
         Assert.Equal(folder, result);
     }
 
     [Fact]
-    public void ResolveDropFolderPath_IgnoresMissingAndWhitespacePaths()
+    public void ResolveDropFolderPath_IgnoresWhitespacePaths()
     {
         var method = GetPrivateStaticMethod("ResolveDropFolderPath");
-        var missingPath = Path.Combine(Path.GetTempPath(), "DevProjex", "missing-folder", Guid.NewGuid().ToString("N"));
 
-        var result = (string?)method.Invoke(null, [new string?[] { null, "", "  ", missingPath }]);
+        var result = (string?)method.Invoke(null, [new string?[] { null, "", "  " }]);
 
         Assert.Null(result);
     }

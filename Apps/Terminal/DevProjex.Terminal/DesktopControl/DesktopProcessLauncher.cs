@@ -44,26 +44,80 @@ public sealed class DesktopProcessLauncher
 				"The current DevProjex executable path is unavailable.");
 		}
 
-		return OperatingSystem.IsWindows()
-			? CreateWindowsStartInfo(executable, requestPath)
-			: CreateUnixStartInfo(executable, requestPath);
+		return CreateStartInfo(
+			requestPath,
+			executable,
+			ProcessEntryPointResolver.ResolveManagedAssemblyPath(),
+			ProcessEntryPointResolver.ResolveCurrentAppHostPath(),
+			OperatingSystem.IsWindows());
 	}
+
+	internal static ProcessStartInfo CreateStartInfo(
+		string requestPath,
+		string executable,
+		string? managedAssemblyPath,
+		string? appHostPath,
+		bool isWindows) =>
+		isWindows
+			? CreateWindowsStartInfo(
+				executable,
+				managedAssemblyPath,
+				appHostPath,
+				requestPath)
+			: CreateUnixStartInfo(
+				executable,
+				managedAssemblyPath,
+				requestPath);
 
 	private static ProcessStartInfo CreateWindowsStartInfo(
 		string executable,
+		string? managedAssemblyPath,
+		string? appHostPath,
 		string requestPath)
 	{
-		var startInfo = new ProcessStartInfo
+		var desktopExecutable = !string.IsNullOrWhiteSpace(appHostPath)
+			? appHostPath
+			: ProcessEntryPointResolver.IsDotnetHost(executable)
+				? null
+				: executable;
+		if (desktopExecutable is not null)
+		{
+			var appHostStartInfo = new ProcessStartInfo
+			{
+				FileName = desktopExecutable,
+				UseShellExecute = true
+			};
+			AddDesktopRequestArguments(appHostStartInfo, requestPath);
+			return appHostStartInfo;
+		}
+
+		if (string.IsNullOrWhiteSpace(managedAssemblyPath))
+		{
+			throw new DesktopControlException(
+				"DPX-DESKTOP-LAUNCH-FAILED",
+				"The managed DevProjex entry point is unavailable.");
+		}
+
+		// Framework-dependent terminal launches run under the console-subsystem
+		// dotnet host. Start it directly without a console window; the internal
+		// desktop request prevents Program from attaching it back to the terminal.
+		var dotnetStartInfo = new ProcessStartInfo
 		{
 			FileName = executable,
-			UseShellExecute = true
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			WorkingDirectory = Directory.GetCurrentDirectory()
 		};
-		AddDesktopArguments(startInfo, executable, requestPath);
-		return startInfo;
+		dotnetStartInfo.ArgumentList.Add(managedAssemblyPath);
+		AddDesktopRequestArguments(dotnetStartInfo, requestPath);
+		dotnetStartInfo.Environment.Remove(
+			InvocationEnvironment.TerminalHostVariable);
+		return dotnetStartInfo;
 	}
 
 	private static ProcessStartInfo CreateUnixStartInfo(
 		string executable,
+		string? managedAssemblyPath,
 		string requestPath)
 	{
 		var startInfo = new ProcessStartInfo
@@ -80,23 +134,37 @@ public sealed class DesktopProcessLauncher
 		startInfo.ArgumentList.Add("exec \"$@\" </dev/null >/dev/null 2>&1");
 		startInfo.ArgumentList.Add("devprojex-desktop");
 		startInfo.ArgumentList.Add(executable);
-		AddDesktopArguments(startInfo, executable, requestPath);
+		AddManagedEntryPointArgument(
+			startInfo,
+			executable,
+			managedAssemblyPath);
+		AddDesktopRequestArguments(startInfo, requestPath);
 		startInfo.Environment.Remove(InvocationEnvironment.TerminalHostVariable);
 		return startInfo;
 	}
 
-	private static void AddDesktopArguments(
+	private static void AddManagedEntryPointArgument(
 		ProcessStartInfo startInfo,
 		string executable,
-		string requestPath)
+		string? managedAssemblyPath)
 	{
-		var entryPath = ProcessEntryPointResolver.ResolveManagedAssemblyPath();
-		if (!string.IsNullOrWhiteSpace(entryPath) &&
-		    ProcessEntryPointResolver.IsDotnetHost(executable))
+		if (!ProcessEntryPointResolver.IsDotnetHost(executable))
+			return;
+
+		if (string.IsNullOrWhiteSpace(managedAssemblyPath))
 		{
-			startInfo.ArgumentList.Add(entryPath);
+			throw new DesktopControlException(
+				"DPX-DESKTOP-LAUNCH-FAILED",
+				"The managed DevProjex entry point is unavailable.");
 		}
 
+		startInfo.ArgumentList.Add(managedAssemblyPath);
+	}
+
+	private static void AddDesktopRequestArguments(
+		ProcessStartInfo startInfo,
+		string requestPath)
+	{
 		startInfo.ArgumentList.Add(DesktopLaunchRequestStore.InternalRequestArgument);
 		startInfo.ArgumentList.Add(requestPath);
 	}

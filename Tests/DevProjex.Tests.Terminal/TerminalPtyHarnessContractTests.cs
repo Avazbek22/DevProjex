@@ -2,6 +2,25 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalPtyHarnessContractTests
 {
+	[Theory]
+	[InlineData(false, false, true, true)]
+	[InlineData(true, false, true, false)]
+	[InlineData(false, true, true, false)]
+	[InlineData(false, false, false, false)]
+	public void WindowsDotNetHostDirectLaunchIsLimitedToOrdinaryJourneys(
+		bool writeShellCompletionMarker,
+		bool verifyExecutableRelaunch,
+		bool launchesThroughDotNetHost,
+		bool expected)
+	{
+		Assert.Equal(
+			expected,
+			TerminalPtyHarness.ShouldLaunchWindowsDotNetHostDirectly(
+				writeShellCompletionMarker,
+				verifyExecutableRelaunch,
+				launchesThroughDotNetHost));
+	}
+
 	[Fact]
 	public void WindowsDotNetHostRunsDirectlyInsideTheWaitableParentShell()
 	{

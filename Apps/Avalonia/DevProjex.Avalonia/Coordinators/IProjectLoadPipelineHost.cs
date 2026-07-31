@@ -24,7 +24,7 @@ internal interface IProjectLoadPipelineHost
 
     Task ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile);
 
-    void RecordRecentFolder(string path);
+    Task RecordRecentFolderAsync(string path, CancellationToken cancellationToken);
 
     Task DeleteRepositoryDirectoryAsync(string path, CancellationToken cancellationToken);
 

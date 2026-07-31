@@ -30,4 +30,17 @@ public sealed class ProcessEntryPointResolverTests
 		Assert.True(File.Exists(artifactPath), artifactPath);
 		Assert.False(ProcessEntryPointResolver.IsSingleFile());
 	}
+
+	[Theory]
+	[InlineData(false, true)]
+	[InlineData(true, false)]
+	public void InternalDesktopLaunchNeverAttachesToParentConsole(
+		bool hasPendingDesktopRequest,
+		bool expected)
+	{
+		Assert.Equal(
+			expected,
+			Program.ShouldAttachConsoleForInvocation(
+				hasPendingDesktopRequest));
+	}
 }

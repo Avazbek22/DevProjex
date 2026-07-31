@@ -1,5 +1,7 @@
 using Avalonia.Layout;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Services;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Xml.Linq;
 
@@ -452,7 +454,7 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
     [InlineData(PreviewContentMode.Tree)]
     [InlineData(PreviewContentMode.Content)]
     [InlineData(PreviewContentMode.TreeAndContent)]
-    public async Task PreviewOpen_PublishesFirstContentBeforePaneAnimationStarts(
+    public async Task PreviewOpen_AnimatesPaneBeforePublishingContent(
         PreviewContentMode mode)
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -461,13 +463,52 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
         {
             var viewModel = UiTestDriver.GetViewModel(window);
             var previewController = GetPreviewWorkspaceController(window);
+            var treePaneContainer =
+                UiTestDriver.GetRequiredControl<Border>(
+                    window,
+                    "TreePaneContainer");
             viewModel.SelectedPreviewContentMode = mode;
             Assert.Null(viewModel.PreviewDocument);
+            var animationStarted =
+                new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+            var contentWasDeferred = false;
 
-            var openTask = previewController.OpenAsync();
-            await openTask;
+            void OnTreePanePropertyChanged(
+                object? sender,
+                AvaloniaPropertyChangedEventArgs args)
+            {
+                if (args.Property != Layoutable.WidthProperty ||
+                    treePaneContainer.Width >
+                    WorkspacePresentationController
+                        .SplitTreePaneMinimumWidth + 1.0)
+                {
+                    return;
+                }
 
-            Assert.True(previewController.WasFirstContentReadyBeforeLastOpenAnimation);
+                treePaneContainer.PropertyChanged -=
+                    OnTreePanePropertyChanged;
+                contentWasDeferred =
+                    viewModel.PreviewDocument is null &&
+                    !viewModel.IsPreviewLoading;
+                animationStarted.TrySetResult();
+            }
+
+            treePaneContainer.PropertyChanged +=
+                OnTreePanePropertyChanged;
+            try
+            {
+                var openTask = previewController.OpenAsync();
+                await animationStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.True(contentWasDeferred);
+                await openTask;
+            }
+            finally
+            {
+                treePaneContainer.PropertyChanged -=
+                    OnTreePanePropertyChanged;
+            }
+
             Assert.NotNull(viewModel.PreviewDocument);
         }
         finally
@@ -503,6 +544,82 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.True(viewModel.IsPreviewMode);
             Assert.NotNull(viewModel.PreviewDocument);
             Assert.False(viewModel.IsPreviewLoading);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewCloseDuringOpenAnimation_InterruptsTransitionAndCleansSnapshots()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var previewController = GetPreviewWorkspaceController(window);
+            var previewModeEntered =
+                new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+            Task? closeRequestTask = null;
+
+            void OnViewModelPropertyChanged(
+                object? sender,
+                PropertyChangedEventArgs args)
+            {
+                if (args.PropertyName !=
+                        nameof(MainWindowViewModel.PreviewWorkspaceMode) ||
+                    !viewModel.IsPreviewMode)
+                {
+                    return;
+                }
+
+                viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+                closeRequestTask = previewController.CloseAsync();
+                previewModeEntered.TrySetResult();
+            }
+
+            viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+            viewModel.PropertyChanged += OnViewModelPropertyChanged;
+
+            try
+            {
+                var openTask = previewController.OpenAsync();
+                await previewModeEntered.Task.WaitAsync(
+                    TimeSpan.FromSeconds(5));
+                await Assert.IsAssignableFrom<Task>(closeRequestTask);
+                await openTask;
+            }
+            finally
+            {
+                viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            }
+
+            var treeSnapshotHost =
+                UiTestDriver.GetRequiredControl<Border>(
+                    window,
+                    "TreePaneAnimationSnapshotHost");
+            var previewSnapshotHost =
+                UiTestDriver.GetRequiredControl<Border>(
+                    window,
+                    "PreviewPaneAnimationSnapshotHost");
+            var treeSnapshotImage =
+                UiTestDriver.GetRequiredControl<Image>(
+                    window,
+                    "TreePaneAnimationSnapshotImage");
+            var previewSnapshotImage =
+                UiTestDriver.GetRequiredControl<Image>(
+                    window,
+                    "PreviewPaneAnimationSnapshotImage");
+
+            Assert.True(previewController.WasLastOpenAnimationInterruptedByClose);
+            Assert.False(viewModel.IsPreviewMode);
+            Assert.False(treeSnapshotHost.IsVisible);
+            Assert.False(previewSnapshotHost.IsVisible);
+            Assert.Null(treeSnapshotImage.Source);
+            Assert.Null(previewSnapshotImage.Source);
         }
         finally
         {
@@ -990,6 +1107,69 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
             await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Tree);
             Assert.True(UiTestDriver.GetViewModel(window).IsPreviewTreeSelected);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewModeSwitch_PreparesContentDuringAnimationAndPublishesAfterIt()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(
+                window,
+                PreviewContentMode.TreeAndContent);
+
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var previewController = GetPreviewWorkspaceController(window);
+            var previousDocument = viewModel.PreviewDocument;
+            Assert.NotNull(previousDocument);
+            var publicationObserved = false;
+            var publicationObservedDuringAnimation = false;
+
+            void OnViewModelPropertyChanged(
+                object? sender,
+                PropertyChangedEventArgs args)
+            {
+                if (args.PropertyName !=
+                        nameof(MainWindowViewModel.PreviewDocument) ||
+                    ReferenceEquals(previousDocument, viewModel.PreviewDocument))
+                {
+                    return;
+                }
+
+                publicationObserved = true;
+                publicationObservedDuringAnimation |=
+                    previewController.IsModeSwitchInProgress;
+            }
+
+            viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            try
+            {
+                var switchTask =
+                    previewController.SwitchModeAsync(PreviewContentMode.Tree);
+
+                Assert.True(previewController.IsModeSwitchInProgress);
+                Assert.True(viewModel.IsPreviewLoading);
+                Assert.Same(previousDocument, viewModel.PreviewDocument);
+
+                await switchTask;
+            }
+            finally
+            {
+                viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            }
+
+            Assert.True(publicationObserved);
+            Assert.False(publicationObservedDuringAnimation);
+            Assert.NotSame(previousDocument, viewModel.PreviewDocument);
+            Assert.True(viewModel.IsPreviewTreeSelected);
         }
         finally
         {

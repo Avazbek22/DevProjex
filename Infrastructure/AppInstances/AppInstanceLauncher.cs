@@ -42,6 +42,7 @@ public sealed class AppInstanceLauncher : IAppInstanceLauncher
             IsWindows: OperatingSystem.IsWindows(),
             ProcessPath: processPath,
             EntryAssemblyPath: entryAssemblyPath,
+            AppHostPath: ProcessEntryPointResolver.ResolveCurrentAppHostPath(),
             WorkingDirectory: workingDirectory,
             WindowsPackageFamilyName: TryGetCurrentPackageFamilyName());
     }

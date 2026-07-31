@@ -1,4 +1,8 @@
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Input.Raw;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using DevProjex.Application.Preview;
 using DevProjex.Avalonia.Controls;
 
@@ -14,6 +18,65 @@ public sealed class VirtualizedPreviewTextControlTests
 
         Assert.True(control.Focusable);
         Assert.Null(control.Cursor);
+    }
+
+    [AvaloniaFact]
+    public void PointerCursor_RemainsIBeamAcrossTrailingAreaAndSelectionPress()
+    {
+        var control = new VirtualizedPreviewTextControl
+        {
+            Text = "short\nlonger preview line",
+            Width = 480,
+            Height = 160,
+            TextFontSize = 15
+        };
+        var window = new Window
+        {
+            Width = 520,
+            Height = 220,
+            WindowDecorations = WindowDecorations.None,
+            Content = control
+        };
+
+        try
+        {
+            window.Show();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            var origin = Assert.IsType<Point>(
+                control.TranslatePoint(default, window));
+            var lineHeight = InvokeResolveLineHeight(control);
+            var textPoint = new Point(
+                origin.X + control.LeftPadding + 2,
+                origin.Y + control.TopPadding + (lineHeight / 2));
+            var trailingAreaPoint = new Point(
+                origin.X + 360,
+                textPoint.Y);
+
+            window.MouseMove(textPoint, RawInputModifiers.None);
+            var textCursor = Assert.IsType<Cursor>(control.Cursor);
+
+            window.MouseMove(trailingAreaPoint, RawInputModifiers.None);
+            Assert.Same(textCursor, control.Cursor);
+
+            window.MouseDown(
+                trailingAreaPoint,
+                MouseButton.Left,
+                RawInputModifiers.LeftMouseButton);
+            Assert.Same(textCursor, control.Cursor);
+
+            window.MouseMove(
+                new Point(trailingAreaPoint.X, trailingAreaPoint.Y + lineHeight),
+                RawInputModifiers.LeftMouseButton);
+            Assert.Same(textCursor, control.Cursor);
+            window.MouseUp(
+                trailingAreaPoint,
+                MouseButton.Left,
+                RawInputModifiers.None);
+        }
+        finally
+        {
+            window.Close();
+        }
     }
 
     [AvaloniaFact]
@@ -240,6 +303,51 @@ public sealed class VirtualizedPreviewTextControlTests
         Assert.InRange(GetLineStartsCapacity(control), 1, 4096);
     }
 
+    [AvaloniaFact]
+    public void Render_ReusesFormattedVisibleLinesAndKeepsScrollCacheBounded()
+    {
+        var control = new VirtualizedPreviewTextControl
+        {
+            Text = string.Join(
+                '\n',
+                Enumerable.Range(1, 3_000).Select(
+                    static lineNumber =>
+                        $"line {lineNumber:D4}: preview rendering cache")),
+            TextBrush = Brushes.White,
+            TextFontSize = 15,
+            ViewportWidth = 640,
+            ViewportHeight = 180,
+            Width = 640,
+            Height = 180
+        };
+        control.Measure(new Size(640, 180));
+        control.Arrange(new Rect(0, 0, 640, 180));
+
+        using var bitmap = new RenderTargetBitmap(new PixelSize(640, 180));
+        bitmap.Render(control);
+        var firstRenderEntries = GetFormattedLineCacheEntries(control);
+
+        bitmap.Render(control);
+        var secondRenderEntries = GetFormattedLineCacheEntries(control);
+
+        Assert.NotEmpty(firstRenderEntries);
+        Assert.Equal(firstRenderEntries.Keys, secondRenderEntries.Keys);
+        foreach (var (lineNumber, entry) in firstRenderEntries)
+            Assert.Same(entry, secondRenderEntries[lineNumber]);
+
+        var lineHeight = InvokeResolveLineHeight(control);
+        for (var firstLine = 1; firstLine <= 3_000; firstLine += 20)
+        {
+            control.VerticalOffset = (firstLine - 1) * lineHeight;
+            bitmap.Render(control);
+        }
+
+        Assert.InRange(
+            GetFormattedLineCacheEntries(control).Count,
+            1,
+            (512 + (3 * 2)) * 2);
+    }
+
     private static double InvokeResolveLineHeight(VirtualizedPreviewTextControl control)
     {
         var method = typeof(VirtualizedPreviewTextControl).GetMethod(
@@ -260,6 +368,26 @@ public sealed class VirtualizedPreviewTextControlTests
         Assert.NotNull(field);
         var lineStarts = Assert.IsType<List<int>>(field!.GetValue(control));
         return lineStarts.Capacity;
+    }
+
+    private static Dictionary<int, object> GetFormattedLineCacheEntries(
+        VirtualizedPreviewTextControl control)
+    {
+        var field = typeof(VirtualizedPreviewTextControl).GetField(
+            "_formattedLineCache",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(field);
+        var cache = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+            field!.GetValue(control));
+        var entries = new Dictionary<int, object>(cache.Count);
+        foreach (var key in cache.Keys)
+        {
+            var lineNumber = Assert.IsType<int>(key);
+            entries.Add(lineNumber, cache[key]!);
+        }
+
+        return entries;
     }
 
     private static double InvokeResolveDistanceFromColumn(

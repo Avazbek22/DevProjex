@@ -502,6 +502,52 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public void WindowsFrameworkDependentDesktopLaunchPrefersGuiAppHost()
+	{
+		var startInfo = DesktopProcessLauncher.CreateStartInfo(
+			"desktop-request.json",
+			@"C:\Program Files\dotnet\dotnet.exe",
+			@"C:\DevProjex\DevProjex.dll",
+			@"C:\DevProjex\DevProjex.exe",
+			isWindows: true);
+
+		Assert.Equal(@"C:\DevProjex\DevProjex.exe", startInfo.FileName);
+		Assert.True(startInfo.UseShellExecute);
+		Assert.False(startInfo.CreateNoWindow);
+		Assert.Equal(
+			[
+				DesktopLaunchRequestStore.InternalRequestArgument,
+				"desktop-request.json"
+			],
+			startInfo.ArgumentList);
+	}
+
+	[Fact]
+	public void WindowsDotnetDesktopFallbackCannotCreateOrReattachConsoleWindow()
+	{
+		var startInfo = DesktopProcessLauncher.CreateStartInfo(
+			"desktop-request.json",
+			@"C:\Program Files\dotnet\dotnet.exe",
+			@"C:\DevProjex\DevProjex.dll",
+			appHostPath: null,
+			isWindows: true);
+
+		Assert.Equal(@"C:\Program Files\dotnet\dotnet.exe", startInfo.FileName);
+		Assert.False(startInfo.UseShellExecute);
+		Assert.True(startInfo.CreateNoWindow);
+		Assert.Equal(
+			[
+				@"C:\DevProjex\DevProjex.dll",
+				DesktopLaunchRequestStore.InternalRequestArgument,
+				"desktop-request.json"
+			],
+			startInfo.ArgumentList);
+		Assert.False(
+			startInfo.Environment.ContainsKey(
+				InvocationEnvironment.TerminalHostVariable));
+	}
+
+	[Fact]
 	public void InternalDesktopRequestIsRemovedBeforePublicRouting()
 	{
 		var previousRequest = Environment.GetEnvironmentVariable(

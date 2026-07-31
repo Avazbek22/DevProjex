@@ -236,6 +236,17 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(TaskbarProgressRecordingState.Progress, taskbar.LastState);
         Assert.Equal(64, taskbar.LastPercent);
 
+        viewModel.StatusPresentationReady = false;
+        coordinator.SyncWithStatusBar();
+
+        Assert.Equal(TaskbarProgressRecordingState.Clear, taskbar.LastState);
+
+        viewModel.StatusPresentationReady = true;
+        coordinator.SyncWithStatusBar();
+
+        Assert.Equal(TaskbarProgressRecordingState.Progress, taskbar.LastState);
+        Assert.Equal(64, taskbar.LastPercent);
+
         coordinator.BeginGitClone();
         coordinator.UpdateGitClone("Receiving objects: 77%");
 
@@ -380,6 +391,45 @@ public sealed class MainWindowCoordinatorRefactorTests
         await loadTask;
 
         Assert.Null(host.CurrentCachedRepoPath);
+    }
+
+    [Fact]
+    public async Task ProjectLoadPipeline_AwaitsRecentProjectsPersistenceBeforeFinalizingLoad()
+    {
+        var viewModel = CreateViewModel();
+        var persistenceStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePersistence = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingProjectLoadHost(viewModel)
+        {
+            RecordRecentFolderHandler = async cancellationToken =>
+            {
+                persistenceStarted.SetResult();
+                await releasePersistence.Task.WaitAsync(cancellationToken);
+            }
+        };
+        var status = new StatusOperationCoordinator(
+            viewModel,
+            isBackgroundMetricsActive: () => false,
+            metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+        using var pipeline = new ProjectLoadPipeline(host, status);
+
+        var loadTask = pipeline.OpenFolderAsync(
+            @"C:\Project",
+            fromDialog: false,
+            recordRecentFolder: true);
+        await persistenceStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(loadTask.IsCompleted);
+        Assert.True(viewModel.StatusBusy);
+        Assert.DoesNotContain(ProjectLoadHostCall.ClearProjectLoadCancellation, host.Calls);
+        Assert.DoesNotContain(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
+
+        releasePersistence.SetResult();
+        await loadTask;
+
+        Assert.False(viewModel.StatusBusy);
+        Assert.Contains(ProjectLoadHostCall.ClearProjectLoadCancellation, host.Calls);
+        Assert.Contains(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
     }
 
     [Fact]
@@ -541,7 +591,7 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
-    public async Task PreviewWorkspacePipeline_ModeSwitchBuildKeepsCurrentDocumentUntilReplacementIsReady()
+    public async Task PreviewWorkspacePipeline_ModeSwitchBuildPreparesReplacementBeforePublicationGate()
     {
         var viewModel = CreateViewModel();
         viewModel.IsProjectLoaded = true;
@@ -553,6 +603,10 @@ public sealed class MainWindowCoordinatorRefactorTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseBuild = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var buildCompleted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var publicationReady = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         var host = new RecordingPreviewWorkspaceHost(viewModel)
         {
             IsPreviewModeSwitchInProgress = true,
@@ -561,8 +615,10 @@ public sealed class MainWindowCoordinatorRefactorTests
             {
                 buildStarted.TrySetResult();
                 releaseBuild.Task.Wait(cancellationToken);
-                return new PreviewBuildResult(
+                var result = new PreviewBuildResult(
                     new InMemoryPreviewTextDocument("replacement"));
+                buildCompleted.TrySetResult();
+                return result;
             }
         };
         using var pipeline = new PreviewWorkspacePipeline(
@@ -570,7 +626,8 @@ public sealed class MainWindowCoordinatorRefactorTests
             TimeSpan.FromMilliseconds(1));
 
         var refreshOperation = pipeline.RefreshNowAsync(
-            allowDuringModeSwitch: true);
+            allowDuringModeSwitch: true,
+            publicationReady: publicationReady.Task);
         await buildStarted.Task.WaitAsync(
             TimeSpan.FromSeconds(5),
             TestContext.Current.CancellationToken);
@@ -581,6 +638,15 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.False(refreshOperation.Completion.IsCompleted);
 
         releaseBuild.TrySetResult();
+        await buildCompleted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.Same(currentDocument, viewModel.PreviewDocument);
+        Assert.Equal(0, host.ApplyDocumentCount);
+        Assert.False(refreshOperation.Completion.IsCompleted);
+
+        publicationReady.TrySetResult();
         await refreshOperation.Completion;
 
         Assert.NotNull(viewModel.PreviewDocument);
@@ -1482,6 +1548,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public Func<CancellationToken, Task>? ReloadHandler { get; set; }
 
+        public Func<CancellationToken, Task>? RecordRecentFolderHandler { get; set; }
+
         public Func<CancellationToken, Task>? DeleteRepositoryDirectoryHandler { get; set; }
 
         public void CaptureProjectLoadCancellationSnapshot() =>
@@ -1533,10 +1601,12 @@ public sealed class MainWindowCoordinatorRefactorTests
                 await ReloadHandler(cancellationToken);
         }
 
-        public void RecordRecentFolder(string path)
+        public async Task RecordRecentFolderAsync(string path, CancellationToken cancellationToken)
         {
             _ = path;
             Calls.Add(ProjectLoadHostCall.RecordRecentFolder);
+            if (RecordRecentFolderHandler is not null)
+                await RecordRecentFolderHandler(cancellationToken);
         }
 
         public async Task DeleteRepositoryDirectoryAsync(string path, CancellationToken cancellationToken)

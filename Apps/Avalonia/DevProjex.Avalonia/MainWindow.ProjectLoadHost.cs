@@ -52,8 +52,10 @@ public partial class MainWindow : IProjectLoadPipelineHost
     Task IProjectLoadPipelineHost.ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile) =>
         ReloadProjectAsync(cancellationToken, applyStoredProfile);
 
-    void IProjectLoadPipelineHost.RecordRecentFolder(string path) =>
-        RecordRecentFolder(path);
+    Task IProjectLoadPipelineHost.RecordRecentFolderAsync(
+        string path,
+        CancellationToken cancellationToken) =>
+        RecordRecentFolderAsync(path, cancellationToken);
 
     Task IProjectLoadPipelineHost.DeleteRepositoryDirectoryAsync(
         string path,

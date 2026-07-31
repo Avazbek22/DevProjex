@@ -77,8 +77,6 @@ internal sealed class PreviewSurfaceController : IDisposable
         _setClipboardTextAsync = setClipboardTextAsync;
         _showErrorAsync = showErrorAsync;
 
-        controls.TextScrollViewer.Cursor =
-            new Cursor(StandardCursorType.Ibeam);
         controls.TextControl.VerticalOffset =
             Math.Max(0, controls.TextScrollViewer.Offset.Y);
         controls.TextControl.ViewportHeight =

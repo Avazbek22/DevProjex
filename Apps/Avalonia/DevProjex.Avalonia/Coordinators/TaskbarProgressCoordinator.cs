@@ -20,7 +20,7 @@ public sealed class TaskbarProgressCoordinator(
         if (_gitCloneProgressActive)
             return;
 
-        if (!viewModel.StatusBusy)
+        if (!viewModel.StatusOperationVisible)
         {
             taskbarProgressService.Clear();
             return;

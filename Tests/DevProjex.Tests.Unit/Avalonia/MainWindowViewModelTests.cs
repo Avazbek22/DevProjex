@@ -212,6 +212,26 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void StatusPresentation_CanStayHiddenWhileOperationRemainsLogicallyBusy()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.StatusPresentationReady = false;
+        viewModel.StatusProgressIsIndeterminate = true;
+        viewModel.StatusBusy = true;
+
+        Assert.True(viewModel.StatusBusy);
+        Assert.False(viewModel.StatusOperationVisible);
+        Assert.False(viewModel.StatusProgressVisible);
+        Assert.False(viewModel.StatusProgressIsIndeterminate);
+
+        viewModel.StatusPresentationReady = true;
+
+        Assert.True(viewModel.StatusOperationVisible);
+        Assert.True(viewModel.StatusProgressVisible);
+        Assert.True(viewModel.StatusProgressIsIndeterminate);
+    }
+
+    [Fact]
     public void ApplySettingsAttention_RequiresPendingChangesAndPausesDuringBusyOperations()
     {
         var viewModel = CreateViewModel();

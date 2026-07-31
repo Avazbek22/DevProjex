@@ -113,15 +113,51 @@ public partial class MainWindow
             return;
 
         if (e.NewValue is Rect rect)
+            ScheduleWindowBoundsUpdate(rect);
+    }
+
+    private void ScheduleWindowBoundsUpdate(Rect bounds)
+    {
+        _pendingWindowBounds = bounds;
+        if (_windowBoundsFramePending)
+            return;
+
+        _windowBoundsFramePending = true;
+        try
         {
-            _viewModel.UpdateHelpPopoverMaxSize(rect.Size);
-            _workspacePresentation.HandleWindowBoundsChanged(rect.Width);
-            if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
-                _metrics.RenderStatusBarMetrics();
-            _previewSurfaceController.RefreshSelectionMetricsPresentation();
-            if (_viewModel.IsAnyPreviewVisible &&
-                !_previewWorkspaceController.IsModeSwitchInProgress)
-                UpdatePreviewSegmentThumbPosition(animate: false);
+            RequestAnimationFrame(
+                _ =>
+                {
+                    _windowBoundsFramePending = false;
+                    if (_windowLifetimeCts is not
+                        {
+                            IsCancellationRequested: false
+                        })
+                    {
+                        return;
+                    }
+
+                    ApplyWindowBoundsUpdate(_pendingWindowBounds);
+                });
+        }
+        catch (InvalidOperationException)
+        {
+            _windowBoundsFramePending = false;
+            ApplyWindowBoundsUpdate(_pendingWindowBounds);
+        }
+    }
+
+    private void ApplyWindowBoundsUpdate(Rect bounds)
+    {
+        _viewModel.UpdateHelpPopoverMaxSize(bounds.Size);
+        _workspacePresentation.HandleWindowBoundsChanged(bounds.Width);
+        if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
+            _metrics.RenderStatusBarMetrics();
+        _previewSurfaceController.RefreshSelectionMetricsPresentation();
+        if (_viewModel.IsAnyPreviewVisible &&
+            !_previewWorkspaceController.IsModeSwitchInProgress)
+        {
+            UpdatePreviewSegmentThumbPosition(animate: false);
         }
     }
 
@@ -245,6 +281,13 @@ public partial class MainWindow
     }
 
     private async Task WaitForNextAnimationFrameAsync(CancellationToken cancellationToken)
+        => await TryWaitForNextAnimationFrameAsync(
+            UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250)),
+            cancellationToken);
+
+    private async Task<bool> TryWaitForNextAnimationFrameAsync(
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         try
@@ -254,14 +297,15 @@ public partial class MainWindow
         catch
         {
             // If a platform denies RAF during startup, never keep the main window hidden.
-            return;
+            return false;
         }
 
         var completedTask = await Task.WhenAny(
             completion.Task,
-            Task.Delay(UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250)), cancellationToken));
+            Task.Delay(timeout, cancellationToken));
         await completedTask;
         cancellationToken.ThrowIfCancellationRequested();
+        return ReferenceEquals(completedTask, completion.Task);
     }
 
     private void CompleteStartupRevealGate()
@@ -308,7 +352,8 @@ public partial class MainWindow
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            var startupProjectPath = ResolveStartupProjectPath();
+            var startupProjectPath =
+                await ResolveStartupProjectPathAsync(cancellationToken);
             if (!string.IsNullOrWhiteSpace(startupProjectPath))
             {
                 var startupLoadStopwatch = Stopwatch.StartNew();
@@ -367,7 +412,8 @@ public partial class MainWindow
             "EnsureAppStateStoresExist");
     }
 
-    private string? ResolveStartupProjectPath()
+    private async Task<string?> ResolveStartupProjectPathAsync(
+        CancellationToken cancellationToken)
     {
         if (_startupOptions.EffectiveSessionMetrics.Enabled)
             return _startupOptions.EffectiveSessionMetrics.ProjectPath;
@@ -378,16 +424,9 @@ public partial class MainWindow
         if (_desktopStartupRequest?.UseLastProject != true)
             return null;
 
-        foreach (var recentFolder in _recentProjectsDb.RecentFolders)
-        {
-            if (!string.IsNullOrWhiteSpace(recentFolder.Path) &&
-                Directory.Exists(recentFolder.Path))
-            {
-                return recentFolder.Path;
-            }
-        }
-
-        return null;
+        return await FindFirstExistingDirectoryAsync(
+            _recentProjectsDb.RecentFolders.Select(static folder => folder.Path),
+            cancellationToken);
     }
 
     #region Drop Zone Handlers
@@ -406,7 +445,10 @@ public partial class MainWindow
         try
         {
             folder = ResolveDropFolderPath(
-                e.DataTransfer.TryGetFiles()?.Select(item => item.TryGetLocalPath()) ?? []);
+                e.DataTransfer.TryGetFiles()?
+                    .OfType<IStorageFolder>()
+                    .Select(static folder => folder.TryGetLocalPath()) ??
+                []);
         }
         catch
         {
@@ -457,9 +499,10 @@ public partial class MainWindow
             var files = e.DataTransfer.TryGetFiles();
             if (files is null) return;
 
-            var localPaths = files
-                .Select(f => f.TryGetLocalPath());
-            var folder = ResolveDropFolderPath(localPaths);
+            var folder = ResolveDropFolderPath(
+                files
+                    .OfType<IStorageFolder>()
+                    .Select(static item => item.TryGetLocalPath()));
             e.DragEffects = ResolveDropEffect(!string.IsNullOrWhiteSpace(folder));
 
             if (!string.IsNullOrWhiteSpace(folder))

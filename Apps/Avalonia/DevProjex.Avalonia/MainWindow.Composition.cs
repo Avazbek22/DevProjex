@@ -145,9 +145,10 @@ public partial class MainWindow
     private Border? _settingsContainer;
     private Border? _settingsIsland;
     private SettingsPanelView? _settingsPanel;
+    private Task _projectLoadFinalizationTask = Task.CompletedTask;
     private Task _postLoadVisualReadyTask = Task.CompletedTask;
     private static readonly TimeSpan SettingsPanelAnimationDuration =
-        WorkspacePresentationController.PanelAnimationDuration;
+        WorkspacePresentationController.SettingsPanelAnimationDuration;
 
     private Border? _previewBarContainer;
     private Border? _previewBar;
@@ -163,6 +164,8 @@ public partial class MainWindow
     private bool _startupRevealCompleted;
     private CancellationTokenSource? _windowLifetimeCts = new();
     private int _startupSequenceStarted;
+    private Rect _pendingWindowBounds;
+    private bool _windowBoundsFramePending;
 
     private static readonly int TreeViewModelBuildParallelism =
         Math.Clamp(Environment.ProcessorCount, min: 2, max: 12);
@@ -567,6 +570,7 @@ public partial class MainWindow
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
                 UpdateDropZoneAnimationState();
             else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
+                     or nameof(MainWindowViewModel.StatusOperationVisible)
                      or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
                      or nameof(MainWindowViewModel.StatusProgressValue))
                 _taskbarProgress.SyncWithStatusBar();

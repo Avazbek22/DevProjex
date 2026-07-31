@@ -390,7 +390,8 @@ internal sealed class MetricsPipeline(
             viewModel.StatusOperationCalculatingData,
             indeterminate: false,
             operationType: StatusOperationType.MetricsCalculation,
-            cancelAction: CancelBackgroundCalculation);
+            cancelAction: CancelBackgroundCalculation,
+            presentation: StatusOperationPresentation.ExtendedDelay);
         IReadOnlyList<string> stagedFilePaths = Array.Empty<string>();
         FileMetricsScanResult[] stagedResults = [];
         try
@@ -886,7 +887,8 @@ internal sealed class MetricsPipeline(
             viewModel.StatusOperationCalculatingData,
             indeterminate: false,
             operationType: StatusOperationType.MetricsCalculation,
-            cancelAction: CancelBackgroundCalculation);
+            cancelAction: CancelBackgroundCalculation,
+            presentation: StatusOperationPresentation.ExtendedDelay);
         var stagedResults = new FileMetricsScanResult[missingPaths.Count];
 
         try

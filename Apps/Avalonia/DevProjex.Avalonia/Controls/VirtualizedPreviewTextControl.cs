@@ -87,6 +87,8 @@ public sealed class VirtualizedPreviewTextControl : Control
     private const int MaxFallbackVisibleLines = 120;
     private const int MaxRenderedVisibleLines = 512;
     private const int MaxRetainedLineMetadataCapacity = 4096;
+    private const int MaxCachedFormattedLines =
+        (MaxRenderedVisibleLines + (RenderBufferLines * 2)) * 2;
     private const double AutoScrollEdgeThreshold = 28.0;
     private static readonly TimeSpan AutoScrollTickInterval = TimeSpan.FromMilliseconds(16);
     private readonly List<int> _lineStarts = [0];
@@ -96,6 +98,12 @@ public sealed class VirtualizedPreviewTextControl : Control
     private IPreviewTextDocument? _cachedVisibleWindowDocument;
     private int _cachedVisibleWindowFirstLine;
     private int _cachedVisibleWindowLastLine;
+    private readonly Dictionary<int, FormattedLineCacheEntry> _formattedLineCache = [];
+    private readonly Queue<int> _formattedLineCacheOrder = [];
+    private string? _formattedLineCacheFontFamilyName;
+    private string? _formattedLineCacheCultureName;
+    private double _formattedLineCacheFontSize = double.NaN;
+    private IBrush? _formattedLineCacheBrush;
     private ScrollViewer? _ownerScrollViewer;
     private int _lineCount = 1;
     private int _maxLineLength;
@@ -337,7 +345,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        Cursor = PreviewMenuCursor;
+        Cursor = PreviewTextCursor;
     }
 
     public void ClearSelection()
@@ -442,7 +450,12 @@ public sealed class VirtualizedPreviewTextControl : Control
 
             if (!TryGetVisibleSelectionRange(visibleWindow, out _, out _))
             {
-                DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
+                DrawVisibleTextLines(
+                    context,
+                    visibleWindow,
+                    origin,
+                    typeface,
+                    lineHeight);
             }
             else
             {
@@ -478,17 +491,20 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private void DrawVisibleTextLines(
         DrawingContext context,
-        string visibleText,
+        VisibleTextWindow visibleWindow,
         Point origin,
         Typeface typeface,
         double lineHeight)
     {
-        var lineIndex = 0;
-        foreach (var line in visibleText.Split('\n'))
+        EnsureFormattedLineCacheStyle();
+        for (var lineIndex = 0; lineIndex < visibleWindow.LineCount; lineIndex++)
         {
             var lineOrigin = new Point(origin.X, origin.Y + (lineIndex * lineHeight));
-            context.DrawText(BuildFormattedText(line, typeface), lineOrigin);
-            lineIndex++;
+            var lineNumber = visibleWindow.FirstLine + lineIndex;
+            var lineText = visibleWindow.GetLineSpan(lineIndex);
+            context.DrawText(
+                GetOrCreateFormattedLine(lineNumber, lineText, typeface),
+                lineOrigin);
         }
     }
 
@@ -502,13 +518,19 @@ public sealed class VirtualizedPreviewTextControl : Control
     {
         if (!TryGetNormalizedSelection(out var selectionStart, out var selectionEnd))
         {
-            DrawVisibleTextLines(context, visibleWindow.Text, origin, typeface, lineHeight);
+            DrawVisibleTextLines(
+                context,
+                visibleWindow,
+                origin,
+                typeface,
+                lineHeight);
             return;
         }
 
-        var lineNumber = visibleWindow.FirstLine;
-        foreach (var lineText in visibleWindow.Text.Split('\n'))
+        for (var lineIndex = 0; lineIndex < visibleWindow.LineCount; lineIndex++)
         {
+            var lineNumber = visibleWindow.FirstLine + lineIndex;
+            var lineText = visibleWindow.GetLineSpan(lineIndex).ToString();
             // Keep selected text on the same per-line baseline model as normal preview rendering.
             var formattedText = BuildFormattedText(lineText, typeface);
             if (selectionForeground is not null &&
@@ -517,11 +539,72 @@ public sealed class VirtualizedPreviewTextControl : Control
                 formattedText.SetForegroundBrush(selectionForeground, startColumn, endColumn - startColumn);
             }
 
-            var lineIndex = lineNumber - visibleWindow.FirstLine;
             var lineOrigin = new Point(origin.X, origin.Y + (lineIndex * lineHeight));
             context.DrawText(formattedText, lineOrigin);
-            lineNumber++;
         }
+    }
+
+    private FormattedText GetOrCreateFormattedLine(
+        int lineNumber,
+        ReadOnlySpan<char> lineText,
+        Typeface typeface)
+    {
+        if (_formattedLineCache.TryGetValue(lineNumber, out var cachedLine) &&
+            lineText.SequenceEqual(cachedLine.Text.AsSpan()))
+        {
+            return cachedLine.FormattedText;
+        }
+
+        var text = lineText.ToString();
+        var formattedText = BuildFormattedText(text, typeface);
+        if (cachedLine is null)
+            _formattedLineCacheOrder.Enqueue(lineNumber);
+
+        _formattedLineCache[lineNumber] =
+            new FormattedLineCacheEntry(text, formattedText);
+        TrimFormattedLineCache();
+        return formattedText;
+    }
+
+    private void EnsureFormattedLineCacheStyle()
+    {
+        var fontFamilyName = (TextFontFamily ?? FontFamily.Default).Name;
+        var cultureName = CultureInfo.CurrentUICulture.Name;
+        var brush = TextBrush ?? Brushes.White;
+        if (string.Equals(
+                _formattedLineCacheFontFamilyName,
+                fontFamilyName,
+                StringComparison.Ordinal) &&
+            string.Equals(
+                _formattedLineCacheCultureName,
+                cultureName,
+                StringComparison.Ordinal) &&
+            _formattedLineCacheFontSize.Equals(TextFontSize) &&
+            ReferenceEquals(_formattedLineCacheBrush, brush))
+        {
+            return;
+        }
+
+        ClearFormattedLineCache();
+        _formattedLineCacheFontFamilyName = fontFamilyName;
+        _formattedLineCacheCultureName = cultureName;
+        _formattedLineCacheFontSize = TextFontSize;
+        _formattedLineCacheBrush = brush;
+    }
+
+    private void TrimFormattedLineCache()
+    {
+        while (_formattedLineCache.Count > MaxCachedFormattedLines &&
+               _formattedLineCacheOrder.TryDequeue(out var lineNumber))
+        {
+            _formattedLineCache.Remove(lineNumber);
+        }
+    }
+
+    private void ClearFormattedLineCache()
+    {
+        _formattedLineCache.Clear();
+        _formattedLineCacheOrder.Clear();
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -551,28 +634,13 @@ public sealed class VirtualizedPreviewTextControl : Control
         base.OnPointerMoved(e);
 
         if (!_isSelecting || e.Pointer.Captured != this)
-        {
-            UpdatePointerCursor(e.GetPosition(this));
             return;
-        }
 
         CaptureSelectionPointer(e);
         UpdateSelectionActivePosition(HitTestSelectionPosition(e.GetPosition(this)));
         UpdateSelectionAutoScrollState();
         Cursor = PreviewTextCursor;
         e.Handled = true;
-    }
-
-    protected override void OnPointerEntered(PointerEventArgs e)
-    {
-        base.OnPointerEntered(e);
-        UpdatePointerCursor(e.GetPosition(this));
-    }
-
-    protected override void OnPointerExited(PointerEventArgs e)
-    {
-        base.OnPointerExited(e);
-        Cursor = PreviewMenuCursor;
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -937,20 +1005,6 @@ public sealed class VirtualizedPreviewTextControl : Control
             x > lineWidth + 1.0
                 ? SelectionHitKind.TrailingArea
                 : SelectionHitKind.Text);
-    }
-
-    private void UpdatePointerCursor(Point point)
-    {
-        if (_isSelecting)
-        {
-            Cursor = PreviewTextCursor;
-            return;
-        }
-
-        var hit = HitTestSelection(point);
-        Cursor = hit.Kind == SelectionHitKind.Text
-            ? PreviewTextCursor
-            : PreviewMenuCursor;
     }
 
     private int ResolveColumnFromDistance(string lineText, double distance, Typeface typeface)
@@ -1461,6 +1515,11 @@ public sealed class VirtualizedPreviewTextControl : Control
         _cachedVisibleWindowDocument = null;
         _cachedVisibleWindowFirstLine = 0;
         _cachedVisibleWindowLastLine = 0;
+        ClearFormattedLineCache();
+        _formattedLineCacheFontFamilyName = null;
+        _formattedLineCacheCultureName = null;
+        _formattedLineCacheFontSize = double.NaN;
+        _formattedLineCacheBrush = null;
     }
 
     private ScrollViewer? GetOwnerScrollViewer()
@@ -1658,6 +1717,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private readonly record struct SelectionHitResult(SelectionPosition Position, SelectionHitKind Kind);
     private readonly record struct SelectionPosition(int Line, int Column);
+    private sealed record FormattedLineCacheEntry(
+        string Text,
+        FormattedText FormattedText);
     private readonly record struct StickyHeaderTrimCacheKey(
         string Text,
         double AvailableWidth,
@@ -1698,6 +1760,26 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         public string Text { get; } = text;
 
+        public int LineCount => _lineStarts.Length;
+
+        public ReadOnlySpan<char> GetLineSpan(int lineIndex)
+        {
+            var normalizedLineIndex = Math.Clamp(
+                lineIndex,
+                0,
+                _lineStarts.Length - 1);
+            var lineStart = _lineStarts[normalizedLineIndex];
+            var lineEnd = normalizedLineIndex + 1 < _lineStarts.Length
+                ? Math.Max(
+                    lineStart,
+                    _lineStarts[normalizedLineIndex + 1] - 1)
+                : Text.Length;
+            if (lineEnd > lineStart && Text[lineEnd - 1] == '\r')
+                lineEnd--;
+
+            return Text.AsSpan(lineStart, Math.Max(0, lineEnd - lineStart));
+        }
+
         public SelectionPosition Clamp(SelectionPosition position)
         {
             var clampedLine = Math.Clamp(position.Line, FirstLine, LastLine);
@@ -1708,11 +1790,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         public int GetLineLength(int lineNumber)
         {
             var lineIndex = Math.Clamp(lineNumber - FirstLine, 0, _lineStarts.Length - 1);
-            var lineStart = _lineStarts[lineIndex];
-            var lineEnd = lineIndex + 1 < _lineStarts.Length
-                ? Math.Max(lineStart, _lineStarts[lineIndex + 1] - 1)
-                : Text.Length;
-            return Math.Max(0, lineEnd - lineStart);
+            return GetLineSpan(lineIndex).Length;
         }
 
         public int GetLocalTextIndex(int lineNumber, int column)
