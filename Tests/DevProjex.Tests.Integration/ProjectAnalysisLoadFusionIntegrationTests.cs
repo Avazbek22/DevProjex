@@ -306,6 +306,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		temp.CreateFile(Path.Combine(repo, ".gitignore"), "*.noise\n");
 		var visiblePath = temp.CreateFile(Path.Combine(repo, "visible.txt"), "visible\n");
 		var ignoredPath = temp.CreateFile(Path.Combine(repo, "generated.noise"), "ignored\n");
+		RunGit(Path.Combine(temp.Path, repo), "init", "--quiet");
 		var gitObjectPath = temp.CreateFile(Path.Combine(repo, ".git", "objects", "probe"), "internal\n");
 		var service = CreateService(new FileSystemScanner(), new TreeBuilder());
 
@@ -319,6 +320,32 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		Assert.Contains(visiblePath, loaded.Tree.OrderedFilePaths!);
 		Assert.DoesNotContain(ignoredPath, loaded.Tree.OrderedFilePaths!);
 		Assert.DoesNotContain(gitObjectPath, loaded.Tree.OrderedFilePaths!);
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("Could not start git.");
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		if (!process.WaitForExit(20_000))
+		{
+			process.Kill(entireProcessTree: true);
+			throw new TimeoutException("Git command did not complete within 20 seconds.");
+		}
+
+		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
 	}
 
 	private static TemporaryDirectory CreateMixedWorkspace()

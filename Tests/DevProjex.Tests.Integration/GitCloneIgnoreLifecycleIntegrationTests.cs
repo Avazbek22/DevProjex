@@ -675,10 +675,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	private static TemporaryDirectory CreateWorkspace(CloneFixtureKind fixtureKind)
 	{
 		var workspace = new TemporaryDirectory();
-		workspace.CreateFile(Path.Combine(".git", "HEAD"), "ref: refs/heads/main\n");
-		workspace.CreateFile(Path.Combine(".git", "objects", "pack", "pack-a.pack"), "metadata\n");
-		workspace.CreateDirectory(Path.Combine(".git", "refs", "tags"));
-		MarkHidden(Path.Combine(workspace.Path, ".git"));
+		InitializeCloneMetadata(workspace);
 
 		if (fixtureKind == CloneFixtureKind.Python)
 		{
@@ -704,10 +701,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	private static TemporaryDirectory CreateDirectoryToggleWorkspace()
 	{
 		var workspace = new TemporaryDirectory();
-		workspace.CreateFile(Path.Combine(".git", "HEAD"), "ref: refs/heads/main\n");
-		workspace.CreateFile(Path.Combine(".git", "objects", "pack", "pack-a.pack"), "metadata\n");
-		workspace.CreateDirectory(Path.Combine(".git", "refs", "tags"));
-		MarkHidden(Path.Combine(workspace.Path, ".git"));
+		InitializeCloneMetadata(workspace);
 		workspace.CreateFile(Path.Combine(".workspace", "settings.json"), "{}\n");
 		workspace.CreateDirectory("empty-root");
 		workspace.CreateFile(Path.Combine("src", "app.cs"), "class App {}\n");
@@ -717,12 +711,48 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	private static TemporaryDirectory CreateBareManagedCloneWorkspace()
 	{
 		var workspace = new TemporaryDirectory();
-		workspace.CreateFile(Path.Combine(".git", "HEAD"), "ref: refs/heads/main\n");
-		workspace.CreateFile(Path.Combine(".git", "objects", "pack", "pack-a.pack"), "metadata\n");
-		workspace.CreateDirectory(Path.Combine(".git", "refs", "tags"));
-		MarkHidden(Path.Combine(workspace.Path, ".git"));
+		InitializeCloneMetadata(workspace);
 		workspace.CreateFile(Path.Combine("src", "app.cs"), "class App {}\n");
 		return workspace;
+	}
+
+	private static void InitializeCloneMetadata(TemporaryDirectory workspace)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workspace.Path,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add("init");
+		startInfo.ArgumentList.Add("--quiet");
+
+		Process? startedProcess;
+		try
+		{
+			startedProcess = Process.Start(startInfo);
+		}
+		catch (System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip("Git is not available in this test environment.");
+			return;
+		}
+
+		using var process = startedProcess ??
+		                    throw new InvalidOperationException("Could not start git.");
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		if (!process.WaitForExit(20_000))
+		{
+			process.Kill(entireProcessTree: true);
+			throw new TimeoutException("Git command did not complete within 20 seconds.");
+		}
+
+		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
+		workspace.CreateFile(Path.Combine(".git", "objects", "pack", "pack-a.pack"), "metadata\n");
+		MarkHidden(Path.Combine(workspace.Path, ".git"));
 	}
 
 	private static ProjectLoadWorkflowRefreshHarness.WorkflowServices CreateManagedCloneServices() =>

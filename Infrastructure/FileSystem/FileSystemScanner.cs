@@ -3680,7 +3680,11 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				// empty projection keeps tracked-only mode fail-closed when the nested
 				// index is missing, unreadable, or being replaced concurrently.
 				var unavailableBoundaryIndex = GitTrackedPathIndex.Unavailable(directoryPath);
-				discoveredTrackedPathIndexes?.Add(unavailableBoundaryIndex);
+				if (!activeContext.ContainsTrackedPathIndex(directoryPath) ||
+				    !candidateContext.ContainsTrackedPathIndex(directoryPath))
+				{
+					discoveredTrackedPathIndexes?.Add(unavailableBoundaryIndex);
+				}
 				activeContext = activeContext.WithTrackedPathIndex(unavailableBoundaryIndex);
 				candidateContext = candidateContext.WithTrackedPathIndex(unavailableBoundaryIndex);
 			}

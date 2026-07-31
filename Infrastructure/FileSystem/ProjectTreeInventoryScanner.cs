@@ -588,7 +588,11 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 				// whose own index cannot be read. The empty boundary is retained in the
 				// inventory so direct and projected builds keep identical ownership.
 				var unavailableBoundaryIndex = GitTrackedPathIndex.Unavailable(directoryPath);
-				discoveredTrackedPathIndexes.Add(unavailableBoundaryIndex);
+				if (!primaryContext.ContainsTrackedPathIndex(directoryPath) ||
+				    !secondaryContext.ContainsTrackedPathIndex(directoryPath))
+				{
+					discoveredTrackedPathIndexes.Add(unavailableBoundaryIndex);
+				}
 				primaryContext = primaryContext.WithTrackedPathIndex(unavailableBoundaryIndex);
 				secondaryContext = secondaryContext.WithTrackedPathIndex(unavailableBoundaryIndex);
 			}

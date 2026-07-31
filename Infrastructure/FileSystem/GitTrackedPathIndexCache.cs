@@ -370,7 +370,21 @@ internal static class GitTrackedPathIndexCache
 			var indexPath = Path.Combine(gitDirectoryPath, "index");
 			var indexInfo = new FileInfo(indexPath);
 			if (!indexInfo.Exists)
-				return false;
+			{
+				// A freshly initialized repository has no physical index until the first
+				// staged entry. Git still defines it as a valid, readable empty index, and
+				// `git ls-files` is the authority for that state. The absent signature is
+				// intentionally distinct so a subsequently created index invalidates cache.
+				signature = new GitIndexSignature(
+					normalizedRootPath,
+					PathUtility.Normalize(gitMetadataPath),
+					PathUtility.Normalize(indexPath),
+					comparisonSemantics,
+					LastWriteTicksUtc: 0,
+					LengthBytes: 0,
+					ContentFingerprint: 0);
+				return true;
+			}
 
 			for (var attempt = 0; attempt < 2; attempt++)
 			{

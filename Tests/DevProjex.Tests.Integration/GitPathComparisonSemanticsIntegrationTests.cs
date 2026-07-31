@@ -98,6 +98,32 @@ public sealed class GitPathComparisonSemanticsIntegrationTests
 	}
 
 	[Fact]
+	public void InvalidatingRepositorySemanticsKeepsUnrelatedRepositoryCacheWarm()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var firstRepository = temp.CreateDirectory("first-repository");
+		var secondRepository = temp.CreateDirectory("second-repository");
+		RunGit(firstRepository, "init", "--quiet");
+		RunGit(secondRepository, "init", "--quiet");
+		RunGit(firstRepository, "config", "core.ignoreCase", "false");
+		RunGit(secondRepository, "config", "core.ignoreCase", "false");
+
+		var resolver = GitConfigPathComparisonSemanticsResolver.Instance;
+		resolver.Invalidate(firstRepository);
+		resolver.Invalidate(secondRepository);
+		Assert.False(resolver.Resolve(firstRepository).IgnoreCase);
+		Assert.False(resolver.Resolve(secondRepository).IgnoreCase);
+
+		RunGit(secondRepository, "config", "core.ignoreCase", "true");
+		resolver.Invalidate(firstRepository);
+		Assert.False(resolver.Resolve(secondRepository).IgnoreCase);
+
+		resolver.Invalidate(secondRepository);
+		Assert.True(resolver.Resolve(secondRepository).IgnoreCase);
+	}
+
+	[Fact]
 	public void CoreIgnoreCaseMatchesNativeGitAsciiOnlyCaseFolding()
 	{
 		EnsureGitAvailable();
@@ -141,6 +167,8 @@ public sealed class GitPathComparisonSemanticsIntegrationTests
 		var trackedAsciiPath = temp.CreateFile(
 			"tracked-unicode-case-repo/AsciiCase.txt",
 			"tracked-ascii");
+		if (!File.Exists(Path.Combine(repositoryRoot, "asciicase.txt")))
+			Assert.Skip("This case-only rename contract requires a case-insensitive filesystem.");
 		var trackedUnicodePath = temp.CreateFile(
 			"tracked-unicode-case-repo/Ä.txt",
 			"tracked-unicode");

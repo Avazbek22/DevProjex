@@ -77,10 +77,10 @@ public sealed class RootFolderStaleCacheRegressionIntegrationTests
         workspace.CreateFile(Path.Combine("src", "empty.cs"), string.Empty);
         workspace.CreateFile(Path.Combine("src", ".generated.cs"), "class Generated {}\n");
         workspace.CreateFile(Path.Combine("src", "LICENSE"), "license\n");
-        workspace.CreateFile(Path.Combine(".git", "objects", "pack.dat"), "metadata\n");
         workspace.CreateFile(Path.Combine(".idea", "workspace.xml"), "<project />\n");
         workspace.CreateFile(Path.Combine(".tmp", "cache.bin"), "cache\n");
         workspace.CreateFile(Path.Combine("ignored-root", "ignored.cs"), "class Ignored {}\n");
+        workspace.CreateFile(Path.Combine("obj", "project.assets.json"), "{}\n");
         workspace.CreateFile(Path.Combine("obj", "Debug", "Generated.g.cs"), "class Generated {}\n");
         return workspace;
     }

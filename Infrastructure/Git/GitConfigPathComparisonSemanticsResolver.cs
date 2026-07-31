@@ -47,35 +47,24 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 
 	public void Invalidate(string rootPath)
 	{
+		if (!TryNormalizePath(rootPath, out var normalizedRootPath))
+			return;
+
 		lock (_cacheSync)
-			_repositoryCache.Clear();
+		{
+			foreach (var repositoryRoot in _repositoryCache.Keys.ToArray())
+			{
+				if (PathsOverlap(repositoryRoot, normalizedRootPath))
+					_repositoryCache.Remove(repositoryRoot);
+			}
+		}
 	}
 
 	private static GitPathComparisonSemantics ResolveRepositorySemantics(string repositoryRoot)
 	{
-		var repositoryProbe = ProbeRepositoryWorkingTree(repositoryRoot);
-		if (repositoryProbe != RepositoryProbeResult.Valid)
-			return UnavailableRepositorySemantics;
-
 		return TryReadEffectiveSemantics(repositoryRoot, out var semantics)
 			? semantics
 			: UnavailableRepositorySemantics;
-	}
-
-	private static RepositoryProbeResult ProbeRepositoryWorkingTree(string repositoryRoot)
-	{
-		if (!TryRunGit(
-				repositoryRoot,
-				["rev-parse", "--is-inside-work-tree"],
-				out var output,
-				out var exitCode))
-		{
-			return RepositoryProbeResult.Unavailable;
-		}
-
-		return exitCode == 0 && string.Equals(output.Trim(), "true", StringComparison.OrdinalIgnoreCase)
-			? RepositoryProbeResult.Valid
-			: RepositoryProbeResult.Invalid;
 	}
 
 	private static bool TryReadEffectiveSemantics(
@@ -85,41 +74,65 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		semantics = default;
 		if (!TryRunGit(
 				repositoryRoot,
-				["config", "--type=bool", "--get-regexp", "^core\\.(ignorecase|precomposeunicode)$"],
+				[
+					"config",
+					"--show-scope",
+					"--type=bool",
+					"--get-regexp",
+					"^core\\.(repositoryformatversion|ignorecase|precomposeunicode)$"
+				],
 				out var output,
 				out var exitCode))
 		{
 			return false;
 		}
 
-		if (exitCode == 1)
-		{
-			semantics = new GitPathComparisonSemantics(IgnoreCase: false, NormalizeUnicode: false);
-			return true;
-		}
 		if (exitCode != 0)
 			return false;
 
 		var ignoreCase = false;
 		var normalizeUnicode = false;
+		var hasLocalRepositoryConfiguration = false;
 		foreach (var line in output.Split(
 			         ['\r', '\n'],
 			         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
 		{
-			var separatorIndex = line.IndexOfAny([' ', '\t', '\n']);
-			if (separatorIndex <= 0 || separatorIndex >= line.Length - 1)
+			var scopeSeparatorIndex = line.IndexOfAny([' ', '\t']);
+			if (scopeSeparatorIndex <= 0 || scopeSeparatorIndex >= line.Length - 1)
+				return false;
+			var keyStartIndex = scopeSeparatorIndex + 1;
+			while (keyStartIndex < line.Length && line[keyStartIndex] is ' ' or '\t')
+				keyStartIndex++;
+			var valueSeparatorIndex = line.IndexOfAny([' ', '\t'], keyStartIndex);
+			if (valueSeparatorIndex <= keyStartIndex || valueSeparatorIndex >= line.Length - 1)
 				return false;
 
-			var key = line[..separatorIndex];
-			if (!bool.TryParse(line[(separatorIndex + 1)..].Trim(), out var value))
+			var valueStartIndex = valueSeparatorIndex + 1;
+			while (valueStartIndex < line.Length && line[valueStartIndex] is ' ' or '\t')
+				valueStartIndex++;
+			if (valueStartIndex >= line.Length)
 				return false;
 
-			if (key.Equals("core.ignorecase", StringComparison.OrdinalIgnoreCase))
+			var scope = line[..scopeSeparatorIndex];
+			var key = line[keyStartIndex..valueSeparatorIndex];
+			if (!bool.TryParse(line[valueStartIndex..].Trim(), out var value))
+				return false;
+
+			if (key.Equals("core.repositoryformatversion", StringComparison.OrdinalIgnoreCase))
+			{
+				hasLocalRepositoryConfiguration |=
+					scope.Equals("local", StringComparison.OrdinalIgnoreCase) ||
+					scope.Equals("worktree", StringComparison.OrdinalIgnoreCase);
+			}
+			else if (key.Equals("core.ignorecase", StringComparison.OrdinalIgnoreCase))
 				ignoreCase = value;
 			else if (OperatingSystem.IsMacOS() &&
 			         key.Equals("core.precomposeunicode", StringComparison.OrdinalIgnoreCase))
 				normalizeUnicode = value;
 		}
+
+		if (!hasLocalRepositoryConfiguration)
+			return false;
 
 		semantics = new GitPathComparisonSemantics(ignoreCase, normalizeUnicode);
 		return true;
@@ -321,6 +334,23 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		}
 	}
 
+	private static bool PathsOverlap(string leftPath, string rightPath) =>
+		IsSameOrDescendantPath(leftPath, rightPath) ||
+		IsSameOrDescendantPath(rightPath, leftPath);
+
+	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
+	{
+		if (PathComparer.Default.Equals(candidatePath, rootPath))
+			return true;
+		if (!candidatePath.StartsWith(rootPath, PathComparer.Comparison) ||
+		    candidatePath.Length <= rootPath.Length)
+		{
+			return false;
+		}
+
+		return candidatePath[rootPath.Length] is '\\' or '/';
+	}
+
 	private static void TryKill(Process process)
 	{
 		try
@@ -334,10 +364,4 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		}
 	}
 
-	private enum RepositoryProbeResult
-	{
-		Unavailable,
-		Invalid,
-		Valid
-	}
 }

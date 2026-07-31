@@ -817,6 +817,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
         WriteTextFile(clonedProject.RootPath, ".gitignore", "logs/\n");
         WriteTextFile(clonedProject.RootPath, Path.Combine("logs", "runtime.log"), "git ignored\n");
         WriteTextFile(clonedProject.RootPath, Path.Combine("obj", "project.assets.json"), "{}\n");
+        RunGit(clonedProject.RootPath, "init", "--quiet");
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(initialProject);
 
         try
