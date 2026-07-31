@@ -38,6 +38,68 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task SettingsListScrollBars_ReachChecklistEdges()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            foreach (var listName in new[]
+                     {
+                         "IgnoreOptionsList",
+                         "ExtensionsList",
+                         "RootFoldersList"
+                     })
+            {
+                var listBox = UiTestDriver.GetRequiredControl<ListBox>(window, listName);
+                var checklistBorder = Assert.IsType<Border>(listBox.Parent);
+                var scrollViewer = Assert.Single(
+                    listBox.GetVisualDescendants().OfType<ScrollViewer>());
+                var verticalScrollBar = Assert.Single(
+                    scrollViewer.GetVisualDescendants()
+                        .OfType<ScrollBar>(),
+                    scrollBar => scrollBar.Orientation == Orientation.Vertical);
+                var scrollBarsSeparator = Assert.Single(
+                    scrollViewer.GetVisualDescendants()
+                        .OfType<Panel>(),
+                    panel => panel.Name == "PART_ScrollBarsSeparator");
+                var checklistBounds =
+                    UiTestDriver.GetBoundsInWindow(checklistBorder, window);
+                var scrollViewerBounds =
+                    UiTestDriver.GetBoundsInWindow(scrollViewer, window);
+
+                Assert.Equal(default, checklistBorder.Padding);
+                Assert.Equal(new Thickness(5), scrollViewer.Padding);
+                Assert.InRange(
+                    Math.Abs(scrollViewerBounds.Left - checklistBounds.Left),
+                    0,
+                    1);
+                Assert.InRange(
+                    Math.Abs(scrollViewerBounds.Top - checklistBounds.Top),
+                    0,
+                    1);
+                Assert.InRange(
+                    Math.Abs(scrollViewerBounds.Right - checklistBounds.Right),
+                    0,
+                    1);
+                Assert.InRange(
+                    Math.Abs(scrollViewerBounds.Bottom - checklistBounds.Bottom),
+                    0,
+                    1);
+                Assert.Equal(default, verticalScrollBar.Margin);
+                Assert.Equal(HorizontalAlignment.Right, verticalScrollBar.HorizontalAlignment);
+                Assert.Equal(VerticalAlignment.Stretch, verticalScrollBar.VerticalAlignment);
+                Assert.Equal(2, Grid.GetRowSpan(verticalScrollBar));
+                Assert.False(scrollBarsSeparator.IsVisible);
+            }
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task LoadedProject_SettingsIslandLeftEdgeAlignsWithFormatSwitcher()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
