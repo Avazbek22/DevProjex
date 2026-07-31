@@ -613,15 +613,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
             TryPreparePreviewPaneSnapshot();
             EnsurePreviewTreePaneTransitions();
 
-            var treePreviewSplitterWidth =
-                _controls.TreePreviewSplitter.IsVisible
-                    ? WorkspacePresentationController.TreePreviewSplitterWidth
-                    : 0.0;
-            var targetTreeWidth =
-                Math.Max(
-                    WorkspacePresentationController.SplitTreePaneMinimumWidth,
-                    _workspace.GetAvailableTreeOnlyWorkspaceWidth() -
-                    treePreviewSplitterWidth);
+            var targetTreeWidth = ResolvePreviewCloseTreeWidth();
             _controls.TreePaneContainer.Width = targetTreeWidth;
             await WaitForPanelAnimationAsync(
                 PaneAnimationDuration,
@@ -641,6 +633,28 @@ internal sealed class PreviewWorkspaceController : IDisposable
             _controls.TreePreviewSplitter.IsHitTestVisible =
                 _viewModel.IsPreviewTreeVisible;
         }
+    }
+
+    private double ResolvePreviewCloseTreeWidth()
+    {
+        var allocatedLeadingWidth =
+            _controls.TreePaneColumn.ActualWidth +
+            _controls.PreviewPaneColumn.ActualWidth;
+        if (allocatedLeadingWidth > 0.5)
+        {
+            return Math.Max(
+                WorkspacePresentationController.SplitTreePaneMinimumWidth,
+                allocatedLeadingWidth);
+        }
+
+        var treePreviewSplitterWidth =
+            _controls.TreePreviewSplitter.IsVisible
+                ? WorkspacePresentationController.TreePreviewSplitterWidth
+                : 0.0;
+        return Math.Max(
+            WorkspacePresentationController.SplitTreePaneMinimumWidth,
+            _workspace.GetAvailableTreeOnlyWorkspaceWidth() -
+            treePreviewSplitterWidth);
     }
 
     private void EnsurePreviewTreePaneTransitions()

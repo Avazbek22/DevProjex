@@ -69,6 +69,9 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
 
         try
         {
+            window.Width = 1499.2;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+
             var settingsIsland =
                 UiTestDriver.GetRequiredControl<Border>(
                     window,
@@ -305,6 +308,7 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
         try
         {
             await transition();
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
             CapturePosition(null, EventArgs.Empty);
         }
         finally
