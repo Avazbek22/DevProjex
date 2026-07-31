@@ -258,6 +258,9 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("${{ matrix.binary }}", workflow, StringComparison.Ordinal);
 		Assert.Contains("Desktop IPC and Redirected EOF Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("retained redirected CLI handles", workflow, StringComparison.Ordinal);
+		Assert.Contains("[int] $TimeoutMilliseconds = 30000", workflow, StringComparison.Ordinal);
+		Assert.Contains("-TimeoutMilliseconds 150000", workflow, StringComparison.Ordinal);
+		Assert.Contains("Get-DesktopTimeoutDiagnostics", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"[IO.Path]::GetFullPath([string]$_.projectPath)",
 			workflow,
