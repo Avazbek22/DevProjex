@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Frozen;
 using System.IO.Enumeration;
 
@@ -236,11 +237,13 @@ public sealed class SmartArtifactIgnoreMatcher
 		SmartArtifactDirectoryRule.Exact(
 			"bin",
 			directories: ["Debug", "Release", "x64", "x86", "AnyCPU", "net"],
-			fileExtensions: [".dll", ".exe", ".pdb", ".deps.json", ".runtimeconfig.json"]),
+			fileExtensions: [".dll", ".exe", ".pdb", ".deps.json", ".runtimeconfig.json"],
+			hasNativeExecutable: true),
 		SmartArtifactDirectoryRule.Exact(
 			"node_modules",
 			files: [".package-lock.json", "package-lock.json"],
-			directories: [".bin", "@types", "@babel", "@vite", "@angular"]),
+			directories: [".bin", "@types", "@babel", "@vite", "@angular"],
+			childFiles: ["package.json"]),
 		SmartArtifactDirectoryRule.Exact(
 			"bower_components",
 			directories: [".bin"],
@@ -345,7 +348,7 @@ public sealed class SmartArtifactIgnoreMatcher
 			files: [".rustc_info.json"]),
 		SmartArtifactDirectoryRule.Exact(
 			"build",
-			files: ["build.ninja", "compile_commands.json", "CMakeCache.txt"],
+			files: ["build.ninja", "compile_commands.json", "CMakeCache.txt", "asset-manifest.json"],
 			directories:
 			[
 				"CMakeFiles",
@@ -356,6 +359,7 @@ public sealed class SmartArtifactIgnoreMatcher
 				"libs",
 				"outputs",
 				"reports",
+				"static",
 				"tmp"
 			]),
 		SmartArtifactDirectoryRule.Exact(
@@ -365,7 +369,7 @@ public sealed class SmartArtifactIgnoreMatcher
 		SmartArtifactDirectoryRule.Exact(
 			"out",
 			files: ["build.ninja", "compile_commands.json"],
-			directories: ["production", "test", "classes", "artifacts"]),
+			directories: ["production", "test", "classes", "artifacts", "_next"]),
 		SmartArtifactDirectoryRule.Exact(
 			"coverage",
 			files: ["lcov.info", "coverage-final.json", "clover.xml", "cobertura-coverage.xml", "index.html"]),
@@ -439,7 +443,7 @@ public sealed class SmartArtifactIgnoreMatcher
 		SmartArtifactDirectoryRule.Exact(
 			"vendor",
 			files: ["autoload.php", "modules.txt"],
-			directories: ["composer", "bin"]),
+			directories: ["composer", "bin", "bundle"]),
 		SmartArtifactDirectoryRule.Exact(
 			".bundle",
 			files: ["config"],
@@ -476,7 +480,11 @@ public sealed class SmartArtifactIgnoreMatcher
 			files: ["CACHEDIR.TAG"]),
 		SmartArtifactDirectoryRule.Exact(
 			"tmp",
-			files: ["CACHEDIR.TAG"]),
+			files: ["CACHEDIR.TAG"],
+			directories: ["cache", "pids", "sockets"]),
+		SmartArtifactDirectoryRule.Exact(
+			"log",
+			files: ["development.log", "test.log", "production.log"]),
 		SmartArtifactDirectoryRule.Exact(
 			"temp",
 			files: ["CACHEDIR.TAG"]),
@@ -517,6 +525,7 @@ public sealed class SmartArtifactIgnoreMatcher
 		private readonly FrozenSet<string> _childFiles;
 		private readonly string[] _pathSuffixSegments;
 		private readonly RepeatedChildArtifactSignature? _repeatedChildSignature;
+		private readonly bool _hasNativeExecutable;
 
 		private SmartArtifactDirectoryRule(
 			string namePattern,
@@ -528,7 +537,8 @@ public sealed class SmartArtifactIgnoreMatcher
 			IReadOnlyCollection<string> childFiles,
 			IReadOnlyCollection<string> pathSuffixSegments,
 			RepeatedChildArtifactSignature? repeatedChildSignature,
-			bool applyOutsideProjectScopes)
+			bool applyOutsideProjectScopes,
+			bool hasNativeExecutable)
 		{
 			NamePattern = namePattern;
 			MatchKind = matchKind;
@@ -540,6 +550,7 @@ public sealed class SmartArtifactIgnoreMatcher
 			_pathSuffixSegments = pathSuffixSegments.Count == 0 ? EmptyNames : pathSuffixSegments.ToArray();
 			_repeatedChildSignature = repeatedChildSignature;
 			ApplyOutsideProjectScopes = applyOutsideProjectScopes;
+			_hasNativeExecutable = hasNativeExecutable;
 		}
 
 		public string NamePattern { get; }
@@ -557,7 +568,8 @@ public sealed class SmartArtifactIgnoreMatcher
 			IReadOnlyCollection<string>? childFiles = null,
 			IReadOnlyCollection<string>? pathSuffixSegments = null,
 			RepeatedChildArtifactSignature? repeatedChildSignature = null,
-			bool applyOutsideProjectScopes = false) =>
+			bool applyOutsideProjectScopes = false,
+			bool hasNativeExecutable = false) =>
 			new(
 				name,
 				SmartArtifactNameMatchKind.Exact,
@@ -568,7 +580,8 @@ public sealed class SmartArtifactIgnoreMatcher
 				childFiles ?? [],
 				pathSuffixSegments ?? [],
 				repeatedChildSignature,
-				applyOutsideProjectScopes);
+				applyOutsideProjectScopes,
+				hasNativeExecutable);
 
 		public static SmartArtifactDirectoryRule Prefix(
 			string prefix,
@@ -579,7 +592,8 @@ public sealed class SmartArtifactIgnoreMatcher
 			IReadOnlyCollection<string>? childFiles = null,
 			IReadOnlyCollection<string>? pathSuffixSegments = null,
 			RepeatedChildArtifactSignature? repeatedChildSignature = null,
-			bool applyOutsideProjectScopes = false) =>
+			bool applyOutsideProjectScopes = false,
+			bool hasNativeExecutable = false) =>
 			new(
 				prefix,
 				SmartArtifactNameMatchKind.Prefix,
@@ -590,7 +604,8 @@ public sealed class SmartArtifactIgnoreMatcher
 				childFiles ?? [],
 				pathSuffixSegments ?? [],
 				repeatedChildSignature,
-				applyOutsideProjectScopes);
+				applyOutsideProjectScopes,
+				hasNativeExecutable);
 
 		public bool MatchesName(string name) =>
 			MatchKind switch
@@ -604,25 +619,31 @@ public sealed class SmartArtifactIgnoreMatcher
 		{
 			try
 			{
+				if (!IsRegularDirectoryNoFollow(directoryPath))
+					return false;
+
 				if (MatchesPathSuffix(directoryPath))
 					return true;
 
 				foreach (var file in _files)
 				{
-					if (File.Exists(Path.Combine(directoryPath, file)))
+					if (IsRegularFileNoFollow(Path.Combine(directoryPath, file)))
 						return true;
 				}
 
 				foreach (var directory in _directories)
 				{
-					if (Directory.Exists(Path.Combine(directoryPath, directory)))
+					if (IsRegularDirectoryNoFollow(Path.Combine(directoryPath, directory)))
 						return true;
 				}
 
 				if (_repeatedChildSignature?.Matches(directoryPath) == true)
 					return true;
 
-				if (_fileSuffixes.Length > 0 || _fileExtensions.Length > 0 || _childFiles.Count > 0)
+				if (_fileSuffixes.Length > 0 ||
+				    _fileExtensions.Length > 0 ||
+				    _childFiles.Count > 0 ||
+				    _hasNativeExecutable)
 					return HasEnumeratedSignature(directoryPath);
 			}
 			catch (Exception exception) when (exception is
@@ -675,22 +696,58 @@ public sealed class SmartArtifactIgnoreMatcher
 
 				if (entry.IsDirectory)
 				{
-					if (_childFiles.Count == 0)
+					if (_childFiles.Count == 0 ||
+					    entry.IsReparsePoint ||
+					    !IsRegularDirectoryNoFollow(entry.FullPath))
 						continue;
 
 					foreach (var childFile in _childFiles)
-						if (File.Exists(Path.Combine(entry.FullPath, childFile)))
+						if (IsRegularFileNoFollow(Path.Combine(entry.FullPath, childFile)))
 							return true;
 
 					continue;
 				}
 
-				if (HasMatchingFileSignature(entry.Name))
+				if (entry.IsReparsePoint)
+					continue;
+				if (HasMatchingFileSignature(entry.Name) && IsRegularFileNoFollow(entry.FullPath))
+					return true;
+				if (_hasNativeExecutable && HasNativeExecutableHeader(entry.FullPath))
 					return true;
 			}
 
 			return false;
 		}
+
+		private static bool HasNativeExecutableHeader(string filePath)
+		{
+			if (!IsRegularFileNoFollow(filePath))
+				return false;
+
+			Span<byte> header = stackalloc byte[4];
+			using var stream = new FileStream(
+				filePath,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				bufferSize: 4,
+				FileOptions.SequentialScan);
+			if (stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false) < header.Length)
+				return false;
+
+			return header[0] == 0x7f && header[1] == 'E' && header[2] == 'L' && header[3] == 'F' ||
+			       header[0] == 'M' && header[1] == 'Z' ||
+			       IsMachObjectHeader(header);
+		}
+
+		private static bool IsMachObjectHeader(ReadOnlySpan<byte> header) =>
+			BinaryPrimitives.ReadUInt32BigEndian(header) is
+				0xfeedface or
+				0xcefaedfe or
+				0xfeedfacf or
+				0xcffaedfe or
+				0xcafebabe or
+				0xbebafeca;
 
 		private bool HasMatchingFileSignature(string fileName)
 		{
@@ -767,7 +824,10 @@ public sealed class SmartArtifactIgnoreMatcher
 				var selfNamedArtifactPath = Path.Combine(
 					entry.FullPath,
 					entry.Name + SelfNamedFileSuffix);
-				if (!File.Exists(selfNamedArtifactPath) || !HasKnownLayoutDirectory(entry.FullPath))
+				if (entry.IsReparsePoint ||
+				    !IsRegularDirectoryNoFollow(entry.FullPath) ||
+				    !IsRegularFileNoFollow(selfNamedArtifactPath) ||
+				    !HasKnownLayoutDirectory(entry.FullPath))
 					continue;
 
 				if (++matchingChildren >= MinimumMatches)
@@ -783,7 +843,7 @@ public sealed class SmartArtifactIgnoreMatcher
 				return true;
 
 			foreach (var directory in _layoutDirectories)
-				if (Directory.Exists(Path.Combine(childPath, directory)))
+				if (IsRegularDirectoryNoFollow(Path.Combine(childPath, directory)))
 					return true;
 
 			return false;
@@ -800,7 +860,8 @@ public sealed class SmartArtifactIgnoreMatcher
 				return new SmartArtifactEntry(
 					name,
 					entry.ToSpecifiedFullPath(),
-					entry.IsDirectory);
+					entry.IsDirectory,
+					(entry.Attributes & FileAttributes.ReparsePoint) != 0);
 			},
 			new EnumerationOptions
 			{
@@ -810,14 +871,54 @@ public sealed class SmartArtifactIgnoreMatcher
 				AttributesToSkip = FileAttributes.ReparsePoint,
 				IgnoreInaccessible = true
 			});
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) => true;
+		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
+			(entry.Attributes & FileAttributes.ReparsePoint) == 0;
 		return enumerable;
+	}
+
+	private static bool IsRegularFileNoFollow(string path) =>
+		IsRegularEntryNoFollow(path, expectedDirectory: false);
+
+	private static bool IsRegularDirectoryNoFollow(string path) =>
+		IsRegularEntryNoFollow(path, expectedDirectory: true);
+
+	private static bool IsRegularEntryNoFollow(string path, bool expectedDirectory)
+	{
+		try
+		{
+			FileSystemInfo entry = expectedDirectory
+				? new DirectoryInfo(path)
+				: new FileInfo(path);
+			entry.Refresh();
+
+			// File.Exists and Directory.Exists follow links. Artifact evidence must be a
+			// regular entry owned by the scanned tree, never a symlink, junction, or other
+			// reparse-point alias whose target can live outside that tree.
+			if (!string.IsNullOrEmpty(entry.LinkTarget) || !entry.Exists)
+				return false;
+
+			var attributes = entry.Attributes;
+			if ((attributes & FileAttributes.ReparsePoint) != 0)
+				return false;
+
+			return ((attributes & FileAttributes.Directory) != 0) == expectedDirectory;
+		}
+		catch (Exception exception) when (exception is
+		       UnauthorizedAccessException or
+		       IOException or
+		       ArgumentException or
+		       NotSupportedException or
+		       System.Security.SecurityException)
+		{
+			return false;
+		}
 	}
 
 	private readonly record struct SmartArtifactEntry(
 		string Name,
 		string FullPath,
-		bool IsDirectory);
+		bool IsDirectory,
+		bool IsReparsePoint);
 }
 
 public enum SmartArtifactNameMatchKind

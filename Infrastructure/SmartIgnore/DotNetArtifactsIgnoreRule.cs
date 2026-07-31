@@ -18,12 +18,16 @@ public sealed class DotNetArtifactsIgnoreRule :
 	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create(
 		"bin",
 		"obj");
+	private static readonly IReadOnlySet<string> EvidenceRequiredFolderNames = FolderNames;
 
 	private static readonly SmartIgnoreResult MatchResult =
 		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
-		SmartIgnoreRuleSet.Descriptor(markerExtensions: MarkerExtensions, folderNames: FolderNames);
+		SmartIgnoreRuleSet.Descriptor(
+			markerExtensions: MarkerExtensions,
+			folderNames: FolderNames,
+			evidenceRequiredFolderNames: EvidenceRequiredFolderNames);
 
 	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
 		rootFacts.Exists && rootFacts.HasAnyFileExtension(MarkerExtensions)

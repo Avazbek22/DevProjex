@@ -92,34 +92,34 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "mustaqil almashtirgichlardir" }
     };
 
-    public static TheoryData<string, string, string> GitIndexContracts => new()
+    public static TheoryData<string, string, string, string> GitIndexContracts => new()
     {
-        { "help.ru.txt", "отслеживаемые файлы остаются видимыми", "без индекса или Git CLI" },
-        { "help.en.txt", "tracked files remain visible", "without an index or Git CLI" },
-        { "help.de.txt", "verfolgte Dateien", "ohne Index oder Git CLI" },
-        { "help.fr.txt", "les fichiers suivis restent visibles", "sans index ou Git CLI" },
-        { "help.it.txt", "i file tracciati restano visibili", "senza indice o Git CLI" },
-        { "help.es.txt", "los archivos con seguimiento permanecen visibles", "sin índice o Git CLI" },
-        { "help.pt.txt", "os arquivos rastreados permanecem visíveis", "sem índice ou Git CLI" },
-        { "help.pt-pt.txt", "os ficheiros controlados permanecem visíveis", "sem índice ou Git CLI" },
-        { "help.kk.txt", "бақыланатын файлдар", "индекс немесе Git CLI болмаса" },
-        { "help.tg.txt", "файлҳои пайгиришаванда", "бе индекс ё Git CLI" },
-        { "help.uz.txt", "kuzatiladigan fayllar", "indeks yoki Git CLI bo‘lmasa" }
+        { "help.ru.txt", "отслеживаемые файлы остаются видимыми", "без этого индекса или Git CLI", "области репозитория" },
+        { "help.en.txt", "tracked files remain visible", "without that index or the Git CLI", "owning repository scope" },
+        { "help.de.txt", "verfolgte Dateien", "ohne diesen Index oder Git CLI", "zuständigen Repository-Bereich" },
+        { "help.fr.txt", "les fichiers suivis restent visibles", "sans cet index ou Git CLI", "zone du dépôt propriétaire" },
+        { "help.it.txt", "i file tracciati restano visibili", "senza tale indice o Git CLI", "ambito del repository proprietario" },
+        { "help.es.txt", "los archivos con seguimiento permanecen visibles", "sin ese índice o la CLI de Git", "ámbito del repositorio propietario" },
+        { "help.pt.txt", "os arquivos rastreados permanecem visíveis", "sem esse índice ou a CLI do Git", "escopo do repositório responsável" },
+        { "help.pt-pt.txt", "os ficheiros controlados permanecem visíveis", "sem esse índice ou a CLI do Git", "âmbito do repositório responsável" },
+        { "help.kk.txt", "бақыланатын файлдар", "осы индекс немесе Git CLI болмаса", "репозиторий аймағы" },
+        { "help.tg.txt", "файлҳои пайгиришаванда", "бе ин индекс ё Git CLI", "минтақаи репозиторий" },
+        { "help.uz.txt", "kuzatiladigan fayllar", "ushbu indeks yoki Git CLI bo‘lmasa", "repozitoriya sohasi" }
     };
 
-    public static TheoryData<string, string, string, string, string, string> TrackedOnlyGitModeContracts => new()
+    public static TheoryData<string, string, string, string, string, string, string, string> TrackedOnlyGitModeContracts => new()
     {
-        { "help.ru.txt", "### 12.4 Только отслеживаемые Git-файлы", "неотслеживаемые файлы исключаются", "взаимно исключают", "поддержкой профилей", "стабильной парой" },
-        { "help.en.txt", "### 12.4 Tracked Git files only", "untracked files are excluded", "mutually exclusive", "support profiles", "stable pair" },
-        { "help.de.txt", "### 12.4 Nur von Git verfolgte Dateien", "nicht verfolgte Dateien werden ausgeschlossen", "schließen sich gegenseitig aus", "Profilunterstützung", "stabiles Schalterpaar" },
-        { "help.fr.txt", "### 12.4 Uniquement les fichiers suivis par Git", "les fichiers non suivis sont exclus", "s’excluent mutuellement", "prenant en charge les profils", "paire stable" },
-        { "help.it.txt", "### 12.4 Solo file tracciati da Git", "i file non tracciati vengono esclusi", "si escludono a vicenda", "supportano i profili", "coppia stabile" },
-        { "help.es.txt", "### 12.4 Solo archivos rastreados por Git", "los archivos no rastreados quedan excluidos", "se excluyen mutuamente", "admiten perfiles", "par estable" },
-        { "help.pt.txt", "### 12.4 Somente arquivos rastreados pelo Git", "arquivos não rastreados são excluídos", "mutuamente exclusivos", "compatíveis com perfis", "par estável" },
-        { "help.pt-pt.txt", "### 12.4 Apenas ficheiros controlados pelo Git", "os ficheiros não controlados são excluídos", "mutuamente exclusivos", "suportam perfis", "par estável" },
-        { "help.kk.txt", "### 12.4 Тек Git бақылайтын файлдар", "бақыланбайтын файлдар алынып тасталады", "бір-бірін өзара жоққа шығарады", "Профильдерді қолдайтын", "тұрақты" },
-        { "help.tg.txt", "### 12.4 Танҳо файлҳои пайгиришавандаи Git", "файлҳои пайгиринашаванда хориҷ мешаванд", "ҳамдигарро истисно мекунанд", "профилҳоро дастгирӣ мекунанд", "ҷуфти устувор" },
-        { "help.uz.txt", "### 12.4 Faqat Git kuzatadigan fayllar", "kuzatilmaydigan fayllar chiqariladi", "o‘zaro istisno qilinadi", "Profillarni qo‘llaydigan", "barqaror" }
+        { "help.ru.txt", "### 12.4 Только отслеживаемые Git-файлы", "неотслеживаемые файлы исключаются", "взаимно исключают", "поддержкой профилей", "стабильной парой", "Git CLI", "вывод и экспорт блокируются" },
+        { "help.en.txt", "### 12.4 Tracked Git files only", "untracked files are excluded", "mutually exclusive", "support profiles", "stable pair", "Git CLI", "output and export are blocked" },
+        { "help.de.txt", "### 12.4 Nur von Git verfolgte Dateien", "nicht verfolgte Dateien werden ausgeschlossen", "schließen sich gegenseitig aus", "Profilunterstützung", "stabiles Schalterpaar", "Git CLI", "Ausgabe und Export gesperrt" },
+        { "help.fr.txt", "### 12.4 Uniquement les fichiers suivis par Git", "les fichiers non suivis sont exclus", "s’excluent mutuellement", "prenant en charge les profils", "paire stable", "CLI Git", "la sortie et l’exportation sont bloquées" },
+        { "help.it.txt", "### 12.4 Solo file tracciati da Git", "i file non tracciati vengono esclusi", "si escludono a vicenda", "supportano i profili", "coppia stabile", "CLI di Git", "output ed esportazione vengono bloccati" },
+        { "help.es.txt", "### 12.4 Solo archivos rastreados por Git", "los archivos no rastreados quedan excluidos", "se excluyen mutuamente", "admiten perfiles", "par estable", "CLI de Git", "la salida y la exportación se bloquean" },
+        { "help.pt.txt", "### 12.4 Somente arquivos rastreados pelo Git", "arquivos não rastreados são excluídos", "mutuamente exclusivos", "compatíveis com perfis", "par estável", "CLI do Git", "a saída e a exportação são bloqueadas" },
+        { "help.pt-pt.txt", "### 12.4 Apenas ficheiros controlados pelo Git", "os ficheiros não controlados são excluídos", "mutuamente exclusivos", "suportam perfis", "par estável", "CLI do Git", "a saída e a exportação são bloqueadas" },
+        { "help.kk.txt", "### 12.4 Тек Git бақылайтын файлдар", "бақыланбайтын файлдар алынып тасталады", "бір-бірін өзара жоққа шығарады", "Профильдерді қолдайтын", "тұрақты", "Git CLI", "шығару мен экспорт бұғатталады" },
+        { "help.tg.txt", "### 12.4 Танҳо файлҳои пайгиришавандаи Git", "файлҳои пайгиринашаванда хориҷ мешаванд", "ҳамдигарро истисно мекунанд", "профилҳоро дастгирӣ мекунанд", "ҷуфти устувор", "Git CLI", "барориш ва содирот баста мешаванд" },
+        { "help.uz.txt", "### 12.4 Faqat Git kuzatadigan fayllar", "kuzatilmaydigan fayllar chiqariladi", "o‘zaro istisno qilinadi", "Profillarni qo‘llaydigan", "barqaror", "Git CLI", "chiqarish va eksport bloklanadi" }
     };
 
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
@@ -256,15 +256,21 @@ public sealed class HelpContentDocumentationContractTests
 
     [Theory]
     [MemberData(nameof(GitIndexContracts))]
-    public void HelpContent_GitIgnoreSection_DescribesTrackedIndexAndPatternOnlyFallback(
+    public void HelpContent_GitIgnoreSection_DescribesOwningIndexAndPatternOnlyFallback(
         string fileName,
         string expectedTrackedBehavior,
-        string expectedFallbackBehavior)
+        string expectedFallbackBehavior,
+        string expectedOwningScope)
     {
         var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
+        var gitIgnoreSection = ExtractSection(ignoreSection, "### 12.3 ", "### 12.4 ");
 
-        Assert.Contains(expectedTrackedBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(expectedFallbackBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedTrackedBehavior, gitIgnoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedFallbackBehavior, gitIgnoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedOwningScope, gitIgnoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".git/info/exclude", gitIgnoreSection, StringComparison.Ordinal);
+        Assert.Contains("core.ignoreCase", gitIgnoreSection, StringComparison.Ordinal);
+        Assert.Contains("core.precomposeUnicode", gitIgnoreSection, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -275,7 +281,9 @@ public sealed class HelpContentDocumentationContractTests
         string expectedUntrackedBehavior,
         string expectedMutualExclusion,
         string expectedProfilePersistence,
-        string expectedStablePair)
+        string expectedStablePair,
+        string expectedGitCliPhrase,
+        string expectedDesktopFailureBehavior)
     {
         var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
         var trackedOnlySection = ExtractSection(ignoreSection, expectedHeading, "### 12.5");
@@ -286,6 +294,10 @@ public sealed class HelpContentDocumentationContractTests
         Assert.Contains("worktree", trackedOnlySection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("HEAD", trackedOnlySection, StringComparison.Ordinal);
         Assert.Contains(".gitignore", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedGitCliPhrase, trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains("TUI", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains("Desktop", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedDesktopFailureBehavior, trackedOnlySection, StringComparison.Ordinal);
         Assert.Contains(expectedStablePair, ignoreSection, StringComparison.Ordinal);
     }
 

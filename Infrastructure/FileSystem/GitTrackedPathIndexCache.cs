@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Infrastructure.FileSystem;
 
@@ -12,21 +13,6 @@ internal static class GitTrackedPathIndexCache
 	private const int GitFileMaximumLength = 64 * 1024;
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
 	private static readonly string GitExecutable = OperatingSystem.IsWindows() ? "git.exe" : "git";
-	private static readonly string[] RepositorySelectionEnvironmentVariables =
-	[
-		"GIT_DIR",
-		"GIT_WORK_TREE",
-		"GIT_INDEX_FILE",
-		"GIT_COMMON_DIR",
-		"GIT_OBJECT_DIRECTORY",
-		"GIT_ALTERNATE_OBJECT_DIRECTORIES",
-		"GIT_NAMESPACE",
-		"GIT_PREFIX",
-		"GIT_CEILING_DIRECTORIES",
-		"GIT_DISCOVERY_ACROSS_FILESYSTEM",
-		"GIT_CONFIG_PARAMETERS",
-		"GIT_CONFIG_COUNT"
-	];
 	private static readonly object CacheSync = new();
 	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache =
 		new(PathComparer.Default);
@@ -96,11 +82,54 @@ internal static class GitTrackedPathIndexCache
 			var gitMetadataPath = Path.Combine(currentPath, ".git");
 			if (TryMetadataEntryExists(gitMetadataPath))
 			{
-				return TryLoad(
+				if (TryLoad(
 					currentPath,
 					gitMetadataPath,
 					cancellationToken,
-					out trackedPathIndex);
+					out trackedPathIndex))
+				{
+					return true;
+				}
+
+				// The nearest metadata entry still owns this subtree when its index is
+				// unreadable or invalid. Retaining an unavailable boundary prevents an
+				// ancestor repository from leaking tracked paths into the selection.
+				trackedPathIndex = GitTrackedPathIndex.Unavailable(currentPath);
+				return true;
+			}
+
+			var parentPath = Path.GetDirectoryName(currentPath);
+			if (string.IsNullOrWhiteSpace(parentPath) || PathComparer.Default.Equals(parentPath, currentPath))
+				break;
+			currentPath = parentPath;
+		}
+
+		return false;
+	}
+
+	internal static bool TryFindNearestRepositoryBoundary(
+		string scanRootPath,
+		CancellationToken cancellationToken,
+		out string repositoryRootPath)
+	{
+		repositoryRootPath = string.Empty;
+		string? currentPath;
+		try
+		{
+			currentPath = PathUtility.Normalize(scanRootPath);
+		}
+		catch
+		{
+			return false;
+		}
+
+		while (!string.IsNullOrWhiteSpace(currentPath))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (TryMetadataEntryExists(Path.Combine(currentPath, ".git")))
+			{
+				repositoryRootPath = currentPath;
+				return true;
 			}
 
 			var parentPath = Path.GetDirectoryName(currentPath);
@@ -201,7 +230,7 @@ internal static class GitTrackedPathIndexCache
 			new GitTrackedPathIndex(
 				signature.RepositoryRootPath,
 				trackedPaths,
-				ResolvePathComparisonSemantics(signature.GitMetadataPath)),
+				signature.ComparisonSemantics),
 			EstimateRetainedBytes(trackedPaths));
 	}
 
@@ -233,7 +262,7 @@ internal static class GitTrackedPathIndexCache
 				throwOnInvalidBytes: false),
 			StandardErrorEncoding = Encoding.UTF8
 		};
-		RemoveRepositorySelectionEnvironment(startInfo);
+		GitProcessEnvironmentSanitizer.RemoveRepositoryOverrides(startInfo);
 		startInfo.ArgumentList.Add("-C");
 		startInfo.ArgumentList.Add(repositoryRootPath);
 		startInfo.ArgumentList.Add("-c");
@@ -246,33 +275,6 @@ internal static class GitTrackedPathIndexCache
 		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
 		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
 		return startInfo;
-	}
-
-	private static void RemoveRepositorySelectionEnvironment(ProcessStartInfo startInfo)
-	{
-		// IDEs and CI jobs may override Git repository discovery for their own commands.
-		// The scan must always read the index belonging to repositoryRootPath.
-		foreach (var variable in RepositorySelectionEnvironmentVariables)
-			startInfo.Environment.Remove(variable);
-
-		List<string>? injectedConfigVariables = null;
-		foreach (var variable in startInfo.Environment.Keys)
-		{
-			if (!variable.StartsWith("GIT_CONFIG_KEY_", StringComparison.OrdinalIgnoreCase) &&
-			    !variable.StartsWith("GIT_CONFIG_VALUE_", StringComparison.OrdinalIgnoreCase))
-			{
-				continue;
-			}
-
-			injectedConfigVariables ??= [];
-			injectedConfigVariables.Add(variable);
-		}
-
-		if (injectedConfigVariables is null)
-			return;
-
-		foreach (var variable in injectedConfigVariables)
-			startInfo.Environment.Remove(variable);
 	}
 
 	private static async Task<List<string>> ReadNullDelimitedPathsAsync(
@@ -358,6 +360,10 @@ internal static class GitTrackedPathIndexCache
 		try
 		{
 			var normalizedRootPath = PathUtility.Normalize(repositoryRootPath);
+			var comparisonSemantics = GitConfigPathComparisonSemanticsResolver.Instance
+				.Resolve(normalizedRootPath);
+			if (!comparisonSemantics.IsAuthoritative)
+				return false;
 			if (!TryResolveGitDirectory(normalizedRootPath, gitMetadataPath, out var gitDirectoryPath))
 				return false;
 
@@ -385,6 +391,7 @@ internal static class GitTrackedPathIndexCache
 					normalizedRootPath,
 					PathUtility.Normalize(gitMetadataPath),
 					PathUtility.Normalize(indexInfo.FullName),
+					comparisonSemantics,
 					lastWriteTicksUtc,
 					lengthBytes,
 					contentFingerprint);
@@ -401,79 +408,10 @@ internal static class GitTrackedPathIndexCache
 
 	internal static GitPathComparisonSemantics ResolvePathComparisonSemantics(string gitMetadataPath)
 	{
-		var fallback = GitPathComparisonSemantics.PlatformDefault;
-		try
-		{
-			var normalizedMetadataPath = PathUtility.Normalize(gitMetadataPath);
-			var parentPath = Path.GetDirectoryName(normalizedMetadataPath);
-			var metadataName = Path.GetFileName(normalizedMetadataPath);
-			if (string.IsNullOrWhiteSpace(parentPath) || string.IsNullOrEmpty(metadataName))
-				return fallback;
-
-			var alternateName = ToggleFirstAsciiLetterCase(metadataName);
-			if (alternateName is null)
-				return fallback;
-
-			var alternatePath = Path.Combine(parentPath, alternateName);
-			try
-			{
-				_ = File.GetAttributes(alternatePath);
-			}
-			catch (FileNotFoundException)
-			{
-				return fallback with { IgnoreCase = false };
-			}
-			catch (DirectoryNotFoundException)
-			{
-				return fallback with { IgnoreCase = false };
-			}
-
-			var hasStoredMetadataName = false;
-			var hasStoredAlternateName = false;
-			foreach (var entryPath in Directory.EnumerateFileSystemEntries(parentPath))
-			{
-				var entryName = Path.GetFileName(entryPath);
-				hasStoredMetadataName |= string.Equals(
-					entryName,
-					metadataName,
-					StringComparison.Ordinal);
-				hasStoredAlternateName |= string.Equals(
-					entryName,
-					alternateName,
-					StringComparison.Ordinal);
-			}
-
-			// Both spellings can coexist only when this directory is case-sensitive.
-			return fallback with
-			{
-				IgnoreCase = !(hasStoredMetadataName && hasStoredAlternateName)
-			};
-		}
-		catch
-		{
-			return fallback;
-		}
-	}
-
-	private static string? ToggleFirstAsciiLetterCase(string value)
-	{
-		for (var index = 0; index < value.Length; index++)
-		{
-			var character = value[index];
-			char replacement;
-			if (character is >= 'a' and <= 'z')
-				replacement = (char)(character - ('a' - 'A'));
-			else if (character is >= 'A' and <= 'Z')
-				replacement = (char)(character + ('a' - 'A'));
-			else
-				continue;
-
-			var characters = value.ToCharArray();
-			characters[index] = replacement;
-			return new string(characters);
-		}
-
-		return null;
+		var repositoryRoot = Path.GetDirectoryName(PathUtility.Normalize(gitMetadataPath));
+		return string.IsNullOrWhiteSpace(repositoryRoot)
+			? GitPathComparisonSemantics.PlatformDefault
+			: GitConfigPathComparisonSemanticsResolver.Instance.Resolve(repositoryRoot);
 	}
 
 	private static bool TryReadTailFingerprint(
@@ -647,12 +585,15 @@ internal static class GitTrackedPathIndexCache
 		string RepositoryRootPath,
 		string GitMetadataPath,
 		string IndexPath,
+		GitPathComparisonSemantics ComparisonSemantics,
 		long LastWriteTicksUtc,
 		long LengthBytes,
 		ulong ContentFingerprint)
 	{
 		public string CreateLoadKey() =>
 			$"{RepositoryRootPath}\0{GitMetadataPath}\0{IndexPath}\0" +
+			$"{ComparisonSemantics.IgnoreCase}\0{ComparisonSemantics.NormalizeUnicode}\0" +
+			$"{ComparisonSemantics.IsAuthoritative}\0" +
 			$"{LastWriteTicksUtc}\0{LengthBytes}\0{ContentFingerprint}";
 	}
 

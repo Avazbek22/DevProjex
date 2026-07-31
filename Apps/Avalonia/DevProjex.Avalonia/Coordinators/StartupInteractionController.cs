@@ -72,11 +72,14 @@ internal sealed class StartupInteractionController(
                         GitMode = selectionSpec.GitMode ?? GitFilteringMode.None,
                         Exclusions = selectionSpec.Exclusions ?? []
                     }));
-            foreach (var option in viewModel.IgnoreOptions)
-            {
-                option.IsChecked =
-                    selectedIgnoreOptions.Contains(option.Id);
-            }
+            selection.ApplyIgnoreSelectionOverride(selectedIgnoreOptions);
+            var selectedRootFolders = viewModel.RootFolders
+                .Where(static option => option.IsChecked)
+                .Select(static option => option.Name)
+                .ToArray();
+            await selection.PopulateIgnoreOptionsForRootSelectionAsync(
+                selectedRootFolders,
+                projectPathProvider());
         }
 
         await selection.WaitForPendingRefreshesAsync();

@@ -5,6 +5,19 @@ namespace DevProjex.Tests.Unit;
 public sealed class GitTrackedPathIndexTests
 {
 	[Fact]
+	public void ExplicitAndPlatformComparisonSemanticsAreAuthoritativeByDefault()
+	{
+		var explicitSemantics = new GitPathComparisonSemantics(
+			IgnoreCase: false,
+			NormalizeUnicode: false);
+		var uncertainSemantics = explicitSemantics with { IsAuthoritative = false };
+
+		Assert.True(explicitSemantics.IsAuthoritative);
+		Assert.True(GitPathComparisonSemantics.PlatformDefault.IsAuthoritative);
+		Assert.False(uncertainSemantics.IsAuthoritative);
+	}
+
+	[Fact]
 	public void TrackedIndexCommandsDoNotAcquireTheParentTerminal()
 	{
 		var startInfo = GitTrackedPathIndexCache.CreateStartInfo(
@@ -126,6 +139,22 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
+	public void ExplicitCaseInsensitiveSemantics_UseGitAsciiFoldWithoutMergingUnicodeNames()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repo");
+		var index = new GitTrackedPathIndex(
+			repositoryRoot,
+			["ASCII/FILE.cs", "Ä.cs"],
+			new GitPathComparisonSemantics(
+				IgnoreCase: true,
+				NormalizeUnicode: false));
+
+		Assert.True(index.Contains(Path.Combine(repositoryRoot, "ascii", "file.CS")));
+		Assert.False(index.Contains(Path.Combine(repositoryRoot, "ä.cs")));
+	}
+
+	[Fact]
 	public void ExplicitCaseSensitiveSemantics_DoNotMatchDifferentCasing()
 	{
 		using var temp = new TemporaryDirectory();
@@ -200,7 +229,7 @@ public sealed class GitTrackedPathIndexTests
 		};
 		var alternateRootPath = Path.Combine(
 			Path.GetDirectoryName(repositoryRoot)!,
-			"RE\u0301PO");
+			"Re\u0301PO");
 		var alternateFilePath = Path.Combine(
 			alternateRootPath,
 			"src",

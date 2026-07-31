@@ -11,6 +11,7 @@ public sealed class TerminalServiceFactory(
 		var resolvedAppDataPathProvider =
 			appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), language);
+		var gitPathComparisonSemantics = GitConfigPathComparisonSemanticsResolver.Instance;
 		var scanner = new FileSystemScanner();
 		var treeBuilder = new TreeBuilder();
 		var iconMapper = new IconMapper();
@@ -30,7 +31,9 @@ public sealed class TerminalServiceFactory(
 			new RubyArtifactsIgnoreRule()
 		]);
 		var ignoreOptions = new IgnoreOptionsService(localization);
-		var ignoreRules = new IgnoreRulesService(smartIgnore);
+		var ignoreRules = new IgnoreRulesService(
+			smartIgnore,
+			pathComparisonSemanticsResolver: gitPathComparisonSemantics);
 		var selectionService = new FilterOptionSelectionService();
 		var treeExport = new TreeExportService();
 		var contentAnalyzer = new FileContentAnalyzer();

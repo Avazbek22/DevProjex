@@ -14,12 +14,17 @@ public sealed class PhpArtifactsIgnoreRule :
 	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(MarkerFile);
 
 	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create("vendor");
+	private static readonly IReadOnlySet<string> EvidenceRequiredFolderNames =
+		SmartIgnoreRuleSet.Create("vendor");
 
 	private static readonly SmartIgnoreResult MatchResult =
 		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
-		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
+		SmartIgnoreRuleSet.Descriptor(
+			markerFiles: MarkerFiles,
+			folderNames: FolderNames,
+			evidenceRequiredFolderNames: EvidenceRequiredFolderNames);
 
 	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
 		rootFacts.Exists && rootFacts.HasMarkerFile(MarkerFile)

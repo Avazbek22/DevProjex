@@ -17,8 +17,15 @@ public sealed record SelectionRefreshSnapshot(
     bool HadAccessDenied,
     ProjectTreeInventorySnapshot? TreeInventory = null,
     IReadOnlyList<SelectionOption>? VisibleExtensionOptions = null,
-    GitWorkspaceEvidence GitEvidence = default)
+    GitWorkspaceEvidence GitEvidence = default,
+    IReadOnlySet<IgnoreOptionId>? SelectedIgnoreOptions = null)
 {
     public IReadOnlyList<SelectionOption> EffectiveExtensionOptions =>
         VisibleExtensionOptions ?? ExtensionOptions;
+
+    public IReadOnlySet<IgnoreOptionId> EffectiveIgnoreOptions =>
+        SelectedIgnoreOptions ?? IgnoreOptions
+            .Where(static option => option.IsChecked)
+            .Select(static option => option.Id)
+            .ToHashSet();
 }

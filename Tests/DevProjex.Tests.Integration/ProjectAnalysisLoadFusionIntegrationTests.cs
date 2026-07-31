@@ -122,6 +122,13 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 
 		Assert.Equal([".cs"], expected.AvailableExtensions);
 		Assert.Equal([".cs"], expected.SelectedExtensions);
+		var explicitPipeline = service.Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+		Assert.Equal([".cs"], explicitPipeline.AvailableExtensions);
+		Assert.Equal([".cs"], explicitPipeline.SelectedExtensions);
 
 		for (var iteration = 0; iteration < 20; iteration++)
 		{
@@ -237,6 +244,30 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		Assert.Equal(1, treeBuilder.DirectBuildCount);
 		Assert.Equal(0, treeBuilder.CompositeInventoryReadCount);
 		Assert.Equal(0, treeBuilder.InventoryProjectionCount);
+	}
+
+	[Fact]
+	public void Load_ExplicitRootsScopeImplicitExtensionsToTheSameSelection()
+	{
+		using var temp = CreateMixedWorkspace();
+		var service = CreateService(new FileSystemScanner(), new TreeBuilder());
+
+		var loaded = service.Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedRootFolders: ["api"],
+				SelectedExtensions: null,
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(".cs", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.Contains(".csproj", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.Contains(".txt", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.DoesNotContain(".ts", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.DoesNotContain(".md", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.Equal(
+			loaded.AvailableExtensions.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase),
+			loaded.SelectedExtensions.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase));
 	}
 
 	[Fact]

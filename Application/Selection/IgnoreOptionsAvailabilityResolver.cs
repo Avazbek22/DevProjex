@@ -18,13 +18,16 @@ public static class IgnoreOptionsAvailabilityResolver
 		bool stateCacheIsComplete)
 	{
 		var availability = WithoutMeasuredOptions(structuralAvailability);
+		var trackedModeIsSelected =
+			stateCache.TryGetValue(IgnoreOptionId.TrackedGitFilesOnly, out var trackedOnly) &&
+			trackedOnly;
 		var hasRepositoryBoundary =
 			availability.IncludeTrackedGitFilesOnly ||
 			snapshotState.GitEvidence.HasRepositoryBoundary;
 		availability = availability with
 		{
 			IncludeGitIgnore = availability.IncludeGitIgnore || hasRepositoryBoundary,
-			IncludeTrackedGitFilesOnly = hasRepositoryBoundary
+			IncludeTrackedGitFilesOnly = hasRepositoryBoundary || trackedModeIsSelected
 		};
 		if (!snapshotState.HasIgnoreOptionCounts)
 		{
@@ -47,7 +50,7 @@ public static class IgnoreOptionsAvailabilityResolver
 			IncludeGitIgnore =
 				hasRepositoryBoundary ||
 				controllerCounts.GitIgnore > 0,
-			IncludeTrackedGitFilesOnly = hasRepositoryBoundary,
+			IncludeTrackedGitFilesOnly = hasRepositoryBoundary || trackedModeIsSelected,
 			// Smart Ignore is evidence-driven after the measured pass. A project marker
 			// alone must not leave a checkbox that cannot change the effective tree.
 			IncludeSmartIgnore = controllerCounts.SmartIgnore > 0,

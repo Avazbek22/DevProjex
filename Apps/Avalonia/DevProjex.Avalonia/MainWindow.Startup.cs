@@ -1,4 +1,5 @@
 using Avalonia.Platform.Storage;
+using DevProjex.Application.Context;
 
 namespace DevProjex.Avalonia;
 
@@ -364,6 +365,12 @@ public partial class MainWindow
                 if (opened)
                 {
                     await TryApplyStartupSelectionOverridesAsync();
+                    if (_desktopStartupRequest is not null &&
+                        GetDesktopGitReadinessDiagnostic(_desktopStartupRequest) is
+                            { Severity: ContextDiagnosticSeverity.Error } diagnostic)
+                    {
+                        _desktopStartupErrorCode = diagnostic.Code;
+                    }
                     await TryApplyStartupUiOptionsAsync();
                     if (await TryRunStartupUiBenchmarkScriptAsync())
                         return;

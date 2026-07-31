@@ -1,31 +1,84 @@
+using System.Diagnostics;
+using DevProjex.Application.Context;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class GitModeCommandContractTests
 {
-	[Fact]
-	public async Task ExplicitTrackedModeWithoutRepositoryWritesReportThenReturnsPolicyFailure()
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task OpenTrackedModeFailsBeforeDesktopLaunchWhenIndexIsUnavailable(
+		bool createRepositoryBoundary)
 	{
 		using var workspace = new TemporaryDirectory();
-		workspace.WriteFile("tracked-looking.cs", "class App {}");
+		workspace.WriteFile("src/App.cs", "class App {}\n");
+		if (createRepositoryBoundary)
+			workspace.CreateDirectory(".git");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(
 			workspace,
 			environment,
+			"open", workspace.Path,
+			"--git-mode", "tracked",
+			"--exclude", "none");
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			ProjectContextGitReadiness.UnavailableDiagnosticCode,
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(false, true)]
+	[InlineData(true, false)]
+	[InlineData(true, true)]
+	public async Task ExplicitTrackedModeWithoutRepositoryWritesReportThenReturnsPolicyFailure(
+		bool strict,
+		bool writeToFile)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var destination = new TemporaryDirectory();
+		workspace.WriteFile("tracked-looking.cs", "class App {}");
+		var environment = new TestTerminalEnvironment();
+		var reportPath = Path.Combine(destination.Path, "analysis.json");
+		var arguments = new List<string>
+		{
 			"analyze", workspace.Path,
 			"--format", "json",
 			"--git-mode", "tracked",
-			"--exclude", "none",
-			"--strict");
+			"--exclude", "none"
+		};
+		if (strict)
+			arguments.Add("--strict");
+		if (writeToFile)
+		{
+			arguments.Add("--output");
+			arguments.Add(reportPath);
+		}
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[.. arguments]);
 
 		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
-		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var payload = writeToFile
+			? File.ReadAllText(reportPath)
+			: environment.StandardOutput;
+		using var document = JsonDocument.Parse(payload);
 		var diagnostic = Assert.Single(
 			document.RootElement.GetProperty("diagnostics").EnumerateArray(),
 			static item => item.GetProperty("code").GetString() == "DPX-GIT-TRACKED-INDEX-UNAVAILABLE");
 		Assert.Equal("error", diagnostic.GetProperty("severity").GetString());
 		Assert.Contains("DPX-GIT-TRACKED-INDEX-UNAVAILABLE", environment.StandardError, StringComparison.Ordinal);
-		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b", payload, StringComparison.Ordinal);
+		if (writeToFile)
+			Assert.Equal(Path.GetFullPath(reportPath), environment.StandardOutput.Trim());
 	}
 
 	[Fact]
@@ -106,6 +159,32 @@ public sealed class GitModeCommandContractTests
 	}
 
 	[Fact]
+	public async Task ExplicitTrackedModeAcceptsReadableEmptyIndexAsReady()
+	{
+		using var workspace = new TemporaryDirectory();
+		if (!TryRunGit(workspace.Path, "init", "--quiet"))
+			Assert.Skip("Git is not available in this test environment.");
+		Assert.True(
+			TryRunGit(workspace.Path, "read-tree", "--empty"),
+			"Git initialized the repository but could not create a readable empty index.");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"analyze", workspace.Path,
+			"--format", "json",
+			"--git-mode", "tracked",
+			"--exclude", "none");
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(0, document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		Assert.Empty(document.RootElement.GetProperty("diagnostics").EnumerateArray());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task NestedStandaloneGitIgnoreIsAppliedAtItsOwnScope()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -139,4 +218,43 @@ public sealed class GitModeCommandContractTests
 				environment,
 				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
+
+	private static bool TryRunGit(string workingDirectory, params string[] arguments)
+	{
+		try
+		{
+			var startInfo = new ProcessStartInfo("git")
+			{
+				WorkingDirectory = workingDirectory,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			};
+			foreach (var argument in arguments)
+				startInfo.ArgumentList.Add(argument);
+
+			using var process = Process.Start(startInfo);
+			if (process is null)
+				return false;
+			var outputTask = process.StandardOutput.ReadToEndAsync();
+			var errorTask = process.StandardError.ReadToEndAsync();
+			if (!process.WaitForExit(10_000))
+			{
+				process.Kill(entireProcessTree: true);
+				return false;
+			}
+
+			_ = outputTask.GetAwaiter().GetResult();
+			_ = errorTask.GetAwaiter().GetResult();
+			return process.ExitCode == 0;
+		}
+		catch (Exception exception) when (exception is
+		       System.ComponentModel.Win32Exception or
+		       IOException or
+		       InvalidOperationException)
+		{
+			return false;
+		}
+	}
 }

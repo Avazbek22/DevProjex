@@ -46,6 +46,7 @@ public sealed class SmartIgnoreService
 		new SmartIgnoreScopeResolver(
 			rootPath,
 			RootFactsProvider,
+			_descriptors.ToArray(),
 			_directoryScopeRules,
 			_fileScopeRules);
 
@@ -56,6 +57,7 @@ public sealed class SmartIgnoreService
 	{
 		var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var evidenceRequiredFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 		foreach (var rule in _rules)
 		{
@@ -77,6 +79,15 @@ public sealed class SmartIgnoreService
 				folders.Add(folder);
 			foreach (var file in result.FileNames)
 				files.Add(file);
+
+			if (rule is ISmartIgnoreRuleDescriptorProvider descriptorProvider)
+			{
+				foreach (var folder in result.FolderNames)
+				{
+					if (descriptorProvider.Descriptor.EvidenceRequiredFolderNames.Contains(folder))
+						evidenceRequiredFolders.Add(folder);
+				}
+			}
 		}
 
 		if (folders.Count == 0 && files.Count == 0)
@@ -84,7 +95,12 @@ public sealed class SmartIgnoreService
 
 		return new SmartIgnoreResult(
 			FreezeOrEmpty(folders, SmartIgnoreResult.Empty.FolderNames),
-			FreezeOrEmpty(files, SmartIgnoreResult.Empty.FileNames));
+			FreezeOrEmpty(files, SmartIgnoreResult.Empty.FileNames))
+		{
+			EvidenceRequiredFolderNames = FreezeOrEmpty(
+				evidenceRequiredFolders,
+				SmartIgnoreResult.Empty.EvidenceRequiredFolderNames)
+		};
 	}
 
 	public bool HasKnownProjectMarker(string rootPath)

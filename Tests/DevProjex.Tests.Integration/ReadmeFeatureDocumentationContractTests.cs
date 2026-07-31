@@ -43,11 +43,33 @@ public sealed class ReadmeFeatureDocumentationContractTests
 		Assert.Contains("every reachable nested repository and worktree independently", readme, StringComparison.Ordinal);
 		Assert.Contains("at any reachable nesting level", readme, StringComparison.Ordinal);
 		Assert.Contains("never inherits tracked state from its parent or sibling", readme, StringComparison.Ordinal);
-		Assert.Contains("does not silently fall back to `.gitignore` patterns", readme, StringComparison.Ordinal);
+		Assert.Contains("index of its owning repository/worktree scope", readme, StringComparison.Ordinal);
+		Assert.Contains("never silently falls back to `.gitignore`", readme, StringComparison.Ordinal);
+		Assert.Contains("TUI startup does not open an unavailable tracked workspace", readme, StringComparison.Ordinal);
+		Assert.Contains("keeps the last usable Git mode", readme, StringComparison.Ordinal);
 		Assert.Contains("not a historical snapshot of `HEAD`", readme, StringComparison.Ordinal);
 		Assert.Contains("stable toggle pair", readme, StringComparison.Ordinal);
 		Assert.Contains("The selected Git mode runs first", readme, StringComparison.Ordinal);
 		Assert.Contains("Root-folder, file-type, and checkbox selections", readme, StringComparison.Ordinal);
+		Assert.Contains("Only regular working-tree `.gitignore` files are rule sources", readme, StringComparison.Ordinal);
+		Assert.Contains("does not apply `.git/info/exclude`, global Git excludes", readme, StringComparison.Ordinal);
+		Assert.Contains("a `.gitignore` symbolic link", readme, StringComparison.Ordinal);
+		Assert.Contains("reports partial access", readme, StringComparison.Ordinal);
+		Assert.Contains("all eight exclusion groups", readme, StringComparison.Ordinal);
+		foreach (var token in new[]
+		         {
+			         "`smart-ignore`",
+			         "`hidden-folders`",
+			         "`hidden-files`",
+			         "`dot-folders`",
+			         "`dot-files`",
+			         "`empty-folders`",
+			         "`empty-files`",
+			         "`extensionless-files`"
+		         })
+		{
+			Assert.Contains(token, readme, StringComparison.Ordinal);
+		}
 	}
 
 	private static string ReadReadme()

@@ -37,6 +37,7 @@ public static class AvaloniaCompositionRoot
         var iconStore = new EmbeddedIconStore();
         var iconMapper = new IconMapper();
         var treePresenter = new TreeNodePresentationService(localization, iconMapper);
+        var gitPathComparisonSemantics = GitConfigPathComparisonSemanticsResolver.Instance;
         var scanner = new FileSystemScanner();
         var treeBuilder = new TreeBuilder();
         var scanOptionsUseCase = new ScanOptionsUseCase(scanner);
@@ -55,7 +56,9 @@ public static class AvaloniaCompositionRoot
         };
         var smartIgnoreService = new SmartIgnoreService(smartIgnoreRules);
         var ignoreOptionsService = new IgnoreOptionsService(localization);
-        var ignoreRulesService = new IgnoreRulesService(smartIgnoreService);
+        var ignoreRulesService = new IgnoreRulesService(
+            smartIgnoreService,
+            pathComparisonSemanticsResolver: gitPathComparisonSemantics);
         var ignoreOwnershipAuditService = new IgnoreOwnershipAuditService();
         var filterSelectionService = new FilterOptionSelectionService();
         var treeExportService = new TreeExportService();

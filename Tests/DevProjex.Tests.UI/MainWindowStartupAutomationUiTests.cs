@@ -1,5 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
+using DevProjex.Avalonia.Coordinators;
+using DevProjex.Application.Context;
+using DevProjex.Application.Services;
+using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.ThemePresets;
 
@@ -223,6 +227,171 @@ public sealed class MainWindowStartupAutomationUiTests
 		{
 			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupTrackedOverrideWithoutRepository_RemainsVisibleAndGuardsEveryPreviewCopyPath()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(
+				ProjectPath: project.RootPath,
+				OpenPreview: true,
+				Selection: new ProjectSelectionSpec(
+					GitMode: GitFilteringMode.TrackedFilesOnly,
+					Exclusions: []),
+				Language: AppLanguage.En));
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var trackedOption = Assert.Single(
+				viewModel.IgnoreOptions,
+				static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly);
+			Assert.True(trackedOption.IsChecked);
+			Assert.Contains(
+				IgnoreOptionId.TrackedGitFilesOnly,
+				UiTestDriver.GetSelectedIgnoreOptionIds(window));
+
+			var diagnostic = Assert.IsType<ContextDiagnostic>(
+				UiTestDriver.GetAppliedGitReadinessDiagnostic(window, project.RootPath));
+			Assert.Equal(ProjectContextGitReadiness.UnavailableDiagnosticCode, diagnostic.Code);
+			Assert.Equal(ContextDiagnosticSeverity.Error, diagnostic.Severity);
+
+			var clipboardSentinel = $"tracked-preview-guard-{Guid.NewGuid():N}";
+			await UiTestDriver.SetClipboardTextAsync(window, clipboardSentinel);
+			await UiTestDriver.ClickPreviewCopyButtonAsync(window);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(clipboardSentinel, await UiTestDriver.GetClipboardTextAsync(window));
+
+			var previewTextControl =
+				UiTestDriver.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+					window,
+					"PreviewTextControl");
+			previewTextControl.SelectAll();
+			Assert.True(previewTextControl.HasSelection);
+			var copySelectionMethod = typeof(DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl)
+				.GetMethod("CopySelectionToClipboardAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(copySelectionMethod);
+			var copyTask = Assert.IsAssignableFrom<Task>(copySelectionMethod.Invoke(previewTextControl, null));
+			await copyTask;
+
+			Assert.Equal(clipboardSentinel, await UiTestDriver.GetClipboardTextAsync(window));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupTrackedOverride_ResolvesAvailabilityOffDispatcherWithoutBlockingUi()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var request = new DesktopOpenRequest(
+			ProjectPath: project.RootPath,
+			Selection: new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.TrackedFilesOnly,
+				Exclusions: []),
+			Language: AppLanguage.En);
+		var startupOptions = new DesktopStartupOptions(request);
+		var services = AvaloniaCompositionRoot.CreateDefault(startupOptions, () => appDataPath);
+		using var viewModel = new MainWindowViewModel(
+			services.Localization,
+			services.HelpContentProvider)
+		{
+			IsProjectLoaded = true
+		};
+		viewModel.RootFolders.Add(new SelectionOptionViewModel("src", isChecked: true));
+
+		using var resolverStarted = new ManualResetEventSlim(initialState: false);
+		using var releaseResolver = new ManualResetEventSlim(initialState: false);
+		var resolverRanOnDispatcher = false;
+		using var selection = new SelectionSyncCoordinator(
+			viewModel,
+			services.ScanOptionsUseCase,
+			services.FilterOptionSelectionService,
+			services.IgnoreOptionsService,
+			static (_, _, _) => new IgnoreRules(
+				false,
+				false,
+				false,
+				false,
+				new HashSet<string>(),
+				new HashSet<string>()),
+			(_, _) =>
+			{
+				resolverRanOnDispatcher = Dispatcher.UIThread.CheckAccess();
+				resolverStarted.Set();
+				releaseResolver.Wait(TimeSpan.FromSeconds(10));
+				return new IgnoreOptionsAvailability(
+					IncludeGitIgnore: false,
+					IncludeSmartIgnore: false,
+					IncludeTrackedGitFilesOnly: false);
+			},
+			static _ => false,
+			() => project.RootPath);
+		var refreshCount = 0;
+		var controller = new StartupInteractionController(
+			request,
+			diagnosticScenario: null,
+			viewModel,
+			selection,
+			searchFilter: null!,
+			preview: null!,
+			workspace: null!,
+			services.SessionMetricsRecorder,
+			() => project.RootPath,
+			static () => null,
+			() =>
+			{
+				refreshCount++;
+				return Task.CompletedTask;
+			},
+			static _ => Task.FromResult(true),
+			static () => { });
+
+		var applyStarted = new TaskCompletionSource<Task>(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		Dispatcher.UIThread.Post(() =>
+		{
+			try
+			{
+				applyStarted.TrySetResult(controller.ApplySelectionOverridesAsync());
+			}
+			catch (Exception exception)
+			{
+				applyStarted.TrySetException(exception);
+			}
+		});
+
+		var reachedResolver = await Task.Run(
+			() => resolverStarted.Wait(TimeSpan.FromSeconds(5)));
+		var dispatcherMarker = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		Dispatcher.UIThread.Post(() => dispatcherMarker.TrySetResult());
+		var markerWinner = await Task.WhenAny(
+			dispatcherMarker.Task,
+			Task.Delay(TimeSpan.FromSeconds(1)));
+		releaseResolver.Set();
+
+		var applyTask = await applyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		await applyTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+		Assert.True(reachedResolver, "The controlled availability resolver was not reached.");
+		Assert.Same(dispatcherMarker.Task, markerWinner);
+		Assert.False(resolverRanOnDispatcher);
+		Assert.Equal(1, refreshCount);
+		var trackedOption = Assert.Single(
+			viewModel.IgnoreOptions,
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly);
+		Assert.True(trackedOption.IsChecked);
 	}
 
 	[AvaloniaFact]

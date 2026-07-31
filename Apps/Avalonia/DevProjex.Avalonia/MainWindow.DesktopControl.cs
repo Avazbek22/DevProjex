@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using DevProjex.Application.Context;
 using DevProjex.Application.DesktopControl;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Kernel;
@@ -87,6 +88,13 @@ public partial class MainWindow
             request,
             diagnosticScenario: null);
         await controller.ApplySelectionOverridesAsync();
+        var gitReadinessDiagnostic = GetDesktopGitReadinessDiagnostic(request);
+        if (gitReadinessDiagnostic is { Severity: ContextDiagnosticSeverity.Error })
+        {
+            return Failure(gitReadinessDiagnostic.Code);
+        }
+        if (gitReadinessDiagnostic is { Severity: ContextDiagnosticSeverity.Warning })
+            _toastService.Show(_localization["Terminal.Diagnostic.TrackedIndexPartial"]);
         await controller.ApplyUiOptionsAsync();
         ActivateDesktop();
         if (_desktopControlServer is not null)
@@ -211,8 +219,33 @@ public partial class MainWindow
                     _ => "text"
                 },
                 ["filter"] = _viewModel.NameFilter,
-                ["search"] = _viewModel.SearchQuery
+                ["search"] = _viewModel.SearchQuery,
+                ["gitMode"] = _selectionCoordinator.AppliedGitReadiness.Mode switch
+                {
+                    GitFilteringMode.RespectGitIgnore => "gitignore",
+                    GitFilteringMode.TrackedFilesOnly => "tracked",
+                    _ => "none"
+                },
+                ["trackedGitReady"] = _selectionCoordinator.AppliedGitReadiness.IsReady
             });
+
+    private ContextDiagnostic? GetDesktopGitReadinessDiagnostic(DesktopOpenRequest request)
+    {
+        if (request.Selection?.GitMode != GitFilteringMode.TrackedFilesOnly)
+            return null;
+
+        var projectPath = _currentPath ?? request.ProjectPath;
+        if (string.IsNullOrWhiteSpace(projectPath))
+        {
+            return ProjectContextGitReadiness
+                .Evaluate(GitFilteringMode.TrackedFilesOnly, 0, 0)
+                .CreateDiagnostic(string.Empty);
+        }
+
+        return _selectionCoordinator.GetAppliedGitReadinessDiagnostic(
+            projectPath,
+            GitFilteringMode.TrackedFilesOnly);
+    }
 
     private static DesktopInteractionResult Failure(string code) =>
         new(false, code);

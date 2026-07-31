@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Controls;
@@ -9,6 +10,7 @@ namespace DevProjex.Avalonia.Controls;
 /// </summary>
 public sealed class VirtualizedPreviewTextControl : Control
 {
+    public event EventHandler<CancelEventArgs>? CopyingToClipboard;
     public event EventHandler? CopiedToClipboard;
     public event EventHandler? PreviewSelectionChanged;
 
@@ -1119,6 +1121,11 @@ public sealed class VirtualizedPreviewTextControl : Control
     {
         var selectedText = BuildSelectedText();
         if (string.IsNullOrEmpty(selectedText))
+            return;
+
+        var copying = new CancelEventArgs();
+        CopyingToClipboard?.Invoke(this, copying);
+        if (copying.Cancel)
             return;
 
         var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;

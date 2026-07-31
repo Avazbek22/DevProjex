@@ -18,7 +18,10 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootPath);
 		return ProjectTreeInventoryScanner.Read(
 			rootPath,
-			ProjectTreeGitIgnoreContexts.Create(gitIgnoreContext, gitIgnoreContext),
+			ProjectTreeGitIgnoreContexts.Create(
+				gitIgnoreContext,
+				gitIgnoreContext,
+				RequiresWorkingTreeGitIgnore(options.IgnoreRules)),
 			(entry, isProjectRootChild, contexts) => ShouldTraverseDirectoryInInventory(
 				entry,
 				isProjectRootChild,
@@ -38,7 +41,11 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		var projectionGitIgnoreContext = projectionRules.CreateGitIgnoreScanContext(rootPath);
 		return ProjectTreeInventoryScanner.Read(
 			rootPath,
-			ProjectTreeGitIgnoreContexts.Create(discoveryGitIgnoreContext, projectionGitIgnoreContext),
+			ProjectTreeGitIgnoreContexts.Create(
+				discoveryGitIgnoreContext,
+				projectionGitIgnoreContext,
+				RequiresWorkingTreeGitIgnore(discoveryRules) ||
+				RequiresWorkingTreeGitIgnore(projectionRules)),
 			(entry, isProjectRootChild, contexts) =>
 			{
 				if (isProjectRootChild && !allowedRootFolders.Contains(entry.Name))
@@ -65,6 +72,9 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 			},
 			cancellationToken);
 	}
+
+	private static bool RequiresWorkingTreeGitIgnore(IgnoreRules rules) =>
+		rules.EnableGitIgnoreTraversal && !rules.UseTrackedGitFilesOnly;
 
 	public TreeBuildResult Build(
 		ProjectTreeInventorySnapshot inventory,

@@ -13,6 +13,7 @@ public partial class MainWindow
     {
         if (!_viewModel.CanExportProjectCopy ||
             !EnsureTreeReady() ||
+            !EnsureTrackedGitOutputReady() ||
             StorageProvider is null ||
             !StorageProvider.CanPickFolder)
             return;
@@ -46,6 +47,7 @@ public partial class MainWindow
     {
         if (!_viewModel.CanExportProjectCopy ||
             !EnsureTreeReady() ||
+            !EnsureTrackedGitOutputReady() ||
             StorageProvider is null ||
             !StorageProvider.CanSave)
             return;

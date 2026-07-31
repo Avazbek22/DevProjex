@@ -430,6 +430,7 @@ public partial class MainWindow
             _treeExport,
             _metrics,
             _previewPipeline,
+            EnsureTrackedGitOutputReady,
             SetClipboardTextAsync,
             ShowErrorAsync);
         _previewWorkspaceController = new PreviewWorkspaceController(

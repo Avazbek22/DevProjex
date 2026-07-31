@@ -72,7 +72,8 @@ public sealed class SelectionRefreshEngine(
             HadAccessDenied: rootSection.HadAccessDenied || dynamicSection.HadAccessDenied,
             TreeInventory: dynamicSection.TreeInventory,
             VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
-            GitEvidence: dynamicSection.SnapshotState.GitEvidence);
+            GitEvidence: dynamicSection.SnapshotState.GitEvidence,
+            SelectedIgnoreOptions: dynamicSection.SelectedIgnoreOptions);
     }
 
     public SelectionRefreshSnapshot ComputeLiveRefreshSnapshot(
@@ -119,7 +120,8 @@ public sealed class SelectionRefreshEngine(
             HadAccessDenied: dynamicSection.HadAccessDenied,
             TreeInventory: dynamicSection.TreeInventory,
             VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
-            GitEvidence: dynamicSection.SnapshotState.GitEvidence);
+            GitEvidence: dynamicSection.SnapshotState.GitEvidence,
+            SelectedIgnoreOptions: dynamicSection.SelectedIgnoreOptions);
     }
 
     private static bool SelectionOptionsMatch(
@@ -1125,9 +1127,11 @@ public sealed class SelectionRefreshEngine(
 		var selected = new HashSet<IgnoreOptionId>();
 		foreach (var (id, isChecked) in stateCache)
 		{
-			// Hidden states are kept for profile roundtrip and transient availability churn,
-			// but invisible options must never silently affect the active tree/export rules.
-			if (isChecked && visibleIds.Contains(id))
+			// Hidden states are kept for profile roundtrip and transient availability churn.
+			// Strict tracked-only is also an active safety policy: losing repository evidence
+			// must fail closed instead of exposing files through an implicit None fallback.
+			if (isChecked &&
+			    (visibleIds.Contains(id) || id == IgnoreOptionId.TrackedGitFilesOnly))
 				selected.Add(id);
 		}
 

@@ -1,4 +1,5 @@
 using DevProjex.Application.Models;
+using DevProjex.Application.Context;
 using DevProjex.Avalonia.Collections;
 
 namespace DevProjex.Tests.Unit;
@@ -6,6 +7,117 @@ namespace DevProjex.Tests.Unit;
 [Collection("AvaloniaUI")]
 public sealed class SelectionSyncCoordinatorAdditionalTests
 {
+	[Fact]
+	public void AppliedTrackedMode_RemainsFailClosedWhenItsOptionIsNoLongerVisible()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => projectPath);
+		var inventory = new ProjectTreeInventorySnapshot([], false, false);
+		var snapshot = new SelectionRefreshSnapshot(
+			RootOptions: [],
+			ExtensionOptions: [],
+			IgnoreOptions: [],
+			ExtensionlessEntriesCount: 0,
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+			IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.TrackedGitFilesOnly] = true
+			},
+			RootAccessDenied: false,
+			HadAccessDenied: false,
+			TreeInventory: inventory,
+			SelectedIgnoreOptions: new HashSet<IgnoreOptionId>
+			{
+				IgnoreOptionId.TrackedGitFilesOnly
+			});
+
+		ApplySelectionRefreshSnapshot(coordinator, snapshot);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath, inventory);
+
+		Assert.Contains(
+			IgnoreOptionId.TrackedGitFilesOnly,
+			coordinator.GetSelectedIgnoreOptionIds());
+		var diagnostic = Assert.IsType<ContextDiagnostic>(
+			coordinator.GetAppliedGitReadinessDiagnostic(projectPath));
+		Assert.Equal(ProjectContextGitReadiness.UnavailableDiagnosticCode, diagnostic.Code);
+		Assert.Equal(ContextDiagnosticSeverity.Error, diagnostic.Severity);
+	}
+
+	[Fact]
+	public void GitReadiness_DistinguishesReadableEmptyIndexFromPartialAndUnavailableScopes()
+	{
+		var readableEmpty = ProjectContextGitReadiness.Evaluate(
+			GitFilteringMode.TrackedFilesOnly,
+			discoveredTrackedIndexCount: 1,
+			unavailableTrackedIndexCount: 0);
+		var partial = ProjectContextGitReadiness.Evaluate(
+			GitFilteringMode.TrackedFilesOnly,
+			discoveredTrackedIndexCount: 2,
+			unavailableTrackedIndexCount: 1);
+		var unavailable = ProjectContextGitReadiness.Evaluate(
+			GitFilteringMode.TrackedFilesOnly,
+			discoveredTrackedIndexCount: 1,
+			unavailableTrackedIndexCount: 1);
+
+		Assert.True(readableEmpty.IsReady);
+		Assert.Null(readableEmpty.CreateDiagnostic("project"));
+		Assert.True(partial.IsReady);
+		Assert.Equal(
+			ProjectContextGitReadiness.PartialDiagnosticCode,
+			partial.CreateDiagnostic("project")?.Code);
+		Assert.False(unavailable.IsReady);
+		Assert.Equal(
+			ProjectContextGitReadiness.UnavailableDiagnosticCode,
+			unavailable.CreateDiagnostic("project")?.Code);
+	}
+
+	[Fact]
+	public void AppliedTrackedMode_PreservesPartialReadinessWarningForOutputGuards()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => projectPath);
+		var snapshot = new SelectionRefreshSnapshot(
+			RootOptions: [],
+			ExtensionOptions: [],
+			IgnoreOptions: [],
+			ExtensionlessEntriesCount: 0,
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+			ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+			IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.TrackedGitFilesOnly] = true
+			},
+			RootAccessDenied: false,
+			HadAccessDenied: true,
+			SelectedIgnoreOptions: new HashSet<IgnoreOptionId>
+			{
+				IgnoreOptionId.TrackedGitFilesOnly
+			});
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: true,
+			discoveredGitTrackedPathIndexes:
+			[
+				new GitTrackedPathIndex(projectPath, []),
+				GitTrackedPathIndex.Unavailable(@"C:\Project\nested")
+			]);
+
+		ApplySelectionRefreshSnapshot(coordinator, snapshot);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath, inventory);
+
+		var diagnostic = Assert.IsType<ContextDiagnostic>(
+			coordinator.GetAppliedGitReadinessDiagnostic(projectPath));
+		Assert.Equal(ProjectContextGitReadiness.PartialDiagnosticCode, diagnostic.Code);
+		Assert.Equal(ContextDiagnosticSeverity.Warning, diagnostic.Severity);
+		Assert.True(coordinator.AppliedGitReadiness.IsReady);
+	}
+
 	[Fact]
 	public void PendingApplyState_TracksEverySettingsSectionAndStopsAfterRoundTrip()
 	{

@@ -1,6 +1,7 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Application.Context;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Contracts;
@@ -860,6 +861,11 @@ internal static class UiTestDriver
     {
         return GetSelectionCoordinator(window).GetSelectedIgnoreOptionIds();
     }
+
+    public static ContextDiagnostic? GetAppliedGitReadinessDiagnostic(
+        MainWindow window,
+        string projectPath) =>
+        GetSelectionCoordinator(window).GetAppliedGitReadinessDiagnostic(projectPath);
 
     public static async Task WaitForSelectionRefreshIdleAsync(MainWindow window, TimeSpan? timeout = null)
     {

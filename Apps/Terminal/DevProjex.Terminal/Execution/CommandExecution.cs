@@ -57,10 +57,13 @@ internal static class CommandExecution
 		}
 		catch (DesktopControl.DesktopControlException exception)
 		{
+			var exitCode = exception.Code == ProjectContextGitReadiness.UnavailableDiagnosticCode
+				? CommandLineExitCodes.PolicyFailure
+				: exception.ExitCode;
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
 				SafeMessageFor(exception.Code, text),
-				ExitCode: exception.ExitCode,
+				ExitCode: exitCode,
 				Exception: exception));
 		}
 		catch (ProjectCopyExportException exception)
@@ -131,6 +134,8 @@ internal static class CommandExecution
 		"DPX-DESKTOP-TIMEOUT" => localization["Terminal.Error.DesktopTimeout"],
 		"DPX-DESKTOP-PROTOCOL-MISMATCH" => localization["Terminal.Error.DesktopProtocolMismatch"],
 		"DPX-DESKTOP-PAYLOAD-TOO-LARGE" => localization["Terminal.Error.DesktopPayloadTooLarge"],
+		ProjectContextGitReadiness.UnavailableDiagnosticCode =>
+			localization["Terminal.Diagnostic.TrackedIndexUnavailable"],
 		var value when value.StartsWith("DPX-DESKTOP-", StringComparison.Ordinal) =>
 			localization["Terminal.Error.DesktopRequestFailed"],
 		_ => localization["Terminal.Error.CommandInvalid"]

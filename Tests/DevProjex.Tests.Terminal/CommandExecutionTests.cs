@@ -48,6 +48,30 @@ public sealed class CommandExecutionTests
 		Assert.DoesNotContain("technical detail", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task DesktopTrackedIndexFailureUsesPolicyExitAndLocalizedSafeMessage()
+	{
+		const string rawMessage = "RAW_TRACKED_INDEX_TECHNICAL_DETAIL";
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await CommandExecution.RunAsync(
+			environment,
+			new TerminalOutputOptions(),
+			() => throw new DesktopControlException(
+				ProjectContextGitReadiness.UnavailableDiagnosticCode,
+				rawMessage,
+				CommandLineExitCodes.DesktopUnavailable));
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			ProjectContextGitReadiness.UnavailableDiagnosticCode,
+			environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.Contains("Tracked Git mode", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain(rawMessage, environment.StandardError, StringComparison.Ordinal);
+	}
+
 	public static TheoryData<ProjectCopyExportError, string> ProjectCopyErrors => new()
 	{
 		{ ProjectCopyExportError.InvalidRequest, "DPX-CLI-INVALID-REQUEST" },

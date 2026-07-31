@@ -107,9 +107,7 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		var gitIgnorePath = temp.CreateFile(".gitignore", "old/\n");
 		temp.CreateFile("old/file.txt", "old");
 		temp.CreateFile("new/file.txt", "new");
-		var service = CreateServiceWithSmartIgnore(
-			[],
-			new ProjectRootFactsProvider(cacheLimit: 0));
+		var service = CreateServiceWithSmartIgnore([]);
 		var originalTimestamp = File.GetLastWriteTimeUtc(gitIgnorePath);
 
 		var before = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], ["old", "new"]);

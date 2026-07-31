@@ -375,12 +375,16 @@ A rule starting with `!` cancels an earlier Git exclusion only within its scope.
 
 A malformed or unsupported line is skipped independently. Other valid rules in that file and rules in neighboring scopes continue to work.
 
-This option covers working-tree `.gitignore` files only. Rules from `.git/info/exclude` and global Git configuration are not applied. When a readable Git index is available, tracked files remain visible even if they match `.gitignore`; without an index or Git CLI, DevProjex safely falls back to pattern-only evaluation.
+This option covers regular working-tree `.gitignore` files only. Rules from `.git/info/exclude` and global Git exclusion rules are not applied; effective repository path-comparison settings such as `core.ignoreCase` and, on macOS, `core.precomposeUnicode` are respected. A symbolic link named `.gitignore` is not followed, matching Git's control-file behavior. If a regular `.gitignore` cannot be read, its directory scope is excluded fail-closed and the scan reports partial access instead of silently including files without complete rule evaluation. When a readable index for the path's owning repository scope is available, tracked files remain visible even if they match `.gitignore`; without that index or the Git CLI, that scope safely falls back to pattern-only evaluation.
+
+The built-in `standard` profile selects `gitignore` plus `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files`, and `extensionless-files`.
 
 ### 12.4 Tracked Git files only
 "Tracked Git files only" builds the Git stage of the tree from existing working-tree files recorded in each readable Git index. Modified tracked files and staged additions remain included; untracked files are excluded. This is the current working tree, not a historical snapshot of `HEAD` or a remote repository.
 
-Every reachable nested repository and worktree is resolved independently at any reachable nesting level. A child repository does not inherit tracked paths from its parent or sibling. If an index cannot be read safely, strict mode does not silently replace it with `.gitignore` pattern evaluation.
+Every reachable nested repository and worktree is resolved independently at any reachable nesting level. A child repository does not inherit tracked paths from its parent or sibling. This mode requires the Git CLI; a readable empty index is valid. If the Terminal Workspace (TUI) starts in this mode and no applicable index can be loaded, the workspace does not open. If the mode is selected interactively in an open TUI workspace and no applicable index can be loaded, the change is rejected and the last usable Git mode remains active. In the same situation, direct commands return a policy or check failure. DevProjex never silently falls back to `.gitignore`. If another applicable index is readable, unavailable nested scopes are excluded with a warning.
+
+In an already-open Desktop workspace, the explicit tracked selection remains visible and fail-closed: output and export are blocked when readiness fails, while partial readiness continues with a localized warning.
 
 "Use .gitignore" and "Tracked Git files only" are mutually exclusive. Enabling one disables the other. For local projects that support profiles, the selected mode is saved with the root-folder, file-type, and other ignore settings.
 

@@ -132,6 +132,11 @@ The workspace supports:
 - dry-run summaries and cancellation;
 - opening the current state in Desktop.
 
+Tracked-files mode uses the installed Git CLI. On startup, an unavailable tracked
+selection does not open the workspace. If an interactive mode change cannot load an
+applicable index, TUI keeps the last usable Git mode. It never silently substitutes
+`.gitignore` or an unfiltered tree.
+
 `Ctrl+P` opens a searchable Action Palette from Welcome or the workspace.
 Important features do not depend on memorizing letter shortcuts: the palette and
 Parameters and visible action bars call the same actions as the keyboard commands

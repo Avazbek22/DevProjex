@@ -162,6 +162,48 @@ none
 `--exclude none` is an exact empty exclusion set. Repeating `none` is idempotent,
 but combining it with another exclusion is a usage error.
 
+The normative `standard` profile has Git mode `gitignore` and contains all eight
+exclusion groups: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`,
+`dot-files`, `empty-folders`, `empty-files`, and `extensionless-files`. Its root,
+extension, and selected-path collections are unresolved defaults, so the current
+project inventory supplies their available values. An explicit CLI field replaces
+only that profile field for the current invocation.
+
+`gitignore` mode reads regular `.gitignore` files reachable in the selected working
+tree. When the selected path is below its owning repository/worktree root, the
+ancestor rule chain from that root through the selected path is applied before
+rules discovered below it. It does not read `.git/info/exclude`, global Git excludes, or symbolic links
+named `.gitignore`; Git itself does not follow a symbolic link when accessing that
+control file. When a regular `.gitignore` cannot be read, its directory scope is
+excluded fail-closed, other scopes continue deterministically, and the invocation
+exposes the existing partial-access diagnostic (`DPX-PROJECT-PARTIAL-ACCESS`)
+instead of silently including files without complete rule evaluation. Skipping a
+`.gitignore` symbolic link is normal Git-compatible behavior and is not an access
+diagnostic. The reader strips an initial UTF-8 BOM and otherwise decodes as UTF-8;
+UTF-16/UTF-32 BOMs are not auto-detected and reinterpreted as valid rules.
+
+Git pattern and tracked-index path comparison use the effective repository
+`core.ignoreCase` value. On macOS, canonical Unicode comparison also follows
+`core.precomposeUnicode`. The same resolved semantics apply to prebuilt rules,
+dynamically discovered nested `.gitignore` scopes, and tracked-index membership;
+refresh invalidates the semantics snapshot together with the ignore caches.
+If an identified repository cannot expose its effective Git configuration, neither
+pattern matching nor tracked-index membership guesses case or Unicode behavior. The
+affected repository scope is unavailable and remains fail-closed. A non-repository folder containing a
+standalone `.gitignore` continues to use the host filesystem comparison policy.
+
+Tracked mode requires an available Git CLI because index ownership is obtained from
+`git ls-files`; DevProjex does not parse `.git/index` independently. Its readiness
+matrix is normative:
+
+- at least one readable index, including a readable empty index: ready;
+- no readable applicable index, a missing Git CLI, or a failed index command:
+  `DPX-GIT-TRACKED-INDEX-UNAVAILABLE`, error severity, fail-closed tree, exit `3`
+  for direct commands (`analyze` still writes its requested report before returning);
+- at least one readable index plus unreadable nested indexes:
+  `DPX-GIT-TRACKED-INDEX-PARTIAL`, warning severity, affected nested scopes excluded,
+  exit `0` unless `analyze --strict` promotes policy diagnostics to exit `3`.
+
 Selection precedence is:
 
 1. Load the selected baseline profile.
@@ -437,7 +479,7 @@ that prevents an accepted option from becoming a no-op.
 | analyze/context/project/open | `--root` | profile roots | replaces the profile root set with each repeated top-level relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
 | analyze/context/project/open | `--extension` | profile extensions | replaces the profile extension set with each repeated normalized extension | repeatable; conflicts with `open --last` | requested payload/path stays on stdout | parser, resolver, handler, process |
 | analyze/context/project/open | `--select` | profile selected paths | replaces the profile explicit path set with each repeated source-relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
-| analyze/context/project/open | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; unavailable tracked index becomes a coded policy diagnostic | requested payload/path stays on stdout; policy failure exits `3` | parser, resolver, handler, process |
+| analyze/context/project/open | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; `tracked` requires Git CLI and at least one readable applicable index | on unavailable index, `analyze` preserves its requested report; context/project/open create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, handler, process |
 | analyze/context/project/open | `--exclude` | profile exclusions | replaces the profile exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
 | `analyze` | `--format` | `text` | selects the canonical text serializer or analysis JSON | none | document on stdout or in the selected file; invalid value exits `2` | parser, serializer, handler, process |
 | `analyze` | `-o`, `--output` | `-` | selects stdout or an exact new report file | existing/unsafe file is rejected; no force or dry-run | document or real absolute path on stdout; conflict exits `4` | handler, destination, process |

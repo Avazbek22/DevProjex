@@ -28,7 +28,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         var allowedRoot = CollectCheckedSelectionNames(
             selectionSnapshot.RootOptions,
             PathComparer.Default);
-        var selectedIgnoreOptions = CollectCheckedIgnoreOptionIds(selectionSnapshot.IgnoreOptions);
+        var selectedIgnoreOptions = new HashSet<IgnoreOptionId>(selectionSnapshot.EffectiveIgnoreOptions);
         var ignoreRules = BuildIgnoreRules(currentPath, selectedIgnoreOptions, allowedRoot);
         var nameFilter = string.IsNullOrWhiteSpace(_viewModel.NameFilter)
             ? null
@@ -128,16 +128,4 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         return selected;
     }
 
-    private static HashSet<IgnoreOptionId> CollectCheckedIgnoreOptionIds(
-        IReadOnlyList<ResolvedIgnoreOptionState> options)
-    {
-        var selected = new HashSet<IgnoreOptionId>();
-        foreach (var option in options)
-        {
-            if (option.IsChecked)
-                selected.Add(option.Id);
-        }
-
-        return selected;
-    }
 }

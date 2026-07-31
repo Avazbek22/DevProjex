@@ -1,4 +1,5 @@
 using Avalonia.Platform.Storage;
+using DevProjex.Application.Context;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 
@@ -64,7 +65,7 @@ public partial class MainWindow
     {
         try
         {
-            if (!EnsureTreeReady())
+            if (!EnsureTreeReady() || !EnsureTrackedGitOutputReady())
                 return;
 
             var snapshot = CaptureProjectTextOutputSnapshot();
@@ -100,7 +101,7 @@ public partial class MainWindow
     {
         try
         {
-            if (!EnsureTreeReady())
+            if (!EnsureTreeReady() || !EnsureTrackedGitOutputReady())
                 return;
 
             var snapshot = CaptureProjectTextOutputSnapshot();
@@ -142,6 +143,25 @@ public partial class MainWindow
             _currentTree.OrderedFilePaths,
             GetCurrentTreeTextFormat(),
             CreateExportPathPresentation());
+
+    private bool EnsureTrackedGitOutputReady()
+    {
+        if (string.IsNullOrWhiteSpace(_currentPath))
+            return true;
+
+        var diagnostic = _selectionCoordinator.GetAppliedGitReadinessDiagnostic(_currentPath);
+        if (diagnostic is null)
+            return true;
+
+        var localizationKey = diagnostic.Code switch
+        {
+            ProjectContextGitReadiness.PartialDiagnosticCode =>
+                "Terminal.Diagnostic.TrackedIndexPartial",
+            _ => "Terminal.Diagnostic.TrackedIndexUnavailable"
+        };
+        _toastService.Show(_localization[localizationKey]);
+        return diagnostic.Severity != ContextDiagnosticSeverity.Error;
+    }
 
     private async Task<ProjectTextOutputResult> PrepareProjectTextOutputAsync(
         ProjectTextOutputMode mode,

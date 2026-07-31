@@ -174,7 +174,7 @@ public sealed class ProjectRootFactsProvider(
 		var hasGitIgnore = false;
 		foreach (var file in files)
 		{
-			if (PathComparer.Default.Equals(file.Name, ".gitignore"))
+			if (!file.IsReparsePoint && PathComparer.Default.Equals(file.Name, ".gitignore"))
 			{
 				hasGitIgnore = true;
 				break;
@@ -195,19 +195,11 @@ public sealed class ProjectRootFactsProvider(
 			if (!linkInfo.Exists)
 				return null;
 
-			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
-			{
-				var resolvedTarget = linkInfo.ResolveLinkTarget(returnFinalTarget: true);
-				if (resolvedTarget is not FileInfo targetInfo || !targetInfo.Exists)
-					return null;
-
-				targetInfo.Refresh();
-				return new ProjectRootFileSignature(
-					targetInfo.LastWriteTimeUtc.Ticks,
-					targetInfo.Length,
-					linkInfo.LinkTarget ?? string.Empty,
-					ComputeContentFingerprint(targetInfo.FullName));
-			}
+			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+			    !string.IsNullOrEmpty(linkInfo.LinkTarget))
+				return null;
+			if (linkInfo.Length > GitIgnoreFileReader.MaximumFileSizeBytes)
+				return null;
 
 			return new ProjectRootFileSignature(
 				linkInfo.LastWriteTimeUtc.Ticks,
@@ -215,7 +207,12 @@ public sealed class ProjectRootFactsProvider(
 				LinkTarget: string.Empty,
 				ComputeContentFingerprint(linkInfo.FullName));
 		}
-		catch
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       System.Security.SecurityException or
+		       NotSupportedException or
+		       ArgumentException)
 		{
 			return null;
 		}
@@ -231,26 +228,20 @@ public sealed class ProjectRootFactsProvider(
 			if (!linkInfo.Exists)
 				return false;
 
-			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
-			{
-				var resolvedTarget = linkInfo.ResolveLinkTarget(returnFinalTarget: true);
-				if (resolvedTarget is not FileInfo targetInfo || !targetInfo.Exists)
-					return false;
+			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+			    !string.IsNullOrEmpty(linkInfo.LinkTarget))
+				return false;
 
-				targetInfo.Refresh();
-				return targetInfo.LastWriteTimeUtc.Ticks == expectedSignature.LastWriteTicksUtc &&
-				       targetInfo.Length == expectedSignature.LengthBytes &&
-				       string.Equals(
-					       linkInfo.LinkTarget ?? string.Empty,
-					       expectedSignature.LinkTarget,
-					       StringComparison.Ordinal);
-			}
-
-			return linkInfo.LastWriteTimeUtc.Ticks == expectedSignature.LastWriteTicksUtc &&
-			       linkInfo.Length == expectedSignature.LengthBytes &&
-			       expectedSignature.LinkTarget.Length == 0;
+			return expectedSignature.LinkTarget.Length == 0 &&
+			       linkInfo.LastWriteTimeUtc.Ticks == expectedSignature.LastWriteTicksUtc &&
+			       linkInfo.Length == expectedSignature.LengthBytes;
 		}
-		catch
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       System.Security.SecurityException or
+		       NotSupportedException or
+		       ArgumentException)
 		{
 			return false;
 		}

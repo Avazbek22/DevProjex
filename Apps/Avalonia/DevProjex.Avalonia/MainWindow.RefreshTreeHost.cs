@@ -129,7 +129,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
         root.IsExpanded = true;
 
         if (!interactiveFilter)
-            _selectionCoordinator.AcceptCurrentSelectionsAsApplied(input.CurrentPath);
+            _selectionCoordinator.AcceptCurrentSelectionsAsApplied(input.CurrentPath, result.Inventory);
 
         if (!interactiveFilter && !string.IsNullOrWhiteSpace(input.NameFilter) && root.Children.Count == 0)
             _toastService.Show(_localization["Toast.NoMatches"]);

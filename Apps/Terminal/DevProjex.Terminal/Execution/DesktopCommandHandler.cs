@@ -203,6 +203,7 @@ public sealed class DesktopCommandHandler(
 						"DevProjex Desktop could not apply the startup request.");
 				}
 				if (!request.WaitForCompletion &&
+				    request.Selection?.GitMode != GitFilteringMode.TrackedFilesOnly &&
 				    (!request.UseLastProject ||
 				     DesktopOpenReadiness.TryGetProjectPath(response.State, out _)))
 				{
@@ -315,6 +316,13 @@ internal static class DesktopOpenReadiness
 			return false;
 		if (request.Search is not null && !StringEquals(state, "search", request.Search))
 			return false;
+		if (request.Selection?.GitMode is { } gitMode &&
+		    (!StringEquals(state, "gitMode", ToToken(gitMode)) ||
+		     (gitMode == GitFilteringMode.TrackedFilesOnly &&
+		      !ReadBoolean(state, "trackedGitReady"))))
+		{
+			return false;
+		}
 
 		return true;
 	}
@@ -403,5 +411,13 @@ internal static class DesktopOpenReadiness
 		TreeTextFormat.Json => "json",
 		TreeTextFormat.Xml => "xml",
 		_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+	};
+
+	private static string ToToken(GitFilteringMode mode) => mode switch
+	{
+		GitFilteringMode.None => "none",
+		GitFilteringMode.RespectGitIgnore => "gitignore",
+		GitFilteringMode.TrackedFilesOnly => "tracked",
+		_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
 	};
 }

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Services;
 using DevProjex.Kernel;
@@ -36,6 +37,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly TreeExportService _treeExport;
     private readonly MetricsPipeline _metrics;
     private readonly PreviewWorkspacePipeline _previewPipeline;
+    private readonly Func<bool> _ensureClipboardOutputReady;
     private readonly Func<string, Task> _setClipboardTextAsync;
     private readonly Func<string, Task> _showErrorAsync;
 
@@ -60,6 +62,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         TreeExportService treeExport,
         MetricsPipeline metrics,
         PreviewWorkspacePipeline previewPipeline,
+        Func<bool> ensureClipboardOutputReady,
         Func<string, Task> setClipboardTextAsync,
         Func<string, Task> showErrorAsync)
     {
@@ -74,6 +77,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         _treeExport = treeExport;
         _metrics = metrics;
         _previewPipeline = previewPipeline;
+        _ensureClipboardOutputReady = ensureClipboardOutputReady;
         _setClipboardTextAsync = setClipboardTextAsync;
         _showErrorAsync = showErrorAsync;
 
@@ -83,6 +87,7 @@ internal sealed class PreviewSurfaceController : IDisposable
             Math.Max(0, controls.TextScrollViewer.Viewport.Height);
         controls.TextControl.ViewportWidth =
             Math.Max(0, controls.TextScrollViewer.Viewport.Width);
+        controls.TextControl.CopyingToClipboard += OnCopyingToClipboard;
         controls.TextControl.CopiedToClipboard += OnCopiedToClipboard;
         controls.TextControl.PreviewSelectionChanged +=
             OnSelectionChanged;
@@ -148,7 +153,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     public async Task CopyVisibleFilePathAsync()
     {
-        if (!await WaitForClipboardSourceReadyAsync()
+        if (!_ensureClipboardOutputReady() ||
+            !await WaitForClipboardSourceReadyAsync()
                 .ConfigureAwait(true) ||
             !TryBuildCurrentStickySectionCopyPayload(out var payload))
         {
@@ -169,7 +175,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     public async Task CopyCurrentPreviewAsync()
     {
-        if (!await WaitForClipboardSourceReadyAsync()
+        if (!_ensureClipboardOutputReady() ||
+            !await WaitForClipboardSourceReadyAsync()
                 .ConfigureAwait(true) ||
             !TryBuildCurrentPreviewCopyPayload(out var payload))
         {
@@ -659,6 +666,8 @@ internal sealed class PreviewSurfaceController : IDisposable
             return;
 
         _disposed = true;
+        _controls.TextControl.CopyingToClipboard -=
+            OnCopyingToClipboard;
         _controls.TextControl.CopiedToClipboard -=
             OnCopiedToClipboard;
         _controls.TextControl.PreviewSelectionChanged -=
@@ -818,6 +827,9 @@ internal sealed class PreviewSurfaceController : IDisposable
                (_controls.TextControl.Document ??
                 _viewModel.PreviewDocument) is not null;
     }
+
+    private void OnCopyingToClipboard(object? sender, CancelEventArgs e)
+        => e.Cancel = !_ensureClipboardOutputReady();
 
     private void OnCopiedToClipboard(object? sender, EventArgs e)
     {

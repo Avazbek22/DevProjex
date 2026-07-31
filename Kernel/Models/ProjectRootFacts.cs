@@ -18,6 +18,7 @@ public sealed class ProjectRootFacts
 	private readonly FrozenSet<string> _nonReparseMarkerDirectoryNames;
 	private readonly FrozenDictionary<string, ProjectRootDirectoryFact> _directoriesByName;
 	private readonly bool _hasGitMetadataEntry;
+	private readonly bool _hasGitIgnoreFile;
 
 	public ProjectRootFacts(
 		string rootPath,
@@ -70,6 +71,9 @@ public sealed class ProjectRootFacts
 		for (var index = 0; index < files.Count; index++)
 		{
 			var file = files[index];
+			if (!file.IsReparsePoint && PathComparer.Default.Equals(file.Name, ".gitignore"))
+				_hasGitIgnoreFile = true;
+
 			if (file.IsReparsePoint || !PathComparer.Default.Equals(file.Name, ".git"))
 				continue;
 
@@ -105,7 +109,11 @@ public sealed class ProjectRootFacts
 
 	public ProjectRootFileSignature? GitIgnoreSignature { get; }
 
-	public bool HasGitIgnoreFile => HasFile(".gitignore");
+	/// <summary>
+	/// Reports only a regular working-tree .gitignore file. Git does not follow a
+	/// symbolic link when it accesses this control file, so neither does DevProjex.
+	/// </summary>
+	public bool HasGitIgnoreFile => _hasGitIgnoreFile;
 
 	public bool HasGitMetadataEntry => _hasGitMetadataEntry;
 

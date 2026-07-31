@@ -75,7 +75,7 @@ public sealed class AnalyzeCommandHandler(
 			environment.Output.WriteLine(writtenPath);
 		}
 
-		return request.Strict && plan.Diagnostics.Count > 0
+		return plan.HasErrors || request.Strict && plan.Diagnostics.Count > 0
 			? CommandLineExitCodes.PolicyFailure
 			: CommandLineExitCodes.Success;
 	}

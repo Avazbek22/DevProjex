@@ -1,6 +1,7 @@
 using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Contracts;
@@ -36,7 +37,9 @@ public static class ProjectLoadWorkflowRuntime
             new RubyArtifactsIgnoreRule()
         };
 
-        return new IgnoreRulesService(new SmartIgnoreService(smartIgnoreRules));
+        return new IgnoreRulesService(
+            new SmartIgnoreService(smartIgnoreRules),
+            pathComparisonSemanticsResolver: GitConfigPathComparisonSemanticsResolver.Instance);
     }
 
     public static BuildTreeUseCase CreateBuildTreeUseCase() =>

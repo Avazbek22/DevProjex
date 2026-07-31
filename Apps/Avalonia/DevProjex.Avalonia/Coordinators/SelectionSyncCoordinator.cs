@@ -1,4 +1,5 @@
 using DevProjex.Application.Models;
+using DevProjex.Application.Context;
 using DevProjex.Avalonia.Collections;
 using DevProjex.Avalonia.Services;
 using DevProjex.Kernel;
@@ -70,6 +71,8 @@ public sealed partial class SelectionSyncCoordinator(
     private SelectionRefreshRollbackSnapshot? _stableSelectionSnapshot;
     private SelectionRefreshRollbackSnapshot? _reversibleSelectionSnapshot;
     private AppliedSelectionState? _appliedSelectionState;
+    private ProjectContextGitReadiness _appliedGitReadiness =
+        ProjectContextGitReadiness.Evaluate(GitFilteringMode.None, 0, 0);
     private int _pendingApplyEvaluationDeferral;
     private bool _pendingApplyEvaluationRequested;
     private readonly IgnoreRulesBuildCache _ignoreRulesBuildCache = new(buildIgnoreRules);
@@ -82,12 +85,34 @@ public sealed partial class SelectionSyncCoordinator(
         getIgnoreOptionsAvailability);
 
     public long CurrentSelectionRevision => _session.Revision;
+    public ProjectContextGitReadiness AppliedGitReadiness => _appliedGitReadiness;
 
-    public void AcceptCurrentSelectionsAsApplied(string projectPath)
+    public void AcceptCurrentSelectionsAsApplied(
+        string projectPath,
+        ProjectTreeInventorySnapshot? inventory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
         _appliedSelectionState = AppliedSelectionState.Capture(projectPath, viewModel);
+        _appliedGitReadiness = ProjectContextGitReadiness.Evaluate(
+            GitFilteringModeResolver.Resolve(_session.IgnoreOptions.OptionStateCache),
+            inventory);
         viewModel.SetPendingFilterSettingsChanges(false);
+    }
+
+    public ContextDiagnostic? GetAppliedGitReadinessDiagnostic(
+        string projectPath,
+        GitFilteringMode? requiredMode = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        if (requiredMode == GitFilteringMode.TrackedFilesOnly &&
+            _appliedGitReadiness.Mode != GitFilteringMode.TrackedFilesOnly)
+        {
+            return ProjectContextGitReadiness
+                .Evaluate(GitFilteringMode.TrackedFilesOnly, 0, 0)
+                .CreateDiagnostic(projectPath);
+        }
+
+        return _appliedGitReadiness.CreateDiagnostic(projectPath);
     }
 
     public void ReevaluatePendingApplyChanges() =>
@@ -96,6 +121,10 @@ public sealed partial class SelectionSyncCoordinator(
     public void ClearAppliedSelectionState()
     {
         _appliedSelectionState = null;
+        _appliedGitReadiness = ProjectContextGitReadiness.Evaluate(
+            GitFilteringMode.None,
+            0,
+            0);
         _pendingApplyEvaluationRequested = false;
         viewModel.SetPendingFilterSettingsChanges(false);
     }
@@ -998,6 +1027,30 @@ public sealed partial class SelectionSyncCoordinator(
         EnsureIgnoreSelectionCache();
         UpdateIgnoreSelectionCache();
         return SnapshotRuntimeSelectedIgnoreOptions();
+    }
+
+    public void ApplyIgnoreSelectionOverride(
+        IReadOnlySet<IgnoreOptionId> selectedOptions)
+    {
+        ArgumentNullException.ThrowIfNull(selectedOptions);
+
+        var stateCache = _session.IgnoreOptions.SnapshotStateCache();
+        foreach (var option in _ignoreOptions)
+            stateCache[option.Id] = selectedOptions.Contains(option.Id);
+        foreach (var option in viewModel.IgnoreOptions)
+            stateCache[option.Id] = selectedOptions.Contains(option.Id);
+
+        // Git modes are a stable public choice even when repository evidence disappears
+        // between CLI preflight and the Desktop request being applied.
+        stateCache[IgnoreOptionId.UseGitIgnore] =
+            selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
+        stateCache[IgnoreOptionId.TrackedGitFilesOnly] =
+            selectedOptions.Contains(IgnoreOptionId.TrackedGitFilesOnly);
+
+        _session.IgnoreOptions.ReplaceStateCache(stateCache);
+        _session.IgnoreOptions.AllPreference = null;
+        _session.AdvanceRevision();
+        RequestPendingApplyEvaluation();
     }
 
     public IReadOnlyDictionary<string, bool>? SnapshotRootOptionStatesForPersistence() =>
@@ -2414,10 +2467,12 @@ public sealed partial class SelectionSyncCoordinator(
         foreach (var option in _ignoreOptions)
             visibleIds.Add(option.Id);
 
-        // The full cache may contain hidden options from profiles or transient refreshes.
-        // Runtime ignore rules must follow only visible UI controls, otherwise an invisible
-        // stale checkbox can keep filtering project content after the user turns everything off.
+        var preserveTrackedOnly = selected.Contains(IgnoreOptionId.TrackedGitFilesOnly);
+        // Ordinary hidden options do not affect runtime rules. Tracked-only is different:
+        // it is an explicit fail-closed policy and must survive lost repository evidence.
         selected.IntersectWith(visibleIds);
+        if (preserveTrackedOnly)
+            selected.Add(IgnoreOptionId.TrackedGitFilesOnly);
         return selected;
     }
 

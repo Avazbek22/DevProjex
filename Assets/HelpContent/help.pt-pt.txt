@@ -375,12 +375,18 @@ Uma regra que começa por `!` cancela uma eliminação anterior do Git apenas de
 
 Uma linha malformada ou sem suporte é ignorada de forma independente. Outras regras válidas nesse ficheiro e regras em escopos vizinhos continuam a funcionar.
 
-Esta opção apenas abrange os ficheiros `.gitignore` da árvore de trabalho. As regras de `.git/info/exclude` e a configuração global do Git não são aplicadas. Quando existe um índice Git legível, os ficheiros controlados permanecem visíveis mesmo que correspondam ao `.gitignore`; sem índice ou Git CLI, o DevProjex regressa em segurança à avaliação apenas por padrões.
+Esta opção apenas abrange os ficheiros `.gitignore` da árvore de trabalho. As regras de exclusão de `.git/info/exclude` e as regras globais de exclusão do Git não são aplicadas; as definições efetivas do repositório para comparação de caminhos, como `core.ignoreCase` e, no macOS, `core.precomposeUnicode`, são respeitadas. Quando existe um índice Git legível para o âmbito do repositório responsável pelo caminho, os ficheiros controlados permanecem visíveis mesmo que correspondam ao `.gitignore`; sem esse índice ou a CLI do Git, esse âmbito regressa em segurança à avaliação apenas por padrões.
+
+Uma ligação simbólica com o nome `.gitignore` não é seguida, de acordo com o comportamento do Git para este ficheiro de controlo. Se um `.gitignore` normal não puder ser lido, o âmbito do respetivo diretório é excluído por completo de forma segura e a análise comunica acesso parcial em vez de incluir ficheiros sem avaliar todas as regras.
+
+O perfil integrado `standard` seleciona `gitignore` e os oito grupos de exclusão: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` e `extensionless-files`.
 
 ### 12.4 Apenas ficheiros controlados pelo Git
 "Apenas ficheiros controlados pelo Git" constrói a etapa Git da árvore a partir dos ficheiros existentes na árvore de trabalho registados em cada índice Git legível. Os ficheiros controlados modificados e os novos ficheiros adicionados ao índice continuam incluídos; os ficheiros não controlados são excluídos. Esta é a árvore de trabalho atual, não uma captura histórica do `HEAD` nem de um repositório remoto.
 
-Cada repositório aninhado e worktree acessível é processado de forma independente em qualquer nível de profundidade acessível. Um repositório filho não herda os caminhos controlados do repositório pai nem de um repositório irmão. Se um índice não puder ser lido em segurança, o modo estrito não o substitui silenciosamente pela avaliação de padrões `.gitignore`.
+Cada repositório aninhado e cada worktree acessível são processados de forma independente em qualquer nível de profundidade acessível. Um repositório filho não herda os caminhos controlados do repositório pai nem de um repositório irmão. Este modo requer a CLI do Git; um índice vazio, mas legível, é válido. Se o espaço de trabalho no terminal (TUI) for iniciado neste modo e nenhum índice aplicável puder ser carregado, o espaço de trabalho não é aberto. Se o modo for selecionado interativamente num espaço de trabalho TUI já aberto e nenhum índice aplicável puder ser carregado, a alteração é rejeitada e o último modo Git utilizável permanece ativo. Na mesma situação, os comandos diretos falham com um erro de política ou verificação. O DevProjex nunca passa silenciosamente para `.gitignore`. Quando outro índice aplicável é legível, os âmbitos aninhados indisponíveis são excluídos com um aviso.
+
+Num espaço de trabalho Desktop já aberto, a seleção explícita permanece visível e falha em segurança: a saída e a exportação são bloqueadas quando a prontidão falha, enquanto a prontidão parcial permite continuar com um aviso localizado.
 
 "Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" são mutuamente exclusivos: ativar um desativa o outro. Nos projetos locais que suportam perfis, o modo escolhido é guardado com as pastas de nível superior, os tipos de ficheiro e as restantes regras de exclusão.
 

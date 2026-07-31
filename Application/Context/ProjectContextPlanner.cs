@@ -7,8 +7,6 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 {
 	private const string InvalidSelectedPathCode = ProjectSelectionPath.InvalidPathCode;
 	private const string MissingSelectedPathCode = "DPX-SELECTION-PATH-MISSING";
-	private const string TrackedIndexUnavailableCode = "DPX-GIT-TRACKED-INDEX-UNAVAILABLE";
-	private const string TrackedIndexPartialCode = "DPX-GIT-TRACKED-INDEX-PARTIAL";
 
 	public async Task<ProjectContextPlan> BuildAsync(
 		ProjectContextRequest request,
@@ -88,29 +86,12 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			.ConfigureAwait(false);
 		AddAnalysisDiagnostics(analysis, diagnostics);
 
-		var unavailableTrackedIndexCount = loaded.UnavailableGitTrackedIndexCount;
-		var trackedIndexCount = Math.Max(
-			0,
-			loaded.DiscoveredGitTrackedIndexCount - unavailableTrackedIndexCount);
-		var trackedReady = selection.GitMode != GitFilteringMode.TrackedFilesOnly ||
-		                   trackedIndexCount > 0;
-		if (!trackedReady)
-		{
-			diagnostics.Add(new ContextDiagnostic(
-				TrackedIndexUnavailableCode,
-				ContextDiagnosticSeverity.Error,
-				"Tracked Git files mode was requested, but no readable Git index is available.",
-				sourceRoot));
-		}
-		else if (selection.GitMode == GitFilteringMode.TrackedFilesOnly &&
-		         unavailableTrackedIndexCount > 0)
-		{
-			diagnostics.Add(new ContextDiagnostic(
-				TrackedIndexPartialCode,
-				ContextDiagnosticSeverity.Warning,
-				"Some nested Git indexes could not be read; those repository scopes were excluded.",
-				sourceRoot));
-		}
+		var gitReadiness = ProjectContextGitReadiness.Evaluate(
+			selection.GitMode!.Value,
+			loaded.DiscoveredGitTrackedIndexCount,
+			loaded.UnavailableGitTrackedIndexCount);
+		if (gitReadiness.CreateDiagnostic(sourceRoot) is { } gitDiagnostic)
+			diagnostics.Add(gitDiagnostic);
 
 		var effectiveSelection = selection with
 		{
@@ -135,11 +116,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			IncludedFolders: includedFolders,
 			Analysis: analysis,
 			Diagnostics: diagnostics,
-			GitReadiness: new ProjectContextGitReadiness(
-				selection.GitMode!.Value,
-				trackedIndexCount,
-				trackedReady,
-				unavailableTrackedIndexCount),
+			GitReadiness: gitReadiness,
 			Fingerprint: BuildFingerprint(sourceRoot, effectiveSelection, includedNodes),
 			IncludedBytes: includedBytes,
 			EffectiveFileSizes: effectiveFileSizes,

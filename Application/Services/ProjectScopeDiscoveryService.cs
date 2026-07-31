@@ -570,7 +570,8 @@ public sealed class ProjectScopeDiscoveryService(
 		// into expensive dependency-style discovery scans. Smart artifact filtering is a
 		// later, cheaper layer; do not compensate for missed scopes by increasing this
 		// depth globally unless benchmarks prove it is safe for large user folders.
-		if (isKnownMonorepoContainer || HasMonorepoMarker(candidateFacts))
+		if (isKnownMonorepoContainer ||
+		    HasMonorepoMarker(candidateFacts))
 		{
 			return new NestedProjectProbe(
 				MonorepoNestedProjectProbeMaxDepth,

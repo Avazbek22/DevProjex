@@ -97,11 +97,11 @@ public sealed class ProjectAnalysisService(
 		}
 		else
 		{
-			scan = scanOptions.Execute(
-				new ScanOptionsRequest(rootPath, discoveryRules),
-				cancellationToken);
 			if (request.SelectedRootFolders is null)
 			{
+				scan = scanOptions.Execute(
+					new ScanOptionsRequest(rootPath, discoveryRules),
+					cancellationToken);
 				var rootProjectionRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, scan.RootFolders);
 				allowedRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
 					rootPath,
@@ -113,6 +113,22 @@ public sealed class ProjectAnalysisService(
 			else
 			{
 				allowedRootFolders = selectedRootFolders.ToArray();
+				var rootFolders = scanOptions.GetRootFolders(
+					rootPath,
+					discoveryRules,
+					cancellationToken);
+				var extensions = scanOptions.GetExtensionsForRootFolders(
+					rootPath,
+					allowedRootFolders,
+					discoveryRules,
+					cancellationToken);
+				scan = new ScanOptionsResult(
+					Extensions: extensions.Value
+						.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase)
+						.ToArray(),
+					RootFolders: rootFolders.Value,
+					RootAccessDenied: rootFolders.RootAccessDenied || extensions.RootAccessDenied,
+					HadAccessDenied: rootFolders.HadAccessDenied || extensions.HadAccessDenied);
 			}
 			rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
 		}
@@ -218,10 +234,7 @@ public sealed class ProjectAnalysisService(
 			.Where(static option => option.IsChecked)
 			.Select(static option => option.Name)
 			.ToArray();
-		var selectedIgnoreOptions = snapshot.IgnoreOptions
-			.Where(static option => option.IsChecked)
-			.Select(static option => option.Id)
-			.ToArray();
+		var selectedIgnoreOptions = snapshot.EffectiveIgnoreOptions.ToArray();
 		var rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
 		var treeRequest = new BuildTreeRequest(
 			rootPath,

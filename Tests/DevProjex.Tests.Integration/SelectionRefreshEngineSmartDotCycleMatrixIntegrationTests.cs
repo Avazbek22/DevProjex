@@ -622,11 +622,11 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
         yield return ["frontend", "package.json", "node_modules", "index.js"];
         yield return ["dotnet", "App.csproj", "bin", "app.dll"];
         yield return ["python", "requirements.txt", "__pycache__", "app.pyc"];
-        yield return ["jvm", "settings.gradle", "build", "classes.bin"];
-        yield return ["rust", "Cargo.toml", "target", "app.bin"];
-        yield return ["go", "go.work", "vendor", "module.go"];
+        yield return ["jvm", "settings.gradle", "build", "classes/App.class"];
+        yield return ["rust", "Cargo.toml", "target", "debug/app.bin"];
+        yield return ["go", "go.work", "vendor", "modules.txt"];
         yield return ["php", "composer.json", "vendor", "autoload.php"];
-        yield return ["ruby", "Gemfile.lock", "tmp", "cache.txt"];
+        yield return ["ruby", "Gemfile.lock", "tmp", "cache/payload.txt"];
     }
 
     private static TemporaryDirectory CreateStackWorkspace(

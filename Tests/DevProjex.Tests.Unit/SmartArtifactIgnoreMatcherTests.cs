@@ -375,6 +375,38 @@ public sealed class SmartArtifactIgnoreMatcherTests
 		Assert.False(SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(candidatePath, "obj"));
 	}
 
+	[Theory]
+	[MemberData(nameof(SmartArtifactFileEvidenceNoFollowCases))]
+	public void SmartArtifactEvidenceNoFollow_FileEvidenceMatrix(
+		SmartArtifactFileEvidenceKind evidenceKind,
+		SmartArtifactLinkState entryState)
+	{
+		using var temp = new TemporaryDirectory();
+		var candidatePath = temp.CreateFolder("output");
+		var matcher = CreateFileEvidenceMatcher(evidenceKind);
+
+		ArrangeFileEvidence(temp, evidenceKind, entryState);
+
+		Assert.Equal(
+			entryState == SmartArtifactLinkState.Regular,
+			matcher.IsIgnoredDirectory(candidatePath, "output"));
+	}
+
+	[Theory]
+	[MemberData(nameof(SmartArtifactDirectoryEvidenceNoFollowCases))]
+	public void SmartArtifactEvidenceNoFollow_DirectoryEvidenceMatrix(
+		SmartArtifactDirectoryEvidenceKind evidenceKind,
+		SmartArtifactLinkState entryState)
+	{
+		using var temp = new TemporaryDirectory();
+		var matcher = CreateDirectoryEvidenceMatcher(evidenceKind);
+		var candidatePath = ArrangeDirectoryEvidence(temp, evidenceKind, entryState);
+
+		Assert.Equal(
+			entryState == SmartArtifactLinkState.Regular,
+			matcher.IsIgnoredDirectory(candidatePath, "output"));
+	}
+
 	public static TheoryData<string, string, ArtifactMarkerKind> StrongArtifactDirectories() => new()
 	{
 		{ "obj", "project.assets.json", ArtifactMarkerKind.File },
@@ -493,6 +525,34 @@ public sealed class SmartArtifactIgnoreMatcherTests
 		"xcuserdata"
 	};
 
+	public static TheoryData<SmartArtifactFileEvidenceKind, SmartArtifactLinkState>
+		SmartArtifactFileEvidenceNoFollowCases()
+	{
+		var cases = new TheoryData<SmartArtifactFileEvidenceKind, SmartArtifactLinkState>();
+		foreach (var evidenceKind in Enum.GetValues<SmartArtifactFileEvidenceKind>())
+		{
+			cases.Add(evidenceKind, SmartArtifactLinkState.Regular);
+			cases.Add(evidenceKind, SmartArtifactLinkState.SymbolicLink);
+			cases.Add(evidenceKind, SmartArtifactLinkState.DanglingSymbolicLink);
+		}
+
+		return cases;
+	}
+
+	public static TheoryData<SmartArtifactDirectoryEvidenceKind, SmartArtifactLinkState>
+		SmartArtifactDirectoryEvidenceNoFollowCases()
+	{
+		var cases = new TheoryData<SmartArtifactDirectoryEvidenceKind, SmartArtifactLinkState>();
+		foreach (var evidenceKind in Enum.GetValues<SmartArtifactDirectoryEvidenceKind>())
+		{
+			cases.Add(evidenceKind, SmartArtifactLinkState.Regular);
+			cases.Add(evidenceKind, SmartArtifactLinkState.SymbolicLink);
+			cases.Add(evidenceKind, SmartArtifactLinkState.DanglingSymbolicLink);
+		}
+
+		return cases;
+	}
+
 	private static void CreateMarker(
 		TemporaryDirectory temp,
 		string relativePath,
@@ -518,6 +578,235 @@ public sealed class SmartArtifactIgnoreMatcherTests
 		temp.CreateFolder($"packages/{packageDirectoryName}/{layoutDirectoryName}");
 	}
 
+	private static SmartArtifactIgnoreMatcher CreateFileEvidenceMatcher(
+		SmartArtifactFileEvidenceKind evidenceKind)
+	{
+		var rule = evidenceKind switch
+		{
+			SmartArtifactFileEvidenceKind.DirectFile =>
+				SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule.Exact(
+					"output",
+					files: ["marker.json"]),
+			SmartArtifactFileEvidenceKind.FileSuffix =>
+				SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule.Exact(
+					"output",
+					fileSuffixes: [".generated.json"]),
+			SmartArtifactFileEvidenceKind.FileExtension =>
+				SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule.Exact(
+					"output",
+					fileExtensions: [".artifact"]),
+			SmartArtifactFileEvidenceKind.ChildFile =>
+				SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule.Exact(
+					"output",
+					childFiles: ["package.json"]),
+			SmartArtifactFileEvidenceKind.RepeatedSelfNamedFile =>
+				CreateRepeatedEvidenceRule(),
+			SmartArtifactFileEvidenceKind.NativeExecutable =>
+				SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule.Exact(
+					"output",
+					hasNativeExecutable: true),
+			_ => throw new ArgumentOutOfRangeException(nameof(evidenceKind), evidenceKind, null)
+		};
+
+		return new SmartArtifactIgnoreMatcher([rule]);
+	}
+
+	private static SmartArtifactIgnoreMatcher CreateDirectoryEvidenceMatcher(
+		SmartArtifactDirectoryEvidenceKind evidenceKind)
+	{
+		var rule = evidenceKind switch
+		{
+			SmartArtifactDirectoryEvidenceKind.DirectDirectory =>
+				SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule.Exact(
+					"output",
+					directories: ["marker-directory"]),
+			SmartArtifactDirectoryEvidenceKind.ChildDirectory =>
+				SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule.Exact(
+					"output",
+					childFiles: ["package.json"]),
+			SmartArtifactDirectoryEvidenceKind.RepeatedLayoutDirectory =>
+				CreateRepeatedEvidenceRule(),
+			SmartArtifactDirectoryEvidenceKind.CandidatePathSuffix =>
+				SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule.Exact(
+					"output",
+					pathSuffixSegments: ["store", "output"]),
+			_ => throw new ArgumentOutOfRangeException(nameof(evidenceKind), evidenceKind, null)
+		};
+
+		return new SmartArtifactIgnoreMatcher([rule]);
+	}
+
+	private static SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule CreateRepeatedEvidenceRule() =>
+		SmartArtifactIgnoreMatcher.SmartArtifactDirectoryRule.Exact(
+			"output",
+			repeatedChildSignature: new SmartArtifactIgnoreMatcher.RepeatedChildArtifactSignature(
+				".pkg",
+				["layout"],
+				minimumMatches: 2,
+				maxEntries: 8));
+
+	private static void ArrangeFileEvidence(
+		TemporaryDirectory temp,
+		SmartArtifactFileEvidenceKind evidenceKind,
+		SmartArtifactLinkState entryState)
+	{
+		var evidencePaths = evidenceKind switch
+		{
+			SmartArtifactFileEvidenceKind.DirectFile => new[] { "output/marker.json" },
+			SmartArtifactFileEvidenceKind.FileSuffix => new[] { "output/item.generated.json" },
+			SmartArtifactFileEvidenceKind.FileExtension => new[] { "output/item.artifact" },
+			SmartArtifactFileEvidenceKind.ChildFile => new[] { "output/package/package.json" },
+			SmartArtifactFileEvidenceKind.RepeatedSelfNamedFile =>
+				new[] { "output/alpha/alpha.pkg", "output/beta/beta.pkg" },
+			SmartArtifactFileEvidenceKind.NativeExecutable => new[] { "output/tool" },
+			_ => throw new ArgumentOutOfRangeException(nameof(evidenceKind), evidenceKind, null)
+		};
+
+		if (evidenceKind == SmartArtifactFileEvidenceKind.RepeatedSelfNamedFile)
+		{
+			temp.CreateFolder("output/alpha/layout");
+			temp.CreateFolder("output/beta/layout");
+		}
+
+		foreach (var relativeEvidencePath in evidencePaths)
+		{
+			var evidencePath = Path.Combine(temp.Path, relativeEvidencePath);
+			var targetPath = Path.Combine(
+				temp.Path,
+				"external-file-evidence",
+				relativeEvidencePath.Replace('/', '_'));
+			CreateFileEntryOrSkip(
+				evidencePath,
+				targetPath,
+				entryState,
+				evidenceKind == SmartArtifactFileEvidenceKind.NativeExecutable
+					? [0x7f, (byte)'E', (byte)'L', (byte)'F']
+					: [(byte)'x']);
+		}
+	}
+
+	private static string ArrangeDirectoryEvidence(
+		TemporaryDirectory temp,
+		SmartArtifactDirectoryEvidenceKind evidenceKind,
+		SmartArtifactLinkState entryState)
+	{
+		var candidatePath = Path.Combine(
+			temp.Path,
+			evidenceKind == SmartArtifactDirectoryEvidenceKind.CandidatePathSuffix
+				? Path.Combine("store", "output")
+				: "output");
+
+		if (evidenceKind == SmartArtifactDirectoryEvidenceKind.CandidatePathSuffix)
+		{
+			CreateDirectoryEntryOrSkip(
+				candidatePath,
+				Path.Combine(temp.Path, "external-directory-evidence", "candidate"),
+				entryState);
+			return candidatePath;
+		}
+
+		Directory.CreateDirectory(candidatePath);
+		switch (evidenceKind)
+		{
+			case SmartArtifactDirectoryEvidenceKind.DirectDirectory:
+				CreateDirectoryEntryOrSkip(
+					Path.Combine(candidatePath, "marker-directory"),
+					Path.Combine(temp.Path, "external-directory-evidence", "direct"),
+					entryState);
+				break;
+			case SmartArtifactDirectoryEvidenceKind.ChildDirectory:
+				var childTarget = Path.Combine(temp.Path, "external-directory-evidence", "child");
+				if (entryState == SmartArtifactLinkState.SymbolicLink)
+				{
+					Directory.CreateDirectory(childTarget);
+					File.WriteAllText(Path.Combine(childTarget, "package.json"), "{}");
+				}
+				CreateDirectoryEntryOrSkip(
+					Path.Combine(candidatePath, "package"),
+					childTarget,
+					entryState,
+					createTarget: false);
+				if (entryState == SmartArtifactLinkState.Regular)
+					File.WriteAllText(Path.Combine(candidatePath, "package", "package.json"), "{}");
+				break;
+			case SmartArtifactDirectoryEvidenceKind.RepeatedLayoutDirectory:
+				foreach (var childName in new[] { "alpha", "beta" })
+				{
+					var childPath = Path.Combine(candidatePath, childName);
+					Directory.CreateDirectory(childPath);
+					File.WriteAllText(Path.Combine(childPath, childName + ".pkg"), "package");
+					CreateDirectoryEntryOrSkip(
+						Path.Combine(childPath, "layout"),
+						Path.Combine(temp.Path, "external-directory-evidence", "layout-" + childName),
+						entryState);
+				}
+				break;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(evidenceKind), evidenceKind, null);
+		}
+
+		return candidatePath;
+	}
+
+	private static void CreateFileEntryOrSkip(
+		string entryPath,
+		string targetPath,
+		SmartArtifactLinkState entryState,
+		byte[] content)
+	{
+		Directory.CreateDirectory(Path.GetDirectoryName(entryPath)!);
+		if (entryState == SmartArtifactLinkState.Regular)
+		{
+			File.WriteAllBytes(entryPath, content);
+			return;
+		}
+
+		Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+		if (entryState == SmartArtifactLinkState.SymbolicLink)
+			File.WriteAllBytes(targetPath, content);
+
+		try
+		{
+			File.CreateSymbolicLink(entryPath, targetPath);
+			if (string.IsNullOrEmpty(new FileInfo(entryPath).LinkTarget))
+				Assert.Skip("The filesystem did not preserve the file symbolic link.");
+		}
+		catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or PlatformNotSupportedException or NotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+	}
+
+	private static void CreateDirectoryEntryOrSkip(
+		string entryPath,
+		string targetPath,
+		SmartArtifactLinkState entryState,
+		bool createTarget = true)
+	{
+		Directory.CreateDirectory(Path.GetDirectoryName(entryPath)!);
+		if (entryState == SmartArtifactLinkState.Regular)
+		{
+			Directory.CreateDirectory(entryPath);
+			return;
+		}
+
+		if (createTarget && entryState != SmartArtifactLinkState.DanglingSymbolicLink)
+			Directory.CreateDirectory(targetPath);
+
+		try
+		{
+			Directory.CreateSymbolicLink(entryPath, targetPath);
+			if (string.IsNullOrEmpty(new DirectoryInfo(entryPath).LinkTarget))
+				Assert.Skip("The filesystem did not preserve the directory symbolic link.");
+		}
+		catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or PlatformNotSupportedException or NotSupportedException)
+		{
+			Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+	}
+
 	private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
 	{
 		try
@@ -536,5 +825,30 @@ public sealed class SmartArtifactIgnoreMatcherTests
 	{
 		File,
 		Directory
+	}
+
+	public enum SmartArtifactFileEvidenceKind
+	{
+		DirectFile,
+		FileSuffix,
+		FileExtension,
+		ChildFile,
+		RepeatedSelfNamedFile,
+		NativeExecutable
+	}
+
+	public enum SmartArtifactDirectoryEvidenceKind
+	{
+		DirectDirectory,
+		ChildDirectory,
+		RepeatedLayoutDirectory,
+		CandidatePathSuffix
+	}
+
+	public enum SmartArtifactLinkState
+	{
+		Regular,
+		SymbolicLink,
+		DanglingSymbolicLink
 	}
 }

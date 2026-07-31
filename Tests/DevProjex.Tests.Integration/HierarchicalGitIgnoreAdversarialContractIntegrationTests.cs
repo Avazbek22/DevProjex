@@ -6,6 +6,78 @@ namespace DevProjex.Tests.Integration;
 public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 {
 	[Fact]
+	public void NativeGitDifferential_OpeningSubfolderLoadsAncestorChainAndStopsAtNearestRepositoryBoundary()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryPath = temp.CreateDirectory("repo");
+		temp.CreateFile(
+			"repo/.gitignore",
+			"opened/*.blocked\nopened/**/*.secret\nembedded/opened/*.outer\n");
+		temp.CreateFile("repo/opened/.gitignore", "!nested/keep.secret\nhidden-root/\n");
+		var repositoryRelativeFiles = new[]
+		{
+			"opened/drop.blocked",
+			"opened/drop.secret",
+			"opened/keep.cs",
+			"opened/nested/drop.secret",
+			"opened/nested/keep.secret",
+			"opened/hidden-root/leak.cs",
+			"opened/visible-root/keep.cs"
+		};
+		foreach (var relativePath in repositoryRelativeFiles)
+			temp.CreateFile($"repo/{relativePath}", relativePath);
+
+		RunGit(repositoryPath, "init", "--quiet");
+		var nativeIgnored = QueryNativeGitIgnoredPaths(repositoryPath, repositoryRelativeFiles);
+		var openedPath = Path.Combine(repositoryPath, "opened");
+		var extensions = new HashSet<string>(
+			[".blocked", ".cs", ".gitignore", ".secret"],
+			StringComparer.OrdinalIgnoreCase);
+		var rules = CreateTraversalRules();
+		var observation = ScanAndCompareTrees(
+			openedPath,
+			RootSet("hidden-root", "nested", "visible-root"),
+			extensions,
+			rules);
+		var applicationIgnored = repositoryRelativeFiles
+			.Select(static path => path["opened/".Length..])
+			.Where(path => !observation.Paths.Contains(path, StringComparer.OrdinalIgnoreCase))
+			.Select(static path => $"opened/{path}")
+			.ToHashSet(StringComparer.Ordinal);
+
+		Assert.True(
+			nativeIgnored.SetEquals(applicationIgnored),
+			$"Native-only=[{string.Join(", ", nativeIgnored.Except(applicationIgnored))}]; " +
+			$"Application-only=[{string.Join(", ", applicationIgnored.Except(nativeIgnored))}]");
+		Assert.Equal(2, observation.ScopeCount);
+		var scanner = new FileSystemScanner();
+		var rootFolders = scanner.GetRootFolderNames(openedPath, rules, TestContext.Current.CancellationToken);
+		Assert.False(rootFolders.HadAccessDenied);
+		Assert.DoesNotContain("hidden-root", rootFolders.Value);
+		Assert.Contains("nested", rootFolders.Value);
+		var rootFileExtensions = scanner.GetRootFileExtensions(
+			openedPath,
+			rules,
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(".blocked", rootFileExtensions.Value);
+		Assert.Contains(".cs", rootFileExtensions.Value);
+
+		var embeddedPath = temp.CreateDirectory("repo/embedded");
+		temp.CreateFile("repo/embedded/opened/visible.outer", "owned by the nested repository");
+		Assert.Contains(
+			"embedded/opened/visible.outer",
+			QueryNativeGitIgnoredPaths(repositoryPath, ["embedded/opened/visible.outer"]));
+		RunGit(embeddedPath, "init", "--quiet");
+		Assert.Empty(QueryNativeGitIgnoredPaths(embeddedPath, ["opened/visible.outer"]));
+		var nestedObservation = ScanAndCompareTrees(
+			Path.Combine(embeddedPath, "opened"),
+			RootSet(),
+			new HashSet<string>([".outer"], StringComparer.OrdinalIgnoreCase),
+			rules);
+		AssertVisible(nestedObservation, "visible.outer");
+	}
+
+	[Fact]
 	public void NativeGitDifferential_OfficialPatternsAndEightScopePrecedenceMatchBothTreePipelines()
 	{
 		using var temp = new TemporaryDirectory();
@@ -67,11 +139,43 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 	}
 
 	[Fact]
+	public void NativeGitDifferential_PartialChildrenGlobstarsAndNegationsMatchFocusedScopeMatrix()
+	{
+		using var temp = new TemporaryDirectory();
+		var relativeFiles = SeedFocusedNativeGitRegressionCorpus(temp);
+		var repoPath = Path.Combine(temp.Path, "repo");
+		RunGit(repoPath, "init", "--quiet");
+		var nativeIgnored = QueryNativeGitIgnoredPaths(repoPath, relativeFiles);
+		var extensions = relativeFiles
+			.Select(Path.GetExtension)
+			.Where(static extension => !string.IsNullOrWhiteSpace(extension))
+			.Select(static extension => extension!)
+			.Append(".gitignore")
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var observation = ScanAndCompareTrees(
+			temp.Path,
+			RootSet("repo"),
+			extensions,
+			CreateTraversalRules());
+		var applicationIgnored = relativeFiles
+			.Where(path => !observation.Paths.Contains($"repo/{path}", StringComparer.OrdinalIgnoreCase))
+			.ToHashSet(StringComparer.Ordinal);
+
+		Assert.True(
+			nativeIgnored.SetEquals(applicationIgnored),
+			$"Native-only=[{string.Join(", ", nativeIgnored.Except(applicationIgnored))}]; " +
+			$"Application-only=[{string.Join(", ", applicationIgnored.Except(nativeIgnored))}]");
+		Assert.Equal(15, observation.ScopeCount);
+	}
+
+	[Fact]
 	public void RepositoryExcludeFiles_AreNotPromotedToWorkingTreeGitIgnoreScopes()
 	{
 		using var temp = new TemporaryDirectory();
+		var repositoryPath = temp.CreateDirectory("repo");
+		RunGit(repositoryPath, "init", "--quiet");
 		temp.CreateFile("repo/.gitignore", "*.tmp\n");
-		temp.CreateFile("repo/.git/info/exclude", "*.local\n");
+		File.WriteAllText(Path.Combine(repositoryPath, ".git", "info", "exclude"), "*.local\n");
 		temp.CreateFile("repo/drop.tmp", "ignored by the supported working-tree rules");
 		temp.CreateFile("repo/visible.local", "repository exclude sources are outside the checkbox contract");
 		temp.CreateFile("repo/visible.txt", "ordinary file");
@@ -88,7 +192,42 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 	}
 
 	[Fact]
-	public void CorruptedFileMatrix_BadEncodingAndMalformedLinesCannotDisableValidRulesOrSiblingScopes()
+	public void NativeGitDifferential_SymlinkedGitIgnoreIsNotAWorkingTreeRuleSource()
+	{
+		using var temp = new TemporaryDirectory();
+		var repoPath = temp.CreateDirectory("repo");
+		RunGit(repoPath, "init", "--quiet");
+		var targetPath = temp.CreateFile("external-ignore-rules", "*.tmp\n");
+		var linkPath = Path.Combine(repoPath, ".gitignore");
+		try
+		{
+			File.CreateSymbolicLink(linkPath, targetPath);
+			if (!File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint))
+				Assert.Skip("The created file link is not reported as a reparse point.");
+		}
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       PlatformNotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		temp.CreateFile("repo/drop.tmp", "must remain visible");
+		var nativeIgnored = QueryNativeGitIgnoredPaths(repoPath, ["drop.tmp"]);
+		var observation = ScanAndCompareTrees(
+			temp.Path,
+			RootSet("repo"),
+			new HashSet<string>([".tmp"], StringComparer.OrdinalIgnoreCase),
+			CreateTraversalRules());
+
+		Assert.Empty(nativeIgnored);
+		Assert.Equal(0, observation.ScopeCount);
+		AssertVisible(observation, "repo/drop.tmp");
+	}
+
+	[Fact]
+	public void CorruptedFileMatrix_InvalidSourcesFailClosedWithoutDisablingValidSiblingScopes()
 	{
 		using var temp = new TemporaryDirectory();
 		SeedCorruptedFileWorkspace(temp);
@@ -99,11 +238,12 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 			AllAdversarialExtensions(),
 			CreateTraversalRules());
 
-		Assert.Equal(5, observation.ScopeCount);
+		Assert.Equal(4, observation.ScopeCount);
+		Assert.True(observation.HadAccessDenied);
 		AssertVisible(observation, "repo/bom/keep.bom");
 		AssertHidden(observation, "repo/bom/drop.bom");
 		AssertHidden(observation, "repo/invalid-utf8/drop.tmp");
-		AssertVisible(observation, "repo/invalid-utf8/keep.txt");
+		AssertHidden(observation, "repo/invalid-utf8/keep.txt");
 		AssertHidden(observation, "repo/malformed-pattern/drop.bad");
 		AssertVisible(observation, "repo/malformed-pattern/invalid/keep.txt");
 		AssertHidden(observation, "repo/nul-line/drop.nul");
@@ -184,7 +324,7 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 			"docs/*.tmp",
 			"scoped/path.txt",
 			"scoped-dir/output/",
-			"triple/***/leaf.txt",
+			"triple/one**two/leaf.txt",
 			"a/**/deep.bin",
 			@"\#literal.txt",
 			@"\!literal.txt",
@@ -224,8 +364,8 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 			"nested/scoped/path.txt",
 			"scoped-dir/output/hidden.txt",
 			"nested/scoped-dir/output/visible.txt",
-			"triple/one/leaf.txt",
-			"triple/one/two/leaf.txt",
+			"triple/onexxtwo/leaf.txt",
+			"triple/one/x/two/leaf.txt",
 			"a/deep.bin",
 			"a/x/y/deep.bin",
 			"other/deep.bin",
@@ -285,7 +425,7 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 			("*.state\n!final.state\n", ["draft.state", "final.state", "nested/final.state"]),
 			("a/**/leaf.x\n", ["a/leaf.x", "a/b/leaf.x", "b/leaf.x"]),
 			("prefix/**\n", ["prefix/file.z", "prefix/nested/file.z", "other/file.z"]),
-			("three/***/leaf.z\n", ["three/a/leaf.z", "three/a/b/leaf.z"]),
+			("three/a**b/leaf.z\n", ["three/axxb/leaf.z", "three/a/x/b/leaf.z"]),
 			("*.secret\n!public.secret\n*.secret\n", ["private.secret", "public.secret"]),
 			("build/\n!build/visible.txt\n", ["build/hidden.txt", "build/visible.txt", "outside.txt"])
 		};
@@ -295,6 +435,43 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 		for (var caseIndex = 0; caseIndex < cases.Length; caseIndex++)
 		{
 			var scope = $"scope-{repetition:D2}-{caseIndex:D2}";
+			temp.CreateFile(Path.Combine("repo", scope, ".gitignore"), cases[caseIndex].Rules);
+			foreach (var file in cases[caseIndex].Files)
+			{
+				var relativePath = $"{scope}/{file}";
+				temp.CreateFile(Path.Combine("repo", relativePath), relativePath);
+				relativeFiles.Add(relativePath.Replace('\\', '/'));
+			}
+		}
+
+		return relativeFiles;
+	}
+
+	private static IReadOnlyList<string> SeedFocusedNativeGitRegressionCorpus(TemporaryDirectory temp)
+	{
+		var cases = new (string Rules, string[] Files)[]
+		{
+			("folder/_\n", ["folder/important.cs"]),
+			("folder/?\n", ["folder/long-name.cs"]),
+			("folder/_*\n", ["folder/_cache.tmp", "folder/source.cs"]),
+			("folder/[!a]*\n", ["folder/_cache.tmp", "folder/artifact.cs"]),
+			("folder/*.log\n", ["folder/debug.log", "folder/source.cs"]),
+			("folder/*\n", ["folder/direct.txt", "folder/nested/deep.txt"]),
+			("**/generated/*.tmp\n", ["generated/root.tmp", "a/generated/deep.tmp", "a/generated/deep.cs"]),
+			("a/**/drop.tmp\n", ["a/drop.tmp", "a/b/c/drop.tmp", "b/drop.tmp"]),
+			("cache/**\n", ["cache/direct.txt", "cache/a/deep.txt", "other.txt"]),
+			("a**b/*.tmp\n", ["axxb/drop.tmp", "a/x/b/drop.tmp", "axxb/keep.cs"]),
+			("**suffix/*.tmp\n", ["xxsuffix/drop.tmp", "x/suffix/drop.tmp"]),
+			("prefix**suffix/*.tmp\n", ["prefix-middle-suffix/drop.tmp", "prefix/middle/suffix/drop.tmp"]),
+			("folder/*\n!folder/keep.txt\n", ["folder/drop.txt", "folder/keep.txt"]),
+			("a/**/*.tmp\n!a/**/keep.tmp\n", ["a/drop.tmp", "a/keep.tmp", "a/b/drop.tmp", "a/b/keep.tmp"]),
+			("a**b/*.tmp\n!a**b/keep.tmp\n", ["axxb/drop.tmp", "axxb/keep.tmp", "a/x/b/drop.tmp"])
+		};
+		var relativeFiles = new List<string>(cases.Sum(static item => item.Files.Length));
+
+		for (var caseIndex = 0; caseIndex < cases.Length; caseIndex++)
+		{
+			var scope = $"focused-{caseIndex:D2}";
 			temp.CreateFile(Path.Combine("repo", scope, ".gitignore"), cases[caseIndex].Rules);
 			foreach (var file in cases[caseIndex].Files)
 			{
@@ -381,7 +558,8 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 		return new ScanObservation(
 			projectedPaths,
 			inventory.DiscoveredGitIgnoreMatchers.Count,
-			scan.Value.IgnoreSection.ControllerImpactCounts);
+			scan.Value.IgnoreSection.ControllerImpactCounts,
+			scan.HadAccessDenied);
 	}
 
 	private static HashSet<string> QueryNativeGitIgnoredPaths(
@@ -631,5 +809,6 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 	private sealed record ScanObservation(
 		IReadOnlyList<string> Paths,
 		int ScopeCount,
-		IgnoreControllerImpactCounts ControllerImpactCounts);
+		IgnoreControllerImpactCounts ControllerImpactCounts,
+		bool HadAccessDenied);
 }

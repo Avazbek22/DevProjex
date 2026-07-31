@@ -1,14 +1,14 @@
-using System.Text;
-
 namespace DevProjex.Kernel.Models;
 
 public readonly record struct GitPathComparisonSemantics(
 	bool IgnoreCase,
-	bool NormalizeUnicode)
+	bool NormalizeUnicode,
+	bool IsAuthoritative = true)
 {
 	public static GitPathComparisonSemantics PlatformDefault { get; } = new(
 		IgnoreCase: OperatingSystem.IsWindows(),
-		NormalizeUnicode: OperatingSystem.IsMacOS());
+		NormalizeUnicode: OperatingSystem.IsMacOS(),
+		IsAuthoritative: true);
 }
 
 /// <summary>
@@ -21,6 +21,7 @@ public sealed class GitTrackedPathIndex
 	private readonly StringComparer _relativePathComparer;
 	private readonly StringComparison _relativePathComparison;
 	private readonly bool _normalizeUnicode;
+	private readonly bool _ignoreAsciiCase;
 	private readonly string _comparisonRootPath;
 	private readonly string _repositoryPathPrefix;
 	private readonly string[] _trackedPaths;
@@ -48,14 +49,11 @@ public sealed class GitTrackedPathIndex
 
 		RepositoryRootPath = PathUtility.Normalize(repositoryRootPath);
 		IsAvailable = isAvailable;
-		_relativePathComparer = comparisonSemantics.IgnoreCase
-			? StringComparer.OrdinalIgnoreCase
-			: StringComparer.Ordinal;
-		_relativePathComparison = comparisonSemantics.IgnoreCase
-			? StringComparison.OrdinalIgnoreCase
-			: StringComparison.Ordinal;
+		_relativePathComparer = StringComparer.Ordinal;
+		_relativePathComparison = StringComparison.Ordinal;
 		_normalizeUnicode = comparisonSemantics.NormalizeUnicode;
-		_comparisonRootPath = NormalizeUnicodeForComparison(RepositoryRootPath);
+		_ignoreAsciiCase = comparisonSemantics.IgnoreCase;
+		_comparisonRootPath = NormalizeForComparison(RepositoryRootPath);
 		_repositoryPathPrefix = Path.EndsInDirectorySeparator(_comparisonRootPath)
 			? _comparisonRootPath
 			: _comparisonRootPath + Path.DirectorySeparatorChar;
@@ -78,7 +76,7 @@ public sealed class GitTrackedPathIndex
 	{
 		try
 		{
-			var normalizedRootPath = NormalizeUnicodeForComparison(
+			var normalizedRootPath = NormalizeForComparison(
 				PathUtility.Normalize(repositoryRootPath));
 			return _relativePathComparer.Equals(normalizedRootPath, _comparisonRootPath);
 		}
@@ -136,7 +134,7 @@ public sealed class GitTrackedPathIndex
 		relativePath = string.Empty;
 		try
 		{
-			var normalizedFullPath = NormalizeUnicodeForComparison(PathUtility.Normalize(fullPath));
+			var normalizedFullPath = NormalizeForComparison(PathUtility.Normalize(fullPath));
 			if (_relativePathComparer.Equals(normalizedFullPath, _comparisonRootPath))
 				return true;
 			if (!normalizedFullPath.StartsWith(_repositoryPathPrefix, _relativePathComparison) ||
@@ -218,27 +216,12 @@ public sealed class GitTrackedPathIndex
 	private string NormalizeRelativePath(string path)
 	{
 		var normalized = path.Replace(Path.DirectorySeparatorChar, '/').TrimEnd('/');
-		return NormalizeUnicodeForComparison(normalized);
+		return NormalizeForComparison(normalized);
 	}
 
-	private string NormalizeUnicodeForComparison(string value)
-	{
-		if (!_normalizeUnicode || !ContainsNonAscii(value))
-			return value;
-
-		return value.IsNormalized(NormalizationForm.FormC)
-			? value
-			: value.Normalize(NormalizationForm.FormC);
-	}
-
-	private static bool ContainsNonAscii(string value)
-	{
-		foreach (var character in value)
-		{
-			if (character > 0x7f)
-				return true;
-		}
-
-		return false;
-	}
+	private string NormalizeForComparison(string value) =>
+		GitPathTextNormalizer.NormalizeObservedPath(
+			value,
+			_normalizeUnicode,
+			_ignoreAsciiCase);
 }

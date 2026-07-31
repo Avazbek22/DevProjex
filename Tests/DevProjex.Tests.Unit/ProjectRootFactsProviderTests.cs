@@ -63,6 +63,25 @@ public sealed class ProjectRootFactsProviderTests
 	}
 
 	[Fact]
+	public void TryGetFileSignature_RejectsOversizedGitIgnoreBeforeHashingContent()
+	{
+		using var temp = new TemporaryDirectory();
+		var gitIgnorePath = Path.Combine(temp.Path, ".gitignore");
+		using (var stream = new FileStream(
+		       gitIgnorePath,
+		       FileMode.CreateNew,
+		       FileAccess.Write,
+		       FileShare.None))
+		{
+			stream.SetLength(GitIgnoreFileReader.MaximumFileSizeBytes + 1);
+		}
+
+		var signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
+
+		Assert.Null(signature);
+	}
+
+	[Fact]
 	public void HasMatchingFileMetadata_ReportsContentRewriteOnlyWhenMetadataChanges()
 	{
 		using var temp = new TemporaryDirectory();
@@ -178,5 +197,54 @@ public sealed class ProjectRootFactsProviderTests
 
 		Assert.True(fileFacts.HasGitMetadataEntry);
 		Assert.True(directoryFacts.HasGitMetadataEntry);
+	}
+
+	[Fact]
+	public void HasGitIgnoreFile_RejectsReparseFileAndAcceptsRegularFile()
+	{
+		var linkFacts = new ProjectRootFacts(
+			rootPath: "project",
+			exists: true,
+			isAccessible: true,
+			files: [new ProjectRootFileFact(".gitignore", string.Empty, IsReparsePoint: true)],
+			directories: [],
+			gitIgnoreSignature: null);
+		var regularFacts = new ProjectRootFacts(
+			rootPath: "project",
+			exists: true,
+			isAccessible: true,
+			files: [new ProjectRootFileFact(".gitignore", string.Empty)],
+			directories: [],
+			gitIgnoreSignature: default);
+
+		Assert.False(linkFacts.HasGitIgnoreFile);
+		Assert.True(regularFacts.HasGitIgnoreFile);
+	}
+
+	[Fact]
+	public void Get_SymlinkedGitIgnoreIsNotWorkingTreeRuleEvidence()
+	{
+		using var temp = new TemporaryDirectory();
+		var targetPath = temp.CreateFile("ignore-rules.txt", "*.secret\n");
+		var linkPath = Path.Combine(temp.Path, ".gitignore");
+		try
+		{
+			File.CreateSymbolicLink(linkPath, targetPath);
+			if (!File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint))
+				Assert.Skip("The created file link is not reported as a reparse point.");
+		}
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       PlatformNotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		var facts = new ProjectRootFactsProvider().Get(temp.Path);
+
+		Assert.False(facts.HasGitIgnoreFile);
+		Assert.Null(facts.GitIgnoreSignature);
+		Assert.Null(ProjectRootFactsProvider.TryGetFileSignature(linkPath));
 	}
 }

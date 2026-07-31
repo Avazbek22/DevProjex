@@ -3,6 +3,7 @@ using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 using DevProjex.Terminal.Tui;
 
 namespace DevProjex.Terminal.CommandLine;
@@ -495,14 +496,22 @@ public sealed class DevProjexCommandTree
 						? null
 						: parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					ProjectSelectionSpec? spec = null;
+					TerminalServices? services = null;
 					if (projectPath is not null)
 					{
-						var services = CreateServices(parseResult);
+						services = CreateServices(parseResult);
 						spec = await selection.ResolveAsync(
 							parseResult,
 							projectPath,
 							services,
 							cancellationToken).ConfigureAwait(false);
+						var readinessExitCode = ValidateDesktopOpenGitReadiness(
+							services,
+							projectPath,
+							spec,
+							cancellationToken);
+						if (readinessExitCode is not null)
+							return readinessExitCode.Value;
 					}
 					var viewValue = parseResult.GetValue(view);
 					TreeTextFormat? treeFormatValue = parseResult.GetValue(format) is { } requestedTreeFormat
@@ -1133,6 +1142,38 @@ public sealed class DevProjexCommandTree
 		result.GetResult(selection.SelectedPaths) is { Implicit: false } ||
 		result.GetResult(selection.GitMode) is { Implicit: false } ||
 		result.GetResult(selection.Exclusions) is { Implicit: false };
+
+	private int? ValidateDesktopOpenGitReadiness(
+		TerminalServices services,
+		string projectPath,
+		ProjectSelectionSpec selection,
+		CancellationToken cancellationToken)
+	{
+		if (selection.GitMode != GitFilteringMode.TrackedFilesOnly)
+			return null;
+
+		var loaded = services.AnalysisService.Load(
+			new ProjectAnalysisRequest(
+				projectPath,
+				selection.Roots,
+				selection.Extensions,
+				ProjectSelectionAdapter.ToIgnoreOptions(selection)),
+			cancellationToken);
+		var readiness = ProjectContextGitReadiness.Evaluate(
+			GitFilteringMode.TrackedFilesOnly,
+			loaded.DiscoveredGitTrackedIndexCount,
+			loaded.UnavailableGitTrackedIndexCount);
+		if (readiness.CreateDiagnostic(PathUtility.Normalize(projectPath)) is not { } diagnostic)
+			return null;
+
+		new ContextDiagnosticRenderer(
+			environment,
+			new TerminalOutputOptions(),
+			services.Localization).Write([diagnostic]);
+		return diagnostic.Severity == ContextDiagnosticSeverity.Error
+			? CommandLineExitCodes.PolicyFailure
+			: null;
+	}
 
 	private static TreeTextFormat ParseTreeFormat(ProjectContextDocumentFormat value) => value switch
 	{

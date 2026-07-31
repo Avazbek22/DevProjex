@@ -14,12 +14,16 @@ public sealed class RustArtifactsIgnoreRule :
 	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(MarkerFile);
 
 	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create("target");
+	private static readonly IReadOnlySet<string> EvidenceRequiredFolderNames = FolderNames;
 
 	private static readonly SmartIgnoreResult MatchResult =
 		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
-		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
+		SmartIgnoreRuleSet.Descriptor(
+			markerFiles: MarkerFiles,
+			folderNames: FolderNames,
+			evidenceRequiredFolderNames: EvidenceRequiredFolderNames);
 
 	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
 		rootFacts.Exists && rootFacts.HasMarkerFile(MarkerFile)
