@@ -29,7 +29,8 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
             {
                 previewCts.Cancel();
                 _toastService.Show(_viewModel.ToastPreviewCanceled);
-            });
+            },
+            presentation: StatusOperationPresentation.ExtendedDelay);
     }
 
     void IPreviewWorkspacePipelineHost.CompletePreviewBuildOperation(long operationId) =>

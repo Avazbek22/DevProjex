@@ -570,6 +570,7 @@ public partial class MainWindow
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
                 UpdateDropZoneAnimationState();
             else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
+                     or nameof(MainWindowViewModel.StatusOperationVisible)
                      or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
                      or nameof(MainWindowViewModel.StatusProgressValue))
                 _taskbarProgress.SyncWithStatusBar();

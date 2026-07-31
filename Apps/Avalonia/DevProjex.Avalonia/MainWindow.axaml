@@ -259,7 +259,7 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     Spacing="8"
-                    IsVisible="{Binding StatusBusy}">
+                    IsVisible="{Binding StatusOperationVisible}">
           <TextBlock Text="{Binding StatusOperationText}"
                      FontSize="12"
                      Opacity="0.8"

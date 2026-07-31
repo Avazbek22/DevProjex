@@ -400,7 +400,8 @@ public partial class MainWindow
 
         return _statusOperations.Begin(
             _localization["Status.Operation.PreparingOutput"],
-            indeterminate: true);
+            indeterminate: true,
+            presentation: StatusOperationPresentation.Delayed);
     }
 
     private string BuildSuggestedExportFileName(string suffix, string extension)

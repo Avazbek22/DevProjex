@@ -236,6 +236,17 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(TaskbarProgressRecordingState.Progress, taskbar.LastState);
         Assert.Equal(64, taskbar.LastPercent);
 
+        viewModel.StatusPresentationReady = false;
+        coordinator.SyncWithStatusBar();
+
+        Assert.Equal(TaskbarProgressRecordingState.Clear, taskbar.LastState);
+
+        viewModel.StatusPresentationReady = true;
+        coordinator.SyncWithStatusBar();
+
+        Assert.Equal(TaskbarProgressRecordingState.Progress, taskbar.LastState);
+        Assert.Equal(64, taskbar.LastPercent);
+
         coordinator.BeginGitClone();
         coordinator.UpdateGitClone("Receiving objects: 77%");
 

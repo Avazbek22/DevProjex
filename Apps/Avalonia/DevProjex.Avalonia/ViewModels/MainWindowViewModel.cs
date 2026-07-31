@@ -114,6 +114,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _statusPreviewSelectionStatsText = string.Empty;
     private string _statusOperationText = string.Empty;
     private bool _statusBusy;
+    private bool _statusPresentationReady = true;
     private bool _applySettingsBusyDelayElapsed;
     private CancellationTokenSource? _applySettingsBusyDelayCts;
     private bool _hasPendingFilterSettingsChanges;
@@ -233,6 +234,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (_statusBusy == value) return;
             _statusBusy = value;
             RaisePropertyChanged();
+            RaisePropertyChanged(nameof(StatusOperationVisible));
             RaisePropertyChanged(nameof(StatusProgressVisible));
             RaisePropertyChanged(nameof(StatusProgressPercentVisible));
             RaisePropertyChanged(nameof(CenteredPreviewSelectionMetricsVisible));
@@ -244,10 +246,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool StatusOperationVisible => _statusBusy && _statusPresentationReady;
+
+    internal bool StatusPresentationReady
+    {
+        get => _statusPresentationReady;
+        set
+        {
+            if (_statusPresentationReady == value)
+                return;
+
+            _statusPresentationReady = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(StatusOperationVisible));
+            RaisePropertyChanged(nameof(StatusProgressVisible));
+            RaisePropertyChanged(nameof(StatusProgressPercentVisible));
+            RaisePropertyChanged(nameof(StatusProgressIsIndeterminate));
+        }
+    }
+
     public bool StatusProgressIsIndeterminate
     {
         // Only return true when also visible - prevents animation running when hidden
-        get => _statusProgressIsIndeterminate && _statusBusy;
+        get => _statusProgressIsIndeterminate && StatusOperationVisible;
         set
         {
             if (_statusProgressIsIndeterminate == value) return;
@@ -269,9 +290,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool StatusProgressVisible => _statusBusy;
+    public bool StatusProgressVisible => StatusOperationVisible;
 
-    public bool StatusProgressPercentVisible => _statusBusy && !_statusProgressIsIndeterminate;
+    public bool StatusProgressPercentVisible =>
+        StatusOperationVisible && !_statusProgressIsIndeterminate;
 
     public string StatusProgressPercentText => $"{Math.Clamp((int)Math.Round(_statusProgressValue), 0, 100)}%";
 

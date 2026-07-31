@@ -6,7 +6,8 @@ namespace DevProjex.Avalonia.Coordinators;
 /// </summary>
 internal sealed class SelectionRefreshStatusLease : IAsyncDisposable
 {
-    private static readonly TimeSpan VisibleDelay = TimeSpan.FromMilliseconds(220);
+    private static readonly TimeSpan VisibleDelay =
+        StatusOperationCoordinator.DefaultDelayedPresentationThreshold;
 
     private readonly MainWindowViewModel _viewModel;
     private readonly StatusOperationCoordinator? _statusOperations;
