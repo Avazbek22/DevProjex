@@ -217,7 +217,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
             {
                 _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
                 cancellationToken.ThrowIfCancellationRequested();
-                PreparePreviewPaneOpenLayout(initialTreeWidth);
+                PreparePreviewPaneOpenLayout(initialTreeWidth, targetTreeWidth);
                 UpdatePreviewSegmentThumbPosition(animate: false);
                 cancellationToken.ThrowIfCancellationRequested();
                 openAnimationStarted = true;
@@ -241,6 +241,8 @@ internal sealed class PreviewWorkspaceController : IDisposable
                 _workspace.CaptureSplitPaneLayout();
                 _workspace.UpdateWorkspaceLayoutForCurrentMode();
                 UpdatePreviewSegmentThumbPosition(animate: false);
+                ResetPreviewPaneSurfaceWidth();
+                await WaitForPreviewRenderPassesAsync();
             }
 
             if (!openAnimationInterrupted && !_closeRequestedDuringOpen)
@@ -319,6 +321,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
                     _controls.TreePaneContainer,
                     ResolvePreviewTreePaneVisibleWidth())
                 : 0.0;
+            var currentPreviewSurfaceWidth = ResolvePreviewPaneSurfaceWidth();
 
             if (_viewModel.IsPreviewTreeVisible)
                 _workspace.CaptureSplitPaneLayout();
@@ -334,7 +337,9 @@ internal sealed class PreviewWorkspaceController : IDisposable
                 UpdatePreviewSegmentThumbPosition(animate: false);
             }
 
-            PreparePreviewPaneCloseLayout(currentTreeWidth);
+            PreparePreviewPaneCloseLayout(
+                currentTreeWidth,
+                currentPreviewSurfaceWidth);
             await AnimatePreviewPaneCloseAsync();
 
             _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.Off;
@@ -513,8 +518,13 @@ internal sealed class PreviewWorkspaceController : IDisposable
         return targetWidth > 0;
     }
 
-    private void PreparePreviewPaneOpenLayout(double initialTreeWidth)
+    private void PreparePreviewPaneOpenLayout(
+        double initialTreeWidth,
+        double targetTreeWidth)
     {
+        var targetPreviewSurfaceWidth =
+            _workspace.ResolveDesiredPreviewPaneWidth(targetTreeWidth) +
+            WorkspacePresentationController.TreePreviewSplitterWidth;
         _controls.TreePaneColumn.MinWidth = 0;
         _controls.TreePaneColumn.Width = GridLength.Auto;
         _controls.PreviewPaneColumn.MinWidth = 0;
@@ -528,14 +538,13 @@ internal sealed class PreviewWorkspaceController : IDisposable
             initialTreeWidth,
             animate: false);
         _workspace.ApplyPreviewPaneWidth(double.NaN, animate: false);
-        ResetPreviewPaneSurfaceWidth();
+        FreezePreviewPaneSurfaceWidth(targetPreviewSurfaceWidth);
     }
 
-    private void PreparePreviewPaneCloseLayout(double currentTreeWidth)
+    private void PreparePreviewPaneCloseLayout(
+        double currentTreeWidth,
+        double previewSurfaceWidth)
     {
-        var previewSurfaceWidth = ResolveRenderedPaneWidth(
-            _controls.PreviewPaneContainer,
-            _controls.PreviewPaneColumn.ActualWidth);
         var showSplitter = currentTreeWidth > 0.5;
         _controls.TreePaneColumn.MinWidth = 0;
         _controls.TreePaneColumn.Width = GridLength.Auto;
@@ -772,6 +781,16 @@ internal sealed class PreviewWorkspaceController : IDisposable
             ? pane.Bounds.Width
             : Math.Max(0, fallbackWidth);
 
+    private double ResolvePreviewPaneSurfaceWidth()
+    {
+        var carrierWidth = ResolveRenderedPaneWidth(
+            _controls.PreviewPaneContainer,
+            _controls.PreviewPaneColumn.ActualWidth);
+        return ResolveRenderedPaneWidth(
+            _controls.PreviewPaneSurface,
+            carrierWidth);
+    }
+
     private void SetTreePreviewSplitterWidthWithoutTransition(double width)
     {
         var cachedTransitions = _controls.TreePreviewSplitter.Transitions;
@@ -785,9 +804,9 @@ internal sealed class PreviewWorkspaceController : IDisposable
         if (width <= 0.5)
             return;
 
-        // Keep live preview content at its pre-close width while the carrier is
-        // clipped by the tree expansion. This avoids both repeated reflow and the
-        // raster swap that can look like a one-frame zoom on scaled displays.
+        // The carrier reveals or clips a live surface with stable geometry. Keeping
+        // layout out of the width transition prevents child controls from reflowing
+        // at different rounded widths on every animation frame.
         _controls.PreviewPaneSurface.HorizontalAlignment = HorizontalAlignment.Left;
         _controls.PreviewPaneSurface.Width = width;
     }

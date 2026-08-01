@@ -190,6 +190,66 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task PreviewOpen_KeepsFinalLiveSurfaceWidthFixedWhileCarrierReveals()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var previewContainer =
+                UiTestDriver.GetRequiredControl<Border>(window, "PreviewPaneContainer");
+            var previewSurface =
+                UiTestDriver.GetRequiredControl<Grid>(window, "PreviewPaneSurface");
+            var frozenFrames = new List<(double SurfaceWidth, double CarrierWidth)>();
+
+            void CaptureFrozenSurface(object? sender, EventArgs args)
+            {
+                _ = sender;
+                _ = args;
+                if (double.IsNaN(previewSurface.Width) ||
+                    previewSurface.Bounds.Width <= 0.5)
+                {
+                    return;
+                }
+
+                frozenFrames.Add(
+                    (previewSurface.Bounds.Width, previewContainer.Bounds.Width));
+            }
+
+            window.LayoutUpdated += CaptureFrozenSurface;
+            try
+            {
+                await UiTestDriver.OpenPreviewAsync(window);
+            }
+            finally
+            {
+                window.LayoutUpdated -= CaptureFrozenSurface;
+            }
+
+            Assert.NotEmpty(frozenFrames);
+            var frozenWidth = frozenFrames[0].SurfaceWidth;
+            Assert.All(
+                frozenFrames,
+                frame =>
+                {
+                    Assert.InRange(Math.Abs(frame.SurfaceWidth - frozenWidth), 0, 0.01);
+                    Assert.True(frame.CarrierWidth <= frozenWidth + 0.01);
+                });
+            Assert.InRange(
+                Math.Abs(frozenFrames[^1].CarrierWidth - frozenWidth),
+                0,
+                1);
+            Assert.True(previewContainer.ClipToBounds);
+            Assert.True(double.IsNaN(previewSurface.Width));
+            Assert.Equal(HorizontalAlignment.Stretch, previewSurface.HorizontalAlignment);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PreviewClose_KeepsLiveSurfaceWidthFixedWhileCarrierClips()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -202,6 +262,7 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
                 UiTestDriver.GetRequiredControl<Border>(window, "PreviewPaneContainer");
             var previewSurface =
                 UiTestDriver.GetRequiredControl<Grid>(window, "PreviewPaneSurface");
+            var renderedSurfaceWidthBeforeClose = previewSurface.Bounds.Width;
             var frozenFrames = new List<(double SurfaceWidth, double CarrierWidth)>();
 
             void CaptureFrozenSurface(object? sender, EventArgs args)
@@ -227,6 +288,10 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
 
             Assert.NotEmpty(frozenFrames);
             var frozenWidth = frozenFrames[0].SurfaceWidth;
+            Assert.InRange(
+                Math.Abs(frozenWidth - renderedSurfaceWidthBeforeClose),
+                0,
+                0.01);
             Assert.All(
                 frozenFrames,
                 frame =>
