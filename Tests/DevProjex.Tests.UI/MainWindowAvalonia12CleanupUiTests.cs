@@ -58,6 +58,7 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             Assert.False(themePopup.OverlayDismissEventPassThrough);
             Assert.False(themePopup.ShouldUseOverlayLayer);
             Assert.False(themePopup.WindowManagerAddShadowHint);
+            Assert.Equal(expectedAdjustment, themePopup.PlacementConstraintAdjustment);
             Assert.Same(themeMenuItem, themePopup.PlacementTarget);
 
             Assert.True(helpPopup.IsLightDismissEnabled);
@@ -65,6 +66,9 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             Assert.False(helpPopup.ShouldUseOverlayLayer);
             Assert.False(helpPopup.WindowManagerAddShadowHint);
             Assert.Equal(expectedAdjustment, helpPopup.PlacementConstraintAdjustment);
+            Assert.Equal(PlacementMode.Custom, helpPopup.Placement);
+            Assert.NotNull(helpPopup.CustomPopupPlacementCallback);
+            Assert.Equal(4, helpPopup.VerticalOffset);
             Assert.Same(helpMenuItem, helpPopup.PlacementTarget);
 
             Assert.True(helpDocsPopup.IsLightDismissEnabled);
@@ -72,6 +76,9 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             Assert.False(helpDocsPopup.ShouldUseOverlayLayer);
             Assert.False(helpDocsPopup.WindowManagerAddShadowHint);
             Assert.Equal(expectedAdjustment, helpDocsPopup.PlacementConstraintAdjustment);
+            Assert.Equal(PlacementMode.Custom, helpDocsPopup.Placement);
+            Assert.NotNull(helpDocsPopup.CustomPopupPlacementCallback);
+            Assert.Equal(4, helpDocsPopup.VerticalOffset);
             Assert.Same(helpMenuItem, helpDocsPopup.PlacementTarget);
         }
         finally

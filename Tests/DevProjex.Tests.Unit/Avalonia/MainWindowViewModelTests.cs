@@ -38,6 +38,19 @@ public sealed class MainWindowViewModelTests
         Assert.True(viewModel.ShowBackgroundTransparencySlider);
     }
 
+    [Fact]
+    public void UpdateHelpPopoverMaxSize_LeavesLargePopoversInsideMinimumWindowViewport()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.UpdateHelpPopoverMaxSize(new Size(850, 600));
+
+        Assert.InRange(viewModel.HelpPopoverMaxWidth, 360, 834);
+        Assert.InRange(viewModel.HelpPopoverMaxHeight, 260, 550);
+        Assert.InRange(viewModel.AboutPopoverMaxWidth, 456, 834);
+        Assert.InRange(viewModel.AboutPopoverMaxHeight, 288, 550);
+    }
+
     [Theory]
     [InlineData(ExportFormat.Ascii, true, false, false, false)]
     [InlineData(ExportFormat.Json, false, true, false, false)]

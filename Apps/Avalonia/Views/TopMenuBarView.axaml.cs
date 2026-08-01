@@ -1,9 +1,11 @@
+using Avalonia.Controls.Primitives.PopupPositioning;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Views;
 
 public partial class TopMenuBarView : UserControl
 {
+    private const double LargePopupViewportInset = 8;
     private bool _ownedControlHandlersAttached;
 
     public event EventHandler<RoutedEventArgs>? OpenFolderRequested;
@@ -65,6 +67,8 @@ public partial class TopMenuBarView : UserControl
     public TopMenuBarView()
     {
         InitializeComponent();
+        HelpPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
+        HelpDocsPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
@@ -272,6 +276,15 @@ public partial class TopMenuBarView : UserControl
         if (HelpDocsPopup is not null)
             HelpDocsPopup.Opened += OnHelpDocsPopupOpened;
 
+        if (RootGrid is not null)
+            RootGrid.SizeChanged += OnLargePopupPlacementBoundsChanged;
+
+        if (HelpPopover is not null)
+            HelpPopover.SizeChanged += OnLargePopupPlacementBoundsChanged;
+
+        if (HelpDocsPopover is not null)
+            HelpDocsPopover.SizeChanged += OnLargePopupPlacementBoundsChanged;
+
         _ownedControlHandlersAttached = true;
     }
 
@@ -308,6 +321,15 @@ public partial class TopMenuBarView : UserControl
 
         if (HelpDocsPopup is not null)
             HelpDocsPopup.Opened -= OnHelpDocsPopupOpened;
+
+        if (RootGrid is not null)
+            RootGrid.SizeChanged -= OnLargePopupPlacementBoundsChanged;
+
+        if (HelpPopover is not null)
+            HelpPopover.SizeChanged -= OnLargePopupPlacementBoundsChanged;
+
+        if (HelpDocsPopover is not null)
+            HelpDocsPopover.SizeChanged -= OnLargePopupPlacementBoundsChanged;
 
         _ownedControlHandlersAttached = false;
     }
@@ -350,14 +372,100 @@ public partial class TopMenuBarView : UserControl
 
     private void OnHelpPopupOpened(object? sender, EventArgs e)
     {
+        SynchronizeLargePopupOffset(HelpPopup);
         HelpPopover?.Focus();
         ApplyPopupBackdrop(HelpPopup);
     }
 
     private void OnHelpDocsPopupOpened(object? sender, EventArgs e)
     {
+        SynchronizeLargePopupOffset(HelpDocsPopup);
         HelpDocsPopover?.Focus();
         ApplyPopupBackdrop(HelpDocsPopup);
+    }
+
+    private void ConfigureLargePopupPlacement(CustomPopupPlacement placement)
+    {
+        // Preserve Avalonia's original Bottom placement (centered under Help) while
+        // constraining the popup to this window rather than the monitor work area.
+        placement.Anchor = PopupAnchor.Bottom;
+        placement.Gravity = PopupGravity.Bottom;
+        placement.Offset = new Point(
+            CalculateLargePopupHorizontalOffset(
+                placement.AnchorRectangle,
+                placement.PopupSize.Width,
+                GetLargePopupViewportBounds()),
+            placement.Offset.Y);
+    }
+
+    private void OnLargePopupPlacementBoundsChanged(object? sender, SizeChangedEventArgs e)
+    {
+        SynchronizeLargePopupOffset(HelpPopup);
+        SynchronizeLargePopupOffset(HelpDocsPopup);
+    }
+
+    private void SynchronizeLargePopupOffset(Popup? popup)
+    {
+        if (popup?.IsOpen != true ||
+            popup.Child is not { Bounds.Width: > 0 } child ||
+            HelpMenuItem is null ||
+            RootGrid is null ||
+            HelpMenuItem.TranslatePoint(default, RootGrid) is not { } targetOrigin)
+        {
+            return;
+        }
+
+        var anchorRectangle = new Rect(targetOrigin, HelpMenuItem.Bounds.Size);
+        var horizontalOffset = CalculateLargePopupHorizontalOffset(
+            anchorRectangle,
+            child.Bounds.Width,
+            new Rect(default, RootGrid.Bounds.Size));
+        if (Math.Abs(popup.HorizontalOffset - horizontalOffset) > 0.1)
+            popup.HorizontalOffset = horizontalOffset;
+    }
+
+    private Rect GetLargePopupViewportBounds()
+    {
+        if (RootGrid is null)
+            return default;
+
+        var topLevel = TopLevel.GetTopLevel(RootGrid);
+        var origin = topLevel is null
+            ? default
+            : RootGrid.TranslatePoint(default, topLevel) ?? default;
+        return new Rect(origin, RootGrid.Bounds.Size);
+    }
+
+    internal static double CalculateLargePopupHorizontalOffset(
+        Rect anchorRectangle,
+        double popupWidth,
+        Rect viewportBounds)
+    {
+        if (!double.IsFinite(popupWidth) ||
+            popupWidth <= 0 ||
+            !double.IsFinite(viewportBounds.Width) ||
+            viewportBounds.Width <= 0)
+        {
+            return 0;
+        }
+
+        var preferredLeft = anchorRectangle.X + (anchorRectangle.Width - popupWidth) / 2;
+        var minimumLeft = viewportBounds.Left + LargePopupViewportInset;
+        var maximumLeft = Math.Max(
+            minimumLeft,
+            viewportBounds.Right - LargePopupViewportInset - popupWidth);
+        var constrainedLeft = Math.Clamp(preferredLeft, minimumLeft, maximumLeft);
+        return constrainedLeft - preferredLeft;
+    }
+
+    internal void RefreshOpenPopupBackdrops()
+    {
+        // Native popups are separate top-level windows. Dynamic brushes update in place,
+        // but changing the selected material does not renegotiate their transparency hints.
+        // Keep already-open surfaces synchronized instead of requiring a close/reopen cycle.
+        ApplyPopupBackdropIfOpen(ThemePopup);
+        ApplyPopupBackdropIfOpen(HelpPopup);
+        ApplyPopupBackdropIfOpen(HelpDocsPopup);
     }
 
     private void OnToolTipLoaded(object? sender, RoutedEventArgs e)
@@ -378,6 +486,12 @@ public partial class TopMenuBarView : UserControl
             TopLevel.GetTopLevel(this),
             viewModel.ActiveThemeEffect,
             PopupBackdropTransparencyFallback.None);
+    }
+
+    private void ApplyPopupBackdropIfOpen(Popup? popup)
+    {
+        if (popup?.IsOpen == true)
+            ApplyPopupBackdrop(popup);
     }
 
     private void ApplyToolTipBackdrop(ToolTip toolTip)

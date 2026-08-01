@@ -330,6 +330,7 @@
            OverlayDismissEventPassThrough="False"
            ShouldUseOverlayLayer="False"
            WindowManagerAddShadowHint="False"
+           PlacementConstraintAdjustment="SlideX, SlideY, FlipX, FlipY, ResizeX, ResizeY"
            Placement="Bottom"
            PlacementTarget="{Binding #ThemeMenuItem}">
       <views:ThemePopoverView Name="ThemePopover" />
@@ -343,8 +344,9 @@
            ShouldUseOverlayLayer="False"
            WindowManagerAddShadowHint="False"
            PlacementConstraintAdjustment="SlideX, SlideY, FlipX, FlipY, ResizeX, ResizeY"
-           Placement="Bottom"
-           PlacementTarget="{Binding #HelpMenuItem}">
+           Placement="Custom"
+           PlacementTarget="{Binding #HelpMenuItem}"
+           VerticalOffset="4">
       <views:AboutPopoverView Name="HelpPopover" />
     </Popup>
 
@@ -356,8 +358,9 @@
            ShouldUseOverlayLayer="False"
            WindowManagerAddShadowHint="False"
            PlacementConstraintAdjustment="SlideX, SlideY, FlipX, FlipY, ResizeX, ResizeY"
-           Placement="Bottom"
-           PlacementTarget="{Binding #HelpMenuItem}">
+           Placement="Custom"
+           PlacementTarget="{Binding #HelpMenuItem}"
+           VerticalOffset="4">
       <views:HelpPopoverView Name="HelpDocsPopover" />
     </Popup>
 

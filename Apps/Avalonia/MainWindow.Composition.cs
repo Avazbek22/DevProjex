@@ -567,6 +567,8 @@ public partial class MainWindow
                 _appearanceSettings.MarkPresetDirty();
                 _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
             }
+            else if (args.PropertyName == nameof(MainWindowViewModel.ActiveThemeEffect))
+                _topMenuBar?.RefreshOpenPopupBackdrops();
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 _appearanceSettings.HandleThemePopoverStateChange();
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
