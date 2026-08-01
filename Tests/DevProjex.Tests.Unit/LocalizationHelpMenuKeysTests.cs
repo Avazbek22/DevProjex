@@ -43,6 +43,24 @@ public sealed class LocalizationHelpMenuKeysTests
 		}
 	}
 
+	[Fact]
+	public void AboutBody_UsesDynamicCopyrightYearAndDeveloperHandleInEveryLanguage()
+	{
+		var localizationDir = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
+		var files = Directory.GetFiles(localizationDir, "*.json");
+
+		foreach (var file in files)
+		{
+			var values = ReadKeyValues(File.ReadAllText(file));
+			var body = values["Help.About.Body"];
+
+			Assert.Contains("{0}", body, StringComparison.Ordinal);
+			Assert.Contains("Avazbek Olimov (Avazbek22)", body, StringComparison.Ordinal);
+			Assert.DoesNotContain("2025–2026", body, StringComparison.Ordinal);
+			Assert.DoesNotContain("GPL-3.0", body, StringComparison.OrdinalIgnoreCase);
+		}
+	}
+
 	private static HashSet<string> ReadKeys(string json)
 	{
 		using var doc = JsonDocument.Parse(json);

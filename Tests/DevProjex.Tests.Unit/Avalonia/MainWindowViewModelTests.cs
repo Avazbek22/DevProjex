@@ -39,6 +39,19 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void UpdateLocalization_FormatsAboutCopyrightWithCurrentYear()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Help.About.Body"] = "Copyright © 2025–{0} Avazbek Olimov"
+        });
+
+        viewModel.UpdateLocalization();
+
+        Assert.Equal($"Copyright © 2025–{DateTime.Now.Year} Avazbek Olimov", viewModel.HelpAboutBody);
+    }
+
+    [Fact]
     public void UpdateHelpPopoverMaxSize_LeavesLargePopoversInsideMinimumWindowViewport()
     {
         var viewModel = CreateViewModel();

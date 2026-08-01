@@ -1568,7 +1568,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         HelpHelpBody = _helpContentProvider.GetHelpBody(_localization.CurrentLanguage);
         HelpHelpCopyAll = _localization["Help.Help.CopyAll"];
         HelpAboutTitle = _localization["Help.About.Title"];
-        HelpAboutBody = _localization["Help.About.Body"];
+        HelpAboutBody = _localization.Format("Help.About.Body", DateTime.Now.Year);
         HelpAboutSupport = _localization["Help.About.Support"];
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
