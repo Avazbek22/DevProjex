@@ -66,7 +66,6 @@ public sealed class ProjectCopyExportUiContractTests
         var source = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "Views",
             "TopMenuBarView.axaml.cs");
         AssertPointerHandlerConsumes(source, "OnProjectCopyHelpIndicatorPointerPressed");
@@ -79,7 +78,6 @@ public sealed class ProjectCopyExportUiContractTests
         var source = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.ProjectCopyExport.cs");
 
         Assert.Contains("_currentTree.Root", source, StringComparison.Ordinal);
@@ -107,7 +105,6 @@ public sealed class ProjectCopyExportUiContractTests
         var source = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.TextOutput.cs");
         Assert.Contains(
             "result.Content,\n                snapshot.RootPath,",
@@ -160,7 +157,6 @@ public sealed class ProjectCopyExportUiContractTests
         var source = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.TextOutput.cs");
         var methodStart = source.IndexOf(
             "private async Task<bool> TryExportTextToFileAsync",
@@ -206,13 +202,11 @@ public sealed class ProjectCopyExportUiContractTests
             FindRepositoryRoot(),
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.axaml"));
         var settings = XDocument.Load(Path.Combine(
             FindRepositoryRoot(),
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "Views",
             "SettingsPanelView.axaml"));
 
@@ -241,23 +235,19 @@ public sealed class ProjectCopyExportUiContractTests
         var exportSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.ProjectCopyExport.cs");
         var menuSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "Views",
             "TopMenuBarView.axaml.cs");
         var windowSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.axaml.cs");
         var outputSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.TextOutput.cs");
 
         Assert.Contains("CancelPreviewRefresh();", exportSource, StringComparison.Ordinal);
@@ -279,17 +269,14 @@ public sealed class ProjectCopyExportUiContractTests
         var compositionSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.Composition.cs");
         var lifecycleSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.Lifecycle.cs");
         var exportSource = ReadRepositoryFile(
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "MainWindow.ProjectCopyExport.cs");
 
         Assert.Contains("Closing += OnWindowClosing", compositionSource, StringComparison.Ordinal);
@@ -304,7 +291,6 @@ public sealed class ProjectCopyExportUiContractTests
         FindRepositoryRoot(),
         "Apps",
         "Avalonia",
-        "DevProjex.Avalonia",
         "Views",
         "TopMenuBarView.axaml"));
 

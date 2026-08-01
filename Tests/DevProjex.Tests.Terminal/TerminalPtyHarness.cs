@@ -948,7 +948,6 @@ internal static class PublishedApplicationLocator
 			repository,
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"bin",
 			configuration,
 			"net10.0",

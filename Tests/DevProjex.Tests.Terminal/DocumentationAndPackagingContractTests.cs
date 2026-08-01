@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace DevProjex.Tests.Terminal;
@@ -542,6 +543,36 @@ public sealed class DocumentationAndPackagingContractTests
 				"TerminalProgressTestCheckpoint",
 				source,
 				StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void TestSourcesDoNotReferencePreFlattenedApplicationDirectories()
+	{
+		var rootPath = FindRepositoryRoot();
+		var testsRoot = Path.Combine(rootPath, "Tests");
+		var obsoletePathPatterns = new[]
+		{
+			new Regex(
+				"\"Apps\"\\s*,\\s*\"Avalonia\"\\s*,\\s*\"DevProjex\\.Avalonia\"",
+				RegexOptions.CultureInvariant),
+			new Regex(
+				"\"Apps\"\\s*,\\s*\"Terminal\"\\s*,\\s*\"DevProjex\\.Terminal\"",
+				RegexOptions.CultureInvariant)
+		};
+
+		foreach (var sourcePath in Directory.EnumerateFiles(
+			         testsRoot,
+			         "*.cs",
+			         SearchOption.AllDirectories))
+		{
+			var source = File.ReadAllText(sourcePath);
+			foreach (var obsoletePathPattern in obsoletePathPatterns)
+			{
+				Assert.False(
+					obsoletePathPattern.IsMatch(source),
+					$"Obsolete pre-flattening path in {Path.GetRelativePath(rootPath, sourcePath)}.");
+			}
 		}
 	}
 
