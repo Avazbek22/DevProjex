@@ -85,4 +85,33 @@ public sealed class SelectionOptionStateCache
 
         return new Dictionary<string, bool>(OptionStates, _comparer);
     }
+
+    public SelectionOptionStateCacheSnapshot CaptureSnapshot() =>
+        new(
+            IsInitialized,
+            HasFullState,
+            new HashSet<string>(SelectedNames, _comparer),
+            new Dictionary<string, bool>(OptionStates, _comparer));
+
+    public void RestoreSnapshot(SelectionOptionStateCacheSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        IsInitialized = snapshot.IsInitialized;
+        HasFullState = snapshot.HasFullState;
+
+        SelectedNames.Clear();
+        foreach (var name in snapshot.SelectedNames)
+            SelectedNames.Add(name);
+
+        OptionStates.Clear();
+        foreach (var (name, isChecked) in snapshot.OptionStates)
+            OptionStates[name] = isChecked;
+    }
 }
+
+public sealed record SelectionOptionStateCacheSnapshot(
+    bool IsInitialized,
+    bool HasFullState,
+    IReadOnlyCollection<string> SelectedNames,
+    IReadOnlyDictionary<string, bool> OptionStates);

@@ -34,58 +34,68 @@ internal sealed class StartupInteractionController(
     public async Task ApplySelectionOverridesAsync()
     {
         var selectionSpec = desktopRequest?.Selection;
+        var currentPath = projectPathProvider();
         if (selectionSpec is null ||
             !viewModel.IsProjectLoaded ||
-            string.IsNullOrWhiteSpace(projectPathProvider()))
+            string.IsNullOrWhiteSpace(currentPath))
         {
             return;
         }
+		var applicationIntent = selectionSpec.ApplicationIntent;
+		var rootMode = applicationIntent?.Roots ?? ResolveLegacyMode(selectionSpec.Roots);
+		var extensionMode = applicationIntent?.Extensions ?? ResolveLegacyMode(selectionSpec.Extensions);
+		var gitMode = applicationIntent?.GitMode ?? ResolveLegacyMode(selectionSpec.GitMode);
+		var exclusionMode = applicationIntent?.Exclusions ?? ResolveLegacyMode(selectionSpec.Exclusions);
+		var applyGitMode = gitMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+		var applyExclusions = exclusionMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 
-        if (selectionSpec.Roots is not null)
-        {
-            var selectedRoots = new HashSet<string>(
+        var selectedRoots = rootMode != ProjectSelectionApplicationMode.ApplyResolvedValue ||
+		                    selectionSpec.Roots is null
+            ? null
+            : new HashSet<string>(
                 selectionSpec.Roots,
                 PathComparer.Default);
-            foreach (var option in viewModel.RootFolders)
-                option.IsChecked = selectedRoots.Contains(option.Name);
-        }
 
-        if (selectionSpec.Extensions is not null)
-        {
-            var selectedExtensions = new HashSet<string>(
+        var selectedExtensions = extensionMode != ProjectSelectionApplicationMode.ApplyResolvedValue ||
+		                         selectionSpec.Extensions is null
+            ? null
+            : new HashSet<string>(
                 selectionSpec.Extensions,
                 StringComparer.OrdinalIgnoreCase);
-            foreach (var option in viewModel.Extensions)
-            {
-                option.IsChecked =
-                    selectedExtensions.Contains(option.Name);
-            }
+
+        HashSet<IgnoreOptionId>? selectedIgnoreOptions = null;
+        if (applyGitMode || applyExclusions)
+        {
+            var persistedIgnoreStates = selection.SnapshotIgnoreOptionStatesForPersistence();
+            var inheritedIgnoreOptions = persistedIgnoreStates is null
+                ? selection.GetSelectedIgnoreOptionIds()
+                : persistedIgnoreStates
+                    .Where(static state => state.Value)
+                    .Select(static state => state.Key)
+                    .ToArray();
+            selectedIgnoreOptions = ResolveIgnoreSelectionOverride(
+				selectionSpec with
+				{
+					GitMode = applyGitMode ? selectionSpec.GitMode : null,
+					Exclusions = applyExclusions ? selectionSpec.Exclusions : null
+				},
+                inheritedIgnoreOptions);
         }
 
-        if (selectionSpec.GitMode is not null ||
-            selectionSpec.Exclusions is not null)
-        {
-            var selectedIgnoreOptions = new HashSet<IgnoreOptionId>(
-                ProjectSelectionAdapter.ToIgnoreOptions(
-                    selectionSpec with
-                    {
-                        GitMode = selectionSpec.GitMode ?? GitFilteringMode.None,
-                        Exclusions = selectionSpec.Exclusions ?? []
-                    }));
-            selection.ApplyIgnoreSelectionOverride(selectedIgnoreOptions);
-            var selectedRootFolders = viewModel.RootFolders
-                .Where(static option => option.IsChecked)
-                .Select(static option => option.Name)
-                .ToArray();
-            await selection.PopulateIgnoreOptionsForRootSelectionAsync(
-                selectedRootFolders,
-                projectPathProvider());
-        }
+        selection.ApplySelectionOverrides(
+            currentPath,
+            selectedRoots,
+            selectedExtensions,
+            selectedIgnoreOptions,
+            ignoreOptionStateIsComplete: applyExclusions,
+			resetRootSelectionToDefaults:
+				rootMode == ProjectSelectionApplicationMode.ResetToDefaults,
+			resetExtensionSelectionToDefaults:
+				extensionMode == ProjectSelectionApplicationMode.ResetToDefaults);
 
         await selection.WaitForPendingRefreshesAsync();
         await refreshTreeAsync();
 
-        var currentPath = projectPathProvider();
         await selection.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
             currentPath);
         await selection.WaitForPendingRefreshesAsync();
@@ -93,6 +103,33 @@ internal sealed class StartupInteractionController(
         if (selectionSpec.SelectedPaths is { Count: > 0 })
             await ApplySelectedPathsAsync(selectionSpec.SelectedPaths);
     }
+
+    internal static HashSet<IgnoreOptionId> ResolveIgnoreSelectionOverride(
+        ProjectSelectionSpec selectionSpec,
+        IReadOnlyCollection<IgnoreOptionId> inheritedIgnoreOptions)
+    {
+        ArgumentNullException.ThrowIfNull(selectionSpec);
+        ArgumentNullException.ThrowIfNull(inheritedIgnoreOptions);
+
+        // Null inherits one component; an empty exclusions collection explicitly disables
+        // every exclusion without silently replacing the independently selected Git mode.
+        var resolvedGitMode = selectionSpec.GitMode ??
+                              GitFilteringModeResolver.Resolve(inheritedIgnoreOptions);
+        var resolvedExclusions = selectionSpec.Exclusions ??
+                                 ProjectSelectionAdapter.ToExclusions(inheritedIgnoreOptions);
+        return new HashSet<IgnoreOptionId>(
+            ProjectSelectionAdapter.ToIgnoreOptions(
+                selectionSpec with
+                {
+                    GitMode = resolvedGitMode,
+                    Exclusions = resolvedExclusions
+                }));
+    }
+
+	private static ProjectSelectionApplicationMode ResolveLegacyMode<T>(T? value) =>
+		value is null
+			? ProjectSelectionApplicationMode.Preserve
+			: ProjectSelectionApplicationMode.ApplyResolvedValue;
 
     public async Task ApplyUiOptionsAsync()
     {

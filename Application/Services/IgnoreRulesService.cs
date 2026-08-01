@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Services;
 
@@ -68,6 +69,7 @@ public sealed class IgnoreRulesService(
 		IReadOnlyCollection<IgnoreOptionId> selectedOptions,
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
+		IgnorePipelineDiagnostics.RecordIgnoreRulesBuild();
 		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
 		// A nested .gitignore can be discovered by the scanner after bounded project-scope
 		// discovery has completed. An explicit/default selection must therefore activate the

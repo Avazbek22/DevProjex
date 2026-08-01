@@ -28,8 +28,9 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         var allowedRoot = CollectCheckedSelectionNames(
             selectionSnapshot.RootOptions,
             PathComparer.Default);
-        var selectedIgnoreOptions = new HashSet<IgnoreOptionId>(selectionSnapshot.EffectiveIgnoreOptions);
-        var ignoreRules = BuildIgnoreRules(currentPath, selectedIgnoreOptions, allowedRoot);
+        var ignoreRules = ProjectLoadIgnoreRulesResolver.Resolve(
+            selectionSnapshot,
+            selectedIgnoreOptions => BuildIgnoreRules(currentPath, selectedIgnoreOptions, allowedRoot));
         var nameFilter = string.IsNullOrWhiteSpace(_viewModel.NameFilter)
             ? null
             : _viewModel.NameFilter.Trim();

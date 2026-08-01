@@ -21,6 +21,9 @@ internal static class ProjectTreeInventoryScanner
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		var gitIgnoreLoadSession = new GitIgnoreMatcherLoadSession();
+		if (initialGitIgnoreContexts.SeedMatchers is { Count: > 0 } seedMatchers)
+			gitIgnoreLoadSession.Seed(seedMatchers);
 
 		var rootName = Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 		if (string.IsNullOrEmpty(rootName))
@@ -77,7 +80,8 @@ internal static class ProjectTreeInventoryScanner
 				inheritedGitIgnoreContexts.Primary,
 				inheritedGitIgnoreContexts.Secondary,
 				cancellationToken,
-				discoveredGitIgnoreMatchers);
+				discoveredGitIgnoreMatchers,
+				gitIgnoreLoadSession);
 			inheritedGitIgnoreContexts = inheritedGitIgnoreContexts with
 			{
 				Primary = ancestorScopes.Active,
@@ -114,6 +118,7 @@ internal static class ProjectTreeInventoryScanner
 			rootGitControlPaths.GitMetadataPath,
 			discoveredGitIgnoreMatchers,
 			discoveredGitTrackedPathIndexes,
+			gitIgnoreLoadSession,
 			cancellationToken,
 			out var rootGitIgnoreReadFailed);
 		if (rootGitIgnoreReadFailed)
@@ -155,6 +160,7 @@ internal static class ProjectTreeInventoryScanner
 					entries[rootChildIndex],
 					rootGitIgnoreContexts,
 					shouldTraverseDirectory,
+					gitIgnoreLoadSession,
 					cancellationToken);
 			}
 		}
@@ -169,6 +175,7 @@ internal static class ProjectTreeInventoryScanner
 					entries[rootChildIndex],
 					rootGitIgnoreContexts,
 					shouldTraverseDirectory,
+					gitIgnoreLoadSession,
 					parallelOptions.CancellationToken);
 			});
 		}
@@ -237,6 +244,7 @@ internal static class ProjectTreeInventoryScanner
 		ProjectTreeInventoryEntry rootEntry,
 		ProjectTreeGitIgnoreContexts inheritedGitIgnoreContexts,
 		Func<FileSystemTreeEntry, bool, ProjectTreeGitIgnoreContexts, bool> shouldTraverseDirectory,
+		GitIgnoreMatcherLoadSession gitIgnoreLoadSession,
 		CancellationToken cancellationToken)
 	{
 		var entries = new List<ProjectTreeInventoryEntry>(capacity: 128)
@@ -286,6 +294,7 @@ internal static class ProjectTreeInventoryScanner
 				gitControlPaths.GitMetadataPath,
 				discoveredGitIgnoreMatchers,
 				discoveredGitTrackedPathIndexes,
+				gitIgnoreLoadSession,
 				cancellationToken,
 				out var gitIgnoreReadFailed);
 			if (gitIgnoreReadFailed)
@@ -504,15 +513,17 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 	bool Enabled,
 	bool ReportGitIgnoreReadFailures,
 	IgnoreRules.GitIgnoreScanContext Primary,
-	IgnoreRules.GitIgnoreScanContext Secondary)
+	IgnoreRules.GitIgnoreScanContext Secondary,
+	IReadOnlyList<ScopedGitIgnoreMatcher>? SeedMatchers)
 {
 	public static ProjectTreeGitIgnoreContexts Disabled => default;
 
 	public static ProjectTreeGitIgnoreContexts Create(
 		IgnoreRules.GitIgnoreScanContext primary,
 		IgnoreRules.GitIgnoreScanContext secondary,
-		bool reportGitIgnoreReadFailures) =>
-		new(Enabled: true, reportGitIgnoreReadFailures, primary, secondary);
+		bool reportGitIgnoreReadFailures,
+		IReadOnlyList<ScopedGitIgnoreMatcher>? seedMatchers = null) =>
+		new(Enabled: true, reportGitIgnoreReadFailures, primary, secondary, seedMatchers);
 
 	public bool HasIgnoreRules =>
 		Enabled && (Primary.HasIgnoreRules || Secondary.HasIgnoreRules);
@@ -534,6 +545,7 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 		string? gitMetadataPath,
 		List<ScopedGitIgnoreMatcher> discoveredMatchers,
 		List<GitTrackedPathIndex> discoveredTrackedPathIndexes,
+		GitIgnoreMatcherLoadSession gitIgnoreLoadSession,
 		CancellationToken cancellationToken,
 		out bool gitIgnoreReadFailed)
 	{
@@ -546,7 +558,7 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 		ScopedGitIgnoreMatcher? matcher = null;
 		if (!string.IsNullOrWhiteSpace(gitIgnorePath))
 		{
-			var loadResult = GitIgnoreMatcherFileCache.Load(directoryPath, gitIgnorePath);
+			var loadResult = gitIgnoreLoadSession.Load(directoryPath, gitIgnorePath);
 			matcher = loadResult.Matcher;
 			gitIgnoreReadFailed = ReportGitIgnoreReadFailures &&
 			                      loadResult.Status == GitIgnoreMatcherLoadStatus.ReadFailure;

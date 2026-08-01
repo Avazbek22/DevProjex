@@ -8,7 +8,7 @@ public sealed partial class SelectionSyncCoordinator
         SelectionRefreshContext Context,
         IReadOnlyCollection<string> SelectedRoots);
 
-    private sealed class AppliedSelectionState(
+    internal sealed class AppliedSelectionState(
         string projectPath,
         HashSet<string> selectedRootFolders,
         HashSet<string> selectedExtensions,

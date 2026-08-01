@@ -22,4 +22,9 @@ public sealed record ProjectLoadCancellationSnapshot(
     bool HasCompleteMetricsBaseline,
     IReadOnlyList<SelectionOptionSnapshot> RootFolders,
     IReadOnlyList<SelectionOptionSnapshot> Extensions,
-    IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions);
+    IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions)
+{
+    // Internal coordinator state augments, but does not replace, the existing public snapshot
+    // contract. External callers can continue constructing and observing the legacy shape.
+    internal SelectionSyncCoordinator.ProjectCheckpoint? SelectionCheckpoint { get; init; }
+}

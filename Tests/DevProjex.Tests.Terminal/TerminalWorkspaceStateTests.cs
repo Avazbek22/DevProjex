@@ -120,6 +120,186 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.Equal("project", root.Node.DisplayName);
 	}
 
+	[Fact]
+	public void DeepFilteredProjectionPreservesPreorderDepthAndExactMatchCount()
+	{
+		const int nodeCount = 768;
+		var rootPath = CreateSyntheticRoot("deep-filter");
+		var paths = new string[nodeCount];
+		var names = new string[nodeCount];
+		for (var index = 0; index < nodeCount; index++)
+		{
+			paths[index] = index == 0
+				? rootPath
+				: Path.Combine(rootPath, $"node-{index:D4}");
+			names[index] = index % 11 == 0 || index == nodeCount - 1
+				? $"target-{index:D4}"
+				: $"node-{index:D4}";
+		}
+
+		TreeNodeDescriptor tree = new(
+			names[^1],
+			paths[^1],
+			IsDirectory: false,
+			IsAccessDenied: false,
+			"file",
+			[]);
+		for (var index = nodeCount - 2; index >= 0; index--)
+		{
+			tree = new TreeNodeDescriptor(
+				names[index],
+				paths[index],
+				IsDirectory: true,
+				IsAccessDenied: false,
+				"folder",
+				[tree]);
+		}
+
+		using var state = new TerminalWorkspaceState(CreatePlan(
+			tree,
+			includedFiles: [paths[^1]],
+			includedFolders: paths[..^1]));
+
+		state.ApplyTreeFilter("target");
+
+		Assert.Equal(names.Count(static name => name.Contains("target", StringComparison.Ordinal)), state.TreeFilterMatchCount);
+		Assert.Equal(nodeCount, state.VisibleRows.Count);
+		for (var index = 0; index < nodeCount; index++)
+		{
+			var row = state.VisibleRows[index];
+			Assert.Equal(paths[index], row.Node.FullPath);
+			Assert.Equal(index, row.Depth);
+			Assert.Equal(index < nodeCount - 1, row.IsExpanded);
+		}
+	}
+
+	[Fact]
+	public void WideFilteredProjectionPreservesExactPreorderAndOmitsNonMatchingLeaves()
+	{
+		const int branchCount = 96;
+		const int leavesPerBranch = 96;
+		const int matchInterval = 12;
+		var rootPath = CreateSyntheticRoot("wide-filter");
+		var branches = new List<TreeNodeDescriptor>(branchCount);
+		var includedFiles = new List<string>(branchCount * leavesPerBranch);
+		var expectedPaths = new List<string>(1 + branchCount + branchCount * (leavesPerBranch / matchInterval))
+		{
+			rootPath
+		};
+
+		for (var branchIndex = 0; branchIndex < branchCount; branchIndex++)
+		{
+			var branchPath = Path.Combine(rootPath, $"branch-{branchIndex:D3}");
+			var leaves = new List<TreeNodeDescriptor>(leavesPerBranch);
+			expectedPaths.Add(branchPath);
+			for (var leafIndex = 0; leafIndex < leavesPerBranch; leafIndex++)
+			{
+				var isMatch = leafIndex % matchInterval == 0;
+				var name = $"{(isMatch ? "target" : "other")}-{branchIndex:D3}-{leafIndex:D3}.cs";
+				var path = Path.Combine(branchPath, name);
+				leaves.Add(new TreeNodeDescriptor(
+					name,
+					path,
+					IsDirectory: false,
+					IsAccessDenied: false,
+					"file",
+					[]));
+				includedFiles.Add(path);
+				if (isMatch)
+					expectedPaths.Add(path);
+			}
+
+			branches.Add(new TreeNodeDescriptor(
+				$"branch-{branchIndex:D3}",
+				branchPath,
+				IsDirectory: true,
+				IsAccessDenied: false,
+				"folder",
+				leaves));
+		}
+
+		var tree = new TreeNodeDescriptor(
+			"project",
+			rootPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			branches);
+		using var state = new TerminalWorkspaceState(CreatePlan(
+			tree,
+			includedFiles,
+			[rootPath, .. branches.Select(static branch => branch.FullPath)]));
+
+		state.ApplyTreeFilter("target");
+
+		var expectedMatchCount = branchCount * (leavesPerBranch / matchInterval);
+		Assert.Equal(expectedMatchCount, state.TreeFilterMatchCount);
+		Assert.Equal(expectedPaths, state.VisibleRows.Select(static row => row.Node.FullPath));
+		Assert.True(state.VisibleRows[0].IsExpanded);
+		Assert.All(
+			state.VisibleRows.Where(static row => row.Depth == 1),
+			static row => Assert.True(row.IsExpanded));
+		Assert.All(
+			state.VisibleRows.Where(static row => row.Depth == 2),
+			static row => Assert.False(row.IsExpanded));
+	}
+
+	[Fact]
+	public void LargeSelectedSubtreeBuildsOneCanonicalRelativePathAndKeepsMixedStates()
+	{
+		const int selectedFileCount = 12_000;
+		var rootPath = CreateSyntheticRoot("large-selection");
+		var selectedPath = Path.Combine(rootPath, "selected");
+		var selectedFiles = new List<TreeNodeDescriptor>(selectedFileCount);
+		var includedFiles = new List<string>(selectedFileCount);
+		for (var index = 0; index < selectedFileCount; index++)
+		{
+			var path = Path.Combine(selectedPath, $"file-{index:D5}.cs");
+			selectedFiles.Add(new TreeNodeDescriptor(
+				Path.GetFileName(path),
+				path,
+				IsDirectory: false,
+				IsAccessDenied: false,
+				"file",
+				[]));
+			includedFiles.Add(path);
+		}
+
+		var selectedDirectory = new TreeNodeDescriptor(
+			"selected",
+			selectedPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			selectedFiles);
+		var unselectedFile = new TreeNodeDescriptor(
+			"unselected.cs",
+			Path.Combine(rootPath, "unselected.cs"),
+			IsDirectory: false,
+			IsAccessDenied: false,
+			"file",
+			[]);
+		var tree = new TreeNodeDescriptor(
+			"project",
+			rootPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			[selectedDirectory, unselectedFile]);
+		using var state = new TerminalWorkspaceState(CreatePlan(
+			tree,
+			includedFiles,
+			[rootPath, selectedPath]));
+
+		var selectedRelativePaths = state.BuildSelectedRelativePaths();
+
+		Assert.Equal(["selected"], selectedRelativePaths);
+		Assert.Equal(selectedFileCount, state.SelectedFileCount);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Checked, state.VisibleRows[1].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[2].CheckState);
+	}
+
 	[Theory]
 	[InlineData(59, 20, TerminalWorkspaceLayoutMode.TooSmall)]
 	[InlineData(60, 20, TerminalWorkspaceLayoutMode.Compact)]
@@ -183,6 +363,50 @@ public sealed class TerminalWorkspaceStateTests
 			new ProjectContextGitReadiness(GitFilteringMode.RespectGitIgnore, 1, true),
 			"fingerprint");
 	}
+
+	private static ProjectContextPlan CreatePlan(
+		TreeNodeDescriptor tree,
+		IReadOnlyList<string> includedFiles,
+		IReadOnlyList<string> includedFolders)
+	{
+		var analysis = new ProjectAnalysisReport(
+			1,
+			DateTimeOffset.UnixEpoch,
+			tree.FullPath,
+			new ProjectAnalysisSelectionReport([], [], []),
+			new ProjectAnalysisInventoryReport(
+				[],
+				[],
+				new ProjectTreeSummaryReport(includedFolders.Count, includedFiles.Count, 0)),
+			new ProjectAnalysisOutputMetricsReport(
+				ProjectOutputMetricsReport.Empty,
+				ProjectOutputMetricsReport.Empty),
+			new ProjectAnalysisTimingReport(0, 0, 0),
+			new ProjectAnalysisDiagnosticsReport(false, false, []));
+		return new ProjectContextPlan(
+			tree.FullPath,
+			ProjectSelectionSpec.Standard,
+			[],
+			[],
+			[],
+			[],
+			tree,
+			tree,
+			new HashSet<string>(PathComparer.Default),
+			includedFiles,
+			includedFolders,
+			analysis,
+			[],
+			new ProjectContextGitReadiness(GitFilteringMode.None, 0, true),
+			"synthetic-fingerprint");
+	}
+
+	private static string CreateSyntheticRoot(string scenario) =>
+		Path.GetFullPath(Path.Combine(
+			Path.GetTempPath(),
+			"DevProjexTerminalState",
+			scenario,
+			Guid.NewGuid().ToString("N")));
 
 	private static TreeNodeDescriptor Node(
 		string root,

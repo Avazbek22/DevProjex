@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using DevProjex.Application.Context;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
@@ -260,6 +261,36 @@ public sealed class GitIgnoreSourceIoIntegrationTests
 				temp.Path,
 				missingPath,
 				nonAuthoritativeResolver).Status);
+	}
+
+	[Fact]
+	public void TreeBuild_ReusesPreparsedRootMatcherAsOneOperationSnapshot()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "*.generated\n");
+		temp.CreateFile("src/App.cs", "class App {}");
+		temp.CreateFile("src/leak.generated", "generated");
+		var rules = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService().Build(
+			temp.Path,
+			[IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: ["src"]);
+
+		using var measurement = IgnorePipelineDiagnostics.BeginMeasurement();
+		var tree = new TreeBuilder().Build(
+			temp.Path,
+			new TreeFilterOptions(
+				new HashSet<string>([".cs", ".generated"], StringComparer.OrdinalIgnoreCase),
+				new HashSet<string>(["src"], PathComparer.Default),
+				rules),
+			TestContext.Current.CancellationToken);
+		var diagnostics = measurement.Capture();
+
+		var sourceRoot = Assert.Single(tree.Root.Children, static node => node.Name == "src");
+		Assert.Contains(sourceRoot.Children, static node => node.Name == "App.cs");
+		Assert.DoesNotContain(sourceRoot.Children, static node => node.Name == "leak.generated");
+		Assert.Equal(0, diagnostics.GitIgnoreLoadExecutions);
+		Assert.Equal(0, diagnostics.GitIgnoreSourceReadRequests);
+		Assert.True(diagnostics.GitIgnoreLoadReuses >= 1);
 	}
 
 	[Fact]

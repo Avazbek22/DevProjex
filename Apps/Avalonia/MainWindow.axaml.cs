@@ -1419,6 +1419,7 @@ public partial class MainWindow : Window
     private ProjectLoadCancellationSnapshot CaptureProjectLoadCancellationSnapshot()
     {
         var hadLoadedProjectBefore = _viewModel.IsProjectLoaded && !string.IsNullOrWhiteSpace(_currentPath);
+		var selectionCheckpoint = _selectionCoordinator.CaptureProjectCheckpoint();
 
         return new ProjectLoadCancellationSnapshot(
             HadLoadedProjectBefore: hadLoadedProjectBefore,
@@ -1441,14 +1442,17 @@ public partial class MainWindow : Window
             AllIgnoreChecked: _viewModel.AllIgnoreChecked,
             HasCompleteMetricsBaseline: _metrics.HasCompleteBaseline,
             RootFolders: _viewModel.RootFolders
-                .Select(option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
-                .ToArray(),
+				.Select(static option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
+				.ToArray(),
             Extensions: _viewModel.Extensions
-                .Select(option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
-                .ToArray(),
+				.Select(static option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
+				.ToArray(),
             IgnoreOptions: _viewModel.IgnoreOptions
-                .Select(option => new IgnoreOptionSnapshot(option.Id, option.Label, option.IsChecked))
-                .ToArray());
+				.Select(static option => new IgnoreOptionSnapshot(option.Id, option.Label, option.IsChecked))
+				.ToArray())
+		{
+			SelectionCheckpoint = selectionCheckpoint
+		};
     }
 
     private bool TryApplyActiveProjectLoadCancellationFallback()
@@ -1485,41 +1489,10 @@ public partial class MainWindow : Window
         foreach (var branch in snapshot.GitBranches)
             _viewModel.GitBranches.Add(branch);
 
-        _viewModel.RootFolders.Clear();
-        foreach (var option in snapshot.RootFolders)
-            _viewModel.RootFolders.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
-
-        _viewModel.Extensions.Clear();
-        foreach (var option in snapshot.Extensions)
-            _viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
-
-        _viewModel.IgnoreOptions.Clear();
-        var controllerGroupEndIndex = -1;
-        for (var index = snapshot.IgnoreOptions.Count - 1; index >= 0; index--)
-        {
-            if (snapshot.IgnoreOptions[index].Id is IgnoreOptionId.UseGitIgnore
-                or IgnoreOptionId.TrackedGitFilesOnly
-                or IgnoreOptionId.SmartIgnore)
-            {
-                controllerGroupEndIndex = index;
-                break;
-            }
-        }
-
-        for (var index = 0; index < snapshot.IgnoreOptions.Count; index++)
-        {
-            var option = snapshot.IgnoreOptions[index];
-            _viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
-                option.Id,
-                option.Label,
-                option.IsChecked,
-                isControllerGroupEnd: index == controllerGroupEndIndex));
-        }
-
-        _viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
-        _viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
-        _viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
-        _selectionCoordinator.ReevaluatePendingApplyChanges();
+		if (snapshot.SelectionCheckpoint is { } selectionCheckpoint)
+			_selectionCoordinator.RestoreProjectCheckpoint(selectionCheckpoint);
+		else
+			RestoreLegacySelectionSnapshot(snapshot);
         _metrics.HasCompleteBaseline = snapshot.HasCompleteMetricsBaseline;
         UpdateCompactModeVisualState();
         UpdateWorkspaceLayoutForCurrentMode();
@@ -1540,6 +1513,45 @@ public partial class MainWindow : Window
         UpdateBranchMenu();
         UpdateTitle();
     }
+
+	private void RestoreLegacySelectionSnapshot(ProjectLoadCancellationSnapshot snapshot)
+	{
+		_viewModel.RootFolders.Clear();
+		foreach (var option in snapshot.RootFolders)
+			_viewModel.RootFolders.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+
+		_viewModel.Extensions.Clear();
+		foreach (var option in snapshot.Extensions)
+			_viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+
+		_viewModel.IgnoreOptions.Clear();
+		var controllerGroupEndIndex = -1;
+		for (var index = snapshot.IgnoreOptions.Count - 1; index >= 0; index--)
+		{
+			if (snapshot.IgnoreOptions[index].Id is IgnoreOptionId.UseGitIgnore
+			    or IgnoreOptionId.TrackedGitFilesOnly
+			    or IgnoreOptionId.SmartIgnore)
+			{
+				controllerGroupEndIndex = index;
+				break;
+			}
+		}
+
+		for (var index = 0; index < snapshot.IgnoreOptions.Count; index++)
+		{
+			var option = snapshot.IgnoreOptions[index];
+			_viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+				option.Id,
+				option.Label,
+				option.IsChecked,
+				isControllerGroupEnd: index == controllerGroupEndIndex));
+		}
+
+		_viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
+		_viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
+		_viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
+		_selectionCoordinator.ReevaluatePendingApplyChanges();
+	}
 
     private static CancellationTokenSource ReplaceCancellationSource(ref CancellationTokenSource? target)
     {

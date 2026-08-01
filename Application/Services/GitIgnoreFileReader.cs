@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Services;
 
@@ -13,6 +14,7 @@ public static class GitIgnoreFileReader
 
 	public static GitIgnoreFileContent Read(string path)
 	{
+		IgnorePipelineDiagnostics.RecordGitIgnoreSourceReadRequest();
 		using var stream = new FileStream(
 			path,
 			FileMode.Open,
@@ -41,6 +43,7 @@ public static class GitIgnoreFileReader
 
 		var contentOffset = HasUtf8ByteOrderMark(bytes) ? 3 : 0;
 		var content = GitTextEncoding.GetString(bytes.AsSpan(contentOffset));
+		IgnorePipelineDiagnostics.RecordGitIgnoreSourceBytes(initialLength);
 		return new GitIgnoreFileContent(
 			content,
 			initialLength,

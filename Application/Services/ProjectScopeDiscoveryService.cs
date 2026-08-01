@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Selection;
 
 namespace DevProjex.Application.Services;
@@ -146,12 +147,16 @@ public sealed class ProjectScopeDiscoveryService(
 	private readonly object _scopeCacheSync = new();
 	private readonly Dictionary<string, LinkedListNode<ScopeCacheEntry>> _scopeCache = new(PathStringComparer);
 	private readonly LinkedList<ScopeCacheEntry> _scopeCacheLru = new();
+	private readonly Dictionary<string, long> _latestDiscoverySequences = new(PathStringComparer);
 	private readonly ProjectRootFactsProvider _rootFactsProvider = rootFactsProvider ?? smartIgnore.RootFactsProvider;
+	private long _scopeCacheGeneration;
+	private long _nextDiscoverySequence;
 
 	public ProjectScanContext Discover(
 		string rootPath,
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
+		IgnorePipelineDiagnostics.RecordProjectScopeDiscovery();
 		if (string.IsNullOrWhiteSpace(rootPath))
 			return ProjectScanContext.Empty;
 
@@ -168,6 +173,8 @@ public sealed class ProjectScopeDiscoveryService(
 		var cacheKey = BuildScopeCacheKey(normalizedRoot, selectedRootFolders);
 		var now = DateTime.UtcNow;
 
+		long cacheGeneration;
+		long discoverySequence;
 		lock (_scopeCacheSync)
 		{
 			if (_scopeCache.TryGetValue(cacheKey, out var cachedNode) &&
@@ -179,19 +186,47 @@ public sealed class ProjectScopeDiscoveryService(
 			}
 
 			RemoveScopeCacheEntry(cacheKey);
+			cacheGeneration = _scopeCacheGeneration;
+			discoverySequence = unchecked(++_nextDiscoverySequence);
+			_latestDiscoverySequences[cacheKey] = discoverySequence;
 		}
 
-		var rootFactsCache = new ProjectRootFactsOperationCache(_rootFactsProvider);
-		var rootFacts = rootFactsCache.Get(normalizedRoot);
-		if (!rootFacts.Exists)
-			return ProjectScanContext.Empty;
+		ProjectScanContext context;
+		ScopeDiscoveryStamp discoveryStamp;
+		try
+		{
+			var rootFactsCache = new ProjectRootFactsOperationCache(_rootFactsProvider);
+			var rootFacts = rootFactsCache.Get(normalizedRoot);
+			if (!rootFacts.Exists)
+			{
+				AbandonDiscoveryReservation(cacheKey, cacheGeneration, discoverySequence);
+				return ProjectScanContext.Empty;
+			}
 
-		var context = BuildProjectScanContext(rootFacts, selectedRootFolders, rootFactsCache);
-		var discoveryStamp = rootFactsCache.CreateDiscoveryStamp();
+			context = BuildProjectScanContext(rootFacts, selectedRootFolders, rootFactsCache);
+			discoveryStamp = rootFactsCache.CreateDiscoveryStamp();
+		}
+		catch
+		{
+			AbandonDiscoveryReservation(cacheKey, cacheGeneration, discoverySequence);
+			throw;
+		}
+
 		lock (_scopeCacheSync)
 		{
+			// Invalidation and a newer discovery both outrank a result computed from an older
+			// filesystem snapshot. The current caller may use its result, but it must not be
+			// published as the topology for a later operation.
+			if (_scopeCacheGeneration != cacheGeneration ||
+			    !_latestDiscoverySequences.TryGetValue(cacheKey, out var latestSequence) ||
+			    latestSequence != discoverySequence)
+			{
+				return context;
+			}
+
+			_latestDiscoverySequences.Remove(cacheKey);
 			RemoveScopeCacheEntry(cacheKey);
-			var entry = new ScopeCacheEntry(cacheKey, now, context, discoveryStamp);
+			var entry = new ScopeCacheEntry(cacheKey, DateTime.UtcNow, context, discoveryStamp);
 			_scopeCache[cacheKey] = _scopeCacheLru.AddFirst(entry);
 
 			while (_scopeCache.Count > ScopeCacheLimit &&
@@ -218,6 +253,8 @@ public sealed class ProjectScopeDiscoveryService(
 
 		lock (_scopeCacheSync)
 		{
+			_scopeCacheGeneration = unchecked(_scopeCacheGeneration + 1);
+			_latestDiscoverySequences.Clear();
 			foreach (var cacheKey in _scopeCache.Keys.ToArray())
 			{
 				if (PathStringComparer.Equals(cacheKey, normalizedRoot) ||
@@ -226,9 +263,12 @@ public sealed class ProjectScopeDiscoveryService(
 					RemoveScopeCacheEntry(cacheKey);
 				}
 			}
-		}
 
-		_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
+			// Keep both cache layers behind one publication boundary. If this happened after
+			// releasing the scope lock, a new Discover could reserve the new generation while
+			// still reading root facts from the old provider generation.
+			_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
+		}
 	}
 
 	public bool Revalidate(string rootPath, CancellationToken cancellationToken = default)
@@ -277,6 +317,13 @@ public sealed class ProjectScopeDiscoveryService(
 		var now = DateTime.UtcNow;
 		lock (_scopeCacheSync)
 		{
+			if (!allCurrent)
+			{
+				_scopeCacheGeneration = unchecked(_scopeCacheGeneration + 1);
+				_latestDiscoverySequences.Clear();
+				_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
+			}
+
 			foreach (var candidate in candidates)
 			{
 				if (!_scopeCache.TryGetValue(candidate.Key, out var currentNode) ||
@@ -299,10 +346,7 @@ public sealed class ProjectScopeDiscoveryService(
 		}
 
 		if (!allCurrent)
-		{
-			_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
 			return false;
-		}
 
 		return true;
 	}
@@ -317,6 +361,22 @@ public sealed class ProjectScopeDiscoveryService(
 			return;
 
 		_scopeCacheLru.Remove(node);
+	}
+
+	private void AbandonDiscoveryReservation(
+		string cacheKey,
+		long cacheGeneration,
+		long discoverySequence)
+	{
+		lock (_scopeCacheSync)
+		{
+			if (_scopeCacheGeneration == cacheGeneration &&
+			    _latestDiscoverySequences.TryGetValue(cacheKey, out var latestSequence) &&
+			    latestSequence == discoverySequence)
+			{
+				_latestDiscoverySequences.Remove(cacheKey);
+			}
+		}
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]

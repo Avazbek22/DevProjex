@@ -105,11 +105,13 @@ public sealed class ProjectRootFactsProviderTests
 		workspace.CreateFile("apps/api/package.json", "{}");
 		unrelated.CreateFile("package.json", "{}");
 		var nestedPath = Path.Combine(workspace.Path, "apps", "api");
-		var provider = new ProjectRootFactsProvider(cacheTtl: TimeSpan.FromMinutes(5));
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 3);
 
 		_ = provider.Get(workspace.Path);
 		_ = provider.Get(nestedPath);
-		_ = provider.Get(unrelated.Path);
+		var unrelatedBeforeInvalidation = provider.Get(unrelated.Path);
 		workspace.CreateFile("pyproject.toml", "[project]");
 		workspace.CreateFile("apps/api/pyproject.toml", "[project]");
 		unrelated.CreateFile("pyproject.toml", "[project]");
@@ -118,7 +120,9 @@ public sealed class ProjectRootFactsProviderTests
 
 		Assert.True(provider.Get(workspace.Path).HasMarkerFile("pyproject.toml"));
 		Assert.True(provider.Get(nestedPath).HasMarkerFile("pyproject.toml"));
-		Assert.False(provider.Get(unrelated.Path).HasMarkerFile("pyproject.toml"));
+		var unrelatedAfterInvalidation = provider.Get(unrelated.Path);
+		Assert.Same(unrelatedBeforeInvalidation, unrelatedAfterInvalidation);
+		Assert.False(unrelatedAfterInvalidation.HasMarkerFile("pyproject.toml"));
 	}
 
 	[Fact]
@@ -137,6 +141,139 @@ public sealed class ProjectRootFactsProviderTests
 		var firstAfterEviction = provider.Get(first.Path);
 
 		Assert.True(firstAfterEviction.HasMarkerFile("pyproject.toml"));
+	}
+
+	[Fact]
+	public void Get_CacheLimitEvictsLeastRecentlyUsedSnapshotAndRetainsMostRecentlyUsedSnapshot()
+	{
+		using var first = new TemporaryDirectory();
+		using var second = new TemporaryDirectory();
+		using var third = new TemporaryDirectory();
+		first.CreateFile("first.marker", "first");
+		second.CreateFile("second.marker", "second");
+		third.CreateFile("third.marker", "third");
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 2);
+
+		_ = provider.Get(first.Path);
+		_ = provider.Get(second.Path);
+		var promotedFirst = provider.Get(first.Path);
+		first.CreateFile("first.updated", "updated");
+		second.CreateFile("second.updated", "updated");
+
+		_ = provider.Get(third.Path);
+
+		var retainedFirst = provider.Get(first.Path);
+		var rebuiltSecond = provider.Get(second.Path);
+		Assert.Same(promotedFirst, retainedFirst);
+		Assert.False(retainedFirst.HasMarkerFile("first.updated"));
+		Assert.True(rebuiltSecond.HasMarkerFile("second.updated"));
+	}
+
+	[Fact]
+	public async Task Invalidate_DuringBuild_DoesNotCacheTheLateSnapshot()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		using var firstBuildStarted = new ManualResetEventSlim();
+		using var releaseFirstBuild = new ManualResetEventSlim();
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				var build = Interlocked.Increment(ref buildCount);
+				if (build == 1)
+				{
+					firstBuildStarted.Set();
+					Assert.True(releaseFirstBuild.Wait(TimeSpan.FromSeconds(5)));
+				}
+
+				return CreateFacts(path, build == 1 ? "old.marker" : "new.marker");
+			});
+
+		var lateBuild = Task.Run(() => provider.Get(rootPath, forceRefresh: true));
+		Assert.True(firstBuildStarted.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+		provider.Invalidate(rootPath);
+		releaseFirstBuild.Set();
+		Assert.True((await lateBuild).HasFile("old.marker"));
+
+		var refreshed = provider.Get(rootPath);
+		var cached = provider.Get(rootPath);
+		Assert.True(refreshed.HasFile("new.marker"));
+		Assert.Same(refreshed, cached);
+		Assert.Equal(2, buildCount);
+	}
+
+	[Fact]
+	public async Task ConcurrentForceRefresh_NewerCompletionCannotBeOverwrittenByOlderBuild()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		using var olderBuildStarted = new ManualResetEventSlim();
+		using var releaseOlderBuild = new ManualResetEventSlim();
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				var build = Interlocked.Increment(ref buildCount);
+				if (build == 1)
+				{
+					olderBuildStarted.Set();
+					Assert.True(releaseOlderBuild.Wait(TimeSpan.FromSeconds(5)));
+				}
+
+				return CreateFacts(path, build == 1 ? "older.marker" : "newer.marker");
+			});
+
+		var olderBuild = Task.Run(() => provider.Get(rootPath, forceRefresh: true));
+		Assert.True(olderBuildStarted.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+		var newerFacts = await Task.Run(() => provider.Get(rootPath, forceRefresh: true));
+		releaseOlderBuild.Set();
+		var olderFacts = await olderBuild;
+
+		Assert.True(olderFacts.HasFile("older.marker"));
+		Assert.True(newerFacts.HasFile("newer.marker"));
+		Assert.Same(newerFacts, provider.Get(rootPath));
+		Assert.Equal(2, buildCount);
+	}
+
+	[Fact]
+	public async Task DescendantInvalidation_DuringChildBuild_PreventsLateCacheCommit()
+	{
+		var parentPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var childPath = Path.Combine(parentPath, "child");
+		using var firstBuildStarted = new ManualResetEventSlim();
+		using var releaseFirstBuild = new ManualResetEventSlim();
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				var build = Interlocked.Increment(ref buildCount);
+				if (build == 1)
+				{
+					firstBuildStarted.Set();
+					Assert.True(releaseFirstBuild.Wait(TimeSpan.FromSeconds(5)));
+				}
+
+				return CreateFacts(path, build == 1 ? "stale.marker" : "fresh.marker");
+			});
+
+		var lateChildBuild = Task.Run(() => provider.Get(childPath, forceRefresh: true));
+		Assert.True(firstBuildStarted.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+		provider.Invalidate(parentPath, includeDescendants: true);
+		releaseFirstBuild.Set();
+		_ = await lateChildBuild;
+
+		Assert.True(provider.Get(childPath).HasFile("fresh.marker"));
+		Assert.Equal(2, buildCount);
 	}
 
 	[Fact]
@@ -198,6 +335,15 @@ public sealed class ProjectRootFactsProviderTests
 		Assert.True(fileFacts.HasGitMetadataEntry);
 		Assert.True(directoryFacts.HasGitMetadataEntry);
 	}
+
+	private static ProjectRootFacts CreateFacts(string rootPath, string markerName) =>
+		new(
+			rootPath,
+			exists: true,
+			isAccessible: true,
+			files: [new ProjectRootFileFact(markerName, Path.GetExtension(markerName))],
+			directories: [],
+			gitIgnoreSignature: null);
 
 	[Fact]
 	public void HasGitIgnoreFile_RejectsReparseFileAndAcceptsRegularFile()

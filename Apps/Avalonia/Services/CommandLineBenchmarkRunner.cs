@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Infrastructure.Reports;
 using DevProjex.Terminal.DesktopControl;
 
@@ -10,7 +11,9 @@ namespace DevProjex.Avalonia.Services;
 internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext context)
 {
 	private const int DefaultMeasuredRuns = 7;
-	private const int DefaultWarmupRuns = 1;
+	// The first pass discovers the full topology; the second lets bounded caches converge.
+	private const int DefaultWarmupRuns = 2;
+	private const int DiagnosticProbeRuns = 2;
 	private const int MinimumMeasuredRuns = 1;
 	private const int MaximumMeasuredRuns = 50;
 	private const int MinimumWarmupRuns = 0;
@@ -52,7 +55,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		{
 			var coldRuns = await RunColdProcessBenchmarksAsync(coldRequest, runConfiguration, cancellationToken)
 				.ConfigureAwait(false);
-			var warmRuns = await RunWarmPipelineBenchmarksAsync(targetPath, runConfiguration, cancellationToken)
+			var warmResult = await RunWarmPipelineBenchmarksAsync(targetPath, runConfiguration, cancellationToken)
 				.ConfigureAwait(false);
 
 			var report = CommandLineBenchmarkReport.Create(
@@ -62,7 +65,8 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 				coldRequest,
 				runConfiguration,
 				coldRuns,
-				warmRuns,
+				warmResult.Runs,
+				warmResult.DiagnosticRuns,
 				outputPath);
 
 			await WriteReportAsync(report, outputPath, cancellationToken).ConfigureAwait(false);
@@ -99,7 +103,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		return runs;
 	}
 
-	private async Task<IReadOnlyList<CommandLineBenchmarkPipelineRun>> RunWarmPipelineBenchmarksAsync(
+	private async Task<CommandLineBenchmarkWarmPipelineResult> RunWarmPipelineBenchmarksAsync(
 		string targetPath,
 		CommandLineBenchmarkRunConfiguration configuration,
 		CancellationToken cancellationToken)
@@ -109,11 +113,30 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		for (var index = 0; index < configuration.TotalRuns; index++)
 		{
 			var isWarmup = index < configuration.Warmup;
-			runs.Add(await RunWarmPipelineOnceAsync(services, targetPath, index + 1, isWarmup, cancellationToken)
+			runs.Add(await RunWarmPipelineOnceAsync(
+				services,
+				targetPath,
+				index + 1,
+				isWarmup,
+				captureDiagnostics: false,
+				cancellationToken)
 				.ConfigureAwait(false));
 		}
 
-		return runs;
+		var diagnosticRuns = new List<CommandLineBenchmarkPipelineRun>(DiagnosticProbeRuns);
+		for (var index = 0; index < DiagnosticProbeRuns; index++)
+		{
+			diagnosticRuns.Add(await RunWarmPipelineOnceAsync(
+				services,
+				targetPath,
+				configuration.TotalRuns + index + 1,
+				isWarmup: false,
+				captureDiagnostics: true,
+				cancellationToken)
+				.ConfigureAwait(false));
+		}
+
+		return new CommandLineBenchmarkWarmPipelineResult(runs, diagnosticRuns);
 	}
 
 	private static async Task<CommandLineBenchmarkPipelineRun> RunWarmPipelineOnceAsync(
@@ -121,8 +144,12 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		string targetPath,
 		int index,
 		bool isWarmup,
+		bool captureDiagnostics,
 		CancellationToken cancellationToken)
 	{
+		using var ignoreMeasurement = captureDiagnostics
+			? IgnorePipelineDiagnostics.BeginMeasurement()
+			: null;
 		var process = Process.GetCurrentProcess();
 		var cpuBefore = TryGetTotalProcessorTime(process);
 		var managedBefore = GC.GetTotalMemory(forceFullCollection: false);
@@ -197,6 +224,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			AnalysisMilliseconds: analysisReport?.Timing.AnalysisMilliseconds,
 			ReportedTotalMilliseconds: analysisReport?.Timing.TotalMilliseconds,
 			Workload: workload,
+			Diagnostics: ignoreMeasurement?.Capture() ?? IgnorePipelineDiagnosticSnapshot.Empty,
 			ExitCode: exitCode,
 			Error: error);
 	}
@@ -321,6 +349,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 
 	private async Task WriteSummaryAsync(CommandLineBenchmarkReport report, CancellationToken cancellationToken)
 	{
+		var diagnostics = report.WarmPipelineDiagnostics.Median;
 		var lines = new[]
 		{
 			"DevProjex benchmark",
@@ -334,6 +363,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			$"  median wall: {FormatMilliseconds(report.ColdProcess.Summary.MedianWallMilliseconds)}",
 			$"  min/max: {FormatMilliseconds(report.ColdProcess.Summary.MinWallMilliseconds)} / {FormatMilliseconds(report.ColdProcess.Summary.MaxWallMilliseconds)}",
 			$"  avg cpu: {FormatMilliseconds(report.ColdProcess.Summary.AvgCpuMilliseconds)}",
+			$"  median cpu: {FormatMilliseconds(report.ColdProcess.Summary.MedianCpuMilliseconds)}",
 			$"  peak memory: {FormatMegabytes(report.ColdProcess.Summary.PeakWorkingSetBytes)}",
 			string.Empty,
 			"Warm pipeline:",
@@ -341,15 +371,29 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 			$"  median wall: {FormatMilliseconds(report.WarmPipeline.Summary.MedianWallMilliseconds)}",
 			$"  min/max: {FormatMilliseconds(report.WarmPipeline.Summary.MinWallMilliseconds)} / {FormatMilliseconds(report.WarmPipeline.Summary.MaxWallMilliseconds)}",
 			$"  avg cpu: {FormatMilliseconds(report.WarmPipeline.Summary.AvgCpuMilliseconds)}",
+			$"  median cpu: {FormatMilliseconds(report.WarmPipeline.Summary.MedianCpuMilliseconds)}",
 			$"  avg allocated: {FormatMegabytes(report.WarmPipeline.Summary.AvgAllocatedBytes)}",
+			$"  median allocated: {FormatMegabytes(report.WarmPipeline.Summary.MedianAllocatedBytes)}",
 			$"  avg loading: {FormatMilliseconds(report.WarmPipeline.Summary.AvgLoadingMilliseconds)}",
+			$"  median loading: {FormatMilliseconds(report.WarmPipeline.Summary.MedianLoadingMilliseconds)}",
 			$"  avg analysis: {FormatMilliseconds(report.WarmPipeline.Summary.AvgAnalysisMilliseconds)}",
+			$"  median analysis: {FormatMilliseconds(report.WarmPipeline.Summary.MedianAnalysisMilliseconds)}",
 			$"  managed memory: {FormatMegabytes(report.WarmPipeline.Summary.ManagedMemoryAfterBytes)}",
 			$"  workload stable: {report.WorkloadConsistent.ToString(CultureInfo.InvariantCulture)}",
 			$"  selection stable: {report.SelectionConsistent.ToString(CultureInfo.InvariantCulture)}",
 			$"  inventory stable: {report.InventoryConsistent.ToString(CultureInfo.InvariantCulture)}",
 			$"  metrics stable: {report.MetricsConsistent.ToString(CultureInfo.InvariantCulture)}",
 			$"  workload fingerprint: {report.Workload?.Fingerprint ?? "n/a"}",
+			string.Empty,
+			"Ignore pipeline (post-measurement diagnostic probes):",
+			$"  probe count: {report.WarmPipelineDiagnostics.Count}",
+			"  counters below are component medians across probes",
+			$"  workspace scans: {diagnostics.WorkspaceScans}",
+			$"  enumerations: directories={diagnostics.DirectoryEnumerations}, files={diagnostics.FileEnumerations}, combined={diagnostics.CombinedEntryEnumerations}",
+			$"  root facts: requests={diagnostics.RootFactsRequests}, hits={diagnostics.RootFactsCacheHits}, builds={diagnostics.RootFactsBuilds}, evictions={diagnostics.RootFactsEvictions}",
+			$"  gitignore loads: requests={diagnostics.GitIgnoreLoadRequests}, executions={diagnostics.GitIgnoreLoadExecutions}, reuses={diagnostics.GitIgnoreLoadReuses}",
+			$"  gitignore reads: requests={diagnostics.GitIgnoreSourceReadRequests}, bytes={diagnostics.GitIgnoreSourceBytes}",
+			$"  diagnostics stable: {report.WarmPipelineDiagnostics.Consistent.ToString(CultureInfo.InvariantCulture)}",
 			string.Empty,
 			"Result:",
 			$"  {report.OutputPath}"
@@ -463,14 +507,16 @@ internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBen
 
 			var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
 			var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-			while (!process.HasExited)
+			var exitTask = process.WaitForExitAsync(cancellationToken);
+			while (!exitTask.IsCompleted)
 			{
 				SampleMemory(process, ref peakWorkingSetBytes, ref peakPrivateMemoryBytes);
-				await Task.Delay(MemoryPollInterval, cancellationToken).ConfigureAwait(false);
+				var nextSample = Task.Delay(MemoryPollInterval, cancellationToken);
+				await Task.WhenAny(exitTask, nextSample).ConfigureAwait(false);
 			}
 
 			SampleMemory(process, ref peakWorkingSetBytes, ref peakPrivateMemoryBytes);
-			await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+			await exitTask.ConfigureAwait(false);
 			stopwatch.Stop();
 
 			var stdout = await stdoutTask.ConfigureAwait(false);
@@ -635,6 +681,10 @@ internal sealed record CommandLineBenchmarkRunConfiguration(
 	public int TotalRuns => Runs + Warmup;
 }
 
+internal sealed record CommandLineBenchmarkWarmPipelineResult(
+	IReadOnlyList<CommandLineBenchmarkPipelineRun> Runs,
+	IReadOnlyList<CommandLineBenchmarkPipelineRun> DiagnosticRuns);
+
 internal sealed record CommandLineBenchmarkReport(
 	int SchemaVersion,
 	DateTimeOffset CreatedAt,
@@ -653,6 +703,8 @@ internal sealed record CommandLineBenchmarkReport(
 	bool MetricsConsistent,
 	CommandLineBenchmarkSection<CommandLineBenchmarkProcessRun> ColdProcess,
 	CommandLineBenchmarkSection<CommandLineBenchmarkPipelineRun> WarmPipeline,
+	CommandLineBenchmarkDiagnosticSummary WarmPipelineDiagnostics,
+	IReadOnlyList<CommandLineBenchmarkPipelineRun> WarmPipelineDiagnosticRuns,
 	bool HasFailures,
 	string OutputPath)
 {
@@ -664,13 +716,15 @@ internal sealed record CommandLineBenchmarkReport(
 		CommandLineBenchmarkRunConfiguration configuration,
 		IReadOnlyList<CommandLineBenchmarkProcessRun> coldRuns,
 		IReadOnlyList<CommandLineBenchmarkPipelineRun> warmRuns,
+		IReadOnlyList<CommandLineBenchmarkPipelineRun> warmDiagnosticRuns,
 		string outputPath)
 	{
 		var coldMeasuredRuns = coldRuns.Where(static run => !run.IsWarmup).ToArray();
 		var warmMeasuredRuns = warmRuns.Where(static run => !run.IsWarmup).ToArray();
 		var hasFailures =
 			coldMeasuredRuns.Any(static run => run.ExitCode != CommandLineExitCodes.Success) ||
-			warmMeasuredRuns.Any(static run => run.ExitCode != CommandLineExitCodes.Success);
+			warmMeasuredRuns.Any(static run => run.ExitCode != CommandLineExitCodes.Success) ||
+			warmDiagnosticRuns.Any(static run => run.ExitCode != CommandLineExitCodes.Success);
 		var successfulWarmRuns = warmMeasuredRuns
 			.Where(static run => run.ExitCode == CommandLineExitCodes.Success)
 			.ToArray();
@@ -695,7 +749,7 @@ internal sealed record CommandLineBenchmarkReport(
 		var workloadConsistent = selectionConsistent && inventoryConsistent && metricsConsistent;
 
 		return new CommandLineBenchmarkReport(
-			SchemaVersion: 2,
+			SchemaVersion: 3,
 			CreatedAt: createdAt,
 			TargetPath: Path.GetFullPath(targetPath).Replace('\\', '/'),
 			ApplicationVersion: applicationVersion,
@@ -718,6 +772,11 @@ internal sealed record CommandLineBenchmarkReport(
 				Summary: CommandLineBenchmarkSummary.FromPipelineRuns(warmMeasuredRuns),
 				WarmupRuns: warmRuns.Where(static run => run.IsWarmup).ToArray(),
 				Runs: warmMeasuredRuns),
+			WarmPipelineDiagnostics: CommandLineBenchmarkDiagnosticSummary.FromRuns(
+				warmDiagnosticRuns
+					.Where(static run => run.ExitCode == CommandLineExitCodes.Success)
+					.ToArray()),
+			WarmPipelineDiagnosticRuns: warmDiagnosticRuns,
 			HasFailures: hasFailures,
 			OutputPath: Path.GetFullPath(outputPath).Replace('\\', '/'));
 	}
@@ -889,6 +948,75 @@ internal sealed record CommandLineBenchmarkSection<TRun>(
 	IReadOnlyList<TRun> WarmupRuns,
 	IReadOnlyList<TRun> Runs);
 
+internal sealed record CommandLineBenchmarkDiagnosticSummary(
+	int Count,
+	bool Consistent,
+	IgnorePipelineDiagnosticSnapshot Minimum,
+	IgnorePipelineDiagnosticSnapshot Median,
+	IgnorePipelineDiagnosticSnapshot Maximum)
+{
+	public static CommandLineBenchmarkDiagnosticSummary FromRuns(
+		IReadOnlyList<CommandLineBenchmarkPipelineRun> runs)
+	{
+		if (runs.Count == 0)
+		{
+			return new CommandLineBenchmarkDiagnosticSummary(
+				0,
+				Consistent: true,
+				IgnorePipelineDiagnosticSnapshot.Empty,
+				IgnorePipelineDiagnosticSnapshot.Empty,
+				IgnorePipelineDiagnosticSnapshot.Empty);
+		}
+
+		var first = runs[0].Diagnostics;
+		return new CommandLineBenchmarkDiagnosticSummary(
+			runs.Count,
+			Consistent: runs.Skip(1).All(run => run.Diagnostics == first),
+			Minimum: Aggregate(runs, static values => values.Min()),
+			Median: Aggregate(runs, MedianValue),
+			Maximum: Aggregate(runs, static values => values.Max()));
+	}
+
+	private static IgnorePipelineDiagnosticSnapshot Aggregate(
+		IReadOnlyList<CommandLineBenchmarkPipelineRun> runs,
+		Func<long[], long> aggregate)
+	{
+		long Read(Func<IgnorePipelineDiagnosticSnapshot, long> selector) =>
+			aggregate(runs.Select(run => selector(run.Diagnostics)).ToArray());
+
+		return new IgnorePipelineDiagnosticSnapshot(
+			Read(static value => value.RootFactsRequests),
+			Read(static value => value.RootFactsCacheHits),
+			Read(static value => value.RootFactsBuilds),
+			Read(static value => value.RootFactsEvictions),
+			Read(static value => value.ProjectScopeDiscoveries),
+			Read(static value => value.IgnoreRulesBuilds),
+			Read(static value => value.FullSelectionRefreshes),
+			Read(static value => value.LiveSelectionRefreshes),
+			Read(static value => value.DynamicSelectionPasses),
+			Read(static value => value.WorkspaceScans),
+			Read(static value => value.DirectoryEnumerations),
+			Read(static value => value.FileEnumerations),
+			Read(static value => value.CombinedEntryEnumerations),
+			Read(static value => value.GitIgnoreSourceReadRequests),
+			Read(static value => value.GitIgnoreSourceBytes),
+			Read(static value => value.GitIgnoreLoadRequests),
+			Read(static value => value.GitIgnoreLoadExecutions),
+			Read(static value => value.GitIgnoreLoadReuses));
+	}
+
+	private static long MedianValue(long[] values)
+	{
+		Array.Sort(values);
+		var middle = values.Length / 2;
+		return values.Length % 2 == 0
+			? (long)Math.Round(
+				values[middle - 1] / 2d + values[middle] / 2d,
+				MidpointRounding.AwayFromZero)
+			: values[middle];
+	}
+}
+
 internal sealed record CommandLineBenchmarkSummary(
 	int Count,
 	int SuccessfulCount,
@@ -898,12 +1026,16 @@ internal sealed record CommandLineBenchmarkSummary(
 	double MinWallMilliseconds,
 	double MaxWallMilliseconds,
 	double? AvgCpuMilliseconds,
+	double? MedianCpuMilliseconds,
 	long? PeakWorkingSetBytes,
 	long? PeakPrivateMemoryBytes,
 	long? ManagedMemoryAfterBytes,
 	long? AvgAllocatedBytes,
+	long? MedianAllocatedBytes,
 	double? AvgLoadingMilliseconds,
+	double? MedianLoadingMilliseconds,
 	double? AvgAnalysisMilliseconds,
+	double? MedianAnalysisMilliseconds,
 	double? AvgReportedTotalMilliseconds,
 	long? AvgStdoutBytes)
 {
@@ -969,12 +1101,16 @@ internal sealed record CommandLineBenchmarkSummary(
 			MinWallMilliseconds: wallMilliseconds.Count == 0 ? 0 : wallMilliseconds.Min(),
 			MaxWallMilliseconds: wallMilliseconds.Count == 0 ? 0 : wallMilliseconds.Max(),
 			AvgCpuMilliseconds: AverageNullable(cpuMilliseconds),
+			MedianCpuMilliseconds: MedianNullable(cpuMilliseconds),
 			PeakWorkingSetBytes: peakWorkingSetBytes,
 			PeakPrivateMemoryBytes: peakPrivateMemoryBytes,
 			ManagedMemoryAfterBytes: managedMemoryAfterBytes,
 			AvgAllocatedBytes: allocatedBytes is null ? null : AverageNullableLong(allocatedBytes),
+			MedianAllocatedBytes: allocatedBytes is null ? null : MedianNullableLong(allocatedBytes),
 			AvgLoadingMilliseconds: loadingMilliseconds is null ? null : AverageNullable(loadingMilliseconds),
+			MedianLoadingMilliseconds: loadingMilliseconds is null ? null : MedianNullable(loadingMilliseconds),
 			AvgAnalysisMilliseconds: analysisMilliseconds is null ? null : AverageNullable(analysisMilliseconds),
+			MedianAnalysisMilliseconds: analysisMilliseconds is null ? null : MedianNullable(analysisMilliseconds),
 			AvgReportedTotalMilliseconds: reportedTotalMilliseconds is null
 				? null
 				: AverageNullable(reportedTotalMilliseconds),
@@ -1002,6 +1138,12 @@ internal sealed record CommandLineBenchmarkSummary(
 		return actual.Length == 0 ? null : actual.Average();
 	}
 
+	private static double? MedianNullable(IEnumerable<double?> values)
+	{
+		var actual = values.Where(static value => value is not null).Select(static value => value!.Value).ToArray();
+		return actual.Length == 0 ? null : Median(actual);
+	}
+
 	private static long? AverageNullableLong(IEnumerable<long?> values)
 	{
 		var actual = values.Where(static value => value is not null).Select(static value => value!.Value).ToArray();
@@ -1009,6 +1151,21 @@ internal sealed record CommandLineBenchmarkSummary(
 			return null;
 
 		return (long)Math.Round(actual.Average(), MidpointRounding.AwayFromZero);
+	}
+
+	private static long? MedianNullableLong(IEnumerable<long?> values)
+	{
+		var actual = values.Where(static value => value is not null).Select(static value => value!.Value).ToArray();
+		if (actual.Length == 0)
+			return null;
+
+		Array.Sort(actual);
+		var middle = actual.Length / 2;
+		return actual.Length % 2 == 0
+			? (long)Math.Round(
+				actual[middle - 1] / 2d + actual[middle] / 2d,
+				MidpointRounding.AwayFromZero)
+			: actual[middle];
 	}
 
 	private static long? MaxNullable(IEnumerable<long?> values)
@@ -1053,5 +1210,6 @@ internal sealed record CommandLineBenchmarkPipelineRun(
 	double? AnalysisMilliseconds,
 	double? ReportedTotalMilliseconds,
 	CommandLineBenchmarkWorkload? Workload,
+	IgnorePipelineDiagnosticSnapshot Diagnostics,
 	int ExitCode,
 	string? Error);

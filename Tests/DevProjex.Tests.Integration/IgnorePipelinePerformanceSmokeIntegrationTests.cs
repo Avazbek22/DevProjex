@@ -1,3 +1,5 @@
+using DevProjex.Application.Diagnostics;
+
 namespace DevProjex.Tests.Integration;
 
 [Trait("Category", "LocalPerformance")]
@@ -56,7 +58,7 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 	{
 		const int candidateCount = 300;
 		using var temp = new TemporaryDirectory();
-		temp.CreateFile(".gitignore", "# active pattern source\n");
+		temp.CreateFile(".gitignore", "*.generated\n");
 		temp.CreateFile("src/App.cs", "public sealed class App {}\n");
 		for (var index = 0; index < candidateCount; index++)
 			temp.CreateDirectory($".candidate-{index:D3}");
@@ -67,6 +69,7 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		var rules = service.Build(temp.Path, selectedOptions, selectedRoots);
 		var scanner = new ScanOptionsUseCase(new FileSystemScanner());
 
+		using var measurement = IgnorePipelineDiagnostics.BeginMeasurement();
 		var stopwatch = Stopwatch.StartNew();
 		var result = scanner.GetProjectWorkspaceSnapshotForRootFolders(
 			temp.Path,
@@ -78,10 +81,14 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken,
 			includeControllerImpactProbeRoots: true);
 		stopwatch.Stop();
+		var diagnostics = measurement.Capture();
 
 		TestContext.Current.TestOutputHelper?.WriteLine(
 			$"Root-candidate Git bootstrap benchmark: {stopwatch.Elapsed.TotalMilliseconds:F3} ms for {candidateCount} candidates.");
 		Assert.Equal(candidateCount, result.Value.IgnoreSection.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(0, diagnostics.GitIgnoreLoadExecutions);
+		Assert.Equal(0, diagnostics.GitIgnoreSourceReadRequests);
+		Assert.True(diagnostics.GitIgnoreLoadReuses >= 1);
 		Assert.True(
 			stopwatch.Elapsed < TimeSpan.FromSeconds(5),
 			$"Root-candidate ignore scan exceeded smoke budget: {stopwatch.Elapsed}.");
@@ -129,6 +136,34 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 			$"100k hierarchical GitIgnore rule smoke exceeded budget: {observation.Elapsed}.");
 		Assert.DoesNotContain("repo/scope-999/drop.cache", observation.Paths);
 		Assert.Contains("repo/scope-999/keep.cache", observation.Paths);
+	}
+
+	[Fact]
+	public void HierarchicalGitIgnore_NestedScopeChains_PreserveInheritedRulesWithinSmokeBudget()
+	{
+		if (!string.Equals(
+			    Environment.GetEnvironmentVariable("DEVPROJEX_RUN_LARGE_PERF_TESTS"),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			Assert.Skip("Set DEVPROJEX_RUN_LARGE_PERF_TESTS=1 for the pre-release performance gate.");
+		}
+
+		const int chainCount = 24;
+		const int depthPerChain = 16;
+		using var temp = CreateNestedGitIgnoreWorkspace(chainCount, depthPerChain, rulesPerScope: 32);
+		var observation = MeasureHierarchicalGitIgnore(
+			temp.Path,
+			expectedScopeCount: chainCount * depthPerChain);
+		var deepestScope = "repo/chain-00/" + string.Join(
+			'/',
+			Enumerable.Range(0, depthPerChain).Select(static depth => $"d{depth:D2}"));
+
+		Assert.True(
+			observation.Elapsed < TimeSpan.FromSeconds(60),
+			$"Nested GitIgnore scope smoke exceeded budget: {observation.Elapsed}.");
+		Assert.DoesNotContain($"{deepestScope}/drop.cache", observation.Paths);
+		Assert.Contains($"{deepestScope}/keep.cache", observation.Paths);
 	}
 
 	private static TimeSpan MeasureIgnoreSnapshot(string rootPath)
@@ -262,6 +297,35 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 			temp.CreateFile($"{scope}/drop.cache", "ignored");
 			temp.CreateFile($"{scope}/keep.cache", "visible");
 			temp.CreateFile($"{scope}/visible.txt", "visible");
+		}
+
+		return temp;
+	}
+
+	private static TemporaryDirectory CreateNestedGitIgnoreWorkspace(
+		int chainCount,
+		int depthPerChain,
+		int rulesPerScope)
+	{
+		var temp = new TemporaryDirectory();
+		for (var chainIndex = 0; chainIndex < chainCount; chainIndex++)
+		{
+			var scope = $"repo/chain-{chainIndex:D2}";
+			for (var depth = 0; depth < depthPerChain; depth++)
+			{
+				scope += $"/d{depth:D2}";
+				var rules = new StringBuilder()
+					.AppendLine("*.cache")
+					.AppendLine("!keep.cache");
+				for (var ruleIndex = 2; ruleIndex < rulesPerScope; ruleIndex++)
+					rules.Append("unused-").Append(chainIndex).Append('-').Append(depth).Append('-')
+						.Append(ruleIndex).AppendLine(".artifact");
+
+				temp.CreateFile($"{scope}/.gitignore", rules.ToString());
+				temp.CreateFile($"{scope}/drop.cache", "ignored");
+				temp.CreateFile($"{scope}/keep.cache", "visible");
+				temp.CreateFile($"{scope}/visible.txt", "visible");
+			}
 		}
 
 		return temp;

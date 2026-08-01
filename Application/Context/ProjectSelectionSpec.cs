@@ -39,6 +39,13 @@ public sealed record ProjectSelectionSpec(
 	IReadOnlyCollection<ProjectExclusion>? Exclusions = null,
 	ProjectProfileReference? ProfileSource = null)
 {
+	/// <summary>
+	/// Preserves which resolved components came from explicit/profile intent when a selection
+	/// crosses the Desktop JSON boundary. A null value keeps the legacy rule where non-null
+	/// components are applied.
+	/// </summary>
+	public ProjectSelectionApplicationIntent? ApplicationIntent { get; init; }
+
 	// Local profiles carry complete checkbox state, not merely the currently checked names.
 	// This internal payload lets every presentation surface apply the same rule: known rows
 	// keep their saved state, while rows discovered after the save use current defaults.
@@ -61,6 +68,19 @@ public sealed record ProjectSelectionSpec(
 		Exclusions: StandardExclusions,
 		ProfileSource: ProjectProfileReference.Standard);
 }
+
+public enum ProjectSelectionApplicationMode
+{
+	Preserve,
+	ApplyResolvedValue,
+	ResetToDefaults
+}
+
+public sealed record ProjectSelectionApplicationIntent(
+	ProjectSelectionApplicationMode Roots,
+	ProjectSelectionApplicationMode Extensions,
+	ProjectSelectionApplicationMode GitMode,
+	ProjectSelectionApplicationMode Exclusions);
 
 internal sealed record LocalProjectSelectionState(
 	ProjectSelectionProfile Profile,

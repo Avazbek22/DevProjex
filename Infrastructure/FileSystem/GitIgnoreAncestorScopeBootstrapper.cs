@@ -7,8 +7,10 @@ internal static class GitIgnoreAncestorScopeBootstrapper
 		IgnoreRules.GitIgnoreScanContext activeContext,
 		IgnoreRules.GitIgnoreScanContext candidateContext,
 		CancellationToken cancellationToken,
-		List<ScopedGitIgnoreMatcher>? discoveredMatchers = null)
+		List<ScopedGitIgnoreMatcher>? discoveredMatchers = null,
+		GitIgnoreMatcherLoadSession? loadSession = null)
 	{
+		loadSession ??= new GitIgnoreMatcherLoadSession();
 		cancellationToken.ThrowIfCancellationRequested();
 		if (!GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
 			    scanRootPath,
@@ -47,7 +49,7 @@ internal static class GitIgnoreAncestorScopeBootstrapper
 		foreach (var scopePath in scopePaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var loadResult = GitIgnoreMatcherFileCache.Load(
+			var loadResult = loadSession.Load(
 				scopePath,
 				Path.Combine(scopePath, ".gitignore"));
 			lastStatus = loadResult.Status;

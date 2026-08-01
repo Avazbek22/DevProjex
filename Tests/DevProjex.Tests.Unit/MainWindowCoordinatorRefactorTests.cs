@@ -1267,6 +1267,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
     private static ProjectLoadCancellationSnapshot CreateProjectLoadSnapshot(bool hadLoadedProjectBefore)
     {
+        var viewModel = CreateViewModel();
+        using var selection = CreateSelectionCoordinator(viewModel);
         return new ProjectLoadCancellationSnapshot(
             HadLoadedProjectBefore: hadLoadedProjectBefore,
             Path: @"C:\Project",
@@ -1289,7 +1291,10 @@ public sealed class MainWindowCoordinatorRefactorTests
             HasCompleteMetricsBaseline: false,
             RootFolders: [],
             Extensions: [],
-            IgnoreOptions: []);
+            IgnoreOptions: [])
+		{
+			SelectionCheckpoint = selection.CaptureProjectCheckpoint()
+		};
     }
 
     private static TreeFilterOptions CreateInventoryScopeOptions(

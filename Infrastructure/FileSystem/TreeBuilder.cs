@@ -21,7 +21,8 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 			ProjectTreeGitIgnoreContexts.Create(
 				gitIgnoreContext,
 				gitIgnoreContext,
-				RequiresWorkingTreeGitIgnore(options.IgnoreRules)),
+				RequiresWorkingTreeGitIgnore(options.IgnoreRules),
+				options.IgnoreRules.ScopedGitIgnoreMatchers),
 			(entry, isProjectRootChild, contexts) => ShouldTraverseDirectoryInInventory(
 				entry,
 				isProjectRootChild,
@@ -45,7 +46,8 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 				discoveryGitIgnoreContext,
 				projectionGitIgnoreContext,
 				RequiresWorkingTreeGitIgnore(discoveryRules) ||
-				RequiresWorkingTreeGitIgnore(projectionRules)),
+				RequiresWorkingTreeGitIgnore(projectionRules),
+				MergeGitIgnoreMatcherSeeds(discoveryRules, projectionRules)),
 			(entry, isProjectRootChild, contexts) =>
 			{
 				if (isProjectRootChild && !allowedRootFolders.Contains(entry.Name))
@@ -75,6 +77,38 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 
 	private static bool RequiresWorkingTreeGitIgnore(IgnoreRules rules) =>
 		rules.EnableGitIgnoreTraversal && !rules.UseTrackedGitFilesOnly;
+
+	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeGitIgnoreMatcherSeeds(
+		IgnoreRules discoveryRules,
+		IgnoreRules projectionRules)
+	{
+		if (ReferenceEquals(discoveryRules, projectionRules) ||
+		    ReferenceEquals(
+			    discoveryRules.ScopedGitIgnoreMatchers,
+			    projectionRules.ScopedGitIgnoreMatchers) ||
+		    projectionRules.ScopedGitIgnoreMatchers.Count == 0)
+		{
+			return discoveryRules.ScopedGitIgnoreMatchers;
+		}
+		if (discoveryRules.ScopedGitIgnoreMatchers.Count == 0)
+			return projectionRules.ScopedGitIgnoreMatchers;
+
+		var merged = new List<ScopedGitIgnoreMatcher>(
+			discoveryRules.ScopedGitIgnoreMatchers.Count + projectionRules.ScopedGitIgnoreMatchers.Count);
+		var seenScopes = new HashSet<string>(PathComparer.Default);
+		foreach (var matcher in discoveryRules.ScopedGitIgnoreMatchers)
+		{
+			if (seenScopes.Add(matcher.ScopeRootPath))
+				merged.Add(matcher);
+		}
+		foreach (var matcher in projectionRules.ScopedGitIgnoreMatchers)
+		{
+			if (seenScopes.Add(matcher.ScopeRootPath))
+				merged.Add(matcher);
+		}
+
+		return merged;
+	}
 
 	public TreeBuildResult Build(
 		ProjectTreeInventorySnapshot inventory,

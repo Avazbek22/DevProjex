@@ -34,6 +34,27 @@ public sealed class ProjectSelectionResolver(
 			Exclusions = overrides.Exclusions ?? baseline.Exclusions,
 			ProfileSource = profile
 		};
+		var applyProfileValues = profile.Kind != ProjectProfileSourceKind.Local;
+		resolved = resolved with
+		{
+			// A local profile is loaded by Desktop with its complete option-state maps. Only
+			// explicit command-line components may replace that live profile state. Standard
+			// and portable profiles, in contrast, must cross the Desktop boundary themselves.
+			ApplicationIntent = new ProjectSelectionApplicationIntent(
+				Roots: ResolveApplicationMode(overrides.Roots is not null, applyProfileValues, resolved.Roots),
+				Extensions: ResolveApplicationMode(
+					overrides.Extensions is not null,
+					applyProfileValues,
+					resolved.Extensions),
+				GitMode: ResolveApplicationMode(
+					overrides.GitMode is not null,
+					applyProfileValues,
+					resolved.GitMode),
+				Exclusions: ResolveApplicationMode(
+					overrides.Exclusions is not null,
+					applyProfileValues,
+					resolved.Exclusions))
+		};
 
 		if (baseline.LocalProfileState is { } localState)
 		{
@@ -49,6 +70,21 @@ public sealed class ProjectSelectionResolver(
 		}
 
 		return resolved;
+	}
+
+	private static ProjectSelectionApplicationMode ResolveApplicationMode<T>(
+		bool hasExplicitOverride,
+		bool applyProfileValues,
+		T? resolvedValue)
+	{
+		if (hasExplicitOverride)
+			return ProjectSelectionApplicationMode.ApplyResolvedValue;
+		if (!applyProfileValues)
+			return ProjectSelectionApplicationMode.Preserve;
+
+		return resolvedValue is null
+			? ProjectSelectionApplicationMode.ResetToDefaults
+			: ProjectSelectionApplicationMode.ApplyResolvedValue;
 	}
 
 	private ProjectSelectionSpec ResolveLocal(string projectPath)

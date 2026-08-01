@@ -55,7 +55,7 @@ public sealed partial class SelectionSyncCoordinator(
     private int _rootScanVersion;
     private int _extensionScanVersion;
     private int _ignoreOptionsVersion;
-    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private SemaphoreSlim _refreshLock = new(1, 1);
     private readonly object _backgroundRefreshSync = new();
     private CancellationTokenSource? _liveOptionsRefreshCts;
     private CancellationTokenSource? _fullRefreshRequestCts;
@@ -675,7 +675,8 @@ public sealed partial class SelectionSyncCoordinator(
         if (IsSupersededLiveOptionsRequest(expectedRequestVersion)) return;
         cancellationToken.ThrowIfCancellationRequested();
 
-        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var refreshLock = Volatile.Read(ref _refreshLock);
+        await refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -733,7 +734,7 @@ public sealed partial class SelectionSyncCoordinator(
         }
         finally
         {
-            _refreshLock.Release();
+            refreshLock.Release();
         }
     }
 
@@ -784,7 +785,8 @@ public sealed partial class SelectionSyncCoordinator(
         CancellationToken cancellationToken)
     {
         // Serialize refresh operations to prevent race conditions
-        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var refreshLock = Volatile.Read(ref _refreshLock);
+        await refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -868,7 +870,7 @@ public sealed partial class SelectionSyncCoordinator(
         }
         finally
         {
-            _refreshLock.Release();
+            refreshLock.Release();
         }
     }
 
@@ -877,7 +879,8 @@ public sealed partial class SelectionSyncCoordinator(
         int? expectedRequestVersion,
         CancellationToken cancellationToken)
     {
-        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var refreshLock = Volatile.Read(ref _refreshLock);
+        await refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -922,7 +925,7 @@ public sealed partial class SelectionSyncCoordinator(
         }
         finally
         {
-            _refreshLock.Release();
+            refreshLock.Release();
         }
     }
 
@@ -930,8 +933,9 @@ public sealed partial class SelectionSyncCoordinator(
     {
         while (true)
         {
-            await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            _refreshLock.Release();
+            var refreshLock = Volatile.Read(ref _refreshLock);
+            await refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            refreshLock.Release();
 
             Task liveTask;
             Task fullTask;
@@ -1040,8 +1044,8 @@ public sealed partial class SelectionSyncCoordinator(
         foreach (var option in viewModel.IgnoreOptions)
             stateCache[option.Id] = selectedOptions.Contains(option.Id);
 
-        // Git modes are a stable public choice even when repository evidence disappears
-        // between CLI preflight and the Desktop request being applied.
+        // Preserve the established public method contract. The batched Desktop path uses
+        // ApplySelectionOverrides instead, so this compatibility surface stays independent.
         stateCache[IgnoreOptionId.UseGitIgnore] =
             selectedOptions.Contains(IgnoreOptionId.UseGitIgnore);
         stateCache[IgnoreOptionId.TrackedGitFilesOnly] =
@@ -2433,7 +2437,9 @@ public sealed partial class SelectionSyncCoordinator(
             ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
             IgnoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete,
             CaptureTreeInventory: captureTreeInventory,
-            CurrentRootOptions: SnapshotVisibleRootOptions());
+            CurrentRootOptions: SnapshotVisibleRootOptions(),
+            RootSelectionIsExplicit: _session.RootSelectionIsExplicit,
+            ExtensionSelectionIsExplicit: _session.ExtensionSelectionIsExplicit);
 
     private IReadOnlyList<SelectionOption> SnapshotVisibleRootOptions()
     {

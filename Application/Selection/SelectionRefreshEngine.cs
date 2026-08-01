@@ -1,4 +1,5 @@
 using DevProjex.Application.Models;
+using DevProjex.Application.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace DevProjex.Application.Selection;
@@ -33,6 +34,7 @@ public sealed class SelectionRefreshEngine(
         SelectionRefreshContext context,
         CancellationToken cancellationToken)
     {
+        IgnorePipelineDiagnostics.RecordFullSelectionRefresh();
         cancellationToken.ThrowIfCancellationRequested();
 
         var warmIgnore = BuildIgnoreOptionState(
@@ -82,6 +84,7 @@ public sealed class SelectionRefreshEngine(
         IReadOnlyCollection<string> selectedRoots,
         CancellationToken cancellationToken)
     {
+        IgnorePipelineDiagnostics.RecordLiveSelectionRefresh();
         cancellationToken.ThrowIfCancellationRequested();
 
         var selectedIgnoreOptions = BuildInitialLiveRefreshIgnoreSelection(context);
@@ -295,6 +298,7 @@ public sealed class SelectionRefreshEngine(
         // requiring the user to trigger another refresh manually.
         for (var passIndex = 0; passIndex < MaximumDynamicSnapshotPasses; passIndex++)
         {
+            IgnorePipelineDiagnostics.RecordDynamicSelectionPass();
             var workspaceScanReuse = reusableWorkspaceScan;
             var removedRootEmptyFolderImpactRoots = reusableRemovedRootEmptyFolderImpactRoots;
             reusableWorkspaceScan = null;
