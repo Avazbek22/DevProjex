@@ -38,13 +38,13 @@ From the repository root:
 ```bash
 dotnet restore DevProjex.sln
 dotnet build DevProjex.sln -c Release --no-restore
-dotnet run --project Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj
+dotnet run --project Apps/Avalonia/DevProjex.Avalonia.csproj
 ```
 
 Run a direct terminal command without initializing the desktop UI:
 
 ```bash
-dotnet run --project Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj -- analyze . --plain
+dotnet run --project Apps/Avalonia/DevProjex.Avalonia.csproj -- analyze . --plain
 ```
 
 The normative public syntax is in

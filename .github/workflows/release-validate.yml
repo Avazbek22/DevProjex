@@ -116,7 +116,7 @@ jobs:
             throw "Do not override Tmds.DBus.Protocol directly. Avalonia.FreeDesktop owns the compatible DBus version. Overrides found in: $($directTmdsOverrides -join ', ')"
           }
 
-          $assetsPath = "Apps/Avalonia/DevProjex.Avalonia/obj/project.assets.json"
+          $assetsPath = "Apps/Avalonia/obj/project.assets.json"
           if (-not (Test-Path -LiteralPath $assetsPath)) {
             throw "Project assets file was not produced by restore: $assetsPath"
           }
@@ -155,7 +155,7 @@ jobs:
         shell: pwsh
         # ReadyToRun validates the same startup-oriented publish shape as release artifacts.
         run: >
-          dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj
+          dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj
           -c Release
           -r ${{ matrix.rid }}
           --self-contained true

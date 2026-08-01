@@ -22,7 +22,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"DevProjex.Avalonia.csproj");
 
 		var document = XDocument.Load(projectFile);
@@ -40,7 +39,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			fileName);
 
@@ -71,7 +69,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			"SettingsPanelView.axaml");
 		var document = XDocument.Load(viewFile);
@@ -91,7 +88,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			"SettingsPanelView.axaml");
 		var document = XDocument.Load(viewFile);
@@ -129,7 +125,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			"ThemePopoverView.axaml");
 		var document = XDocument.Load(viewFile);
@@ -177,7 +172,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			"ThemePopoverView.axaml");
 		var document = XDocument.Load(viewFile);
@@ -206,7 +200,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Styles",
 			"Theme.axaml");
 		var document = XDocument.Load(styleFile);
@@ -234,7 +227,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Styles",
 			"Theme.axaml");
 		var document = XDocument.Load(styleFile);
@@ -261,7 +253,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			repositoryRoot,
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Styles",
 			"Theme.axaml"));
 		var styleRoot = Assert.IsType<XElement>(styleDocument.Root);
@@ -293,7 +284,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			repositoryRoot,
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"MainWindow.axaml"));
 		var windowRoot = Assert.IsType<XElement>(windowDocument.Root);
 		var previewScrollViewer = Assert.Single(
@@ -310,7 +300,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"MainWindow.axaml");
 		var document = XDocument.Load(viewFile);
 		var root = Assert.IsType<XElement>(document.Root);
@@ -325,7 +314,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"MainWindow.axaml");
 		var document = XDocument.Load(viewFile);
 		var root = Assert.IsType<XElement>(document.Root);

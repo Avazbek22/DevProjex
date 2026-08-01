@@ -73,6 +73,8 @@ public partial class MainWindow
     private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
     private readonly TaskbarProgressCoordinator _taskbarProgress;
     private readonly SemaphoreSlim _desktopInteractionGate = new(1, 1);
+    private readonly TaskCompletionSource<bool> _shutdownCompletion =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private DesktopControlServer? _desktopControlServer;
     private bool _desktopStartupReady;
     private string? _desktopStartupErrorCode;
@@ -126,6 +128,7 @@ public partial class MainWindow
     private VirtualizedLineNumbersControl? _previewLineNumbersControl;
     private CancellationTokenSource? _projectOperationCts;
     private CancellationTokenSource? _applySettingsCts;
+    private Task _latestApplySettingsTask = Task.CompletedTask;
     private CancellationTokenSource? _gitCloneCts;
     private CancellationTokenSource? _gitOperationCts;
     private CancellationTokenSource? _projectCopyExportCts;

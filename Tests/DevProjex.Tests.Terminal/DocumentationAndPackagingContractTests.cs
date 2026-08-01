@@ -207,13 +207,11 @@ public sealed class DocumentationAndPackagingContractTests
 			rootPath,
 			"Apps",
 			"Terminal",
-			"DevProjex.Terminal",
 			"DevProjex.Terminal.csproj");
 		var desktopProjectPath = Path.Combine(
 			rootPath,
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"DevProjex.Avalonia.csproj");
 		var terminalProject = XDocument.Load(terminalProjectPath);
 		var desktopProject = XDocument.Load(desktopProjectPath);
@@ -504,13 +502,11 @@ public sealed class DocumentationAndPackagingContractTests
 				rootPath,
 				"Apps",
 				"Terminal",
-				"DevProjex.Terminal",
 				"DevProjex.Terminal.csproj"),
 			Path.Combine(
 				rootPath,
 				"Apps",
 				"Avalonia",
-				"DevProjex.Avalonia",
 				"DevProjex.Avalonia.csproj")
 		};
 		foreach (var productProjectPath in productProjectPaths)

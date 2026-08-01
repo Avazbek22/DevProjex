@@ -69,7 +69,7 @@ targets .NET 10 and therefore requires macOS 14 or newer.
 
 ```bash
 # Build for macOS
-dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj \
+dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj \
     -c Release \
     -r osx-x64 \
     --self-contained true \

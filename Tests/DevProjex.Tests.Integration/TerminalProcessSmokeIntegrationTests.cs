@@ -423,7 +423,6 @@ public sealed class TerminalProcessSmokeIntegrationTests
 			root,
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"bin",
 			configuration,
 			"net10.0",

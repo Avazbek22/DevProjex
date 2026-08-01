@@ -493,6 +493,15 @@ public partial class MainWindow
 
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
+        var applyTask = ApplySettingsAsync();
+        _latestApplySettingsTask = applyTask;
+        await applyTask;
+    }
+
+    internal Task LatestApplySettingsTask => _latestApplySettingsTask;
+
+    private async Task ApplySettingsAsync()
+    {
         if (!_viewModel.CanApplySettings)
             return;
 

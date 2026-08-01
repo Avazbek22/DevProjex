@@ -122,7 +122,8 @@ internal static class UiTestDriver
         // teardown does not race app work that would still be running for a real user.
         await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
-        await WaitForSettledFramesAsync(frameCount: 10);
+        await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+        await WaitForSettledFramesAsync(frameCount: 2);
         UntrackTopLevelWindow(window);
         if (cleanupAppData)
             CleanupWindowAppData(window);
@@ -312,7 +313,19 @@ internal static class UiTestDriver
     }
 
     public static async Task ClickApplySettingsAsync(MainWindow window)
-        => await ClickAsync(window, GetRequiredApplySettingsButton(window));
+    {
+        var previousApplyTask = window.LatestApplySettingsTask;
+        // Selection workflow tests own the routed Apply contract; pointer hit-testing is
+        // covered separately. Raising Button.Click avoids coupling every semantic matrix
+        // to stale headless pointer capture from an unrelated test window.
+        await RaiseButtonClickAsync(GetRequiredApplySettingsButton(window));
+        await WaitForConditionAsync(
+            window,
+            () => !ReferenceEquals(window.LatestApplySettingsTask, previousApplyTask),
+            "the routed Apply command to publish its owned operation");
+        await window.LatestApplySettingsTask.WaitAsync(TimeSpan.FromSeconds(30));
+        await WaitForSelectionRefreshIdleAsync(window);
+    }
 
     public static async Task RaiseButtonClickAsync(Button button)
     {

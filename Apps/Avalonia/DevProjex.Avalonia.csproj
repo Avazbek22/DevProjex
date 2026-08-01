@@ -16,7 +16,7 @@
     <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'==''">true</EnableProjectLoadTiming>
     <DefineConstants Condition="'$(EnableProjectLoadTiming)'=='true'">$(DefineConstants);DEVPROJEX_PROJECT_LOAD_TIMING</DefineConstants>
     <!-- Windows .exe icon (shown in Explorer, taskbar, Alt+Tab) -->
-    <ApplicationIcon Condition="Exists('..\..\..\Assets\AppIcon\Windows\app.ico')">..\..\..\Assets\AppIcon\Windows\app.ico</ApplicationIcon>
+    <ApplicationIcon Condition="Exists('..\..\Assets\AppIcon\Windows\app.ico')">..\..\Assets\AppIcon\Windows\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -33,9 +33,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\Application\Application.csproj" />
-    <ProjectReference Include="..\..\..\Infrastructure\Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Terminal\DevProjex.Terminal\DevProjex.Terminal.csproj" />
+    <ProjectReference Include="..\..\Application\Application.csproj" />
+    <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj" />
+    <ProjectReference Include="..\Terminal\DevProjex.Terminal.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -54,16 +54,16 @@
   </Target>
 
   <ItemGroup>
-    <AvaloniaResource Include="..\..\..\Assets\IconPacks\Default\UIFilter.png">
+    <AvaloniaResource Include="..\..\Assets\IconPacks\Default\UIFilter.png">
       <Link>IconPacks\Default\UIFilter.png</Link>
     </AvaloniaResource>
     <!-- Windows window icon. Keep this aligned with MSIX VisualAssets so the
          portable EXE gets the same DPI-specific titlebar/taskbar sizes as the Store build. -->
-    <AvaloniaResource Include="..\..\..\Assets\AppIcon\Windows\app.ico">
+    <AvaloniaResource Include="..\..\Assets\AppIcon\Windows\app.ico">
       <Link>AppIcon\app.ico</Link>
     </AvaloniaResource>
     <!-- Large PNG fallback kept for platforms/tooling that prefer image assets. -->
-    <AvaloniaResource Include="..\..\..\Assets\AppIcon\Linux\png\256.png">
+    <AvaloniaResource Include="..\..\Assets\AppIcon\Linux\png\256.png">
       <Link>AppIcon\icon-256.png</Link>
     </AvaloniaResource>
   </ItemGroup>

@@ -38,7 +38,7 @@ public sealed class AppInstanceStartInfoFactoryTests
         var context = new AppInstanceLaunchContext(
             IsWindows: false,
             ProcessPath: processPath,
-            EntryAssemblyPath: @"C:\Users\avazb\RiderProjects\DevProjex\Apps\Avalonia\DevProjex.Avalonia\bin\Debug\net10.0\DevProjex.dll",
+            EntryAssemblyPath: @"C:\Users\avazb\RiderProjects\DevProjex\Apps\Avalonia\bin\Debug\net10.0\DevProjex.dll",
             AppHostPath: null,
             WorkingDirectory: @"C:\Users\avazb\RiderProjects\DevProjex",
             WindowsPackageFamilyName: null);

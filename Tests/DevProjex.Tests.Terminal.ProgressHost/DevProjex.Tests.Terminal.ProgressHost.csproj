@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Apps\Terminal\DevProjex.Terminal\DevProjex.Terminal.csproj" />
+    <ProjectReference Include="..\..\Apps\Terminal\DevProjex.Terminal.csproj" />
   </ItemGroup>
 
   <ItemGroup>

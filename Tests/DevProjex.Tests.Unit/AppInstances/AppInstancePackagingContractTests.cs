@@ -150,7 +150,6 @@ public sealed class AppInstancePackagingContractTests
             repositoryRoot,
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "DevProjex.Avalonia.csproj");
         var centralPackagesPath = Path.Combine(repositoryRoot, "Directory.Packages.props");
 
@@ -180,7 +179,6 @@ public sealed class AppInstancePackagingContractTests
             repositoryRoot,
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "obj",
             "project.assets.json");
 

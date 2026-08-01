@@ -88,6 +88,7 @@ public sealed class MainWindowLifecycleUiTests
 				debounceTimer);
 
 			await UiTestDriver.CloseWindowAsync(window);
+			Assert.True(window.ShutdownCompletion.IsCompletedSuccessfully);
 
 			foreach (var (fieldName, token) in tokensByField)
 			{

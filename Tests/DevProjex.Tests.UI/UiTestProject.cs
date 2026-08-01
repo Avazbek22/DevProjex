@@ -100,7 +100,6 @@ internal sealed class UiTestProject : IDisposable
                 Path.Combine(
                     "Apps",
                     "Avalonia",
-                    "DevProjex.Avalonia",
                     "Coordinators",
                     "AppearanceSettingsController.cs"),
                 "internal sealed class AppearanceSettingsController {}\n");
