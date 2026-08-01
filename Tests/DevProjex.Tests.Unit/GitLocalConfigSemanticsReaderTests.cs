@@ -1,0 +1,199 @@
+namespace DevProjex.Tests.Unit;
+
+public sealed class GitLocalConfigSemanticsReaderTests
+{
+	[Fact]
+	public void ExplicitLocalValuesResolveWithoutNativeGitFallback()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repository");
+		var gitMetadataPath = CreateStandardMetadata(temp, "repository/.git");
+		temp.CreateFile(
+			"repository/.git/config",
+			"""
+			[core]
+				repositoryformatversion = 0
+				ignorecase = yes
+				precomposeunicode = on
+			""");
+
+		var resolved = GitLocalConfigSemanticsReader.TryRead(
+			repositoryRoot,
+			gitMetadataPath,
+			out var semantics);
+
+		Assert.True(resolved);
+		Assert.True(semantics.IsAuthoritative);
+		Assert.True(semantics.IgnoreCase);
+		Assert.Equal(OperatingSystem.IsMacOS(), semantics.NormalizeUnicode);
+	}
+
+	[Fact]
+	public void IncludeDirectiveRequiresNativeGitFallback()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repository");
+		var gitMetadataPath = CreateStandardMetadata(temp, "repository/.git");
+		temp.CreateFile(
+			"repository/.git/config",
+			"""
+			[core]
+				repositoryformatversion = 0
+				ignorecase = true
+			[include]
+				path = ../shared.config
+			""");
+
+		Assert.False(GitLocalConfigSemanticsReader.TryRead(
+			repositoryRoot,
+			gitMetadataPath,
+			out _));
+	}
+
+	[Fact]
+	public void WorktreeConfigOverridesCommonRepositoryValues()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repository");
+		var gitMetadataPath = CreateStandardMetadata(temp, "repository/.git");
+		temp.CreateFile(
+			"repository/.git/config",
+			"""
+			[core]
+				repositoryformatversion = 0
+				ignorecase = false
+				precomposeunicode = true
+			[extensions]
+				worktreeconfig = true
+			""");
+		temp.CreateFile(
+			"repository/.git/config.worktree",
+			"""
+			[core]
+				ignorecase = true
+				precomposeunicode = false
+			""");
+
+		var resolved = GitLocalConfigSemanticsReader.TryRead(
+			repositoryRoot,
+			gitMetadataPath,
+			out var semantics);
+
+		Assert.True(resolved);
+		Assert.True(semantics.IgnoreCase);
+		Assert.False(semantics.NormalizeUnicode);
+	}
+
+	[Fact]
+	public void LinkedWorktreeUsesCommonConfigAndWorktreeOverride()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("linked workspace");
+		var commonGitDirectory = temp.CreateFolder("main repository/.git");
+		var worktreeGitDirectory = temp.CreateFolder("main repository/.git/worktrees/feature");
+		temp.CreateFile("main repository/.git/worktrees/feature/HEAD", "ref: refs/heads/feature\n");
+		temp.CreateFolder("main repository/.git/objects");
+		temp.CreateFolder("main repository/.git/refs");
+		var gitMetadataPath = temp.CreateFile(
+			"linked workspace/.git",
+			$"gitdir: {worktreeGitDirectory}\n");
+		temp.CreateFile("main repository/.git/worktrees/feature/commondir", "../..\n");
+		temp.CreateFile(
+			"main repository/.git/config",
+			"""
+			[core]
+				repositoryformatversion = 0
+				ignorecase = false
+				precomposeunicode = true
+			[extensions]
+				worktreeconfig = true
+			""");
+		temp.CreateFile(
+			"main repository/.git/worktrees/feature/config.worktree",
+			"""
+			[core]
+				ignorecase = true
+				precomposeunicode = false
+			""");
+
+		var resolved = GitLocalConfigSemanticsReader.TryRead(
+			repositoryRoot,
+			gitMetadataPath,
+			out var semantics);
+
+		Assert.True(resolved);
+		Assert.True(semantics.IgnoreCase);
+		Assert.False(semantics.NormalizeUnicode);
+		Assert.True(Directory.Exists(commonGitDirectory));
+	}
+
+	[Fact]
+	public void MissingExplicitCasePolicyRequiresNativeGitFallback()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repository");
+		var gitMetadataPath = CreateStandardMetadata(temp, "repository/.git");
+		temp.CreateFile(
+			"repository/.git/config",
+			"""
+			[core]
+				repositoryformatversion = 0
+			""");
+
+		Assert.False(GitLocalConfigSemanticsReader.TryRead(
+			repositoryRoot,
+			gitMetadataPath,
+			out _));
+	}
+
+	[Fact]
+	public void MalformedUnrelatedConfigRequiresNativeGitFallback()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repository");
+		var gitMetadataPath = CreateStandardMetadata(temp, "repository/.git");
+		temp.CreateFile(
+			"repository/.git/config",
+			"""
+			[core]
+				repositoryformatversion = 0
+				ignorecase = true
+			[remote "unterminated]
+				url = https://example.test/repository.git
+			""");
+
+		Assert.False(GitLocalConfigSemanticsReader.TryRead(
+			repositoryRoot,
+			gitMetadataPath,
+			out _));
+	}
+
+	[Fact]
+	public void ConfigWithoutRepositoryStructureRequiresNativeGitFallback()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repository");
+		var gitMetadataPath = temp.CreateFolder("repository/.git");
+		temp.CreateFile(
+			"repository/.git/config",
+			"""
+			[core]
+				repositoryformatversion = 0
+				ignorecase = true
+			""");
+
+		Assert.False(GitLocalConfigSemanticsReader.TryRead(
+			repositoryRoot,
+			gitMetadataPath,
+			out _));
+	}
+
+	private static string CreateStandardMetadata(TemporaryDirectory temp, string relativeGitPath)
+	{
+		var gitMetadataPath = temp.CreateFolder(relativeGitPath);
+		temp.CreateFile(Path.Combine(relativeGitPath, "HEAD"), "ref: refs/heads/main\n");
+		temp.CreateFolder(Path.Combine(relativeGitPath, "objects"));
+		temp.CreateFolder(Path.Combine(relativeGitPath, "refs"));
+		return gitMetadataPath;
+	}
+}

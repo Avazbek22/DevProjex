@@ -129,7 +129,17 @@ public sealed class TerminalRecentProjectsPtyTests
 					new ProjectSelectionProfile(
 						SelectedRootFolders: ["src"],
 						SelectedExtensions: [".cs"],
-						SelectedIgnoreOptions: []));
+						SelectedIgnoreOptions: [],
+						RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+						{
+							["src"] = true
+						},
+						ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+						{
+							[".cs"] = true,
+							[".json"] = false
+						},
+						IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>()));
 			},
 			cancellationToken: TestContext.Current.CancellationToken);
 

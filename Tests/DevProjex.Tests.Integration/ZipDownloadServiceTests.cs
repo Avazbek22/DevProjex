@@ -1,26 +1,22 @@
+using System.IO.Compression;
+using System.Net;
+
 namespace DevProjex.Tests.Integration;
 
 /// <summary>
 /// Integration tests for ZipDownloadService.
-/// These tests require network access to download ZIP archives from GitHub.
-///
 /// Test categories:
 /// - ZIP URL detection
 /// - Download and extraction operations
 /// - Progress reporting
 /// - Error handling (invalid URLs, network errors)
 /// - Cancellation support
-///
-/// IMPORTANT: These tests use real network operations.
-/// Some tests may fail if GitHub is unavailable or network is down.
 /// </summary>
 public class ZipDownloadServiceTests : IAsyncLifetime
 {
-    private readonly ZipDownloadService _service = new();
+    private readonly ZipDownloadService _service = new(new GitHubArchiveHandler());
     private string? _tempDir;
 
-    // Test repository - small public repo for testing
-    // Using octocat/Hello-World - small and stable repo
     private const string TestRepoUrl = "https://github.com/octocat/Hello-World";
     private const string TestRepoName = "Hello-World";
 
@@ -119,39 +115,12 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
     #region Download Tests
 
-    private static bool ShouldSkipForTransientNetworkFailure(bool success, string? errorMessage)
-    {
-        if (success)
-            return false;
-
-        if (string.IsNullOrWhiteSpace(errorMessage))
-            return false;
-
-        var message = errorMessage.ToLowerInvariant();
-        return message.Contains("502") ||
-               message.Contains("503") ||
-               message.Contains("timed out") ||
-               message.Contains("timeout") ||
-               message.Contains("proxy") ||
-               message.Contains("connection") ||
-               message.Contains("соедин") ||
-               message.Contains("отклик") ||
-               message.Contains("разорвано") ||
-               message.Contains("name or service not known") ||
-               message.Contains("could not resolve") ||
-               message.Contains("host is unknown") ||
-               message.Contains("хост неизвестен");
-    }
-
     [Fact]
     public async Task DownloadAndExtractAsync_DownloadsAndExtracts_Successfully()
     {
-        // This test requires network access - skip if no internet
         var targetDir = Path.Combine(_tempDir!, "download-test");
 
         var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
-        if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
-            return;
 
         Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
         Assert.Equal(targetDir, result.LocalPath);
@@ -174,8 +143,6 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         var progress = new ProgressRecorder();
 
         var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, progress, cancellationToken: TestContext.Current.CancellationToken);
-        if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
-            return;
 
         Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
 
@@ -219,8 +186,6 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         var targetDir = Path.Combine(_tempDir!, "no-root-test");
 
         var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
-        if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
-            return;
 
         Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
 
@@ -238,8 +203,6 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         var targetDir = Path.Combine(_tempDir!, "name-test");
 
         var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
-        if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
-            return;
 
         Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
         Assert.Equal(TestRepoName, result.RepositoryName);
@@ -252,8 +215,6 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         var targetDir = Path.Combine(_tempDir!, "url-storage-test");
 
         var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
-        if (ShouldSkipForTransientNetworkFailure(result.Success, result.ErrorMessage))
-            return;
 
         Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
         Assert.Equal(TestRepoUrl, result.RepositoryUrl);
@@ -319,11 +280,6 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         var task2 = _service.DownloadAndExtractAsync(TestRepoUrl, targetDir2, cancellationToken: TestContext.Current.CancellationToken);
 
         var results = await Task.WhenAll(task1, task2);
-        if (ShouldSkipForTransientNetworkFailure(results[0].Success, results[0].ErrorMessage) ||
-            ShouldSkipForTransientNetworkFailure(results[1].Success, results[1].ErrorMessage))
-        {
-            return;
-        }
 
         Assert.True(results[0].Success, $"First download failed: {results[0].ErrorMessage}");
         Assert.True(results[1].Success, $"Second download failed: {results[1].ErrorMessage}");
@@ -342,18 +298,12 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     [Fact]
     public async Task DownloadAndExtractAsync_RespectsTimeout()
     {
-        // HttpClient has 10 minute timeout configured
-        // This test verifies that timeout is configured (not that it triggers)
+        // The deterministic response must complete within the production timeout.
         var targetDir = Path.Combine(_tempDir!, "timeout-test");
 
-        // Use a fast download that should complete within timeout
         var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
-        // Should succeed if network is available
-        if (result.Success)
-        {
-            Assert.True(result.Success);
-        }
+        Assert.True(result.Success, result.ErrorMessage);
     }
 
     #endregion
@@ -369,10 +319,8 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         var result = await _service.DownloadAndExtractAsync(originalUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
-        if (result.Success)
-        {
-            Assert.Equal(originalUrl, result.RepositoryUrl);
-        }
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(originalUrl, result.RepositoryUrl);
     }
 
     #endregion
@@ -387,16 +335,8 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         var result = await _service.DownloadAndExtractAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
 
-        if (result.Success)
-        {
-            // Temp ZIP should be cleaned up - check temp folder
-            var tempFolder = Path.GetTempPath();
-            var tempZipFiles = Directory.GetFiles(tempFolder, "devprojex_*.zip");
-
-            // Our temp file should not exist (was cleaned up)
-            // Note: Other temp files may exist from other tests, so we can't assert complete absence
-            Assert.True(result.Success);
-        }
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.True(File.Exists(Path.Combine(targetDir, "README.md")));
     }
 
     [Fact]
@@ -414,6 +354,57 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // Temp file should be cleaned up even on error
         // This is best-effort verification
         Assert.False(result.Success);
+    }
+
+    private sealed class GitHubArchiveHandler : HttpMessageHandler
+    {
+        // Keep URL generation, streaming, extraction, and error mapping under test
+        // without making their result depend on external DNS or GitHub availability.
+        private static readonly byte[] RepositoryArchive = CreateRepositoryArchive();
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var requestUri = request.RequestUri?.AbsoluteUri ?? string.Empty;
+            if (requestUri.Contains("user-that-definitely-does-not-exist", StringComparison.Ordinal))
+                throw new HttpRequestException("Simulated DNS failure.");
+
+            if (requestUri.Contains("nonexistent", StringComparison.Ordinal) ||
+                requestUri.Contains("/invalid/", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            }
+
+            return Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(RepositoryArchive)
+                });
+        }
+
+        private static byte[] CreateRepositoryArchive()
+        {
+            using var buffer = new MemoryStream();
+            using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                WriteEntry(archive, "Hello-World-main/README.md", "# Hello World\n");
+                WriteEntry(
+                    archive,
+                    "Hello-World-main/src/App.cs",
+                    "internal static class App { }\n");
+            }
+
+            return buffer.ToArray();
+        }
+
+        private static void WriteEntry(ZipArchive archive, string path, string content)
+        {
+            var entry = archive.CreateEntry(path, CompressionLevel.Fastest);
+            using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
+            writer.Write(content);
+        }
     }
 
     #endregion

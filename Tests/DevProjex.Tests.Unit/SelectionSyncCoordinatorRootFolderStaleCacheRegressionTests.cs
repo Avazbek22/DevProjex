@@ -49,7 +49,6 @@ public sealed class SelectionSyncCoordinatorRootFolderStaleCacheRegressionTests
     private static TemporaryDirectory CreateWorkspace()
     {
         var workspace = new TemporaryDirectory();
-        workspace.CreateFile(".gitignore", "*.user\n");
         workspace.CreateFile("DevProjex.sln", string.Empty);
         workspace.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
         workspace.CreateFile(Path.Combine("src", "empty.cs"), string.Empty);

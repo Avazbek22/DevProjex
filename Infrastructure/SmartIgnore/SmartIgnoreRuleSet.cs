@@ -16,12 +16,14 @@ internal static class SmartIgnoreRuleSet
 		IReadOnlySet<string>? markerFiles = null,
 		IReadOnlySet<string>? markerExtensions = null,
 		IReadOnlySet<string>? folderNames = null,
-		IReadOnlySet<string>? fileNames = null) =>
+		IReadOnlySet<string>? fileNames = null,
+		IReadOnlySet<string>? evidenceRequiredFolderNames = null) =>
 		new(
 			markerFiles ?? Empty,
 			markerExtensions ?? Empty,
 			folderNames ?? Empty,
-			fileNames ?? Empty);
+			fileNames ?? Empty,
+			evidenceRequiredFolderNames ?? Empty);
 
 	public static SmartIgnoreResult Result(
 		IReadOnlySet<string>? folderNames = null,

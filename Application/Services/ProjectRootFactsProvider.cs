@@ -1,12 +1,10 @@
 using System.IO.Enumeration;
 using System.Security.Cryptography;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Services;
 
-public sealed class ProjectRootFactsProvider(
-	TimeSpan? cacheTtl = null,
-	int cacheLimit = ProjectRootFactsProvider.DefaultCacheLimit,
-	Func<DateTime>? utcNowProvider = null)
+public sealed class ProjectRootFactsProvider
 {
 	private const int DefaultCacheLimit = 256;
 	private static readonly TimeSpan DefaultCacheTtl = TimeSpan.FromSeconds(5);
@@ -19,13 +17,39 @@ public sealed class ProjectRootFactsProvider(
 	};
 
 	private readonly object _cacheSync = new();
-	private readonly Dictionary<string, CacheEntry> _cache = new(PathComparer.Default);
-	private readonly TimeSpan _cacheTtl = cacheTtl ?? DefaultCacheTtl;
-	private readonly int _cacheLimit = Math.Max(0, cacheLimit);
-	private readonly Func<DateTime> _utcNowProvider = utcNowProvider ?? (() => DateTime.UtcNow);
+	private readonly Dictionary<string, LinkedListNode<CacheEntry>> _cache = new(PathComparer.Default);
+	private readonly LinkedList<CacheEntry> _cacheLru = new();
+	private readonly TimeSpan _cacheTtl;
+	private readonly int _cacheLimit;
+	private readonly Func<DateTime> _utcNowProvider;
+	private readonly Func<string, ProjectRootFacts> _factsBuilder;
+	private readonly Dictionary<string, long> _latestBuildSequences = new(PathComparer.Default);
+	private long _cacheGeneration;
+	private long _nextBuildSequence;
+
+	public ProjectRootFactsProvider(
+		TimeSpan? cacheTtl = null,
+		int cacheLimit = DefaultCacheLimit,
+		Func<DateTime>? utcNowProvider = null)
+		: this(cacheTtl, cacheLimit, utcNowProvider, Build)
+	{
+	}
+
+	internal ProjectRootFactsProvider(
+		TimeSpan? cacheTtl,
+		int cacheLimit,
+		Func<DateTime>? utcNowProvider,
+		Func<string, ProjectRootFacts> factsBuilder)
+	{
+		_cacheTtl = cacheTtl ?? DefaultCacheTtl;
+		_cacheLimit = Math.Max(0, cacheLimit);
+		_utcNowProvider = utcNowProvider ?? (() => DateTime.UtcNow);
+		_factsBuilder = factsBuilder ?? throw new ArgumentNullException(nameof(factsBuilder));
+	}
 
 	public ProjectRootFacts Get(string rootPath, bool forceRefresh = false)
 	{
+		IgnorePipelineDiagnostics.RecordRootFactsRequest();
 		if (string.IsNullOrWhiteSpace(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
 
@@ -44,23 +68,57 @@ public sealed class ProjectRootFactsProvider(
 		{
 			lock (_cacheSync)
 			{
-				if (_cache.TryGetValue(normalizedRootPath, out var cached) &&
-				    now - cached.CachedAtUtc <= _cacheTtl)
+				if (_cache.TryGetValue(normalizedRootPath, out var cachedNode) &&
+				    now - cachedNode.Value.CachedAtUtc <= _cacheTtl)
 				{
-					return cached.Facts;
+					_cacheLru.Remove(cachedNode);
+					_cacheLru.AddFirst(cachedNode);
+					IgnorePipelineDiagnostics.RecordRootFactsCacheHit();
+					return cachedNode.Value.Facts;
 				}
 			}
 		}
 
-		var facts = Build(normalizedRootPath);
-		if (_cacheLimit > 0)
+		IgnorePipelineDiagnostics.RecordRootFactsBuild();
+		if (_cacheLimit == 0)
+			return _factsBuilder(normalizedRootPath);
+
+		long cacheGeneration;
+		long buildSequence;
+		lock (_cacheSync)
 		{
-			lock (_cacheSync)
+			cacheGeneration = _cacheGeneration;
+			buildSequence = unchecked(++_nextBuildSequence);
+			_latestBuildSequences[normalizedRootPath] = buildSequence;
+		}
+
+		ProjectRootFacts facts;
+		try
+		{
+			facts = _factsBuilder(normalizedRootPath);
+		}
+		catch
+		{
+			AbandonBuildReservation(normalizedRootPath, cacheGeneration, buildSequence);
+			throw;
+		}
+
+		lock (_cacheSync)
+		{
+			// A filesystem invalidation or a newer refresh wins even if this older build
+			// completes later. Returning the facts to its caller is safe; caching them is not.
+			if (_cacheGeneration != cacheGeneration ||
+			    !_latestBuildSequences.TryGetValue(normalizedRootPath, out var latestSequence) ||
+			    latestSequence != buildSequence)
 			{
-				_cache[normalizedRootPath] = new CacheEntry(now, facts);
-				if (_cache.Count > _cacheLimit)
-					_cache.Clear();
+				return facts;
 			}
+
+			_latestBuildSequences.Remove(normalizedRootPath);
+			RemoveCacheEntry(normalizedRootPath);
+			var entry = new CacheEntry(normalizedRootPath, _utcNowProvider(), facts);
+			_cache[normalizedRootPath] = _cacheLru.AddFirst(entry);
+			TrimCache();
 		}
 
 		return facts;
@@ -73,34 +131,50 @@ public sealed class ProjectRootFactsProvider(
 
 		lock (_cacheSync)
 		{
+			_cacheGeneration = unchecked(_cacheGeneration + 1);
+			_latestBuildSequences.Clear();
 			if (!includeDescendants)
 			{
-				_cache.Remove(normalizedRootPath);
+				RemoveCacheEntry(normalizedRootPath);
 				return;
 			}
 
 			foreach (var cachedPath in _cache.Keys.ToArray())
 			{
 				if (IsSameOrDescendantPath(cachedPath, normalizedRootPath))
-					_cache.Remove(cachedPath);
+					RemoveCacheEntry(cachedPath);
 			}
 		}
 	}
 
-	internal void RefreshCacheLifetime(IReadOnlyCollection<string> rootPaths)
+	private void AbandonBuildReservation(string path, long cacheGeneration, long buildSequence)
 	{
-		if (rootPaths.Count == 0 || _cacheLimit == 0)
-			return;
-
-		var now = _utcNowProvider();
 		lock (_cacheSync)
 		{
-			foreach (var rootPath in rootPaths)
+			if (_cacheGeneration == cacheGeneration &&
+			    _latestBuildSequences.TryGetValue(path, out var latestSequence) &&
+			    latestSequence == buildSequence)
 			{
-				if (_cache.TryGetValue(rootPath, out var cached))
-					_cache[rootPath] = cached with { CachedAtUtc = now };
+				_latestBuildSequences.Remove(path);
 			}
 		}
+	}
+
+	private void TrimCache()
+	{
+		while (_cache.Count > _cacheLimit && _cacheLru.Last is { } leastRecentlyUsed)
+		{
+			RemoveCacheEntry(leastRecentlyUsed.Value.Path);
+			IgnorePipelineDiagnostics.RecordRootFactsEviction();
+		}
+	}
+
+	private void RemoveCacheEntry(string path)
+	{
+		if (!_cache.Remove(path, out var node))
+			return;
+
+		_cacheLru.Remove(node);
 	}
 
 	private static ProjectRootFacts Build(string rootPath)
@@ -174,7 +248,7 @@ public sealed class ProjectRootFactsProvider(
 		var hasGitIgnore = false;
 		foreach (var file in files)
 		{
-			if (PathComparer.Default.Equals(file.Name, ".gitignore"))
+			if (!file.IsReparsePoint && PathComparer.Default.Equals(file.Name, ".gitignore"))
 			{
 				hasGitIgnore = true;
 				break;
@@ -195,19 +269,11 @@ public sealed class ProjectRootFactsProvider(
 			if (!linkInfo.Exists)
 				return null;
 
-			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
-			{
-				var resolvedTarget = linkInfo.ResolveLinkTarget(returnFinalTarget: true);
-				if (resolvedTarget is not FileInfo targetInfo || !targetInfo.Exists)
-					return null;
-
-				targetInfo.Refresh();
-				return new ProjectRootFileSignature(
-					targetInfo.LastWriteTimeUtc.Ticks,
-					targetInfo.Length,
-					linkInfo.LinkTarget ?? string.Empty,
-					ComputeContentFingerprint(targetInfo.FullName));
-			}
+			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+			    !string.IsNullOrEmpty(linkInfo.LinkTarget))
+				return null;
+			if (linkInfo.Length > GitIgnoreFileReader.MaximumFileSizeBytes)
+				return null;
 
 			return new ProjectRootFileSignature(
 				linkInfo.LastWriteTimeUtc.Ticks,
@@ -215,7 +281,12 @@ public sealed class ProjectRootFactsProvider(
 				LinkTarget: string.Empty,
 				ComputeContentFingerprint(linkInfo.FullName));
 		}
-		catch
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       System.Security.SecurityException or
+		       NotSupportedException or
+		       ArgumentException)
 		{
 			return null;
 		}
@@ -231,26 +302,20 @@ public sealed class ProjectRootFactsProvider(
 			if (!linkInfo.Exists)
 				return false;
 
-			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
-			{
-				var resolvedTarget = linkInfo.ResolveLinkTarget(returnFinalTarget: true);
-				if (resolvedTarget is not FileInfo targetInfo || !targetInfo.Exists)
-					return false;
+			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+			    !string.IsNullOrEmpty(linkInfo.LinkTarget))
+				return false;
 
-				targetInfo.Refresh();
-				return targetInfo.LastWriteTimeUtc.Ticks == expectedSignature.LastWriteTicksUtc &&
-				       targetInfo.Length == expectedSignature.LengthBytes &&
-				       string.Equals(
-					       linkInfo.LinkTarget ?? string.Empty,
-					       expectedSignature.LinkTarget,
-					       StringComparison.Ordinal);
-			}
-
-			return linkInfo.LastWriteTimeUtc.Ticks == expectedSignature.LastWriteTicksUtc &&
-			       linkInfo.Length == expectedSignature.LengthBytes &&
-			       expectedSignature.LinkTarget.Length == 0;
+			return expectedSignature.LinkTarget.Length == 0 &&
+			       linkInfo.LastWriteTimeUtc.Ticks == expectedSignature.LastWriteTicksUtc &&
+			       linkInfo.Length == expectedSignature.LengthBytes;
 		}
-		catch
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       System.Security.SecurityException or
+		       NotSupportedException or
+		       ArgumentException)
 		{
 			return false;
 		}
@@ -306,5 +371,5 @@ public sealed class ProjectRootFactsProvider(
 		bool IsDirectory,
 		bool IsReparsePoint);
 
-	private sealed record CacheEntry(DateTime CachedAtUtc, ProjectRootFacts Facts);
+	private sealed record CacheEntry(string Path, DateTime CachedAtUtc, ProjectRootFacts Facts);
 }

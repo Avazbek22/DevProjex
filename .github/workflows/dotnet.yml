@@ -296,12 +296,15 @@ jobs:
           - os_name: Windows
             runner: windows-latest
             os_id: windows
+            run_large_perf_tests: "0"
           - os_name: Linux
             runner: ubuntu-latest
             os_id: linux
+            run_large_perf_tests: "1"
           - os_name: macOS
             runner: macos-latest
             os_id: macos
+            run_large_perf_tests: "0"
 
     steps:
       - uses: actions/checkout@v4
@@ -330,12 +333,14 @@ jobs:
 
       - name: Run ignore/scanner integration tests
         shell: pwsh
+        env:
+          DEVPROJEX_RUN_LARGE_PERF_TESTS: ${{ matrix.run_large_perf_tests }}
         run: >
           dotnet test Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~Ignore|FullyQualifiedName~Scanner|FullyQualifiedName~ReparsePoint|FullyQualifiedName~FileSystemMutation"
+          --filter "Category=IgnoreContract|FullyQualifiedName~Ignore|FullyQualifiedName~Scanner|FullyQualifiedName~ReparsePoint|FullyQualifiedName~FileSystemMutation"
           --logger "trx;LogFileName=ignore-scanner.trx"
           --results-directory "TestResults/ignore-scanner"
 

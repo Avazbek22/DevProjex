@@ -81,8 +81,8 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **Progress bar + operation cancellation** with safe fallback behavior
 * **Modern appearance system**
 
-  * Light / Dark
-  * Transparency & blur where supported
+  * System / Light / Dark
+  * Transparency / blur / Mica where supported
   * Presets stored locally
   * Island-based layout and smooth UI animations
 * **Animated toasts** for user feedback
@@ -136,18 +136,24 @@ Deep projects are not limited to the repository root. When an artifact candidate
 
 | Mode | Result |
 |---|---|
-| **Use `.gitignore`** | Keeps tracked files and untracked files that are not excluded by reachable `.gitignore` rules. If no readable Git index is available, DevProjex safely falls back to pattern-only evaluation. |
-| **Tracked Git files only** | Starts from existing working-tree files recorded in each readable Git index. Modified tracked files and staged additions remain included; untracked files are excluded. |
+| **Use `.gitignore`** | Keeps tracked files and untracked files that are not excluded by reachable `.gitignore` rules. Each path uses the index of its owning repository/worktree scope; a scope without a readable index safely falls back to pattern-only evaluation. |
+| **Tracked Git files only** | Uses the installed Git CLI to start from existing working-tree files recorded in each readable Git index. Modified tracked files and staged additions remain included; untracked files are excluded. |
 
-In `.gitignore` mode, every reachable `.gitignore` is evaluated in its own directory scope, including nested rules and negations.
+In `.gitignore` mode, every reachable `.gitignore` is evaluated in its own directory scope, including the ancestor rule chain when a repository subfolder is opened, nested rules, and negations. Pattern case matching follows the effective repository `core.ignoreCase` value; macOS Unicode comparison also follows Git's `core.precomposeUnicode` behavior. This keeps the tree, extension list, preview, and exports on the same path semantics as Git.
 
-DevProjex resolves every reachable nested repository and worktree independently, at any reachable nesting level. A child repository never inherits tracked state from its parent or sibling. Strict tracked-files mode does not silently fall back to `.gitignore` patterns when an index cannot be read.
+Only regular working-tree `.gitignore` files are rule sources. DevProjex does not apply `.git/info/exclude`, global Git excludes, or a `.gitignore` symbolic link; this matches Git's own control-file behavior and prevents a link target outside the project from changing the result. If a regular `.gitignore` cannot be read, its directory scope is excluded fail-closed and the scan reports partial access instead of silently including files without applying all ignore rules.
+
+If no `.gitignore` exists, the selected mode remains active with an empty pattern set: only the exact Git administration entry `.git` is protected, while names such as `.github` remain normal project content.
+
+DevProjex resolves every reachable nested repository and worktree independently, at any reachable nesting level. A child repository never inherits tracked state from its parent or sibling. Tracked-files mode is fail-closed and never silently falls back to `.gitignore`: direct commands, including `devprojex open`, return a policy failure before output or Desktop handoff if the Git CLI cannot load any applicable index; an already-open Desktop workspace keeps the explicit selection visible so it can be turned off; TUI startup does not open an unavailable tracked workspace, while an unsuccessful interactive TUI mode change keeps the last usable Git mode. A readable empty index is valid; unreadable nested indexes are excluded with a warning when another applicable index was loaded.
 
 This is a view of the current working tree, not a historical snapshot of `HEAD` or a promise that the files match a remote Git host. The current bytes of modified tracked files are used.
 
 ### 5. Compose filters predictably
 
 The selected Git mode runs first. Smart Ignore processes the remaining items, followed by the explicit dot-file, hidden-item, empty-item, and extensionless-file rules. Root-folder, file-type, and checkbox selections can narrow the same effective tree further.
+
+The built-in `standard` profile selects `gitignore` mode and all eight exclusion groups: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files`, and `extensionless-files`. Explicit CLI options replace the corresponding profile field for that invocation.
 
 Inside a Git repository, the two Git modes remain visible as a stable toggle pair. Smart Ignore and the evidence-based basic options appear only when they can affect the current tree. Smart Ignore may therefore stay hidden while the selected Git mode already excludes all matching artifacts, then appear after that mode is changed.
 

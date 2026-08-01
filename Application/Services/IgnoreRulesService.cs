@@ -1,18 +1,24 @@
 using System.Collections.Frozen;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Services;
 
 public sealed class IgnoreRulesService(
 	SmartIgnoreService smartIgnore,
-	ProjectScopeDiscoveryService? projectScopeDiscovery = null)
+	ProjectScopeDiscoveryService? projectScopeDiscovery = null,
+	IGitPathComparisonSemanticsResolver? pathComparisonSemanticsResolver = null)
 {
 	private const int CacheLimit = 512;
+	private const long CacheByteLimit = 16L * 1024 * 1024;
 	private static readonly object CacheSync = new();
 	private static readonly Dictionary<string, LinkedListNode<GitIgnoreCacheEntry>> GitIgnoreCache =
 		new(PathComparer.Default);
 	private static readonly LinkedList<GitIgnoreCacheEntry> GitIgnoreCacheLru = new();
+	private static long _gitIgnoreCacheSizeBytes;
 	private readonly ProjectScopeDiscoveryService _projectScopeDiscovery =
 		projectScopeDiscovery ?? new ProjectScopeDiscoveryService(smartIgnore);
+	private readonly IGitPathComparisonSemanticsResolver _pathComparisonSemanticsResolver =
+		pathComparisonSemanticsResolver ?? PlatformGitPathComparisonSemanticsResolver.Instance;
 
 	private static readonly StringComparer PathStringComparer = PathComparer.Default;
 	private static readonly StringComparison PathStringComparison = PathComparer.Comparison;
@@ -23,11 +29,13 @@ public sealed class IgnoreRulesService(
 	public void InvalidateCaches(string rootPath)
 	{
 		_projectScopeDiscovery.Invalidate(rootPath);
+		_pathComparisonSemanticsResolver.Invalidate(rootPath);
 		InvalidateGitIgnoreMatchers(rootPath);
 	}
 
 	public bool RevalidateCaches(string rootPath, CancellationToken cancellationToken = default)
 	{
+		_pathComparisonSemanticsResolver.Invalidate(rootPath);
 		var reusedDiscovery = _projectScopeDiscovery.Revalidate(rootPath, cancellationToken);
 		if (!reusedDiscovery)
 			InvalidateGitIgnoreMatchers(rootPath);
@@ -61,6 +69,7 @@ public sealed class IgnoreRulesService(
 		IReadOnlyCollection<IgnoreOptionId> selectedOptions,
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
+		IgnorePipelineDiagnostics.RecordIgnoreRulesBuild();
 		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
 		// A nested .gitignore can be discovered by the scanner after bounded project-scope
 		// discovery has completed. An explicit/default selection must therefore activate the
@@ -76,11 +85,14 @@ public sealed class IgnoreRulesService(
 		var candidateGitIgnoreMatcher = candidateScopedGitMatchers.Length == 1
 			? candidateScopedGitMatchers[0].Matcher
 			: GitIgnoreMatcher.Empty;
-		var useGitIgnore = requestedGitIgnore && candidateScopedGitMatchers.Length > 0;
-		var scopedMatchers = useGitIgnore
+		// Git mode is user intent, not a side effect of discovering a control file.
+		// A missing .gitignore means an active empty rule set; it must never downgrade
+		// RespectGitIgnore or expose Git administrative data from an otherwise valid scan.
+		var useGitIgnore = requestedGitIgnore;
+		var scopedMatchers = requestedGitIgnore
 			? candidateScopedGitMatchers
 			: Array.Empty<ScopedGitIgnoreMatcher>();
-		var gitIgnoreMatcher = useGitIgnore && scopedMatchers.Length == 1
+		var gitIgnoreMatcher = requestedGitIgnore && scopedMatchers.Length == 1
 			? scopedMatchers[0].Matcher
 			: GitIgnoreMatcher.Empty;
 
@@ -131,7 +143,7 @@ public sealed class IgnoreRulesService(
 			UseTrackedGitFilesOnly = useTrackedGitFilesOnly,
 			EnableGitIgnoreTraversal = requestedGitIgnore || useTrackedGitFilesOnly,
 			UseSmartIgnore = useSmartIgnore,
-			GitIgnoreCandidateMatchesActiveRules = useGitIgnore,
+			GitIgnoreCandidateMatchesActiveRules = requestedGitIgnore,
 			SmartIgnoreCandidateMatchesActiveRules = useSmartIgnore,
 			GitIgnoreMatcher = gitIgnoreMatcher,
 			ScopedGitIgnoreMatchers = scopedMatchers,
@@ -289,7 +301,8 @@ public sealed class IgnoreRulesService(
 					localState.ScopedMatchers.Add(new ScopedSmartIgnoreMatcher(
 						scope.RootPath,
 						FreezeOrEmpty(smart.FolderNames),
-						FreezeOrEmpty(smart.FileNames)));
+						FreezeOrEmpty(smart.FileNames),
+						FreezeOrEmpty(smart.EvidenceRequiredFolderNames)));
 				}
 
 				return localState;
@@ -353,7 +366,9 @@ public sealed class IgnoreRulesService(
 
 		foreach (var scope in scopesWithGitIgnore)
 		{
-			var matcher = TryBuildGitIgnoreMatcher(scope.RootPath, smartIgnore.RootFactsProvider.Get(scope.RootPath));
+			var matcher = TryBuildGitIgnoreMatcher(
+				scope.RootPath,
+				smartIgnore.RootFactsProvider.Get(scope.RootPath));
 			if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty))
 				continue;
 
@@ -366,7 +381,7 @@ public sealed class IgnoreRulesService(
 		IReadOnlyCollection<string>? selectedRootFolders) =>
 		_projectScopeDiscovery.Discover(rootPath, selectedRootFolders);
 
-	private static GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath, ProjectRootFacts? rootFacts = null)
+	private GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath, ProjectRootFacts? rootFacts = null)
 	{
 		if (string.IsNullOrWhiteSpace(rootPath))
 			return GitIgnoreMatcher.Empty;
@@ -378,44 +393,72 @@ public sealed class IgnoreRulesService(
 		try
 		{
 			var cacheKey = Path.GetFullPath(gitIgnorePath);
-			var signature = rootFacts?.GitIgnoreSignature;
-			if (!signature.HasValue ||
-			    !ProjectRootFactsProvider.HasMatchingFileMetadata(gitIgnorePath, signature.GetValueOrDefault()))
+			var comparisonSemantics = _pathComparisonSemanticsResolver.Resolve(rootPath);
+			if (!comparisonSemantics.IsAuthoritative)
 			{
-				signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
+				// Guessing case or Unicode behavior is not monotonic for escaped literals,
+				// character classes, and negations. The scanner will surface the dynamic
+				// source as unavailable and exclude the affected scope fail-closed.
+				return GitIgnoreMatcher.Empty;
 			}
+			// The root-facts cache is intentionally short-lived, but timestamp and length
+			// alone cannot identify a .gitignore rewrite. Always obtain the current content
+			// fingerprint before reusing a compiled matcher.
+			var signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
+			// A missing signature means that this is not a readable regular working-tree
+			// file. The filesystem scanner owns the visible partial-access diagnostic;
+			// this prebuild path must neither follow a link nor invent an empty rule set.
+			if (!signature.HasValue)
+				return GitIgnoreMatcher.Empty;
 
-			if (signature.HasValue)
+			lock (CacheSync)
 			{
-				lock (CacheSync)
+				if (GitIgnoreCache.TryGetValue(cacheKey, out var cachedNode) &&
+				    cachedNode.Value.Signature.Equals(signature.GetValueOrDefault()) &&
+				    cachedNode.Value.ComparisonSemantics.Equals(comparisonSemantics))
 				{
-					if (GitIgnoreCache.TryGetValue(cacheKey, out var cachedNode) &&
-						cachedNode.Value.Signature.Equals(signature.GetValueOrDefault()))
-					{
-						GitIgnoreCacheLru.Remove(cachedNode);
-						GitIgnoreCacheLru.AddFirst(cachedNode);
-						return cachedNode.Value.Matcher;
-					}
-
-					RemoveGitIgnoreCacheEntry(cacheKey);
+					GitIgnoreCacheLru.Remove(cachedNode);
+					GitIgnoreCacheLru.AddFirst(cachedNode);
+					return cachedNode.Value.Matcher;
 				}
+
+				RemoveGitIgnoreCacheEntry(cacheKey);
 			}
 
-			var matcher = GitIgnoreMatcher.Build(rootPath, File.ReadLines(gitIgnorePath));
-			if (signature.HasValue)
+			var source = GitIgnoreFileReader.Read(gitIgnorePath);
+			if (source.LengthBytes != signature.GetValueOrDefault().LengthBytes ||
+			    !string.Equals(
+				    source.ContentFingerprint,
+				    signature.GetValueOrDefault().ContentFingerprint,
+				    StringComparison.Ordinal))
 			{
-				lock (CacheSync)
+				return GitIgnoreMatcher.Empty;
+			}
+
+			var matcher = GitIgnoreMatcher.Build(
+				rootPath,
+				GitIgnoreFileReader.SplitLines(source.Content),
+				comparisonSemantics);
+			lock (CacheSync)
+			{
+				RemoveGitIgnoreCacheEntry(cacheKey);
+				var sourceSizeBytes = signature.GetValueOrDefault().LengthBytes;
+				// A pathological but valid source remains usable for this scan. Retaining
+				// it would let the static cache grow by hundreds of megabytes per scope.
+				if (sourceSizeBytes <= CacheByteLimit)
 				{
-					RemoveGitIgnoreCacheEntry(cacheKey);
 					var entry = new GitIgnoreCacheEntry(
 						cacheKey,
 						signature.GetValueOrDefault(),
+						comparisonSemantics,
 						matcher);
 					GitIgnoreCache[cacheKey] = GitIgnoreCacheLru.AddFirst(entry);
+					_gitIgnoreCacheSizeBytes += sourceSizeBytes;
 
-					// Evict one cold matcher at a time. Clearing the whole cache caused
-					// repeated parse storms in workspaces with many nested repositories.
-					while (GitIgnoreCache.Count > CacheLimit &&
+					// Evict cold matchers one at a time. Count and source weight are both
+					// bounded because compiled matcher cost scales with pattern input.
+					while ((GitIgnoreCache.Count > CacheLimit ||
+					        _gitIgnoreCacheSizeBytes > CacheByteLimit) &&
 					       GitIgnoreCacheLru.Last is { } leastRecentlyUsed)
 					{
 						RemoveGitIgnoreCacheEntry(leastRecentlyUsed.Value.CacheKey);
@@ -425,7 +468,12 @@ public sealed class IgnoreRulesService(
 
 			return matcher;
 		}
-		catch
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       System.Security.SecurityException or
+		       NotSupportedException or
+		       ArgumentException)
 		{
 			return GitIgnoreMatcher.Empty;
 		}
@@ -436,12 +484,16 @@ public sealed class IgnoreRulesService(
 		if (!GitIgnoreCache.Remove(cacheKey, out var node))
 			return;
 
+		_gitIgnoreCacheSizeBytes = Math.Max(
+			0,
+			_gitIgnoreCacheSizeBytes - node.Value.Signature.LengthBytes);
 		GitIgnoreCacheLru.Remove(node);
 	}
 
 	private sealed record GitIgnoreCacheEntry(
 		string CacheKey,
 		ProjectRootFileSignature Signature,
+		GitPathComparisonSemantics ComparisonSemantics,
 		GitIgnoreMatcher Matcher);
 
 	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)

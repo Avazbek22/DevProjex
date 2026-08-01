@@ -32,12 +32,17 @@ public sealed class PythonArtifactsIgnoreRule :
 		".hypothesis",
 		".ipynb_checkpoints",
 		".pyre");
+	private static readonly IReadOnlySet<string> EvidenceRequiredFolderNames =
+		SmartIgnoreRuleSet.Create("venv", "env");
 
 	private static readonly SmartIgnoreResult MatchResult =
 		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
-		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
+		SmartIgnoreRuleSet.Descriptor(
+			markerFiles: MarkerFiles,
+			folderNames: FolderNames,
+			evidenceRequiredFolderNames: EvidenceRequiredFolderNames);
 
 	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
 		rootFacts.Exists && rootFacts.HasAnyMarkerFile(MarkerFiles)

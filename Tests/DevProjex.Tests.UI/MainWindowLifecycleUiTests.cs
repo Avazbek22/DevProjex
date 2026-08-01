@@ -1,6 +1,8 @@
 using System.Reflection;
+using Avalonia.Media;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Views;
+using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.UI;
 
@@ -20,7 +22,7 @@ public sealed class MainWindowLifecycleUiTests
 	];
 
 	[AvaloniaFact]
-	public async Task StartupRevealGate_RestoresWindowOpacityAfterInitialRenderFrames()
+	public async Task StartupRevealGate_KeepsContentVisibleAndRevealsNativeBackdropBehindIt()
 	{
 		var appDataPath = Path.Combine(Path.GetTempPath(), "DevProjexTests", Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(appDataPath);
@@ -36,15 +38,83 @@ public sealed class MainWindowLifecycleUiTests
 
 		try
 		{
-			var expectedInitialOpacity = MainWindow.ShouldUseStartupRevealGate() ? 0.0 : 1.0;
-			Assert.Equal(expectedInitialOpacity, window.Opacity);
+			var cover = Assert.IsType<Border>(window.FindControl<Border>("StartupBackdropCover"));
+			var revealGateActive = Assert.IsType<bool>(GetPrivateFieldValue(
+				window,
+				new OwnedField(null, "_startupRevealGateActive")));
+
+			Assert.Equal(1.0, window.Opacity);
+			Assert.Equal(revealGateActive, cover.IsVisible);
+			Assert.Equal(revealGateActive ? 1.0 : 0.0, cover.Opacity);
 
 			window.Show();
 
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => window.Opacity >= 0.99,
-				"startup reveal gate to restore the window opacity");
+				() => window.Opacity >= 0.99 && cover.Opacity <= 0.01,
+				"startup backdrop cover to reveal the native material");
+			Assert.Equal(1.0, window.Opacity);
+		}
+		finally
+		{
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+
+			try
+			{
+				Directory.Delete(appDataPath, recursive: true);
+			}
+			catch
+			{
+				// Best effort test cleanup only.
+			}
+		}
+	}
+
+	[Theory]
+	[InlineData(true, ThemeEffectMode.Acrylic, true)]
+	[InlineData(true, ThemeEffectMode.Mica, true)]
+	[InlineData(true, ThemeEffectMode.Solid, false)]
+	[InlineData(true, ThemeEffectMode.Transparent, false)]
+	[InlineData(false, ThemeEffectMode.Acrylic, false)]
+	[InlineData(false, ThemeEffectMode.Mica, false)]
+	public void StartupRevealGate_IsReservedForWindowsNativeBackdrops(
+		bool isWindows,
+		ThemeEffectMode effect,
+		bool expected)
+	{
+		Assert.Equal(expected, MainWindow.ShouldUseStartupRevealGate(isWindows, effect));
+	}
+
+	[AvaloniaFact]
+	public async Task Startup_LoadsOptionalFontCatalogAfterTheWindowBecomesVisible()
+	{
+		var appDataPath = Path.Combine(Path.GetTempPath(), "DevProjexTests", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(appDataPath);
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.Single(viewModel.FontFamilies);
+			Assert.Equal(FontFamily.Default, viewModel.SelectedFontFamily);
+			Assert.False(Assert.IsType<bool>(GetPrivateFieldValue(
+				window,
+				new OwnedField(null, "_fontCatalogLoaded"))));
+
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => Assert.IsType<bool>(GetPrivateFieldValue(
+					window,
+					new OwnedField(null, "_fontCatalogLoaded"))),
+				"optional font catalog to load at application idle");
+
+			Assert.Equal(FontFamily.Default, viewModel.SelectedFontFamily);
+			Assert.Equal(FontFamily.Default, viewModel.PendingFontFamily);
 		}
 		finally
 		{
@@ -88,6 +158,7 @@ public sealed class MainWindowLifecycleUiTests
 				debounceTimer);
 
 			await UiTestDriver.CloseWindowAsync(window);
+			Assert.True(window.ShutdownCompletion.IsCompletedSuccessfully);
 
 			foreach (var (fieldName, token) in tokensByField)
 			{

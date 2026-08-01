@@ -3,6 +3,60 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectScopeDiscoveryServiceTests
 {
 	[Fact]
+	public async Task Discover_InvalidatedWhileFactsAreBuilding_DoesNotPublishStaleTopology()
+	{
+		using var buildStarted = new ManualResetEventSlim();
+		using var releaseFirstBuild = new ManualResetEventSlim();
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var buildCount = 0;
+		var factsProvider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(1),
+			cacheLimit: 8,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				var call = Interlocked.Increment(ref buildCount);
+				if (call == 1)
+				{
+					buildStarted.Set();
+					if (!releaseFirstBuild.Wait(
+						    TimeSpan.FromSeconds(5),
+						    TestContext.Current.CancellationToken))
+						throw new TimeoutException("The controlled root-facts build was not released.");
+				}
+
+				return new ProjectRootFacts(
+					path,
+					exists: true,
+					isAccessible: true,
+					files: call == 1
+						? [new ProjectRootFileFact(".gitignore", string.Empty)]
+						: [],
+					directories: [],
+					gitIgnoreSignature: null);
+			});
+		var discovery = new ProjectScopeDiscoveryService(
+			new SmartIgnoreService([]),
+			factsProvider);
+
+		var staleDiscovery = Task.Run(() => discovery.Discover(rootPath, selectedRootFolders: null));
+		Assert.True(buildStarted.Wait(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken));
+		discovery.Invalidate(rootPath);
+		releaseFirstBuild.Set();
+
+		var staleResult = await staleDiscovery;
+		var currentResult = discovery.Discover(rootPath, selectedRootFolders: null);
+		var cachedCurrentResult = discovery.Discover(rootPath, selectedRootFolders: null);
+
+		Assert.True(staleResult.HasAnyGitIgnore);
+		Assert.False(currentResult.HasAnyGitIgnore);
+		Assert.Same(currentResult, cachedCurrentResult);
+		Assert.Equal(2, Volatile.Read(ref buildCount));
+	}
+
+	[Fact]
 	public void Discover_SelectedMissingRoot_ReturnsEmptyContextWithoutWorkspaceFallback()
 	{
 		using var temp = new TemporaryDirectory();
@@ -43,16 +97,37 @@ public sealed class ProjectScopeDiscoveryServiceTests
 		var initial = discovery.Discover(temp.Path, ["workspace"]);
 		Assert.DoesNotContain(initial.Scopes, scope => ScopeEndsWith(scope, "workspace/service"));
 
+		var originalWriteTime = Directory.GetLastWriteTimeUtc(workspacePath);
 		temp.CreateFile("workspace/service/package.json", "{}");
-		Directory.SetLastWriteTimeUtc(
-			workspacePath,
-			Directory.GetLastWriteTimeUtc(workspacePath).AddSeconds(2));
+		Directory.SetLastWriteTimeUtc(workspacePath, originalWriteTime);
 
 		var reused = discovery.Revalidate(temp.Path, TestContext.Current.CancellationToken);
 		var refreshed = discovery.Discover(temp.Path, ["workspace"]);
 
 		Assert.False(reused);
 		Assert.Contains(refreshed.Scopes, scope => ScopeEndsWith(scope, "workspace/service"));
+	}
+
+	[Fact]
+	public void Discover_PosixDelimiterNames_DoNotShareCachedScopeTopology()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("The pipe character is not a valid Windows directory name.");
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("a/source.txt", "a");
+		temp.CreateFile("b|c/.gitignore", "*.cache\n");
+		temp.CreateFile("a|b/package.json", "{}");
+		temp.CreateFile("c/source.txt", "c");
+		var discovery = CreateDiscovery();
+
+		var first = discovery.Discover(temp.Path, ["a", "b|c"]);
+		var second = discovery.Discover(temp.Path, ["a|b", "c"]);
+
+		Assert.Contains(first.Scopes, scope => ScopeEndsWith(scope, "b|c") && scope.HasGitIgnore);
+		Assert.DoesNotContain(first.Scopes, scope => ScopeEndsWith(scope, "a|b"));
+		Assert.Contains(second.Scopes, scope => ScopeEndsWith(scope, "a|b") && scope.HasProjectMarker);
+		Assert.DoesNotContain(second.Scopes, scope => ScopeEndsWith(scope, "b|c"));
 	}
 
 	[Fact]

@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj" />
+    <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia.csproj" />
   </ItemGroup>
 
   <ItemGroup>

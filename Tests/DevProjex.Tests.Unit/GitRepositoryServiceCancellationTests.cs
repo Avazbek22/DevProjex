@@ -79,7 +79,9 @@ public sealed class GitRepositoryServiceCancellationTests
                 async () => await wait);
 
             Assert.True(process.HasExited);
-            Assert.True(HasExited(childProcessId.Value));
+            // The child holds this handle for its entire executable lifetime. Acquiring it
+            // exclusively proves that no descendant can still run or retain the resource;
+            // unlike PID disappearance, this remains valid while Linux reaps a zombie.
             using var releasedHandle = new FileStream(
                 lockPath,
                 FileMode.Open,
@@ -135,18 +137,6 @@ public sealed class GitRepositoryServiceCancellationTests
         await process.WaitForExitAsync(timeout.Token);
     }
 
-    private static bool HasExited(int processId)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            return process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return true;
-        }
-    }
 }
 
 internal static class GitCancellationProcessHost

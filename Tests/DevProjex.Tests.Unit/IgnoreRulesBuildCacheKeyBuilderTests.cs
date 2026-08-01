@@ -16,7 +16,7 @@ public sealed class IgnoreRulesBuildCacheKeyBuilderTests
 			new[] { IgnoreOptionId.ExtensionlessFiles, IgnoreOptionId.EmptyFiles, IgnoreOptionId.DotFiles },
 			new[] { IgnoreOptionId.DotFiles, IgnoreOptionId.ExtensionlessFiles, IgnoreOptionId.EmptyFiles },
 			new[] { " api ", "web", "" },
-			new[] { "web", "api", "   " }
+			new[] { "web", " api ", "" }
 		];
 	}
 
@@ -41,7 +41,7 @@ public sealed class IgnoreRulesBuildCacheKeyBuilderTests
 	}
 
 	[Fact]
-	public void Build_NullEmptyAndWhitespaceRootSelections_AreSeparateContracts()
+	public void Build_NullAndEmptyRootSelections_AreSeparateWhileBlankTokensAreRejected()
 	{
 		var nullRoots = IgnoreRulesBuildCacheKeyBuilder.Build("project", [], selectedRootFolders: null);
 		var emptyRoots = IgnoreRulesBuildCacheKeyBuilder.Build("project", [], []);
@@ -49,6 +49,45 @@ public sealed class IgnoreRulesBuildCacheKeyBuilderTests
 
 		Assert.NotEqual(nullRoots, emptyRoots);
 		Assert.Equal(emptyRoots, whitespaceRoots);
+	}
+
+	[Fact]
+	public void Build_DelimiterAndSentinelLikeRootNames_NeverCollide()
+	{
+		var firstDelimitedSet = IgnoreRulesBuildCacheKeyBuilder.Build(
+			"project",
+			[IgnoreOptionId.UseGitIgnore],
+			["a", "b|c"]);
+		var secondDelimitedSet = IgnoreRulesBuildCacheKeyBuilder.Build(
+			"project",
+			[IgnoreOptionId.UseGitIgnore],
+			["a|b", "c"]);
+		var sentinelLikeName = IgnoreRulesBuildCacheKeyBuilder.Build(
+			"project",
+			[IgnoreOptionId.UseGitIgnore],
+			["<null>"]);
+		var nullSelection = IgnoreRulesBuildCacheKeyBuilder.Build(
+			"project",
+			[IgnoreOptionId.UseGitIgnore],
+			selectedRootFolders: null);
+
+		Assert.NotEqual(firstDelimitedSet, secondDelimitedSet);
+		Assert.NotEqual(sentinelLikeName, nullSelection);
+	}
+
+	[Fact]
+	public void Build_LeadingAndTrailingWhitespaceRemainPartOfRootIdentity()
+	{
+		var exact = IgnoreRulesBuildCacheKeyBuilder.Build(
+			"project",
+			[IgnoreOptionId.DotFolders],
+			[" source "]);
+		var trimmed = IgnoreRulesBuildCacheKeyBuilder.Build(
+			"project",
+			[IgnoreOptionId.DotFolders],
+			["source"]);
+
+		Assert.NotEqual(exact, trimmed);
 	}
 
 	[Fact]

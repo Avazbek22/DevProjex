@@ -241,8 +241,8 @@ Faixa: 6–28, a redefinição é 15.
 Torna a UI mais densa: menor espaçamento na árvore e nas configurações.
 Enquanto a área de trabalho de visualização estiver ativa, o Modo Compacto será ativado automaticamente.
 
-### Animação de árvore
-Ativa a animação suave do slide ao passar o mouse sobre as linhas das árvores.
+### Animação de expansão da árvore
+Gira suavemente a seta e expande ou recolhe um ramo, deslocando as linhas adjacentes. É ativada por padrão; quando desativada, a expansão é imediata.
 
 ### Fonte de árvore
 A fonte da árvore é selecionada em “Exibir → Fonte da árvore”.
@@ -375,12 +375,18 @@ Uma regra que começa com `!` cancela uma exclusão anterior do Git apenas dentr
 
 Uma linha malformada ou sem suporte é ignorada de forma independente. Outras regras válidas nesse arquivo e regras em escopos vizinhos continuam funcionando.
 
-Esta opção abrange apenas arquivos `.gitignore` da árvore de trabalho. As regras de `.git/info/exclude` e a configuração global do Git não são aplicadas. Quando há um índice Git legível, os arquivos rastreados permanecem visíveis mesmo que correspondam ao `.gitignore`; sem índice ou Git CLI, o DevProjex volta com segurança à avaliação apenas por padrões.
+Esta opção abrange apenas arquivos `.gitignore` da árvore de trabalho. As regras de exclusão de `.git/info/exclude` e as regras globais de exclusão do Git não são aplicadas; as configurações efetivas do repositório para comparação de caminhos, como `core.ignoreCase` e, no macOS, `core.precomposeUnicode`, são respeitadas. Quando há um índice Git legível para o escopo do repositório responsável pelo caminho, os arquivos rastreados permanecem visíveis mesmo que correspondam ao `.gitignore`; sem esse índice ou a CLI do Git, esse escopo volta com segurança à avaliação apenas por padrões.
+
+Um link simbólico chamado `.gitignore` não é seguido, de acordo com o comportamento do Git para esse arquivo de controle. Se um `.gitignore` normal não puder ser lido, o escopo do respectivo diretório será excluído por completo de forma segura e a análise informará acesso parcial em vez de incluir arquivos sem avaliar todas as regras.
+
+O perfil integrado `standard` seleciona `gitignore` e os oito grupos de exclusão: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` e `extensionless-files`.
 
 ### 12.4 Somente arquivos rastreados pelo Git
 "Somente arquivos rastreados pelo Git" constrói a etapa Git da árvore com os arquivos existentes na árvore de trabalho registrados em cada índice Git legível. Arquivos rastreados modificados e novos arquivos adicionados ao índice continuam incluídos; arquivos não rastreados são excluídos. Essa é a árvore de trabalho atual, não uma captura histórica do `HEAD` nem de um repositório remoto.
 
-Cada repositório aninhado e worktree acessível é processado de forma independente em qualquer nível de aninhamento acessível. Um repositório filho não herda os caminhos rastreados do repositório pai nem de um repositório irmão. Se um índice não puder ser lido com segurança, o modo estrito não o substitui silenciosamente pela avaliação de padrões `.gitignore`.
+Cada repositório aninhado e cada worktree acessível são processados de forma independente em qualquer nível de aninhamento acessível. Um repositório filho não herda os caminhos rastreados do repositório pai nem de um repositório irmão. Este modo requer a CLI do Git; um índice vazio, mas legível, é válido. Se o espaço de trabalho no terminal (TUI) for iniciado neste modo e nenhum índice aplicável puder ser carregado, o espaço de trabalho não será aberto. Se o modo for selecionado interativamente em um espaço de trabalho TUI já aberto e nenhum índice aplicável puder ser carregado, a alteração será rejeitada e o último modo Git utilizável permanecerá ativo. Na mesma situação, os comandos diretos falham com um erro de política ou verificação. O DevProjex nunca passa silenciosamente para `.gitignore`. Quando outro índice aplicável é legível, os escopos aninhados indisponíveis são excluídos com um aviso.
+
+Em um espaço de trabalho Desktop já aberto, a seleção explícita permanece visível e falha de modo seguro: a saída e a exportação são bloqueadas quando a prontidão falha, enquanto a prontidão parcial permite continuar com um aviso localizado.
 
 "Use .gitignore" e "Somente arquivos rastreados pelo Git" são mutuamente exclusivos: ativar um desativa o outro. Nos projetos locais compatíveis com perfis, o modo escolhido é salvo junto com as pastas de nível superior, os tipos de arquivo e as demais regras de exclusão.
 
@@ -473,10 +479,12 @@ Ordem de seleção dos ícones:
 4) caso contrário — desconhecido
 
 ## 15) Tema e efeitos
-A seção Tema permite selecionar um tema claro ou escuro e um efeito de fundo:
+A seção Tema permite selecionar Sistema, Claro ou Escuro e um efeito de fundo:
 * Transparência
 * Desfoque
 * Mica
+
+Sistema é selecionado por padrão e acompanha as alterações do tema do sistema operacional. Após a primeira inicialização ou a redefinição das configurações, um tema claro do sistema usa um fundo opaco regular, enquanto um tema escuro do sistema usa Desfoque. Se não for possível determinar a preferência do sistema, o DevProjex usa Escuro com Desfoque. Os temas Claro e Escuro lembram seus efeitos separadamente. Uma seleção explícita de Claro ou Escuro ignora as alterações do sistema até que Sistema seja selecionado novamente.
 
 Os efeitos são mutuamente exclusivos. Clicar novamente no efeito selecionado o desativa e restaura um fundo opaco regular.
 
@@ -493,7 +501,7 @@ No modo Transparência, o fundo da janela principal permanece transparente. Menu
 ## 16) Ajuda
 
 ### 16.1 Redefinir configurações
-Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema padrão, efeitos, modo compacto, animação em árvore e idioma da interface. Perfis de projeto, histórico e arquivos em disco não são alterados.
+Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema padrão, efeitos, modo compacto, animação de expansão da árvore e idioma da interface. Perfis de projeto, histórico e arquivos em disco não são alterados.
 
 ### 16.2 Redefinir dados
 Redefinir dados (Ajuda → Redefinir dados) remove perfis de parâmetros de projeto local salvos:
@@ -530,5 +538,4 @@ Botão X (cancelar) na barra de status:
 * para operações sem suporte para cancelamento, ele interrompe a indicação da barra de status, enquanto a operação em si ainda pode terminar em segundo plano.
 
 ## 19) Notas
-* Por padrão, o tema escuro com Blur é usado. Se o Blur não estiver disponível, o aplicativo tentará o Mica; se nenhum efeito estiver disponível, os efeitos serão desativados.
 * Caso as permissões sejam insuficientes, o app pode sugerir reiniciar com elevação; se recusado, uma notificação será mostrada.

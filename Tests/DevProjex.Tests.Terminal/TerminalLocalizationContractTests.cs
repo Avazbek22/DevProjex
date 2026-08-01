@@ -73,7 +73,7 @@ public sealed partial class TerminalLocalizationContractTests
 		var repositoryRoot = FindRepositoryRoot();
 		var sourceDirectories = new[]
 		{
-			Path.Combine(repositoryRoot, "Apps", "Terminal", "DevProjex.Terminal"),
+			Path.Combine(repositoryRoot, "Apps", "Terminal"),
 			Path.Combine(repositoryRoot, "Application", "Presentation")
 		};
 		var sourceKeys = sourceDirectories

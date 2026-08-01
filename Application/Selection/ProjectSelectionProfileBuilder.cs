@@ -15,6 +15,9 @@ public static class ProjectSelectionProfileBuilder
         StringComparer rootFolderComparer,
         StringComparer extensionComparer)
     {
+		// Selected arrays are the effective projection used by older readers. Full state
+		// maps are the durable local-profile contract because unchecked and temporarily
+		// hidden rows carry user intent just as strongly as visible checked rows.
         var rootOptions = MaterializeSelectionOptions(visibleRootFolders);
         var extensionOptions = MaterializeSelectionOptions(visibleExtensions);
         var ignoreOptions = MaterializeIgnoreOptions(visibleIgnoreOptions);

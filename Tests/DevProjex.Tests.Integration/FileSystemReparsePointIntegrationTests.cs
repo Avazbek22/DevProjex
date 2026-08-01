@@ -9,7 +9,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 		temp.CreateFile("real/app.cs", "class App {}");
 
 		if (!TryCreateDirectorySymlink(Path.Combine(temp.Path, "real", "back-to-root"), temp.Path))
-			return;
+			Assert.Skip("Directory symbolic links are unavailable in this test environment.");
 
 		var tree = new TreeBuilder().Build(
 			temp.Path,
@@ -31,7 +31,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 		temp.CreateFile("real/.idea/workspace.xml", "<project />");
 
 		if (!TryCreateDirectorySymlink(Path.Combine(temp.Path, "linked"), Path.Combine(temp.Path, "real")))
-			return;
+			Assert.Skip("Directory symbolic links are unavailable in this test environment.");
 
 		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
 		var rules = CreateIgnoreRules() with { IgnoreDotFolders = true };
@@ -68,7 +68,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 
 		var linkPath = Path.Combine(temp.Path, "dangling");
 		if (!TryCreateDanglingDirectorySymlink(linkPath, Path.Combine(temp.Path, "missing-target")))
-			return;
+			Assert.Skip("Dangling directory symbolic links are unavailable in this test environment.");
 
 		var tree = new TreeBuilder().Build(
 			temp.Path,
@@ -88,7 +88,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 		temp.CreateFile("real/app.cs", "class App {}");
 
 		if (!TryCreateFileSymlink(Path.Combine(temp.Path, "linked.cs"), Path.Combine(temp.Path, "real", "app.cs")))
-			return;
+			Assert.Skip("File symbolic links are unavailable in this test environment.");
 
 		var tree = new TreeBuilder().Build(
 			temp.Path,
@@ -113,7 +113,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			    Path.Combine(temp.Path, "real", "nested", "linked-external"),
 			    Path.Combine(temp.Path, "external")))
 		{
-			return;
+			Assert.Skip("Directory symbolic links are unavailable in this test environment.");
 		}
 
 		var rules = CreateIgnoreRules();
@@ -148,7 +148,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			    Path.Combine(temp.Path, "dangling"),
 			    Path.Combine(temp.Path, "missing-target")))
 		{
-			return;
+			Assert.Skip("Dangling directory symbolic links are unavailable in this test environment.");
 		}
 
 		var rules = CreateIgnoreRules();
@@ -169,7 +169,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 	public void ScanOptions_WindowsJunctionRoot_DoesNotBecomeRootFolderOrSelectedScanSource()
 	{
 		if (!OperatingSystem.IsWindows())
-			return;
+			Assert.Skip("Windows junctions are only available on Windows.");
 
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("real/app.cs", "class App {}");
@@ -179,7 +179,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			    Path.Combine(temp.Path, "junction"),
 			    Path.Combine(temp.Path, "target")))
 		{
-			return;
+			Assert.Skip("The test environment did not allow creating a Windows junction.");
 		}
 
 		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
@@ -199,7 +199,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 	}
 
 	[Fact]
-	public void SymlinkedGitIgnore_IsParsedWithoutTraversingSymlinkedContentAsProjectFiles()
+	public void SymlinkedGitIgnore_IsNotUsedAsRuleSource()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("gitignore-target", "ignored/\nlogs/\n*.log\n");
@@ -212,7 +212,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			    Path.Combine(temp.Path, ".gitignore"),
 			    Path.Combine(temp.Path, "gitignore-target")))
 		{
-			return;
+			Assert.Skip("File symbolic links are unavailable in this test environment.");
 		}
 
 		var rules = new IgnoreRulesService(new SmartIgnoreService([])).Build(
@@ -227,10 +227,11 @@ public sealed class FileSystemReparsePointIntegrationTests
 				IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(rules.UseGitIgnore);
+		Assert.True(rules.EnableGitIgnoreTraversal);
 		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "src", StringComparison.Ordinal));
-		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "ignored", StringComparison.Ordinal));
-		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "logs", StringComparison.Ordinal));
-		Assert.DoesNotContain(tree.Root.Children, node => string.Equals(node.Name, "runtime.log", StringComparison.Ordinal));
+		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "ignored", StringComparison.Ordinal));
+		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "logs", StringComparison.Ordinal));
+		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "runtime.log", StringComparison.Ordinal));
 	}
 
 	[Fact]
@@ -257,7 +258,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 	}
 
 	[Fact]
-	public void SymlinkedGitIgnore_TargetMutationInvalidatesMatcherCache()
+	public void SymlinkedGitIgnore_TargetMutationNeverActivatesRules()
 	{
 		using var temp = new TemporaryDirectory();
 		var targetPath = Path.Combine(temp.Path, "gitignore-target");
@@ -266,7 +267,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 		temp.CreateFile("ignored/noise.cs", "class Noise {}");
 
 		if (!TryCreateFileSymlink(Path.Combine(temp.Path, ".gitignore"), targetPath))
-			return;
+			Assert.Skip("File symbolic links are unavailable in this test environment.");
 
 		var ignoreRulesService = new IgnoreRulesService(new SmartIgnoreService([]));
 
@@ -275,7 +276,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 			[IgnoreOptionId.UseGitIgnore],
 			selectedRootFolders: ["src", "ignored"]);
 		var firstTree = BuildGitIgnoreSymlinkTree(temp.Path, firstRules);
-		Assert.DoesNotContain(firstTree.Root.Children, node => string.Equals(node.Name, "ignored", StringComparison.Ordinal));
+		Assert.Contains(firstTree.Root.Children, node => string.Equals(node.Name, "ignored", StringComparison.Ordinal));
 
 		File.WriteAllText(targetPath, "# no ignores now\n");
 		File.SetLastWriteTimeUtc(targetPath, DateTime.UtcNow.AddMinutes(1));
@@ -354,8 +355,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 			if (linkInfo.ResolveLinkTarget(returnFinalTarget: true) is not FileInfo { Exists: true })
 				return false;
 
-			// The production path reads the symlink as .gitignore. Validate that exact
-			// operation before running assertions so unsupported platforms exit cleanly.
+			// The target must be readable so the regression proves that source policy,
+			// rather than a broken link, prevents it from becoming an ignore rule source.
 			using var stream = File.Open(linkPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
 			return stream.CanRead;
 		}

@@ -14,6 +14,13 @@ public enum ThemeVariant
     Dark
 }
 
+public enum ThemeSelectionMode
+{
+    System,
+    Light,
+    Dark
+}
+
 public sealed record ThemePreset
 {
     public double BackgroundTransparency { get; init; }
@@ -33,13 +40,16 @@ public sealed class ThemeSettingsDocument
     public int SchemaVersion { get; set; }
     public int DefaultsRevision { get; set; }
     public Dictionary<string, ThemePreset> Presets { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public ThemeSelectionMode SelectedThemeMode { get; set; } = ThemeSelectionMode.System;
+    public ThemeEffectMode LightThemeEffect { get; set; } = ThemeEffectMode.Solid;
+    public ThemeEffectMode DarkThemeEffect { get; set; } = ThemeEffectMode.Acrylic;
     public string SelectedPreset { get; set; } = string.Empty;
 }
 
 public sealed record AppViewSettings
 {
     public bool IsCompactMode { get; init; }
-    public bool IsTreeAnimationEnabled { get; init; }
+    public bool IsTreeExpansionAnimationEnabled { get; init; } = true;
     public bool IsTerminalCommandPromptDismissed { get; init; }
     public AppLanguage? PreferredLanguage { get; init; }
 }

@@ -241,8 +241,8 @@ Bereich: 6–28, Reset: 15.
 Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellungen.
 Während der Vorschau-Arbeitsbereich aktiv ist, wird der Kompaktmodus automatisch eingeschaltet.
 
-### Baumanimation
-Aktiviert eine sanfte Schiebe-Animation beim Überfahren von Baumzeilen.
+### Animation beim Aufklappen des Baums
+Dreht den Pfeil sanft und klappt einen Baumzweig auf oder zu, während benachbarte Zeilen verschoben werden. Standardmäßig aktiviert; bei Deaktivierung erfolgt das Aufklappen sofort.
 
 ### Baum-Schrift
 Die Baum-Schrift wird über „Ansicht → Baum-Schrift“ ausgewählt.
@@ -336,12 +336,18 @@ Für einen Pfad werden die Regeln von der übergeordneten zur tieferen `.gitigno
 
 Eine Regel mit `!` hebt nur einen früheren Git-Ausschluss in ihrem Bereich auf. Sie kann keine Datei zurückholen, solange deren übergeordneter Ordner ausgeschlossen bleibt. Eine `.gitignore` in einem vollständig ausgeschlossenen und unerreichbaren Ordner wird nicht ausgewertet.
 
-Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen; andere gültige Regeln bleiben aktiv. Die Option umfasst nur `.gitignore`-Dateien des Arbeitsbaums. `.git/info/exclude` und globale Git-Regeln werden nicht berücksichtigt. Ist ein lesbarer Git-Index verfügbar, bleiben verfolgte Dateien trotz eines Treffers in `.gitignore` sichtbar; ohne Index oder Git CLI fällt DevProjex sicher auf die reine Musterauswertung zurück.
+Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen; andere gültige Regeln bleiben aktiv. Die Option umfasst nur `.gitignore`-Dateien des Arbeitsbaums. `.git/info/exclude` und globale Git-Ausschlussregeln werden nicht berücksichtigt; wirksame Repository-Einstellungen für Pfadvergleiche wie `core.ignoreCase` und unter macOS `core.precomposeUnicode` werden beachtet. Ist für den zuständigen Repository-Bereich eines Pfads ein lesbarer Git-Index verfügbar, bleiben verfolgte Dateien trotz eines Treffers in `.gitignore` sichtbar; ohne diesen Index oder Git CLI fällt dieser Bereich sicher auf die reine Musterauswertung zurück.
+
+Ein symbolischer Link namens `.gitignore` wird entsprechend dem Verhalten von Git für diese Steuerdatei nicht verfolgt. Kann eine reguläre `.gitignore` nicht gelesen werden, wird ihr Verzeichnisbereich sicher vollständig ausgeschlossen und der Scan meldet einen Teilzugriff, statt Dateien ohne vollständige Regelauswertung still einzuschließen.
+
+Das integrierte Profil `standard` wählt `gitignore` und alle acht Ausschlussgruppen: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` und `extensionless-files`.
 
 ### 12.4 Nur von Git verfolgte Dateien
 „Nur von Git verfolgte Dateien“ baut die Git-Stufe des Baums aus vorhandenen Arbeitsbaumdateien auf, die in jedem lesbaren Git-Index eingetragen sind. Geänderte verfolgte Dateien und neu zum Index hinzugefügte Dateien bleiben enthalten; nicht verfolgte Dateien werden ausgeschlossen. Dies ist der aktuelle Arbeitsbaum, kein historischer Snapshot von `HEAD` oder einem entfernten Repository.
 
-Jedes erreichbare verschachtelte Repository und jeder Worktree wird auf jeder erreichbaren Verschachtelungsebene unabhängig verarbeitet. Ein untergeordnetes Repository übernimmt keine verfolgten Pfade vom übergeordneten oder einem benachbarten Repository. Kann ein Index nicht sicher gelesen werden, ersetzt der strikte Modus ihn nicht stillschweigend durch eine `.gitignore`-Musterauswertung.
+Jedes erreichbare verschachtelte Repository und jeder erreichbare Worktree wird auf jeder erreichbaren Verschachtelungsebene unabhängig verarbeitet. Ein untergeordnetes Repository übernimmt keine verfolgten Pfade vom übergeordneten oder einem benachbarten Repository. Dieser Modus benötigt die Git CLI; ein lesbarer leerer Index ist gültig. Wird der Terminal-Arbeitsbereich (TUI) in diesem Modus gestartet und kann kein passender Index geladen werden, wird der Arbeitsbereich nicht geöffnet. Wird der Modus interaktiv in einem bereits geöffneten TUI-Arbeitsbereich gewählt und kann kein passender Index geladen werden, wird die Änderung abgelehnt und der letzte verwendbare Git-Modus bleibt aktiv. Direkte Befehle enden in diesem Fall mit einem Richtlinien- oder Prüfungsfehler. DevProjex wechselt niemals stillschweigend zu `.gitignore`. Ist ein anderer passender Index lesbar, werden nicht verfügbare verschachtelte Bereiche mit einer Warnung ausgeschlossen.
+
+In einem bereits geöffneten Desktop-Arbeitsbereich bleibt die explizite Auswahl sichtbar und ausfallsicher: Bei fehlender Bereitschaft sind Ausgabe und Export gesperrt; bei teilweiser Bereitschaft wird mit einer lokalisierten Warnung fortgefahren.
 
 „.gitignore verwenden“ und „Nur von Git verfolgte Dateien“ schließen sich gegenseitig aus: Das Aktivieren des einen deaktiviert das andere. Bei lokalen Projekten mit Profilunterstützung wird der gewählte Modus zusammen mit den Ordnern der obersten Ebene, Dateitypen und übrigen Ausschlusseinstellungen gespeichert.
 
@@ -419,10 +425,12 @@ Auswahlreihenfolge:
 4) sonst — unbekannt
 
 ## 15) Thema und Effekte
-Im Bereich „Thema“ können ein helles oder dunkles Theme und ein Hintergrundeffekt gewählt werden:
+Im Bereich „Thema“ können System, Hell oder Dunkel und ein Hintergrundeffekt gewählt werden:
 * Transparenz
 * Weichzeichnen
 * Mica
+
+„System“ ist standardmäßig ausgewählt und folgt Änderungen des Betriebssystem-Themas. Nach dem ersten Start oder einem Zurücksetzen beginnt ein helles System-Theme mit einem normalen undurchsichtigen Hintergrund, ein dunkles System-Theme mit Weichzeichnen. Kann die Systempräferenz nicht ermittelt werden, verwendet DevProjex Dunkel mit Weichzeichnen. Helles und dunkles Theme speichern ihre Effekte getrennt. Eine ausdrückliche Auswahl von Hell oder Dunkel ignoriert Systemänderungen, bis erneut System gewählt wird.
 
 Die Effekte schließen sich gegenseitig aus. Ein erneuter Klick auf den ausgewählten Effekt deaktiviert ihn und stellt einen normalen undurchsichtigen Hintergrund wieder her.
 
@@ -439,7 +447,7 @@ Im Transparenzmodus bleibt der Hintergrund des Hauptfensters transparent. Menüs
 ## 16) Hilfe
 
 ### 16.1 Einstellungen zurücksetzen
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Baumanimation und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Animation beim Aufklappen des Baums und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
 
 ### 16.2 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
@@ -476,5 +484,4 @@ X-Schaltfläche (Abbrechen) in der Statusleiste:
 * bei Operationen ohne Abbruchunterstützung wird nur die Statusleisten-Anzeige beendet, die Operation selbst kann im Hintergrund weiterlaufen.
 
 ## 19) Hinweise
-* Standardmäßig wird das dunkle Theme mit Weichzeichnen verwendet. Ist Weichzeichnen nicht verfügbar, versucht die App Mica; sind beide Effekte nicht verfügbar, werden die Effekte deaktiviert.
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.

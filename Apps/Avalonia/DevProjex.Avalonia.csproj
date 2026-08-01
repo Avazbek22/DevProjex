@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Keep UI bindings statically compiled unless a binding cannot be typed safely. -->
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <AssemblyName>DevProjex</AssemblyName>
+    <AssemblyTitle>DevProjex</AssemblyTitle>
+    <Product>DevProjex</Product>
+    <RootNamespace>DevProjex.Avalonia</RootNamespace>
+    <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'=='' and '$(Configuration)'=='ReleaseStore'">false</EnableProjectLoadTiming>
+    <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'=='' and '$(PublishSingleFile)'=='true'">false</EnableProjectLoadTiming>
+    <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'==''">true</EnableProjectLoadTiming>
+    <DefineConstants Condition="'$(EnableProjectLoadTiming)'=='true'">$(DefineConstants);DEVPROJEX_PROJECT_LOAD_TIMING</DefineConstants>
+    <!-- Windows .exe icon (shown in Explorer, taskbar, Alt+Tab) -->
+    <ApplicationIcon Condition="Exists('..\..\Assets\AppIcon\Windows\app.ico')">..\..\Assets\AppIcon\Windows\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+  </ItemGroup>
+
+  <!--  Do not remove ref to Test for correct testing-->
+  <ItemGroup>
+    <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
+    <InternalsVisibleTo Include="DevProjex.Tests.UI" />
+    <InternalsVisibleTo Include="DevProjex.Tests.Integration" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Application\Application.csproj" />
+    <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj" />
+    <ProjectReference Include="..\Terminal\DevProjex.Terminal.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaXaml Update="Views\FilterBarView.axaml" />
+  </ItemGroup>
+
+  <Target
+    Name="RemovePackageSymbolsFromSingleFilePublish"
+    BeforeTargets="_ComputeFilesToBundle"
+    Condition="'$(PublishSingleFile)' == 'true' and '$(DebugSymbols)' != 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish
+        Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\Assets\IconPacks\Default\UIFilter.png">
+      <Link>IconPacks\Default\UIFilter.png</Link>
+    </AvaloniaResource>
+    <!-- Windows window icon. Keep this aligned with MSIX VisualAssets so the
+         portable EXE gets the same DPI-specific titlebar/taskbar sizes as the Store build. -->
+    <AvaloniaResource Include="..\..\Assets\AppIcon\Windows\app.ico">
+      <Link>AppIcon\app.ico</Link>
+    </AvaloniaResource>
+    <!-- Large PNG fallback kept for platforms/tooling that prefer image assets. -->
+    <AvaloniaResource Include="..\..\Assets\AppIcon\Linux\png\256.png">
+      <Link>AppIcon\icon-256.png</Link>
+    </AvaloniaResource>
+  </ItemGroup>
+
+  <!-- Important: don't add .axaml as AvaloniaResource -->
+</Project>

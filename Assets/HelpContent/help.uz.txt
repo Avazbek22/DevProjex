@@ -241,8 +241,8 @@ Oraliq: 6–28, tiklash — 15.
 Interfeysni zichroq qiladi: daraxt va sozlamalarda oraliqlar kichikroq.
 Preview workspace faol bo‘lganda ixcham rejim avtomatik ravishda yoqiladi.
 
-### Daraxt animatsiyasi
-Daraxt qatorlarini kursorga tutganda silliq siljish animatsiyasini yoqadi.
+### Daraxtni ochish animatsiyasi
+Ko‘rsatkichni silliq aylantiradi va yonma-yon qatorlarni siljitib, daraxt shoxini ochadi yoki yopadi. Standart holatda yoqilgan; o‘chirilganda ochish darhol bajariladi.
 
 ### Daraxt shrifti
 Daraxt shrifti «Ko‘rinish → Daraxt shrifti» orqali tanlanadi.
@@ -336,12 +336,18 @@ Muayyan yo‘l uchun qoidalar ota `.gitignore` faylidan chuqurroq fayllarga, bit
 
 `!` bilan boshlangan qoida faqat o‘z hududidagi oldingi Git istisnosini bekor qiladi. Ota papka hali ham chiqarilgan bo‘lsa, faylni qaytara olmaydi. To‘liq chiqarilgan va yetib bo‘lmaydigan papka ichidagi `.gitignore` ishlanmaydi.
 
-Buzilgan yoki qo‘llanmaydigan satr alohida o‘tkazib yuboriladi, qolgan to‘g‘ri qoidalar ishlashda davom etadi. Bu band faqat ishchi daraxtdagi `.gitignore` fayllariga tegishli; `.git/info/exclude` va global Git qoidalari qo‘llanmaydi. O‘qiladigan Git indeksi mavjud bo‘lsa, kuzatiladigan fayllar `.gitignore` ga mos kelsa ham ko‘rinadi; indeks yoki Git CLI bo‘lmasa, DevProjex xavfsiz tarzda faqat andozalarni baholashga qaytadi.
+Buzilgan yoki qo‘llanmaydigan satr alohida o‘tkazib yuboriladi, qolgan to‘g‘ri qoidalar ishlashda davom etadi. Bu band faqat ishchi daraxtdagi `.gitignore` fayllariga tegishli; `.git/info/exclude` va global Git istisno qoidalari qo‘llanmaydi, lekin yo‘llarni taqqoslash uchun `core.ignoreCase` hamda macOS tizimidagi `core.precomposeUnicode` kabi repozitoriyaning amaldagi sozlamalari hisobga olinadi. Yo‘l tegishli bo‘lgan repozitoriya sohasi uchun o‘qiladigan Git indeksi mavjud bo‘lsa, kuzatiladigan fayllar `.gitignore` ga mos kelsa ham ko‘rinadi; ushbu indeks yoki Git CLI bo‘lmasa, bu soha xavfsiz tarzda faqat andozalarni baholashga qaytadi.
+
+`.gitignore` nomli ramziy havola o‘qilmaydi — bu Gitning ushbu boshqaruv fayliga nisbatan xatti-harakatiga mos keladi. Oddiy `.gitignore` faylini o‘qib bo‘lmasa, uning katalog doirasi xavfsiz tarzda to‘liq chiqariladi va tekshiruv barcha qoidalarni baholamasdan fayllarni yashirincha kiritish o‘rniga qisman kirish haqida xabar beradi.
+
+Ichki `standard` profili `gitignore` rejimini va barcha sakkizta istisno guruhini tanlaydi: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` va `extensionless-files`.
 
 ### 12.4 Faqat Git kuzatadigan fayllar
 «Faqat Git kuzatadigan fayllar» daraxtning Git bosqichini har bir o‘qiladigan Git indeksida qayd etilgan, ishchi daraxtda mavjud fayllardan tuzadi. O‘zgartirilgan kuzatiladigan fayllar va indeksga qo‘shilgan yangi fayllar kiritiladi; kuzatilmaydigan fayllar chiqariladi. Bu `HEAD` yoki masofaviy repozitoriyaning tarixiy nusxasi emas, joriy ishchi daraxtdir.
 
-Har bir yetib boriladigan ichki repozitoriya va worktree istalgan erishiladigan chuqurlikda mustaqil qayta ishlanadi. Ichki repozitoriya ota yoki qo‘shni repozitoriyaning kuzatiladigan yo‘llarini meros qilib olmaydi. Indeksni xavfsiz o‘qib bo‘lmasa, qat’iy rejim uni `.gitignore` andozalarini baholash bilan yashirincha almashtirmaydi.
+Har bir yetib boriladigan ichki repozitoriya va worktree istalgan erishiladigan chuqurlikda mustaqil qayta ishlanadi. Ichki repozitoriya ota yoki qo‘shni repozitoriyaning kuzatiladigan yo‘llarini meros qilib olmaydi. Bu rejim uchun Git CLI kerak; o‘qiladigan bo‘sh indeks yaroqli. Terminal ish maydoni (TUI) shu rejimda ishga tushirilib, hech bir mos indeks yuklanmasa, ish maydoni ochilmaydi. Rejim allaqachon ochiq TUI ish maydonida interaktiv tarzda tanlanib, hech bir mos indeks yuklanmasa, o‘zgarish rad etiladi va oxirgi ishlaydigan Git rejimi faol qoladi. Xuddi shu holatda to‘g‘ridan-to‘g‘ri buyruqlar siyosat yoki tekshiruv xatosi bilan tugaydi. DevProjex hech qachon yashirincha `.gitignore` ga o‘tmaydi. Boshqa mos indeks o‘qilsa, indeksini o‘qib bo‘lmaydigan ichki sohalar ogohlantirish bilan chiqariladi.
+
+Allaqachon ochiq Desktop ish maydonida aniq tanlov ko‘rinib turadi va fail-closed ishlaydi: tayyorlik xatosida chiqarish va eksport bloklanadi, qisman tayyorlikda esa amal mahalliylashtirilgan ogohlantirish bilan davom etadi.
 
 «.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» o‘zaro istisno qilinadi: birini yoqish ikkinchisini o‘chiradi. Profillarni qo‘llaydigan mahalliy loyihalarda tanlangan rejim yuqori darajadagi papkalar, fayl turlari va boshqa istisno sozlamalari bilan birga saqlanadi.
 
@@ -419,10 +425,12 @@ Ikonka tanlash tartibi:
 4) aks holda — noma’lum
 
 ## 15) Mavzu va effektlar
-«Mavzu» bo‘limida yorug‘ yoki qorong‘i mavzu va bitta fon effektini tanlash mumkin:
+«Mavzu» bo‘limida Tizim, Yorug‘ yoki Qorong‘i rejim va bitta fon effektini tanlash mumkin:
 * Shaffoflik
 * Xiralashtirish
 * Mica
+
+Standart holatda Tizim rejimi tanlanadi va u operatsion tizim mavzusidagi o‘zgarishlarni kuzatadi. Birinchi ishga tushirishdan yoki sozlamalarni tiklashdan keyin tizimning yorug‘ mavzusi oddiy shaffof bo‘lmagan fon bilan, qorong‘i mavzusi esa Xiralashtirish bilan ishga tushadi. Tizim tanlovini aniqlab bo‘lmasa, DevProjex Qorong‘i rejimni Xiralashtirish bilan ishlatadi. Yorug‘ va Qorong‘i mavzular o‘z effektlarini alohida eslab qoladi. Yorug‘ yoki Qorong‘i rejimni aniq tanlash Tizim qayta tanlanmaguncha tizim o‘zgarishlarini e’tiborsiz qoldiradi.
 
 Effektlar bir vaqtda ishlamaydi. Tanlangan effektni qayta bosish uni o‘chiradi va oddiy shaffof bo‘lmagan fonni qaytaradi.
 
@@ -439,7 +447,7 @@ Mica platformaning tizim materialidan foydalanadi va fon shaffofligi uchun alohi
 ## 16) Yordam
 
 ### 16.1 Sozlamalarni tiklash
-Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) mavzu, effektlar, ixcham rejim, daraxt animatsiyasi va interfeys tilini standart qiymatlarga qaytaradi. Loyiha profillari, tarix va diskdagi fayllar o‘zgartirilmaydi.
+Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) mavzu, effektlar, ixcham rejim, daraxtni ochish animatsiyasi va interfeys tilini standart qiymatlarga qaytaradi. Loyiha profillari, tarix va diskdagi fayllar o‘zgartirilmaydi.
 
 ### 16.2 Ma’lumotlarni tiklash
 Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha parametrlarining saqlangan profillarini o‘chiradi:
@@ -476,5 +484,4 @@ Status-bardagi X (bekor qilish) tugmasi:
 * bekor qilishni qo‘llamaydigan amallarda status-bar indikatsiyasini tugatadi, lekin amal fon rejimida yakunlanishi mumkin.
 
 ## 19) Eslatmalar
-* Standart holatda Xiralashtirish effektli qorong‘i mavzu ishlatiladi. Xiralashtirish mavjud bo‘lmasa, ilova Mica-ni sinab ko‘radi; ikkala effekt ham mavjud bo‘lmasa, effektlar o‘chiriladi.
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.

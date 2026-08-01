@@ -1,4 +1,5 @@
 using System.IO.Enumeration;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Infrastructure.FileSystem;
 
@@ -21,6 +22,7 @@ internal static class FileSystemEntryEnumerator
 
 	public static IEnumerable<FileSystemDirectoryEntry> EnumerateDirectories(string path, string relativeDirectory)
 	{
+		IgnorePipelineDiagnostics.RecordDirectoryEnumeration();
 		var enumerable = new FileSystemEnumerable<FileSystemDirectoryEntry>(
 			path,
 			(ref FileSystemEntry entry) =>
@@ -43,6 +45,7 @@ internal static class FileSystemEntryEnumerator
 		string relativeDirectory,
 		CancellationToken cancellationToken)
 	{
+		IgnorePipelineDiagnostics.RecordCombinedEntryEnumeration();
 		var enumerable = new FileSystemEnumerable<DirectoryDiscoveryEntry>(
 			path,
 			(ref FileSystemEntry entry) =>
@@ -97,6 +100,7 @@ internal static class FileSystemEntryEnumerator
 
 	public static IEnumerable<FileSystemFileEntry> EnumerateFiles(string path, string relativeDirectory)
 	{
+		IgnorePipelineDiagnostics.RecordFileEnumeration();
 		var enumerable = new FileSystemEnumerable<FileSystemFileEntry>(
 			path,
 			(ref FileSystemEntry entry) =>
@@ -122,6 +126,7 @@ internal static class FileSystemEntryEnumerator
 
 	public static IEnumerable<FileSystemTreeEntry> EnumerateEntries(string path, string relativeDirectory)
 	{
+		IgnorePipelineDiagnostics.RecordCombinedEntryEnumeration();
 		var enumerable = new FileSystemEnumerable<FileSystemTreeEntry>(
 			path,
 			(ref FileSystemEntry entry) =>

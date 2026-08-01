@@ -307,7 +307,7 @@ public sealed class IgnoreRulesHierarchicalGitIgnoreMatrixTests
 	}
 
 	[Fact]
-	public void GitIgnoreScanContext_DynamicallyDiscoveredScopePrunesOnlyItsAdministrativeDirectory()
+	public void GitIgnoreScanContext_ActiveEmptyModePrunesAdministrativeDirectoriesAcrossTheScan()
 	{
 		using var temp = new TemporaryDirectory();
 		var rules = new IgnoreRulesService(new SmartIgnoreService([]))
@@ -321,12 +321,12 @@ public sealed class IgnoreRulesHierarchicalGitIgnoreMatrixTests
 		var scopedGitPath = Path.Combine(scopeRoot, ".git");
 		var unrelatedGitPath = Path.Combine(temp.Path, "other", ".git");
 
-		Assert.False(rules.UseGitIgnore);
+		Assert.True(rules.UseGitIgnore);
 		Assert.True(rules.IsGitIgnoreTraversalEnabled);
 		Assert.True(context
 			.Evaluate(scopedGitPath, "deep/repository/.git", isDirectory: true, ".git")
 			.IsIgnored);
-		Assert.False(context
+		Assert.True(context
 			.Evaluate(unrelatedGitPath, "other/.git", isDirectory: true, ".git")
 			.IsIgnored);
 	}

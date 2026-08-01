@@ -16,12 +16,17 @@ public sealed class GoArtifactsIgnoreRule :
 	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create(
 		"vendor",
 		"bin");
+	private static readonly IReadOnlySet<string> EvidenceRequiredFolderNames =
+		SmartIgnoreRuleSet.Create("vendor", "bin");
 
 	private static readonly SmartIgnoreResult MatchResult =
 		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
-		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
+		SmartIgnoreRuleSet.Descriptor(
+			markerFiles: MarkerFiles,
+			folderNames: FolderNames,
+			evidenceRequiredFolderNames: EvidenceRequiredFolderNames);
 
 	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
 		rootFacts.Exists && rootFacts.HasAnyMarkerFile(MarkerFiles)

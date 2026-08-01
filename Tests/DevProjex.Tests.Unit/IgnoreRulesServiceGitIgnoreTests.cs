@@ -3,7 +3,58 @@ namespace DevProjex.Tests.Unit;
 public sealed class IgnoreRulesServiceGitIgnoreTests
 {
 	[Fact]
-	public void Build_WhenGitIgnoreOptionSelectedAndFileMissing_DisablesGitIgnore()
+	public void AdministrativeNameMatrix_DependsOnSelectedGitModeAndPlatformPathSemantics()
+	{
+		using var temp = new TemporaryDirectory();
+		var service = new IgnoreRulesService(new SmartIgnoreService([]));
+		var activeRules = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+		var trackedRules = service.Build(temp.Path, [IgnoreOptionId.TrackedGitFilesOnly]);
+		var active = activeRules
+			.CreateGitIgnoreScanContext(temp.Path);
+		var disabled = service.Build(temp.Path, [])
+			.CreateGitIgnoreScanContext(temp.Path);
+		var cases = new Dictionary<string, bool>(StringComparer.Ordinal)
+		{
+			[".git"] = true,
+			[".github"] = false,
+			[".git-owned"] = false,
+			[".gitattributes"] = false,
+			[".gitignore"] = false,
+			["git"] = false,
+			[".Git"] = OperatingSystem.IsWindows()
+		};
+		var tracked = trackedRules
+			.CreateGitIgnoreScanContext(temp.Path)
+			.WithTrackedPathIndex(new GitTrackedPathIndex(
+				temp.Path,
+				cases.Keys.Select(static name => $"nested/{name}")));
+
+		foreach (var (name, expectedIgnored) in cases)
+		{
+			var path = Path.Combine(temp.Path, "nested", name);
+			Assert.Equal(
+				expectedIgnored,
+				active.Evaluate(path, $"nested/{name}", isDirectory: true, name).IsIgnored);
+			Assert.Equal(
+				expectedIgnored,
+				tracked.Evaluate(path, $"nested/{name}", isDirectory: true, name).IsIgnored);
+			Assert.Equal(expectedIgnored, activeRules.IsGitIgnored(path, isDirectory: true, name));
+			Assert.False(disabled.Evaluate(path, $"nested/{name}", isDirectory: true, name).IsIgnored);
+		}
+
+		Assert.True(active.Evaluate(
+			Path.Combine(temp.Path, ".git"),
+			".git",
+			isDirectory: false,
+			".git").IsIgnored);
+		Assert.True(trackedRules.IsGitIgnored(
+			Path.Combine(temp.Path, ".git"),
+			isDirectory: true,
+			".git"));
+	}
+
+	[Fact]
+	public void Build_WhenGitIgnoreOptionSelectedAndFileMissing_KeepsRequestedModeActive()
 	{
 		var tempRoot = Path.Combine(Path.GetTempPath(), $"devprojex-tests-{Guid.NewGuid():N}");
 		Directory.CreateDirectory(tempRoot);
@@ -13,8 +64,15 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 
 			var rules = service.Build(tempRoot, [IgnoreOptionId.UseGitIgnore]);
 
-			Assert.False(rules.UseGitIgnore);
+			Assert.True(rules.UseGitIgnore);
+			Assert.Equal(GitFilteringMode.RespectGitIgnore, rules.GitFilteringMode);
 			Assert.Same(GitIgnoreMatcher.Empty, rules.GitIgnoreMatcher);
+
+			var context = rules.CreateGitIgnoreScanContext(tempRoot);
+			var gitMetadata = Path.Combine(tempRoot, ".git");
+			var lookalike = Path.Combine(tempRoot, ".github");
+			Assert.True(context.Evaluate(gitMetadata, ".git", isDirectory: true, ".git").IsIgnored);
+			Assert.False(context.Evaluate(lookalike, ".github", isDirectory: true, ".github").IsIgnored);
 		}
 		finally
 		{
@@ -23,7 +81,7 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 	}
 
 	[Fact]
-	public void Build_WhenGitIgnoreMissing_DisablesSmartIgnoreEvenIfOptionSelected()
+	public void Build_WhenOnlyGitIgnoreIsSelected_DoesNotActivateSmartIgnore()
 	{
 		var tempRoot = Path.Combine(Path.GetTempPath(), $"devprojex-tests-{Guid.NewGuid():N}");
 		Directory.CreateDirectory(tempRoot);
@@ -36,7 +94,7 @@ public sealed class IgnoreRulesServiceGitIgnoreTests
 
 			var rules = service.Build(tempRoot, [IgnoreOptionId.UseGitIgnore]);
 
-			Assert.False(rules.UseGitIgnore);
+			Assert.True(rules.UseGitIgnore);
 			Assert.Same(GitIgnoreMatcher.Empty, rules.GitIgnoreMatcher);
 			Assert.Empty(rules.SmartIgnoredFolders);
 			Assert.Empty(rules.SmartIgnoredFiles);

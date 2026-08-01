@@ -4,6 +4,49 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class GitTrackedPathIndexTests
 {
+	[Theory]
+	[InlineData("src/App.cs", true, false, true)]
+	[InlineData("src", false, true, true)]
+	[InlineData("src/Missing.cs", false, false, false)]
+	public void NormalizedRelativeProbes_MatchPublicFullPathContract(
+		string relativePath,
+		bool expectedContains,
+		bool expectedDescendant,
+		bool expectedContainsOrDescendant)
+	{
+		using var temp = new TemporaryDirectory();
+		var index = new GitTrackedPathIndex(
+			temp.Path,
+			["src/App.cs", "docs/readme.md"],
+			new GitPathComparisonSemantics(IgnoreCase: false, NormalizeUnicode: false));
+		var fullPath = Path.Combine(
+			temp.Path,
+			relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+		Assert.True(index.TryGetNormalizedRelativePath(fullPath, out var normalizedRelativePath));
+		Assert.Equal(expectedContains, index.Contains(fullPath));
+		Assert.Equal(expectedContains, index.ContainsNormalizedRelativePath(normalizedRelativePath));
+		Assert.Equal(expectedDescendant, index.HasDescendant(fullPath));
+		Assert.Equal(expectedDescendant, index.HasDescendantNormalizedRelativePath(normalizedRelativePath));
+		Assert.Equal(expectedContainsOrDescendant, index.ContainsOrHasDescendant(fullPath));
+		Assert.Equal(
+			expectedContainsOrDescendant,
+			index.ContainsOrHasDescendantNormalizedRelativePath(normalizedRelativePath));
+	}
+
+	[Fact]
+	public void ExplicitAndPlatformComparisonSemanticsAreAuthoritativeByDefault()
+	{
+		var explicitSemantics = new GitPathComparisonSemantics(
+			IgnoreCase: false,
+			NormalizeUnicode: false);
+		var uncertainSemantics = explicitSemantics with { IsAuthoritative = false };
+
+		Assert.True(explicitSemantics.IsAuthoritative);
+		Assert.True(GitPathComparisonSemantics.PlatformDefault.IsAuthoritative);
+		Assert.False(uncertainSemantics.IsAuthoritative);
+	}
+
 	[Fact]
 	public void TrackedIndexCommandsDoNotAcquireTheParentTerminal()
 	{
@@ -126,6 +169,22 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
+	public void ExplicitCaseInsensitiveSemantics_UseGitAsciiFoldWithoutMergingUnicodeNames()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repo");
+		var index = new GitTrackedPathIndex(
+			repositoryRoot,
+			["ASCII/FILE.cs", "Ä.cs"],
+			new GitPathComparisonSemantics(
+				IgnoreCase: true,
+				NormalizeUnicode: false));
+
+		Assert.True(index.Contains(Path.Combine(repositoryRoot, "ascii", "file.CS")));
+		Assert.False(index.Contains(Path.Combine(repositoryRoot, "ä.cs")));
+	}
+
+	[Fact]
 	public void ExplicitCaseSensitiveSemantics_DoNotMatchDifferentCasing()
 	{
 		using var temp = new TemporaryDirectory();
@@ -200,7 +259,7 @@ public sealed class GitTrackedPathIndexTests
 		};
 		var alternateRootPath = Path.Combine(
 			Path.GetDirectoryName(repositoryRoot)!,
-			"RE\u0301PO");
+			"Re\u0301PO");
 		var alternateFilePath = Path.Combine(
 			alternateRootPath,
 			"src",

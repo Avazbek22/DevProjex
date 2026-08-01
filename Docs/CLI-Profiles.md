@@ -28,6 +28,16 @@ An absent option inherits its profile field. An explicitly empty collection is a
 empty set. In particular, `--exclude none` replaces profile Exclusions with an
 empty set.
 
+Local Desktop/TUI profiles persist complete state maps for the three parameter
+sections: top-level folders, extensions, and Exclusions. A known row keeps its saved
+state even while another filter temporarily hides it. A row first discovered after
+the save uses the current default, so new source folders and file types do not become
+silently unavailable. CLI and TUI resolve this same modern state instead of reducing
+it to selected-name lists. Legacy selected-only local records are promoted into complete
+maps by retaining their selected values as checked entries; all other rows use current
+defaults consistently across surfaces. Explicit CLI fields are exact for that invocation
+and never mutate the stored maps.
+
 ## Schema v1
 
 ```json
@@ -57,6 +67,9 @@ Semantics:
 - a directory includes its effective subtree;
 - Git mode is exactly one of `none`, `gitignore`, or `tracked`;
 - Exclusions contain only ordinary exclusion tokens.
+
+Nonblank root values are exact top-level filesystem names. They are compared with the
+effective host path semantics and are not whitespace-trimmed.
 
 Unknown additive JSON properties are allowed for forward compatibility. A missing
 or unsupported schema, unknown required Git mode, unknown exclusion token, or

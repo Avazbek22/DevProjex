@@ -43,7 +43,6 @@ public sealed class TerminalProgressHostContractTests
 			Path.Combine(
 				repositoryRoot,
 				"Apps",
-				"Avalonia",
-				"DevProjex.Avalonia")));
+				"Avalonia")));
 	}
 }

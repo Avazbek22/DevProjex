@@ -92,34 +92,34 @@ public sealed class HelpContentDocumentationContractTests
         { "help.uz.txt", "mustaqil almashtirgichlardir" }
     };
 
-    public static TheoryData<string, string, string> GitIndexContracts => new()
+    public static TheoryData<string, string, string, string> GitIndexContracts => new()
     {
-        { "help.ru.txt", "отслеживаемые файлы остаются видимыми", "без индекса или Git CLI" },
-        { "help.en.txt", "tracked files remain visible", "without an index or Git CLI" },
-        { "help.de.txt", "verfolgte Dateien", "ohne Index oder Git CLI" },
-        { "help.fr.txt", "les fichiers suivis restent visibles", "sans index ou Git CLI" },
-        { "help.it.txt", "i file tracciati restano visibili", "senza indice o Git CLI" },
-        { "help.es.txt", "los archivos con seguimiento permanecen visibles", "sin índice o Git CLI" },
-        { "help.pt.txt", "os arquivos rastreados permanecem visíveis", "sem índice ou Git CLI" },
-        { "help.pt-pt.txt", "os ficheiros controlados permanecem visíveis", "sem índice ou Git CLI" },
-        { "help.kk.txt", "бақыланатын файлдар", "индекс немесе Git CLI болмаса" },
-        { "help.tg.txt", "файлҳои пайгиришаванда", "бе индекс ё Git CLI" },
-        { "help.uz.txt", "kuzatiladigan fayllar", "indeks yoki Git CLI bo‘lmasa" }
+        { "help.ru.txt", "отслеживаемые файлы остаются видимыми", "без этого индекса или Git CLI", "области репозитория" },
+        { "help.en.txt", "tracked files remain visible", "without that index or the Git CLI", "owning repository scope" },
+        { "help.de.txt", "verfolgte Dateien", "ohne diesen Index oder Git CLI", "zuständigen Repository-Bereich" },
+        { "help.fr.txt", "les fichiers suivis restent visibles", "sans cet index ou Git CLI", "zone du dépôt propriétaire" },
+        { "help.it.txt", "i file tracciati restano visibili", "senza tale indice o Git CLI", "ambito del repository proprietario" },
+        { "help.es.txt", "los archivos con seguimiento permanecen visibles", "sin ese índice o la CLI de Git", "ámbito del repositorio propietario" },
+        { "help.pt.txt", "os arquivos rastreados permanecem visíveis", "sem esse índice ou a CLI do Git", "escopo do repositório responsável" },
+        { "help.pt-pt.txt", "os ficheiros controlados permanecem visíveis", "sem esse índice ou a CLI do Git", "âmbito do repositório responsável" },
+        { "help.kk.txt", "бақыланатын файлдар", "осы индекс немесе Git CLI болмаса", "репозиторий аймағы" },
+        { "help.tg.txt", "файлҳои пайгиришаванда", "бе ин индекс ё Git CLI", "минтақаи репозиторий" },
+        { "help.uz.txt", "kuzatiladigan fayllar", "ushbu indeks yoki Git CLI bo‘lmasa", "repozitoriya sohasi" }
     };
 
-    public static TheoryData<string, string, string, string, string, string> TrackedOnlyGitModeContracts => new()
+    public static TheoryData<string, string, string, string, string, string, string, string> TrackedOnlyGitModeContracts => new()
     {
-        { "help.ru.txt", "### 12.4 Только отслеживаемые Git-файлы", "неотслеживаемые файлы исключаются", "взаимно исключают", "поддержкой профилей", "стабильной парой" },
-        { "help.en.txt", "### 12.4 Tracked Git files only", "untracked files are excluded", "mutually exclusive", "support profiles", "stable pair" },
-        { "help.de.txt", "### 12.4 Nur von Git verfolgte Dateien", "nicht verfolgte Dateien werden ausgeschlossen", "schließen sich gegenseitig aus", "Profilunterstützung", "stabiles Schalterpaar" },
-        { "help.fr.txt", "### 12.4 Uniquement les fichiers suivis par Git", "les fichiers non suivis sont exclus", "s’excluent mutuellement", "prenant en charge les profils", "paire stable" },
-        { "help.it.txt", "### 12.4 Solo file tracciati da Git", "i file non tracciati vengono esclusi", "si escludono a vicenda", "supportano i profili", "coppia stabile" },
-        { "help.es.txt", "### 12.4 Solo archivos rastreados por Git", "los archivos no rastreados quedan excluidos", "se excluyen mutuamente", "admiten perfiles", "par estable" },
-        { "help.pt.txt", "### 12.4 Somente arquivos rastreados pelo Git", "arquivos não rastreados são excluídos", "mutuamente exclusivos", "compatíveis com perfis", "par estável" },
-        { "help.pt-pt.txt", "### 12.4 Apenas ficheiros controlados pelo Git", "os ficheiros não controlados são excluídos", "mutuamente exclusivos", "suportam perfis", "par estável" },
-        { "help.kk.txt", "### 12.4 Тек Git бақылайтын файлдар", "бақыланбайтын файлдар алынып тасталады", "бір-бірін өзара жоққа шығарады", "Профильдерді қолдайтын", "тұрақты" },
-        { "help.tg.txt", "### 12.4 Танҳо файлҳои пайгиришавандаи Git", "файлҳои пайгиринашаванда хориҷ мешаванд", "ҳамдигарро истисно мекунанд", "профилҳоро дастгирӣ мекунанд", "ҷуфти устувор" },
-        { "help.uz.txt", "### 12.4 Faqat Git kuzatadigan fayllar", "kuzatilmaydigan fayllar chiqariladi", "o‘zaro istisno qilinadi", "Profillarni qo‘llaydigan", "barqaror" }
+        { "help.ru.txt", "### 12.4 Только отслеживаемые Git-файлы", "неотслеживаемые файлы исключаются", "взаимно исключают", "поддержкой профилей", "стабильной парой", "Git CLI", "вывод и экспорт блокируются" },
+        { "help.en.txt", "### 12.4 Tracked Git files only", "untracked files are excluded", "mutually exclusive", "support profiles", "stable pair", "Git CLI", "output and export are blocked" },
+        { "help.de.txt", "### 12.4 Nur von Git verfolgte Dateien", "nicht verfolgte Dateien werden ausgeschlossen", "schließen sich gegenseitig aus", "Profilunterstützung", "stabiles Schalterpaar", "Git CLI", "Ausgabe und Export gesperrt" },
+        { "help.fr.txt", "### 12.4 Uniquement les fichiers suivis par Git", "les fichiers non suivis sont exclus", "s’excluent mutuellement", "prenant en charge les profils", "paire stable", "CLI Git", "la sortie et l’exportation sont bloquées" },
+        { "help.it.txt", "### 12.4 Solo file tracciati da Git", "i file non tracciati vengono esclusi", "si escludono a vicenda", "supportano i profili", "coppia stabile", "CLI di Git", "output ed esportazione vengono bloccati" },
+        { "help.es.txt", "### 12.4 Solo archivos rastreados por Git", "los archivos no rastreados quedan excluidos", "se excluyen mutuamente", "admiten perfiles", "par estable", "CLI de Git", "la salida y la exportación se bloquean" },
+        { "help.pt.txt", "### 12.4 Somente arquivos rastreados pelo Git", "arquivos não rastreados são excluídos", "mutuamente exclusivos", "compatíveis com perfis", "par estável", "CLI do Git", "a saída e a exportação são bloqueadas" },
+        { "help.pt-pt.txt", "### 12.4 Apenas ficheiros controlados pelo Git", "os ficheiros não controlados são excluídos", "mutuamente exclusivos", "suportam perfis", "par estável", "CLI do Git", "a saída e a exportação são bloqueadas" },
+        { "help.kk.txt", "### 12.4 Тек Git бақылайтын файлдар", "бақыланбайтын файлдар алынып тасталады", "бір-бірін өзара жоққа шығарады", "Профильдерді қолдайтын", "тұрақты", "Git CLI", "шығару мен экспорт бұғатталады" },
+        { "help.tg.txt", "### 12.4 Танҳо файлҳои пайгиришавандаи Git", "файлҳои пайгиринашаванда хориҷ мешаванд", "ҳамдигарро истисно мекунанд", "профилҳоро дастгирӣ мекунанд", "ҷуфти устувор", "Git CLI", "барориш ва содирот баста мешаванд" },
+        { "help.uz.txt", "### 12.4 Faqat Git kuzatadigan fayllar", "kuzatilmaydigan fayllar chiqariladi", "o‘zaro istisno qilinadi", "Profillarni qo‘llaydigan", "barqaror", "Git CLI", "chiqarish va eksport bloklanadi" }
     };
 
     public static TheoryData<string, string> JsonTreeFormatContracts => new()
@@ -128,19 +128,19 @@ public sealed class HelpContentDocumentationContractTests
         { "help.en.txt", "JSON export uses this tree format: arrays contain files, objects contain subfolders, `/` contains files in the current folder, and `[]` represents an empty folder." }
     };
 
-    public static TheoryData<string, string, string, string> ThemeFallbackContracts => new()
+    public static TheoryData<string, string, string, string, string, string, string, string> ThemeBehaviorContracts => new()
     {
-        { "help.ru.txt", "сначала пробует другой системный эффект", "фон главного окна", "Если Blur недоступен, приложение пробует Mica" },
-        { "help.en.txt", "first tries the other native effect", "main-window background", "If Blur is unavailable, the app tries Mica" },
-        { "help.de.txt", "zunächst den jeweils anderen nativen Effekt", "Hintergrund des Hauptfensters", "Ist Weichzeichnen nicht verfügbar, versucht die App Mica" },
-        { "help.fr.txt", "essaie d’abord l’autre effet natif", "arrière-plan de la fenêtre principale", "Si le Flou n’est pas disponible, l’application essaie Mica" },
-        { "help.it.txt", "prova prima l’altro effetto nativo", "sfondo della finestra principale", "Se Sfocatura non è disponibile, l’app prova Mica" },
-        { "help.es.txt", "prueba primero el otro efecto nativo", "fondo de la ventana principal", "Si Blur no está disponible, la aplicación prueba Mica" },
-        { "help.pt.txt", "primeiro tenta o outro efeito nativo", "fundo da janela principal", "Se o Blur não estiver disponível, o aplicativo tentará o Mica" },
-        { "help.pt-pt.txt", "tenta primeiro o outro efeito nativo", "fundo da janela principal", "Se o Blur não estiver disponível, a aplicação tentará o Mica" },
-        { "help.kk.txt", "алдымен басқа жүйелік эффектіні қолданып көреді", "негізгі терезенің фоны", "Бұлдырлату қолжетімсіз болса, қолданба Mica-ны қолданып көреді" },
-        { "help.tg.txt", "аввал эффекти дигари системавиро месанҷад", "заминаи равзанаи асосӣ", "Агар Тирагӣ дастрас набошад, барнома Mica-ро месанҷад" },
-        { "help.uz.txt", "avval boshqa tizim effektini sinab ko‘radi", "asosiy oyna foni", "Xiralashtirish mavjud bo‘lmasa, ilova Mica-ni sinab ko‘radi" }
+        { "help.ru.txt", "По умолчанию выбрана «Системная»", "светлая системная тема включается с обычным непрозрачным фоном", "тёмная — с Blur", "запоминают выбранные эффекты независимо", "Если тему системы определить невозможно", "сначала пробует другой системный эффект", "фон главного окна" },
+        { "help.en.txt", "System is selected by default", "light system theme starts with a regular opaque background", "dark system theme starts with Blur", "remember their effects independently", "If the system preference cannot be determined", "first tries the other native effect", "main-window background" },
+        { "help.de.txt", "„System“ ist standardmäßig ausgewählt", "helles System-Theme mit einem normalen undurchsichtigen Hintergrund", "dunkles System-Theme mit Weichzeichnen", "speichern ihre Effekte getrennt", "Kann die Systempräferenz nicht ermittelt werden", "zunächst den jeweils anderen nativen Effekt", "Hintergrund des Hauptfensters" },
+        { "help.fr.txt", "Système est sélectionné par défaut", "thème système clair utilise un arrière-plan opaque normal", "thème système sombre utilise le Flou", "mémorisent leurs effets séparément", "Si la préférence système ne peut pas être déterminée", "essaie d’abord l’autre effet natif", "arrière-plan de la fenêtre principale" },
+        { "help.it.txt", "Sistema è selezionato per impostazione predefinita", "tema di sistema chiaro usa un normale sfondo opaco", "tema di sistema scuro usa Sfocatura", "ricordano i propri effetti separatamente", "Se la preferenza di sistema non può essere determinata", "prova prima l’altro effetto nativo", "sfondo della finestra principale" },
+        { "help.es.txt", "Sistema está seleccionado de forma predeterminada", "tema claro del sistema utiliza un fondo opaco normal", "tema oscuro del sistema utiliza Desenfoque", "recuerdan sus efectos por separado", "Si no se puede determinar la preferencia del sistema", "prueba primero el otro efecto nativo", "fondo de la ventana principal" },
+        { "help.pt.txt", "Sistema é selecionado por padrão", "tema claro do sistema usa um fundo opaco regular", "tema escuro do sistema usa Desfoque", "lembram seus efeitos separadamente", "Se não for possível determinar a preferência do sistema", "primeiro tenta o outro efeito nativo", "fundo da janela principal" },
+        { "help.pt-pt.txt", "Sistema é selecionado por predefinição", "tema claro do sistema utiliza um fundo opaco regular", "tema escuro do sistema utiliza Desfoque", "memorizam os seus efeitos separadamente", "Se não for possível determinar a preferência do sistema", "tenta primeiro o outro efeito nativo", "fundo da janela principal" },
+        { "help.kk.txt", "Әдепкіде Жүйелік режим таңдалады", "жүйенің ашық тақырыбы кәдімгі мөлдір емес фонмен", "қараңғы тақырыбы Бұлдырлатумен", "өз эффектілерін бөлек сақтайды", "Жүйе таңдауын анықтау мүмкін болмаса", "алдымен басқа жүйелік эффектіні қолданып көреді", "негізгі терезенің фоны" },
+        { "help.tg.txt", "Бо нобаёнӣ реҷаи Системавӣ интихоб мешавад", "мавзӯи равшани система бо заминаи одии ношаффоф", "мавзӯи торики система бо Тирагӣ", "эффектҳои худро алоҳида нигоҳ медоранд", "Агар афзалияти система муайян карда нашавад", "аввал эффекти дигари системавиро месанҷад", "заминаи равзанаи асосӣ" },
+        { "help.uz.txt", "Standart holatda Tizim rejimi tanlanadi", "tizimning yorug‘ mavzusi oddiy shaffof bo‘lmagan fon bilan", "qorong‘i mavzusi esa Xiralashtirish bilan", "o‘z effektlarini alohida eslab qoladi", "Tizim tanlovini aniqlab bo‘lmasa", "avval boshqa tizim effektini sinab ko‘radi", "asosiy oyna foni" }
     };
 
     public static TheoryData<string, string, string, string, string, string, string, string> ProjectExportContracts => new()
@@ -256,15 +256,21 @@ public sealed class HelpContentDocumentationContractTests
 
     [Theory]
     [MemberData(nameof(GitIndexContracts))]
-    public void HelpContent_GitIgnoreSection_DescribesTrackedIndexAndPatternOnlyFallback(
+    public void HelpContent_GitIgnoreSection_DescribesOwningIndexAndPatternOnlyFallback(
         string fileName,
         string expectedTrackedBehavior,
-        string expectedFallbackBehavior)
+        string expectedFallbackBehavior,
+        string expectedOwningScope)
     {
         var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
+        var gitIgnoreSection = ExtractSection(ignoreSection, "### 12.3 ", "### 12.4 ");
 
-        Assert.Contains(expectedTrackedBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(expectedFallbackBehavior, ignoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedTrackedBehavior, gitIgnoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedFallbackBehavior, gitIgnoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedOwningScope, gitIgnoreSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".git/info/exclude", gitIgnoreSection, StringComparison.Ordinal);
+        Assert.Contains("core.ignoreCase", gitIgnoreSection, StringComparison.Ordinal);
+        Assert.Contains("core.precomposeUnicode", gitIgnoreSection, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -275,7 +281,9 @@ public sealed class HelpContentDocumentationContractTests
         string expectedUntrackedBehavior,
         string expectedMutualExclusion,
         string expectedProfilePersistence,
-        string expectedStablePair)
+        string expectedStablePair,
+        string expectedGitCliPhrase,
+        string expectedDesktopFailureBehavior)
     {
         var ignoreSection = ExtractSection(ReadHelpFile(fileName), "## 12)", "## 13)");
         var trackedOnlySection = ExtractSection(ignoreSection, expectedHeading, "### 12.5");
@@ -286,6 +294,10 @@ public sealed class HelpContentDocumentationContractTests
         Assert.Contains("worktree", trackedOnlySection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("HEAD", trackedOnlySection, StringComparison.Ordinal);
         Assert.Contains(".gitignore", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedGitCliPhrase, trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains("TUI", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains("Desktop", trackedOnlySection, StringComparison.Ordinal);
+        Assert.Contains(expectedDesktopFailureBehavior, trackedOnlySection, StringComparison.Ordinal);
         Assert.Contains(expectedStablePair, ignoreSection, StringComparison.Ordinal);
     }
 
@@ -303,19 +315,27 @@ public sealed class HelpContentDocumentationContractTests
     }
 
     [Theory]
-    [MemberData(nameof(ThemeFallbackContracts))]
-    public void HelpContent_ThemeSection_DescribesNativeFallbackChainAndTransparentPopupSurfaces(
+    [MemberData(nameof(ThemeBehaviorContracts))]
+    public void HelpContent_ThemeSection_DescribesSystemModeDefaultsAndFallbacks(
         string fileName,
+        string expectedSystemDefaultText,
+        string expectedLightDefaultText,
+        string expectedDarkDefaultText,
+        string expectedIndependentEffectsText,
+        string expectedUnknownSystemFallbackText,
         string expectedNativeFallbackText,
-        string expectedTransparentWindowText,
-        string expectedDefaultFallbackText)
+        string expectedTransparentWindowText)
     {
         var content = ReadHelpFile(fileName);
         var themeSection = ExtractSection(content, "## 15)", "## 16)");
 
+        Assert.Contains(expectedSystemDefaultText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedLightDefaultText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedDarkDefaultText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedIndependentEffectsText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedUnknownSystemFallbackText, themeSection, StringComparison.Ordinal);
         Assert.Contains(expectedNativeFallbackText, themeSection, StringComparison.Ordinal);
         Assert.Contains(expectedTransparentWindowText, themeSection, StringComparison.Ordinal);
-        Assert.Contains(expectedDefaultFallbackText, content, StringComparison.Ordinal);
     }
 
     [Theory]

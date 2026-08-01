@@ -40,7 +40,7 @@ public sealed class UserSettingsPersistenceIntegrationTests
         var restartedThemeSettings = new ThemeSettingsStore(() => temp.Path).Load();
 
         Assert.True(upgradedUserSettings.ViewSettings.IsCompactMode);
-        Assert.True(upgradedUserSettings.ViewSettings.IsTreeAnimationEnabled);
+        Assert.True(upgradedUserSettings.ViewSettings.IsTreeExpansionAnimationEnabled);
         Assert.True(upgradedUserSettings.ViewSettings.IsTerminalCommandPromptDismissed);
         Assert.Equal(AppLanguage.Uz, upgradedUserSettings.ViewSettings.PreferredLanguage);
         Assert.Equal(upgradedUserSettings.ViewSettings, restartedUserSettings.ViewSettings);
@@ -66,13 +66,13 @@ public sealed class UserSettingsPersistenceIntegrationTests
         firstSnapshot.ViewSettings = new AppViewSettings
         {
             IsCompactMode = true,
-            IsTreeAnimationEnabled = false,
+            IsTreeExpansionAnimationEnabled = false,
             PreferredLanguage = AppLanguage.De
         };
         secondSnapshot.ViewSettings = new AppViewSettings
         {
             IsCompactMode = false,
-            IsTreeAnimationEnabled = true,
+            IsTreeExpansionAnimationEnabled = true,
             PreferredLanguage = AppLanguage.Fr
         };
         using var startGate = new ManualResetEventSlim(false);
@@ -95,11 +95,11 @@ public sealed class UserSettingsPersistenceIntegrationTests
         var reloaded = new UserSettingsStore(() => temp.Path).Load();
         var matchesFirstSnapshot =
             reloaded.ViewSettings.IsCompactMode &&
-            !reloaded.ViewSettings.IsTreeAnimationEnabled &&
+            !reloaded.ViewSettings.IsTreeExpansionAnimationEnabled &&
             reloaded.ViewSettings.PreferredLanguage == AppLanguage.De;
         var matchesSecondSnapshot =
             !reloaded.ViewSettings.IsCompactMode &&
-            reloaded.ViewSettings.IsTreeAnimationEnabled &&
+            reloaded.ViewSettings.IsTreeExpansionAnimationEnabled &&
             reloaded.ViewSettings.PreferredLanguage == AppLanguage.Fr;
 
         Assert.True(File.Exists(storeA.GetPath()));

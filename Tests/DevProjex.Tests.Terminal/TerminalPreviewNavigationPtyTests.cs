@@ -204,9 +204,9 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 
 		await terminal.SendAsync("A", TestContext.Current.CancellationToken);
 		var analysis = await terminal.WaitForScreenAsync(
-			"Files:",
+			"Estimated tokens:",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Estimated tokens:", analysis, StringComparison.Ordinal);
+		Assert.Contains("Files:", analysis, StringComparison.Ordinal);
 		Assert.DoesNotContain("Fingerprint", analysis, StringComparison.Ordinal);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(

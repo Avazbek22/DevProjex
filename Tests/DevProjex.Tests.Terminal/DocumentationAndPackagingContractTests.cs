@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace DevProjex.Tests.Terminal;
@@ -207,13 +208,11 @@ public sealed class DocumentationAndPackagingContractTests
 			rootPath,
 			"Apps",
 			"Terminal",
-			"DevProjex.Terminal",
 			"DevProjex.Terminal.csproj");
 		var desktopProjectPath = Path.Combine(
 			rootPath,
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"DevProjex.Avalonia.csproj");
 		var terminalProject = XDocument.Load(terminalProjectPath);
 		var desktopProject = XDocument.Load(desktopProjectPath);
@@ -258,6 +257,9 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("${{ matrix.binary }}", workflow, StringComparison.Ordinal);
 		Assert.Contains("Desktop IPC and Redirected EOF Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("retained redirected CLI handles", workflow, StringComparison.Ordinal);
+		Assert.Contains("[int] $TimeoutMilliseconds = 30000", workflow, StringComparison.Ordinal);
+		Assert.Contains("-TimeoutMilliseconds 150000", workflow, StringComparison.Ordinal);
+		Assert.Contains("Get-DesktopTimeoutDiagnostics", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"[IO.Path]::GetFullPath([string]$_.projectPath)",
 			workflow,
@@ -501,13 +503,11 @@ public sealed class DocumentationAndPackagingContractTests
 				rootPath,
 				"Apps",
 				"Terminal",
-				"DevProjex.Terminal",
 				"DevProjex.Terminal.csproj"),
 			Path.Combine(
 				rootPath,
 				"Apps",
 				"Avalonia",
-				"DevProjex.Avalonia",
 				"DevProjex.Avalonia.csproj")
 		};
 		foreach (var productProjectPath in productProjectPaths)
@@ -543,6 +543,36 @@ public sealed class DocumentationAndPackagingContractTests
 				"TerminalProgressTestCheckpoint",
 				source,
 				StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void TestSourcesDoNotReferencePreFlattenedApplicationDirectories()
+	{
+		var rootPath = FindRepositoryRoot();
+		var testsRoot = Path.Combine(rootPath, "Tests");
+		var obsoletePathPatterns = new[]
+		{
+			new Regex(
+				"\"Apps\"\\s*,\\s*\"Avalonia\"\\s*,\\s*\"DevProjex\\.Avalonia\"",
+				RegexOptions.CultureInvariant),
+			new Regex(
+				"\"Apps\"\\s*,\\s*\"Terminal\"\\s*,\\s*\"DevProjex\\.Terminal\"",
+				RegexOptions.CultureInvariant)
+		};
+
+		foreach (var sourcePath in Directory.EnumerateFiles(
+			         testsRoot,
+			         "*.cs",
+			         SearchOption.AllDirectories))
+		{
+			var source = File.ReadAllText(sourcePath);
+			foreach (var obsoletePathPattern in obsoletePathPatterns)
+			{
+				Assert.False(
+					obsoletePathPattern.IsMatch(source),
+					$"Obsolete pre-flattening path in {Path.GetRelativePath(rootPath, sourcePath)}.");
+			}
 		}
 	}
 

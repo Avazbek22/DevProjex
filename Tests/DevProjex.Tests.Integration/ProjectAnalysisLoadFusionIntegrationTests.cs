@@ -8,7 +8,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 	public async Task Load_ExplicitSelectionCanonicalPipelineIsDeterministicAcrossSelectionMatrix()
 	{
 		using var temp = CreateMixedWorkspace();
-		var firstService = CreateService(new FileSystemScanner(), new TreeBuilder());
+		var firstService = CreateService(new FileSystemScanner(), new DirectOnlyTreeBuilder());
 		var secondService = CreateService(new FileSystemScanner(), new TreeBuilder());
 		var requests = new ProjectAnalysisRequest[]
 		{
@@ -122,6 +122,13 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 
 		Assert.Equal([".cs"], expected.AvailableExtensions);
 		Assert.Equal([".cs"], expected.SelectedExtensions);
+		var explicitPipeline = service.Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+		Assert.Equal([".cs"], explicitPipeline.AvailableExtensions);
+		Assert.Equal([".cs"], explicitPipeline.SelectedExtensions);
 
 		for (var iteration = 0; iteration < 20; iteration++)
 		{
@@ -218,7 +225,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 	}
 
 	[Fact]
-	public void Load_ExplicitRootSelectionKeepsLegacyBoundedInventoryPath()
+	public void Load_ExplicitRootSelectionReusesCompositeInventory()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("src/App.cs", "class App {}\n");
@@ -234,9 +241,33 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Single(loaded.Tree.OrderedFilePaths!);
-		Assert.Equal(1, treeBuilder.DirectBuildCount);
-		Assert.Equal(0, treeBuilder.CompositeInventoryReadCount);
-		Assert.Equal(0, treeBuilder.InventoryProjectionCount);
+		Assert.Equal(0, treeBuilder.DirectBuildCount);
+		Assert.Equal(1, treeBuilder.CompositeInventoryReadCount);
+		Assert.Equal(1, treeBuilder.InventoryProjectionCount);
+	}
+
+	[Fact]
+	public void Load_ExplicitRootsScopeImplicitExtensionsToTheSameSelection()
+	{
+		using var temp = CreateMixedWorkspace();
+		var service = CreateService(new FileSystemScanner(), new TreeBuilder());
+
+		var loaded = service.Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedRootFolders: ["api"],
+				SelectedExtensions: null,
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(".cs", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.Contains(".csproj", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.Contains(".txt", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.DoesNotContain(".ts", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.DoesNotContain(".md", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.Equal(
+			loaded.AvailableExtensions.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase),
+			loaded.SelectedExtensions.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase));
 	}
 
 	[Fact]
@@ -275,6 +306,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		temp.CreateFile(Path.Combine(repo, ".gitignore"), "*.noise\n");
 		var visiblePath = temp.CreateFile(Path.Combine(repo, "visible.txt"), "visible\n");
 		var ignoredPath = temp.CreateFile(Path.Combine(repo, "generated.noise"), "ignored\n");
+		RunGit(Path.Combine(temp.Path, repo), "init", "--quiet");
 		var gitObjectPath = temp.CreateFile(Path.Combine(repo, ".git", "objects", "probe"), "internal\n");
 		var service = CreateService(new FileSystemScanner(), new TreeBuilder());
 
@@ -288,6 +320,32 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		Assert.Contains(visiblePath, loaded.Tree.OrderedFilePaths!);
 		Assert.DoesNotContain(ignoredPath, loaded.Tree.OrderedFilePaths!);
 		Assert.DoesNotContain(gitObjectPath, loaded.Tree.OrderedFilePaths!);
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("Could not start git.");
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		if (!process.WaitForExit(20_000))
+		{
+			process.Kill(entireProcessTree: true);
+			throw new TimeoutException("Git command did not complete within 20 seconds.");
+		}
+
+		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
 	}
 
 	private static TemporaryDirectory CreateMixedWorkspace()
@@ -464,6 +522,17 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 			InventoryProjectionCount++;
 			return _inner.Build(inventory, options, cancellationToken);
 		}
+	}
+
+	private sealed class DirectOnlyTreeBuilder : ITreeBuilder
+	{
+		private readonly TreeBuilder _inner = new();
+
+		public TreeBuildResult Build(
+			string rootPath,
+			TreeFilterOptions options,
+			CancellationToken cancellationToken = default) =>
+			_inner.Build(rootPath, options, cancellationToken);
 	}
 
 	private sealed class TestLocalizationCatalog : ILocalizationCatalog

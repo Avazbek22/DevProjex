@@ -1,28 +1,19 @@
+using DevProjex.Application.Context;
+
 namespace DevProjex.Tests.Integration;
 
 public sealed class GitIgnoreTrackedIndexIntegrationTests
 {
 	[Fact]
-	public void RepositoryPathComparisonSemanticsFollowMetadataDirectoryFilesystem()
+	public void InvalidRepositoryMetadataDoesNotProduceAuthoritativeComparisonSemantics()
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateDirectory("repo");
-		var gitMetadataPath = temp.CreateDirectory("repo/.git");
-		var alternateMetadataPath = Path.Combine(repositoryRoot, ".Git");
-		var alternatePathResolves = Directory.Exists(alternateMetadataPath);
-		var hasBothStoredSpellings = Directory
-			.EnumerateFileSystemEntries(repositoryRoot)
-			.Select(Path.GetFileName)
-			.Contains(".git", StringComparer.Ordinal) &&
-			Directory
-				.EnumerateFileSystemEntries(repositoryRoot)
-				.Select(Path.GetFileName)
-				.Contains(".Git", StringComparer.Ordinal);
+		var gitMetadataPath = Directory.CreateDirectory(Path.Combine(repositoryRoot, ".git")).FullName;
 
 		var semantics = GitTrackedPathIndexCache.ResolvePathComparisonSemantics(gitMetadataPath);
 
-		Assert.Equal(alternatePathResolves && !hasBothStoredSpellings, semantics.IgnoreCase);
-		Assert.Equal(OperatingSystem.IsMacOS(), semantics.NormalizeUnicode);
+		Assert.False(semantics.IsAuthoritative);
 	}
 
 	[Fact]
@@ -809,6 +800,66 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 	}
 
 	[Fact]
+	public void TrackedOnlyModeReportsPartialReadinessWhenOuterIndexIsUnavailableAndNestedIndexLoads()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var outerRoot = temp.CreateDirectory("outer");
+		temp.CreateFile("outer/README.md", "tracked before the index becomes unreadable");
+		InitializeIndex(outerRoot, "README.md");
+		var nestedRoot = temp.CreateDirectory("outer/nested");
+		temp.CreateFile("outer/nested/tracked.cs", "tracked in nested repository");
+		InitializeIndex(nestedRoot, "tracked.cs");
+		File.WriteAllBytes(Path.Combine(outerRoot, ".git", "index"), [0x44, 0x50, 0x58]);
+		var rules = CreateTrackedOnlyRules(outerRoot);
+
+		var tree = BuildTree(
+			outerRoot,
+			RootSet("nested"),
+			ExtensionSet(".cs", ".md"),
+			rules);
+		var readiness = ProjectContextGitReadiness.Evaluate(
+			GitFilteringMode.TrackedFilesOnly,
+			tree.Inventory);
+
+		AssertHidden(tree.Paths, "README.md");
+		AssertVisible(tree.Paths, "nested/tracked.cs");
+		Assert.Equal(2, tree.Inventory.DiscoveredGitTrackedPathIndexes.Count);
+		Assert.Single(tree.Inventory.DiscoveredGitTrackedPathIndexes, static index => !index.IsAvailable);
+		Assert.Equal(1, readiness.LoadedTrackedIndexCount);
+		Assert.Equal(1, readiness.UnavailableTrackedIndexCount);
+		Assert.True(readiness.IsReady);
+		Assert.Equal(
+			ProjectContextGitReadiness.PartialDiagnosticCode,
+			readiness.CreateDiagnostic(outerRoot)?.Code);
+	}
+
+	[Fact]
+	public void StandaloneGitIgnoreDoesNotInventUnavailableRepositoryBoundary()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "*.local\n");
+		temp.CreateFile("loose.local", "not owned by a repository");
+		var nestedRoot = temp.CreateDirectory("nested");
+		temp.CreateFile("nested/tracked.cs", "tracked in nested repository");
+		InitializeIndex(nestedRoot, "tracked.cs");
+		var rules = CreateTrackedOnlyRules(temp.Path);
+
+		var tree = BuildTree(
+			temp.Path,
+			RootSet("nested"),
+			ExtensionSet(".cs", ".local"),
+			rules);
+
+		AssertHidden(tree.Paths, "loose.local");
+		AssertVisible(tree.Paths, "nested/tracked.cs");
+		var discovered = Assert.Single(tree.Inventory.DiscoveredGitTrackedPathIndexes);
+		Assert.True(discovered.IsAvailable);
+		Assert.Equal(PathUtility.Normalize(nestedRoot), discovered.RepositoryRootPath, PathComparer.Default);
+	}
+
+	[Fact]
 	public void TrackedOnlyModeStillAppliesSmartAndOrdinaryFiltersAfterGitOwnership()
 	{
 		EnsureGitAvailable();
@@ -979,25 +1030,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		Assert.False(loaded.IgnoreOptionStates[IgnoreOptionId.UseGitIgnore]);
 
 		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
-		var context = ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(repositoryRoot) with
-		{
-			PreparedSelectionMode = PreparedSelectionMode.Profile,
-			AllRootFoldersChecked = false,
-			AllExtensionsChecked = false,
-			RootSelectionInitialized = true,
-			RootSelectionCache = new HashSet<string>(loaded.SelectedRootFolders, PathComparer.Default),
-			RootOptionStateCache = loaded.RootFolderStates,
-			ExtensionsSelectionInitialized = true,
-			ExtensionsSelectionCache = new HashSet<string>(
-				loaded.SelectedExtensions,
-				StringComparer.OrdinalIgnoreCase),
-			ExtensionOptionStateCache = loaded.ExtensionStates,
-			IgnoreSelectionInitialized = true,
-			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(loaded.SelectedIgnoreOptions),
-			IgnoreOptionStateCache = loaded.IgnoreOptionStates,
-			IgnoreOptionStateCacheIsComplete = true,
-			CaptureTreeInventory = true
-		};
+		var context = CreateProfileContext(repositoryRoot, loaded);
 		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
 			context,
 			TestContext.Current.CancellationToken);
@@ -1016,6 +1049,85 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 				snapshot,
 				services.IgnoreRulesService,
 				payloadOnly: false));
+	}
+
+	[Fact]
+	public void TrackedOnlyProfileReopenChecksNewTrackedExtensionAndHidesNewUntrackedFile()
+	{
+		EnsureGitAvailable();
+		using var project = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var repositoryRoot = project.CreateDirectory("repo");
+		project.CreateFile("repo/src/App.cs", "class App {}\n");
+		InitializeIndex(repositoryRoot, "src/App.cs");
+		var store = new ProjectProfileStore(() => appData.Path);
+		store.SaveProfile(repositoryRoot, CreateTrackedOnlyProfile());
+
+		project.CreateFile("repo/src/NewFeature.ts", "export const ready = true;\n");
+		project.CreateFile("repo/src/local-only.py", "print('untracked')\n");
+		RunGit(repositoryRoot, "add", "--", "src/NewFeature.ts");
+
+		Assert.True(store.TryLoadProfile(repositoryRoot, out var loaded));
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateProfileContext(repositoryRoot, loaded),
+			TestContext.Current.CancellationToken);
+
+		AssertGitFilteringMode(snapshot, GitFilteringMode.TrackedFilesOnly);
+		Assert.Contains(snapshot.EffectiveExtensionOptions, static option =>
+			option.Name == ".ts" && option.IsChecked);
+		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, static option =>
+			option.Name == ".py");
+		Assert.Equal(
+			new HashSet<string>(StringComparer.Ordinal)
+			{
+				"src/App.cs",
+				"src/NewFeature.ts"
+			},
+			BuildEffectiveFileSet(
+				repositoryRoot,
+				snapshot,
+				services.IgnoreRulesService,
+				payloadOnly: false));
+	}
+
+	[Fact]
+	public void TrackedOnlyProfileReopenWithoutRepositoryEvidenceRemainsFailClosed()
+	{
+		EnsureGitAvailable();
+		using var project = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var repositoryRoot = project.CreateDirectory("repo");
+		project.CreateFile("repo/src/App.cs", "class App {}\n");
+		project.CreateFile("repo/src/local-only.py", "print('untracked')\n");
+		InitializeIndex(repositoryRoot, "src/App.cs");
+		var store = new ProjectProfileStore(() => appData.Path);
+		store.SaveProfile(repositoryRoot, CreateTrackedOnlyProfile());
+		Assert.True(store.TryLoadProfile(repositoryRoot, out var loaded));
+
+		Directory.Move(
+			Path.Combine(repositoryRoot, ".git"),
+			Path.Combine(project.Path, "detached-git"));
+		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateProfileContext(repositoryRoot, loaded),
+			TestContext.Current.CancellationToken);
+		var readiness = ProjectContextGitReadiness.Evaluate(
+			GitFilteringMode.TrackedFilesOnly,
+			snapshot.TreeInventory);
+
+		Assert.Contains(snapshot.IgnoreOptions, static option =>
+			option.Id == IgnoreOptionId.TrackedGitFilesOnly && option.IsChecked);
+		Assert.Contains(IgnoreOptionId.TrackedGitFilesOnly, snapshot.EffectiveIgnoreOptions);
+		Assert.Empty(BuildEffectiveFileSet(
+			repositoryRoot,
+			snapshot,
+			services.IgnoreRulesService,
+			payloadOnly: false));
+		Assert.False(readiness.IsReady);
+		Assert.Equal(
+			ProjectContextGitReadiness.UnavailableDiagnosticCode,
+			readiness.CreateDiagnostic(repositoryRoot)?.Code);
 	}
 
 	private static TreeObservation BuildTree(
@@ -1079,6 +1191,47 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			"docs/guide.md");
 		return repositoryRoot;
 	}
+
+	private static ProjectSelectionProfile CreateTrackedOnlyProfile() =>
+		new(
+			SelectedRootFolders: ["src"],
+			SelectedExtensions: [".cs"],
+			SelectedIgnoreOptions: [IgnoreOptionId.TrackedGitFilesOnly],
+			RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+			{
+				["src"] = true
+			},
+			ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				[".cs"] = true
+			},
+			IgnoreOptionStates: Enum.GetValues<IgnoreOptionId>().ToDictionary(
+				static optionId => optionId,
+				static optionId => optionId == IgnoreOptionId.TrackedGitFilesOnly));
+
+	private static SelectionRefreshContext CreateProfileContext(
+		string repositoryRoot,
+		ProjectSelectionProfile profile) =>
+		ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(repositoryRoot) with
+		{
+			PreparedSelectionMode = PreparedSelectionMode.Profile,
+			AllRootFoldersChecked = false,
+			AllExtensionsChecked = false,
+			RootSelectionInitialized = true,
+			RootSelectionCache = new HashSet<string>(profile.SelectedRootFolders, PathComparer.Default),
+			RootOptionStateCache = profile.RootFolderStates,
+			ExtensionsSelectionInitialized = true,
+			ExtensionsSelectionCache = new HashSet<string>(
+				profile.SelectedExtensions,
+				StringComparer.OrdinalIgnoreCase),
+			ExtensionOptionStateCache = profile.ExtensionStates,
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(profile.SelectedIgnoreOptions),
+			IgnoreOptionStateCache = profile.IgnoreOptionStates ??
+				profile.SelectedIgnoreOptions.ToDictionary(static optionId => optionId, static _ => true),
+			IgnoreOptionStateCacheIsComplete = profile.IgnoreOptionStates is not null,
+			CaptureTreeInventory = true
+		};
 
 	private static SelectionRefreshContext CreateSettingsIslandContext(
 		string repositoryRoot,

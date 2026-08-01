@@ -8,6 +8,26 @@ namespace DevProjex.Application.Selection;
 /// </summary>
 public static class ExtensionOptionProjection
 {
+	public static void AddCanonicalExtension(
+		HashSet<string> extensions,
+		ReadOnlySpan<char> extension)
+	{
+		ArgumentNullException.ThrowIfNull(extensions);
+		if (extension.IsEmpty)
+			return;
+
+		Span<char> normalized = extension.Length <= 128
+			? stackalloc char[extension.Length]
+			: new char[extension.Length];
+		for (var index = 0; index < extension.Length; index++)
+			normalized[index] = char.ToLowerInvariant(extension[index]);
+
+		if (extensions.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup) && lookup.Contains(normalized))
+			return;
+
+		extensions.Add(normalized.ToString());
+	}
+
 	public static int SplitAvailableEntries(
 		IReadOnlyCollection<string> source,
 		ICollection<string> visibleExtensions)

@@ -1,19 +1,14 @@
-using System.Collections.Concurrent;
 using System.Collections.Frozen;
 
 namespace DevProjex.Application.Services;
 
 public sealed class SmartIgnoreScopeResolver : ISmartIgnoreScopeResolver
 {
-	private const int ResultCacheLimit = 4_096;
 	private readonly string _rootPath;
 	private readonly ProjectRootFactsProvider _rootFactsProvider;
+	private readonly SmartIgnoreRuleDescriptor[] _descriptors;
 	private readonly FrozenDictionary<string, SmartIgnoreRuleDescriptor[]> _directoryRules;
 	private readonly FrozenDictionary<string, SmartIgnoreRuleDescriptor[]> _fileRules;
-	private readonly ConcurrentDictionary<string, bool> _directoryResults;
-	private readonly ConcurrentDictionary<string, bool> _fileResults;
-	private readonly ConcurrentQueue<string> _directoryResultOrder = new();
-	private readonly ConcurrentQueue<string> _fileResultOrder = new();
 
 	public SmartIgnoreScopeResolver(
 		string rootPath,
@@ -22,6 +17,7 @@ public sealed class SmartIgnoreScopeResolver : ISmartIgnoreScopeResolver
 		: this(
 			rootPath,
 			rootFactsProvider,
+			descriptors.ToArray(),
 			BuildRuleIndex(descriptors, static descriptor => descriptor.FolderNames),
 			BuildRuleIndex(descriptors, static descriptor => descriptor.FileNames))
 	{
@@ -30,32 +26,39 @@ public sealed class SmartIgnoreScopeResolver : ISmartIgnoreScopeResolver
 	internal SmartIgnoreScopeResolver(
 		string rootPath,
 		ProjectRootFactsProvider rootFactsProvider,
+		SmartIgnoreRuleDescriptor[] descriptors,
 		FrozenDictionary<string, SmartIgnoreRuleDescriptor[]> directoryRules,
 		FrozenDictionary<string, SmartIgnoreRuleDescriptor[]> fileRules)
 	{
 		_rootPath = PathUtility.Normalize(rootPath);
 		_rootFactsProvider = rootFactsProvider;
+		_descriptors = descriptors;
 		_directoryRules = directoryRules;
 		_fileRules = fileRules;
-		_directoryResults = new ConcurrentDictionary<string, bool>(PathComparer.Default);
-		_fileResults = new ConcurrentDictionary<string, bool>(PathComparer.Default);
 	}
 
-	public bool IsIgnoredDirectory(string fullPath, string name) =>
-		IsIgnored(fullPath, name, _directoryRules, _directoryResults, _directoryResultOrder);
+	public SmartIgnoreScopeDecision EvaluateDirectory(string fullPath, string name) =>
+		Evaluate(
+			fullPath,
+			name,
+			isDirectory: true,
+			_directoryRules);
 
-	public bool IsIgnoredFile(string fullPath, string name) =>
-		IsIgnored(fullPath, name, _fileRules, _fileResults, _fileResultOrder);
+	public SmartIgnoreScopeDecision EvaluateFile(string fullPath, string name) =>
+		Evaluate(
+			fullPath,
+			name,
+			isDirectory: false,
+			_fileRules);
 
-	private bool IsIgnored(
+	private SmartIgnoreScopeDecision Evaluate(
 		string fullPath,
 		string name,
-		IReadOnlyDictionary<string, SmartIgnoreRuleDescriptor[]> ruleIndex,
-		ConcurrentDictionary<string, bool> resultCache,
-		ConcurrentQueue<string> insertionOrder)
+		bool isDirectory,
+		IReadOnlyDictionary<string, SmartIgnoreRuleDescriptor[]> ruleIndex)
 	{
 		if (!ruleIndex.TryGetValue(name, out var relevantRules))
-			return false;
+			return SmartIgnoreScopeDecision.Unresolved;
 
 		string normalizedPath;
 		try
@@ -64,47 +67,83 @@ public sealed class SmartIgnoreScopeResolver : ISmartIgnoreScopeResolver
 		}
 		catch
 		{
-			return false;
+			return SmartIgnoreScopeDecision.Unresolved;
 		}
 
 		if (!IsWithinRoot(normalizedPath))
-			return false;
-		if (resultCache.TryGetValue(normalizedPath, out var cached))
-			return cached;
+			return SmartIgnoreScopeDecision.Unresolved;
+
+		// A nested project marker protects collision-prone candidates. Distinctive
+		// artifact directories such as node_modules may contain package metadata of
+		// their own, but that metadata does not turn the dependency store into a project.
+		var candidateOwnsScope = isDirectory &&
+		                         HasKnownProjectMarker(_rootFactsProvider.Get(normalizedPath));
 
 		var currentDirectory = Path.GetDirectoryName(normalizedPath);
-		var isIgnored = false;
+		var decision = SmartIgnoreScopeDecision.Unresolved;
 		while (!string.IsNullOrWhiteSpace(currentDirectory) &&
 		       IsWithinRoot(currentDirectory))
 		{
 			var rootFacts = _rootFactsProvider.Get(currentDirectory);
+			var ownsNestedScope = HasKnownProjectMarker(rootFacts);
+			var hasApplicableRule = false;
+			var requiresEvidenceForEveryApplicableRule = true;
 			foreach (var rule in relevantRules)
 			{
-				if (rootFacts.HasAnyMarkerFile(rule.MarkerFiles) ||
-				    rootFacts.HasAnyFileExtension(rule.MarkerExtensions))
+				if (!rootFacts.HasAnyMarkerFile(rule.MarkerFiles) &&
+				    !rootFacts.HasAnyFileExtension(rule.MarkerExtensions))
+					continue;
+
+				hasApplicableRule = true;
+				if (!isDirectory || !rule.EvidenceRequiredFolderNames.Contains(name))
 				{
-					isIgnored = true;
+					requiresEvidenceForEveryApplicableRule = false;
 					break;
 				}
 			}
 
-			if (isIgnored || PathComparer.Default.Equals(currentDirectory, _rootPath))
+			if (hasApplicableRule)
+			{
+				var isIgnored = !requiresEvidenceForEveryApplicableRule ||
+				                !candidateOwnsScope &&
+				                SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(fullPath, name);
+				decision = isIgnored
+					? SmartIgnoreScopeDecision.Exclude
+					: SmartIgnoreScopeDecision.Include;
+			}
+
+			// The nearest marked project owns its descendants. Continuing into a parent
+			// would let a frontend rule, for example, hide a same-named source directory
+			// inside a nested .NET project.
+			if (decision.IsResolved || ownsNestedScope)
+			{
+				if (!decision.IsResolved)
+					decision = SmartIgnoreScopeDecision.Include;
+				break;
+			}
+
+			if (PathComparer.Default.Equals(currentDirectory, _rootPath))
 				break;
 
 			currentDirectory = Path.GetDirectoryName(currentDirectory);
 		}
 
-		if (resultCache.TryAdd(normalizedPath, isIgnored))
+		// Project markers can change between refreshes, so scope ownership is not cached.
+		return decision;
+	}
+
+	private bool HasKnownProjectMarker(ProjectRootFacts rootFacts)
+	{
+		foreach (var descriptor in _descriptors)
 		{
-			insertionOrder.Enqueue(normalizedPath);
-			while (resultCache.Count > ResultCacheLimit &&
-			       insertionOrder.TryDequeue(out var oldest))
+			if (rootFacts.HasAnyMarkerFile(descriptor.MarkerFiles) ||
+			    rootFacts.HasAnyFileExtension(descriptor.MarkerExtensions))
 			{
-				resultCache.TryRemove(oldest, out _);
+				return true;
 			}
 		}
 
-		return isIgnored;
+		return false;
 	}
 
 	private bool IsWithinRoot(string path)

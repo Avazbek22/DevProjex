@@ -441,6 +441,43 @@ public sealed class DesktopControlIntegrationTests
 		}
 	}
 
+	[Fact]
+	public void OpenWaitReadinessRequiresRequestedTrackedModeAndReadableIndex()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var request = new DesktopOpenRequest(
+			ProjectPath: project,
+			Selection: ProjectSelectionSpec.Standard with
+			{
+				GitMode = GitFilteringMode.TrackedFilesOnly
+			});
+		var state = DeserializeState(new Dictionary<string, object?>
+		{
+			["startupReady"] = true,
+			["startupError"] = null,
+			["projectLoaded"] = true,
+			["projectPath"] = project,
+			["previewOpen"] = false,
+			["previewView"] = "tree-content",
+			["treeFormat"] = "text",
+			["filter"] = null,
+			["search"] = null,
+			["gitMode"] = "tracked",
+			["trackedGitReady"] = true
+		});
+
+		Assert.True(DesktopOpenReadiness.IsApplied(request, state));
+
+		var unavailable = state.ToDictionary(static pair => pair.Key, static pair => pair.Value);
+		unavailable["trackedGitReady"] = JsonSerializer.SerializeToElement(false);
+		Assert.False(DesktopOpenReadiness.IsApplied(request, unavailable));
+
+		var wrongMode = state.ToDictionary(static pair => pair.Key, static pair => pair.Value);
+		wrongMode["gitMode"] = JsonSerializer.SerializeToElement("none");
+		Assert.False(DesktopOpenReadiness.IsApplied(request, wrongMode));
+	}
+
 	[Theory]
 	[InlineData(false, false, false, false)]
 	[InlineData(true, false, false, true)]

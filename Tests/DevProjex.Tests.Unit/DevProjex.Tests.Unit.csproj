@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Application\Application.csproj" />
-    <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj" />
+    <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia.csproj" />
     <ProjectReference Include="..\..\Kernel\Kernel.csproj" />
   </ItemGroup>
 

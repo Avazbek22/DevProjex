@@ -637,6 +637,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.HiddenFolders,
                 "Hidden folders (1)");
             await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "config.txt");
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".hidden-dot", "payload.txt");
 
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.HiddenFolders, isChecked: false);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
@@ -645,7 +646,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.HiddenFolders,
                 visible: true,
                 isChecked: false);
-            await WaitForProjectTreePathStateAsync(window, exists: true, ".git", "config.txt");
+            // Disabling user-facing dot/hidden filters may expose ordinary project data, but
+            // it must never override the independently selected Git administrative boundary.
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "config.txt");
+            await WaitForProjectTreePathStateAsync(window, exists: true, ".hidden-dot", "payload.txt");
 
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
@@ -659,6 +663,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 visible: true,
                 isChecked: true);
             await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "config.txt");
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".hidden-dot", "payload.txt");
 
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: false);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
@@ -667,7 +672,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.HiddenFolders,
                 visible: true,
                 isChecked: false);
-            await WaitForProjectTreePathStateAsync(window, exists: true, ".git", "config.txt");
+            await WaitForProjectTreePathStateAsync(window, exists: false, ".git", "config.txt");
+            await WaitForProjectTreePathStateAsync(window, exists: true, ".hidden-dot", "payload.txt");
         }
         finally
         {
@@ -817,6 +823,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
         WriteTextFile(clonedProject.RootPath, ".gitignore", "logs/\n");
         WriteTextFile(clonedProject.RootPath, Path.Combine("logs", "runtime.log"), "git ignored\n");
         WriteTextFile(clonedProject.RootPath, Path.Combine("obj", "project.assets.json"), "{}\n");
+        RunGit(clonedProject.RootPath, "init", "--quiet");
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(initialProject);
 
         try

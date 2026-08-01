@@ -5,4 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>DevProjex.Kernel</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
+  </ItemGroup>
 </Project>

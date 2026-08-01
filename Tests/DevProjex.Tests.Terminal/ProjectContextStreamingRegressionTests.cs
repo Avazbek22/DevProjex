@@ -964,7 +964,6 @@ public sealed class ProjectContextStreamingRegressionTests
 			PublishedApplicationLocator.FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"bin",
 			configuration,
 			"net10.0",

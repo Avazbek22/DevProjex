@@ -115,10 +115,14 @@ public sealed record IgnoreRules(
 		var context = CreateGitIgnoreScanContext(scanRootPath);
 		foreach (var matcher in additionalMatchers)
 		{
-			if (!TryGetScopeRelativePath(scanRootPath, matcher.ScopeRootPath, out var scopeRelativePath))
-				continue;
-
-			context = context.WithScope(matcher, scopeRelativePath);
+			if (TryGetScopeRelativePath(scanRootPath, matcher.ScopeRootPath, out var scopeRelativePath))
+			{
+				context = context.WithScope(matcher, scopeRelativePath);
+			}
+			else if (IsPathInsideScope(scanRootPath, matcher.ScopeRootPath))
+			{
+				context = context.WithAncestorScope(matcher, scanRootPath);
+			}
 		}
 
 		foreach (var trackedPathIndex in additionalTrackedPathIndexes)
@@ -169,7 +173,9 @@ public sealed record IgnoreRules(
 			if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty) ||
 			    !matcher.TryGetRelativePath(scanRootPath, out var baseRelativePath, allowRoot: true))
 			{
-				return !useCandidates && UseTrackedGitFilesOnly
+				// An active Git policy still owns the administrative .git boundary when
+				// there are no pattern files. Disabled is reserved for an unselected mode.
+				return !useCandidates && (UseGitIgnore || UseTrackedGitFilesOnly)
 					? GitIgnoreScanContext.Scoped(
 						this,
 						useCandidates: false,
@@ -243,7 +249,7 @@ public sealed record IgnoreRules(
 		bool useCandidates)
 	{
 		// Git administrative entries are outside the working tree and must never be traversed as ignore-pattern content.
-		if ((useCandidates || UseGitIgnore) && IsGitAdministrativeEntry(name))
+		if ((useCandidates || UseGitIgnore || UseTrackedGitFilesOnly) && IsGitAdministrativeEntry(name))
 			return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 
 		var scopedMatchersSource = GetScopedGitIgnoreMatchers(useCandidates);
@@ -470,47 +476,81 @@ public sealed record IgnoreRules(
 				SmartArtifactIgnoreMatcher,
 				fullPath,
 				name,
-				portableOnly: !appliesToProjectScope))
+				portableOnly: true))
 			return true;
+
+		if (SmartIgnoreScopeResolver?.EvaluateDirectory(fullPath, name) is
+		    { IsResolved: true } scopeDecision)
+		{
+			return scopeDecision.IsIgnored;
+		}
+
+		if (appliesToProjectScope && IsSmartArtifactIgnoredDirectory(
+				SmartArtifactIgnoreMatcher,
+				fullPath,
+				name,
+				portableOnly: false))
+		{
+			return true;
+		}
 
 		if (!SmartIgnoredFolders.Contains(name))
 			return false;
 
-		foreach (var scoped in ScopedSmartIgnoreMatchers)
+		var scoped = GetMostSpecificSmartIgnoreMatcher(fullPath, ScopedSmartIgnoreMatchers);
+		if (scoped is not null)
 		{
-			if (scoped.FolderNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-				return true;
-		}
+			if (!scoped.FolderNames.Contains(name))
+				return false;
 
+			return !scoped.EvidenceRequiredFolderNames.Contains(name);
+		}
 		if (SmartIgnoreScopeResolver is not null)
-			return SmartIgnoreScopeResolver.IsIgnoredDirectory(fullPath, name);
+			return false;
 
 		return appliesToProjectScope && ScopedSmartIgnoreMatchers.Count == 0;
 	}
 
 	public bool IsSmartIgnoredDirectoryCandidate(string fullPath, string name)
 	{
+		var scopedMatchers = GetScopedSmartIgnoreMatchers(useCandidates: true);
 		var appliesToProjectScope = ShouldApplySmartIgnoreCandidate(fullPath, isDirectory: true);
 		if (IsSmartArtifactIgnoredDirectory(
 				SmartArtifactIgnoreCandidateMatcher,
 				fullPath,
 				name,
-				portableOnly: !appliesToProjectScope))
+				portableOnly: true))
 			return true;
+
+		if (SmartIgnoreScopeResolver?.EvaluateDirectory(fullPath, name) is
+		    { IsResolved: true } scopeDecision)
+		{
+			return scopeDecision.IsIgnored;
+		}
+
+		if (appliesToProjectScope && IsSmartArtifactIgnoredDirectory(
+				SmartArtifactIgnoreCandidateMatcher,
+				fullPath,
+				name,
+				portableOnly: false))
+		{
+			return true;
+		}
 
 		var candidateFolders = SmartIgnoreCandidateFolders ?? SmartIgnoredFolders;
 		if (!candidateFolders.Contains(name))
 			return false;
 
-		var scopedMatchers = GetScopedSmartIgnoreMatchers(useCandidates: true);
-		foreach (var scoped in scopedMatchers)
+		var scoped = GetMostSpecificSmartIgnoreMatcher(fullPath, scopedMatchers);
+		if (scoped is not null)
 		{
-			if (scoped.FolderNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-				return true;
-		}
+			if (!scoped.FolderNames.Contains(name))
+				return false;
 
+			return !scoped.EvidenceRequiredFolderNames.Contains(name);
+		}
 		if (SmartIgnoreScopeResolver is not null)
-			return SmartIgnoreScopeResolver.IsIgnoredDirectory(fullPath, name);
+			return false;
 
 		return appliesToProjectScope && scopedMatchers.Count == 0;
 	}
@@ -528,15 +568,18 @@ public sealed record IgnoreRules(
 
 		if (shouldApplySmartIgnore)
 		{
-			foreach (var scoped in ScopedSmartIgnoreMatchers)
+			if (SmartIgnoreScopeResolver?.EvaluateFile(fullPath, name) is
+			    { IsResolved: true } scopeDecision)
 			{
-				if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-					return true;
+				return scopeDecision.IsIgnored;
 			}
-		}
 
-		if (SmartIgnoreScopeResolver is not null)
-			return SmartIgnoreScopeResolver.IsIgnoredFile(fullPath, name);
+			var scoped = GetMostSpecificSmartIgnoreMatcher(fullPath, ScopedSmartIgnoreMatchers);
+			if (scoped is not null)
+				return scoped.FileNames.Contains(name);
+			if (SmartIgnoreScopeResolver is not null)
+				return false;
+		}
 
 		return shouldApplySmartIgnore && ScopedSmartIgnoreMatchers.Count == 0;
 	}
@@ -553,15 +596,18 @@ public sealed record IgnoreRules(
 		var scopedMatchers = GetScopedSmartIgnoreMatchers(useCandidates: true);
 		if (shouldApplySmartIgnore)
 		{
-			foreach (var scoped in scopedMatchers)
+			if (SmartIgnoreScopeResolver?.EvaluateFile(fullPath, name) is
+			    { IsResolved: true } scopeDecision)
 			{
-				if (scoped.FileNames.Contains(name) && IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-					return true;
+				return scopeDecision.IsIgnored;
 			}
-		}
 
-		if (SmartIgnoreScopeResolver is not null)
-			return SmartIgnoreScopeResolver.IsIgnoredFile(fullPath, name);
+			var scoped = GetMostSpecificSmartIgnoreMatcher(fullPath, scopedMatchers);
+			if (scoped is not null)
+				return scoped.FileNames.Contains(name);
+			if (SmartIgnoreScopeResolver is not null)
+				return false;
+		}
 
 		return shouldApplySmartIgnore && scopedMatchers.Count == 0;
 	}
@@ -669,17 +715,33 @@ public sealed record IgnoreRules(
 		return ScopedSmartIgnoreCandidateMatchers;
 	}
 
+	private static ScopedSmartIgnoreMatcher? GetMostSpecificSmartIgnoreMatcher(
+		string fullPath,
+		IReadOnlyList<ScopedSmartIgnoreMatcher> matchers)
+	{
+		ScopedSmartIgnoreMatcher? mostSpecific = null;
+		foreach (var matcher in matchers)
+		{
+			if (!IsPathInsideScope(fullPath, matcher.ScopeRootPath))
+				continue;
+
+			if (mostSpecific is null || matcher.ScopeRootPath.Length > mostSpecific.ScopeRootPath.Length)
+				mostSpecific = matcher;
+		}
+
+		return mostSpecific;
+	}
+
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static bool IsPathInsideScope(string fullPath, string scopeRootPath)
 	{
 		if (string.IsNullOrWhiteSpace(fullPath) || string.IsNullOrWhiteSpace(scopeRootPath))
 			return false;
 
-		// Use Span for faster comparison
 		var fullSpan = fullPath.AsSpan();
 		var scopeSpan = scopeRootPath.AsSpan();
 
-		if (!fullSpan.StartsWith(scopeSpan, PathComparison))
+		if (!StartsWithPathPrefix(fullSpan, scopeSpan))
 			return false;
 
 		if (fullSpan.Length == scopeSpan.Length)
@@ -688,6 +750,34 @@ public sealed record IgnoreRules(
 		var next = fullSpan[scopeSpan.Length];
 		return next == Path.DirectorySeparatorChar || next == Path.AltDirectorySeparatorChar;
 	}
+
+	private static bool StartsWithPathPrefix(
+		ReadOnlySpan<char> fullPath,
+		ReadOnlySpan<char> scopeRootPath)
+	{
+		if (scopeRootPath.Length > fullPath.Length)
+			return false;
+
+		for (var index = 0; index < scopeRootPath.Length; index++)
+		{
+			var fullCharacter = fullPath[index];
+			var scopeCharacter = scopeRootPath[index];
+			if (fullCharacter == scopeCharacter ||
+			    IsDirectorySeparator(fullCharacter) && IsDirectorySeparator(scopeCharacter))
+			{
+				continue;
+			}
+
+			if (!fullPath.Slice(index, 1).Equals(scopeRootPath.Slice(index, 1), PathComparison))
+				return false;
+		}
+
+		return true;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static bool IsDirectorySeparator(char character) =>
+		character == Path.DirectorySeparatorChar || character == Path.AltDirectorySeparatorChar;
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static GitIgnoreEvaluation EvaluateWithSingleMatcher(
@@ -829,6 +919,34 @@ public sealed record IgnoreRules(
 				_trackedPathIndexes);
 		}
 
+		public GitIgnoreScanContext WithAncestorScope(
+			ScopedGitIgnoreMatcher scopedMatcher,
+			string scanRootPath)
+		{
+			if (ReferenceEquals(scopedMatcher.Matcher, GitIgnoreMatcher.Empty) ||
+			    ContainsScope(scopedMatcher.ScopeRootPath) ||
+			    !scopedMatcher.Matcher.TryGetRelativePath(
+				    scanRootPath,
+				    out var matcherBaseRelativePath,
+				    allowRoot: true))
+			{
+				return this;
+			}
+
+			return new GitIgnoreScanContext(
+				_rules,
+				_relativeMatcher,
+				_baseRelativePath,
+				_useCandidates,
+				_evaluateRulesFallback,
+				new AdditionalGitIgnoreScope(
+					_additionalScopes,
+					scopedMatcher,
+					scopeRelativePath: string.Empty,
+					matcherBaseRelativePath: matcherBaseRelativePath),
+				_trackedPathIndexes);
+		}
+
 		public bool ContainsTrackedPathIndex(string repositoryRootPath)
 		{
 			try
@@ -924,8 +1042,7 @@ public sealed record IgnoreRules(
 			string fullPath,
 			bool isDirectory)
 		{
-			var trackedPathIndex = _trackedPathIndexes?.Resolve(fullPath);
-			if (trackedPathIndex is null)
+			if (_trackedPathIndexes?.Resolve(fullPath) is not { } trackedPath)
 			{
 				// Outside a known repository, directories remain traversal-only containers
 				// so a workspace root can still discover repositories at any descendant depth.
@@ -936,12 +1053,12 @@ public sealed record IgnoreRules(
 
 			if (!isDirectory)
 			{
-				return trackedPathIndex.Contains(fullPath)
+				return trackedPath.Index.ContainsNormalizedRelativePath(trackedPath.RelativePath)
 					? GitIgnoreEvaluation.NotIgnored
 					: new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 			}
 
-			if (trackedPathIndex.ContainsOrHasDescendant(fullPath))
+			if (trackedPath.Index.ContainsOrHasDescendantNormalizedRelativePath(trackedPath.RelativePath))
 				return GitIgnoreEvaluation.NotIgnored;
 
 			// Untracked directories are traversal-only containers. This lets the scanner
@@ -960,21 +1077,20 @@ public sealed record IgnoreRules(
 			if (!evaluation.IsIgnored)
 				return evaluation;
 
-			var trackedPathIndex = _trackedPathIndexes?.Resolve(fullPath);
-			if (trackedPathIndex is null)
+			if (_trackedPathIndexes?.Resolve(fullPath) is not { } trackedPath)
 				return evaluation;
 
 			if (!isDirectory)
 			{
-				return trackedPathIndex.Contains(fullPath)
+				return trackedPath.Index.ContainsNormalizedRelativePath(trackedPath.RelativePath)
 					? GitIgnoreEvaluation.NotIgnored
 					: evaluation;
 			}
 
-			if (trackedPathIndex.Contains(fullPath))
+			if (trackedPath.Index.ContainsNormalizedRelativePath(trackedPath.RelativePath))
 				return GitIgnoreEvaluation.NotIgnored;
 
-			return trackedPathIndex.HasDescendant(fullPath)
+			return trackedPath.Index.HasDescendantNormalizedRelativePath(trackedPath.RelativePath)
 				? new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: true)
 				: evaluation;
 		}
@@ -1060,7 +1176,8 @@ public sealed record IgnoreRules(
 		private sealed class AdditionalGitIgnoreScope(
 			AdditionalGitIgnoreScope? parent,
 			ScopedGitIgnoreMatcher scopedMatcher,
-			string scopeRelativePath)
+			string scopeRelativePath,
+			string? matcherBaseRelativePath = null)
 		{
 			private readonly AdditionalGitIgnoreScope? _parent = parent;
 			private readonly ScopedGitIgnoreMatcher _scopedMatcher = scopedMatcher;
@@ -1094,13 +1211,26 @@ public sealed record IgnoreRules(
 						inherited,
 						out reIncludedIgnoredPath);
 				}
-				if (!TryGetMatcherRelativePath(scanRelativePath, out var matcherRelativePath))
-					return evaluation;
-
-				var local = _scopedMatcher.Matcher.EvaluateRelativeNormalized(
-					matcherRelativePath,
-					isDirectory,
-					name);
+				GitIgnoreMatcher.IgnoreEvaluation local;
+				if (matcherBaseRelativePath is not null)
+				{
+					var matcherRelativePath = BuildAncestorMatcherRelativePath(scanRelativePath);
+					if (matcherRelativePath.Length == 0)
+						return evaluation;
+					local = _scopedMatcher.Matcher.EvaluateRelativeNormalized(
+						matcherRelativePath.AsSpan(),
+						isDirectory,
+						name);
+				}
+				else
+				{
+					if (!TryGetMatcherRelativePath(scanRelativePath, out var matcherRelativePath))
+						return evaluation;
+					local = _scopedMatcher.Matcher.EvaluateRelativeNormalized(
+						matcherRelativePath,
+						isDirectory,
+						name);
+				}
 				if (local.HasMatch)
 				{
 					if (evaluation.IsIgnored && !local.IsIgnored)
@@ -1124,13 +1254,26 @@ public sealed record IgnoreRules(
 					isDirectory,
 					name,
 					inherited) ?? inherited;
-				if (!TryGetMatcherRelativePath(scanRelativePath, out var matcherRelativePath))
-					return evaluation;
-
-				var local = _scopedMatcher.Matcher.EvaluateRelativeRulesOnlyNormalized(
-					matcherRelativePath,
-					isDirectory,
-					name);
+				GitIgnoreMatcher.IgnoreEvaluation local;
+				if (matcherBaseRelativePath is not null)
+				{
+					var matcherRelativePath = BuildAncestorMatcherRelativePath(scanRelativePath);
+					if (matcherRelativePath.Length == 0)
+						return evaluation;
+					local = _scopedMatcher.Matcher.EvaluateRelativeRulesOnlyNormalized(
+						matcherRelativePath.AsSpan(),
+						isDirectory,
+						name);
+				}
+				else
+				{
+					if (!TryGetMatcherRelativePath(scanRelativePath, out var matcherRelativePath))
+						return evaluation;
+					local = _scopedMatcher.Matcher.EvaluateRelativeRulesOnlyNormalized(
+						matcherRelativePath,
+						isDirectory,
+						name);
+				}
 				return local.HasMatch ? local : evaluation;
 			}
 
@@ -1139,10 +1282,29 @@ public sealed record IgnoreRules(
 				if (_parent?.HasTraversalCandidate(scanRelativePath, name) == true)
 					return true;
 
-				return TryGetMatcherRelativePath(scanRelativePath, out var matcherRelativePath) &&
+				if (matcherBaseRelativePath is not null)
+				{
+					var matcherRelativePath = BuildAncestorMatcherRelativePath(scanRelativePath);
+					return matcherRelativePath.Length > 0 &&
+					       _scopedMatcher.Matcher.ShouldTraverseIgnoredDirectoryRelativeNormalized(
+						       matcherRelativePath.AsSpan(),
+						       name);
+				}
+
+				return TryGetMatcherRelativePath(scanRelativePath, out var descendantRelativePath) &&
 				       _scopedMatcher.Matcher.ShouldTraverseIgnoredDirectoryRelativeNormalized(
-					       matcherRelativePath,
+					       descendantRelativePath,
 					       name);
+			}
+
+			private string BuildAncestorMatcherRelativePath(string scanRelativePath)
+			{
+				if (matcherBaseRelativePath!.Length == 0)
+					return scanRelativePath;
+				if (scanRelativePath.Length == 0)
+					return matcherBaseRelativePath;
+
+				return $"{matcherBaseRelativePath}/{scanRelativePath}";
 			}
 
 			private bool TryGetMatcherRelativePath(
@@ -1191,24 +1353,28 @@ public sealed record IgnoreRules(
 				return false;
 			}
 
-			public GitTrackedPathIndex? Resolve(string fullPath)
+			public ResolvedGitTrackedPath? Resolve(string fullPath)
 			{
-				GitTrackedPathIndex? bestMatch = null;
+				ResolvedGitTrackedPath? bestMatch = null;
 				for (var current = this; current is not null; current = current._parent)
 				{
 					var candidate = current._trackedPathIndex;
-					if (!candidate.IsPathInsideRepository(fullPath))
+					if (!candidate.TryGetNormalizedRelativePath(fullPath, out var relativePath))
 						continue;
 					if (bestMatch is null ||
-					    candidate.RepositoryRootPath.Length > bestMatch.RepositoryRootPath.Length)
+					    candidate.RepositoryRootPath.Length > bestMatch.Value.Index.RepositoryRootPath.Length)
 					{
-						bestMatch = candidate;
+						bestMatch = new ResolvedGitTrackedPath(candidate, relativePath);
 					}
 				}
 
 				return bestMatch;
 			}
 		}
+
+		private readonly record struct ResolvedGitTrackedPath(
+			GitTrackedPathIndex Index,
+			string RelativePath);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1223,4 +1389,5 @@ public sealed record ScopedGitIgnoreMatcher(
 public sealed record ScopedSmartIgnoreMatcher(
 	string ScopeRootPath,
 	IReadOnlySet<string> FolderNames,
-	IReadOnlySet<string> FileNames);
+	IReadOnlySet<string> FileNames,
+	IReadOnlySet<string> EvidenceRequiredFolderNames);

@@ -241,8 +241,8 @@ Plage : 6–28, reset : 15.
 Rend l’interface plus dense : moins d’espaces dans l’arbre et les paramètres.
 Quand l’espace de travail d’aperçu est actif, le mode compact est activé automatiquement.
 
-### Animation de l'arborescence
-Active une animation de glissement fluide au survol des lignes de l'arborescence.
+### Animation de déploiement de l’arborescence
+Fait pivoter la flèche et déploie ou replie une branche en déplaçant les lignes voisines. Activée par défaut ; lorsqu’elle est désactivée, le déploiement est immédiat.
 
 ### Police de l’arborescence
 La police de l’arborescence se choisit via « Affichage → Police de l’arborescence ».
@@ -336,12 +336,18 @@ Pour un chemin donné, les règles sont évaluées du `.gitignore` parent vers l
 
 Une règle commençant par `!` annule uniquement une exclusion Git antérieure dans sa zone. Elle ne peut pas restaurer un fichier tant que son dossier parent reste exclu. Un `.gitignore` situé dans un dossier entièrement exclu et inaccessible n’est pas évalué.
 
-Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude` et les règles Git globales ne sont pas appliqués. Si un index Git lisible est disponible, les fichiers suivis restent visibles même s’ils correspondent à `.gitignore` ; sans index ou Git CLI, DevProjex revient en toute sécurité à l’évaluation des motifs seuls.
+Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude` et les règles d’exclusion Git globales ne sont pas appliqués ; les paramètres effectifs du dépôt pour la comparaison des chemins, tels que `core.ignoreCase` et, sous macOS, `core.precomposeUnicode`, sont respectés. Lorsqu’un index Git lisible existe pour la zone du dépôt propriétaire du chemin, les fichiers suivis restent visibles même s’ils correspondent à `.gitignore` ; sans cet index ou Git CLI, cette zone revient en toute sécurité à l’évaluation des motifs seuls.
+
+Un lien symbolique nommé `.gitignore` n’est pas suivi, conformément au comportement de Git pour ce fichier de contrôle. Si un fichier `.gitignore` ordinaire ne peut pas être lu, la zone de son répertoire est entièrement exclue de manière sûre et l’analyse signale un accès partiel au lieu d’inclure des fichiers sans évaluer toutes les règles.
+
+Le profil intégré `standard` sélectionne `gitignore` et les huit groupes d’exclusion : `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` et `extensionless-files`.
 
 ### 12.4 Uniquement les fichiers suivis par Git
 « Uniquement les fichiers suivis par Git » construit l’étape Git de l’arbre à partir des fichiers existants de l’arbre de travail enregistrés dans chaque index Git lisible. Les fichiers suivis modifiés et les nouveaux fichiers ajoutés à l’index restent inclus ; les fichiers non suivis sont exclus. Il s’agit de l’arbre de travail actuel, et non d’un instantané historique de `HEAD` ou d’un dépôt distant.
 
-Chaque dépôt imbriqué et worktree accessible est traité indépendamment à chaque niveau d’imbrication accessible. Un dépôt enfant n’hérite pas des chemins suivis de son parent ni d’un dépôt voisin. Si un index ne peut pas être lu en toute sécurité, le mode strict ne le remplace pas silencieusement par l’évaluation des motifs `.gitignore`.
+Chaque dépôt imbriqué et chaque worktree accessible sont traités indépendamment à chaque niveau d’imbrication accessible. Un dépôt enfant n’hérite pas des chemins suivis de son parent ni d’un dépôt voisin. Ce mode nécessite la CLI Git ; un index vide mais lisible est valide. Si l’espace de travail interactif du terminal (TUI) démarre dans ce mode et qu’aucun index applicable ne peut être chargé, l’espace de travail ne s’ouvre pas. Si ce mode est sélectionné de manière interactive dans un espace de travail TUI déjà ouvert et qu’aucun index applicable ne peut être chargé, la modification est refusée et le dernier mode Git utilisable reste actif. Dans la même situation, les commandes directes renvoient une erreur de stratégie ou de vérification. DevProjex ne bascule jamais silencieusement vers `.gitignore`. Lorsqu’un autre index applicable est lisible, les zones imbriquées indisponibles sont exclues avec un avertissement.
+
+Dans un espace de travail Desktop déjà ouvert, la sélection explicite reste visible et échoue de façon sûre : la sortie et l’exportation sont bloquées si la disponibilité échoue, tandis qu’une disponibilité partielle permet de continuer avec un avertissement localisé.
 
 « Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » s’excluent mutuellement : activer l’un désactive l’autre. Pour les projets locaux prenant en charge les profils, le mode choisi est enregistré avec les dossiers de premier niveau, les types de fichiers et les autres règles d’exclusion.
 
@@ -419,10 +425,12 @@ Ordre de sélection :
 4) sinon — inconnu
 
 ## 15) Thème et effets
-La section « Thème » permet de choisir un thème clair ou sombre et un effet d’arrière-plan :
+La section « Thème » permet de choisir Système, Clair ou Sombre et un effet d’arrière-plan :
 * Transparence
 * Flou
 * Mica
+
+Système est sélectionné par défaut et suit les changements de thème du système d’exploitation. Après le premier démarrage ou une réinitialisation des paramètres, un thème système clair utilise un arrière-plan opaque normal, tandis qu’un thème système sombre utilise le Flou. Si la préférence système ne peut pas être déterminée, DevProjex utilise Sombre avec le Flou. Les thèmes Clair et Sombre mémorisent leurs effets séparément. Un choix explicite de Clair ou Sombre ignore les changements du système jusqu’à ce que Système soit de nouveau sélectionné.
 
 Les effets sont mutuellement exclusifs. Un nouveau clic sur l’effet sélectionné le désactive et rétablit un arrière-plan opaque normal.
 
@@ -439,7 +447,7 @@ En mode Transparence, l’arrière-plan de la fenêtre principale reste transpar
 ## 16) Aide
 
 ### 16.1 Réinitialiser les paramètres
-Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, de l’animation de l’arborescence et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
+Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, de l’animation de déploiement de l’arborescence et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
 
 ### 16.2 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
@@ -476,5 +484,4 @@ Bouton X (annuler) dans la barre d’état :
 * pour les opérations sans prise en charge de l’annulation, arrête l’indication dans la barre d’état, tandis que l’opération peut se terminer en arrière-plan.
 
 ## 19) Notes
-* Par défaut, le thème sombre avec l’effet Flou est utilisé. Si le Flou n’est pas disponible, l’application essaie Mica ; si aucun des deux effets n’est disponible, les effets sont désactivés.
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.

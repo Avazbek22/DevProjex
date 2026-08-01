@@ -1,3 +1,5 @@
+using DevProjex.Application.Selection;
+
 namespace DevProjex.Application.UseCases;
 
 public static class ProjectTreeInventoryExtensionDiscovery
@@ -93,9 +95,6 @@ public static class ProjectTreeInventoryExtensionDiscovery
 		if (extension.IsEmpty)
 			return;
 
-		if (extensions.TryGetAlternateLookup<ReadOnlySpan<char>>(out var lookup) && lookup.Contains(extension))
-			return;
-
-		extensions.Add(extension.ToString());
+		ExtensionOptionProjection.AddCanonicalExtension(extensions, extension);
 	}
 }

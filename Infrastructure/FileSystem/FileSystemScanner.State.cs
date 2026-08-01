@@ -50,7 +50,7 @@ public sealed partial class FileSystemScanner
 
     private sealed record RootSelectionScanPlan(
         List<FileSystemDirectoryEntry> SelectedRoots,
-        List<FileSystemDirectoryEntry> DirectoryToggleCandidates,
+        List<DirectoryScanFacts> DirectoryToggleCandidates,
         List<DirectoryScanFacts> ControllerImpactCandidates,
         bool RootAccessDenied,
         bool HadAccessDenied);

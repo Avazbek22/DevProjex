@@ -100,7 +100,6 @@ internal sealed class UiTestProject : IDisposable
                 Path.Combine(
                     "Apps",
                     "Avalonia",
-                    "DevProjex.Avalonia",
                     "Coordinators",
                     "AppearanceSettingsController.cs"),
                 "internal sealed class AppearanceSettingsController {}\n");
@@ -390,7 +389,9 @@ internal sealed class UiTestProject : IDisposable
         {
             WriteFile(rootPath, Path.Combine("src", "Program.cs"), BuildCSharpFile("OverlapProbe", "Program", 6));
             WriteFile(rootPath, Path.Combine(".idea", "workspace.xml"), "<project />\n");
+            WriteFile(rootPath, Path.Combine(".hidden-dot", "payload.txt"), "hidden dot payload\n");
             WriteFile(rootPath, Path.Combine(".git", "config.txt"), "[core]\n");
+            TryMarkHidden(Path.Combine(rootPath, ".hidden-dot"));
             TryMarkHidden(Path.Combine(rootPath, ".git"));
         });
     }

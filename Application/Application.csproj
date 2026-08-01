@@ -9,4 +9,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Kernel\Kernel.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
+  </ItemGroup>
 </Project>

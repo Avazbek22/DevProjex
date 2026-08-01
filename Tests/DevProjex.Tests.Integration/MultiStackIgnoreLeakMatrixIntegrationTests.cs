@@ -248,16 +248,19 @@ public sealed class MultiStackIgnoreLeakMatrixIntegrationTests
 		temp.CreateFile("workspace/web-app/package.json", "{}");
 		temp.CreateFile("workspace/web-app/src/main.tsx", "export const app = 1;");
 		temp.CreateFile("workspace/web-app/node_modules/lib/index.js", "module.exports = {};");
+		temp.CreateFile("workspace/web-app/dist/manifest.json", "{}");
 		temp.CreateFile("workspace/web-app/dist/app.js", "console.log('dist');");
 
 		temp.CreateFile("workspace/service-dotnet/App.csproj", "<Project />");
 		temp.CreateFile("workspace/service-dotnet/Program.cs", "class Program {}");
 		temp.CreateFile("workspace/service-dotnet/bin/Release/app.dll", "binary");
+		temp.CreateFile("workspace/service-dotnet/obj/project.assets.json", "{}");
 		temp.CreateFile("workspace/service-dotnet/obj/Release/cache.dll", "binary");
 
 		temp.CreateFile("workspace/python-worker/pyproject.toml", "[project]");
 		temp.CreateFile("workspace/python-worker/app.py", "print('ok')");
 		temp.CreateFile("workspace/python-worker/__pycache__/app.pyc", "binary");
+		temp.CreateFile("workspace/python-worker/.venv/pyvenv.cfg", "home = python");
 		temp.CreateFile("workspace/python-worker/.venv/bin/python", "binary");
 	}
 }

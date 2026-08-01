@@ -12,7 +12,7 @@
     <AppxPackageDir>$(SolutionDir)publish\store\</AppxPackageDir>
     <AppxManifest>Package.appxmanifest</AppxManifest>
     <AppxPackageManifest>Package.appxmanifest</AppxPackageManifest>
-    <EntryPointProjectUniqueName>..\..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj</EntryPointProjectUniqueName>
+    <EntryPointProjectUniqueName>..\..\..\Apps\Avalonia\DevProjex.Avalonia.csproj</EntryPointProjectUniqueName>
     <UapAppxPackageBuildMode>StoreUpload</UapAppxPackageBuildMode>
     <GenerateAppInstallerFile>false</GenerateAppInstallerFile>
     <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
@@ -20,7 +20,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj" />
+    <ProjectReference Include="..\..\..\Apps\Avalonia\DevProjex.Avalonia.csproj" />
   </ItemGroup>
 
   <ItemGroup>

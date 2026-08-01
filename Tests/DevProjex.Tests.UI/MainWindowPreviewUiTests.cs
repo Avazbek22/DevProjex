@@ -552,7 +552,7 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
-    public async Task PreviewCloseDuringOpenAnimation_InterruptsTransitionAndCleansSnapshots()
+    public async Task PreviewCloseDuringOpenAnimation_InterruptsTransitionAndCleansVisualState()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
 
@@ -601,25 +601,19 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
                 UiTestDriver.GetRequiredControl<Border>(
                     window,
                     "TreePaneAnimationSnapshotHost");
-            var previewSnapshotHost =
-                UiTestDriver.GetRequiredControl<Border>(
-                    window,
-                    "PreviewPaneAnimationSnapshotHost");
             var treeSnapshotImage =
                 UiTestDriver.GetRequiredControl<Image>(
                     window,
                     "TreePaneAnimationSnapshotImage");
-            var previewSnapshotImage =
-                UiTestDriver.GetRequiredControl<Image>(
-                    window,
-                    "PreviewPaneAnimationSnapshotImage");
+            var previewSurface =
+                UiTestDriver.GetRequiredControl<Grid>(window, "PreviewPaneSurface");
 
             Assert.True(previewController.WasLastOpenAnimationInterruptedByClose);
             Assert.False(viewModel.IsPreviewMode);
             Assert.False(treeSnapshotHost.IsVisible);
-            Assert.False(previewSnapshotHost.IsVisible);
             Assert.Null(treeSnapshotImage.Source);
-            Assert.Null(previewSnapshotImage.Source);
+            Assert.True(double.IsNaN(previewSurface.Width));
+            Assert.Equal(HorizontalAlignment.Stretch, previewSurface.HorizontalAlignment);
         }
         finally
         {

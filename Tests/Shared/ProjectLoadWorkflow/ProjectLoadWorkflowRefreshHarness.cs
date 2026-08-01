@@ -246,6 +246,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
         Assert.Equal(expected.HasIgnoreOptionCounts, actual.HasIgnoreOptionCounts);
         Assert.Equal(expected.IgnoreOptionCounts, actual.IgnoreOptionCounts);
         Assert.Equal(expected.ControllerImpactCounts, actual.ControllerImpactCounts);
+        Assert.True(expected.EffectiveIgnoreOptions.SetEquals(actual.EffectiveIgnoreOptions));
         Assert.Equal(expected.IgnoreOptionStateCache.Count, actual.IgnoreOptionStateCache.Count);
         foreach (var pair in expected.IgnoreOptionStateCache.OrderBy(pair => pair.Key))
         {
@@ -284,8 +285,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
             StringComparer.OrdinalIgnoreCase);
 
     public static HashSet<IgnoreOptionId> CollectCheckedIgnoreOptionIds(SelectionRefreshSnapshot snapshot) =>
-        new(
-            snapshot.IgnoreOptions.Where(option => option.IsChecked).Select(option => option.Id));
+        new(snapshot.EffectiveIgnoreOptions);
 
     private static IReadOnlySet<string> BuildRequestedRootNames(WorkflowRootScenario scenario)
     {

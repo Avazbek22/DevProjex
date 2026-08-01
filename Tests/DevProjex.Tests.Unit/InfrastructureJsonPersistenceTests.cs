@@ -49,7 +49,7 @@ public sealed class InfrastructureJsonPersistenceTests
 			.ToArray();
 
 		Assert.Contains("useGitIgnore", selectedIgnoreOptions);
-		Assert.Contains("dotFolders", selectedIgnoreOptions);
+		Assert.DoesNotContain("dotFolders", selectedIgnoreOptions);
 		Assert.False(storedProfile.GetProperty("rootFolderStates").GetProperty("docs").GetBoolean());
 		Assert.False(storedProfile.GetProperty("extensionStates").GetProperty(".csv").GetBoolean());
 		Assert.False(storedProfile.GetProperty("ignoreOptionStates").GetProperty("dotFolders").GetBoolean());
@@ -77,11 +77,8 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Contains("src", loaded.SelectedRootFolders);
 		Assert.Contains(".cs", loaded.SelectedExtensions);
 		Assert.Contains(IgnoreOptionId.SmartIgnore, loaded.SelectedIgnoreOptions);
-		Assert.NotNull(loaded.RootFolderStates);
-		Assert.NotNull(loaded.ExtensionStates);
-		Assert.NotNull(loaded.IgnoreOptionStates);
-		Assert.Empty(loaded.RootFolderStates);
-		Assert.Empty(loaded.ExtensionStates);
+		Assert.True(loaded.RootFolderStates!["src"]);
+		Assert.True(loaded.ExtensionStates![".cs"]);
 		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.SmartIgnore]);
 
 		store.SaveProfile(projectPath, loaded);
@@ -181,7 +178,7 @@ public sealed class InfrastructureJsonPersistenceTests
 		db.ViewSettings = new AppViewSettings
 		{
 			IsCompactMode = true,
-			IsTreeAnimationEnabled = true,
+			IsTreeExpansionAnimationEnabled = false,
 			IsTerminalCommandPromptDismissed = true,
 			PreferredLanguage = AppLanguage.Ru
 		};
@@ -209,7 +206,7 @@ public sealed class InfrastructureJsonPersistenceTests
 
 		var loaded = store.Load();
 		Assert.True(loaded.ViewSettings.IsCompactMode);
-		Assert.True(loaded.ViewSettings.IsTreeAnimationEnabled);
+		Assert.False(loaded.ViewSettings.IsTreeExpansionAnimationEnabled);
 		Assert.True(loaded.ViewSettings.IsTerminalCommandPromptDismissed);
 		Assert.Equal(AppLanguage.Ru, loaded.ViewSettings.PreferredLanguage);
 		Assert.Equal(42, themeStore.Load().Presets["Dark.Acrylic"].BackgroundTransparency);

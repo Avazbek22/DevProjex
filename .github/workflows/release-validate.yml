@@ -116,7 +116,7 @@ jobs:
             throw "Do not override Tmds.DBus.Protocol directly. Avalonia.FreeDesktop owns the compatible DBus version. Overrides found in: $($directTmdsOverrides -join ', ')"
           }
 
-          $assetsPath = "Apps/Avalonia/DevProjex.Avalonia/obj/project.assets.json"
+          $assetsPath = "Apps/Avalonia/obj/project.assets.json"
           if (-not (Test-Path -LiteralPath $assetsPath)) {
             throw "Project assets file was not produced by restore: $assetsPath"
           }
@@ -155,7 +155,7 @@ jobs:
         shell: pwsh
         # ReadyToRun validates the same startup-oriented publish shape as release artifacts.
         run: >
-          dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj
+          dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj
           -c Release
           -r ${{ matrix.rid }}
           --self-contained true
@@ -414,6 +414,16 @@ jobs:
           $sourceDirectory = Join-Path $projectDirectory "src"
           New-Item -ItemType Directory -Force -Path $sourceDirectory | Out-Null
           "class App {}" | Set-Content -LiteralPath (Join-Path $sourceDirectory "App.cs") -Encoding utf8NoBOM
+          $githubDirectory = Join-Path $projectDirectory ".github"
+          $gitLookalikeDirectory = Join-Path $projectDirectory ".git-owned"
+          New-Item -ItemType Directory -Force -Path $githubDirectory, $gitLookalikeDirectory | Out-Null
+          "name: ci" | Set-Content -LiteralPath (Join-Path $githubDirectory "ci.yml") -Encoding utf8NoBOM
+          "ordinary content" | Set-Content -LiteralPath (Join-Path $gitLookalikeDirectory "data.txt") -Encoding utf8NoBOM
+          "untracked" | Set-Content -LiteralPath (Join-Path $projectDirectory "untracked.txt") -Encoding utf8NoBOM
+          git -C $projectDirectory init --quiet
+          if ($LASTEXITCODE -ne 0) { throw "Failed to initialize published ignore-contract fixture." }
+          git -C $projectDirectory add -- "src/App.cs" ".github/ci.yml"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to stage published tracked-mode fixture." }
 
           $exportStdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-native-export-stdout.txt"
           $exportStderrPath = Join-Path $env:RUNNER_TEMP "devprojex-native-export-stderr.txt"
@@ -458,6 +468,82 @@ jobs:
 
           if ($exportStdout -notmatch "App\.cs") {
             throw "Published export smoke did not print the expected tree for ${{ matrix.rid }}. StdOut=$exportStdout"
+          }
+
+          $emptyGitIgnoreDestination = Join-Path $env:RUNNER_TEMP "devprojex-empty-gitignore-${{ matrix.rid }}"
+          Remove-Item -LiteralPath $emptyGitIgnoreDestination -Recurse -Force -ErrorAction SilentlyContinue
+          $emptyGitIgnore = Invoke-NativeCommand -Name "empty gitignore contract" -Arguments @(
+            "export", "project", $projectDirectory,
+            "--as", "folder",
+            "--git-mode", "gitignore",
+            "--exclude", "none",
+            "--plain",
+            "--language", "en",
+            "-o", $emptyGitIgnoreDestination)
+          if ($emptyGitIgnore.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($emptyGitIgnore.StdErr) -or
+              -not (Test-Path -LiteralPath (Join-Path $emptyGitIgnoreDestination ".github/ci.yml") -PathType Leaf) -or
+              -not (Test-Path -LiteralPath (Join-Path $emptyGitIgnoreDestination ".git-owned/data.txt") -PathType Leaf) -or
+              (Test-Path -LiteralPath (Join-Path $emptyGitIgnoreDestination ".git"))) {
+            throw "Published empty-.gitignore mode leaked Git administration or hid a lookalike. ExitCode=$($emptyGitIgnore.ExitCode) StdOut=$($emptyGitIgnore.StdOut) StdErr=$($emptyGitIgnore.StdErr)"
+          }
+          $emptyGitIgnoreManifest = @(
+            Get-ChildItem -LiteralPath $emptyGitIgnoreDestination -Force -File -Recurse |
+              ForEach-Object {
+                [System.IO.Path]::GetRelativePath($emptyGitIgnoreDestination, $_.FullName).Replace('\', '/')
+              })
+          $expectedEmptyGitIgnoreManifest = @(
+            ".github/ci.yml",
+            ".git-owned/data.txt",
+            "src/App.cs",
+            "untracked.txt")
+          $emptyGitIgnoreManifestSet =
+            [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+          $emptyGitIgnoreManifestSet.UnionWith([string[]] $emptyGitIgnoreManifest)
+          $expectedEmptyGitIgnoreManifestSet =
+            [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+          $expectedEmptyGitIgnoreManifestSet.UnionWith([string[]] $expectedEmptyGitIgnoreManifest)
+          if ($emptyGitIgnoreManifestSet.Count -ne $emptyGitIgnoreManifest.Count -or
+              $expectedEmptyGitIgnoreManifestSet.Count -ne $expectedEmptyGitIgnoreManifest.Count -or
+              -not $emptyGitIgnoreManifestSet.SetEquals($expectedEmptyGitIgnoreManifestSet)) {
+            throw "Published empty-.gitignore manifest drifted. Actual=$($emptyGitIgnoreManifest -join ', ')"
+          }
+
+          $trackedOnlyDestination = Join-Path $env:RUNNER_TEMP "devprojex-tracked-only-${{ matrix.rid }}"
+          Remove-Item -LiteralPath $trackedOnlyDestination -Recurse -Force -ErrorAction SilentlyContinue
+          $trackedOnly = Invoke-NativeCommand -Name "tracked-only contract" -Arguments @(
+            "export", "project", $projectDirectory,
+            "--as", "folder",
+            "--git-mode", "tracked",
+            "--exclude", "none",
+            "--plain",
+            "--language", "en",
+            "-o", $trackedOnlyDestination)
+          if ($trackedOnly.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($trackedOnly.StdErr) -or
+              -not (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination "src/App.cs") -PathType Leaf) -or
+              -not (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination ".github/ci.yml") -PathType Leaf) -or
+              (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination "untracked.txt")) -or
+              (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination ".git-owned/data.txt")) -or
+              (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination ".git"))) {
+            throw "Published tracked-only mode violated its exact manifest contract. ExitCode=$($trackedOnly.ExitCode) StdOut=$($trackedOnly.StdOut) StdErr=$($trackedOnly.StdErr)"
+          }
+          $trackedOnlyManifest = @(
+            Get-ChildItem -LiteralPath $trackedOnlyDestination -Force -File -Recurse |
+              ForEach-Object {
+                [System.IO.Path]::GetRelativePath($trackedOnlyDestination, $_.FullName).Replace('\', '/')
+              })
+          $expectedTrackedOnlyManifest = @(".github/ci.yml", "src/App.cs")
+          $trackedOnlyManifestSet =
+            [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+          $trackedOnlyManifestSet.UnionWith([string[]] $trackedOnlyManifest)
+          $expectedTrackedOnlyManifestSet =
+            [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+          $expectedTrackedOnlyManifestSet.UnionWith([string[]] $expectedTrackedOnlyManifest)
+          if ($trackedOnlyManifestSet.Count -ne $trackedOnlyManifest.Count -or
+              $expectedTrackedOnlyManifestSet.Count -ne $expectedTrackedOnlyManifest.Count -or
+              -not $trackedOnlyManifestSet.SetEquals($expectedTrackedOnlyManifestSet)) {
+            throw "Published tracked-only manifest drifted. Actual=$($trackedOnlyManifest -join ', ')"
           }
 
           $sourceBytesBeforeProjectExport =
@@ -785,7 +871,8 @@ jobs:
             param(
               [Parameter(Mandatory = $true)]
               [string[]] $Arguments,
-              [int] $TimeoutMilliseconds = 30000
+              [int] $TimeoutMilliseconds = 30000,
+              [scriptblock] $OnTimeout = $null
             )
 
             $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
@@ -806,14 +893,26 @@ jobs:
               $outputTasks = [System.Threading.Tasks.Task]::WhenAll(
                 [System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask))
               if (-not $process.WaitForExit($TimeoutMilliseconds)) {
-                $process.Kill($true)
+                $timeoutDiagnostics = "No timeout diagnostics were requested."
+                if ($null -ne $OnTimeout) {
+                  try {
+                    $timeoutDiagnostics = [string](& $OnTimeout)
+                  }
+                  catch {
+                    $timeoutDiagnostics = "Timeout diagnostic capture failed: $($_.Exception.Message)"
+                  }
+                }
+
+                if (-not $process.HasExited) {
+                  $process.Kill($true)
+                }
                 if (-not $process.WaitForExit(5000)) {
                   throw "Timed-out DevProjex process did not terminate after tree kill: $($Arguments -join ' ')"
                 }
                 if (-not $outputTasks.Wait(5000)) {
                   throw "Timed-out DevProjex process retained redirected handles: $($Arguments -join ' ')"
                 }
-                throw "DevProjex command timed out: $($Arguments -join ' ')"
+                throw "DevProjex command timed out: $($Arguments -join ' '). Diagnostics=$timeoutDiagnostics"
               }
 
               if (-not $outputTasks.Wait(5000)) {
@@ -839,17 +938,57 @@ jobs:
             }
           }
 
+          function Get-DesktopTimeoutDiagnostics {
+            try {
+              $list = Invoke-DevProjexProcess `
+                -Arguments @("ui", "list", "--format", "json", "--language", "en") `
+                -TimeoutMilliseconds 10000
+              $diagnostics = @("ui list: $($list.Stdout.Trim())")
+              $instances = @(($list.Stdout | ConvertFrom-Json).instances)
+              $matchingInstance = @(
+                $instances |
+                  Where-Object {
+                    [IO.Path]::GetFullPath([string]$_.projectPath) -eq $expectedProjectPath
+                  } |
+                  Select-Object -First 1)
+              if ($matchingInstance.Count -eq 1) {
+                try {
+                  $status = Invoke-DevProjexProcess `
+                    -Arguments @(
+                      "ui", "status",
+                      "--instance", [string]$matchingInstance[0].instanceId,
+                      "--language", "en") `
+                    -TimeoutMilliseconds 10000
+                  $diagnostics += "ui status: $($status.Stdout.Trim())"
+                }
+                catch {
+                  $diagnostics += "ui status capture failed: $($_.Exception.Message)"
+                }
+              }
+
+              return $diagnostics -join [Environment]::NewLine
+            }
+            catch {
+              return "ui list capture failed: $($_.Exception.Message)"
+            }
+          }
+
           $desktopProcessId = $null
           $instanceId = $null
           $expectedProjectPath = (Resolve-Path $projectDirectory).Path
           try {
-            $open = Invoke-DevProjexProcess -Arguments @(
-              "open", $projectDirectory,
-              "--new-window",
-              "--wait",
-              "--preview",
-              "--view", "tree",
-              "--language", "en")
+            # open --wait owns a two-minute application timeout. The outer watchdog
+            # must let that contract return its typed failure before terminating it.
+            $open = Invoke-DevProjexProcess `
+              -Arguments @(
+                "open", $projectDirectory,
+                "--new-window",
+                "--wait",
+                "--preview",
+                "--view", "tree",
+                "--language", "en") `
+              -TimeoutMilliseconds 150000 `
+              -OnTimeout { Get-DesktopTimeoutDiagnostics }
             if ($open.Stdout.Trim() -ne (Resolve-Path $projectDirectory).Path) {
               throw "Desktop open did not print the accepted project path. StdOut=$($open.Stdout)"
             }

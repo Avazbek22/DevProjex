@@ -85,6 +85,23 @@ Response:
 Messages are size-bounded and validated. Unknown versions, actions, payloads, and
 targets fail with stable codes.
 
+Successful state dictionaries use these stable keys:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `projectPath` | string or null | Canonical loaded project path |
+| `projectLoaded` | boolean | A project is loaded |
+| `busy` | boolean | Desktop is applying an operation |
+| `startupReady` | boolean | Startup routing completed |
+| `startupError` | string or null | Stable startup failure code |
+| `previewOpen` | boolean | Preview island is open |
+| `previewView` | string | `tree`, `content`, or `tree-content` |
+| `treeFormat` | string | `text`, `markdown`, `json`, or `xml` |
+| `filter` | string or null | Current tree-name filter |
+| `search` | string or null | Current preview search |
+| `gitMode` | string | `none`, `gitignore`, or `tracked` |
+| `trackedGitReady` | boolean | At least one applicable tracked index was loaded, or tracked mode is not selected |
+
 ## Desktop Semantics
 
 Requests represent user intent, not control names or methods. Avalonia operations

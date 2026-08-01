@@ -58,12 +58,47 @@ public sealed class IgnoreRulesSmartArtifactScopeTests
 				new ScopedSmartIgnoreMatcher(
 					Path.Combine(temp.Path, "scoped"),
 					folderNames,
+					new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 					new HashSet<string>(StringComparer.OrdinalIgnoreCase))
 			]
 		};
 
 		Assert.True(rules.IsSmartIgnoredDirectory(scopedGenerated, "generated"));
 		Assert.False(rules.IsSmartIgnoredDirectory(outsideGenerated, "generated"));
+	}
+
+	[Fact]
+	public void IsSmartIgnoredDirectory_NearestNestedProjectOwnsTheFolderDecision()
+	{
+		using var temp = new TemporaryDirectory();
+		var parentGenerated = temp.CreateFolder("workspace/generated");
+		var nestedGenerated = temp.CreateFolder("workspace/service/generated");
+		var generated = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "generated" };
+		var empty = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var matchers = new[]
+		{
+			new ScopedSmartIgnoreMatcher(
+				Path.Combine(temp.Path, "workspace"),
+				generated,
+				empty,
+				empty),
+			new ScopedSmartIgnoreMatcher(
+				Path.Combine(temp.Path, "workspace", "service"),
+				empty,
+				empty,
+				empty)
+		};
+		var rules = new IgnoreRules(false, false, false, false, generated, empty)
+		{
+			UseSmartIgnore = true,
+			ScopedSmartIgnoreMatchers = matchers,
+			ScopedSmartIgnoreCandidateMatchers = matchers,
+			SmartIgnoreCandidateFolders = generated
+		};
+
+		Assert.True(rules.IsSmartIgnoredDirectory(parentGenerated, "generated"));
+		Assert.False(rules.IsSmartIgnoredDirectory(nestedGenerated, "generated"));
+		Assert.False(rules.IsSmartIgnoredDirectoryCandidate(nestedGenerated, "generated"));
 	}
 
 	[Fact]

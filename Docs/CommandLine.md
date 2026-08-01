@@ -95,7 +95,15 @@ Git modes:
 |---|---|
 | `none` | No Git-based filtering |
 | `gitignore` | Respect applicable hierarchical `.gitignore` rules |
-| `tracked` | Include only paths known to applicable Git indexes |
+| `tracked` | Include only paths returned from applicable indexes by the installed Git CLI; no readable index fails closed with exit `3` |
+
+A readable empty index is a valid tracked view with zero files. If at least one index
+loads but a nested index does not, that nested scope is excluded and reported with
+`DPX-GIT-TRACKED-INDEX-PARTIAL`. If none load, commands report
+`DPX-GIT-TRACKED-INDEX-UNAVAILABLE`; they never reinterpret `tracked` as `gitignore`.
+An absent `.gitignore` is an active empty rule set, not a fallback to `none`.
+The administrative path named exactly `.git` remains excluded; `.github` and other
+`.git*` names are not treated as Git metadata.
 
 Exclusion tokens:
 
@@ -115,6 +123,10 @@ If at least one `--exclude` is present, the supplied values are the exact ordina
 exclusion set. `--exclude none` selects an empty set and cannot be combined with
 another exclusion. If an option is absent, its value comes from the selected
 profile.
+
+Modern local profiles retain checked and unchecked states across roots, extensions,
+and Exclusions. Newly discovered rows use current defaults in Desktop, CLI, and TUI;
+explicit CLI collections remain exact and invocation-only.
 
 Selected paths are relative to the project root. A file selects that file; a
 directory selects its effective subtree. Parent/child overlaps are deduplicated.

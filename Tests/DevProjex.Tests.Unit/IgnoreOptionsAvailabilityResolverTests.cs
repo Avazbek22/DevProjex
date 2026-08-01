@@ -178,6 +178,32 @@ public sealed class IgnoreOptionsAvailabilityResolverTests
 		Assert.False(actual.IncludeTrackedGitFilesOnly);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void Resolve_SelectedTrackedModeRemainsVisibleWithoutRepositoryEvidence(
+		bool stateCacheIsComplete)
+	{
+		var actual = IgnoreOptionsAvailabilityResolver.Resolve(
+			new IgnoreOptionsAvailability(
+				IncludeGitIgnore: false,
+				IncludeSmartIgnore: false),
+			new IgnoreSectionSnapshotState(
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: IgnoreOptionCounts.Empty,
+				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+				HasExtensionlessEntries: false,
+				ExtensionlessEntriesCount: 0),
+			new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.TrackedGitFilesOnly] = true
+			},
+			stateCacheIsComplete);
+
+		Assert.False(actual.IncludeGitIgnore);
+		Assert.True(actual.IncludeTrackedGitFilesOnly);
+	}
+
 	[Fact]
 	public void SnapshotState_GitEvidenceChangeAffectsAvailabilityComparison()
 	{

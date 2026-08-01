@@ -23,9 +23,9 @@ public sealed class IgnoreRulesSmartScopeBoundaryMatrixTests
 
 		if (Path.DirectorySeparatorChar != Path.AltDirectorySeparatorChar)
 		{
-			// Alternate separator style is not normalized by IgnoreRules path checks.
+			// Both Windows directory separators identify the same absolute scope.
 			var alt = inside.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-			yield return [alt, false];
+			yield return [alt, true];
 		}
 	}
 

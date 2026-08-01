@@ -153,9 +153,9 @@ public sealed class IgnoreAllOffAndSingleToggleStackMatrixIntegrationTests
 		new("python", "requirements.txt", "src/app.py", "__pycache__/app.pyc"),
 		new("jvm", "settings.gradle", "src/main/java/App.java", "build/classes/App.class"),
 		new("rust", "Cargo.toml", "src/main.rs", "target/debug/app.bin"),
-		new("go", "go.work", "main.go", "vendor/module.go"),
+		new("go", "go.work", "main.go", "vendor/modules.txt"),
 		new("php", "composer.json", "src/App.php", "vendor/autoload.php"),
-		new("ruby", "Gemfile.lock", "lib/app.rb", "tmp/cache.txt")
+		new("ruby", "Gemfile.lock", "lib/app.rb", "tmp/cache/payload.txt")
 	];
 
 	private static TemporaryDirectory CreateStackWorkspace(StackCase stackCase, bool includeGitIgnore)

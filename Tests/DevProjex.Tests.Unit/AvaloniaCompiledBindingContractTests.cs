@@ -22,7 +22,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"DevProjex.Avalonia.csproj");
 
 		var document = XDocument.Load(projectFile);
@@ -40,7 +39,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			fileName);
 
@@ -71,7 +69,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			"SettingsPanelView.axaml");
 		var document = XDocument.Load(viewFile);
@@ -91,7 +88,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			"SettingsPanelView.axaml");
 		var document = XDocument.Load(viewFile);
@@ -129,7 +125,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			"ThemePopoverView.axaml");
 		var document = XDocument.Load(viewFile);
@@ -171,13 +166,40 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void ThemePopover_ExposesSystemLightAndDarkAsExclusiveSelectionBindings()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"ThemePopoverView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var selectionBindings = root
+			.Descendants(avaloniaNamespace + "CheckBox")
+			.Select(element => element.Attribute("IsChecked")?.Value)
+			.Where(value => value?.Contains("ThemeSelected", StringComparison.Ordinal) == true)
+			.OfType<string>()
+			.ToArray();
+
+		Assert.Equal(
+			[
+				"{Binding IsSystemThemeSelected, Mode=OneWay}",
+				"{Binding IsLightThemeSelected, Mode=OneWay}",
+				"{Binding IsDarkThemeSelected, Mode=OneWay}"
+			],
+			selectionBindings);
+	}
+
+	[Fact]
 	public void ThemeStyles_MainMenuUsesDedicatedPopupBrushAtEveryDepth()
 	{
 		var styleFile = Path.Combine(
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Styles",
 			"Theme.axaml");
 		var document = XDocument.Load(styleFile);
@@ -205,7 +227,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Styles",
 			"Theme.axaml");
 		var document = XDocument.Load(styleFile);
@@ -232,7 +253,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			repositoryRoot,
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Styles",
 			"Theme.axaml"));
 		var styleRoot = Assert.IsType<XElement>(styleDocument.Root);
@@ -264,7 +284,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			repositoryRoot,
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"MainWindow.axaml"));
 		var windowRoot = Assert.IsType<XElement>(windowDocument.Root);
 		var previewScrollViewer = Assert.Single(
@@ -281,7 +300,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"MainWindow.axaml");
 		var document = XDocument.Load(viewFile);
 		var root = Assert.IsType<XElement>(document.Root);
@@ -296,7 +314,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"MainWindow.axaml");
 		var document = XDocument.Load(viewFile);
 		var root = Assert.IsType<XElement>(document.Root);

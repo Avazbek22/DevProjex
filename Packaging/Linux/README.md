@@ -12,7 +12,7 @@ This folder contains resources for packaging DevProjex on Linux.
 ### 1. Build the application
 
 ```bash
-dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj \
+dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj \
     -c Release \
     -r linux-x64 \
     --self-contained true \

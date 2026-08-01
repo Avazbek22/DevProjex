@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Selection;
 
 namespace DevProjex.Application.Services;
 
@@ -145,12 +147,16 @@ public sealed class ProjectScopeDiscoveryService(
 	private readonly object _scopeCacheSync = new();
 	private readonly Dictionary<string, LinkedListNode<ScopeCacheEntry>> _scopeCache = new(PathStringComparer);
 	private readonly LinkedList<ScopeCacheEntry> _scopeCacheLru = new();
+	private readonly Dictionary<string, long> _latestDiscoverySequences = new(PathStringComparer);
 	private readonly ProjectRootFactsProvider _rootFactsProvider = rootFactsProvider ?? smartIgnore.RootFactsProvider;
+	private long _scopeCacheGeneration;
+	private long _nextDiscoverySequence;
 
 	public ProjectScanContext Discover(
 		string rootPath,
 		IReadOnlyCollection<string>? selectedRootFolders)
 	{
+		IgnorePipelineDiagnostics.RecordProjectScopeDiscovery();
 		if (string.IsNullOrWhiteSpace(rootPath))
 			return ProjectScanContext.Empty;
 
@@ -167,6 +173,8 @@ public sealed class ProjectScopeDiscoveryService(
 		var cacheKey = BuildScopeCacheKey(normalizedRoot, selectedRootFolders);
 		var now = DateTime.UtcNow;
 
+		long cacheGeneration;
+		long discoverySequence;
 		lock (_scopeCacheSync)
 		{
 			if (_scopeCache.TryGetValue(cacheKey, out var cachedNode) &&
@@ -178,19 +186,47 @@ public sealed class ProjectScopeDiscoveryService(
 			}
 
 			RemoveScopeCacheEntry(cacheKey);
+			cacheGeneration = _scopeCacheGeneration;
+			discoverySequence = unchecked(++_nextDiscoverySequence);
+			_latestDiscoverySequences[cacheKey] = discoverySequence;
 		}
 
-		var rootFactsCache = new ProjectRootFactsOperationCache(_rootFactsProvider);
-		var rootFacts = rootFactsCache.Get(normalizedRoot);
-		if (!rootFacts.Exists)
-			return ProjectScanContext.Empty;
+		ProjectScanContext context;
+		ScopeDiscoveryStamp discoveryStamp;
+		try
+		{
+			var rootFactsCache = new ProjectRootFactsOperationCache(_rootFactsProvider);
+			var rootFacts = rootFactsCache.Get(normalizedRoot);
+			if (!rootFacts.Exists)
+			{
+				AbandonDiscoveryReservation(cacheKey, cacheGeneration, discoverySequence);
+				return ProjectScanContext.Empty;
+			}
 
-		var context = BuildProjectScanContext(rootFacts, selectedRootFolders, rootFactsCache);
-		var discoveryStamp = rootFactsCache.CreateDiscoveryStamp(context.Scopes);
+			context = BuildProjectScanContext(rootFacts, selectedRootFolders, rootFactsCache);
+			discoveryStamp = rootFactsCache.CreateDiscoveryStamp();
+		}
+		catch
+		{
+			AbandonDiscoveryReservation(cacheKey, cacheGeneration, discoverySequence);
+			throw;
+		}
+
 		lock (_scopeCacheSync)
 		{
+			// Invalidation and a newer discovery both outrank a result computed from an older
+			// filesystem snapshot. The current caller may use its result, but it must not be
+			// published as the topology for a later operation.
+			if (_scopeCacheGeneration != cacheGeneration ||
+			    !_latestDiscoverySequences.TryGetValue(cacheKey, out var latestSequence) ||
+			    latestSequence != discoverySequence)
+			{
+				return context;
+			}
+
+			_latestDiscoverySequences.Remove(cacheKey);
 			RemoveScopeCacheEntry(cacheKey);
-			var entry = new ScopeCacheEntry(cacheKey, now, context, discoveryStamp);
+			var entry = new ScopeCacheEntry(cacheKey, DateTime.UtcNow, context, discoveryStamp);
 			_scopeCache[cacheKey] = _scopeCacheLru.AddFirst(entry);
 
 			while (_scopeCache.Count > ScopeCacheLimit &&
@@ -217,6 +253,8 @@ public sealed class ProjectScopeDiscoveryService(
 
 		lock (_scopeCacheSync)
 		{
+			_scopeCacheGeneration = unchecked(_scopeCacheGeneration + 1);
+			_latestDiscoverySequences.Clear();
 			foreach (var cacheKey in _scopeCache.Keys.ToArray())
 			{
 				if (PathStringComparer.Equals(cacheKey, normalizedRoot) ||
@@ -225,9 +263,12 @@ public sealed class ProjectScopeDiscoveryService(
 					RemoveScopeCacheEntry(cacheKey);
 				}
 			}
-		}
 
-		_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
+			// Keep both cache layers behind one publication boundary. If this happened after
+			// releasing the scope lock, a new Discover could reserve the new generation while
+			// still reading root facts from the old provider generation.
+			_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
+		}
 	}
 
 	public bool Revalidate(string rootPath, CancellationToken cancellationToken = default)
@@ -257,15 +298,14 @@ public sealed class ProjectScopeDiscoveryService(
 		if (candidates.Length == 0)
 			return false;
 
-		var observedWriteTimes = new Dictionary<string, long?>(PathStringComparer);
-		var observedGitIgnoreSignatures = new Dictionary<string, ProjectRootFileSignature?>(PathStringComparer);
+		var observedFacts = new Dictionary<string, ProjectRootFactsStamp>(PathStringComparer);
 		var allCurrent = true;
 		foreach (var candidate in candidates)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (candidate.Value.Value.DiscoveryStamp.IsCurrent(
-				    observedWriteTimes,
-				    observedGitIgnoreSignatures,
+				    _rootFactsProvider,
+				    observedFacts,
 				    cancellationToken))
 			{
 				continue;
@@ -275,10 +315,15 @@ public sealed class ProjectScopeDiscoveryService(
 			break;
 		}
 		var now = DateTime.UtcNow;
-		var retainedPaths = new HashSet<string>(PathStringComparer);
-
 		lock (_scopeCacheSync)
 		{
+			if (!allCurrent)
+			{
+				_scopeCacheGeneration = unchecked(_scopeCacheGeneration + 1);
+				_latestDiscoverySequences.Clear();
+				_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
+			}
+
 			foreach (var candidate in candidates)
 			{
 				if (!_scopeCache.TryGetValue(candidate.Key, out var currentNode) ||
@@ -297,17 +342,12 @@ public sealed class ProjectScopeDiscoveryService(
 				currentNode.Value = refreshed;
 				_scopeCacheLru.Remove(currentNode);
 				_scopeCacheLru.AddFirst(currentNode);
-				refreshed.DiscoveryStamp.AddPathsTo(retainedPaths);
 			}
 		}
 
 		if (!allCurrent)
-		{
-			_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
 			return false;
-		}
 
-		_rootFactsProvider.RefreshCacheLifetime(retainedPaths);
 		return true;
 	}
 
@@ -323,6 +363,22 @@ public sealed class ProjectScopeDiscoveryService(
 		_scopeCacheLru.Remove(node);
 	}
 
+	private void AbandonDiscoveryReservation(
+		string cacheKey,
+		long cacheGeneration,
+		long discoverySequence)
+	{
+		lock (_scopeCacheSync)
+		{
+			if (_scopeCacheGeneration == cacheGeneration &&
+			    _latestDiscoverySequences.TryGetValue(cacheKey, out var latestSequence) &&
+			    latestSequence == discoverySequence)
+			{
+				_latestDiscoverySequences.Remove(cacheKey);
+			}
+		}
+	}
+
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static string BuildScopeCacheKey(
 		string rootPath,
@@ -331,33 +387,11 @@ public sealed class ProjectScopeDiscoveryService(
 		if (selectedRootFolders is null || selectedRootFolders.Count == 0)
 			return rootPath;
 
-		var uniqueNames = new HashSet<string>(PathStringComparer);
-		foreach (var name in selectedRootFolders)
-		{
-			if (!string.IsNullOrWhiteSpace(name))
-				uniqueNames.Add(name.Trim());
-		}
-
-		if (uniqueNames.Count == 0)
+		var encodedSelection = SelectionCacheKeyEncoder.EncodeStrings(selectedRootFolders);
+		if (encodedSelection == SelectionCacheKeyEncoder.EncodeStrings([]))
 			return rootPath;
 
-		var sorted = new List<string>(uniqueNames);
-		sorted.Sort(PathStringComparer);
-
-		var capacity = rootPath.Length + 2;
-		foreach (var name in sorted)
-			capacity += name.Length + 1;
-
-		var builder = new StringBuilder(capacity);
-		builder.Append(rootPath).Append("::");
-		for (var index = 0; index < sorted.Count; index++)
-		{
-			if (index > 0)
-				builder.Append('|');
-			builder.Append(sorted[index]);
-		}
-
-		return builder.ToString();
+		return rootPath + "::" + encodedSelection;
 	}
 
 	private ProjectScanContext BuildProjectScanContext(
@@ -570,7 +604,8 @@ public sealed class ProjectScopeDiscoveryService(
 		// into expensive dependency-style discovery scans. Smart artifact filtering is a
 		// later, cheaper layer; do not compensate for missed scopes by increasing this
 		// depth globally unless benchmarks prove it is safe for large user folders.
-		if (isKnownMonorepoContainer || HasMonorepoMarker(candidateFacts))
+		if (isKnownMonorepoContainer ||
+		    HasMonorepoMarker(candidateFacts))
 		{
 			return new NestedProjectProbe(
 				MonorepoNestedProjectProbeMaxDepth,
@@ -742,7 +777,6 @@ public sealed class ProjectScopeDiscoveryService(
 	private sealed class ProjectRootFactsOperationCache(ProjectRootFactsProvider provider)
 	{
 		private readonly ConcurrentDictionary<string, Lazy<ProjectRootFacts>> _facts = new(PathStringComparer);
-		private readonly ConcurrentDictionary<string, long> _directoryWriteTimes = new(PathStringComparer);
 
 		public ProjectRootFacts Get(string rootPath)
 		{
@@ -753,110 +787,102 @@ public sealed class ProjectScopeDiscoveryService(
 					LazyThreadSafetyMode.ExecutionAndPublication),
 				provider).Value;
 
-			if (facts.Exists && TryGetDirectoryWriteTime(rootPath, out var writeTimeTicks))
-				_directoryWriteTimes.TryAdd(rootPath, writeTimeTicks);
-
 			return facts;
 		}
 
-		public ScopeDiscoveryStamp CreateDiscoveryStamp(IReadOnlyList<ProjectScope> scopes)
+		public ScopeDiscoveryStamp CreateDiscoveryStamp()
 		{
-			var gitIgnoreScopePaths = scopes
-				.Where(static scope => scope.HasGitIgnore)
-				.Select(static scope => scope.RootPath)
-				.ToHashSet(PathStringComparer);
-
 			return new ScopeDiscoveryStamp(
-				_directoryWriteTimes
-					.OrderBy(static pair => pair.Key, PathComparer.Default)
-					.Select(static pair => new DirectoryWriteStamp(pair.Key, pair.Value))
-					.ToArray(),
 				_facts
 					.Select(static pair => new { pair.Key, Facts = pair.Value.Value })
-					.Where(pair => gitIgnoreScopePaths.Contains(pair.Key) && pair.Facts.GitIgnoreSignature.HasValue)
 					.OrderBy(static pair => pair.Key, PathComparer.Default)
-					.Select(static pair => new GitIgnoreWriteStamp(
-						Path.Combine(pair.Key, ".gitignore"),
-						pair.Facts.GitIgnoreSignature.GetValueOrDefault()))
+					.Select(static pair => ProjectRootFactsStamp.Capture(pair.Key, pair.Facts))
 					.ToArray());
 		}
 	}
 
-	private static bool TryGetDirectoryWriteTime(string path, out long writeTimeTicks)
+	private sealed record ScopeDiscoveryStamp(IReadOnlyList<ProjectRootFactsStamp> Roots)
 	{
-		try
-		{
-			var directory = new DirectoryInfo(path);
-			if (!directory.Exists)
-			{
-				writeTimeTicks = 0;
-				return false;
-			}
-
-			writeTimeTicks = directory.LastWriteTimeUtc.Ticks;
-			return true;
-		}
-		catch
-		{
-			writeTimeTicks = 0;
-			return false;
-		}
-	}
-
-	private sealed record ScopeDiscoveryStamp(
-		IReadOnlyList<DirectoryWriteStamp> Directories,
-		IReadOnlyList<GitIgnoreWriteStamp> GitIgnoreFiles)
-	{
-		// Directory timestamps detect additions/removals without re-enumeration. Content hashes
-		// cover .gitignore rewrites because changing file contents need not update its parent.
-		public void AddPathsTo(ISet<string> paths)
-		{
-			foreach (var directory in Directories)
-				paths.Add(directory.Path);
-		}
-
 		public bool IsCurrent(
-			IDictionary<string, long?> observedWriteTimes,
-			IDictionary<string, ProjectRootFileSignature?> observedGitIgnoreSignatures,
+			ProjectRootFactsProvider provider,
+			IDictionary<string, ProjectRootFactsStamp> observedFacts,
 			CancellationToken cancellationToken)
 		{
-			foreach (var directory in Directories)
+			foreach (var expected in Roots)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				if (!observedWriteTimes.TryGetValue(directory.Path, out var observed))
+				if (!observedFacts.TryGetValue(expected.Path, out var observed))
 				{
-					observed = TryGetDirectoryWriteTime(directory.Path, out var writeTimeTicks)
-						? writeTimeTicks
-						: null;
-					observedWriteTimes[directory.Path] = observed;
+					// Directory timestamps are not a correctness boundary: they are coarse on
+					// some filesystems and can be deliberately restored. Re-enumerating only
+					// the already-probed roots is bounded and detects equal-timestamp topology.
+					observed = ProjectRootFactsStamp.Capture(
+						expected.Path,
+						provider.Get(expected.Path, forceRefresh: true));
+					observedFacts[expected.Path] = observed;
 				}
 
-				if (observed != directory.LastWriteTimeTicks)
+				if (!expected.IsEquivalentTo(observed))
 					return false;
 			}
 
-			foreach (var gitIgnoreFile in GitIgnoreFiles)
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				if (!observedGitIgnoreSignatures.TryGetValue(gitIgnoreFile.Path, out var observed))
-				{
-					observed = ProjectRootFactsProvider.TryGetFileSignature(gitIgnoreFile.Path);
-					observedGitIgnoreSignatures[gitIgnoreFile.Path] = observed;
-				}
-
-				if (!observed.HasValue ||
-				    !observed.GetValueOrDefault().Equals(gitIgnoreFile.Signature))
-				{
-					return false;
-				}
-			}
-
-			return Directories.Count > 0;
+			return Roots.Count > 0;
 		}
 	}
 
-	private readonly record struct DirectoryWriteStamp(string Path, long LastWriteTimeTicks);
-	private readonly record struct GitIgnoreWriteStamp(string Path, ProjectRootFileSignature Signature);
+	private sealed record ProjectRootFactsStamp(
+		string Path,
+		bool Exists,
+		bool IsAccessible,
+		IReadOnlyList<ProjectRootEntryStamp> Entries,
+		ProjectRootFileSignature? GitIgnoreSignature)
+	{
+		public static ProjectRootFactsStamp Capture(string path, ProjectRootFacts facts)
+		{
+			var entries = new List<ProjectRootEntryStamp>(facts.Files.Count + facts.Directories.Count);
+			entries.AddRange(facts.Files.Select(static file =>
+				new ProjectRootEntryStamp(file.Name, IsDirectory: false, file.IsReparsePoint)));
+			entries.AddRange(facts.Directories.Select(static directory =>
+				new ProjectRootEntryStamp(directory.Name, IsDirectory: true, directory.IsReparsePoint)));
+			entries.Sort(ProjectRootEntryStampComparer.Instance);
+
+			return new ProjectRootFactsStamp(
+				path,
+				facts.Exists,
+				facts.IsAccessible,
+				entries,
+				facts.GitIgnoreSignature);
+		}
+
+		public bool IsEquivalentTo(ProjectRootFactsStamp other)
+		{
+			return Exists == other.Exists &&
+			       IsAccessible == other.IsAccessible &&
+			       Nullable.Equals(GitIgnoreSignature, other.GitIgnoreSignature) &&
+			       Entries.SequenceEqual(other.Entries);
+		}
+	}
+
+	private readonly record struct ProjectRootEntryStamp(
+		string Name,
+		bool IsDirectory,
+		bool IsReparsePoint);
+
+	private sealed class ProjectRootEntryStampComparer : IComparer<ProjectRootEntryStamp>
+	{
+		public static ProjectRootEntryStampComparer Instance { get; } = new();
+
+		public int Compare(ProjectRootEntryStamp left, ProjectRootEntryStamp right)
+		{
+			var nameComparison = PathStringComparer.Compare(left.Name, right.Name);
+			if (nameComparison != 0)
+				return nameComparison;
+			var directoryComparison = left.IsDirectory.CompareTo(right.IsDirectory);
+			return directoryComparison != 0
+				? directoryComparison
+				: left.IsReparsePoint.CompareTo(right.IsReparsePoint);
+		}
+	}
 
 	private sealed record ScopeCacheEntry(
 		string CacheKey,

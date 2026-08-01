@@ -92,7 +92,6 @@ public sealed class LocalizationLanguageCoverageIntegrationTests
             root,
             "Apps",
             "Avalonia",
-            "DevProjex.Avalonia",
             "Views",
             "TopMenuBarView.axaml");
         var document = XDocument.Load(file);

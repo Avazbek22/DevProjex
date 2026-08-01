@@ -1,3 +1,5 @@
+using DevProjex.Application.Selection;
+
 namespace DevProjex.Application.Context;
 
 public sealed class ProjectSelectionResolver(
@@ -23,7 +25,7 @@ public sealed class ProjectSelectionResolver(
 			_ => throw new ArgumentOutOfRangeException(nameof(profile), profile.Kind, null)
 		};
 
-		return baseline with
+		var resolved = baseline with
 		{
 			Roots = overrides.Roots ?? baseline.Roots,
 			Extensions = overrides.Extensions ?? baseline.Extensions,
@@ -32,6 +34,57 @@ public sealed class ProjectSelectionResolver(
 			Exclusions = overrides.Exclusions ?? baseline.Exclusions,
 			ProfileSource = profile
 		};
+		var applyProfileValues = profile.Kind != ProjectProfileSourceKind.Local;
+		resolved = resolved with
+		{
+			// A local profile is loaded by Desktop with its complete option-state maps. Only
+			// explicit command-line components may replace that live profile state. Standard
+			// and portable profiles, in contrast, must cross the Desktop boundary themselves.
+			ApplicationIntent = new ProjectSelectionApplicationIntent(
+				Roots: ResolveApplicationMode(overrides.Roots is not null, applyProfileValues, resolved.Roots),
+				Extensions: ResolveApplicationMode(
+					overrides.Extensions is not null,
+					applyProfileValues,
+					resolved.Extensions),
+				GitMode: ResolveApplicationMode(
+					overrides.GitMode is not null,
+					applyProfileValues,
+					resolved.GitMode),
+				Exclusions: ResolveApplicationMode(
+					overrides.Exclusions is not null,
+					applyProfileValues,
+					resolved.Exclusions))
+		};
+
+		if (baseline.LocalProfileState is { } localState)
+		{
+			resolved = resolved with
+			{
+				LocalProfileState = localState with
+				{
+					RootsOverridden = overrides.Roots is not null,
+					ExtensionsOverridden = overrides.Extensions is not null,
+					IgnoreOptionsOverridden = overrides.GitMode is not null || overrides.Exclusions is not null
+				}
+			};
+		}
+
+		return resolved;
+	}
+
+	private static ProjectSelectionApplicationMode ResolveApplicationMode<T>(
+		bool hasExplicitOverride,
+		bool applyProfileValues,
+		T? resolvedValue)
+	{
+		if (hasExplicitOverride)
+			return ProjectSelectionApplicationMode.ApplyResolvedValue;
+		if (!applyProfileValues)
+			return ProjectSelectionApplicationMode.Preserve;
+
+		return resolvedValue is null
+			? ProjectSelectionApplicationMode.ResetToDefaults
+			: ProjectSelectionApplicationMode.ApplyResolvedValue;
 	}
 
 	private ProjectSelectionSpec ResolveLocal(string projectPath)
@@ -43,6 +96,10 @@ public sealed class ProjectSelectionResolver(
 				"No local profile exists for this project.");
 		}
 
-		return ProjectSelectionAdapter.FromLegacyProfile(profile, ProjectProfileReference.Local);
+		var snapshot = ProjectSelectionProfileBuilder.Clone(profile);
+		return ProjectSelectionAdapter.FromLegacyProfile(snapshot, ProjectProfileReference.Local) with
+		{
+			LocalProfileState = new LocalProjectSelectionState(snapshot)
+		};
 	}
 }

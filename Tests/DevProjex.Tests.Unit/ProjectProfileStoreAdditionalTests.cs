@@ -247,9 +247,9 @@ public sealed class ProjectProfileStoreAdditionalTests
 			store.SaveProfile(
 				projectPath,
 				new ProjectSelectionProfile(
-					SelectedRootFolders: ["src"],
-					SelectedExtensions: [".cs"],
-					SelectedIgnoreOptions: [IgnoreOptionId.DotFiles],
+					SelectedRootFolders: ["src", "docs"],
+					SelectedExtensions: [".cs", ".csv"],
+					SelectedIgnoreOptions: [IgnoreOptionId.DotFiles, IgnoreOptionId.EmptyFiles],
 					RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
 					{
 						["src"] = true,
@@ -276,6 +276,9 @@ public sealed class ProjectProfileStoreAdditionalTests
 			Assert.False(loaded.ExtensionStates![".csv"]);
 			Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.DotFiles]);
 			Assert.False(loaded.IgnoreOptionStates![IgnoreOptionId.EmptyFiles]);
+			Assert.DoesNotContain("docs", loaded.SelectedRootFolders, PathComparer.Default);
+			Assert.DoesNotContain(".csv", loaded.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
+			Assert.DoesNotContain(IgnoreOptionId.EmptyFiles, loaded.SelectedIgnoreOptions);
 		}
 		finally
 		{
@@ -299,15 +302,12 @@ public sealed class ProjectProfileStoreAdditionalTests
 			Assert.Contains("docs", legacyProfile.SelectedRootFolders);
 			Assert.Contains(".csv", legacyProfile.SelectedExtensions);
 			Assert.Contains(IgnoreOptionId.EmptyFiles, legacyProfile.SelectedIgnoreOptions);
-			Assert.NotNull(legacyProfile.RootFolderStates);
-			Assert.NotNull(legacyProfile.ExtensionStates);
-			Assert.NotNull(legacyProfile.IgnoreOptionStates);
-			Assert.Empty(legacyProfile.RootFolderStates);
-			Assert.Empty(legacyProfile.ExtensionStates);
-			Assert.Empty(legacyProfile.IgnoreOptionStates);
+			Assert.True(legacyProfile.RootFolderStates!["docs"]);
+			Assert.True(legacyProfile.ExtensionStates![".csv"]);
+			Assert.True(legacyProfile.IgnoreOptionStates![IgnoreOptionId.EmptyFiles]);
 
-			// Empty legacy state maps keep checked legacy entries available but allow
-			// entries first seen after reopen to use the current checked defaults.
+			// Selected-only input is promoted to complete maps at the storage boundary.
+			// This preserves checked legacy rows while letting unseen rows use defaults.
 			store.SaveProfile(
 				projectPath,
 				new ProjectSelectionProfile(

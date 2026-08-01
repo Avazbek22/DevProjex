@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,19 +11,34 @@ public sealed class GitIgnoreMatcher
     private readonly string _normalizedRootPath;
     private readonly IReadOnlyList<Rule> _rules;
     private readonly StringComparison _pathComparison;
+    private readonly bool _ignoreAsciiCase;
+    private readonly bool _normalizeUnicode;
     private readonly bool _hasNegationRules;
 
     // Pre-compiled search values for SIMD-optimized character lookup
     private static readonly SearchValues<char> GlobSpecialChars = SearchValues.Create("*?[");
 
-    public static GitIgnoreMatcher Empty { get; } = new(string.Empty, [], false);
+    public static GitIgnoreMatcher Empty { get; } = new(
+        string.Empty,
+        [],
+        false,
+        GitPathComparisonSemantics.PlatformDefault);
 
-    private GitIgnoreMatcher(string normalizedRootPath, IReadOnlyList<Rule> rules, bool hasNegationRules)
+    private GitIgnoreMatcher(
+        string normalizedRootPath,
+        IReadOnlyList<Rule> rules,
+        bool hasNegationRules,
+        GitPathComparisonSemantics comparisonSemantics)
     {
         _normalizedRootPath = normalizedRootPath;
         _rules = rules;
         _hasNegationRules = hasNegationRules;
-        _pathComparison = PathComparer.Comparison;
+        // Git wildmatch applies WM_CASEFOLD only to ASCII bytes. Pre-folding patterns
+        // and paths keeps literal and regex rules consistent without culture-sensitive
+        // Unicode matches that native Git would not make.
+        _pathComparison = StringComparison.Ordinal;
+        _ignoreAsciiCase = comparisonSemantics.IgnoreCase;
+        _normalizeUnicode = comparisonSemantics.NormalizeUnicode;
     }
 
     public bool HasNegationRules => _hasNegationRules;
@@ -33,7 +49,10 @@ public sealed class GitIgnoreMatcher
             return false;
 
         return string.Equals(
-            NormalizePath(path).TrimEnd('/'),
+            GitPathTextNormalizer.NormalizeObservedPath(
+                NormalizePath(path).TrimEnd('/'),
+                _normalizeUnicode,
+                _ignoreAsciiCase),
             _normalizedRootPath,
             _pathComparison);
     }
@@ -42,36 +61,52 @@ public sealed class GitIgnoreMatcher
 
     public static GitIgnoreMatcher Build(string rootPath, IEnumerable<string> lines)
     {
+        return Build(rootPath, lines, GitPathComparisonSemantics.PlatformDefault);
+    }
+
+    public static GitIgnoreMatcher Build(
+        string rootPath,
+        IEnumerable<string> lines,
+        GitPathComparisonSemantics comparisonSemantics)
+    {
         if (string.IsNullOrWhiteSpace(rootPath))
             return Empty;
 
-        var normalizedRoot = NormalizePath(rootPath).TrimEnd('/');
+        var normalizedRoot = GitPathTextNormalizer.NormalizeObservedPath(
+            NormalizePath(rootPath).TrimEnd('/'),
+            comparisonSemantics.NormalizeUnicode,
+            comparisonSemantics.IgnoreCase);
         if (normalizedRoot.Length == 0)
             return Empty;
 
         var rules = new List<Rule>();
-        var regexOptions = RegexOptions.Compiled;
-        if (PathComparer.Comparison == StringComparison.OrdinalIgnoreCase)
-            regexOptions |= RegexOptions.IgnoreCase;
+        var regexOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant;
 
         foreach (var raw in lines)
         {
             if (raw is null)
                 continue;
 
-            var line = TrimUnescapedTrailingSpaces(raw);
+            var sourceLine = TrimUnescapedTrailingSpaces(raw);
+            var line = GitPathTextNormalizer.NormalizePattern(
+                sourceLine,
+                comparisonSemantics.IgnoreCase);
             if (line.Length == 0 || line.StartsWith('#'))
                 continue;
 
             var escapedSpecial = line.StartsWith(@"\#") || line.StartsWith(@"\!");
             if (escapedSpecial)
+            {
                 line = line[1..];
+                sourceLine = sourceLine[1..];
+            }
 
             // Only treat as negation if not escaped
             var isNegation = !escapedSpecial && line.StartsWith('!');
             if (isNegation)
             {
                 line = line[1..];
+                sourceLine = sourceLine[1..];
                 if (line.Length == 0)
                     continue;
             }
@@ -87,14 +122,20 @@ public sealed class GitIgnoreMatcher
 
             var directoryOnly = line.EndsWith('/');
             if (directoryOnly)
+            {
                 line = line.TrimEnd('/');
+                sourceLine = sourceLine.TrimEnd('/');
+            }
 
             if (line.Length == 0)
                 continue;
 
             var anchored = line.StartsWith('/');
             if (anchored)
+            {
                 line = line[1..];
+                sourceLine = sourceLine[1..];
+            }
 
             if (line.Length == 0)
                 continue;
@@ -107,7 +148,18 @@ public sealed class GitIgnoreMatcher
             Regex? pattern = null;
             if (matchKind == RuleMatchKind.Regex)
             {
-                var globRegex = GlobToRegex(line);
+                var projectedPattern = ProjectUtf8BytesForRegex(line);
+                var projectedSourcePattern = ProjectUtf8BytesForRegex(sourceLine);
+                if (!TryGlobToRegex(
+                        projectedPattern,
+                        projectedSourcePattern,
+                        anchored,
+                        comparisonSemantics.IgnoreCase,
+                        out var globRegex))
+                {
+                    continue;
+                }
+
                 var regexPattern = matchByNameOnly
                     ? $"^{globRegex}$"
                     : BuildPathRegex(globRegex, relativeToMatcherRoot, directoryOnly);
@@ -129,6 +181,7 @@ public sealed class GitIgnoreMatcher
                 isNegation,
                 directoryOnly,
                 matchByNameOnly,
+                !directoryOnly && !matchByNameOnly && MatchesEveryDirectChildName(line),
                 ComputeStaticPrefix(line)));
         }
 
@@ -143,7 +196,7 @@ public sealed class GitIgnoreMatcher
             }
         }
 
-        return new GitIgnoreMatcher(normalizedRoot, rules, hasNegation);
+        return new GitIgnoreMatcher(normalizedRoot, rules, hasNegation, comparisonSemantics);
     }
 
     public IgnoreEvaluation Evaluate(string fullPath, bool isDirectory, string name)
@@ -159,7 +212,7 @@ public sealed class GitIgnoreMatcher
         if (_rules.Count == 0 || string.IsNullOrWhiteSpace(relativePath))
             return default;
 
-        return EvaluateRelativeCore(NormalizeRelativePath(relativePath), isDirectory, name);
+        return EvaluateRelativeCore(NormalizeRelativePathForComparison(relativePath), isDirectory, name);
     }
 
     internal IgnoreEvaluation EvaluateRelativeNormalized(
@@ -170,7 +223,7 @@ public sealed class GitIgnoreMatcher
         if (_rules.Count == 0 || relativePath.IsWhiteSpace())
             return default;
 
-        return EvaluateRelativeCore(relativePath, isDirectory, name);
+        return EvaluateRelativeNormalizedCore(relativePath, isDirectory, name);
     }
 
     internal IgnoreEvaluation EvaluateRulesOnly(string fullPath, bool isDirectory, string name)
@@ -191,7 +244,31 @@ public sealed class GitIgnoreMatcher
             return default;
 
         var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath).ToString() : name;
+        if (RequiresComparisonNormalization(relativePath))
+        {
+            var normalizedPath = GitPathTextNormalizer.NormalizeObservedPath(
+                relativePath.ToString(),
+                _normalizeUnicode,
+                _ignoreAsciiCase);
+            return EvaluateRules(normalizedPath, isDirectory, normalizedName);
+        }
+
         return EvaluateRules(relativePath, isDirectory, normalizedName);
+    }
+
+    private IgnoreEvaluation EvaluateRelativeNormalizedCore(
+        ReadOnlySpan<char> relativePath,
+        bool isDirectory,
+        string name)
+    {
+        if (!RequiresComparisonNormalization(relativePath))
+            return EvaluateRelativeCore(relativePath, isDirectory, name);
+
+        var normalizedPath = GitPathTextNormalizer.NormalizeObservedPath(
+            relativePath.ToString(),
+            _normalizeUnicode,
+            _ignoreAsciiCase);
+        return EvaluateRelativeCore(normalizedPath, isDirectory, name);
     }
 
     private IgnoreEvaluation EvaluateRelativeCore(ReadOnlySpan<char> relativePath, bool isDirectory, string name)
@@ -221,7 +298,7 @@ public sealed class GitIgnoreMatcher
             testChildPath[^1] = '_';
             foreach (var rule in _rules)
             {
-                if (rule.DirectoryOnly || rule.MatchByNameOnly)
+                if (!rule.MatchesEveryDirectChildName)
                     continue;
 
                 if (rule.IsMatch(testChildPath, "_", isDirectory: false, _pathComparison))
@@ -241,12 +318,34 @@ public sealed class GitIgnoreMatcher
         bool isDirectory,
         string normalizedName)
     {
+        normalizedName = GitPathTextNormalizer.NormalizeObservedPath(
+            normalizedName,
+            _normalizeUnicode,
+            _ignoreAsciiCase);
         var ignored = false;
         var hasMatch = false;
+        var regexProjectionInitialized = false;
+        string? projectedRelativePath = null;
+        string? projectedName = null;
         foreach (var rule in _rules)
         {
-            if (!rule.IsMatch(relativePath, normalizedName, isDirectory, _pathComparison))
+            if (rule.MatchKind == RuleMatchKind.Regex && !regexProjectionInitialized)
+            {
+                projectedRelativePath = ProjectUtf8BytesForRegexOrNull(relativePath);
+                projectedName = ProjectUtf8BytesForRegexOrNull(normalizedName);
+                regexProjectionInitialized = true;
+            }
+
+            if (!rule.IsMatch(
+                    relativePath,
+                    normalizedName,
+                    isDirectory,
+                    _pathComparison,
+                    projectedRelativePath,
+                    projectedName))
+            {
                 continue;
+            }
 
             ignored = !rule.IsNegation;
             hasMatch = true;
@@ -295,14 +394,22 @@ public sealed class GitIgnoreMatcher
         if (!HasNegationRules || string.IsNullOrWhiteSpace(relativePath))
             return false;
 
-        return ShouldTraverseIgnoredDirectoryRelativeCore(NormalizeRelativePath(relativePath), name);
+        return ShouldTraverseIgnoredDirectoryRelativeCore(NormalizeRelativePathForComparison(relativePath), name);
     }
 
     internal bool ShouldTraverseIgnoredDirectoryRelativeNormalized(ReadOnlySpan<char> relativePath, string name)
     {
-        return HasNegationRules &&
-               !relativePath.IsWhiteSpace() &&
-               ShouldTraverseIgnoredDirectoryRelativeCore(relativePath, name);
+        if (!HasNegationRules || relativePath.IsWhiteSpace())
+            return false;
+
+        if (!RequiresComparisonNormalization(relativePath))
+            return ShouldTraverseIgnoredDirectoryRelativeCore(relativePath, name);
+
+        var normalizedPath = GitPathTextNormalizer.NormalizeObservedPath(
+            relativePath.ToString(),
+            _normalizeUnicode,
+            _ignoreAsciiCase);
+        return ShouldTraverseIgnoredDirectoryRelativeCore(normalizedPath, name);
     }
 
     private bool ShouldTraverseIgnoredDirectoryRelativeCore(ReadOnlySpan<char> relativePath, string name)
@@ -355,7 +462,10 @@ public sealed class GitIgnoreMatcher
         if (_rules.Count == 0 || string.IsNullOrWhiteSpace(fullPath))
             return false;
 
-        var normalizedFullPath = NormalizePath(fullPath);
+        var normalizedFullPath = GitPathTextNormalizer.NormalizeObservedPath(
+            NormalizePath(fullPath),
+            _normalizeUnicode,
+            _ignoreAsciiCase);
         if (!normalizedFullPath.StartsWith(_normalizedRootPath, _pathComparison))
             return false;
 
@@ -402,11 +512,17 @@ public sealed class GitIgnoreMatcher
             : RuleMatchKind.UnanchoredPathLiteral;
     }
 
-    private static string GlobToRegex(string pattern)
+    private static bool TryGlobToRegex(
+        string pattern,
+        string sourcePattern,
+        bool anchored,
+        bool ignoreAsciiCase,
+        out string regex)
     {
         // Pre-size StringBuilder based on typical expansion factor
         var sb = new StringBuilder(pattern.Length * 2);
         var span = pattern.AsSpan();
+        var sourceSpan = sourcePattern.AsSpan();
         for (var i = 0; i < span.Length; i++)
         {
             var current = span[i];
@@ -414,39 +530,63 @@ public sealed class GitIgnoreMatcher
             switch (current)
             {
                 case '*':
-                    if (i + 1 < span.Length && span[i + 1] == '*')
+                    var runEnd = i + 1;
+                    while (runEnd < span.Length && span[runEnd] == '*')
+                        runEnd++;
+
+                    var runLength = runEnd - i;
+                    var atSegmentStart = i == 0 || span[i - 1] == '/';
+                    var followedBySlash = runEnd < span.Length && span[runEnd] == '/';
+                    var isDirectoryGlobStar = runLength == 2 && atSegmentStart && followedBySlash;
+                    var isTrailingGlobStar = runLength == 2 && runEnd == span.Length &&
+                                             (i > 0 && span[i - 1] == '/' || i == 0 && anchored);
+                    if (!isDirectoryGlobStar && !isTrailingGlobStar)
                     {
-                        // Check if ** is followed by /
-                        if (i + 2 < span.Length && span[i + 2] == '/')
-                        {
-                            // **/ means "zero or more directories"
-                            sb.Append("(?:.*/)?");
-                            i += 2; // Skip both * and /
-                        }
-                        else
-                        {
-                            // ** at end or not followed by / - match anything
-                            sb.Append(".*");
-                            i++;
-                        }
-                    }
-                    else
-                    {
+                        // Consecutive asterisks outside the three documented globstar
+                        // positions are ordinary '*' wildcards and cannot cross '/'.
                         sb.Append("[^/]*");
+                        i = runEnd - 1;
+                        break;
                     }
+
+                    if (isDirectoryGlobStar)
+                    {
+                        // Leading **/ and /**/ match zero or more directories.
+                        sb.Append("(?:.*/)?");
+                        i = runEnd; // Consume the slash after the globstar too.
+                        break;
+                    }
+
+                    // A trailing /** matches every descendant. The anchored flag
+                    // preserves that meaning for the root pattern '/**' after its
+                    // leading slash has been removed by the parser.
+                    if (i > 0 || anchored)
+                        sb.Append(".*");
+                    else
+                        sb.Append("[^/]*");
+                    i = runEnd - 1;
                     break;
                 case '?':
                     sb.Append("[^/]");
                     break;
                 case '[':
-                    var closingBracket = FindCharacterClassEnd(span, i + 1);
+                    var closingBracket = GitPathTextNormalizer.FindCharacterClassEnd(span, i + 1);
                     if (closingBracket < 0)
                     {
                         sb.Append(@"\[");
                         break;
                     }
 
-                    AppendCharacterClass(sb, span[(i + 1)..closingBracket]);
+                    if (!TryAppendCharacterClass(
+                            sb,
+                            span[(i + 1)..closingBracket],
+                            sourceSpan[(i + 1)..closingBracket],
+                            ignoreAsciiCase))
+                    {
+                        regex = string.Empty;
+                        return false;
+                    }
+
                     i = closingBracket;
                     break;
                 case '\\':
@@ -462,63 +602,284 @@ public sealed class GitIgnoreMatcher
             }
         }
 
-        return sb.ToString();
+        regex = sb.ToString();
+        return true;
     }
 
-    private static int FindCharacterClassEnd(ReadOnlySpan<char> pattern, int start)
+    private static bool MatchesEveryDirectChildName(string pattern)
     {
-        var index = start;
-        if (index < pattern.Length && pattern[index] is '!' or '^')
-            index++;
-        if (index < pattern.Length && pattern[index] == ']')
-            index++;
+        var lastSlash = pattern.LastIndexOf('/');
+        if (lastSlash < 0 || lastSlash == pattern.Length - 1)
+            return false;
 
-        for (; index < pattern.Length; index++)
+        var segment = pattern.AsSpan(lastSlash + 1);
+        var hasAsterisk = false;
+        var questionMarkCount = 0;
+        foreach (var current in segment)
         {
-            if (pattern[index] == '\\' && index + 1 < pattern.Length)
+            switch (current)
             {
+                case '*':
+                    hasAsterisk = true;
+                    break;
+                case '?':
+                    questionMarkCount++;
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        // A direct child always has a non-empty name. '*' covers every name;
+        // one '?' combined with '*' still covers every non-empty name. More
+        // question marks impose a minimum length and are therefore partial.
+        return hasAsterisk && questionMarkCount <= 1;
+    }
+
+    private static bool TryAppendCharacterClass(
+        StringBuilder builder,
+        ReadOnlySpan<char> content,
+        ReadOnlySpan<char> sourceContent,
+        bool ignoreAsciiCase)
+    {
+        var index = 0;
+        var negated = false;
+        if (index < content.Length && content[index] is '!' or '^')
+        {
+            negated = true;
+            index++;
+        }
+
+        var classBody = new StringBuilder(content.Length * 2);
+        var hasMatchableCharacter = false;
+        var hasPreviousCharacter = false;
+        var previousCharacter = '\0';
+        while (index < content.Length)
+        {
+            var current = content[index];
+            if (current == '\\')
+            {
+                if (++index >= content.Length)
+                    return false;
+
+                current = content[index++];
+                AppendCharacterClassLiteral(classBody, current, ref hasMatchableCharacter);
+                previousCharacter = current;
+                hasPreviousCharacter = true;
+                continue;
+            }
+
+            if (current == '-' && hasPreviousCharacter && index + 1 < content.Length)
+            {
+                var rangeEnd = content[++index];
+                if (rangeEnd == '\\')
+                {
+                    if (++index >= content.Length)
+                        return false;
+                    rangeEnd = content[index];
+                }
+
+                if (!TryAppendCharacterClassRange(
+                        classBody,
+                        previousCharacter,
+                        rangeEnd,
+                        ignoreAsciiCase,
+                        ref hasMatchableCharacter))
+                {
+                    return false;
+                }
+
+                hasPreviousCharacter = false;
                 index++;
                 continue;
             }
 
-            if (pattern[index] == ']')
-                return index;
-        }
-
-        return -1;
-    }
-
-    private static void AppendCharacterClass(StringBuilder builder, ReadOnlySpan<char> content)
-    {
-        builder.Append('[');
-        var index = 0;
-        if (index < content.Length && content[index] is '!' or '^')
-        {
-            builder.Append('^');
-            index++;
-        }
-
-        if (index < content.Length && content[index] == ']')
-        {
-            builder.Append(@"\]");
-            index++;
-        }
-
-        for (; index < content.Length; index++)
-        {
-            var current = content[index];
-            if (current == '\\' && index + 1 < content.Length)
+            if (current == '[' && index + 1 < content.Length && content[index + 1] == ':')
             {
-                AppendEscapedRegexCharacter(builder, content[++index], insideCharacterClass: true);
-                continue;
+                var relativeEnd = content[(index + 2)..].IndexOf(']');
+                if (relativeEnd < 0)
+                {
+                    AppendCharacterClassLiteral(classBody, current, ref hasMatchableCharacter);
+                    previousCharacter = current;
+                    hasPreviousCharacter = true;
+                    index++;
+                    continue;
+                }
+
+                var posixClassEnd = index + 2 + relativeEnd;
+                if (posixClassEnd > index + 1 && content[posixClassEnd - 1] == ':')
+                {
+                    var classNameStart = index + 2;
+                    var classNameLength = posixClassEnd - classNameStart - 1;
+                    if (!TryAppendPosixCharacterClass(
+                            classBody,
+                            sourceContent.Slice(classNameStart, classNameLength),
+                            ignoreAsciiCase))
+                    {
+                        return false;
+                    }
+
+                    hasMatchableCharacter = true;
+                    hasPreviousCharacter = false;
+                    index = posixClassEnd + 1;
+                    continue;
+                }
             }
 
-            if (current is '[' or '^')
-                builder.Append('\\');
-            builder.Append(current);
+            AppendCharacterClassLiteral(classBody, current, ref hasMatchableCharacter);
+            previousCharacter = current;
+            hasPreviousCharacter = true;
+            index++;
         }
 
-        builder.Append(']');
+        if (negated)
+        {
+            builder.Append("[^/").Append(classBody).Append(']');
+            return true;
+        }
+
+        if (!hasMatchableCharacter)
+        {
+            builder.Append("(?!)");
+            return true;
+        }
+
+        builder.Append('[').Append(classBody).Append(']');
+        return true;
+    }
+
+    private static bool TryAppendPosixCharacterClass(
+        StringBuilder builder,
+        ReadOnlySpan<char> className,
+        bool ignoreAsciiCase)
+    {
+        var fragment = className.ToString() switch
+        {
+            "alnum" => @"\u0030-\u0039\u0041-\u005A\u0061-\u007A",
+            "alpha" => @"\u0041-\u005A\u0061-\u007A",
+            "blank" => @"\u0009\u0020",
+            "cntrl" => @"\u0000-\u001F\u007F",
+            "digit" => @"\u0030-\u0039",
+            "graph" => @"\u0021-\u002E\u0030-\u007E",
+            "lower" => @"\u0061-\u007A",
+            "print" => @"\u0020-\u002E\u0030-\u007E",
+            "punct" => @"\u0021-\u002E\u003A-\u0040\u005B-\u0060\u007B-\u007E",
+            "space" => @"\u0009-\u000D\u0020",
+            "upper" when ignoreAsciiCase => @"\u0061-\u007A",
+            "upper" => @"\u0041-\u005A",
+            "xdigit" => @"\u0030-\u0039\u0041-\u0046\u0061-\u0066",
+            _ => null
+        };
+        if (fragment is null)
+            return false;
+
+        builder.Append(fragment);
+        return true;
+    }
+
+    private static void AppendCharacterClassLiteral(
+        StringBuilder builder,
+        char value,
+        ref bool hasMatchableCharacter)
+    {
+        if (value == '/')
+            return;
+
+        AppendCharacterClassCodeUnit(builder, value);
+        hasMatchableCharacter = true;
+    }
+
+    private static bool TryAppendCharacterClassRange(
+        StringBuilder builder,
+        char rangeStart,
+        char rangeEnd,
+        bool ignoreAsciiCase,
+        ref bool hasMatchableCharacter)
+    {
+        if (rangeStart > rangeEnd)
+            return false;
+
+        const char slash = '/';
+        if (rangeStart < slash)
+        {
+            AppendCharacterClassRangeSegment(
+                builder,
+                rangeStart,
+                rangeEnd < slash ? rangeEnd : (char)(slash - 1));
+            hasMatchableCharacter = true;
+        }
+
+        if (rangeEnd > slash)
+        {
+            AppendCharacterClassRangeSegment(
+                builder,
+                rangeStart > slash ? rangeStart : (char)(slash + 1),
+                rangeEnd);
+            hasMatchableCharacter = true;
+        }
+
+        if (ignoreAsciiCase)
+        {
+            var upperStart = rangeStart > 'A' ? rangeStart : 'A';
+            var upperEnd = rangeEnd < 'Z' ? rangeEnd : 'Z';
+            if (upperStart <= upperEnd)
+            {
+                AppendCharacterClassRangeSegment(
+                    builder,
+                    (char)(upperStart + ('a' - 'A')),
+                    (char)(upperEnd + ('a' - 'A')));
+                hasMatchableCharacter = true;
+            }
+        }
+
+        return true;
+    }
+
+    private static void AppendCharacterClassRangeSegment(
+        StringBuilder builder,
+        char rangeStart,
+        char rangeEnd)
+    {
+        AppendCharacterClassCodeUnit(builder, rangeStart);
+        if (rangeStart == rangeEnd)
+            return;
+
+        builder.Append('-');
+        AppendCharacterClassCodeUnit(builder, rangeEnd);
+    }
+
+    private static void AppendCharacterClassCodeUnit(StringBuilder builder, char value)
+    {
+        builder
+            .Append(@"\u")
+            .Append(((int)value).ToString("X4", CultureInfo.InvariantCulture));
+    }
+
+    private static string ProjectUtf8BytesForRegex(string value)
+    {
+        if (IsAscii(value))
+            return value;
+
+        return Encoding.Latin1.GetString(Encoding.UTF8.GetBytes(value));
+    }
+
+    private static string? ProjectUtf8BytesForRegexOrNull(ReadOnlySpan<char> value)
+    {
+        if (IsAscii(value))
+            return null;
+
+        return Encoding.Latin1.GetString(Encoding.UTF8.GetBytes(value.ToString()));
+    }
+
+    private static bool IsAscii(ReadOnlySpan<char> value)
+    {
+        foreach (var character in value)
+        {
+            if (character > 0x7f)
+                return false;
+        }
+
+        return true;
     }
 
     private static void AppendEscapedRegexCharacter(
@@ -603,7 +964,7 @@ public sealed class GitIgnoreMatcher
             if (pattern[index] != '[')
                 continue;
 
-            var closingBracket = FindCharacterClassEnd(pattern, index + 1);
+            var closingBracket = GitPathTextNormalizer.FindCharacterClassEnd(pattern, index + 1);
             if (closingBracket < 0)
                 return true;
             index = closingBracket;
@@ -633,6 +994,18 @@ public sealed class GitIgnoreMatcher
         return span.ToString().Replace('\\', '/');
     }
 
+    private string NormalizeRelativePathForComparison(string path) =>
+        GitPathTextNormalizer.NormalizeObservedPath(
+            NormalizeRelativePath(path),
+            _normalizeUnicode,
+            _ignoreAsciiCase);
+
+    private bool RequiresComparisonNormalization(ReadOnlySpan<char> value) =>
+        GitPathTextNormalizer.RequiresObservedPathNormalization(
+            value,
+            _normalizeUnicode,
+            _ignoreAsciiCase);
+
     private enum RuleMatchKind
     {
         Regex,
@@ -650,13 +1023,16 @@ public sealed class GitIgnoreMatcher
         bool IsNegation,
         bool DirectoryOnly,
         bool MatchByNameOnly,
+        bool MatchesEveryDirectChildName,
         string StaticPrefix)
     {
         public bool IsMatch(
             ReadOnlySpan<char> relativePath,
             string normalizedName,
             bool isDirectory,
-            StringComparison comparison) =>
+            StringComparison comparison,
+            string? projectedRelativePath = null,
+            string? projectedName = null) =>
             MatchKind switch
             {
                 RuleMatchKind.NameLiteral => string.Equals(normalizedName, LiteralPattern, comparison),
@@ -664,16 +1040,33 @@ public sealed class GitIgnoreMatcher
                 RuleMatchKind.UnanchoredPathLiteral => MatchesUnanchoredPathLiteral(relativePath, LiteralPattern, comparison),
                 RuleMatchKind.AnchoredDirectoryLiteral => MatchesAnchoredDirectoryLiteral(relativePath, LiteralPattern, isDirectory, comparison),
                 RuleMatchKind.UnanchoredDirectoryLiteral => MatchesUnanchoredDirectoryLiteral(relativePath, LiteralPattern, isDirectory, comparison),
-                _ => MatchesRegex(relativePath, normalizedName, isDirectory)
+                _ => MatchesRegex(
+                    relativePath,
+                    normalizedName,
+                    isDirectory,
+                    projectedRelativePath,
+                    projectedName)
             };
 
-        private bool MatchesRegex(ReadOnlySpan<char> relativePath, string normalizedName, bool isDirectory)
+        private bool MatchesRegex(
+            ReadOnlySpan<char> relativePath,
+            string normalizedName,
+            bool isDirectory,
+            string? projectedRelativePath,
+            string? projectedName)
         {
             if (MatchByNameOnly)
-                return Pattern!.IsMatch(normalizedName);
+                return Pattern!.IsMatch(projectedName ?? normalizedName);
 
             if (!DirectoryOnly || !isDirectory)
-                return Pattern!.IsMatch(relativePath);
+            {
+                return projectedRelativePath is null
+                    ? Pattern!.IsMatch(relativePath)
+                    : Pattern!.IsMatch(projectedRelativePath);
+            }
+
+            if (projectedRelativePath is not null)
+                return Pattern!.IsMatch(projectedRelativePath + "/");
 
             Span<char> directoryPath = relativePath.Length <= 511
                 ? stackalloc char[relativePath.Length + 1]

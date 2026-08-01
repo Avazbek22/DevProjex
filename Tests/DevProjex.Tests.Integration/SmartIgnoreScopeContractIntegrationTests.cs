@@ -9,6 +9,7 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 		temp.CreateFile("pyproject.toml", "[project]\nname = \"api\"\n");
 		temp.CreateFile("src/app.py", "print('ok')\n");
 		temp.CreateFile("src/__pycache__/app.pyc", "binary");
+		temp.CreateFile("src/.venv/pyvenv.cfg", "home = python\n");
 		temp.CreateFile("src/.venv/bin/python", "binary");
 
 		var rulesService = new IgnoreRulesService(new SmartIgnoreService([
@@ -69,6 +70,7 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 		temp.CreateFile("src/app.py", "print('ok')\n");
 		temp.CreateFile(".venv/pyvenv.cfg", "home = python\n");
 		temp.CreateFile("frontend/package.json", "{}");
+		temp.CreateFile("frontend/node_modules/.package-lock.json", "{}");
 		temp.CreateFile("frontend/node_modules/pkg/index.js", "module.exports = {};");
 		temp.CreateFile("plain-data/node_modules/pkg/index.js", "must stay visible");
 
@@ -221,14 +223,14 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 	{
 		var cases = new[]
 		{
-			new StackCase("frontend", "package.json", "node_modules", "index.js", new FrontendArtifactsIgnoreRule()),
+			new StackCase("frontend", "package.json", "node_modules", ".package-lock.json", new FrontendArtifactsIgnoreRule()),
 			new StackCase("dotnet", "App.csproj", "bin", "app.dll", new DotNetArtifactsIgnoreRule()),
 			new StackCase("python", "requirements.txt", "__pycache__", "app.pyc", new PythonArtifactsIgnoreRule()),
-			new StackCase("jvm", "settings.gradle", "build", "classes.bin", new JvmArtifactsIgnoreRule()),
-			new StackCase("rust", "Cargo.toml", "target", "app.bin", new RustArtifactsIgnoreRule()),
-			new StackCase("go", "go.work", "vendor", "module.go", new GoArtifactsIgnoreRule()),
+			new StackCase("jvm", "settings.gradle", "build", "classes/App.class", new JvmArtifactsIgnoreRule()),
+			new StackCase("rust", "Cargo.toml", "target", "debug/app", new RustArtifactsIgnoreRule()),
+			new StackCase("go", "go.work", "vendor", "modules.txt", new GoArtifactsIgnoreRule()),
 			new StackCase("php", "composer.json", "vendor", "autoload.php", new PhpArtifactsIgnoreRule()),
-			new StackCase("ruby", "Gemfile.lock", "tmp", "cache.txt", new RubyArtifactsIgnoreRule())
+			new StackCase("ruby", "Gemfile.lock", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule())
 		};
 
 		foreach (var testCase in cases)
@@ -253,14 +255,14 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 	{
 		var cases = new[]
 		{
-			new StackCase("frontend", "package.json", "node_modules", "index.js", new FrontendArtifactsIgnoreRule()),
+			new StackCase("frontend", "package.json", "node_modules", ".package-lock.json", new FrontendArtifactsIgnoreRule()),
 			new StackCase("dotnet", "App.csproj", "bin", "app.dll", new DotNetArtifactsIgnoreRule()),
 			new StackCase("python", "requirements.txt", "__pycache__", "app.pyc", new PythonArtifactsIgnoreRule()),
-			new StackCase("jvm", "settings.gradle", "build", "classes.bin", new JvmArtifactsIgnoreRule()),
-			new StackCase("rust", "Cargo.toml", "target", "app.bin", new RustArtifactsIgnoreRule()),
-			new StackCase("go", "go.work", "vendor", "module.go", new GoArtifactsIgnoreRule()),
+			new StackCase("jvm", "settings.gradle", "build", "classes/App.class", new JvmArtifactsIgnoreRule()),
+			new StackCase("rust", "Cargo.toml", "target", "debug/app", new RustArtifactsIgnoreRule()),
+			new StackCase("go", "go.work", "vendor", "modules.txt", new GoArtifactsIgnoreRule()),
 			new StackCase("php", "composer.json", "vendor", "autoload.php", new PhpArtifactsIgnoreRule()),
-			new StackCase("ruby", "Gemfile.lock", "tmp", "cache.txt", new RubyArtifactsIgnoreRule())
+			new StackCase("ruby", "Gemfile.lock", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule())
 		};
 
 		foreach (var testCase in cases)

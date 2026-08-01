@@ -316,7 +316,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			roots: null,
 			extensions: null,
 			forcedStates: AllOffStates(),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".js", ".json", ".log", ".md", ".tmp", ".ts", ".xml"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".js", ".json", ".log", ".md", ".tag", ".tmp", ".ts", ".xml"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
@@ -837,6 +837,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		workspace.CreateFile("web/package.json", "{ \"name\": \"web\" }\n");
 		workspace.CreateFile("web/src/app.ts", "export const ok = true;\n");
 		workspace.CreateFile("web/node_modules/pkg/index.js", "module.exports = {};\n");
+		workspace.CreateFile("web/.cache/CACHEDIR.TAG", "Signature: 8a477f597d28d172789f06886806bc55\n");
 		workspace.CreateFile("web/.cache/cache.json", "{}\n");
 		workspace.CreateFile("docs/readme.md", "# docs\n");
 		workspace.CreateFile("docs/.drafts/draft.md", "# draft\n");

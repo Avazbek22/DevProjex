@@ -32,6 +32,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		"__DEVPROJEX_FRESH_SHELL_INPUT__";
 	internal const string ShellEchoProbe = "terminal-ok";
 	private const string ShellHandshakeMarker = "__DEVPROJEX_SHELL_HANDSHAKE__";
+	private const string CursorVisibleSequence = "\u001b[?25h";
+	private const string CursorHiddenSequence = "\u001b[?25l";
 	private const string WindowSizeQuery = "\u001b[18t";
 	private readonly Hex1bTerminalChildProcess _process;
 	private readonly XTermTerminal _terminal;
@@ -421,6 +423,14 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				ShellCompletionMarker,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
+		if (OperatingSystem.IsWindows())
+		{
+			// ConHost versions may report the settled visible cursor immediately
+			// before or after the marker. Wait for the resulting mode state instead
+			// of requiring one specific output-chunk ordering.
+			await WaitForVisibleCursorStateAsync(cancellationToken)
+				.ConfigureAwait(false);
+		}
 	}
 
 	public Task ReleaseParentShellAsync(CancellationToken cancellationToken = default) =>
@@ -686,6 +696,33 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			$"Raw output tail:\n{CaptureRawOutputTail()}");
 	}
 
+	private async Task WaitForVisibleCursorStateAsync(
+		CancellationToken cancellationToken)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		var timeout = TimeSpan.FromSeconds(15);
+		while (stopwatch.Elapsed < timeout)
+		{
+			var output = CaptureRawOutput();
+			var visibleIndex = output.LastIndexOf(CursorVisibleSequence, StringComparison.Ordinal);
+			var hiddenIndex = output.LastIndexOf(CursorHiddenSequence, StringComparison.Ordinal);
+			if (visibleIndex >= 0 && visibleIndex > hiddenIndex)
+				return;
+			if (HasExited)
+			{
+				throw new Xunit.Sdk.XunitException(
+					$"Terminal process exited with code {_process.ExitCode} before " +
+					$"the parent shell restored the cursor.\nRaw output:\n{output}");
+			}
+
+			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+		}
+
+		throw new TimeoutException(
+			"Timed out waiting for the parent shell to restore the cursor.\n" +
+			$"Raw output tail:\n{CaptureRawOutputTail()}");
+	}
+
 	public async Task<int> WaitForExitAsync(
 		TimeSpan? timeout = null,
 		CancellationToken cancellationToken = default)
@@ -911,7 +948,6 @@ internal static class PublishedApplicationLocator
 			repository,
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"bin",
 			configuration,
 			"net10.0",

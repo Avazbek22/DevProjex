@@ -7,8 +7,6 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 {
 	private const string InvalidSelectedPathCode = ProjectSelectionPath.InvalidPathCode;
 	private const string MissingSelectedPathCode = "DPX-SELECTION-PATH-MISSING";
-	private const string TrackedIndexUnavailableCode = "DPX-GIT-TRACKED-INDEX-UNAVAILABLE";
-	private const string TrackedIndexPartialCode = "DPX-GIT-TRACKED-INDEX-PARTIAL";
 
 	public async Task<ProjectContextPlan> BuildAsync(
 		ProjectContextRequest request,
@@ -18,14 +16,17 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		ArgumentNullException.ThrowIfNull(request.Selection);
 
 		var sourceRoot = NormalizeSourceRoot(request.ProjectPath);
-		var selection = EnsureResolved(request.Selection);
+		var selection = ResolveLocalOverrideIntent(EnsureResolved(request.Selection));
 		var selectedIgnoreOptions = ProjectSelectionAdapter.ToIgnoreOptions(selection);
 		var loaded = analysisService.Load(
 			new ProjectAnalysisRequest(
 				sourceRoot,
 				selection.Roots,
 				selection.Extensions,
-				selectedIgnoreOptions),
+				selectedIgnoreOptions)
+			{
+				LocalProfileState = selection.LocalProfileState
+			},
 			cancellationToken);
 		var sourceIdentity = ResolveSourceIdentity(sourceRoot, request.SourceIdentity);
 		var effectiveRoot = loaded.Tree.Root with
@@ -88,37 +89,27 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			.ConfigureAwait(false);
 		AddAnalysisDiagnostics(analysis, diagnostics);
 
-		var unavailableTrackedIndexCount = loaded.UnavailableGitTrackedIndexCount;
-		var trackedIndexCount = Math.Max(
-			0,
-			loaded.DiscoveredGitTrackedIndexCount - unavailableTrackedIndexCount);
-		var trackedReady = selection.GitMode != GitFilteringMode.TrackedFilesOnly ||
-		                   trackedIndexCount > 0;
-		if (!trackedReady)
-		{
-			diagnostics.Add(new ContextDiagnostic(
-				TrackedIndexUnavailableCode,
-				ContextDiagnosticSeverity.Error,
-				"Tracked Git files mode was requested, but no readable Git index is available.",
-				sourceRoot));
-		}
-		else if (selection.GitMode == GitFilteringMode.TrackedFilesOnly &&
-		         unavailableTrackedIndexCount > 0)
-		{
-			diagnostics.Add(new ContextDiagnostic(
-				TrackedIndexPartialCode,
-				ContextDiagnosticSeverity.Warning,
-				"Some nested Git indexes could not be read; those repository scopes were excluded.",
-				sourceRoot));
-		}
+		var gitReadiness = ProjectContextGitReadiness.Evaluate(
+			selection.GitMode!.Value,
+			loaded.DiscoveredGitTrackedIndexCount,
+			loaded.UnavailableGitTrackedIndexCount);
+		if (gitReadiness.CreateDiagnostic(sourceRoot) is { } gitDiagnostic)
+			diagnostics.Add(gitDiagnostic);
 
+		var refreshedLocalState = RefreshLocalProfileState(selection.LocalProfileState, loaded);
 		var effectiveSelection = selection with
 		{
-			Roots = loaded.SelectedRootFolders.ToArray(),
-			Extensions = loaded.SelectedExtensions.ToArray(),
+			// Selection is durable user intent; SelectedRoots/SelectedExtensions below are
+			// the effective rows that exist now. Keeping them separate preserves stale-profile
+			// diagnostics and hidden checkbox state without feeding phantom names to the tree.
+			Roots = ResolveRootSelectionIntent(selection, refreshedLocalState, loaded),
+			Extensions = ResolveExtensionSelectionIntent(selection, refreshedLocalState, loaded),
+			GitMode = ResolveGitModeIntent(selection, refreshedLocalState, loaded),
+			Exclusions = ResolveExclusionIntent(selection, refreshedLocalState, loaded),
 			SelectedPaths = NormalizeRelativeSelectionForOutput(
 				sourceRoot,
-				selectedFullPaths)
+				selectedFullPaths),
+			LocalProfileState = refreshedLocalState
 		};
 
 		return new ProjectContextPlan(
@@ -135,11 +126,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			IncludedFolders: includedFolders,
 			Analysis: analysis,
 			Diagnostics: diagnostics,
-			GitReadiness: new ProjectContextGitReadiness(
-				selection.GitMode!.Value,
-				trackedIndexCount,
-				trackedReady,
-				unavailableTrackedIndexCount),
+			GitReadiness: gitReadiness,
 			Fingerprint: BuildFingerprint(sourceRoot, effectiveSelection, includedNodes),
 			IncludedBytes: includedBytes,
 			EffectiveFileSizes: effectiveFileSizes,
@@ -364,6 +351,207 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 		return selection;
 	}
+
+	private static ProjectSelectionSpec ResolveLocalOverrideIntent(ProjectSelectionSpec selection)
+	{
+		if (selection.LocalProfileState is not { } state)
+			return selection;
+
+		var profile = state.Profile;
+		var profileRoots = ResolveStoredSelection(profile.SelectedRootFolders, profile.RootFolderStates);
+		var profileExtensions = ResolveStoredSelection(profile.SelectedExtensions, profile.ExtensionStates);
+		var profileIgnoreOptions = ResolveStoredIgnoreSelection(profile);
+		var inferredState = state with
+		{
+			RootsOverridden = state.RootsOverridden ||
+			                  !SetEquals(selection.Roots, profileRoots, PathComparer.Default),
+			ExtensionsOverridden = state.ExtensionsOverridden ||
+			                       !SetEquals(
+				                       selection.Extensions,
+				                       profileExtensions,
+				                       StringComparer.OrdinalIgnoreCase),
+			IgnoreOptionsOverridden = state.IgnoreOptionsOverridden ||
+			                          selection.GitMode != GitFilteringModeResolver.Resolve(profileIgnoreOptions) ||
+			                          !SetEquals(
+				                          selection.Exclusions,
+				                          ProjectSelectionAdapter.ToExclusions(profileIgnoreOptions),
+				                          EqualityComparer<ProjectExclusion>.Default)
+		};
+
+		return selection with { LocalProfileState = inferredState };
+	}
+
+	private static LocalProjectSelectionState? RefreshLocalProfileState(
+		LocalProjectSelectionState? state,
+		LoadedProjectAnalysisRequest loaded)
+	{
+		if (state is null)
+			return null;
+
+		var profile = state.Profile;
+		var rootStates = state.RootsOverridden
+			? profile.RootFolderStates
+			: RefreshStringStates(
+				profile.RootFolderStates,
+				loaded.AvailableRootFolders,
+				loaded.SelectedRootFolders,
+				PathComparer.Default);
+		var extensionStates = state.ExtensionsOverridden
+			? profile.ExtensionStates
+			: RefreshStringStates(
+				profile.ExtensionStates,
+				loaded.AvailableExtensions,
+				loaded.SelectedExtensions,
+				StringComparer.OrdinalIgnoreCase);
+		var ignoreStates = state.IgnoreOptionsOverridden
+			? profile.IgnoreOptionStates
+			: RefreshIgnoreStates(
+				profile.IgnoreOptionStates,
+				loaded.ResolvedIgnoreOptionStates,
+				loaded.SelectedIgnoreOptions);
+		var selectedRoots = rootStates is null
+			? profile.SelectedRootFolders.ToArray()
+			: SelectCheckedNames(rootStates, PathComparer.Default);
+		var selectedExtensions = extensionStates is null
+			? profile.SelectedExtensions.ToArray()
+			: SelectCheckedNames(extensionStates, StringComparer.OrdinalIgnoreCase);
+		var selectedIgnoreOptions = ignoreStates is null
+			? profile.SelectedIgnoreOptions.ToArray()
+			: ignoreStates
+				.Where(static pair => pair.Value)
+				.Select(static pair => pair.Key)
+				.OrderBy(static option => (int)option)
+				.ToArray();
+
+		return state with
+		{
+			Profile = new ProjectSelectionProfile(
+				selectedRoots,
+				selectedExtensions,
+				selectedIgnoreOptions,
+				rootStates,
+				extensionStates,
+				ignoreStates,
+				profile.SelectedPaths?.ToArray())
+		};
+	}
+
+	private static IReadOnlyDictionary<string, bool>? RefreshStringStates(
+		IReadOnlyDictionary<string, bool>? previousStates,
+		IReadOnlyCollection<string> available,
+		IReadOnlyCollection<string> selected,
+		StringComparer comparer)
+	{
+		if (previousStates is null)
+			return null;
+
+		var selectedSet = selected.ToHashSet(comparer);
+		var refreshed = new Dictionary<string, bool>(previousStates, comparer);
+		foreach (var name in available)
+			refreshed[name] = selectedSet.Contains(name);
+		return refreshed;
+	}
+
+	private static IReadOnlyDictionary<IgnoreOptionId, bool>? RefreshIgnoreStates(
+		IReadOnlyDictionary<IgnoreOptionId, bool>? previousStates,
+		IReadOnlyDictionary<IgnoreOptionId, bool>? resolvedStates,
+		IReadOnlyCollection<IgnoreOptionId> selected)
+	{
+		if (previousStates is null)
+			return null;
+
+		var refreshed = new Dictionary<IgnoreOptionId, bool>(previousStates);
+		if (resolvedStates is not null)
+		{
+			// The engine owns visibility churn and preserves hidden known rows. Rebuilding
+			// from the visible selected set would silently clear a checked option precisely
+			// when that option hid its own evidence.
+			foreach (var (option, isChecked) in resolvedStates)
+				refreshed[option] = isChecked;
+		}
+		else
+		{
+			var selectedSet = selected.ToHashSet();
+			foreach (var option in previousStates.Keys)
+				refreshed[option] = selectedSet.Contains(option);
+			foreach (var option in selectedSet)
+				refreshed[option] = true;
+		}
+		GitFilteringModeResolver.Normalize(refreshed);
+		return refreshed;
+	}
+
+	private static string[] SelectCheckedNames(
+		IReadOnlyDictionary<string, bool> states,
+		StringComparer comparer) =>
+		states
+			.Where(static pair => pair.Value)
+			.Select(static pair => pair.Key)
+			.Distinct(comparer)
+			.OrderBy(static name => name, comparer)
+			.ToArray();
+
+	private static IReadOnlyCollection<string>? ResolveRootSelectionIntent(
+		ProjectSelectionSpec selection,
+		LocalProjectSelectionState? state,
+		LoadedProjectAnalysisRequest loaded) =>
+		state is null
+			? loaded.SelectedRootFolders.ToArray()
+			: state.RootsOverridden
+				? selection.Roots
+				: ResolveStoredSelection(state.Profile.SelectedRootFolders, state.Profile.RootFolderStates);
+
+	private static IReadOnlyCollection<string>? ResolveExtensionSelectionIntent(
+		ProjectSelectionSpec selection,
+		LocalProjectSelectionState? state,
+		LoadedProjectAnalysisRequest loaded) =>
+		state is null
+			? loaded.SelectedExtensions.ToArray()
+			: state.ExtensionsOverridden
+				? selection.Extensions
+				: ResolveStoredSelection(state.Profile.SelectedExtensions, state.Profile.ExtensionStates);
+
+	private static GitFilteringMode ResolveGitModeIntent(
+		ProjectSelectionSpec selection,
+		LocalProjectSelectionState? state,
+		LoadedProjectAnalysisRequest loaded) =>
+		state is null || state.IgnoreOptionsOverridden
+			? state is null
+				? GitFilteringModeResolver.Resolve(loaded.SelectedIgnoreOptions)
+				: selection.GitMode!.Value
+			: GitFilteringModeResolver.Resolve(ResolveStoredIgnoreSelection(state.Profile));
+
+	private static IReadOnlyCollection<ProjectExclusion> ResolveExclusionIntent(
+		ProjectSelectionSpec selection,
+		LocalProjectSelectionState? state,
+		LoadedProjectAnalysisRequest loaded) =>
+		state is null || state.IgnoreOptionsOverridden
+			? state is null
+				? ProjectSelectionAdapter.ToExclusions(loaded.SelectedIgnoreOptions)
+				: selection.Exclusions ?? []
+			: ProjectSelectionAdapter.ToExclusions(ResolveStoredIgnoreSelection(state.Profile));
+
+	private static IReadOnlyCollection<string> ResolveStoredSelection(
+		IReadOnlyCollection<string> selected,
+		IReadOnlyDictionary<string, bool>? states) =>
+		states is null
+			? selected
+			: states.Where(static pair => pair.Value).Select(static pair => pair.Key).ToArray();
+
+	private static IReadOnlyCollection<IgnoreOptionId> ResolveStoredIgnoreSelection(
+		ProjectSelectionProfile profile) =>
+		profile.IgnoreOptionStates is null
+			? profile.SelectedIgnoreOptions
+			: profile.IgnoreOptionStates
+				.Where(static pair => pair.Value)
+				.Select(static pair => pair.Key)
+				.ToArray();
+
+	private static bool SetEquals<T>(
+		IReadOnlyCollection<T>? left,
+		IReadOnlyCollection<T> right,
+		IEqualityComparer<T> comparer) =>
+		new HashSet<T>(left ?? [], comparer).SetEquals(right);
 
 	private static IReadOnlySet<string> ResolveSelectedPaths(
 		TreeNodeDescriptor root,

@@ -478,7 +478,7 @@ function Invoke-ReleaseConfigValidation([string]$repoRoot) {
     Assert-Condition ($versionInfo.AssemblyVersion -eq $versionInfo.FileVersion) "AssemblyVersion and FileVersion must stay identical."
     Assert-Condition ($versionInfo.AssemblyVersion -eq $versionInfo.StorePackageVersion) "AssemblyVersion and StorePackageVersion must stay identical."
 
-    $appProjectPath = Join-Path $repoRoot "Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj"
+    $appProjectPath = Join-Path $repoRoot "Apps\Avalonia\DevProjex.Avalonia.csproj"
     $appProjectContent = Get-Content -Path $appProjectPath -Raw
     foreach ($versionPropertyName in @("Version", "AssemblyVersion", "FileVersion", "InformationalVersion")) {
         Assert-Condition (-not ($appProjectContent -match "<$versionPropertyName>")) "App project must inherit $versionPropertyName from Directory.Build.props: $appProjectPath"
@@ -548,7 +548,7 @@ function Invoke-StoreSmokeBuild([string]$repoRoot, [string]$versionOverride) {
 
     $versionProperties = Get-BuildVersionProperties -displayVersion $resolvedDisplayVersion -storePackageVersion $storePackageVersion
     $projectPath = Join-Path $repoRoot "Packaging\Windows\DevProjex.Store\DevProjex.Store.wapproj"
-    $appProjectPath = Join-Path $repoRoot "Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj"
+    $appProjectPath = Join-Path $repoRoot "Apps\Avalonia\DevProjex.Avalonia.csproj"
     $msbuildPath = Get-MsBuildPath
     $targetPlatformResolution = Resolve-StoreTargetPlatformVersion -projectPath $projectPath
     $outputRoot = Join-Path $env:TEMP ("devprojex-store-smoke-" + [Guid]::NewGuid().ToString("N"))
@@ -717,7 +717,7 @@ function Create-IsolatedWorkspace([string]$sourceRoot) {
 }
 
 function Build-GitHubArtifactsInWorkspace([string]$version, [string]$configuration) {
-    $projectPath = Join-Path $script:IsolatedRepoRoot "Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj"
+    $projectPath = Join-Path $script:IsolatedRepoRoot "Apps\Avalonia\DevProjex.Avalonia.csproj"
     if (-not (Test-Path $projectPath)) {
         throw "Avalonia project not found in isolated workspace: $projectPath"
     }
@@ -952,7 +952,7 @@ function Build-StoreArtifactsInWorkspace(
         Write-Host "Updated Package.appxmanifest version to $packageVersion"
     }
 
-    $avaloniaProjectPath = Join-Path $script:IsolatedRepoRoot "Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj"
+    $avaloniaProjectPath = Join-Path $script:IsolatedRepoRoot "Apps\Avalonia\DevProjex.Avalonia.csproj"
     Write-Host "Restoring packages..."
     Set-StoreProjectTargetPlatformVersion -projectPath $project -targetPlatformVersion $targetPlatformResolution.ResolvedVersion | Out-Null
     Invoke-ExternalCommand -filePath "dotnet" -arguments (@("restore", $avaloniaProjectPath, "/p:Configuration=$configuration") + $versionProperties) -failureMessage "dotnet restore failed for store build" -workingDirectory $script:IsolatedRepoRoot

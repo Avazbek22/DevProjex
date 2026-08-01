@@ -290,17 +290,22 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	}
 
 	[Fact]
-	public void ManagedCloneMetadata_RootGitIsExcludedButNestedGitFollowsDotFolderToggle()
+	public void ManagedCloneMetadata_ExactGitEntriesRemainAdministrativeAtEveryDepth()
 	{
 		using var workspace = CreateBareManagedCloneWorkspace();
 		workspace.CreateFile(Path.Combine("src", ".git", "metadata.txt"), "nested repository metadata\n");
+		workspace.CreateFile(Path.Combine("src", ".github", "workflow.yml"), "name: build\n");
+		workspace.CreateFile(Path.Combine("src", ".git-owned", "data.txt"), "ordinary project data\n");
 		var services = CreateManagedCloneServices();
 		var baseline = RefreshFull(
 			workspace.Path,
 			services,
 			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(workspace.Path));
 
-		AssertIgnoreOption(baseline, IgnoreOptionId.DotFolders, expectedChecked: true, expectedCount: 1);
+		// The administrative guarantee is deliberately an exact-name rule. It protects
+		// nested repository/worktree metadata but must not swallow ordinary .git* names.
+		Assert.Equal(2, baseline.IgnoreOptionCounts.DotFolders);
+		AssertIgnoreOption(baseline, IgnoreOptionId.DotFolders, expectedChecked: true, expectedCount: 2);
 		AssertCloneMetadataExcluded(baseline);
 		Assert.Equal(["src"], SnapshotRootNames(baseline));
 		AssertTreePathHidden(workspace.Path, services, baseline, Path.Combine("src", ".git", "metadata.txt"));
@@ -312,11 +317,13 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			IgnoreOptionId.DotFolders,
 			isChecked: false);
 
-		AssertIgnoreOption(dotFoldersDisabled, IgnoreOptionId.DotFolders, expectedChecked: false, expectedCount: 1);
+		AssertIgnoreOption(dotFoldersDisabled, IgnoreOptionId.DotFolders, expectedChecked: false, expectedCount: 2);
 		AssertCloneMetadataExcluded(dotFoldersDisabled);
 		Assert.Equal(["src"], SnapshotRootNames(dotFoldersDisabled));
-		AssertTreePathVisible(workspace.Path, services, dotFoldersDisabled, Path.Combine("src", ".git"));
-		AssertTreePathVisible(workspace.Path, services, dotFoldersDisabled, Path.Combine("src", ".git", "metadata.txt"));
+		AssertTreePathHidden(workspace.Path, services, dotFoldersDisabled, Path.Combine("src", ".git"));
+		AssertTreePathHidden(workspace.Path, services, dotFoldersDisabled, Path.Combine("src", ".git", "metadata.txt"));
+		AssertTreePathVisible(workspace.Path, services, dotFoldersDisabled, Path.Combine("src", ".github", "workflow.yml"));
+		AssertTreePathVisible(workspace.Path, services, dotFoldersDisabled, Path.Combine("src", ".git-owned", "data.txt"));
 		SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
 			workspace.Path,
 			services.IgnoreRulesService,
@@ -329,7 +336,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			IgnoreOptionId.DotFolders,
 			isChecked: true);
 
-		AssertIgnoreOption(dotFoldersReenabled, IgnoreOptionId.DotFolders, expectedChecked: true, expectedCount: 1);
+		AssertIgnoreOption(dotFoldersReenabled, IgnoreOptionId.DotFolders, expectedChecked: true, expectedCount: 2);
 		AssertCloneMetadataExcluded(dotFoldersReenabled);
 		Assert.Equal(["src"], SnapshotRootNames(dotFoldersReenabled));
 		AssertTreePathHidden(workspace.Path, services, dotFoldersReenabled, Path.Combine("src", ".git", "metadata.txt"));
@@ -675,10 +682,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	private static TemporaryDirectory CreateWorkspace(CloneFixtureKind fixtureKind)
 	{
 		var workspace = new TemporaryDirectory();
-		workspace.CreateFile(Path.Combine(".git", "HEAD"), "ref: refs/heads/main\n");
-		workspace.CreateFile(Path.Combine(".git", "objects", "pack", "pack-a.pack"), "metadata\n");
-		workspace.CreateDirectory(Path.Combine(".git", "refs", "tags"));
-		MarkHidden(Path.Combine(workspace.Path, ".git"));
+		InitializeCloneMetadata(workspace);
 
 		if (fixtureKind == CloneFixtureKind.Python)
 		{
@@ -704,10 +708,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	private static TemporaryDirectory CreateDirectoryToggleWorkspace()
 	{
 		var workspace = new TemporaryDirectory();
-		workspace.CreateFile(Path.Combine(".git", "HEAD"), "ref: refs/heads/main\n");
-		workspace.CreateFile(Path.Combine(".git", "objects", "pack", "pack-a.pack"), "metadata\n");
-		workspace.CreateDirectory(Path.Combine(".git", "refs", "tags"));
-		MarkHidden(Path.Combine(workspace.Path, ".git"));
+		InitializeCloneMetadata(workspace);
 		workspace.CreateFile(Path.Combine(".workspace", "settings.json"), "{}\n");
 		workspace.CreateDirectory("empty-root");
 		workspace.CreateFile(Path.Combine("src", "app.cs"), "class App {}\n");
@@ -717,12 +718,48 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	private static TemporaryDirectory CreateBareManagedCloneWorkspace()
 	{
 		var workspace = new TemporaryDirectory();
-		workspace.CreateFile(Path.Combine(".git", "HEAD"), "ref: refs/heads/main\n");
-		workspace.CreateFile(Path.Combine(".git", "objects", "pack", "pack-a.pack"), "metadata\n");
-		workspace.CreateDirectory(Path.Combine(".git", "refs", "tags"));
-		MarkHidden(Path.Combine(workspace.Path, ".git"));
+		InitializeCloneMetadata(workspace);
 		workspace.CreateFile(Path.Combine("src", "app.cs"), "class App {}\n");
 		return workspace;
+	}
+
+	private static void InitializeCloneMetadata(TemporaryDirectory workspace)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workspace.Path,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add("init");
+		startInfo.ArgumentList.Add("--quiet");
+
+		Process? startedProcess;
+		try
+		{
+			startedProcess = Process.Start(startInfo);
+		}
+		catch (System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip("Git is not available in this test environment.");
+			return;
+		}
+
+		using var process = startedProcess ??
+		                    throw new InvalidOperationException("Could not start git.");
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		if (!process.WaitForExit(20_000))
+		{
+			process.Kill(entireProcessTree: true);
+			throw new TimeoutException("Git command did not complete within 20 seconds.");
+		}
+
+		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
+		workspace.CreateFile(Path.Combine(".git", "objects", "pack", "pack-a.pack"), "metadata\n");
+		MarkHidden(Path.Combine(workspace.Path, ".git"));
 	}
 
 	private static ProjectLoadWorkflowRefreshHarness.WorkflowServices CreateManagedCloneServices() =>

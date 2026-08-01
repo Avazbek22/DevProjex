@@ -18,6 +18,29 @@ public sealed class IgnoreSelectionState
 
 	public Dictionary<IgnoreOptionId, bool> SnapshotStateCache() => new(_optionStateCache);
 
+	public IgnoreSelectionStateSnapshot CaptureSnapshot() =>
+		new(
+			IsInitialized,
+			AllPreference,
+			new Dictionary<IgnoreOptionId, bool>(_optionStateCache),
+			_preferredGitFilteringMode);
+
+	public void RestoreSnapshot(IgnoreSelectionStateSnapshot snapshot)
+	{
+		ArgumentNullException.ThrowIfNull(snapshot);
+
+		IsInitialized = snapshot.IsInitialized;
+		AllPreference = snapshot.AllPreference;
+		_optionStateCache.Clear();
+		foreach (var (id, isChecked) in snapshot.OptionStateCache)
+			_optionStateCache[id] = isChecked;
+
+		// Preferred mode is independent state while both Git choices are temporarily off.
+		// Re-resolving it from the map would silently change the next "select all" result.
+		_preferredGitFilteringMode = snapshot.PreferredGitFilteringMode;
+		RebuildSelectedOptions();
+	}
+
 	public bool TryGetCachedState(IgnoreOptionId optionId, out bool isChecked) =>
 		_optionStateCache.TryGetValue(optionId, out isChecked);
 
@@ -81,6 +104,8 @@ public sealed class IgnoreSelectionState
 		IReadOnlySet<IgnoreOptionId>? preserveMissingFrom,
 		IEnumerable<IgnoreOptionId> visibleDescriptorIds)
 	{
+		// Visibility is evidence-driven, not ownership of state. A checkbox disappearing
+		// because another rule hid its evidence must not silently disable that rule.
 		if (preserveMissingFrom is not null && preserveMissingFrom.Count > 0)
 			PreserveMissingSelections(preserveMissingFrom, visibleDescriptorIds);
 
@@ -149,3 +174,9 @@ public sealed class IgnoreSelectionState
 		}
 	}
 }
+
+public sealed record IgnoreSelectionStateSnapshot(
+	bool IsInitialized,
+	bool? AllPreference,
+	IReadOnlyDictionary<IgnoreOptionId, bool> OptionStateCache,
+	GitFilteringMode PreferredGitFilteringMode);

@@ -1,0 +1,974 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:DevProjex.Avalonia.ViewModels"
+        xmlns:views="using:DevProjex.Avalonia.Views"
+        xmlns:controls="using:DevProjex.Avalonia.Controls"
+        xmlns:converters="using:DevProjex.Avalonia.Converters"
+        x:Class="DevProjex.Avalonia.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="True"
+        Title="{Binding Title}"
+        Icon="avares://DevProjex/AppIcon/app.ico"
+        Width="1200" Height="800"
+        MinWidth="850" MinHeight="600"
+        TransparencyLevelHint="None"
+        Background="{DynamicResource AppBackgroundBrush}">
+  <Window.Styles>
+    <Style Selector="TreeViewItem" x:DataType="vm:TreeNodeViewModel">
+      <Setter Property="IsExpanded" Value="{CompiledBinding IsExpanded, Mode=TwoWay}" />
+      <Setter Property="IsSelected" Value="{CompiledBinding IsSelected, Mode=TwoWay}" />
+      <Setter Property="Padding" Value="{DynamicResource TreeItemPaddingResource}" />
+    </Style>
+    <!-- ProjectTreeViewItem owns chevron visibility at local-binding priority because Fluent's
+         :empty state cannot represent lazy children. Opacity remains a recycling-safe fallback. -->
+    <Style Selector="TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron"
+           x:DataType="vm:TreeNodeViewModel">
+      <Setter Property="Opacity" Value="{CompiledBinding HasChildren,
+        Converter={x:Static converters:BoolToOpacityConverter.Instance}}" />
+    </Style>
+
+    <!-- Drop Zone Styles -->
+
+    <!--
+      PERFORMANCE CONTRACT:
+      These animations are intentionally infinite while the drop zone is visible.
+      The drop-zone-animating selector class is owned by UpdateDropZoneAnimationState();
+      never make that class permanent in XAML. A permanent class previously kept the
+      Avalonia render loop and Skia/ANGLE GPU work active after a project was loaded.
+      OnlyIfVisible is defense in depth, not a replacement for detaching the selector.
+      Do not gate the class on window activation: native drag sources may retain focus
+      while this window is the active drop target.
+    -->
+    <Style Selector="Rectangle.drop-zone-border">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="StrokeDashOffset" Value="0" />
+    </Style>
+    <Style Selector="Border.drop-zone-animating Rectangle.drop-zone-border">
+      <Style.Animations>
+        <Animation Duration="0:0:0.8"
+                   IterationCount="INFINITE"
+                   PlaybackBehavior="OnlyIfVisible"
+                   Easing="LinearEasing">
+          <KeyFrame Cue="0%">
+            <Setter Property="StrokeDashOffset" Value="0" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="StrokeDashOffset" Value="-14" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+
+    <Style Selector="Viewbox.drop-zone-icon">
+      <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+      <Setter Property="RenderTransform">
+        <TranslateTransform Y="5" />
+      </Setter>
+    </Style>
+    <Style Selector="Border.drop-zone-animating Viewbox.drop-zone-icon">
+      <Style.Animations>
+        <Animation Duration="0:0:2.1"
+                   IterationCount="INFINITE"
+                   PlaybackBehavior="OnlyIfVisible">
+          <KeyFrame Cue="0%">
+            <Setter Property="TranslateTransform.Y" Value="5" />
+          </KeyFrame>
+          <KeyFrame Cue="25%" KeySpline="0,0,0.58,1">
+            <Setter Property="TranslateTransform.Y" Value="10.5" />
+          </KeyFrame>
+          <KeyFrame Cue="75%" KeySpline="0.42,0,0.58,1">
+            <Setter Property="TranslateTransform.Y" Value="-0.5" />
+          </KeyFrame>
+          <KeyFrame Cue="100%" KeySpline="0.42,0,1,1">
+            <Setter Property="TranslateTransform.Y" Value="5" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+
+    <Style Selector="Border.drop-zone-outer:pointerover Rectangle.drop-zone-border">
+      <Setter Property="StrokeThickness" Value="3" />
+      <Setter Property="Margin" Value="-1.5" />
+      <Setter Property="RadiusX" Value="21.5" />
+      <Setter Property="RadiusY" Value="21.5" />
+    </Style>
+
+    <!-- Drop zone button with smooth transitions -->
+    <Style Selector="Button.drop-zone-button">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <DoubleTransition Property="Opacity" Duration="0:0:0.25" Easing="CubicEaseInOut" />
+        </Transitions>
+      </Setter>
+    </Style>
+
+    <Style Selector="Button.drop-zone-button:pointerover">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+
+    <Style Selector="Button.drop-zone-button:pressed">
+      <Setter Property="Opacity" Value="0.92" />
+    </Style>
+
+    <Style Selector="Border.island-panel">
+      <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="ClipToBounds" Value="True" />
+    </Style>
+
+    <Style Selector="Border.content-island">
+      <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <Style Selector="Border.content-island TreeView">
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Border.settings-island">
+      <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <Style Selector="Border.island-splitter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Width" Value="4" />
+      <Setter Property="MinWidth" Value="4" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="VerticalAlignment" Value="Stretch" />
+      <Setter Property="Cursor" Value="SizeWestEast" />
+      <Setter Property="UseLayoutRounding" Value="True" />
+    </Style>
+
+    <Style Selector="Border.island-splitter:pointerover, Border.island-splitter.splitter-dragging">
+      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="Opacity" Value="0.44" />
+    </Style>
+
+    <Style Selector="Border.status-strip">
+      <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="10,5" />
+    </Style>
+
+    <Style Selector="ProgressBar.status-progress">
+      <Setter Property="Height" Value="4" />
+      <Setter Property="MinWidth" Value="120" />
+      <Setter Property="MaxWidth" Value="170" />
+      <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+    </Style>
+
+    <Style Selector="Button.status-cancel">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="MinWidth" Value="16" />
+      <Setter Property="MinHeight" Value="16" />
+      <Setter Property="Width" Value="16" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+  </Window.Styles>
+
+  <Grid>
+    <!-- The native Windows backdrop is attached independently from Avalonia's visual tree.
+         This opaque layer sits behind the ready UI so startup never exposes a clear/empty
+         backdrop frame. It is removed before atomic reveal, or faded as a safe fallback
+         when a driver cannot report native-material readiness. -->
+    <Border Name="StartupBackdropCover"
+            IsVisible="False"
+            IsHitTestVisible="False"
+            Opacity="0"
+            Background="{DynamicResource StartupBackdropCoverBrush}" />
+
+    <DockPanel LastChildFill="True">
+      <views:TopMenuBarView DockPanel.Dock="Top"
+                          Name="TopMenuBar"
+                          OpenFolderRequested="OnOpenFolder"
+                          OpenNewWindowRequested="OnOpenNewWindow"
+                          RefreshRequested="OnRefresh"
+                          ExportTreeToFileRequested="OnExportTreeToFile"
+                          ExportContentToFileRequested="OnExportContentToFile"
+                          ExportTreeAndContentToFileRequested="OnExportTreeAndContentToFile"
+                          ExportProjectCopyToFolderRequested="OnExportProjectCopyToFolder"
+                          ExportProjectCopyToZipRequested="OnExportProjectCopyToZip"
+                          ExitRequested="OnExit"
+                          CopyTreeRequested="OnCopyTree"
+                          CopyContentRequested="OnCopyContent"
+                          CopyTreeAndContentRequested="OnCopyTreeAndContent"
+                          ExpandAllRequested="OnExpandAll"
+                          CollapseAllRequested="OnCollapseAll"
+                          ZoomInRequested="OnZoomIn"
+                          ZoomOutRequested="OnZoomOut"
+                          ZoomResetRequested="OnZoomReset"
+                          ToggleCompactModeRequested="OnToggleCompactMode"
+                          ToggleTreeExpansionAnimationRequested="OnToggleTreeExpansionAnimation"
+                          ToggleSearchRequested="OnToggleSearch"
+                          ToggleSettingsRequested="OnToggleSettings"
+                          TogglePreviewRequested="OnTogglePreview"
+                          ToggleFilterRequested="OnToggleFilter"
+                          ThemeMenuClickRequested="OnThemeMenuClick"
+                          HelpRequested="OnHelp"
+                          TerminalCommandSetupRequested="OnTerminalCommandSetup"
+                          HelpCloseRequested="OnHelpClose"
+                          LanguageRuRequested="OnLangRu"
+                          LanguageEnRequested="OnLangEn"
+                          LanguageUzRequested="OnLangUz"
+                          LanguageTgRequested="OnLangTg"
+                          LanguageKkRequested="OnLangKk"
+                          LanguageFrRequested="OnLangFr"
+                          LanguageDeRequested="OnLangDe"
+                          LanguageItRequested="OnLangIt"
+                          LanguageEsRequested="OnLangEs"
+                          LanguagePtRequested="OnLangPt"
+                          LanguagePtPtRequested="OnLangPtPt"
+                          AboutRequested="OnAbout"
+                          AboutCloseRequested="OnAboutClose"
+                          AboutOpenLinkRequested="OnAboutOpenLink"
+                          AboutCopyLinkRequested="OnAboutCopyLink"
+                          ResetSettingsRequested="OnResetSettings"
+                          ResetDataRequested="OnResetData"
+                          SetSystemThemeRequested="OnSetSystemThemeCheckbox"
+                          SetLightThemeRequested="OnSetLightThemeCheckbox"
+                          SetDarkThemeRequested="OnSetDarkThemeCheckbox"
+                          SetTransparentModeRequested="OnSetTransparentMode"
+                          SetMicaModeRequested="OnSetMicaMode"
+                          SetAcrylicModeRequested="OnSetAcrylicMode"
+                          GitCloneRequested="OnGitClone"
+                          GitGetUpdatesRequested="OnGitGetUpdates"
+                          GitBranchSwitchRequested="OnGitBranchSwitch" />
+
+    <Border DockPanel.Dock="Bottom" Classes="status-strip" IsVisible="{Binding IsProjectLoaded}">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <!-- Left: Tree metrics -->
+        <StackPanel Grid.Column="0"
+                    Orientation="Horizontal"
+                    VerticalAlignment="Center"
+                    IsVisible="{Binding StatusMetricsVisible}">
+          <TextBlock Text="{Binding StatusTreeLabel}"
+                     FontSize="12"
+                     FontWeight="SemiBold"
+                     Opacity="0.9"
+                     VerticalAlignment="Center" />
+          <TextBlock Text=" - "
+                     FontSize="12"
+                     Opacity="0.6"
+                     VerticalAlignment="Center" />
+          <TextBlock Text="{Binding StatusTreeStatsText}"
+                     FontSize="12"
+                     Foreground="{DynamicResource AppTextBrush}"
+                     Opacity="0.88"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Center: Progress bar with operation text -->
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="8"
+                    IsVisible="{Binding StatusOperationVisible}">
+          <TextBlock Text="{Binding StatusOperationText}"
+                     FontSize="12"
+                     Opacity="0.8"
+                     VerticalAlignment="Center" />
+          <ProgressBar Classes="status-progress"
+                       IsVisible="{Binding StatusProgressVisible}"
+                       IsIndeterminate="{Binding StatusProgressIsIndeterminate}"
+                       Value="{Binding StatusProgressValue}"
+                       Minimum="0"
+                       Maximum="100"
+                       VerticalAlignment="Center" />
+          <TextBlock Text="{Binding StatusProgressPercentText}"
+                     IsVisible="{Binding StatusProgressPercentVisible}"
+                     FontSize="11"
+                     Opacity="0.75"
+                     VerticalAlignment="Center" />
+          <Button Classes="status-cancel"
+                  Click="OnStatusOperationCancelRequested"
+                  VerticalAlignment="Center">
+            <Grid Width="16" Height="16">
+              <Ellipse Fill="{DynamicResource AppPanelBrush}"
+                       Stroke="{DynamicResource AppBorderBrush}"
+                       StrokeThickness="1" />
+              <TextBlock Text="X"
+                         FontSize="9"
+                         FontWeight="SemiBold"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         Opacity="0.85" />
+            </Grid>
+          </Button>
+        </StackPanel>
+
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    IsVisible="{Binding CenteredPreviewSelectionMetricsVisible}">
+          <TextBlock Text="{Binding StatusPreviewSelectionStatsText}"
+                     FontSize="12"
+                     Foreground="{DynamicResource AppTextBrush}"
+                     Opacity="0.88"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Right: Content metrics -->
+        <StackPanel Grid.Column="2"
+                    Orientation="Horizontal"
+                    VerticalAlignment="Center"
+                    IsVisible="{Binding StatusMetricsVisible}">
+          <TextBlock Text="{Binding StatusContentLabel}"
+                     FontSize="12"
+                     FontWeight="SemiBold"
+                     Opacity="0.9"
+                     VerticalAlignment="Center" />
+          <TextBlock Text=" - "
+                     FontSize="12"
+                     Opacity="0.6"
+                     VerticalAlignment="Center" />
+          <TextBlock Text="{Binding StatusContentStatsText}"
+                     FontSize="12"
+                     Foreground="{DynamicResource AppTextBrush}"
+                     Opacity="0.88"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid>
+      <!-- Drop zone shown when no project is loaded -->
+      <!--
+        Do not add drop-zone-animating to this static class list. MainWindow adds it
+        only while this surface is active and removes it before the workspace takes over.
+      -->
+      <Border Name="DropZoneContainer"
+              Classes="drop-zone-outer"
+              IsVisible="{Binding !IsProjectLoaded}"
+              Background="Transparent"
+              Margin="60"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Stretch"
+              Cursor="Hand"
+              PointerPressed="OnDropZoneClick"
+              DragDrop.AllowDrop="True">
+
+        <Grid ClipToBounds="False">
+          <!-- Dashed frame rendered via Rectangle -->
+          <Rectangle Classes="drop-zone-border"
+                     RadiusX="21.25" RadiusY="21.25"
+                     StrokeThickness="2.5"
+                     Stroke="{DynamicResource DropZoneBorderBrush}"
+                     StrokeDashArray="8,6"
+                     Margin="-1.25"
+                     Fill="Transparent" />
+
+          <!-- Soft semi-transparent background -->
+          <Rectangle RadiusX="20" RadiusY="20"
+                     Fill="{DynamicResource DropZoneInnerBrush}"
+                     Margin="1" />
+
+          <Rectangle RadiusX="20" RadiusY="20"
+                     Fill="#000000"
+                     Opacity="{Binding DropZoneShadeOpacity}"
+                     Margin="1" />
+
+          <!-- Content -->
+          <Grid RowDefinitions="*,Auto,Auto,Auto,Auto,1.7*"
+                Margin="40">
+
+            <!-- Fixed-height icon container -->
+            <Border Grid.Row="1"
+                    Height="115"
+                    Margin="0,0,0,20"
+                    Background="Transparent"
+                    ClipToBounds="False">
+              <!-- Folder icon with floating animation -->
+              <Viewbox Name="DropZoneIcon"
+                       Classes="drop-zone-icon"
+                       Width="128"
+                       Height="128"
+                       VerticalAlignment="Bottom">
+                <Canvas Width="100" Height="90">
+                  <!-- Folder back shape -->
+                  <Path Canvas.Left="10" Canvas.Top="15"
+                        Fill="{DynamicResource DropZoneFolderBackBrush}"
+                        Data="M 0,12 L 0,60 Q 0,65 5,65 L 75,65 Q 80,65 80,60 L 80,12 Q 80,7 75,7 L 32,7 L 27,0 L 5,0 Q 0,0 0,5 Z" />
+
+                  <!-- Folder front shape -->
+                  <Path Canvas.Left="10" Canvas.Top="15"
+                        Fill="{DynamicResource DropZoneFolderFrontBrush}"
+                        Data="M 0,22 L 0,60 Q 0,65 5,65 L 75,65 Q 80,65 80,60 L 80,22 Q 80,17 75,17 L 5,17 Q 0,17 0,22 Z" />
+
+                  <!-- Down arrow -->
+                  <Path Canvas.Left="40" Canvas.Top="28"
+                        Fill="{DynamicResource DropZoneArrowBrush}"
+                        Data="M 10,0 L 10,14 L 4,14 L 10,24 L 16,14 L 10,14 L 10,0 Z" />
+                </Canvas>
+              </Viewbox>
+            </Border>
+
+            <!-- Primary text -->
+            <TextBlock Grid.Row="2"
+                       Text="{Binding DropZoneTitle}"
+                       FontSize="24"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource AppTextBrush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,6" />
+
+            <!-- Secondary text with hotkey hint -->
+            <StackPanel Grid.Row="3"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        Margin="0,0,0,12"
+                        Spacing="8"
+                        Opacity="0.7">
+              <TextBlock Text="{Binding DropZoneHotkeyHint}"
+                         FontSize="14"
+                         Foreground="{DynamicResource AppMutedTextBrush}"
+                         VerticalAlignment="Center" />
+              <Border Background="{DynamicResource DropZoneKbdBrush}"
+                      CornerRadius="4"
+                      Height="20"
+                      Padding="6,0"
+                      VerticalAlignment="Center"
+                      BorderBrush="{DynamicResource AppBorderBrush}"
+                      BorderThickness="1">
+                <TextBlock Text="Ctrl+O"
+                           FontSize="11"
+                           FontFamily="Consolas, monospace"
+                           VerticalAlignment="Center"
+                           Margin="0,5,0,0"
+                           TextAlignment="Center"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+              </Border>
+            </StackPanel>
+
+            <StackPanel Grid.Row="4"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        Spacing="10"
+                        Margin="0,16,0,0">
+              <!-- Folder selection button -->
+              <Button Classes="drop-zone-button primary-action"
+                      Padding="24,12"
+                      CornerRadius="10"
+                      BorderThickness="0"
+                      Cursor="Hand"
+                      Click="OnOpenFolder">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <!-- Folder icon -->
+                  <Path Fill="{DynamicResource PrimaryActionForegroundBrush}"
+                        Width="18" Height="18"
+                        Stretch="Uniform"
+                        Data="M 1,3 L 1,15 L 17,15 L 17,5 L 9,5 L 7,3 Z M 2,6 L 16,6 L 16,14 L 2,14 Z" />
+                  <TextBlock Text="{Binding DropZoneButtonText}"
+                             FontSize="14"
+                             FontWeight="SemiBold"
+                             Foreground="{DynamicResource PrimaryActionForegroundBrush}"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+
+              <Button Classes="drop-zone-button primary-action"
+                      Padding="20,12"
+                      CornerRadius="10"
+                      BorderThickness="0"
+                      Cursor="Hand"
+                      Click="OnGitClone">
+                <TextBlock Text="{Binding DropZoneCloneButtonText}"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryActionForegroundBrush}"
+                           VerticalAlignment="Center" />
+              </Button>
+            </StackPanel>
+
+          </Grid>
+        </Grid>
+      </Border>
+
+      <!-- Project workspace shown when a project is loaded -->
+      <Grid Name="WorkspaceGrid"
+            ColumnDefinitions="*,0,Auto"
+            IsVisible="{Binding IsProjectLoaded}"
+            Margin="4,3,4,3">
+        <Border Grid.Column="0"
+                Name="TreePaneContainer"
+                ClipToBounds="True">
+          <Grid>
+            <Grid Name="TreePaneRoot"
+                  RowDefinitions="Auto,*">
+              <StackPanel Grid.Row="0"
+                          Name="TreeToolsHost"
+                          IsVisible="{Binding IsTreePaneVisible}">
+              <!-- Animated search bar container - only pushes the tree column down -->
+              <Border
+                      Name="SearchBarContainer"
+                      UseLayoutRounding="True"
+                      ClipToBounds="True"
+                      Height="0">
+                <views:SearchBarView Name="SearchBar"
+                                     IsEnabled="{Binding IsSearchAvailable}"
+                                     RenderTransformOrigin="50%,0%"
+                                     SearchKeyDown="OnSearchKeyDown"
+                                     SearchPrevRequested="OnSearchPrev"
+                                     SearchNextRequested="OnSearchNext"
+                                     SearchCloseRequested="OnSearchClose">
+                  <views:SearchBarView.RenderTransform>
+                    <TranslateTransform Y="0" />
+                  </views:SearchBarView.RenderTransform>
+                </views:SearchBarView>
+              </Border>
+
+              <!-- Animated filter bar container - only pushes the tree column down -->
+              <Border
+                      Name="FilterBarContainer"
+                      UseLayoutRounding="True"
+                      ClipToBounds="True"
+                      Height="0">
+                <views:FilterBarView Name="FilterBar"
+                                     IsEnabled="{Binding IsSearchFilterAvailable}"
+                                     RenderTransformOrigin="50%,0%"
+                                     FilterKeyDown="OnFilterKeyDown"
+                                     FilterCloseRequested="OnFilterClose">
+                  <views:FilterBarView.RenderTransform>
+                    <TranslateTransform Y="0" />
+                  </views:FilterBarView.RenderTransform>
+                </views:FilterBarView>
+              </Border>
+              </StackPanel>
+
+            <!-- Tree content island -->
+              <Border Grid.Row="1"
+                      Name="TreeIsland"
+                      Classes="island-panel content-island"
+                      IsVisible="{Binding IsTreePaneVisible}">
+                <Grid>
+                  <controls:ProjectTreeView Name="ProjectTree"
+                                            ItemsSource="{Binding TreeNodes}"
+                                            ItemContainerTheme="{StaticResource DevProjexAnimatedTreeViewItemTheme}"
+                                            IsExpansionAnimationEnabled="{Binding IsTreeExpansionAnimationEnabled}"
+                                            IsEnabled="{Binding CanUseProjectWorkspaceActions}"
+                                            Padding="0,0,0,4"
+                                            FontFamily="{Binding SelectedFontFamily}"
+                                            FontSize="{Binding TreeFontSize}">
+                    <controls:ProjectTreeView.Styles>
+                      <!-- Fluent reserves a corner row where both scrollbars meet. The vertical
+                           rail spans that row so it reaches the bottom edge, just like preview. -->
+                      <Style Selector="ScrollViewer /template/ ScrollBar#PART_VerticalScrollBar">
+                        <Setter Property="Grid.RowSpan" Value="2" />
+                      </Style>
+                      <Style Selector="ScrollViewer /template/ Panel#PART_ScrollBarsSeparator">
+                        <Setter Property="IsVisible" Value="False" />
+                      </Style>
+                    </controls:ProjectTreeView.Styles>
+                    <controls:ProjectTreeView.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <VirtualizingStackPanel CacheLength="2" />
+                      </ItemsPanelTemplate>
+                    </controls:ProjectTreeView.ItemsPanel>
+                    <controls:ProjectTreeView.ItemTemplate>
+                      <TreeDataTemplate x:DataType="vm:TreeNodeViewModel"
+                                        ItemsSource="{CompiledBinding ChildItemsSource}">
+                        <Grid ColumnDefinitions="Auto,*" Background="Transparent">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="{CompiledBinding IndentWidth}" />
+                            <ColumnDefinition Width="*" />
+                          </Grid.ColumnDefinitions>
+                          <StackPanel Grid.Column="1"
+                                      Name="TreeItemContent"
+                                      Orientation="Horizontal"
+                                      Background="Transparent"
+                                      Spacing="{DynamicResource TreeItemSpacingResource}">
+                            <CheckBox IsThreeState="True"
+                                      IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
+                                      VerticalAlignment="Center" />
+                            <Image Source="{CompiledBinding Icon}"
+                                   Width="{DynamicResource TreeIconSizeResource}"
+                                   Height="{DynamicResource TreeIconSizeResource}"
+                                   Stretch="Uniform"
+                                   VerticalAlignment="Center" />
+                            <TextBlock Text="{CompiledBinding DisplayName}"
+                                       IsVisible="{Binding !HasHighlightedDisplay}"
+                                       VerticalAlignment="Center"
+                                       Margin="{DynamicResource TreeTextMarginResource}"
+                                       Foreground="{DynamicResource AppTextBrush}" />
+                            <TextBlock Inlines="{CompiledBinding DisplayInlines}"
+                                       IsVisible="{Binding HasHighlightedDisplay}"
+                                       VerticalAlignment="Center"
+                                       Margin="{DynamicResource TreeTextMarginResource}"
+                                       Foreground="{DynamicResource AppTextBrush}" />
+                          </StackPanel>
+                        </Grid>
+                      </TreeDataTemplate>
+                    </controls:ProjectTreeView.ItemTemplate>
+                  </controls:ProjectTreeView>
+
+                  <Button Name="PreviewTreeHideButton"
+                          Classes="menu-icon-button tree-island-close-button"
+                          IsVisible="{Binding IsPreviewMode}"
+                          IsEnabled="{Binding IsProjectLoaded}"
+                          HorizontalAlignment="Right"
+                          VerticalAlignment="Top"
+                          Margin="0,8,13,0"
+                          Width="28"
+                          Height="28"
+                          Click="OnPreviewTreeHide">
+                    <Grid>
+                      <ExperimentalAcrylicBorder CornerRadius="6"
+                                                ClipToBounds="True"
+                                                IsHitTestVisible="False">
+                        <ExperimentalAcrylicBorder.Material>
+                          <ExperimentalAcrylicMaterial BackgroundSource="Digger"
+                                                        TintColor="{DynamicResource TreeIslandCloseBlurTintColor}"
+                                                        TintOpacity="{DynamicResource TreeIslandCloseBlurTintOpacity}"
+                                                        MaterialOpacity="{DynamicResource TreeIslandCloseBlurMaterialOpacity}"
+                                                        PlatformTransparencyCompensationLevel="{DynamicResource TreeIslandCloseBlurCompensationLevel}"
+                                                        FallbackColor="{DynamicResource TreeIslandCloseBlurFallbackColor}" />
+                        </ExperimentalAcrylicBorder.Material>
+                      </ExperimentalAcrylicBorder>
+                      <Border Classes="tree-island-close-surface"
+                              IsHitTestVisible="False" />
+                      <TextBlock Text="✕"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 FontSize="12"
+                                 FontWeight="SemiBold"
+                                 Foreground="{DynamicResource AppTextBrush}" />
+                    </Grid>
+                  </Button>
+                </Grid>
+              </Border>
+            </Grid>
+
+            <Border Name="TreePaneAnimationSnapshotHost"
+                    ClipToBounds="True"
+                    IsVisible="False"
+                    IsHitTestVisible="False"
+                    UseLayoutRounding="True"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    ZIndex="1000">
+              <Image Name="TreePaneAnimationSnapshotImage"
+                     IsVisible="False"
+                     Stretch="None"
+                     UseLayoutRounding="True"
+                     HorizontalAlignment="Left"
+                     VerticalAlignment="Top"
+                     Opacity="0">
+                <Image.RenderTransform>
+                  <TranslateTransform X="0" />
+                </Image.RenderTransform>
+              </Image>
+            </Border>
+          </Grid>
+        </Border>
+
+        <!-- Preview owns its divider so both widths can transition in one layout pass. -->
+        <Border Grid.Column="1"
+                Name="PreviewPaneContainer"
+                ClipToBounds="True"
+                UseLayoutRounding="True">
+          <Grid Name="PreviewPaneSurface"
+                ColumnDefinitions="Auto,*">
+            <Border Grid.Column="0"
+                    Name="TreePreviewSplitter"
+                    Classes="island-splitter"
+                    Width="0"
+                    MinWidth="0"
+                    IsVisible="False"
+                    PointerPressed="OnTreePreviewSplitterPointerPressed"
+                    PointerMoved="OnWorkspaceSplitterPointerMoved"
+                    PointerReleased="OnWorkspaceSplitterPointerReleased"
+                    PointerCaptureLost="OnWorkspaceSplitterPointerCaptureLost"
+                    PointerExited="OnWorkspaceSplitterPointerExited" />
+
+            <Grid Grid.Column="1"
+                  Name="PreviewPaneRoot"
+                  RowDefinitions="Auto,*">
+            <!-- Animated preview bar container -->
+            <Border Grid.Row="0"
+                    Name="PreviewBarContainer"
+                    ClipToBounds="True"
+                    Margin="0,0,0,4">
+              <Border Name="PreviewBar"
+                      Classes="preview-panel"
+                      IsEnabled="{Binding IsProjectLoaded}">
+              <Grid Name="PreviewBarLayoutGrid"
+                    ColumnDefinitions="Auto,*,Auto"
+                    Margin="12,5"
+                    VerticalAlignment="Center">
+                <Button Grid.Column="0"
+                        Name="PreviewCopyButton"
+                        Classes="menu-icon-button preview-copy-button"
+                        ToolTip.ShowDelay="700"
+                        Width="32"
+                        Height="32"
+                        Margin="0,0,8,0"
+                        Click="OnPreviewCopyCurrentMode">
+                  <ToolTip.Tip>
+                    <ToolTip Classes="preview-blurred-tooltip"
+                             Loaded="OnPreviewToolTipLoaded">
+                      <TextBlock Text="{Binding PreviewCopyCurrentModeTooltip}" />
+                    </ToolTip>
+                  </ToolTip.Tip>
+                  <Viewbox Width="15"
+                           Height="15"
+                           Margin="-1,0,0,0"
+                           Stretch="Uniform">
+                    <Path Classes="preview-icon"
+                          Data="{StaticResource PreviewCopyIconGeometry}"
+                          Fill="{DynamicResource AppTextBrush}" />
+                  </Viewbox>
+                </Button>
+                <Border Grid.Column="1"
+                        Name="PreviewSegmentedControl"
+                        Margin="0,0,8,0"
+                        Classes="segmented-control preview-segmented-control">
+                  <Grid Name="PreviewSegmentGrid"
+                        ColumnDefinitions="1.15*,1.15*,1.6*">
+                    <Grid Grid.ColumnSpan="3"
+                          Classes="preview-segment-divider-layer"
+                          ColumnDefinitions="1.15*,1.15*,1.6*"
+                          IsHitTestVisible="False">
+                      <Border Grid.Column="0"
+                              Classes="preview-segment-divider" />
+                      <Border Grid.Column="1"
+                              Classes="preview-segment-divider" />
+                    </Grid>
+
+                    <Border Name="PreviewSegmentThumb"
+                            Grid.Column="0"
+                            Classes="segment-thumb preview-segment-thumb"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Stretch" />
+
+                    <Button Grid.Column="0"
+                            Name="PreviewTreeModeButton"
+                            Classes="segment-text-button preview-segment-button"
+                            Classes.segment-selected="{Binding IsPreviewTreeSelected}"
+                            Click="OnPreviewTreeModeClick" />
+                    <Button Grid.Column="1"
+                            Name="PreviewContentModeButton"
+                            Classes="segment-text-button preview-segment-button"
+                            Classes.segment-selected="{Binding IsPreviewContentSelected}"
+                            Click="OnPreviewContentModeClick" />
+                    <Button Grid.Column="2"
+                            Name="PreviewTreeAndContentModeButton"
+                            Classes="segment-text-button preview-segment-button"
+                            Classes.segment-selected="{Binding IsPreviewTreeAndContentSelected}"
+                            Click="OnPreviewTreeAndContentModeClick" />
+                  </Grid>
+                </Border>
+                <Button Grid.Column="2"
+                        Name="PreviewCloseButton"
+                        Classes="menu-icon-button preview-close-button"
+                        Width="32"
+                        Height="32"
+                        Margin="5,0,0,0"
+                        Content="✕"
+                        Click="OnPreviewClose" />
+              </Grid>
+              </Border>
+            </Border>
+
+            <!-- Preview content island -->
+            <Border Grid.Row="1"
+                    Name="PreviewIsland"
+                    Classes="island-panel content-island"
+                    IsVisible="{Binding IsPreviewPaneVisible}">
+            <Grid>
+              <Grid ColumnDefinitions="Auto,*">
+                <!-- Persistent line-number background that spans the full preview height -->
+                <Grid Grid.Column="0"
+                      ClipToBounds="True">
+                  <Border Name="PreviewLineNumbersBackground"
+                          Classes="preview-line-numbers" />
+                  <controls:VirtualizedLineNumbersControl Name="PreviewLineNumbersControl"
+                                                          IsHitTestVisible="False"
+                                                          VerticalAlignment="Stretch"
+                                                          LineCount="{Binding PreviewLineCount}"
+                                                          NumberFontFamily="{Binding SelectedFontFamily}"
+                                                          NumberFontSize="{Binding PreviewFontSize}"
+                                                          NumberBrush="{DynamicResource AppTextBrush}"
+                                                          Opacity="0.72"
+                                                          TopPadding="10"
+                                                          BottomPadding="10"
+                                                          LeftPadding="10"
+                                                          RightPadding="8" />
+                </Grid>
+
+                <Grid Grid.Column="1"
+                      ClipToBounds="True">
+                  <ScrollViewer Name="PreviewTextScrollViewer"
+                                Classes="preview-scroll"
+                                IsScrollInertiaEnabled="True"
+                                HorizontalScrollBarVisibility="Auto"
+                                VerticalScrollBarVisibility="Auto"
+                                PointerPressed="OnPreviewScrollViewerPointerPressed"
+                                ScrollChanged="OnPreviewTextScrollChanged">
+                    <controls:VirtualizedPreviewTextControl Name="PreviewTextControl"
+                                                            Document="{Binding PreviewDocument}"
+                                                            CopyMenuHeader="{Binding PreviewSelectionCopy}"
+                                                            SelectAllMenuHeader="{Binding PreviewSelectionSelectAll}"
+                                                            ClearSelectionMenuHeader="{Binding PreviewSelectionClear}"
+                                                            TextFontFamily="{Binding SelectedFontFamily}"
+                                                            TextFontSize="{Binding PreviewFontSize}"
+                                                            TextBrush="{DynamicResource AppTextBrush}"
+                                                            SectionDividerBrush="{DynamicResource PreviewSectionDividerBrush}"
+                                                            TopPadding="10"
+                                                            BottomPadding="10"
+                                                            LeftPadding="10"
+                                                            RightPadding="16"
+                                                            HorizontalAlignment="Left"
+                                                            VerticalAlignment="Top" />
+                  </ScrollViewer>
+                </Grid>
+
+                <Grid Grid.ColumnSpan="2"
+                      ColumnDefinitions="Auto,*"
+                      VerticalAlignment="Top"
+                      ZIndex="10">
+                  <Border Grid.Column="0"
+                          Name="PreviewStickyHeaderCap"
+                          Classes="preview-sticky-header-cap"
+                          Width="{Binding #PreviewLineNumbersBackground.Bounds.Width}"
+                          IsVisible="False">
+                    <Border Classes="preview-sticky-copy-host">
+                      <Button Name="PreviewStickyHeaderCopyButton"
+                              Classes="menu-icon-button preview-sticky-copy-button"
+                              ToolTip.Placement="Right"
+                              ToolTip.ShowDelay="700"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Click="OnPreviewCopyVisibleFilePath">
+                        <ToolTip.Tip>
+                          <ToolTip Classes="preview-blurred-tooltip"
+                                   Loaded="OnPreviewToolTipLoaded">
+                            <TextBlock Text="{Binding PreviewCopyFilePathTooltip}" />
+                          </ToolTip>
+                        </ToolTip.Tip>
+                        <Viewbox Width="12"
+                                 Height="12"
+                                 Margin="-1,0,0,0"
+                                 Stretch="Uniform">
+                          <Path Classes="preview-icon"
+                                Data="{StaticResource PreviewCopyIconGeometry}"
+                                Fill="{DynamicResource AppTextBrush}" />
+                        </Viewbox>
+                      </Button>
+                    </Border>
+                  </Border>
+
+                  <Border Grid.Column="1"
+                          Name="PreviewStickyHeaderContainer"
+                          Classes="preview-sticky-header"
+                          IsVisible="False">
+                    <TextBlock Name="PreviewStickyHeaderText"
+                               Classes="preview-sticky-header-text"
+                               FontFamily="{Binding SelectedFontFamily}"
+                               FontSize="{Binding PreviewFontSize}"
+                               Margin="10,4,10,4"
+                               MinWidth="0"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                  </Border>
+                </Grid>
+              </Grid>
+            </Grid>
+            </Border>
+              </Grid>
+          </Grid>
+        </Border>
+
+        <!-- The resize splitter belongs to the animated carrier. Keeping it in a
+             separate workspace column would add or remove four DIPs in one layout
+             pass while the settings island itself is still animating. -->
+        <Border Grid.Column="2"
+                Name="SettingsContainer"
+                ClipToBounds="True"
+                UseLayoutRounding="True"
+                IsVisible="{Binding IsProjectLoaded}">
+          <Grid ColumnDefinitions="4,*">
+            <Border Grid.Column="0"
+                    Name="PreviewSettingsSplitter"
+                    Classes="island-splitter"
+                    IsVisible="False"
+                    PointerPressed="OnPreviewSettingsSplitterPointerPressed"
+                    PointerMoved="OnWorkspaceSplitterPointerMoved"
+                    PointerReleased="OnWorkspaceSplitterPointerReleased"
+                    PointerCaptureLost="OnWorkspaceSplitterPointerCaptureLost"
+                    PointerExited="OnWorkspaceSplitterPointerExited" />
+
+            <Border Grid.Column="1"
+                    Classes="island-panel settings-island"
+                    Name="SettingsIsland"
+                    HorizontalAlignment="Left">
+              <!-- Settings panel -->
+              <views:SettingsPanelView Name="SettingsPanel"
+                                       ApplySettingsRequested="OnApplySettings"
+                                       IgnoreAllChanged="OnIgnoreAllChanged"
+                                       ExtensionsAllChanged="OnExtensionsAllChanged"
+                                       RootAllChanged="OnRootAllChanged" />
+            </Border>
+          </Grid>
+        </Border>
+
+      </Grid>
+
+      <ItemsControl Name="ToastHost"
+                    ItemsSource="{Binding ToastItems}"
+                    IsVisible="{Binding HasToastItems}"
+                    IsHitTestVisible="False"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,38">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="8" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ToastMessageViewModel">
+            <Border Background="{DynamicResource ToastSurfaceBrush}"
+                    CornerRadius="8"
+                    Padding="14,10"
+                    Opacity="{Binding Opacity}"
+                    MaxWidth="560"
+                    HorizontalAlignment="Center"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1">
+              <Border.Transitions>
+                <Transitions>
+                  <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
+                </Transitions>
+              </Border.Transitions>
+              <Border.RenderTransform>
+                <TranslateTransform Y="{Binding OffsetY}">
+                  <TranslateTransform.Transitions>
+                    <Transitions>
+                      <DoubleTransition Property="Y" Duration="0:0:0.2" />
+                    </Transitions>
+                  </TranslateTransform.Transitions>
+                </TranslateTransform>
+              </Border.RenderTransform>
+              <TextBlock Text="{Binding Message}"
+                         TextWrapping="Wrap"
+                         TextAlignment="Center"
+                         HorizontalAlignment="Center"
+                         FontSize="14"
+                         Foreground="{DynamicResource AppTextBrush}" />
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Grid>
+    </DockPanel>
+  </Grid>
+</Window>

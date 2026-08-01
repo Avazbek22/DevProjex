@@ -19,11 +19,18 @@ internal static partial class TerminalPtyStateAssertions
 			AssertUnixTerminalStateRestored(output, markerIndex);
 
 		var allTransitions = ParseTransitions(output);
+		// Windows ConHost may settle the cursor immediately before or after the
+		// shell marker. The harness waits for the final visible state, so the
+		// complete captured stream is the authoritative presentation boundary.
+		var presentationBoundary = OperatingSystem.IsWindows()
+			? output.Length
+			: markerIndex;
 		var transitions = allTransitions
-			.Where(transition => transition.Index < markerIndex)
+			.Where(transition => transition.Index < presentationBoundary)
 			.ToArray();
 		var diagnosticContext =
-			$"Marker={markerIndex}; complete trace: {DescribeTransitions(allTransitions)}";
+			$"Marker={markerIndex}; boundary={presentationBoundary}; " +
+			$"complete trace: {DescribeTransitions(allTransitions)}";
 
 		AssertFinalState(
 			transitions,
@@ -42,7 +49,7 @@ internal static partial class TerminalPtyStateAssertions
 
 		AssertAlternateScreenState(transitions, screenMode, diagnosticContext);
 		AssertMouseState(transitions, diagnosticContext);
-		AssertSgrStateRestored(output, markerIndex, diagnosticContext);
+		AssertSgrStateRestored(output, presentationBoundary, diagnosticContext);
 	}
 
 	internal static string? FindUnixTerminalStateMismatch(

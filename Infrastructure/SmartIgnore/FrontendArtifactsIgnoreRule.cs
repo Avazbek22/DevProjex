@@ -32,12 +32,21 @@ public sealed class FrontendArtifactsIgnoreRule :
 		".astro",
 		"storybook-static",
 		"out");
+	private static readonly IReadOnlySet<string> EvidenceRequiredFolderNames = SmartIgnoreRuleSet.Create(
+		"dist",
+		"build",
+		"coverage",
+		".cache",
+		"out");
 
 	private static readonly SmartIgnoreResult MatchResult =
 		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
-		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
+		SmartIgnoreRuleSet.Descriptor(
+			markerFiles: MarkerFiles,
+			folderNames: FolderNames,
+			evidenceRequiredFolderNames: EvidenceRequiredFolderNames);
 
 	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
 		rootFacts.Exists && rootFacts.HasAnyMarkerFile(MarkerFiles)

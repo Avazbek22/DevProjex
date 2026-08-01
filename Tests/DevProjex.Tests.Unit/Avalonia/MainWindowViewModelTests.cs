@@ -1,6 +1,7 @@
 ﻿namespace DevProjex.Tests.Unit.Avalonia;
 
 using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
 public sealed class MainWindowViewModelTests
 {
@@ -630,6 +631,39 @@ public sealed class MainWindowViewModelTests
 
         Assert.False(viewModel.IsDarkTheme);
         Assert.True(viewModel.IsLightTheme);
+    }
+
+    [Theory]
+    [InlineData(ThemeSelectionMode.System, true, false, false)]
+    [InlineData(ThemeSelectionMode.Light, false, true, false)]
+    [InlineData(ThemeSelectionMode.Dark, false, false, true)]
+    public void SelectedThemeMode_ExposesExactlyOneSelectedMode(
+        ThemeSelectionMode mode,
+        bool systemSelected,
+        bool lightSelected,
+        bool darkSelected)
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.SelectedThemeMode = mode;
+
+        Assert.Equal(systemSelected, viewModel.IsSystemThemeSelected);
+        Assert.Equal(lightSelected, viewModel.IsLightThemeSelected);
+        Assert.Equal(darkSelected, viewModel.IsDarkThemeSelected);
+    }
+
+    [Fact]
+    public void SelectedThemeMode_ReassertsDerivedSelectionWhenCurrentModeIsChosenAgain()
+    {
+        var viewModel = CreateViewModel();
+        var notifications = new List<string?>();
+        viewModel.PropertyChanged += (_, args) => notifications.Add(args.PropertyName);
+
+        viewModel.SelectedThemeMode = ThemeSelectionMode.System;
+
+        Assert.Contains(nameof(MainWindowViewModel.IsSystemThemeSelected), notifications);
+        Assert.Contains(nameof(MainWindowViewModel.IsLightThemeSelected), notifications);
+        Assert.Contains(nameof(MainWindowViewModel.IsDarkThemeSelected), notifications);
     }
 
     [Fact]

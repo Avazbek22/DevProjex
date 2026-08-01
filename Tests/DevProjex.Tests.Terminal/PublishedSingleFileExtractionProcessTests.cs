@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -246,6 +247,114 @@ public sealed class PublishedSingleFileExtractionProcessTests
 			Directory.EnumerateFiles(project, "*", SearchOption.AllDirectories)
 				.Select(path => Path.GetRelativePath(project, path))
 				.ToArray());
+	}
+
+	[Fact]
+	public async Task TrackedModeFailsClosedWhenGitIsUnavailableInPublishedProcess()
+	{
+		var application = GetPublishedSingleFileOrSkip();
+		using var workspace = new TemporaryDirectory();
+		var home = workspace.CreateDirectory("git-unavailable/home");
+		var temporary = workspace.CreateDirectory("git-unavailable/temp");
+		var dataRoot = workspace.CreateDirectory("git-unavailable/data");
+		var extractionRoot = workspace.CreateDirectory("git-unavailable/extraction");
+		var emptyPath = workspace.CreateDirectory("git-unavailable/empty-path");
+		var project = workspace.CreateDirectory("git-unavailable/source");
+		var sourcePath = workspace.WriteFile(
+			"git-unavailable/source/App.cs",
+			"class App {}\n");
+		var indexPath = workspace.WriteFile(
+			"git-unavailable/source/.git/index",
+			"unreadable index fixture\n");
+		var outputPath = Path.Combine(workspace.Path, "git-unavailable", "context.json");
+		var environment = CreateEnvironment(
+			home,
+			temporary,
+			dataRoot,
+			extractionRoot);
+		environment["PATH"] = emptyPath;
+		var sourceSnapshot = CaptureSourceTree(project);
+
+		var analysis = await RunAsync(
+			application,
+			[
+				"analyze", project,
+				"--format", "json",
+				"--git-mode", "tracked",
+				"--exclude", "none",
+				"--plain",
+				"--language", "en"
+			],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, analysis.ExitCode);
+		using (var document = JsonDocument.Parse(analysis.StandardOutput))
+		{
+			Assert.Equal(
+				0,
+				document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+			Assert.Contains(
+				document.RootElement.GetProperty("diagnostics").EnumerateArray(),
+				static diagnostic =>
+					diagnostic.GetProperty("code").GetString() ==
+					"DPX-GIT-TRACKED-INDEX-UNAVAILABLE");
+		}
+		Assert.Contains(
+			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
+			analysis.StandardError,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001b', analysis.StandardOutput);
+		Assert.DoesNotContain('\u001b', analysis.StandardError);
+		Assert.DoesNotContain("DPX-CLI-UNEXPECTED", analysis.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain(" at DevProjex.", analysis.StandardError, StringComparison.Ordinal);
+
+		var contextExport = await RunAsync(
+			application,
+			[
+				"export", "context", project,
+				"--format", "json",
+				"--git-mode", "tracked",
+				"--exclude", "none",
+				"--output", outputPath,
+				"--plain",
+				"--language", "en"
+			],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, contextExport.ExitCode);
+		Assert.Empty(contextExport.StandardOutput);
+		Assert.Contains(
+			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
+			contextExport.StandardError,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001b', contextExport.StandardError);
+		Assert.DoesNotContain("DPX-CLI-UNEXPECTED", contextExport.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain(" at DevProjex.", contextExport.StandardError, StringComparison.Ordinal);
+		Assert.False(File.Exists(outputPath));
+		Assert.Equal("class App {}\n", File.ReadAllText(sourcePath));
+		Assert.Equal("unreadable index fixture\n", File.ReadAllText(indexPath));
+		Assert.Equal(sourceSnapshot, CaptureSourceTree(project));
+	}
+
+	private static IReadOnlyList<string> CaptureSourceTree(string rootPath)
+	{
+		var entries = new List<string>();
+		foreach (var directory in Directory.EnumerateDirectories(rootPath, "*", SearchOption.AllDirectories))
+		{
+			entries.Add($"D:{Path.GetRelativePath(rootPath, directory).Replace('\\', '/')}");
+		}
+		foreach (var file in Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories))
+		{
+			var relativePath = Path.GetRelativePath(rootPath, file).Replace('\\', '/');
+			entries.Add($"F:{relativePath}:{Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file)))}");
+		}
+
+		entries.Sort(StringComparer.Ordinal);
+		return entries;
 	}
 
 	private static string GetPublishedSingleFileOrSkip()

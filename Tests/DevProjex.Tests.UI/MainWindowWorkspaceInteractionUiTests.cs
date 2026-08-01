@@ -3,6 +3,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using DevProjex.Avalonia.Controls;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Kernel.Abstractions;
 
@@ -185,6 +186,238 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                         .GetVisualAncestors()
                         .Select(visual =>
                             $"{visual.GetType().Name} '{(visual as Control)?.Name}': IsVisible={visual.IsVisible}")));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TreeChevron_RotatesSingleGeometryAndReturnsToCollapsedState()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var folderNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "src",
+                    StringComparison.Ordinal));
+            var chevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, folderNode));
+            var chevronPath = Assert.Single(
+                chevron.GetVisualDescendants().OfType<global::Avalonia.Controls.Shapes.Path>(),
+                path => path.Name == "ChevronPath");
+            var transition = Assert.IsType<global::Avalonia.Animation.TransformOperationsTransition>(
+                Assert.Single(chevronPath.Transitions!));
+            var collapsedGeometry = chevronPath.Data;
+            var collapsedTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
+
+            Assert.Equal(TimeSpan.FromMilliseconds(120), transition.Duration);
+            Assert.Equal(Visual.RenderTransformProperty, transition.Property);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => folderNode.IsExpanded,
+                "tree folder to expand from its animated chevron");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => IsQuarterTurn(
+                    chevronPath.RenderTransform?.Value ?? Matrix.Identity),
+                "tree chevron rotation to reach its expanded angle");
+
+            var expandedTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
+            Assert.NotEqual(collapsedTransform, expandedTransform);
+            Assert.Same(collapsedGeometry, chevronPath.Data);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !folderNode.IsExpanded,
+                "tree folder to collapse from its animated chevron");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => AreMatricesClose(
+                    collapsedTransform,
+                    chevronPath.RenderTransform?.Value ?? Matrix.Identity),
+                "tree chevron rotation to return to its collapsed angle");
+
+            var restoredTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
+            AssertMatricesClose(collapsedTransform, restoredTransform);
+            Assert.Same(collapsedGeometry, chevronPath.Data);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !folderNode.IsExpanded,
+                "rapidly toggled tree folder to keep the final collapsed state");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => AreMatricesClose(
+                    collapsedTransform,
+                    chevronPath.RenderTransform?.Value ?? Matrix.Identity),
+                "retargeted tree chevron rotation to return to its collapsed angle");
+
+            var retargetedTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
+            AssertMatricesClose(collapsedTransform, retargetedTransform);
+            Assert.Same(collapsedGeometry, chevronPath.Data);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TreeBranch_UserToggleAnimatesChildren_ProgrammaticToggleSnaps()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var folderNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "src",
+                    StringComparison.Ordinal));
+            var chevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, folderNode));
+            var childrenHost = Assert.Single(
+                window.GetVisualDescendants().OfType<AnimatedTreeChildrenHost>(),
+                control => ReferenceEquals(control.DataContext, folderNode));
+            var heightTransition = Assert.Single(
+                childrenHost.Transitions!
+                    .OfType<global::Avalonia.Animation.DoubleTransition>(),
+                transition =>
+                    transition.Property ==
+                    AnimatedTreeChildrenHost.ExpansionProgressProperty);
+
+            Assert.Equal(
+                AnimatedTreeChildrenHost.ExpansionDuration,
+                heightTransition.Duration);
+            Assert.False(childrenHost.IsVisible);
+            Assert.Equal(0d, childrenHost.ExpansionProgress);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => folderNode.IsExpanded &&
+                      childrenHost.IsVisible &&
+                      childrenHost.ExpansionProgress >= 0.999d,
+                "tree children expansion animation to finish");
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !folderNode.IsExpanded && !childrenHost.IsVisible,
+                "tree children collapse animation to finish");
+
+            // Search, restore and bulk tree operations update IsExpanded directly. Those
+            // paths must not fan out into many simultaneous layout animations.
+            folderNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+            Assert.True(childrenHost.IsVisible);
+            Assert.Equal(1d, childrenHost.ExpansionProgress);
+
+            folderNode.IsExpanded = false;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+            Assert.False(childrenHost.IsVisible);
+            Assert.Equal(0d, childrenHost.ExpansionProgress);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TreeExpansionAnimationSetting_ControlsChevronAndBranchMotionTogether()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var tree = UiTestDriver.GetRequiredControl<ProjectTreeView>(window, "ProjectTree");
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var folderNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "src",
+                    StringComparison.Ordinal));
+            var chevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, folderNode));
+            var chevronPath = Assert.Single(
+                chevron.GetVisualDescendants()
+                    .OfType<global::Avalonia.Controls.Shapes.Path>(),
+                path => path.Name == "ChevronPath");
+            var childrenHost = Assert.Single(
+                window.GetVisualDescendants().OfType<AnimatedTreeChildrenHost>(),
+                control => ReferenceEquals(control.DataContext, folderNode));
+            var menuItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+                window,
+                "TreeExpansionAnimationMenuItem");
+            var menuCheckBox = Assert.IsType<CheckBox>(menuItem.Header);
+
+            Assert.True(viewModel.IsTreeExpansionAnimationEnabled);
+            Assert.True(tree.IsExpansionAnimationEnabled);
+            Assert.True(menuCheckBox.IsChecked);
+            Assert.Equal("Tree expansion animation", menuCheckBox.Content);
+            Assert.Single(chevronPath.Transitions!);
+
+            await UiTestDriver.RaiseMenuItemClickAsync(menuItem);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+            Assert.False(viewModel.IsTreeExpansionAnimationEnabled);
+            Assert.False(tree.IsExpansionAnimationEnabled);
+            Assert.False(menuCheckBox.IsChecked);
+            Assert.True(chevronPath.Transitions is null or { Count: 0 });
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+            Assert.True(folderNode.IsExpanded);
+            Assert.True(childrenHost.IsVisible);
+            Assert.Equal(1d, childrenHost.ExpansionProgress);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+            Assert.False(folderNode.IsExpanded);
+            Assert.False(childrenHost.IsVisible);
+            Assert.Equal(0d, childrenHost.ExpansionProgress);
+
+            await UiTestDriver.RaiseMenuItemClickAsync(menuItem);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+            Assert.True(viewModel.IsTreeExpansionAnimationEnabled);
+            Assert.True(tree.IsExpansionAnimationEnabled);
+            Assert.True(menuCheckBox.IsChecked);
+            Assert.Single(chevronPath.Transitions!);
         }
         finally
         {
@@ -573,16 +806,16 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             await UiTestDriver.OpenPreviewAsync(window);
 
             var splitter = UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
-            var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var settingsIsland = UiTestDriver.GetRequiredControl<Border>(window, "SettingsIsland");
             var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
-            var widthBefore = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var widthBefore = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
             var requiredMinimum = settingsPanel.GetRequiredMinimumWidth();
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: -220);
-            var widthAfterExpansionDrag = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var widthAfterExpansionDrag = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: 220);
-            var widthAfterCollapseDrag = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var widthAfterCollapseDrag = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
 
             var diagnostic =
                 $"Before={widthBefore:F2}, Expanded={widthAfterExpansionDrag:F2}, Collapsed={widthAfterCollapseDrag:F2}, " +
@@ -885,15 +1118,15 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             await UiTestDriver.OpenPreviewAsync(window);
 
             var splitter = UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
-            var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var settingsIsland = UiTestDriver.GetRequiredControl<Border>(window, "SettingsIsland");
             var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
             var requiredMinimum = settingsPanel.GetRequiredMinimumWidth();
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: 2_000);
-            var collapsedWidth = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var collapsedWidth = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: -2_000);
-            var expandedWidth = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var expandedWidth = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
 
             Assert.True(
                 collapsedWidth >= requiredMinimum - 1,
@@ -916,5 +1149,32 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
         Assert.NotNull(method);
         method.Invoke(window, []);
+    }
+
+    private static void AssertMatricesClose(Matrix expected, Matrix actual)
+    {
+        Assert.True(
+            AreMatricesClose(expected, actual),
+            $"Expected transform {expected}, actual {actual}.");
+    }
+
+    private static bool AreMatricesClose(Matrix expected, Matrix actual)
+    {
+        const double tolerance = 0.001;
+        return Math.Abs(expected.M11 - actual.M11) <= tolerance &&
+               Math.Abs(expected.M12 - actual.M12) <= tolerance &&
+               Math.Abs(expected.M21 - actual.M21) <= tolerance &&
+               Math.Abs(expected.M22 - actual.M22) <= tolerance &&
+               Math.Abs(expected.M31 - actual.M31) <= tolerance &&
+               Math.Abs(expected.M32 - actual.M32) <= tolerance;
+    }
+
+    private static bool IsQuarterTurn(Matrix matrix)
+    {
+        const double tolerance = 0.001;
+        return Math.Abs(matrix.M11) <= tolerance &&
+               Math.Abs(matrix.M12 - 1.0) <= tolerance &&
+               Math.Abs(matrix.M21 + 1.0) <= tolerance &&
+               Math.Abs(matrix.M22) <= tolerance;
     }
 }
