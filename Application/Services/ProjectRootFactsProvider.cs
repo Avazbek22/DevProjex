@@ -87,22 +87,6 @@ public sealed class ProjectRootFactsProvider(
 		}
 	}
 
-	internal void RefreshCacheLifetime(IReadOnlyCollection<string> rootPaths)
-	{
-		if (rootPaths.Count == 0 || _cacheLimit == 0)
-			return;
-
-		var now = _utcNowProvider();
-		lock (_cacheSync)
-		{
-			foreach (var rootPath in rootPaths)
-			{
-				if (_cache.TryGetValue(rootPath, out var cached))
-					_cache[rootPath] = cached with { CachedAtUtc = now };
-			}
-		}
-	}
-
 	private static ProjectRootFacts Build(string rootPath)
 	{
 		if (!Directory.Exists(rootPath))

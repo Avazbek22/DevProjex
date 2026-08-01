@@ -81,6 +81,8 @@ public sealed class IgnoreSelectionState
 		IReadOnlySet<IgnoreOptionId>? preserveMissingFrom,
 		IEnumerable<IgnoreOptionId> visibleDescriptorIds)
 	{
+		// Visibility is evidence-driven, not ownership of state. A checkbox disappearing
+		// because another rule hid its evidence must not silently disable that rule.
 		if (preserveMissingFrom is not null && preserveMissingFrom.Count > 0)
 			PreserveMissingSelections(preserveMissingFrom, visibleDescriptorIds);
 

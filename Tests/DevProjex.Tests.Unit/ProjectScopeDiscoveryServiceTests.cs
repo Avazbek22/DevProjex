@@ -43,16 +43,37 @@ public sealed class ProjectScopeDiscoveryServiceTests
 		var initial = discovery.Discover(temp.Path, ["workspace"]);
 		Assert.DoesNotContain(initial.Scopes, scope => ScopeEndsWith(scope, "workspace/service"));
 
+		var originalWriteTime = Directory.GetLastWriteTimeUtc(workspacePath);
 		temp.CreateFile("workspace/service/package.json", "{}");
-		Directory.SetLastWriteTimeUtc(
-			workspacePath,
-			Directory.GetLastWriteTimeUtc(workspacePath).AddSeconds(2));
+		Directory.SetLastWriteTimeUtc(workspacePath, originalWriteTime);
 
 		var reused = discovery.Revalidate(temp.Path, TestContext.Current.CancellationToken);
 		var refreshed = discovery.Discover(temp.Path, ["workspace"]);
 
 		Assert.False(reused);
 		Assert.Contains(refreshed.Scopes, scope => ScopeEndsWith(scope, "workspace/service"));
+	}
+
+	[Fact]
+	public void Discover_PosixDelimiterNames_DoNotShareCachedScopeTopology()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("The pipe character is not a valid Windows directory name.");
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("a/source.txt", "a");
+		temp.CreateFile("b|c/.gitignore", "*.cache\n");
+		temp.CreateFile("a|b/package.json", "{}");
+		temp.CreateFile("c/source.txt", "c");
+		var discovery = CreateDiscovery();
+
+		var first = discovery.Discover(temp.Path, ["a", "b|c"]);
+		var second = discovery.Discover(temp.Path, ["a|b", "c"]);
+
+		Assert.Contains(first.Scopes, scope => ScopeEndsWith(scope, "b|c") && scope.HasGitIgnore);
+		Assert.DoesNotContain(first.Scopes, scope => ScopeEndsWith(scope, "a|b"));
+		Assert.Contains(second.Scopes, scope => ScopeEndsWith(scope, "a|b") && scope.HasProjectMarker);
+		Assert.DoesNotContain(second.Scopes, scope => ScopeEndsWith(scope, "b|c"));
 	}
 
 	[Fact]

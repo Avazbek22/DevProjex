@@ -73,7 +73,8 @@ public sealed class SelectionRefreshEngine(
             TreeInventory: dynamicSection.TreeInventory,
             VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
             GitEvidence: dynamicSection.SnapshotState.GitEvidence,
-            SelectedIgnoreOptions: dynamicSection.SelectedIgnoreOptions);
+            SelectedIgnoreOptions: dynamicSection.SelectedIgnoreOptions,
+            EffectiveRules: dynamicSection.EffectiveRules);
     }
 
     public SelectionRefreshSnapshot ComputeLiveRefreshSnapshot(
@@ -121,7 +122,8 @@ public sealed class SelectionRefreshEngine(
             TreeInventory: dynamicSection.TreeInventory,
             VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
             GitEvidence: dynamicSection.SnapshotState.GitEvidence,
-            SelectedIgnoreOptions: dynamicSection.SelectedIgnoreOptions);
+            SelectedIgnoreOptions: dynamicSection.SelectedIgnoreOptions,
+            EffectiveRules: dynamicSection.EffectiveRules);
     }
 
     private static bool SelectionOptionsMatch(
@@ -246,14 +248,17 @@ public sealed class SelectionRefreshEngine(
             ignoreRules,
             context.RootSelectionInitialized,
             context.RootOptionStateCache);
-        options = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
-            context.PreparedSelectionMode,
-            context.RootSelectionCache,
-            options,
-            visibleRootFolders,
-            ignoreRules,
-            filterSelectionService,
-            EmptyRootSelection);
+		if (!context.RootSelectionIsExplicit)
+		{
+			options = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
+				context.PreparedSelectionMode,
+				context.RootSelectionCache,
+				options,
+				visibleRootFolders,
+				ignoreRules,
+				filterSelectionService,
+				EmptyRootSelection);
+		}
 
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllRootFoldersChecked)
             options = ForceAllChecked(options);
@@ -456,14 +461,19 @@ public sealed class SelectionRefreshEngine(
                 ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
                 : EmptyExtensionSelection,
             context.ExtensionOptionStateCache);
-        var usedProfileFallback = SelectionRefreshPolicy.ShouldApplyMissingProfileSelectionsFallback(
+		extensionOptions = ApplyExplicitExtensionSelection(context, extensionOptions);
+		var usedProfileFallback = !context.ExtensionSelectionIsExplicit &&
+			SelectionRefreshPolicy.ShouldApplyMissingProfileSelectionsFallback(
             context.PreparedSelectionMode,
             context.ExtensionsSelectionCache,
             extensionOptions);
-        extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
-            context.PreparedSelectionMode,
-            context.ExtensionsSelectionCache,
-            extensionOptions);
+		if (!context.ExtensionSelectionIsExplicit)
+		{
+			extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
+				context.PreparedSelectionMode,
+				context.ExtensionsSelectionCache,
+				extensionOptions);
+		}
 
         if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
             extensionOptions = ForceAllChecked(extensionOptions);
@@ -506,10 +516,14 @@ public sealed class SelectionRefreshEngine(
                     ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
                     : EmptyExtensionSelection,
                 context.ExtensionOptionStateCache);
-            extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
-                context.PreparedSelectionMode,
-                context.ExtensionsSelectionCache,
-                extensionOptions);
+			extensionOptions = ApplyExplicitExtensionSelection(context, extensionOptions);
+			if (!context.ExtensionSelectionIsExplicit)
+			{
+				extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
+					context.PreparedSelectionMode,
+					context.ExtensionsSelectionCache,
+					extensionOptions);
+			}
 
             if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
                 extensionOptions = ForceAllChecked(extensionOptions);
@@ -545,6 +559,21 @@ public sealed class SelectionRefreshEngine(
             EffectiveRules: ignoreRules,
             WorkspaceScan: scan.Value);
     }
+
+	private static IReadOnlyList<SelectionOption> ApplyExplicitExtensionSelection(
+		SelectionRefreshContext context,
+		IReadOnlyList<SelectionOption> options)
+	{
+		if (!context.ExtensionSelectionIsExplicit)
+			return options;
+
+		// CLI extension overrides are exact sets. Unlike a persisted settings island,
+		// newly discovered rows must not opt themselves into an explicit invocation.
+		var selected = context.ExtensionsSelectionCache;
+		return options
+			.Select(option => option with { IsChecked = selected.Contains(option.Name) })
+			.ToArray();
+	}
 
     private ScanResult<ProjectWorkspaceScanSnapshot> GetDynamicSectionScan(
         SelectionRefreshContext context,
@@ -1128,10 +1157,11 @@ public sealed class SelectionRefreshEngine(
 		foreach (var (id, isChecked) in stateCache)
 		{
 			// Hidden states are kept for profile roundtrip and transient availability churn.
-			// Strict tracked-only is also an active safety policy: losing repository evidence
-			// must fail closed instead of exposing files through an implicit None fallback.
+			// A selected Git mode is also active policy: no pattern file means an empty
+			// gitignore rule set, while unavailable tracked evidence must remain fail-closed.
 			if (isChecked &&
-			    (visibleIds.Contains(id) || id == IgnoreOptionId.TrackedGitFilesOnly))
+			    (visibleIds.Contains(id) ||
+			     id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.TrackedGitFilesOnly))
 				selected.Add(id);
 		}
 

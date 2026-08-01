@@ -1,3 +1,5 @@
+using DevProjex.Application.Selection;
+
 namespace DevProjex.Application.Context;
 
 public sealed class ProjectSelectionResolver(
@@ -23,7 +25,7 @@ public sealed class ProjectSelectionResolver(
 			_ => throw new ArgumentOutOfRangeException(nameof(profile), profile.Kind, null)
 		};
 
-		return baseline with
+		var resolved = baseline with
 		{
 			Roots = overrides.Roots ?? baseline.Roots,
 			Extensions = overrides.Extensions ?? baseline.Extensions,
@@ -32,6 +34,21 @@ public sealed class ProjectSelectionResolver(
 			Exclusions = overrides.Exclusions ?? baseline.Exclusions,
 			ProfileSource = profile
 		};
+
+		if (baseline.LocalProfileState is { } localState)
+		{
+			resolved = resolved with
+			{
+				LocalProfileState = localState with
+				{
+					RootsOverridden = overrides.Roots is not null,
+					ExtensionsOverridden = overrides.Extensions is not null,
+					IgnoreOptionsOverridden = overrides.GitMode is not null || overrides.Exclusions is not null
+				}
+			};
+		}
+
+		return resolved;
 	}
 
 	private ProjectSelectionSpec ResolveLocal(string projectPath)
@@ -43,6 +60,10 @@ public sealed class ProjectSelectionResolver(
 				"No local profile exists for this project.");
 		}
 
-		return ProjectSelectionAdapter.FromLegacyProfile(profile, ProjectProfileReference.Local);
+		var snapshot = ProjectSelectionProfileBuilder.Clone(profile);
+		return ProjectSelectionAdapter.FromLegacyProfile(snapshot, ProjectProfileReference.Local) with
+		{
+			LocalProfileState = new LocalProjectSelectionState(snapshot)
+		};
 	}
 }

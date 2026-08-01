@@ -335,7 +335,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~Ignore|FullyQualifiedName~Scanner|FullyQualifiedName~ReparsePoint|FullyQualifiedName~FileSystemMutation"
+          --filter "Category=IgnoreContract|FullyQualifiedName~Ignore|FullyQualifiedName~Scanner|FullyQualifiedName~ReparsePoint|FullyQualifiedName~FileSystemMutation"
           --logger "trx;LogFileName=ignore-scanner.trx"
           --results-directory "TestResults/ignore-scanner"
 

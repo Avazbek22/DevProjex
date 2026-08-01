@@ -60,7 +60,10 @@ public sealed class HybridSmartIgnoreGoldenMatrixIntegrationTests
 			selectedOptions,
 			contract.SelectedRootFolders);
 
-		var expectedUseGitIgnore = contract.HasGitController && gitSelected;
+		// Availability controls whether the Parameters island has evidence to display a
+		// controller. It does not rewrite an already selected filtering mode. In particular,
+		// a missing .gitignore is an active empty ruleset, not an implicit "git mode off".
+		var expectedUseGitIgnore = gitSelected;
 		var expectedUseSmartIgnore = smartSelected;
 
 		Assert.Equal(contract.HasGitController, availability.IncludeGitIgnore);

@@ -51,6 +51,42 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		Assert.Contains("repo/scope-127/visible.txt", observation.Paths);
 	}
 
+	[Fact]
+	public void RootDirectoryToggleCandidates_ReuseOneGitScopeBootstrapPerOperation()
+	{
+		const int candidateCount = 300;
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "# active pattern source\n");
+		temp.CreateFile("src/App.cs", "public sealed class App {}\n");
+		for (var index = 0; index < candidateCount; index++)
+			temp.CreateDirectory($".candidate-{index:D3}");
+
+		var service = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
+		var selectedOptions = new[] { IgnoreOptionId.UseGitIgnore, IgnoreOptionId.DotFolders };
+		var selectedRoots = new[] { "src" };
+		var rules = service.Build(temp.Path, selectedOptions, selectedRoots);
+		var scanner = new ScanOptionsUseCase(new FileSystemScanner());
+
+		var stopwatch = Stopwatch.StartNew();
+		var result = scanner.GetProjectWorkspaceSnapshotForRootFolders(
+			temp.Path,
+			selectedRoots,
+			IgnoreRulesProjection.ForExtensionAvailability(rules),
+			rules,
+			effectiveExtensionPolicy: null,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: TestContext.Current.CancellationToken,
+			includeControllerImpactProbeRoots: true);
+		stopwatch.Stop();
+
+		TestContext.Current.TestOutputHelper?.WriteLine(
+			$"Root-candidate Git bootstrap benchmark: {stopwatch.Elapsed.TotalMilliseconds:F3} ms for {candidateCount} candidates.");
+		Assert.Equal(candidateCount, result.Value.IgnoreSection.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.True(
+			stopwatch.Elapsed < TimeSpan.FromSeconds(5),
+			$"Root-candidate ignore scan exceeded smoke budget: {stopwatch.Elapsed}.");
+	}
+
 	[Theory]
 	[InlineData(50_000, 90)]
 	[InlineData(100_000, 180)]
@@ -63,7 +99,7 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 			    "1",
 			    StringComparison.Ordinal))
 		{
-			return;
+			Assert.Skip("Set DEVPROJEX_RUN_LARGE_PERF_TESTS=1 for the pre-release performance gate.");
 		}
 
 		using var temp = CreateSyntheticWorkspace(fileCount);
@@ -82,7 +118,7 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 			    "1",
 			    StringComparison.Ordinal))
 		{
-			return;
+			Assert.Skip("Set DEVPROJEX_RUN_LARGE_PERF_TESTS=1 for the pre-release performance gate.");
 		}
 
 		using var temp = CreateHierarchicalGitIgnoreWorkspace(scopeCount: 1_000, rulesPerScope: 100);

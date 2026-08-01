@@ -48,6 +48,10 @@ public sealed class TerminalWorkspaceController(
 		ProjectSelectionSpec selection,
 		CancellationToken cancellationToken)
 	{
+		// Pull and branch changes may add project markers, roots, extensions, or ignore
+		// controls without changing the TUI selection itself. Revalidate the shared
+		// Application cache before rebuilding so TUI, CLI, and Desktop see one topology.
+		services.IgnoreRulesService.RevalidateCaches(state.Plan.SourceRoot, cancellationToken);
 		var sourceIdentity = await services.SourceIdentityResolver
 			.ResolveAsync(state.Plan.SourceRoot, cancellationToken: cancellationToken)
 			.ConfigureAwait(false);

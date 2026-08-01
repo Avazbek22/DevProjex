@@ -414,6 +414,16 @@ jobs:
           $sourceDirectory = Join-Path $projectDirectory "src"
           New-Item -ItemType Directory -Force -Path $sourceDirectory | Out-Null
           "class App {}" | Set-Content -LiteralPath (Join-Path $sourceDirectory "App.cs") -Encoding utf8NoBOM
+          $githubDirectory = Join-Path $projectDirectory ".github"
+          $gitLookalikeDirectory = Join-Path $projectDirectory ".git-owned"
+          New-Item -ItemType Directory -Force -Path $githubDirectory, $gitLookalikeDirectory | Out-Null
+          "name: ci" | Set-Content -LiteralPath (Join-Path $githubDirectory "ci.yml") -Encoding utf8NoBOM
+          "ordinary content" | Set-Content -LiteralPath (Join-Path $gitLookalikeDirectory "data.txt") -Encoding utf8NoBOM
+          "untracked" | Set-Content -LiteralPath (Join-Path $projectDirectory "untracked.txt") -Encoding utf8NoBOM
+          git -C $projectDirectory init --quiet
+          if ($LASTEXITCODE -ne 0) { throw "Failed to initialize published ignore-contract fixture." }
+          git -C $projectDirectory add -- "src/App.cs" ".github/ci.yml"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to stage published tracked-mode fixture." }
 
           $exportStdoutPath = Join-Path $env:RUNNER_TEMP "devprojex-native-export-stdout.txt"
           $exportStderrPath = Join-Path $env:RUNNER_TEMP "devprojex-native-export-stderr.txt"
@@ -458,6 +468,70 @@ jobs:
 
           if ($exportStdout -notmatch "App\.cs") {
             throw "Published export smoke did not print the expected tree for ${{ matrix.rid }}. StdOut=$exportStdout"
+          }
+
+          $emptyGitIgnoreDestination = Join-Path $env:RUNNER_TEMP "devprojex-empty-gitignore-${{ matrix.rid }}"
+          Remove-Item -LiteralPath $emptyGitIgnoreDestination -Recurse -Force -ErrorAction SilentlyContinue
+          $emptyGitIgnore = Invoke-NativeCommand -Name "empty gitignore contract" -Arguments @(
+            "export", "project", $projectDirectory,
+            "--as", "folder",
+            "--git-mode", "gitignore",
+            "--exclude", "none",
+            "--plain",
+            "--language", "en",
+            "-o", $emptyGitIgnoreDestination)
+          if ($emptyGitIgnore.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($emptyGitIgnore.StdErr) -or
+              -not (Test-Path -LiteralPath (Join-Path $emptyGitIgnoreDestination ".github/ci.yml") -PathType Leaf) -or
+              -not (Test-Path -LiteralPath (Join-Path $emptyGitIgnoreDestination ".git-owned/data.txt") -PathType Leaf) -or
+              (Test-Path -LiteralPath (Join-Path $emptyGitIgnoreDestination ".git"))) {
+            throw "Published empty-.gitignore mode leaked Git administration or hid a lookalike. ExitCode=$($emptyGitIgnore.ExitCode) StdOut=$($emptyGitIgnore.StdOut) StdErr=$($emptyGitIgnore.StdErr)"
+          }
+          $emptyGitIgnoreManifest = @(
+            Get-ChildItem -LiteralPath $emptyGitIgnoreDestination -File -Recurse |
+              ForEach-Object {
+                [System.IO.Path]::GetRelativePath($emptyGitIgnoreDestination, $_.FullName).Replace('\', '/')
+              } |
+              Sort-Object)
+          $expectedEmptyGitIgnoreManifest = @(
+            ".github/ci.yml",
+            ".git-owned/data.txt",
+            "src/App.cs",
+            "untracked.txt")
+          if ([string]::Join("`n", $emptyGitIgnoreManifest) -ne
+              [string]::Join("`n", $expectedEmptyGitIgnoreManifest)) {
+            throw "Published empty-.gitignore manifest drifted. Actual=$($emptyGitIgnoreManifest -join ', ')"
+          }
+
+          $trackedOnlyDestination = Join-Path $env:RUNNER_TEMP "devprojex-tracked-only-${{ matrix.rid }}"
+          Remove-Item -LiteralPath $trackedOnlyDestination -Recurse -Force -ErrorAction SilentlyContinue
+          $trackedOnly = Invoke-NativeCommand -Name "tracked-only contract" -Arguments @(
+            "export", "project", $projectDirectory,
+            "--as", "folder",
+            "--git-mode", "tracked",
+            "--exclude", "none",
+            "--plain",
+            "--language", "en",
+            "-o", $trackedOnlyDestination)
+          if ($trackedOnly.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($trackedOnly.StdErr) -or
+              -not (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination "src/App.cs") -PathType Leaf) -or
+              -not (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination ".github/ci.yml") -PathType Leaf) -or
+              (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination "untracked.txt")) -or
+              (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination ".git-owned/data.txt")) -or
+              (Test-Path -LiteralPath (Join-Path $trackedOnlyDestination ".git"))) {
+            throw "Published tracked-only mode violated its exact manifest contract. ExitCode=$($trackedOnly.ExitCode) StdOut=$($trackedOnly.StdOut) StdErr=$($trackedOnly.StdErr)"
+          }
+          $trackedOnlyManifest = @(
+            Get-ChildItem -LiteralPath $trackedOnlyDestination -File -Recurse |
+              ForEach-Object {
+                [System.IO.Path]::GetRelativePath($trackedOnlyDestination, $_.FullName).Replace('\', '/')
+              } |
+              Sort-Object)
+          $expectedTrackedOnlyManifest = @(".github/ci.yml", "src/App.cs")
+          if ([string]::Join("`n", $trackedOnlyManifest) -ne
+              [string]::Join("`n", $expectedTrackedOnlyManifest)) {
+            throw "Published tracked-only manifest drifted. Actual=$($trackedOnlyManifest -join ', ')"
           }
 
           $sourceBytesBeforeProjectExport =

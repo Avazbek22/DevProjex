@@ -174,7 +174,10 @@ tree. When the selected path is below its owning repository/worktree root, the
 ancestor rule chain from that root through the selected path is applied before
 rules discovered below it. It does not read `.git/info/exclude`, global Git excludes, or symbolic links
 named `.gitignore`; Git itself does not follow a symbolic link when accessing that
-control file. When a regular `.gitignore` cannot be read, its directory scope is
+control file. If no regular `.gitignore` exists, the selected mode remains
+`gitignore` with an empty pattern set; the administrative entry named exactly `.git`
+is still excluded, while lookalikes such as `.github` and `.git-owned` are ordinary
+paths. When a regular `.gitignore` cannot be read, its directory scope is
 excluded fail-closed, other scopes continue deterministically, and the invocation
 exposes the existing partial-access diagnostic (`DPX-PROJECT-PARTIAL-ACCESS`)
 instead of silently including files without complete rule evaluation. Skipping a
@@ -215,6 +218,15 @@ An absent collection inherits the profile. An explicitly supplied collection
 replaces that profile field. Selected paths are relative to the source root.
 Selecting a directory selects its effective subtree. Parent traversal, absolute
 selected paths, and link-based escapes are rejected.
+
+A modern local profile stores complete checkbox maps for root folders, extensions,
+and Exclusions. Known rows retain their saved checked or unchecked state. Rows that
+appear after the profile was saved use the current product default, consistently in
+Desktop, CLI, and TUI. Legacy selected-only local data is promoted at the storage
+boundary: its selected values become checked state entries and other rows use current
+defaults. Explicit CLI root, extension, Git-mode, or exclusion overrides are exact
+invocation-only fields and do not rewrite the local profile. Root names are exact
+nonblank filesystem names; DevProjex never trims legal leading or trailing whitespace.
 
 Direct commands default to `standard`. TUI and `open` default to `local` when a
 valid local profile exists, otherwise `standard`.

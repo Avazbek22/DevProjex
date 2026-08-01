@@ -27,6 +27,9 @@ public sealed class ProjectSelectionSessionState
 
     public void ApplyProfile(string projectPath, ProjectSelectionProfile profile)
     {
+		// Root folders, extensions, and exclusions form one logical parameters snapshot.
+		// Restoring all maps together prevents a refresh in one island from interpreting
+		// stale selected-only data from another island as a new user decision.
         PreparedPath = projectPath;
         PreparedMode = PreparedSelectionMode.Profile;
 
@@ -35,6 +38,8 @@ public sealed class ProjectSelectionSessionState
 
         if (profile.IgnoreOptionStates is not null)
         {
+			// Even an empty map is meaningful: it is a complete modern snapshot whose
+			// future, newly available checkboxes receive their descriptor defaults.
             IgnoreOptions.ReplaceStateCache(profile.IgnoreOptionStates);
             IgnoreOptionStateCacheIsComplete = true;
             return;

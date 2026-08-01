@@ -72,6 +72,7 @@ public sealed class TerminalServiceFactory(
 		return new TerminalServices(
 			Localization: localization,
 			AnalysisService: analysis,
+			IgnoreRulesService: ignoreRules,
 			ContextPlanner: contextPlanner,
 			ContextFactory: contextFactory,
 			SourceIdentityResolver: sourceIdentityResolver,

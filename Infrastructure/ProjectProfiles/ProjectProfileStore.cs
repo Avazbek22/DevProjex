@@ -338,6 +338,21 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			}
 		}
 
+		// Persisted state maps are authoritative because they retain unchecked rows.
+		// Older selected-only documents have no map entries, so each selected value is
+		// promoted once to a true entry. TryAdd deliberately preserves an explicit false
+		// from a modern profile instead of resurrecting a stale compatibility projection.
+		ReconcileSelectedStringValues(
+			profile.SelectedRootFolders,
+			profile.RootFolderStates,
+			PathComparer.Default);
+		ReconcileSelectedStringValues(
+			profile.SelectedExtensions,
+			profile.ExtensionStates,
+			StringComparer.OrdinalIgnoreCase);
+		ReconcileSelectedIgnoreOptions(
+			profile.SelectedIgnoreOptions,
+			profile.IgnoreOptionStates);
 		NormalizeGitFilteringState(profile.SelectedIgnoreOptions, profile.IgnoreOptionStates);
 
 		if (profile.UpdatedUtc <= DateTimeOffset.UnixEpoch)
@@ -348,27 +363,36 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private static PersistedProjectProfile ToPersistedProfile(ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
 	{
+		var selectedRootFolders = profile.SelectedRootFolders
+			.Where(static item => !string.IsNullOrWhiteSpace(item))
+			.Distinct(PathComparer.Default)
+			.ToList();
+		var selectedExtensions = profile.SelectedExtensions
+			.Where(static item => !string.IsNullOrWhiteSpace(item))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
 		var selectedIgnoreOptions = profile.SelectedIgnoreOptions
 			.Distinct()
 			.ToList();
+		var rootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default);
+		var extensionStates = NormalizeStringStateDictionary(
+			profile.ExtensionStates,
+			StringComparer.OrdinalIgnoreCase);
 		var ignoreOptionStates = profile.IgnoreOptionStates is null
 			? []
 			: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
+		ReconcileSelectedStringValues(selectedRootFolders, rootFolderStates, PathComparer.Default);
+		ReconcileSelectedStringValues(selectedExtensions, extensionStates, StringComparer.OrdinalIgnoreCase);
+		ReconcileSelectedIgnoreOptions(selectedIgnoreOptions, ignoreOptionStates);
 		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreOptionStates);
 
 		return new PersistedProjectProfile
 		{
-			SelectedRootFolders = profile.SelectedRootFolders
-				.Where(static item => !string.IsNullOrWhiteSpace(item))
-				.Distinct(PathComparer.Default)
-				.ToList(),
-			SelectedExtensions = profile.SelectedExtensions
-				.Where(static item => !string.IsNullOrWhiteSpace(item))
-				.Distinct(StringComparer.OrdinalIgnoreCase)
-				.ToList(),
+			SelectedRootFolders = selectedRootFolders,
+			SelectedExtensions = selectedExtensions,
 			SelectedIgnoreOptions = selectedIgnoreOptions,
-			RootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default),
-			ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
+			RootFolderStates = rootFolderStates,
+			ExtensionStates = extensionStates,
 			IgnoreOptionStates = ignoreOptionStates,
 			SelectedPaths = (profile.SelectedPaths ?? [])
 				.Where(static item => !string.IsNullOrWhiteSpace(item))
@@ -385,8 +409,9 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		var rootFolders = new HashSet<string>(profile.SelectedRootFolders, PathComparer.Default);
 		var extensions = new HashSet<string>(profile.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
 		var selectedIgnoreOptions = profile.SelectedIgnoreOptions.ToList();
-		// Empty state maps still carry v2 semantics: options first seen after reopen
-		// use current defaults instead of being treated as unchecked legacy misses.
+		// Local persistence always exposes a complete-map contract. Selected-only input is
+		// promoted at the storage boundary, so all surfaces give newly discovered rows the
+		// same current default without losing historical positive selections.
 		var rootStates = new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default);
 		var extensionStates = new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		var ignoreStates = new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
@@ -443,6 +468,35 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 
 		return normalized;
+	}
+
+	private static void ReconcileSelectedStringValues(
+		List<string> selectedValues,
+		Dictionary<string, bool> states,
+		StringComparer comparer)
+	{
+		foreach (var selectedValue in selectedValues)
+			states.TryAdd(selectedValue, true);
+
+		selectedValues.Clear();
+		selectedValues.AddRange(states
+			.Where(static pair => pair.Value)
+			.Select(static pair => pair.Key)
+			.OrderBy(static value => value, comparer));
+	}
+
+	private static void ReconcileSelectedIgnoreOptions(
+		List<IgnoreOptionId> selectedOptions,
+		Dictionary<IgnoreOptionId, bool> states)
+	{
+		foreach (var selectedOption in selectedOptions)
+			states.TryAdd(selectedOption, true);
+
+		selectedOptions.Clear();
+		selectedOptions.AddRange(states
+			.Where(static pair => pair.Value)
+			.Select(static pair => pair.Key)
+			.OrderBy(static option => (int)option));
 	}
 
 	private static void PruneProfiles(ProjectProfileDb db)

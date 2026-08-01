@@ -72,7 +72,9 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 
 		Assert.False(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
-		Assert.False(rules.UseGitIgnore);
+		// Availability controls whether a dynamic checkbox is shown; it never rewrites
+		// an already selected Git mode into None.
+		Assert.True(rules.UseGitIgnore);
 		Assert.True(rules.UseSmartIgnore);
 	}
 

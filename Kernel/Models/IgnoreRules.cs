@@ -173,7 +173,9 @@ public sealed record IgnoreRules(
 			if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty) ||
 			    !matcher.TryGetRelativePath(scanRootPath, out var baseRelativePath, allowRoot: true))
 			{
-				return !useCandidates && UseTrackedGitFilesOnly
+				// An active Git policy still owns the administrative .git boundary when
+				// there are no pattern files. Disabled is reserved for an unselected mode.
+				return !useCandidates && (UseGitIgnore || UseTrackedGitFilesOnly)
 					? GitIgnoreScanContext.Scoped(
 						this,
 						useCandidates: false,
@@ -247,7 +249,7 @@ public sealed record IgnoreRules(
 		bool useCandidates)
 	{
 		// Git administrative entries are outside the working tree and must never be traversed as ignore-pattern content.
-		if ((useCandidates || UseGitIgnore) && IsGitAdministrativeEntry(name))
+		if ((useCandidates || UseGitIgnore || UseTrackedGitFilesOnly) && IsGitAdministrativeEntry(name))
 			return new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 
 		var scopedMatchersSource = GetScopedGitIgnoreMatchers(useCandidates);

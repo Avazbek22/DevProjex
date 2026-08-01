@@ -83,11 +83,14 @@ public sealed class IgnoreRulesService(
 		var candidateGitIgnoreMatcher = candidateScopedGitMatchers.Length == 1
 			? candidateScopedGitMatchers[0].Matcher
 			: GitIgnoreMatcher.Empty;
-		var useGitIgnore = requestedGitIgnore && candidateScopedGitMatchers.Length > 0;
-		var scopedMatchers = useGitIgnore
+		// Git mode is user intent, not a side effect of discovering a control file.
+		// A missing .gitignore means an active empty rule set; it must never downgrade
+		// RespectGitIgnore or expose Git administrative data from an otherwise valid scan.
+		var useGitIgnore = requestedGitIgnore;
+		var scopedMatchers = requestedGitIgnore
 			? candidateScopedGitMatchers
 			: Array.Empty<ScopedGitIgnoreMatcher>();
-		var gitIgnoreMatcher = useGitIgnore && scopedMatchers.Length == 1
+		var gitIgnoreMatcher = requestedGitIgnore && scopedMatchers.Length == 1
 			? scopedMatchers[0].Matcher
 			: GitIgnoreMatcher.Empty;
 
@@ -138,7 +141,7 @@ public sealed class IgnoreRulesService(
 			UseTrackedGitFilesOnly = useTrackedGitFilesOnly,
 			EnableGitIgnoreTraversal = requestedGitIgnore || useTrackedGitFilesOnly,
 			UseSmartIgnore = useSmartIgnore,
-			GitIgnoreCandidateMatchesActiveRules = useGitIgnore,
+			GitIgnoreCandidateMatchesActiveRules = requestedGitIgnore,
 			SmartIgnoreCandidateMatchesActiveRules = useSmartIgnore,
 			GitIgnoreMatcher = gitIgnoreMatcher,
 			ScopedGitIgnoreMatchers = scopedMatchers,

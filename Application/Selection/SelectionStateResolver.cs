@@ -11,14 +11,17 @@ public sealed class SelectionStateResolver(
 			if (previousStateCache.TryGetValue(name, out var cachedState))
 				return cachedState;
 
-			// Older profiles only persisted checked entries. Keep those selections while
-			// letting missing entries use the current product default for new options.
+			// A complete settings-island map is open-world: known rows are authoritative,
+			// while rows first discovered after the save use the current product default.
+			// The selected set remains a compatibility bridge for partially migrated data.
 			if (previousSelections.Contains(name))
 				return true;
 
 			return defaultForNewEntry;
 		}
 
+		// No state map means the legacy selected-only contract. Missing names are
+		// unchecked; callers decide separately whether a legacy fallback is warranted.
 		return previousSelections.Contains(name);
 	}
 }

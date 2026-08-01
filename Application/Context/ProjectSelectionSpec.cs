@@ -39,6 +39,11 @@ public sealed record ProjectSelectionSpec(
 	IReadOnlyCollection<ProjectExclusion>? Exclusions = null,
 	ProjectProfileReference? ProfileSource = null)
 {
+	// Local profiles carry complete checkbox state, not merely the currently checked names.
+	// This internal payload lets every presentation surface apply the same rule: known rows
+	// keep their saved state, while rows discovered after the save use current defaults.
+	internal LocalProjectSelectionState? LocalProfileState { get; init; }
+
 	public static IReadOnlyCollection<ProjectExclusion> StandardExclusions { get; } =
 	[
 		ProjectExclusion.SmartIgnore,
@@ -56,3 +61,9 @@ public sealed record ProjectSelectionSpec(
 		Exclusions: StandardExclusions,
 		ProfileSource: ProjectProfileReference.Standard);
 }
+
+internal sealed record LocalProjectSelectionState(
+	ProjectSelectionProfile Profile,
+	bool RootsOverridden = false,
+	bool ExtensionsOverridden = false,
+	bool IgnoreOptionsOverridden = false);

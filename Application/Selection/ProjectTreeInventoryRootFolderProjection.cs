@@ -191,6 +191,9 @@ public static class ProjectTreeInventoryRootFolderProjection
                 return RootProjection.Visible;
             if (!isTraversedGitIgnoredDirectory)
                 hasStructureHiddenByEmptyFolders = true;
+			var shouldApplySmartIgnoreToFiles = rules.ShouldApplySmartIgnore(
+				directory.FullPath,
+				isDirectory: true);
 
             for (var childOffset = 0; childOffset < directory.ChildCount; childOffset++)
             {
@@ -215,7 +218,7 @@ public static class ProjectTreeInventoryRootFolderProjection
                     child.IsHidden,
                     child.Length,
                     rules,
-                    rules.ShouldApplySmartIgnore(directory.FullPath, isDirectory: true),
+					shouldApplySmartIgnoreToFiles,
                     fileGitIgnore);
                 if (!fileDecision.IsIgnored && IsAllowedFile(child.Name, allowedExtensions))
                     return RootProjection.Visible;

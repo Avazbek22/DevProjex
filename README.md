@@ -143,6 +143,8 @@ In `.gitignore` mode, every reachable `.gitignore` is evaluated in its own direc
 
 Only regular working-tree `.gitignore` files are rule sources. DevProjex does not apply `.git/info/exclude`, global Git excludes, or a `.gitignore` symbolic link; this matches Git's own control-file behavior and prevents a link target outside the project from changing the result. If a regular `.gitignore` cannot be read, its directory scope is excluded fail-closed and the scan reports partial access instead of silently including files without applying all ignore rules.
 
+If no `.gitignore` exists, the selected mode remains active with an empty pattern set: only the exact Git administration entry `.git` is protected, while names such as `.github` remain normal project content.
+
 DevProjex resolves every reachable nested repository and worktree independently, at any reachable nesting level. A child repository never inherits tracked state from its parent or sibling. Tracked-files mode is fail-closed and never silently falls back to `.gitignore`: direct commands, including `devprojex open`, return a policy failure before output or Desktop handoff if the Git CLI cannot load any applicable index; an already-open Desktop workspace keeps the explicit selection visible so it can be turned off; TUI startup does not open an unavailable tracked workspace, while an unsuccessful interactive TUI mode change keeps the last usable Git mode. A readable empty index is valid; unreadable nested indexes are excluded with a warning when another applicable index was loaded.
 
 This is a view of the current working tree, not a historical snapshot of `HEAD` or a promise that the files match a remote Git host. The current bytes of modified tracked files are used.

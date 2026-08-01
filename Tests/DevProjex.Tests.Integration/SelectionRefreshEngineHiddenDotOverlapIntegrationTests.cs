@@ -59,7 +59,7 @@ public sealed class SelectionRefreshEngineHiddenDotOverlapIntegrationTests
 		if (!OperatingSystem.IsWindows())
 			return;
 
-		using var temp = CreateHiddenDotWorkspaceWithVisibleGitContent();
+		using var temp = CreateHiddenDotWorkspace();
 		var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
 
 		var baseline = services.Engine.ComputeFullRefreshSnapshot(
@@ -92,7 +92,7 @@ public sealed class SelectionRefreshEngineHiddenDotOverlapIntegrationTests
 				}),
 			CancellationToken.None);
 		AssertVisibleOption(hiddenFoldersOff, IgnoreOptionId.HiddenFolders, isChecked: false);
-		Assert.Contains(hiddenFoldersOff.RootOptions!, option => option.Name == ".git" && option.IsChecked);
+		Assert.Contains(hiddenFoldersOff.RootOptions!, option => option.Name == ".hidden-dot" && option.IsChecked);
 
 		var dotFoldersOnAgain = services.Engine.ComputeFullRefreshSnapshot(
 			CreateContextWithIgnoreStates(
@@ -119,7 +119,7 @@ public sealed class SelectionRefreshEngineHiddenDotOverlapIntegrationTests
 				}),
 			CancellationToken.None);
 		AssertVisibleOption(dotFoldersOffAgain, IgnoreOptionId.HiddenFolders, isChecked: false);
-		Assert.Contains(dotFoldersOffAgain.RootOptions!, option => option.Name == ".git" && option.IsChecked);
+		Assert.Contains(dotFoldersOffAgain.RootOptions!, option => option.Name == ".hidden-dot" && option.IsChecked);
 	}
 
 	[Fact]
@@ -151,12 +151,17 @@ public sealed class SelectionRefreshEngineHiddenDotOverlapIntegrationTests
 		Assert.Equal(baseline.IgnoreOptionCounts.DotFolders, secondPass.IgnoreOptionCounts.DotFolders);
 	}
 
-	private static TemporaryDirectory CreateHiddenDotWorkspaceWithVisibleGitContent()
+	private static TemporaryDirectory CreateHiddenDotWorkspace()
 	{
 		var temp = new TemporaryDirectory();
 		temp.CreateFile("src/Program.cs", "class Program {}");
 		temp.CreateFile(".idea/workspace.xml", "<project />");
+		temp.CreateFile(".hidden-dot/payload.txt", "hidden dot payload");
 		temp.CreateFile(".git/config.txt", "[core]\n");
+		// .git is an administrative boundary while Git filtering is active, so it cannot
+		// double as ordinary HiddenFolders evidence. The separate .hidden-dot entry exercises
+		// that overlap while .idea keeps DotFolders measurable after the first toggle.
+		MarkHidden(Path.Combine(temp.Path, ".hidden-dot"));
 		MarkHidden(Path.Combine(temp.Path, ".git"));
 		return temp;
 	}

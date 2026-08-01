@@ -226,7 +226,7 @@ public sealed class FileSystemReparsePointIntegrationTests
 				AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "src", "ignored", "logs" },
 				IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.False(rules.UseGitIgnore);
+		Assert.True(rules.UseGitIgnore);
 		Assert.True(rules.EnableGitIgnoreTraversal);
 		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "src", StringComparison.Ordinal));
 		Assert.Contains(tree.Root.Children, node => string.Equals(node.Name, "ignored", StringComparison.Ordinal));

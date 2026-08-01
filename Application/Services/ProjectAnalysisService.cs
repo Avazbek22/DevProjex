@@ -43,11 +43,12 @@ public sealed class ProjectAnalysisService(
 			throw new DirectoryNotFoundException($"Project path was not found: {request.RootPath}");
 
 		var loadingStopwatch = Stopwatch.StartNew();
-		if (CanUseUnifiedDefaultSelectionPipeline(request) &&
+		if (CanUseUnifiedSelectionPipeline(request) &&
 		    buildTree.SupportsCompositeInventory)
 		{
-			return LoadWithUnifiedDefaultSelection(
+			return LoadWithUnifiedSelection(
 				rootPath,
+				request,
 				loadingStopwatch,
 				cancellationToken);
 		}
@@ -186,13 +187,15 @@ public sealed class ProjectAnalysisService(
 			TreeInventory: treeInventory);
 	}
 
-	private static bool CanUseUnifiedDefaultSelectionPipeline(ProjectAnalysisRequest request) =>
-		request.SelectedRootFolders is null &&
-		request.SelectedExtensions is null &&
-		request.SelectedIgnoreOptions is null;
+	private static bool CanUseUnifiedSelectionPipeline(ProjectAnalysisRequest request) =>
+		request.LocalProfileState is not null ||
+		(request.SelectedRootFolders is null &&
+		 request.SelectedExtensions is null &&
+		 request.SelectedIgnoreOptions is null);
 
-	private LoadedProjectAnalysisRequest LoadWithUnifiedDefaultSelection(
+	private LoadedProjectAnalysisRequest LoadWithUnifiedSelection(
 		string rootPath,
+		ProjectAnalysisRequest request,
 		Stopwatch loadingStopwatch,
 		CancellationToken cancellationToken)
 	{
@@ -204,22 +207,9 @@ public sealed class ProjectAnalysisService(
 				ignoreRules.Build(candidateRootPath, selectedOptions, selectedRootFolders),
 			(candidateRootPath, selectedRootFolders) =>
 				ignoreRules.GetIgnoreOptionsAvailability(candidateRootPath, selectedRootFolders));
+		var selectionContext = BuildUnifiedSelectionContext(rootPath, request);
 		var snapshot = selectionRefreshEngine.ComputeFullRefreshSnapshot(
-			new SelectionRefreshContext(
-				Path: rootPath,
-				PreparedSelectionMode: PreparedSelectionMode.Defaults,
-				AllRootFoldersChecked: true,
-				AllExtensionsChecked: true,
-				RootSelectionInitialized: false,
-				RootSelectionCache: EmptyRootSelection,
-				ExtensionsSelectionInitialized: false,
-				ExtensionsSelectionCache: EmptyExtensionSelection,
-				IgnoreSelectionInitialized: false,
-				IgnoreSelectionCache: EmptyIgnoreSelection,
-				IgnoreOptionStateCache: EmptyIgnoreState,
-				IgnoreAllPreference: null,
-				CurrentSnapshotState: default,
-				CaptureTreeInventory: true),
+			selectionContext,
 			cancellationToken);
 		var inventory = snapshot.TreeInventory ??
 		                throw new InvalidOperationException(
@@ -235,7 +225,8 @@ public sealed class ProjectAnalysisService(
 			.Select(static option => option.Name)
 			.ToArray();
 		var selectedIgnoreOptions = snapshot.EffectiveIgnoreOptions.ToArray();
-		var rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		var rules = snapshot.EffectiveRules ??
+		            ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
 		var treeRequest = new BuildTreeRequest(
 			rootPath,
 			new TreeFilterOptions(
@@ -262,7 +253,84 @@ public sealed class ProjectAnalysisService(
 			DiscoveredGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count,
 			UnavailableGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count(
 				static index => !index.IsAvailable),
-			TreeInventory: inventory);
+			TreeInventory: inventory)
+		{
+			// The refresh snapshot intentionally contains only effective rows. Keep the
+			// requested selection separately so stale profile/CLI values still produce the
+			// same actionable diagnostics without leaking into the tree filter or output plan.
+			RequestedRootFoldersForDiagnostics = selectionContext.RootSelectionInitialized
+				? selectionContext.RootSelectionCache
+				: selectedRootFolders,
+			RequestedExtensionsForDiagnostics = selectionContext.ExtensionsSelectionInitialized
+				? selectionContext.ExtensionsSelectionCache
+				: selectedExtensions,
+			ResolvedIgnoreOptionStates = snapshot.IgnoreOptionStateCache
+		};
+	}
+
+	private static SelectionRefreshContext BuildUnifiedSelectionContext(
+		string rootPath,
+		ProjectAnalysisRequest request)
+	{
+		if (request.LocalProfileState is not { } localState)
+		{
+			return new SelectionRefreshContext(
+				Path: rootPath,
+				PreparedSelectionMode: PreparedSelectionMode.Defaults,
+				AllRootFoldersChecked: true,
+				AllExtensionsChecked: true,
+				RootSelectionInitialized: false,
+				RootSelectionCache: EmptyRootSelection,
+				ExtensionsSelectionInitialized: false,
+				ExtensionsSelectionCache: EmptyExtensionSelection,
+				IgnoreSelectionInitialized: false,
+				IgnoreSelectionCache: EmptyIgnoreSelection,
+				IgnoreOptionStateCache: EmptyIgnoreState,
+				IgnoreAllPreference: null,
+				CurrentSnapshotState: default,
+				CaptureTreeInventory: true);
+		}
+
+		var profile = localState.Profile;
+		var selectedRoots = request.SelectedRootFolders ?? profile.SelectedRootFolders;
+		var selectedExtensions = request.SelectedExtensions ?? profile.SelectedExtensions;
+		var selectedIgnoreOptions = request.SelectedIgnoreOptions ?? profile.SelectedIgnoreOptions;
+		var ignoreState = localState.IgnoreOptionsOverridden
+			? BuildExplicitIgnoreState(selectedIgnoreOptions)
+			: profile.IgnoreOptionStates ?? EmptyIgnoreState;
+
+		// The three settings islands share one snapshot contract. Complete modern maps
+		// preserve every known checkbox and let genuinely new rows use current defaults;
+		// explicit CLI overrides remain exact and never mutate the persisted profile.
+		return new SelectionRefreshContext(
+			Path: rootPath,
+			PreparedSelectionMode: PreparedSelectionMode.Profile,
+			AllRootFoldersChecked: false,
+			AllExtensionsChecked: false,
+			RootSelectionInitialized: true,
+			RootSelectionCache: selectedRoots.ToHashSet(PathComparer.Default),
+			ExtensionsSelectionInitialized: true,
+			ExtensionsSelectionCache: selectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
+			IgnoreSelectionInitialized: true,
+			IgnoreSelectionCache: selectedIgnoreOptions.ToHashSet(),
+			IgnoreOptionStateCache: ignoreState,
+			IgnoreAllPreference: null,
+			CurrentSnapshotState: default,
+			RootOptionStateCache: localState.RootsOverridden ? null : profile.RootFolderStates,
+			ExtensionOptionStateCache: localState.ExtensionsOverridden ? null : profile.ExtensionStates,
+			IgnoreOptionStateCacheIsComplete:
+				localState.IgnoreOptionsOverridden || profile.IgnoreOptionStates is not null,
+			CaptureTreeInventory: true,
+			RootSelectionIsExplicit: localState.RootsOverridden,
+			ExtensionSelectionIsExplicit: localState.ExtensionsOverridden);
+	}
+
+	private static IReadOnlyDictionary<IgnoreOptionId, bool> BuildExplicitIgnoreState(
+		IReadOnlyCollection<IgnoreOptionId> selectedOptions)
+	{
+		var selected = selectedOptions.ToHashSet();
+		return Enum.GetValues<IgnoreOptionId>()
+			.ToDictionary(static option => option, selected.Contains);
 	}
 
 	private static IReadOnlyList<string> GetVisibleRootFolderNames(TreeNodeDescriptor root)
@@ -461,13 +529,15 @@ public sealed class ProjectAnalysisService(
 
 	private static IEnumerable<string> BuildWarnings(LoadedProjectAnalysisRequest request)
 	{
-		foreach (var root in request.SelectedRootFolders)
+		var requestedRoots = request.RequestedRootFoldersForDiagnostics ?? request.SelectedRootFolders;
+		foreach (var root in requestedRoots)
 		{
 			if (!request.AvailableRootFolders.Contains(root, PathComparer.Default))
 				yield return $"Selected root folder was not found in the current project: {root}";
 		}
 
-		foreach (var extension in request.SelectedExtensions)
+		var requestedExtensions = request.RequestedExtensionsForDiagnostics ?? request.SelectedExtensions;
+		foreach (var extension in requestedExtensions)
 		{
 			if (!request.AvailableExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
 				yield return $"Selected extension was not found in the current project: {extension}";
@@ -480,8 +550,8 @@ public sealed class ProjectAnalysisService(
 			return [];
 
 		return rootFolders
+			// Root folder names come from the filesystem. Do not trim legal POSIX names.
 			.Where(static value => !string.IsNullOrWhiteSpace(value))
-			.Select(static value => value.Trim())
 			.Distinct(PathComparer.Default)
 			.OrderBy(static value => value, PathComparer.Default)
 			.ToArray();
@@ -535,7 +605,10 @@ public sealed record ProjectAnalysisRequest(
 	string RootPath,
 	IReadOnlyCollection<string>? SelectedRootFolders = null,
 	IReadOnlyCollection<string>? SelectedExtensions = null,
-	IReadOnlyCollection<IgnoreOptionId>? SelectedIgnoreOptions = null);
+	IReadOnlyCollection<IgnoreOptionId>? SelectedIgnoreOptions = null)
+{
+	internal LocalProjectSelectionState? LocalProfileState { get; init; }
+}
 
 public sealed record LoadedProjectAnalysisRequest(
 	string RootPath,
@@ -550,4 +623,9 @@ public sealed record LoadedProjectAnalysisRequest(
 	TimeSpan? KnownLoadingElapsed = null,
 	int DiscoveredGitTrackedIndexCount = 0,
 	int UnavailableGitTrackedIndexCount = 0,
-	ProjectTreeInventorySnapshot? TreeInventory = null);
+	ProjectTreeInventorySnapshot? TreeInventory = null)
+{
+	internal IReadOnlyCollection<string>? RequestedRootFoldersForDiagnostics { get; init; }
+	internal IReadOnlyCollection<string>? RequestedExtensionsForDiagnostics { get; init; }
+	internal IReadOnlyDictionary<IgnoreOptionId, bool>? ResolvedIgnoreOptionStates { get; init; }
+}

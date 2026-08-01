@@ -5,6 +5,7 @@ namespace DevProjex.Terminal.Execution;
 public sealed record TerminalServices(
 	LocalizationService Localization,
 	ProjectAnalysisService AnalysisService,
+	IgnoreRulesService IgnoreRulesService,
 	ProjectContextPlanner ContextPlanner,
 	TerminalProjectContextFactory ContextFactory,
 	ProjectSourceIdentityResolver SourceIdentityResolver,

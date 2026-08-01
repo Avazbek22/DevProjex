@@ -18,7 +18,8 @@ public sealed record SelectionRefreshSnapshot(
     ProjectTreeInventorySnapshot? TreeInventory = null,
     IReadOnlyList<SelectionOption>? VisibleExtensionOptions = null,
     GitWorkspaceEvidence GitEvidence = default,
-    IReadOnlySet<IgnoreOptionId>? SelectedIgnoreOptions = null)
+    IReadOnlySet<IgnoreOptionId>? SelectedIgnoreOptions = null,
+    IgnoreRules? EffectiveRules = null)
 {
     public IReadOnlyList<SelectionOption> EffectiveExtensionOptions =>
         VisibleExtensionOptions ?? ExtensionOptions;
