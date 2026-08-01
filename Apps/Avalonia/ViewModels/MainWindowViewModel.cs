@@ -33,7 +33,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     public const string TitleVersion = "4.9";
     public const string BaseTitle = "DevProjex v" + TitleVersion;
-    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v" + TitleVersion;
     public const double DefaultTreeFontSize = 15;
     public const double DefaultPreviewFontSize = 15;
 
@@ -130,7 +129,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _localization = localization;
         _helpContentProvider = helpContentProvider;
-        _title = BaseTitleWithAuthor;
+        _title = BaseTitle;
         _allExtensionsChecked = true;
         _allRootFoldersChecked = true;
         _allIgnoreChecked = true;

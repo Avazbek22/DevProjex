@@ -1369,7 +1369,7 @@ public partial class MainWindow : Window
         string? currentProjectDisplayName)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
-            return MainWindowViewModel.BaseTitleWithAuthor;
+            return MainWindowViewModel.BaseTitle;
 
         if (isGitMode && !string.IsNullOrEmpty(currentRepositoryUrl))
         {

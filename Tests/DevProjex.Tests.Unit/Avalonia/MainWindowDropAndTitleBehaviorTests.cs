@@ -78,13 +78,13 @@ public sealed class MainWindowDropAndTitleBehaviorTests
     }
 
     [Fact]
-    public void BuildWindowTitle_NoProjectLoaded_UsesBaseTitleWithAuthor()
+    public void BuildWindowTitle_NoProjectLoaded_UsesBaseTitle()
     {
         var method = GetPrivateStaticMethod("BuildWindowTitle");
 
         var title = (string)method.Invoke(null, [null, false, null, null, null])!;
 
-        Assert.Equal(MainWindowViewModel.BaseTitleWithAuthor, title);
+        Assert.Equal(MainWindowViewModel.BaseTitle, title);
     }
 
     [Fact]
