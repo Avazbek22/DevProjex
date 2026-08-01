@@ -11,6 +11,9 @@
     <AssemblyTitle>DevProjex</AssemblyTitle>
     <Product>DevProjex</Product>
     <RootNamespace>DevProjex.Avalonia</RootNamespace>
+    <!-- Branch switches can leave ignored bin/obj output under the former nested project
+         directory. Exclude that legacy root so generated sources can never be compiled twice. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);DevProjex.Avalonia/**</DefaultItemExcludes>
     <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'=='' and '$(Configuration)'=='ReleaseStore'">false</EnableProjectLoadTiming>
     <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'=='' and '$(PublishSingleFile)'=='true'">false</EnableProjectLoadTiming>
     <EnableProjectLoadTiming Condition="'$(EnableProjectLoadTiming)'==''">true</EnableProjectLoadTiming>

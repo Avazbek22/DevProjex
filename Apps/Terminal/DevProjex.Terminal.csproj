@@ -4,6 +4,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>DevProjex.Terminal</RootNamespace>
+    <!-- Branch switches can leave ignored bin/obj output under the former nested project
+         directory. Exclude that legacy root so generated sources can never be compiled twice. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);DevProjex.Terminal/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
