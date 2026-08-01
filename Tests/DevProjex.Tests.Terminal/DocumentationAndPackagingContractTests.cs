@@ -312,7 +312,33 @@ public sealed class DocumentationAndPackagingContractTests
 			completionStep,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"DEVPROJEX_REQUIRED_COMPLETION_SHELLS",
+			"DEVPROJEX_COMPLETION_SHELLS",
+			completionStep,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"rid = 'win-x64'; binary = 'DevProjex.exe'; " +
+			"completion_shells = 'bash,powershell'",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"rid = 'win-arm64'; binary = 'DevProjex.exe'; " +
+			"completion_shells = 'powershell'",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"completion_shells = 'bash,zsh,fish,powershell'",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"completion_shells = 'zsh,powershell'",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"${{ matrix.completion_shells }}",
+			completionStep,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Completion shell matrix is missing for ${{ matrix.rid }}.",
 			completionStep,
 			StringComparison.Ordinal);
 		Assert.Contains(

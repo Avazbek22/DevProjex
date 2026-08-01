@@ -7,8 +7,8 @@ namespace DevProjex.Tests.Terminal;
 public sealed class GeneratedCompletionNativeShellIntegrationTests
 {
 	private const string CompletionLine = "devprojex analyze . --format ";
-	private const string RequiredShellsVariable =
-		"DEVPROJEX_REQUIRED_COMPLETION_SHELLS";
+	private const string CompletionShellsVariable =
+		"DEVPROJEX_COMPLETION_SHELLS";
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
 	[Theory]
@@ -18,6 +18,7 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 	[InlineData("powershell")]
 	public async Task GeneratedScriptLoadsAndCompletesAgainstUnifiedHost(string shell)
 	{
+		SkipShellOutsideConfiguredMatrix(shell);
 		var shellExecutable = ResolveShellOrSkip(shell);
 		using var workspace = new TemporaryDirectory();
 		await EnsureShellCanExecuteWindowsHostOrSkipAsync(
@@ -507,7 +508,7 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		string reason)
 	{
 		if (IsRequiredCompletionShell(shell))
-			Assert.Fail($"{reason} The shell is required by {RequiredShellsVariable}.");
+			Assert.Fail($"{reason} The shell is required by {CompletionShellsVariable}.");
 		Assert.Skip(reason);
 	}
 
@@ -819,22 +820,44 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		if (IsRequiredCompletionShell(shell))
 		{
 			Assert.Fail(
-				$"{shell} is required by {RequiredShellsVariable} but is not installed " +
+				$"{shell} is required by {CompletionShellsVariable} but is not installed " +
 				"or cannot be resolved through PATH.");
 		}
 		Assert.Skip($"{shell} is not installed on this test host.");
 		return string.Empty;
 	}
 
+	private static void SkipShellOutsideConfiguredMatrix(string shell)
+	{
+		var configuredShells = GetConfiguredCompletionShells();
+		if (configuredShells is null || configuredShells.Contains(shell))
+			return;
+
+		// CI owns a deterministic platform matrix; incidental tools installed on a
+		// runner must not silently become release requirements. Local runs without
+		// the variable still exercise every shell that can be resolved through PATH.
+		Assert.Skip(
+			$"{shell} is not selected by the {CompletionShellsVariable} release matrix.");
+	}
+
 	private static bool IsRequiredCompletionShell(string shell)
 	{
-		var required = Environment.GetEnvironmentVariable(RequiredShellsVariable);
-		return !string.IsNullOrWhiteSpace(required) &&
-		       required.Split(
-				       [',', ';'],
-				       StringSplitOptions.RemoveEmptyEntries |
-				       StringSplitOptions.TrimEntries)
-			       .Contains(shell, StringComparer.OrdinalIgnoreCase);
+		var configuredShells = GetConfiguredCompletionShells();
+		return configuredShells is not null && configuredShells.Contains(shell);
+	}
+
+	private static HashSet<string>? GetConfiguredCompletionShells()
+	{
+		var configured = Environment.GetEnvironmentVariable(CompletionShellsVariable);
+		if (string.IsNullOrWhiteSpace(configured))
+			return null;
+
+		return configured
+			.Split(
+				[',', ';'],
+				StringSplitOptions.RemoveEmptyEntries |
+				StringSplitOptions.TrimEntries)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
 	}
 
 	private static bool TryResolveExecutable(
