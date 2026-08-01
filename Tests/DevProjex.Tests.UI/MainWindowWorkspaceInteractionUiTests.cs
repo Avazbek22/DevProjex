@@ -193,6 +193,93 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
     [AvaloniaFact]
+    public async Task TreeChevron_RotatesSingleGeometryAndReturnsToCollapsedState()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var folderNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "src",
+                    StringComparison.Ordinal));
+            var chevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, folderNode));
+            var chevronPath = Assert.Single(
+                chevron.GetVisualDescendants().OfType<global::Avalonia.Controls.Shapes.Path>(),
+                path => path.Name == "ChevronPath");
+            var transition = Assert.IsType<global::Avalonia.Animation.TransformOperationsTransition>(
+                Assert.Single(chevronPath.Transitions!));
+            var collapsedGeometry = chevronPath.Data;
+            var collapsedTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
+
+            Assert.Equal(TimeSpan.FromMilliseconds(140), transition.Duration);
+            Assert.Equal(Visual.RenderTransformProperty, transition.Property);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => folderNode.IsExpanded,
+                "tree folder to expand from its animated chevron");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => IsQuarterTurn(
+                    chevronPath.RenderTransform?.Value ?? Matrix.Identity),
+                "tree chevron rotation to reach its expanded angle");
+
+            var expandedTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
+            Assert.NotEqual(collapsedTransform, expandedTransform);
+            Assert.Same(collapsedGeometry, chevronPath.Data);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !folderNode.IsExpanded,
+                "tree folder to collapse from its animated chevron");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => AreMatricesClose(
+                    collapsedTransform,
+                    chevronPath.RenderTransform?.Value ?? Matrix.Identity),
+                "tree chevron rotation to return to its collapsed angle");
+
+            var restoredTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
+            AssertMatricesClose(collapsedTransform, restoredTransform);
+            Assert.Same(collapsedGeometry, chevronPath.Data);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !folderNode.IsExpanded,
+                "rapidly toggled tree folder to keep the final collapsed state");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => AreMatricesClose(
+                    collapsedTransform,
+                    chevronPath.RenderTransform?.Value ?? Matrix.Identity),
+                "retargeted tree chevron rotation to return to its collapsed angle");
+
+            var retargetedTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
+            AssertMatricesClose(collapsedTransform, retargetedTransform);
+            Assert.Same(collapsedGeometry, chevronPath.Data);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task RecentProjects_AreFlushedOnClose_WhenImmediateSaveFails()
     {
         var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
@@ -916,5 +1003,32 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
         Assert.NotNull(method);
         method.Invoke(window, []);
+    }
+
+    private static void AssertMatricesClose(Matrix expected, Matrix actual)
+    {
+        Assert.True(
+            AreMatricesClose(expected, actual),
+            $"Expected transform {expected}, actual {actual}.");
+    }
+
+    private static bool AreMatricesClose(Matrix expected, Matrix actual)
+    {
+        const double tolerance = 0.001;
+        return Math.Abs(expected.M11 - actual.M11) <= tolerance &&
+               Math.Abs(expected.M12 - actual.M12) <= tolerance &&
+               Math.Abs(expected.M21 - actual.M21) <= tolerance &&
+               Math.Abs(expected.M22 - actual.M22) <= tolerance &&
+               Math.Abs(expected.M31 - actual.M31) <= tolerance &&
+               Math.Abs(expected.M32 - actual.M32) <= tolerance;
+    }
+
+    private static bool IsQuarterTurn(Matrix matrix)
+    {
+        const double tolerance = 0.001;
+        return Math.Abs(matrix.M11) <= tolerance &&
+               Math.Abs(matrix.M12 - 1.0) <= tolerance &&
+               Math.Abs(matrix.M21 + 1.0) <= tolerance &&
+               Math.Abs(matrix.M22) <= tolerance;
     }
 }

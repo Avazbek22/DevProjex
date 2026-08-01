@@ -31,6 +31,9 @@ public class ProjectTreeView : TreeView
 
 internal sealed class ProjectTreeViewItem : TreeViewItem
 {
+    private const string ChevronThemeResourceKey =
+        "DevProjexTreeExpandCollapseChevronTheme";
+
     private IDisposable? _chevronVisibilityBinding;
 
     protected override Type StyleKeyOverride => typeof(TreeViewItem);
@@ -45,12 +48,31 @@ internal sealed class ProjectTreeViewItem : TreeViewItem
         if (e.NameScope.Find<ToggleButton>(
                 "PART_ExpandCollapseChevron") is { } chevron)
         {
+            ApplyAnimatedChevronTheme(chevron);
+
             // Fluent derives chevron visibility from ItemsSource emptiness. A lazy node
             // intentionally has an empty source before expansion, so descriptor metadata
             // must own this property at local-binding priority across container recycling.
             _chevronVisibilityBinding = chevron.Bind(
                 IsVisibleProperty,
                 new Binding(nameof(TreeNodeViewModel.HasChildren)));
+        }
+    }
+
+    private static void ApplyAnimatedChevronTheme(ToggleButton chevron)
+    {
+        var application = global::Avalonia.Application.Current;
+        var themeVariant = application?.ActualThemeVariant ?? ThemeVariant.Light;
+        if (application?.TryFindResource(
+                ChevronThemeResourceKey,
+                themeVariant,
+                out var resource) == true &&
+            resource is ControlTheme theme)
+        {
+            // The Fluent TreeViewItem template assigns its chevron theme at template
+            // priority. A local value is required here so the lazy-node container can
+            // preserve Fluent behavior while replacing only the abrupt glyph swap.
+            chevron.Theme = theme;
         }
     }
 
