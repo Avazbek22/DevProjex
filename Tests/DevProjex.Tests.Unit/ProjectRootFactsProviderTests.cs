@@ -2,6 +2,53 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ProjectRootFactsProviderTests
 {
+	[Theory]
+	[InlineData(15)]
+	[InlineData(16)]
+	[InlineData(17)]
+	[InlineData(31)]
+	[InlineData(32)]
+	[InlineData(33)]
+	[InlineData(63)]
+	[InlineData(64)]
+	[InlineData(65)]
+	[InlineData(127)]
+	[InlineData(128)]
+	[InlineData(129)]
+	public void ProjectRootFacts_AdaptiveLookupBoundary_PreservesEveryQueryContract(int entryCount)
+	{
+		var files = Enumerable.Range(0, entryCount)
+			.Select(index => index switch
+			{
+				0 => new ProjectRootFileFact(".git", string.Empty),
+				1 => new ProjectRootFileFact(".gitignore", string.Empty),
+				_ => new ProjectRootFileFact($"marker-{index:D2}.Json", ".Json")
+			})
+			.ToArray();
+		var directories = Enumerable.Range(0, entryCount)
+			.Select(index => index == entryCount - 1
+				? new ProjectRootDirectoryFact("linked", "root/linked", IsReparsePoint: true)
+				: new ProjectRootDirectoryFact(
+					$"folder-{index:D2}",
+					Path.Combine("root", $"folder-{index:D2}"),
+					IsReparsePoint: false))
+			.ToArray();
+		var facts = new ProjectRootFacts("root", true, true, files, directories, null);
+
+		Assert.True(facts.HasFile("marker-02.Json"));
+		Assert.True(facts.HasMarkerFile("MARKER-02.JSON"));
+		Assert.True(facts.HasAnyMarkerFile(["missing", "MARKER-03.JSON"]));
+		Assert.True(facts.HasAnyFileExtension([".missing", ".JSON"]));
+		Assert.True(facts.HasDirectory("folder-00"));
+		Assert.True(facts.TryGetDirectory("folder-01", out var directory));
+		Assert.Equal("folder-01", directory.Name);
+		Assert.True(facts.HasAnyDirectoryName(["FOLDER-02"]));
+		Assert.False(facts.HasAnyDirectoryName(["LINKED"]));
+		Assert.True(facts.HasAnyDirectoryName(["LINKED"], includeReparsePoints: true));
+		Assert.True(facts.HasGitMetadataEntry);
+		Assert.True(facts.HasGitIgnoreFile);
+	}
+
 	[Fact]
 	public void Get_CapturesTopLevelFilesDirectoriesAndGitIgnoreSignature()
 	{

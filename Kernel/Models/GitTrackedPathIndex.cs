@@ -86,50 +86,33 @@ public sealed class GitTrackedPathIndex
 		}
 	}
 
-	internal bool IsPathInsideRepository(string fullPath) =>
-		TryGetRelativePath(fullPath, out _);
-
 	public bool Contains(string fullPath)
 	{
-		if (!TryGetRelativePath(fullPath, out var relativePath))
+		if (!TryGetNormalizedRelativePath(fullPath, out var relativePath))
 			return false;
 
-		return Array.BinarySearch(_trackedPaths, relativePath, _relativePathComparer) >= 0;
+		return ContainsNormalizedRelativePath(relativePath);
 	}
 
 	public bool HasDescendant(string directoryPath)
 	{
-		if (!TryGetRelativePath(directoryPath, out var relativePath))
+		if (!TryGetNormalizedRelativePath(directoryPath, out var relativePath))
 			return false;
 
-		if (relativePath.Length == 0)
-			return _trackedPaths.Length > 0;
-
-		var prefix = relativePath + "/";
-		var index = FindLowerBound(prefix);
-		return index < _trackedPaths.Length &&
-		       _trackedPaths[index].StartsWith(prefix, _relativePathComparison);
+		return HasDescendantNormalizedRelativePath(relativePath);
 	}
 
 	public bool ContainsOrHasDescendant(string directoryPath)
 	{
-		if (!TryGetRelativePath(directoryPath, out var relativePath))
+		if (!TryGetNormalizedRelativePath(directoryPath, out var relativePath))
 			return false;
 
-		if (relativePath.Length == 0)
-			return _trackedPaths.Length > 0;
-
-		var index = Array.BinarySearch(_trackedPaths, relativePath, _relativePathComparer);
-		if (index >= 0)
-			return true;
-
-		var prefix = relativePath + "/";
-		index = FindLowerBound(prefix);
-		return index < _trackedPaths.Length &&
-		       _trackedPaths[index].StartsWith(prefix, _relativePathComparison);
+		return ContainsOrHasDescendantNormalizedRelativePath(relativePath);
 	}
 
-	private bool TryGetRelativePath(string fullPath, out string relativePath)
+	// Scan contexts use this once to establish repository ownership. The returned key
+	// is the only form accepted by the internal probes below; callers must not pass raw paths.
+	internal bool TryGetNormalizedRelativePath(string fullPath, out string relativePath)
 	{
 		relativePath = string.Empty;
 		try
@@ -154,6 +137,29 @@ public sealed class GitTrackedPathIndex
 			relativePath = string.Empty;
 			return false;
 		}
+	}
+
+	internal bool ContainsNormalizedRelativePath(string relativePath) =>
+		Array.BinarySearch(_trackedPaths, relativePath, _relativePathComparer) >= 0;
+
+	internal bool HasDescendantNormalizedRelativePath(string relativePath)
+	{
+		if (relativePath.Length == 0)
+			return _trackedPaths.Length > 0;
+
+		var prefix = relativePath + "/";
+		var index = FindLowerBound(prefix);
+		return index < _trackedPaths.Length &&
+		       _trackedPaths[index].StartsWith(prefix, _relativePathComparison);
+	}
+
+	internal bool ContainsOrHasDescendantNormalizedRelativePath(string relativePath)
+	{
+		if (relativePath.Length == 0)
+			return _trackedPaths.Length > 0;
+
+		return ContainsNormalizedRelativePath(relativePath) ||
+		       HasDescendantNormalizedRelativePath(relativePath);
 	}
 
 	private int FindLowerBound(string value)

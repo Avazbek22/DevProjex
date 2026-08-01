@@ -110,6 +110,7 @@ public sealed class ProjectAnalysisService(
 					rootProjectionRules,
 					cancellationToken);
 				scan = scan with { RootFolders = allowedRootFolders };
+				rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
 			}
 			else
 			{
@@ -118,20 +119,46 @@ public sealed class ProjectAnalysisService(
 					rootPath,
 					discoveryRules,
 					cancellationToken);
-				var extensions = scanOptions.GetExtensionsForRootFolders(
-					rootPath,
-					allowedRootFolders,
-					discoveryRules,
-					cancellationToken);
-				scan = new ScanOptionsResult(
-					Extensions: extensions.Value
-						.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase)
-						.ToArray(),
-					RootFolders: rootFolders.Value,
-					RootAccessDenied: rootFolders.RootAccessDenied || extensions.RootAccessDenied,
-					HadAccessDenied: rootFolders.HadAccessDenied || extensions.HadAccessDenied);
+				rules = discoveryRules;
+				if (buildTree.SupportsCompositeInventory)
+				{
+					// Explicit CLI/TUI selections do not need the interactive convergence loop.
+					// Reuse one composite inventory for extension discovery and tree projection
+					// so the optimized path remains exact without scanning every file twice.
+					treeInventory = buildTree.ReadCompositeInventory(
+						rootPath,
+						allowedRootFolders.ToHashSet(PathComparer.Default),
+						discoveryRules,
+						rules,
+						cancellationToken);
+					var extensions = ProjectTreeInventoryExtensionDiscovery.GetVisibleExtensions(
+						treeInventory,
+						discoveryRules,
+						cancellationToken);
+					scan = new ScanOptionsResult(
+						Extensions: extensions
+							.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase)
+							.ToArray(),
+						RootFolders: rootFolders.Value,
+						RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
+						HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied);
+				}
+				else
+				{
+					var extensions = scanOptions.GetExtensionsForRootFolders(
+						rootPath,
+						allowedRootFolders,
+						discoveryRules,
+						cancellationToken);
+					scan = new ScanOptionsResult(
+						Extensions: extensions.Value
+							.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase)
+							.ToArray(),
+						RootFolders: rootFolders.Value,
+						RootAccessDenied: rootFolders.RootAccessDenied || extensions.RootAccessDenied,
+						HadAccessDenied: rootFolders.HadAccessDenied || extensions.HadAccessDenied);
+				}
 			}
-			rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
 		}
 
 		var allowedExtensions = request.SelectedExtensions is null

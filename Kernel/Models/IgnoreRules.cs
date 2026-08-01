@@ -1042,8 +1042,7 @@ public sealed record IgnoreRules(
 			string fullPath,
 			bool isDirectory)
 		{
-			var trackedPathIndex = _trackedPathIndexes?.Resolve(fullPath);
-			if (trackedPathIndex is null)
+			if (_trackedPathIndexes?.Resolve(fullPath) is not { } trackedPath)
 			{
 				// Outside a known repository, directories remain traversal-only containers
 				// so a workspace root can still discover repositories at any descendant depth.
@@ -1054,12 +1053,12 @@ public sealed record IgnoreRules(
 
 			if (!isDirectory)
 			{
-				return trackedPathIndex.Contains(fullPath)
+				return trackedPath.Index.ContainsNormalizedRelativePath(trackedPath.RelativePath)
 					? GitIgnoreEvaluation.NotIgnored
 					: new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: false);
 			}
 
-			if (trackedPathIndex.ContainsOrHasDescendant(fullPath))
+			if (trackedPath.Index.ContainsOrHasDescendantNormalizedRelativePath(trackedPath.RelativePath))
 				return GitIgnoreEvaluation.NotIgnored;
 
 			// Untracked directories are traversal-only containers. This lets the scanner
@@ -1078,21 +1077,20 @@ public sealed record IgnoreRules(
 			if (!evaluation.IsIgnored)
 				return evaluation;
 
-			var trackedPathIndex = _trackedPathIndexes?.Resolve(fullPath);
-			if (trackedPathIndex is null)
+			if (_trackedPathIndexes?.Resolve(fullPath) is not { } trackedPath)
 				return evaluation;
 
 			if (!isDirectory)
 			{
-				return trackedPathIndex.Contains(fullPath)
+				return trackedPath.Index.ContainsNormalizedRelativePath(trackedPath.RelativePath)
 					? GitIgnoreEvaluation.NotIgnored
 					: evaluation;
 			}
 
-			if (trackedPathIndex.Contains(fullPath))
+			if (trackedPath.Index.ContainsNormalizedRelativePath(trackedPath.RelativePath))
 				return GitIgnoreEvaluation.NotIgnored;
 
-			return trackedPathIndex.HasDescendant(fullPath)
+			return trackedPath.Index.HasDescendantNormalizedRelativePath(trackedPath.RelativePath)
 				? new GitIgnoreEvaluation(IsIgnored: true, ShouldTraverseIgnoredDirectory: true)
 				: evaluation;
 		}
@@ -1355,24 +1353,28 @@ public sealed record IgnoreRules(
 				return false;
 			}
 
-			public GitTrackedPathIndex? Resolve(string fullPath)
+			public ResolvedGitTrackedPath? Resolve(string fullPath)
 			{
-				GitTrackedPathIndex? bestMatch = null;
+				ResolvedGitTrackedPath? bestMatch = null;
 				for (var current = this; current is not null; current = current._parent)
 				{
 					var candidate = current._trackedPathIndex;
-					if (!candidate.IsPathInsideRepository(fullPath))
+					if (!candidate.TryGetNormalizedRelativePath(fullPath, out var relativePath))
 						continue;
 					if (bestMatch is null ||
-					    candidate.RepositoryRootPath.Length > bestMatch.RepositoryRootPath.Length)
+					    candidate.RepositoryRootPath.Length > bestMatch.Value.Index.RepositoryRootPath.Length)
 					{
-						bestMatch = candidate;
+						bestMatch = new ResolvedGitTrackedPath(candidate, relativePath);
 					}
 				}
 
 				return bestMatch;
 			}
 		}
+
+		private readonly record struct ResolvedGitTrackedPath(
+			GitTrackedPathIndex Index,
+			string RelativePath);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]

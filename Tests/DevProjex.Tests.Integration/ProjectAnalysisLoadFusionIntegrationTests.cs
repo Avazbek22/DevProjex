@@ -8,7 +8,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 	public async Task Load_ExplicitSelectionCanonicalPipelineIsDeterministicAcrossSelectionMatrix()
 	{
 		using var temp = CreateMixedWorkspace();
-		var firstService = CreateService(new FileSystemScanner(), new TreeBuilder());
+		var firstService = CreateService(new FileSystemScanner(), new DirectOnlyTreeBuilder());
 		var secondService = CreateService(new FileSystemScanner(), new TreeBuilder());
 		var requests = new ProjectAnalysisRequest[]
 		{
@@ -225,7 +225,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 	}
 
 	[Fact]
-	public void Load_ExplicitRootSelectionKeepsLegacyBoundedInventoryPath()
+	public void Load_ExplicitRootSelectionReusesCompositeInventory()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("src/App.cs", "class App {}\n");
@@ -241,9 +241,9 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Single(loaded.Tree.OrderedFilePaths!);
-		Assert.Equal(1, treeBuilder.DirectBuildCount);
-		Assert.Equal(0, treeBuilder.CompositeInventoryReadCount);
-		Assert.Equal(0, treeBuilder.InventoryProjectionCount);
+		Assert.Equal(0, treeBuilder.DirectBuildCount);
+		Assert.Equal(1, treeBuilder.CompositeInventoryReadCount);
+		Assert.Equal(1, treeBuilder.InventoryProjectionCount);
 	}
 
 	[Fact]
@@ -522,6 +522,17 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 			InventoryProjectionCount++;
 			return _inner.Build(inventory, options, cancellationToken);
 		}
+	}
+
+	private sealed class DirectOnlyTreeBuilder : ITreeBuilder
+	{
+		private readonly TreeBuilder _inner = new();
+
+		public TreeBuildResult Build(
+			string rootPath,
+			TreeFilterOptions options,
+			CancellationToken cancellationToken = default) =>
+			_inner.Build(rootPath, options, cancellationToken);
 	}
 
 	private sealed class TestLocalizationCatalog : ILocalizationCatalog

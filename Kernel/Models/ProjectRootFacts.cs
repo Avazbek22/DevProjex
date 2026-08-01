@@ -4,19 +4,17 @@ namespace DevProjex.Kernel.Models;
 
 public sealed class ProjectRootFacts
 {
-	private static readonly FrozenSet<string> EmptyPathNameSet =
-		Array.Empty<string>().ToFrozenSet(PathComparer.Default);
+	// Most project roots contain only a handful of entries. Below this benchmark-backed
+	// threshold, linear probes cost less than constructing and retaining six frozen indexes.
+	private const int IndexedLookupThreshold = 128;
 
-	private static readonly FrozenSet<string> EmptyMarkerNameSet =
-		Array.Empty<string>().ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-
-	private readonly FrozenSet<string> _fileNames;
-	private readonly FrozenSet<string> _markerFileNames;
-	private readonly FrozenSet<string> _fileExtensions;
-	private readonly FrozenSet<string> _directoryNames;
-	private readonly FrozenSet<string> _markerDirectoryNames;
-	private readonly FrozenSet<string> _nonReparseMarkerDirectoryNames;
-	private readonly FrozenDictionary<string, ProjectRootDirectoryFact> _directoriesByName;
+	private readonly FrozenSet<string>? _fileNames;
+	private readonly FrozenSet<string>? _markerFileNames;
+	private readonly FrozenSet<string>? _fileExtensions;
+	private readonly FrozenSet<string>? _directoryNames;
+	private readonly FrozenSet<string>? _markerDirectoryNames;
+	private readonly FrozenSet<string>? _nonReparseMarkerDirectoryNames;
+	private readonly FrozenDictionary<string, ProjectRootDirectoryFact>? _directoriesByName;
 	private readonly bool _hasGitMetadataEntry;
 	private readonly bool _hasGitIgnoreFile;
 
@@ -35,38 +33,39 @@ public sealed class ProjectRootFacts
 		Directories = directories;
 		GitIgnoreSignature = gitIgnoreSignature;
 
-		_fileNames = files.Count == 0
-			? EmptyPathNameSet
-			: files.Select(static file => file.Name).ToFrozenSet(PathComparer.Default);
-		_markerFileNames = files.Count == 0
-			? EmptyMarkerNameSet
-			: files.Select(static file => file.Name).ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-		_fileExtensions = files.Count == 0
-			? EmptyMarkerNameSet
-			: files
+		if (files.Count >= IndexedLookupThreshold)
+		{
+			_fileNames = files.Select(static file => file.Name).ToFrozenSet(PathComparer.Default);
+			_markerFileNames = files.Select(static file => file.Name).ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+			_fileExtensions = files
 				.Select(static file => file.Extension)
 				.Where(static extension => !string.IsNullOrWhiteSpace(extension))
 				.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-		_directoryNames = directories.Count == 0
-			? EmptyPathNameSet
-			: directories.Select(static directory => directory.Name).ToFrozenSet(PathComparer.Default);
-		_markerDirectoryNames = directories.Count == 0
-			? EmptyMarkerNameSet
-			: directories.Select(static directory => directory.Name).ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-		_nonReparseMarkerDirectoryNames = directories.Count == 0
-			? EmptyMarkerNameSet
-			: directories
+		}
+
+		if (directories.Count >= IndexedLookupThreshold)
+		{
+			_directoryNames = directories
+				.Select(static directory => directory.Name)
+				.ToFrozenSet(PathComparer.Default);
+			_markerDirectoryNames = directories
+				.Select(static directory => directory.Name)
+				.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+			_nonReparseMarkerDirectoryNames = directories
 				.Where(static directory => !directory.IsReparsePoint)
 				.Select(static directory => directory.Name)
 				.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-		_directoriesByName = directories.Count == 0
-			? FrozenDictionary<string, ProjectRootDirectoryFact>.Empty
-			: directories
-				.GroupBy(static directory => directory.Name, PathComparer.Default)
-				.ToFrozenDictionary(
-					static group => group.Key,
-					static group => group.First(),
-					PathComparer.Default);
+
+			// Filesystems cannot normally expose duplicate sibling names, but synthetic
+			// facts and transient observations can. Preserve the former first-entry contract.
+			var directoriesByName = new Dictionary<string, ProjectRootDirectoryFact>(
+				directories.Count,
+				PathComparer.Default);
+			foreach (var directory in directories)
+				directoriesByName.TryAdd(directory.Name, directory);
+			_directoriesByName = directoriesByName.ToFrozenDictionary(PathComparer.Default);
+		}
+
 		var hasGitMetadataEntry = false;
 		for (var index = 0; index < files.Count; index++)
 		{
@@ -74,11 +73,8 @@ public sealed class ProjectRootFacts
 			if (!file.IsReparsePoint && PathComparer.Default.Equals(file.Name, ".gitignore"))
 				_hasGitIgnoreFile = true;
 
-			if (file.IsReparsePoint || !PathComparer.Default.Equals(file.Name, ".git"))
-				continue;
-
-			hasGitMetadataEntry = true;
-			break;
+			if (!file.IsReparsePoint && PathComparer.Default.Equals(file.Name, ".git"))
+				hasGitMetadataEntry = true;
 		}
 
 		if (!hasGitMetadataEntry)
@@ -136,10 +132,10 @@ public sealed class ProjectRootFacts
 			gitIgnoreSignature: null);
 
 	public bool HasFile(string fileName) =>
-		!string.IsNullOrWhiteSpace(fileName) && _fileNames.Contains(fileName);
+		!string.IsNullOrWhiteSpace(fileName) && ContainsFileName(fileName, markerComparison: false);
 
 	public bool HasMarkerFile(string fileName) =>
-		!string.IsNullOrWhiteSpace(fileName) && _markerFileNames.Contains(fileName);
+		!string.IsNullOrWhiteSpace(fileName) && ContainsFileName(fileName, markerComparison: true);
 
 	public bool HasAnyMarkerFile(IEnumerable<string> fileNames)
 	{
@@ -156,7 +152,7 @@ public sealed class ProjectRootFacts
 	{
 		foreach (var extension in extensions)
 		{
-			if (!string.IsNullOrWhiteSpace(extension) && _fileExtensions.Contains(extension))
+			if (!string.IsNullOrWhiteSpace(extension) && ContainsFileExtension(extension))
 				return true;
 		}
 
@@ -164,7 +160,10 @@ public sealed class ProjectRootFacts
 	}
 
 	public bool HasDirectory(string directoryName) =>
-		!string.IsNullOrWhiteSpace(directoryName) && _directoryNames.Contains(directoryName);
+		!string.IsNullOrWhiteSpace(directoryName) && ContainsDirectoryName(
+			directoryName,
+			markerComparison: false,
+			includeReparsePoints: true);
 
 	public bool TryGetDirectory(string directoryName, out ProjectRootDirectoryFact directory)
 	{
@@ -174,17 +173,85 @@ public sealed class ProjectRootFacts
 			return false;
 		}
 
-		return _directoriesByName.TryGetValue(directoryName, out directory);
+		if (_directoriesByName is not null)
+			return _directoriesByName.TryGetValue(directoryName, out directory);
+
+		for (var index = 0; index < Directories.Count; index++)
+		{
+			var candidate = Directories[index];
+			if (!PathComparer.Default.Equals(candidate.Name, directoryName))
+				continue;
+
+			directory = candidate;
+			return true;
+		}
+
+		directory = default;
+		return false;
 	}
 
 	public bool HasAnyDirectoryName(IEnumerable<string> directoryNames, bool includeReparsePoints = false)
 	{
-		var availableNames = includeReparsePoints
-			? _markerDirectoryNames
-			: _nonReparseMarkerDirectoryNames;
 		foreach (var directoryName in directoryNames)
-			if (!string.IsNullOrWhiteSpace(directoryName) && availableNames.Contains(directoryName))
+			if (!string.IsNullOrWhiteSpace(directoryName) &&
+			    ContainsDirectoryName(
+				    directoryName,
+				    markerComparison: true,
+				    includeReparsePoints))
 				return true;
+
+		return false;
+	}
+
+	private bool ContainsFileName(string fileName, bool markerComparison)
+	{
+		var index = markerComparison ? _markerFileNames : _fileNames;
+		if (index is not null)
+			return index.Contains(fileName);
+
+		var comparer = markerComparison ? StringComparer.OrdinalIgnoreCase : PathComparer.Default;
+		for (var position = 0; position < Files.Count; position++)
+			if (comparer.Equals(Files[position].Name, fileName))
+				return true;
+		return false;
+	}
+
+	private bool ContainsFileExtension(string extension)
+	{
+		if (_fileExtensions is not null)
+			return _fileExtensions.Contains(extension);
+
+		for (var index = 0; index < Files.Count; index++)
+			if (StringComparer.OrdinalIgnoreCase.Equals(Files[index].Extension, extension))
+				return true;
+		return false;
+	}
+
+	private bool ContainsDirectoryName(
+		string directoryName,
+		bool markerComparison,
+		bool includeReparsePoints)
+	{
+		var index = markerComparison
+			? includeReparsePoints
+				? _markerDirectoryNames
+				: _nonReparseMarkerDirectoryNames
+			: _directoryNames;
+		if (index is not null)
+			return index.Contains(directoryName);
+
+		var comparer = markerComparison ? StringComparer.OrdinalIgnoreCase : PathComparer.Default;
+		for (var position = 0; position < Directories.Count; position++)
+		{
+			var directory = Directories[position];
+			if ((!includeReparsePoints && directory.IsReparsePoint) ||
+			    !comparer.Equals(directory.Name, directoryName))
+			{
+				continue;
+			}
+
+			return true;
+		}
 
 		return false;
 	}
