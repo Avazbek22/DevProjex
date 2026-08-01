@@ -1,5 +1,6 @@
 using DevProjex.Avalonia.Collections;
 using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
 namespace DevProjex.Avalonia.ViewModels;
 
@@ -69,6 +70,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _allRootFoldersChecked;
     private bool _allIgnoreChecked;
     private bool _isDarkTheme = true;
+    private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
     private bool _isTreeAnimationEnabled;
     private bool _filterVisible;
@@ -562,6 +564,29 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsLightTheme => !_isDarkTheme;
+
+    public ThemeSelectionMode SelectedThemeMode
+    {
+        get => _selectedThemeMode;
+        set
+        {
+            if (_selectedThemeMode != value)
+            {
+                _selectedThemeMode = value;
+                RaisePropertyChanged();
+            }
+
+            // The selector uses checkbox visuals. Re-publish the derived values so clicking
+            // the already selected item cannot leave its local checked state toggled off.
+            RaisePropertyChanged(nameof(IsSystemThemeSelected));
+            RaisePropertyChanged(nameof(IsLightThemeSelected));
+            RaisePropertyChanged(nameof(IsDarkThemeSelected));
+        }
+    }
+
+    public bool IsSystemThemeSelected => _selectedThemeMode == ThemeSelectionMode.System;
+    public bool IsLightThemeSelected => _selectedThemeMode == ThemeSelectionMode.Light;
+    public bool IsDarkThemeSelected => _selectedThemeMode == ThemeSelectionMode.Dark;
 
     public bool IsCompactMode
     {
@@ -1386,6 +1411,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string HelpAboutCopyLink { get; private set; } = string.Empty;
     public string MenuTheme { get; private set; } = string.Empty;
     public string ThemeModeLabel { get; private set; } = string.Empty;
+    public string ThemeSystemLabel { get; private set; } = string.Empty;
     public string ThemeEffectsLabel { get; private set; } = string.Empty;
     public string ThemeLightLabel { get; private set; } = string.Empty;
     public string ThemeDarkLabel { get; private set; } = string.Empty;
@@ -1626,6 +1652,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // Theme popover localization
         MenuTheme = _localization["Menu.Theme"];
         ThemeModeLabel = _localization["Theme.ModeLabel"];
+        ThemeSystemLabel = _localization["Theme.System"];
         ThemeEffectsLabel = _localization["Theme.EffectsLabel"];
         ThemeLightLabel = _localization["Theme.Light"];
         ThemeDarkLabel = _localization["Theme.Dark"];
@@ -1739,6 +1766,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // Theme popover localization
         RaisePropertyChanged(nameof(MenuTheme));
         RaisePropertyChanged(nameof(ThemeModeLabel));
+        RaisePropertyChanged(nameof(ThemeSystemLabel));
         RaisePropertyChanged(nameof(ThemeEffectsLabel));
         RaisePropertyChanged(nameof(ThemeLightLabel));
         RaisePropertyChanged(nameof(ThemeDarkLabel));

@@ -2,17 +2,20 @@ using DevProjex.Application;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Infrastructure.TerminalCommands;
-using ThemePresetVariant = DevProjex.Infrastructure.ThemePresets.ThemeVariant;
+using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
 namespace DevProjex.Avalonia;
 
 public partial class MainWindow
 {
+    private void OnSetSystemTheme(object? sender, RoutedEventArgs e)
+        => _appearanceSettings.SetTheme(ThemeSelectionMode.System);
+
     private void OnSetLightTheme(object? sender, RoutedEventArgs e)
-        => _appearanceSettings.SetTheme(ThemePresetVariant.Light);
+        => _appearanceSettings.SetTheme(ThemeSelectionMode.Light);
 
     private void OnSetDarkTheme(object? sender, RoutedEventArgs e)
-        => _appearanceSettings.SetTheme(ThemePresetVariant.Dark);
+        => _appearanceSettings.SetTheme(ThemeSelectionMode.Dark);
 
     private void OnToggleCompactMode(object? sender, RoutedEventArgs e)
         => _appearanceSettings.ToggleCompactMode();
@@ -23,6 +26,12 @@ public partial class MainWindow
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
     {
         _appearanceSettings.ToggleThemePopover();
+        e.Handled = true;
+    }
+
+    private void OnSetSystemThemeCheckbox(object? sender, RoutedEventArgs e)
+    {
+        OnSetSystemTheme(sender, e);
         e.Handled = true;
     }
 

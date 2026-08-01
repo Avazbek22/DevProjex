@@ -50,6 +50,7 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? AboutCopyLinkRequested;
     public event EventHandler<RoutedEventArgs>? ResetSettingsRequested;
     public event EventHandler<RoutedEventArgs>? ResetDataRequested;
+    public event EventHandler<RoutedEventArgs>? SetSystemThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetLightThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetDarkThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetTransparentModeRequested;
@@ -242,6 +243,7 @@ public partial class TopMenuBarView : UserControl
 
         if (ThemePopover is not null)
         {
+            ThemePopover.SetSystemThemeRequested += OnThemePopoverSetSystemThemeRequested;
             ThemePopover.SetLightThemeRequested += OnThemePopoverSetLightThemeRequested;
             ThemePopover.SetDarkThemeRequested += OnThemePopoverSetDarkThemeRequested;
             ThemePopover.SetTransparentModeRequested += OnThemePopoverSetTransparentModeRequested;
@@ -278,6 +280,7 @@ public partial class TopMenuBarView : UserControl
 
         if (ThemePopover is not null)
         {
+            ThemePopover.SetSystemThemeRequested -= OnThemePopoverSetSystemThemeRequested;
             ThemePopover.SetLightThemeRequested -= OnThemePopoverSetLightThemeRequested;
             ThemePopover.SetDarkThemeRequested -= OnThemePopoverSetDarkThemeRequested;
             ThemePopover.SetTransparentModeRequested -= OnThemePopoverSetTransparentModeRequested;
@@ -306,6 +309,9 @@ public partial class TopMenuBarView : UserControl
 
         _ownedControlHandlersAttached = false;
     }
+
+    private void OnThemePopoverSetSystemThemeRequested(object? sender, RoutedEventArgs e)
+        => SetSystemThemeRequested?.Invoke(this, e);
 
     private void OnThemePopoverSetLightThemeRequested(object? sender, RoutedEventArgs e)
         => SetLightThemeRequested?.Invoke(this, e);

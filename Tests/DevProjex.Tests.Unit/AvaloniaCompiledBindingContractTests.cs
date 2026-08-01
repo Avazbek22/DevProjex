@@ -171,6 +171,35 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void ThemePopover_ExposesSystemLightAndDarkAsExclusiveSelectionBindings()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia",
+			"Views",
+			"ThemePopoverView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var selectionBindings = root
+			.Descendants(avaloniaNamespace + "CheckBox")
+			.Select(element => element.Attribute("IsChecked")?.Value)
+			.Where(value => value?.Contains("ThemeSelected", StringComparison.Ordinal) == true)
+			.OfType<string>()
+			.ToArray();
+
+		Assert.Equal(
+			[
+				"{Binding IsSystemThemeSelected, Mode=OneWay}",
+				"{Binding IsLightThemeSelected, Mode=OneWay}",
+				"{Binding IsDarkThemeSelected, Mode=OneWay}"
+			],
+			selectionBindings);
+	}
+
+	[Fact]
 	public void ThemeStyles_MainMenuUsesDedicatedPopupBrushAtEveryDepth()
 	{
 		var styleFile = Path.Combine(

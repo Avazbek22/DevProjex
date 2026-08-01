@@ -221,6 +221,7 @@
                           AboutCopyLinkRequested="OnAboutCopyLink"
                           ResetSettingsRequested="OnResetSettings"
                           ResetDataRequested="OnResetData"
+                          SetSystemThemeRequested="OnSetSystemThemeCheckbox"
                           SetLightThemeRequested="OnSetLightThemeCheckbox"
                           SetDarkThemeRequested="OnSetDarkThemeCheckbox"
                           SetTransparentModeRequested="OnSetTransparentMode"

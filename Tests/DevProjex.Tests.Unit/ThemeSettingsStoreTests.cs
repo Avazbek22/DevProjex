@@ -44,6 +44,9 @@ public sealed class ThemeSettingsStoreTests
         Assert.Equal(menuTransparency, preset.MenuTransparency);
         Assert.Equal(borderVisibility, preset.BorderVisibility);
         Assert.Equal("Dark.Acrylic", document.SelectedPreset);
+        Assert.Equal(ThemeSelectionMode.System, document.SelectedThemeMode);
+        Assert.Equal(ThemeEffectMode.Solid, document.LightThemeEffect);
+        Assert.Equal(ThemeEffectMode.Acrylic, document.DarkThemeEffect);
         Assert.Equal(ThemeSettingsStore.CurrentSchemaVersion, document.SchemaVersion);
         Assert.Equal(ThemeSettingsStore.CurrentDefaultsRevision, document.DefaultsRevision);
     }
@@ -66,6 +69,9 @@ public sealed class ThemeSettingsStoreTests
         Assert.DoesNotContain("borderStrength", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"theme\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"effect\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"selectedThemeMode\": \"system\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"lightThemeEffect\": \"solid\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"darkThemeEffect\": \"acrylic\"", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -112,6 +118,7 @@ public sealed class ThemeSettingsStoreTests
 
     [Theory]
     [InlineData(0, ThemeSettingsStore.CurrentDefaultsRevision)]
+    [InlineData(1, 1)]
     [InlineData(ThemeSettingsStore.CurrentSchemaVersion, 0)]
     public void LoadForStartup_ObsoleteSchemaOrRevision_HardResetsEveryPreset(
         int schemaVersion,
@@ -133,6 +140,9 @@ public sealed class ThemeSettingsStoreTests
         var reset = store.LoadForStartup(TimeSpan.FromSeconds(1));
 
         Assert.Equal("Dark.Acrylic", reset.SelectedPreset);
+        Assert.Equal(ThemeSelectionMode.System, reset.SelectedThemeMode);
+        Assert.Equal(ThemeEffectMode.Solid, reset.LightThemeEffect);
+        Assert.Equal(ThemeEffectMode.Acrylic, reset.DarkThemeEffect);
         Assert.Equal(8, reset.Presets.Count);
         Assert.Equal(84.77564102564102, reset.Presets["Dark.Acrylic"].BackgroundTransparency);
         var persisted = JsonSerializer.Deserialize<ThemeSettingsDocument>(
@@ -277,6 +287,9 @@ public sealed class ThemeSettingsStoreTests
             SchemaVersion = ThemeSettingsStore.CurrentSchemaVersion,
             DefaultsRevision = ThemeSettingsStore.CurrentDefaultsRevision,
             SelectedPreset = "invalid",
+            SelectedThemeMode = (ThemeSelectionMode)999,
+            LightThemeEffect = (ThemeEffectMode)999,
+            DarkThemeEffect = (ThemeEffectMode)999,
             Presets = new Dictionary<string, ThemePreset>
             {
                 ["Dark.Acrylic"] = new ThemePreset
@@ -295,6 +308,9 @@ public sealed class ThemeSettingsStoreTests
         Assert.Equal(8, normalized.Presets.Count);
         Assert.DoesNotContain("Unknown.Future", normalized.Presets);
         Assert.Equal("Dark.Acrylic", normalized.SelectedPreset);
+        Assert.Equal(ThemeSelectionMode.System, normalized.SelectedThemeMode);
+        Assert.Equal(ThemeEffectMode.Solid, normalized.LightThemeEffect);
+        Assert.Equal(ThemeEffectMode.Acrylic, normalized.DarkThemeEffect);
         var acrylic = normalized.Presets["Dark.Acrylic"];
         Assert.Equal(0, acrylic.BackgroundTransparency);
         Assert.Equal(0, acrylic.PanelContrast);

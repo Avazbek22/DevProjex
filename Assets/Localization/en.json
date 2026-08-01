@@ -59,6 +59,7 @@
   "Menu.Theme": "Theme",
   "Theme.ModeLabel": "Theme mode",
   "Theme.EffectsLabel": "Background effects",
+  "Theme.System": "System",
   "Theme.Light": "Light",
   "Theme.Dark": "Dark",
   "Theme.Transparent": "Transparency",

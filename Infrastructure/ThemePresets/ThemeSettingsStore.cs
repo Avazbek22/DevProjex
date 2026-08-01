@@ -4,8 +4,8 @@ namespace DevProjex.Infrastructure.ThemePresets;
 
 public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 {
-    public const int CurrentSchemaVersion = 1;
-    public const int CurrentDefaultsRevision = 1;
+    public const int CurrentSchemaVersion = 2;
+    public const int CurrentDefaultsRevision = 2;
 
     private const string FolderName = "DevProjex";
     private const string FileName = "theme-settings.json";
@@ -98,7 +98,9 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
     public bool TryPersistChanges(
         ThemeSettingsDocument document,
         IReadOnlyCollection<string> changedPresetKeys,
-        string selectedPreset)
+        string selectedPreset,
+        bool selectedThemeModeChanged = true,
+        IReadOnlyCollection<ThemeVariant>? changedEffectThemes = null)
     {
         lock (_sync)
         {
@@ -126,6 +128,17 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
                 if (TryParseKey(selectedPreset, out var selectedTheme, out var selectedEffect))
                     latest.SelectedPreset = GetKey(selectedTheme, selectedEffect);
+
+                if (selectedThemeModeChanged)
+                    latest.SelectedThemeMode = document.SelectedThemeMode;
+
+                foreach (var theme in changedEffectThemes ?? Enum.GetValues<ThemeVariant>())
+                {
+                    if (theme == ThemeVariant.Light)
+                        latest.LightThemeEffect = document.LightThemeEffect;
+                    else
+                        latest.DarkThemeEffect = document.DarkThemeEffect;
+                }
 
                 latest = NormalizeCurrent(latest);
                 if (!TrySaveInternal(fileSet, latest))
@@ -312,6 +325,13 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         foreach (var unknownKey in document.Presets.Keys.Where(key => !DefaultPresets.ContainsKey(key)).ToArray())
             document.Presets.Remove(unknownKey);
 
+        if (!Enum.IsDefined(document.SelectedThemeMode))
+            document.SelectedThemeMode = ThemeSelectionMode.System;
+        if (!Enum.IsDefined(document.LightThemeEffect))
+            document.LightThemeEffect = ThemeSelectionPolicy.GetFactoryEffect(ThemeVariant.Light);
+        if (!Enum.IsDefined(document.DarkThemeEffect))
+            document.DarkThemeEffect = ThemeSelectionPolicy.GetFactoryEffect(ThemeVariant.Dark);
+
         if (!TryParseKeyStatic(document.SelectedPreset, out var selectedTheme, out var selectedEffect))
             document.SelectedPreset = DefaultSelectedPreset;
         else
@@ -336,6 +356,9 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         SchemaVersion = CurrentSchemaVersion,
         DefaultsRevision = CurrentDefaultsRevision,
         Presets = new Dictionary<string, ThemePreset>(DefaultPresets, StringComparer.OrdinalIgnoreCase),
+        SelectedThemeMode = ThemeSelectionMode.System,
+        LightThemeEffect = ThemeSelectionPolicy.GetFactoryEffect(ThemeVariant.Light),
+        DarkThemeEffect = ThemeSelectionPolicy.GetFactoryEffect(ThemeVariant.Dark),
         SelectedPreset = DefaultSelectedPreset
     };
 
@@ -434,6 +457,9 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         destination.SchemaVersion = source.SchemaVersion;
         destination.DefaultsRevision = source.DefaultsRevision;
         destination.Presets = source.Presets;
+        destination.SelectedThemeMode = source.SelectedThemeMode;
+        destination.LightThemeEffect = source.LightThemeEffect;
+        destination.DarkThemeEffect = source.DarkThemeEffect;
         destination.SelectedPreset = source.SelectedPreset;
     }
 

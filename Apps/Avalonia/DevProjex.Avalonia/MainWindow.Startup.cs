@@ -84,6 +84,7 @@ public partial class MainWindow
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {
+        SyncThemeWithSystem();
         _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
 
         // Defer update to let theme resources settle first.

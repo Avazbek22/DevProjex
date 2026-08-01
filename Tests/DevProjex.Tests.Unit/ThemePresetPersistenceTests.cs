@@ -4,6 +4,62 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ThemePresetPersistenceTests
 {
+    [Theory]
+    [InlineData(ThemeVariant.Light, ThemeVariant.Light, ThemeEffectMode.Solid)]
+    [InlineData(ThemeVariant.Dark, ThemeVariant.Dark, ThemeEffectMode.Acrylic)]
+    [InlineData(null, ThemeVariant.Dark, ThemeEffectMode.Acrylic)]
+    public void Session_SystemMode_UsesSystemThemeAndDarkFallback(
+        ThemeVariant? systemTheme,
+        ThemeVariant expectedTheme,
+        ThemeEffectMode expectedEffect)
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+
+        var session = new ThemePresetSession(store, store.Load(), systemTheme);
+
+        Assert.Equal(ThemeSelectionMode.System, session.CurrentMode);
+        Assert.Equal(expectedTheme, session.CurrentTheme);
+        Assert.Equal(expectedEffect, session.CurrentEffect);
+    }
+
+    [Fact]
+    public void Session_SystemThemeChange_UsesIndependentRememberedEffectAndPreservesMode()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var session = new ThemePresetSession(store, store.Load(), ThemeVariant.Dark);
+
+        session.SelectEffect(ThemeEffectMode.Mica, session.CurrentPreset);
+        var lightPreset = session.SynchronizeSystemTheme(ThemeVariant.Light, session.CurrentPreset);
+
+        Assert.Equal(ThemeSelectionMode.System, session.CurrentMode);
+        Assert.Equal(ThemeVariant.Light, session.CurrentTheme);
+        Assert.Equal(ThemeEffectMode.Solid, session.CurrentEffect);
+        Assert.Equal(session.Database.Presets["Light.Solid"], lightPreset);
+
+        session.SynchronizeSystemTheme(ThemeVariant.Dark, lightPreset);
+
+        Assert.Equal(ThemeSelectionMode.System, session.CurrentMode);
+        Assert.Equal(ThemeVariant.Dark, session.CurrentTheme);
+        Assert.Equal(ThemeEffectMode.Mica, session.CurrentEffect);
+    }
+
+    [Fact]
+    public void Session_ExplicitMode_IgnoresSubsequentSystemThemeChanges()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var session = new ThemePresetSession(store, store.Load(), ThemeVariant.Dark);
+        session.SelectMode(ThemeSelectionMode.Light, ThemeVariant.Dark, session.CurrentPreset);
+
+        session.SynchronizeSystemTheme(ThemeVariant.Dark, session.CurrentPreset);
+
+        Assert.Equal(ThemeSelectionMode.Light, session.CurrentMode);
+        Assert.Equal(ThemeVariant.Light, session.CurrentTheme);
+        Assert.Equal(ThemeEffectMode.Solid, session.CurrentEffect);
+    }
+
     [Fact]
     public void Session_EditSwitchReturn_PreservesEveryPresetWithoutPrematureIo()
     {
@@ -91,6 +147,8 @@ public sealed class ThemePresetPersistenceTests
 
         var reloaded = store.Load();
         Assert.Equal("Light.Mica", reloaded.SelectedPreset);
+        Assert.Equal(ThemeSelectionMode.Light, reloaded.SelectedThemeMode);
+        Assert.Equal(ThemeEffectMode.Mica, reloaded.LightThemeEffect);
         Assert.Equal(originalAcrylic, reloaded.Presets["Dark.Acrylic"]);
     }
 
@@ -144,6 +202,28 @@ public sealed class ThemePresetPersistenceTests
         var reloaded = new ThemeSettingsStore(() => temp.Path).Load();
         Assert.Equal(editedAcrylic, reloaded.Presets["Dark.Acrylic"]);
         Assert.Equal(editedMica, reloaded.Presets["Light.Mica"]);
+    }
+
+    [Fact]
+    public void Session_StaleInstancesChangingDifferentThemeEffects_MergeBothPreferences()
+    {
+        using var temp = new TemporaryDirectory();
+        var storeA = new ThemeSettingsStore(() => temp.Path);
+        var storeB = new ThemeSettingsStore(() => temp.Path);
+        var sessionA = new ThemePresetSession(storeA, storeA.Load(), ThemeVariant.Dark);
+        var sessionB = new ThemePresetSession(storeB, storeB.Load(), ThemeVariant.Dark);
+
+        var darkMica = sessionA.SelectEffect(ThemeEffectMode.Mica, sessionA.CurrentPreset);
+        sessionB.SynchronizeSystemTheme(ThemeVariant.Light, sessionB.CurrentPreset);
+        var lightAcrylic = sessionB.SelectEffect(ThemeEffectMode.Acrylic, sessionB.CurrentPreset);
+
+        Assert.True(sessionA.Persist(darkMica));
+        Assert.True(sessionB.Persist(lightAcrylic));
+
+        var reloaded = storeA.Load();
+        Assert.Equal(ThemeSelectionMode.System, reloaded.SelectedThemeMode);
+        Assert.Equal(ThemeEffectMode.Mica, reloaded.DarkThemeEffect);
+        Assert.Equal(ThemeEffectMode.Acrylic, reloaded.LightThemeEffect);
     }
 
     private static ThemePreset CreatePreset(double seed) => new()

@@ -2,6 +2,7 @@ namespace DevProjex.Avalonia.Views;
 
 public partial class ThemePopoverView : UserControl
 {
+    public event EventHandler<RoutedEventArgs>? SetSystemThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetLightThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetDarkThemeRequested;
     public event EventHandler<RoutedEventArgs>? SetTransparentModeRequested;
@@ -11,6 +12,12 @@ public partial class ThemePopoverView : UserControl
     public ThemePopoverView()
     {
         InitializeComponent();
+    }
+
+    private void OnSetSystemThemeCheckbox(object? sender, RoutedEventArgs e)
+    {
+        SetSystemThemeRequested?.Invoke(sender, e);
+        e.Handled = true;
     }
 
     private void OnSetLightThemeCheckbox(object? sender, RoutedEventArgs e)

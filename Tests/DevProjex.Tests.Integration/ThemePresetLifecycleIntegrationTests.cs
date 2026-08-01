@@ -5,6 +5,36 @@ namespace DevProjex.Tests.Integration;
 public sealed class ThemePresetLifecycleIntegrationTests
 {
     [Fact]
+    public void SystemMode_CustomEffectsForBothPalettes_RoundTripWithoutBecomingExplicit()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var session = new ThemePresetSession(store, store.Load(), ThemeVariant.Dark);
+
+        var darkMica = session.SelectEffect(ThemeEffectMode.Mica, session.CurrentPreset);
+        var lightSolid = session.SynchronizeSystemTheme(ThemeVariant.Light, darkMica);
+        var lightAcrylic = session.SelectEffect(ThemeEffectMode.Acrylic, lightSolid);
+        Assert.True(session.Persist(lightAcrylic));
+
+        var restartedStore = new ThemeSettingsStore(() => temp.Path);
+        var restartedLight = new ThemePresetSession(
+            restartedStore,
+            restartedStore.Load(),
+            ThemeVariant.Light);
+        var restartedDark = new ThemePresetSession(
+            restartedStore,
+            restartedStore.Load(),
+            ThemeVariant.Dark);
+
+        Assert.Equal(ThemeSelectionMode.System, restartedLight.CurrentMode);
+        Assert.Equal(ThemeVariant.Light, restartedLight.CurrentTheme);
+        Assert.Equal(ThemeEffectMode.Acrylic, restartedLight.CurrentEffect);
+        Assert.Equal(ThemeSelectionMode.System, restartedDark.CurrentMode);
+        Assert.Equal(ThemeVariant.Dark, restartedDark.CurrentTheme);
+        Assert.Equal(ThemeEffectMode.Mica, restartedDark.CurrentEffect);
+    }
+
+    [Fact]
     public void EditSwitchReturnSolidAndRestart_PreservesEveryRequestedState()
     {
         using var temp = new TemporaryDirectory();

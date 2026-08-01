@@ -3,6 +3,7 @@ using DevProjex.Avalonia.Services;
 using AvaloniaThemeVariant = Avalonia.Styling.ThemeVariant;
 using ThemePreset = DevProjex.Infrastructure.ThemePresets.ThemePreset;
 using ThemePresetEffect = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+using ThemePresetSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 using ThemePresetVariant = DevProjex.Infrastructure.ThemePresets.ThemeVariant;
 
 namespace DevProjex.Avalonia.Coordinators;
@@ -25,6 +26,7 @@ internal sealed class AppearanceSettingsController(
     private UserSettingsDb _userSettings = new();
     private ThemeSettingsDocument _themeSettings = new();
     private ThemePresetSession? _themeSession;
+    private ThemePresetSelectionMode _currentThemeMode = ThemePresetSelectionMode.System;
     private ThemePresetVariant _currentTheme = ThemePresetVariant.Dark;
     private ThemePresetEffect _currentEffect = ThemePresetEffect.Transparent;
     private bool _wasThemePopoverOpen;
@@ -45,15 +47,19 @@ internal sealed class AppearanceSettingsController(
         _themeSettings =
             themeSettingsStore.LoadForStartup(StartupStoreLockTimeout);
         _themeSession =
-            new ThemePresetSession(themeSettingsStore, _themeSettings);
+            new ThemePresetSession(
+                themeSettingsStore,
+                _themeSettings,
+                ResolveSystemTheme());
+        NormalizeSessionEffectForPlatform(_themeSession.CurrentPreset);
 
+        _currentThemeMode = _themeSession.CurrentMode;
         _currentTheme = _themeSession.CurrentTheme;
-        _currentEffect = ThemeEffectPlatformSupport.Normalize(
-            _themeSession.CurrentEffect,
-            isMicaSupported);
+        _currentEffect = _themeSession.CurrentEffect;
 
         viewModel.IsDarkTheme =
             _currentTheme == ThemePresetVariant.Dark;
+        viewModel.SelectedThemeMode = _currentThemeMode;
         ApplyEffectMode(_currentEffect);
         ApplyPresetValues(themeSettingsStore.GetPreset(
             _themeSettings,
@@ -68,12 +74,10 @@ internal sealed class AppearanceSettingsController(
         if (global::Avalonia.Application.Current is not { } application)
             return;
 
-        application.RequestedThemeVariant =
-            _currentTheme == ThemePresetVariant.Dark
-                ? AvaloniaThemeVariant.Dark
-                : AvaloniaThemeVariant.Light;
+        application.RequestedThemeVariant = ResolveRequestedThemeVariant();
         viewModel.IsDarkTheme =
             _currentTheme == ThemePresetVariant.Dark;
+        viewModel.SelectedThemeMode = _currentThemeMode;
         ApplyEffectMode(_currentEffect);
         ApplyPresetValues(themeSettingsStore.GetPreset(
             _themeSettings,
@@ -96,17 +100,30 @@ internal sealed class AppearanceSettingsController(
         _wasThemePopoverOpen = viewModel.ThemePopoverOpen;
     }
 
-    public void SetTheme(ThemePresetVariant theme)
+    public void SetTheme(ThemePresetSelectionMode mode)
     {
         if (global::Avalonia.Application.Current is not { } application)
             return;
 
-        application.RequestedThemeVariant =
-            theme == ThemePresetVariant.Dark
-                ? AvaloniaThemeVariant.Dark
-                : AvaloniaThemeVariant.Light;
-        viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
-        ApplyPresetForSelection(theme, GetSelectedEffectMode());
+        var systemTheme = mode == ThemePresetSelectionMode.System
+            ? ResolveSystemTheme()
+            : null;
+        var session = _themeSession;
+        if (session is null)
+            return;
+
+        session.SelectMode(
+            mode,
+            systemTheme,
+            CreateCurrentThemePreset());
+        application.RequestedThemeVariant = ToRequestedThemeVariant(
+            mode,
+            session.CurrentTheme);
+        var preset = NormalizeSessionEffectForPlatform(session.CurrentPreset);
+        SynchronizeSelectionFromSession();
+        ApplyEffectMode(_currentEffect);
+        ApplyPresetValues(preset);
+        themeBrushes.UpdateTransparencyEffect();
         refreshActiveQueryHighlights();
         themeBrushes.UpdateDynamicThemeBrushes();
     }
@@ -177,30 +194,27 @@ internal sealed class AppearanceSettingsController(
     {
         var resetDocument = themeSettingsStore.ResetToDefaults();
         var resetSession =
-            new ThemePresetSession(themeSettingsStore, resetDocument);
-        var theme = resetSession.CurrentTheme;
-        var effect = ThemeEffectPlatformSupport.Normalize(
-            resetSession.CurrentEffect,
-            isMicaSupported);
+            new ThemePresetSession(
+                themeSettingsStore,
+                resetDocument,
+                ResolveSystemTheme());
+        NormalizeSessionEffectForPlatform(resetSession, resetSession.CurrentPreset);
+
+        _themeSettings = resetDocument;
+        _themeSession = resetSession;
+        SynchronizeSelectionFromSession();
 
         if (global::Avalonia.Application.Current is { } application)
         {
-            application.RequestedThemeVariant =
-                theme == ThemePresetVariant.Dark
-                    ? AvaloniaThemeVariant.Dark
-                    : AvaloniaThemeVariant.Light;
+            application.RequestedThemeVariant = ToRequestedThemeVariant(
+                resetSession.CurrentMode,
+                resetSession.CurrentTheme);
         }
 
-        _currentTheme = theme;
-        _currentEffect = effect;
-        viewModel.IsDarkTheme = theme == ThemePresetVariant.Dark;
-        ApplyEffectMode(effect);
-        ApplyPresetValues(themeSettingsStore.GetPreset(
-            resetDocument,
-            theme,
-            effect));
-        _themeSettings = resetDocument;
-        _themeSession = resetSession;
+        var preset = NormalizeSessionEffectForPlatform(resetSession.CurrentPreset);
+        SynchronizeSelectionFromSession();
+        ApplyEffectMode(_currentEffect);
+        ApplyPresetValues(preset);
         themeBrushes.UpdateTransparencyEffect();
         themeBrushes.UpdateDynamicThemeBrushes();
     }
@@ -213,11 +227,25 @@ internal sealed class AppearanceSettingsController(
 
     public void SyncThemeWithSystem()
     {
-        if (global::Avalonia.Application.Current is not { } application)
+        if (_themeSession is not { CurrentMode: ThemePresetSelectionMode.System } session ||
+            global::Avalonia.Application.Current is not { } application)
+        {
+            return;
+        }
+
+        var systemTheme = ToPresetThemeVariant(application.ActualThemeVariant);
+        var previousTheme = session.CurrentTheme;
+        var preset = session.SynchronizeSystemTheme(
+            systemTheme,
+            CreateCurrentThemePreset());
+        if (session.CurrentTheme == previousTheme)
             return;
 
-        viewModel.IsDarkTheme =
-            application.ActualThemeVariant == AvaloniaThemeVariant.Dark;
+        preset = NormalizeSessionEffectForPlatform(preset);
+        SynchronizeSelectionFromSession();
+        ApplyEffectMode(_currentEffect);
+        ApplyPresetValues(preset);
+        themeBrushes.UpdateTransparencyEffect();
     }
 
     internal static AppLanguage ResolveStartupLanguage(
@@ -287,19 +315,15 @@ internal sealed class AppearanceSettingsController(
         }
     }
 
-    private void ApplyPresetForSelection(
-        ThemePresetVariant theme,
-        ThemePresetEffect effect)
+    private void ApplyPresetForSelectedEffect(ThemePresetEffect effect)
     {
         if (_themeSession is null)
             return;
 
-        var preset = _themeSession.Select(
-            theme,
+        var preset = _themeSession.SelectEffect(
             effect,
             CreateCurrentThemePreset());
-        _currentTheme = theme;
-        _currentEffect = effect;
+        SynchronizeSelectionFromSession();
         ApplyPresetValues(preset);
     }
 
@@ -322,9 +346,7 @@ internal sealed class AppearanceSettingsController(
 
     private void ApplySelectedEffect()
     {
-        ApplyPresetForSelection(
-            GetSelectedThemeVariant(),
-            GetSelectedEffectMode());
+        ApplyPresetForSelectedEffect(GetSelectedEffectMode());
         themeBrushes.UpdateTransparencyEffect();
     }
 
@@ -358,11 +380,6 @@ internal sealed class AppearanceSettingsController(
         userSettingsStore.TryPersistViewSettings(_userSettings);
     }
 
-    private ThemePresetVariant GetSelectedThemeVariant()
-        => viewModel.IsDarkTheme
-            ? ThemePresetVariant.Dark
-            : ThemePresetVariant.Light;
-
     private ThemePresetEffect GetSelectedEffectMode()
     {
         if (viewModel.IsMicaEnabled)
@@ -372,5 +389,77 @@ internal sealed class AppearanceSettingsController(
         return viewModel.IsTransparentEnabled
             ? ThemePresetEffect.Transparent
             : ThemePresetEffect.Solid;
+    }
+
+    private void SynchronizeSelectionFromSession()
+    {
+        if (_themeSession is null)
+            return;
+
+        _currentThemeMode = _themeSession.CurrentMode;
+        _currentTheme = _themeSession.CurrentTheme;
+        _currentEffect = _themeSession.CurrentEffect;
+        viewModel.SelectedThemeMode = _currentThemeMode;
+        viewModel.IsDarkTheme = _currentTheme == ThemePresetVariant.Dark;
+    }
+
+    private AvaloniaThemeVariant ResolveRequestedThemeVariant()
+        => ToRequestedThemeVariant(_currentThemeMode, _currentTheme);
+
+    private static AvaloniaThemeVariant ToRequestedThemeVariant(
+        ThemePresetSelectionMode mode,
+        ThemePresetVariant effectiveTheme) => mode switch
+    {
+        ThemePresetSelectionMode.System => AvaloniaThemeVariant.Default,
+        _ => effectiveTheme == ThemePresetVariant.Dark
+            ? AvaloniaThemeVariant.Dark
+            : AvaloniaThemeVariant.Light
+    };
+
+    private ThemePresetVariant? ResolveSystemTheme()
+    {
+        var platformTheme = window.GetPlatformSettings()?.GetColorValues().ThemeVariant;
+        if (platformTheme is { } detectedTheme)
+        {
+            return detectedTheme == global::Avalonia.Platform.PlatformThemeVariant.Dark
+                ? ThemePresetVariant.Dark
+                : ThemePresetVariant.Light;
+        }
+
+        if (global::Avalonia.Application.Current is { } application &&
+            application.RequestedThemeVariant == AvaloniaThemeVariant.Default)
+        {
+            return ToPresetThemeVariant(application.ActualThemeVariant);
+        }
+
+        return null;
+    }
+
+    private static ThemePresetVariant? ToPresetThemeVariant(AvaloniaThemeVariant? themeVariant)
+        => themeVariant switch
+        {
+            var theme when theme == AvaloniaThemeVariant.Light => ThemePresetVariant.Light,
+            var theme when theme == AvaloniaThemeVariant.Dark => ThemePresetVariant.Dark,
+            _ => null
+        };
+
+    private ThemePreset NormalizeSessionEffectForPlatform(ThemePreset currentPreset)
+    {
+        if (_themeSession is null)
+            return currentPreset;
+
+        return NormalizeSessionEffectForPlatform(_themeSession, currentPreset);
+    }
+
+    private ThemePreset NormalizeSessionEffectForPlatform(
+        ThemePresetSession session,
+        ThemePreset currentPreset)
+    {
+        var normalizedEffect = ThemeEffectPlatformSupport.Normalize(
+            session.CurrentEffect,
+            isMicaSupported);
+        return normalizedEffect == session.CurrentEffect
+            ? currentPreset
+            : session.SelectEffect(normalizedEffect, currentPreset);
     }
 }
