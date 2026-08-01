@@ -31,8 +31,8 @@
       </ScrollViewer>
 
       <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+        <Button Content="{Binding HelpAboutSupport}" Classes="primary-action" Click="OnSupport" />
         <Button Content="{Binding HelpAboutOpenLink}" Classes="primary-action" Click="OnOpenLink" />
-        <Button Content="{Binding HelpAboutCopyLink}" Classes="primary-action" Click="OnCopyLink" />
       </StackPanel>
     </Grid>
   </Border>

@@ -46,8 +46,8 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? HelpCloseRequested;
     public event EventHandler<RoutedEventArgs>? AboutRequested;
     public event EventHandler<RoutedEventArgs>? AboutCloseRequested;
+    public event EventHandler<RoutedEventArgs>? AboutSupportRequested;
     public event EventHandler<RoutedEventArgs>? AboutOpenLinkRequested;
-    public event EventHandler<RoutedEventArgs>? AboutCopyLinkRequested;
     public event EventHandler<RoutedEventArgs>? ResetSettingsRequested;
     public event EventHandler<RoutedEventArgs>? ResetDataRequested;
     public event EventHandler<RoutedEventArgs>? SetSystemThemeRequested;
@@ -256,8 +256,8 @@ public partial class TopMenuBarView : UserControl
         if (HelpPopover is not null)
         {
             HelpPopover.CloseRequested += OnHelpPopoverCloseRequested;
+            HelpPopover.SupportRequested += OnHelpPopoverSupportRequested;
             HelpPopover.OpenLinkRequested += OnHelpPopoverOpenLinkRequested;
-            HelpPopover.CopyLinkRequested += OnHelpPopoverCopyLinkRequested;
         }
 
         if (ThemePopup is not null)
@@ -293,8 +293,8 @@ public partial class TopMenuBarView : UserControl
         if (HelpPopover is not null)
         {
             HelpPopover.CloseRequested -= OnHelpPopoverCloseRequested;
+            HelpPopover.SupportRequested -= OnHelpPopoverSupportRequested;
             HelpPopover.OpenLinkRequested -= OnHelpPopoverOpenLinkRequested;
-            HelpPopover.CopyLinkRequested -= OnHelpPopoverCopyLinkRequested;
         }
 
         if (ThemePopup is not null)
@@ -333,11 +333,11 @@ public partial class TopMenuBarView : UserControl
     private void OnHelpPopoverCloseRequested(object? sender, RoutedEventArgs e)
         => AboutCloseRequested?.Invoke(this, e);
 
+    private void OnHelpPopoverSupportRequested(object? sender, RoutedEventArgs e)
+        => AboutSupportRequested?.Invoke(this, e);
+
     private void OnHelpPopoverOpenLinkRequested(object? sender, RoutedEventArgs e)
         => AboutOpenLinkRequested?.Invoke(this, e);
-
-    private void OnHelpPopoverCopyLinkRequested(object? sender, RoutedEventArgs e)
-        => AboutCopyLinkRequested?.Invoke(this, e);
 
     private void OnHelpDocsPopoverCloseRequested(object? sender, RoutedEventArgs e)
         => HelpCloseRequested?.Invoke(this, e);

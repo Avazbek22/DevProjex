@@ -261,20 +261,13 @@ public partial class MainWindow
 
     private void OnAboutOpenLink(object? sender, RoutedEventArgs e)
     {
-        OpenRepositoryLink();
+        OpenExternalLink(ProjectLinks.RepositoryUrl);
         e.Handled = true;
     }
 
-    private async void OnAboutCopyLink(object? sender, RoutedEventArgs e)
+    private void OnAboutSupport(object? sender, RoutedEventArgs e)
     {
-        try
-        {
-            await SetClipboardTextAsync(ProjectLinks.RepositoryUrl);
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync(ex.Message);
-        }
+        OpenExternalLink(ProjectLinks.SupportUrl);
         e.Handled = true;
     }
 

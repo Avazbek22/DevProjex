@@ -102,7 +102,7 @@
     "Help.About.Title":  "Sobre",
     "Help.About.Body":  "DevProjex é uma ferramenta para preparar rapidamente o contexto do projeto: visualize a estrutura, selecione os arquivos necessários e copie a árvore ou conteúdo para a área de transferência. Isso é conveniente para análise de código, revisão de código, aprendizado e trabalho com assistentes de IA quando é importante transmitir a estrutura do projeto com rapidez e precisão.\n\nO aplicativo opera apenas no modo somente leitura e não modifica arquivos.\n\nDevProjex é um projeto de código aberto licenciado sob GPL-3.0. O código-fonte está aberto para estudo e modificação; sugestões e melhorias arquitetônicas (PRs) são bem-vindas como parte do desenvolvimento do projeto.\n\nPilha: .NET 10 · UI Avalonia\nDesenvolvedor: Avazbek Olimov\nDireitos autorais © 2025–2026 Avazbek Olimov",
     "Help.About.OpenLink":  "Abra o repositório GitHub",
-    "Help.About.CopyLink":  "Copiar link",
+    "Help.About.Support":  "Apoiar (Boosty)",
     "Dialog.SelectRoot":  "Selecione a pasta raiz do projeto",
     "Dialog.ResetSettings.Title":  "Confirmar redefinição das configurações",
     "Dialog.ResetSettings.Message":  "As configurações de aparência serão redefinidas: tema, efeitos, predefinições e parâmetros de IU.\nPerfis de projetos salvos não serão alterados.\n\nRedefinir configurações?",

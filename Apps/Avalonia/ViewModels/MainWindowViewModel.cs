@@ -1407,8 +1407,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string HelpHelpCopyAll { get; private set; } = string.Empty;
     public string HelpAboutTitle { get; private set; } = string.Empty;
     public string HelpAboutBody { get; private set; } = string.Empty;
+    public string HelpAboutSupport { get; private set; } = string.Empty;
     public string HelpAboutOpenLink { get; private set; } = string.Empty;
-    public string HelpAboutCopyLink { get; private set; } = string.Empty;
     public string MenuTheme { get; private set; } = string.Empty;
     public string ThemeModeLabel { get; private set; } = string.Empty;
     public string ThemeSystemLabel { get; private set; } = string.Empty;
@@ -1569,8 +1569,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         HelpHelpCopyAll = _localization["Help.Help.CopyAll"];
         HelpAboutTitle = _localization["Help.About.Title"];
         HelpAboutBody = _localization["Help.About.Body"];
+        HelpAboutSupport = _localization["Help.About.Support"];
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
-        HelpAboutCopyLink = _localization["Help.About.CopyLink"];
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
         SettingsAll = _localization["Settings.All"];
         UpdateAllCheckboxLabels();
@@ -1713,8 +1713,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HelpHelpCopyAll));
         RaisePropertyChanged(nameof(HelpAboutTitle));
         RaisePropertyChanged(nameof(HelpAboutBody));
+        RaisePropertyChanged(nameof(HelpAboutSupport));
         RaisePropertyChanged(nameof(HelpAboutOpenLink));
-        RaisePropertyChanged(nameof(HelpAboutCopyLink));
         RaisePropertyChanged(nameof(SettingsIgnoreTitle));
         RaisePropertyChanged(nameof(SettingsAll));
         RaisePropertyChanged(nameof(SettingsExtensions));
