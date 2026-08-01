@@ -18,11 +18,19 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
     private bool _disposed;
 
     public ZipDownloadService()
+        : this(new HttpClient())
     {
-        _httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromMinutes(10)
-        };
+    }
+
+    internal ZipDownloadService(HttpMessageHandler handler)
+        : this(CreateHttpClient(handler))
+    {
+    }
+
+    private ZipDownloadService(HttpClient httpClient)
+    {
+        _httpClient = httpClient;
+        _httpClient.Timeout = TimeSpan.FromMinutes(10);
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("DevProjex/1.0");
     }
 
@@ -375,6 +383,12 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
             FileShare.None,
             StreamBufferSize,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+    private static HttpClient CreateHttpClient(HttpMessageHandler handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        return new HttpClient(handler, disposeHandler: true);
+    }
 
     private static void ReportPercent(IProgress<string>? progress, int percent, ref int lastReportedPercent)
     {

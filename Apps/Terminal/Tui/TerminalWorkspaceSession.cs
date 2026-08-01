@@ -3786,16 +3786,22 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private bool HasActiveOperation =>
 		_activeOperationCts is { IsCancellationRequested: false };
 
-	private Task<T> InvokeAsync<T>(Func<T> action)
+	private async Task<T> InvokeAsync<T>(Func<T> action)
 	{
-		if (_stopping)
-			return Task.FromCanceled<T>(new CancellationToken(canceled: true));
+		if (_stopping || _sessionCts.IsCancellationRequested)
+			return await Task.FromCanceled<T>(_sessionCts.Token).ConfigureAwait(false);
+
 		var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+		// A callback queued just before RequestStop is not guaranteed to run after the
+		// Terminal.Gui event loop exits. Session cancellation must release the worker
+		// that is awaiting it, otherwise shutdown can deadlock in CompleteAsync.
+		using var cancellationRegistration = _sessionCts.Token.Register(
+			() => completion.TrySetCanceled(_sessionCts.Token));
 		_application.Invoke(() =>
 		{
-			if (_stopping)
+			if (_stopping || _sessionCts.IsCancellationRequested)
 			{
-				completion.TrySetCanceled();
+				completion.TrySetCanceled(_sessionCts.Token);
 				return;
 			}
 			try
@@ -3807,7 +3813,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				completion.TrySetException(exception);
 			}
 		});
-		return completion.Task;
+		return await completion.Task.ConfigureAwait(false);
 	}
 
 	private void RequestExit()
