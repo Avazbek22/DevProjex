@@ -111,7 +111,6 @@ public partial class MainWindow
     private ColumnDefinition? _treePaneColumn;
     private ColumnDefinition? _treePreviewSplitterColumn;
     private ColumnDefinition? _previewPaneColumn;
-    private ColumnDefinition? _previewSettingsSplitterColumn;
     private Border? _treePreviewSplitter;
     private Border? _previewSettingsSplitter;
     private Border? _treeIsland;
@@ -308,12 +307,11 @@ public partial class MainWindow
         _treeIsland = this.FindControl<Border>("TreeIsland");
         _previewIsland = this.FindControl<Border>("PreviewIsland");
         _toastHost = this.FindControl<ItemsControl>("ToastHost");
-        if (_workspaceGrid is not null && _workspaceGrid.ColumnDefinitions.Count >= 5)
+        if (_workspaceGrid is not null && _workspaceGrid.ColumnDefinitions.Count >= 4)
         {
             _treePaneColumn = _workspaceGrid.ColumnDefinitions[0];
             _treePreviewSplitterColumn = _workspaceGrid.ColumnDefinitions[1];
             _previewPaneColumn = _workspaceGrid.ColumnDefinitions[2];
-            _previewSettingsSplitterColumn = _workspaceGrid.ColumnDefinitions[3];
         }
         _searchBar = this.FindControl<SearchBarView>("SearchBar");
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
@@ -348,7 +346,6 @@ public partial class MainWindow
                 _treePaneColumn ?? throw new InvalidOperationException("Tree pane column was not found."),
                 _treePreviewSplitterColumn ?? throw new InvalidOperationException("Tree splitter column was not found."),
                 _previewPaneColumn ?? throw new InvalidOperationException("Preview pane column was not found."),
-                _previewSettingsSplitterColumn ?? throw new InvalidOperationException("Settings splitter column was not found."),
                 _treePreviewSplitter ?? throw new InvalidOperationException("Tree splitter was not found."),
                 _previewSettingsSplitter ?? throw new InvalidOperationException("Settings splitter was not found."),
                 _treeIsland ?? throw new InvalidOperationException("Tree island was not found."),

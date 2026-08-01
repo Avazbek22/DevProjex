@@ -573,16 +573,16 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             await UiTestDriver.OpenPreviewAsync(window);
 
             var splitter = UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
-            var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var settingsIsland = UiTestDriver.GetRequiredControl<Border>(window, "SettingsIsland");
             var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
-            var widthBefore = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var widthBefore = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
             var requiredMinimum = settingsPanel.GetRequiredMinimumWidth();
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: -220);
-            var widthAfterExpansionDrag = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var widthAfterExpansionDrag = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: 220);
-            var widthAfterCollapseDrag = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var widthAfterCollapseDrag = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
 
             var diagnostic =
                 $"Before={widthBefore:F2}, Expanded={widthAfterExpansionDrag:F2}, Collapsed={widthAfterCollapseDrag:F2}, " +
@@ -885,15 +885,15 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             await UiTestDriver.OpenPreviewAsync(window);
 
             var splitter = UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
-            var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var settingsIsland = UiTestDriver.GetRequiredControl<Border>(window, "SettingsIsland");
             var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
             var requiredMinimum = settingsPanel.GetRequiredMinimumWidth();
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: 2_000);
-            var collapsedWidth = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var collapsedWidth = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
 
             await UiTestDriver.DragAsync(window, splitter, deltaX: -2_000);
-            var expandedWidth = UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width;
+            var expandedWidth = UiTestDriver.GetBoundsInWindow(settingsIsland, window).Width;
 
             Assert.True(
                 collapsedWidth >= requiredMinimum - 1,

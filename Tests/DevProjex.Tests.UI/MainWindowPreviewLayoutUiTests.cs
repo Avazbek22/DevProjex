@@ -106,10 +106,10 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
 
         try
         {
-            var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
+            var settingsIsland = UiTestDriver.GetRequiredControl<Border>(window, "SettingsIsland");
             var formatSwitcher = UiTestDriver.GetRequiredTopMenuControl<Border>(window, "FormatSegmentedControl");
 
-            var settingsBounds = UiTestDriver.GetBoundsInWindow(settingsContainer, window);
+            var settingsBounds = UiTestDriver.GetBoundsInWindow(settingsIsland, window);
             var formatBounds = UiTestDriver.GetBoundsInWindow(formatSwitcher, window);
 
             var delta = Math.Abs(settingsBounds.Left - formatBounds.Left);
@@ -390,8 +390,6 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
             UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
         var settingsIsland =
             UiTestDriver.GetRequiredControl<Border>(window, "SettingsIsland");
-        var settingsSplitter =
-            UiTestDriver.GetRequiredControl<Border>(window, "PreviewSettingsSplitter");
         var errors = new List<double>();
 
         void CaptureBoundary(object? sender, EventArgs args)
@@ -404,13 +402,14 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
                 UiTestDriver.GetBoundsInWindow(settingsContainer, window);
             var settingsIslandBounds =
                 UiTestDriver.GetBoundsInWindow(settingsIsland, window);
-            var expectedGap = settingsSplitter.IsVisible
-                ? WorkspacePresentationController.PreviewSettingsSplitterWidth
-                : 0.0;
             var layoutBoundaryError =
-                Math.Abs(settingsBounds.Left - leadingBounds.Right - expectedGap);
-            var visibleIslandBoundaryError =
-                Math.Abs(settingsIslandBounds.Left - settingsBounds.Left);
+                Math.Abs(settingsBounds.Left - leadingBounds.Right);
+            var visibleIslandBoundaryError = settingsBounds.Width > 0.5
+                ? Math.Abs(
+                    settingsIslandBounds.Left -
+                    settingsBounds.Left -
+                    WorkspacePresentationController.PreviewSettingsSplitterWidth)
+                : 0.0;
             errors.Add(Math.Max(layoutBoundaryError, visibleIslandBoundaryError));
         }
 

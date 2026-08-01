@@ -12,7 +12,6 @@ internal sealed record WorkspacePresentationControls(
     ColumnDefinition TreePaneColumn,
     ColumnDefinition TreePreviewSplitterColumn,
     ColumnDefinition PreviewPaneColumn,
-    ColumnDefinition PreviewSettingsSplitterColumn,
     Border TreePreviewSplitter,
     Border PreviewSettingsSplitter,
     Border TreeIsland,
@@ -405,8 +404,6 @@ internal sealed class WorkspacePresentationController : IDisposable
 
     public void SetPreviewSettingsSplitterVisibility(bool isVisible)
     {
-        _controls.PreviewSettingsSplitterColumn.Width =
-            new GridLength(isVisible ? PreviewSettingsSplitterWidth : 0);
         _controls.PreviewSettingsSplitter.IsVisible = isVisible;
         _controls.PreviewSettingsSplitter.IsHitTestVisible = isVisible;
     }
@@ -451,10 +448,10 @@ internal sealed class WorkspacePresentationController : IDisposable
     public double GetVisibleSettingsPanelWidth()
     {
         if (_controls.SettingsContainer.Width > 0.5)
-            return _controls.SettingsContainer.Width;
+            return GetSettingsContentWidth(_controls.SettingsContainer.Width);
 
         if (_controls.SettingsContainer.Bounds.Width > 0.5)
-            return _controls.SettingsContainer.Bounds.Width;
+            return GetSettingsContentWidth(_controls.SettingsContainer.Bounds.Width);
 
         return _currentSettingsPanelWidth;
     }
@@ -752,15 +749,22 @@ internal sealed class WorkspacePresentationController : IDisposable
         if (width > 0.5)
             SetWidthWithoutTransition(_controls.SettingsIsland, width);
 
+        var carrierWidth = width > 0.5
+            ? width + PreviewSettingsSplitterWidth
+            : 0.0;
+
         if (animate)
         {
             EnsureSettingsPanelTransitions();
-            _controls.SettingsContainer.Width = width;
+            _controls.SettingsContainer.Width = carrierWidth;
             return;
         }
 
-        SetWidthWithoutTransition(_controls.SettingsContainer, width);
+        SetWidthWithoutTransition(_controls.SettingsContainer, carrierWidth);
     }
+
+    private static double GetSettingsContentWidth(double carrierWidth)
+        => Math.Max(0.0, carrierWidth - PreviewSettingsSplitterWidth);
 
     private void BeginWorkspaceResize(
         Border? splitter,
@@ -871,10 +875,11 @@ internal sealed class WorkspacePresentationController : IDisposable
                 GetClampedSettingsPanelWidth(_currentSettingsPanelWidth);
             var targetVisibleWidth = _currentSettingsPanelWidth;
 
-            if (show)
-                SetPreviewSettingsSplitterVisibility(true);
-            else
-                SetPreviewSettingsSplitterVisibility(false);
+            // Keep the divider inside the animated carrier until the close frame has
+            // completed. Hiding it up front leaves a four-DIP visual gap moving on
+            // its own even though the carrier geometry is still correct.
+            SetPreviewSettingsSplitterVisibility(true);
+            _controls.PreviewSettingsSplitter.IsHitTestVisible = show;
 
             ApplySettingsPanelWidth(show ? targetVisibleWidth : 0.0, animate: true);
             _controls.SettingsIsland.Opacity = show ? 1.0 : 0.0;
@@ -919,9 +924,18 @@ internal sealed class WorkspacePresentationController : IDisposable
 
     private void EnsureSettingsPanelTransitions()
     {
-        EnsureWidthTransition(
-            _controls.SettingsContainer,
-            SettingsPanelAnimationDuration);
+        if (_controls.SettingsContainer.Transitions is null)
+        {
+            _controls.SettingsContainer.Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = Layoutable.WidthProperty,
+                    Duration = SettingsPanelAnimationDuration,
+                    Easing = new CubicEaseInOut()
+                }
+            ];
+        }
 
         if (_controls.SettingsIsland.Transitions is null)
         {

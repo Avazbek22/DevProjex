@@ -484,7 +484,7 @@
 
       <!-- Project workspace shown when a project is loaded -->
       <Grid Name="WorkspaceGrid"
-            ColumnDefinitions="*,0,0,0,Auto"
+            ColumnDefinitions="*,0,0,Auto"
             IsVisible="{Binding IsProjectLoaded}"
             Margin="4,3,4,3">
         <Border Grid.Column="0"
@@ -885,31 +885,37 @@
           </Grid>
         </Border>
 
+        <!-- The resize splitter belongs to the animated carrier. Keeping it in a
+             separate workspace column would add or remove four DIPs in one layout
+             pass while the settings island itself is still animating. -->
         <Border Grid.Column="3"
-                Name="PreviewSettingsSplitter"
-                Classes="island-splitter"
-                IsVisible="False"
-                PointerPressed="OnPreviewSettingsSplitterPointerPressed"
-                PointerMoved="OnWorkspaceSplitterPointerMoved"
-                PointerReleased="OnWorkspaceSplitterPointerReleased"
-                PointerCaptureLost="OnWorkspaceSplitterPointerCaptureLost"
-                PointerExited="OnWorkspaceSplitterPointerExited" />
-
-        <!-- Animated settings panel container -->
-        <Border Grid.Column="4"
                 Name="SettingsContainer"
                 ClipToBounds="True"
+                UseLayoutRounding="True"
                 IsVisible="{Binding IsProjectLoaded}">
-          <Border Classes="island-panel settings-island"
-                  Name="SettingsIsland"
-                  HorizontalAlignment="Left">
-            <!-- Settings panel -->
-            <views:SettingsPanelView Name="SettingsPanel"
-                                     ApplySettingsRequested="OnApplySettings"
-                                     IgnoreAllChanged="OnIgnoreAllChanged"
-                                     ExtensionsAllChanged="OnExtensionsAllChanged"
-                                     RootAllChanged="OnRootAllChanged" />
-          </Border>
+          <Grid ColumnDefinitions="4,*">
+            <Border Grid.Column="0"
+                    Name="PreviewSettingsSplitter"
+                    Classes="island-splitter"
+                    IsVisible="False"
+                    PointerPressed="OnPreviewSettingsSplitterPointerPressed"
+                    PointerMoved="OnWorkspaceSplitterPointerMoved"
+                    PointerReleased="OnWorkspaceSplitterPointerReleased"
+                    PointerCaptureLost="OnWorkspaceSplitterPointerCaptureLost"
+                    PointerExited="OnWorkspaceSplitterPointerExited" />
+
+            <Border Grid.Column="1"
+                    Classes="island-panel settings-island"
+                    Name="SettingsIsland"
+                    HorizontalAlignment="Left">
+              <!-- Settings panel -->
+              <views:SettingsPanelView Name="SettingsPanel"
+                                       ApplySettingsRequested="OnApplySettings"
+                                       IgnoreAllChanged="OnIgnoreAllChanged"
+                                       ExtensionsAllChanged="OnExtensionsAllChanged"
+                                       RootAllChanged="OnRootAllChanged" />
+            </Border>
+          </Grid>
         </Border>
 
       </Grid>
