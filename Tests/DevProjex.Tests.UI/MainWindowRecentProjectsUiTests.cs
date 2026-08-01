@@ -25,8 +25,7 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 
 		try
 		{
-			var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
-			recentMenu.IsSubMenuOpen = true;
+			var recentMenu = await OpenRecentMenuAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => FindRecentItem(recentMenu, missingPath).Classes.Contains("recent-folder-unavailable"),
@@ -71,6 +70,11 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 		{
 			var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
 			Assert.True(recentMenu.IsVisible);
+			Assert.DoesNotContain(
+				recentMenu.Items.OfType<MenuItem>(),
+				static item => item.Tag is string);
+
+			recentMenu = await OpenRecentMenuAsync(window);
 			Assert.Equal(3, recentMenu.Items.Count);
 
 			var recentItems = recentMenu.Items.OfType<MenuItem>().ToArray();
@@ -93,7 +97,7 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 
 		try
 		{
-			var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
+			var recentMenu = await OpenRecentMenuAsync(window);
 
 			Assert.True(recentMenu.IsVisible);
 			Assert.Single(recentMenu.Items.OfType<MenuItem>());
@@ -122,7 +126,7 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 
 		try
 		{
-			var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
+			var recentMenu = await OpenRecentMenuAsync(window);
 			var recentItems = recentMenu.Items.OfType<MenuItem>().ToArray();
 
 			Assert.Contains(recentItems, item => string.Equals(item.Tag as string, workspace.Project.RootPath, StringComparison.Ordinal));
@@ -150,7 +154,7 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 
 		try
 		{
-			var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
+			var recentMenu = await OpenRecentMenuAsync(window);
 			var recentItems = recentMenu.Items.OfType<MenuItem>().ToArray();
 
 			Assert.NotEmpty(recentItems);
@@ -292,4 +296,15 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 		=> Assert.Single(
 			recentMenu.Items.OfType<MenuItem>(),
 			item => item.Tag is string itemPath && PathComparer.Default.Equals(itemPath, path));
+
+	private static async Task<MenuItem> OpenRecentMenuAsync(MainWindow window)
+	{
+		var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
+		recentMenu.IsSubMenuOpen = true;
+		await UiTestDriver.WaitForConditionAsync(
+			window,
+			() => recentMenu.Items.OfType<MenuItem>().Any(static item => item.Tag is string),
+			"recent project menu entries to materialize on first open");
+		return recentMenu;
+	}
 }

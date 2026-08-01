@@ -9,10 +9,38 @@ public partial class MainWindow
 
     #region Recent Projects
 
-    private void LoadRecentProjects()
+    private void LoadRecentProjectsSynchronously()
     {
         _recentProjectsDb = _recentProjectsStore.LoadForStartup(
             RecentProjectsStartupStoreLockTimeout);
+        _recentProjectsLoadTask = Task.FromResult(_recentProjectsDb);
+        _recentProjectsLoaded = true;
+        SyncRecentProjectsToViewModel();
+    }
+
+    private void StartDeferredRecentProjectsLoad(CancellationToken cancellationToken)
+        => ObserveDetachedTask(
+            EnsureRecentProjectsLoadedAsync(cancellationToken),
+            "LoadRecentProjects");
+
+    private async Task EnsureRecentProjectsLoadedAsync(CancellationToken cancellationToken)
+    {
+        if (_recentProjectsLoaded)
+            return;
+
+        // Keep persistence IO off the dispatcher, but share one load between startup,
+        // the Recent menu, Desktop IPC, and the Git clone dialog.
+        _recentProjectsLoadTask ??= Task.Run(
+            () => _recentProjectsStore.LoadForStartup(RecentProjectsStartupStoreLockTimeout),
+            CancellationToken.None);
+
+        var loaded = await _recentProjectsLoadTask.WaitAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_recentProjectsLoaded)
+            return;
+
+        _recentProjectsDb = loaded;
+        _recentProjectsLoaded = true;
         SyncRecentProjectsToViewModel();
     }
 
@@ -62,10 +90,20 @@ public partial class MainWindow
             recentMenuItem.SubmenuOpened -= OnRecentMenuSubmenuOpened;
     }
 
-    private void OnRecentMenuSubmenuOpened(object? sender, RoutedEventArgs e)
+    private async void OnRecentMenuSubmenuOpened(object? sender, RoutedEventArgs e)
     {
-        RefreshRecentFoldersMenu();
-        StartRecentFolderAvailabilityRefresh();
+        try
+        {
+            var lifetimeToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+            await EnsureRecentProjectsLoadedAsync(lifetimeToken);
+            _recentMenuMaterialized = true;
+            RefreshRecentFoldersMenu();
+            StartRecentFolderAvailabilityRefresh();
+        }
+        catch (OperationCanceledException)
+        {
+            // Closing the window owns cancellation of deferred menu work.
+        }
     }
 
     private void RefreshRecentFoldersMenu()
@@ -209,6 +247,7 @@ public partial class MainWindow
 
     private async Task RemoveRecentFolderAsync(string path, CancellationToken cancellationToken)
     {
+        await EnsureRecentProjectsLoadedAsync(cancellationToken);
         var recentProjectsSnapshot = _recentProjectsDb;
         var updatedRecentProjects = await Task.Run(
             () => _recentProjectsStore.RemoveFolder(recentProjectsSnapshot, path),
@@ -218,11 +257,12 @@ public partial class MainWindow
         _recentProjectsDb = updatedRecentProjects;
         _unavailableRecentFolderPaths.Remove(path);
         SyncRecentProjectsToViewModel();
-        RefreshRecentFoldersMenu();
+        RefreshRecentFoldersMenuIfMaterialized();
     }
 
     private async Task RecordRecentFolderAsync(string path, CancellationToken cancellationToken)
     {
+        await EnsureRecentProjectsLoadedAsync(cancellationToken);
         var recentProjectsSnapshot = _recentProjectsDb;
         var updatedRecentProjects = await Task.Run(
             () => _recentProjectsStore.AddFolder(recentProjectsSnapshot, path),
@@ -232,13 +272,14 @@ public partial class MainWindow
         _recentProjectsDb = updatedRecentProjects;
         _unavailableRecentFolderPaths.Remove(path);
         SyncRecentProjectsToViewModel();
-        RefreshRecentFoldersMenu();
+        RefreshRecentFoldersMenuIfMaterialized();
     }
 
     private async Task RecordRecentRepositoryAsync(
         string repositoryUrl,
         CancellationToken cancellationToken)
     {
+        await EnsureRecentProjectsLoadedAsync(cancellationToken);
         var recentProjectsSnapshot = _recentProjectsDb;
         var updatedRecentProjects = await Task.Run(
             () => _recentProjectsStore.AddRepository(recentProjectsSnapshot, repositoryUrl),
@@ -247,6 +288,12 @@ public partial class MainWindow
 
         _recentProjectsDb = updatedRecentProjects;
         SyncRecentProjectsToViewModel();
+    }
+
+    private void RefreshRecentFoldersMenuIfMaterialized()
+    {
+        if (_recentMenuMaterialized)
+            RefreshRecentFoldersMenu();
     }
 
     #endregion
@@ -304,6 +351,7 @@ public partial class MainWindow
 
     private void OnTreeFontMenuSubmenuOpened(object? sender, RoutedEventArgs e)
     {
+        EnsureOptionalFontCatalogLoaded();
         RefreshTreeFontMenu();
     }
 

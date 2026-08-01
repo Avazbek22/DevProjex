@@ -151,47 +151,89 @@ public partial class MainWindow : Window
     private void SetLanguageForCurrentSession(AppLanguage language)
         => _appearanceSettings.SetLanguageForCurrentSession(language);
 
-    private void InitializeFonts()
+    private void InitializeDefaultFont()
     {
-        // Only use predefined fonts like WinForms
-        var predefinedFonts = new[]
-            { "Consolas", "Courier New", "Fira Code", "Lucida Console", "Cascadia Code", "JetBrains Mono" };
+        _viewModel.FontFamilies.Add(FontFamily.Default);
+        _viewModel.SelectedFontFamily = FontFamily.Default;
+        _viewModel.PendingFontFamily = FontFamily.Default;
+    }
+
+    private void ScheduleOptionalFontCatalogLoad()
+    {
+        if (_fontCatalogLoadScheduled || _fontCatalogLoaded)
+            return;
+
+        _fontCatalogLoadScheduled = true;
+        Dispatcher.Post(
+            () =>
+            {
+                if (_windowLifetimeCts is not { IsCancellationRequested: false })
+                    return;
+
+                EnsureOptionalFontCatalogLoaded();
+            },
+            DispatcherPriority.ApplicationIdle);
+    }
+
+    private void EnsureOptionalFontCatalogLoaded()
+    {
+        if (_fontCatalogLoaded)
+            return;
+
+        _fontCatalogLoadScheduled = true;
+        try
+        {
+            PopulateOptionalFontCatalog();
+        }
+        catch (Exception ex)
+        {
+            // Platform font discovery is optional; keep the default family usable if a
+            // native provider fails instead of turning a settings menu into a startup fault.
+            Debug.WriteLine($"Optional font catalog discovery failed: {ex.GetType().Name}");
+        }
+        finally
+        {
+            // Font discovery is optional. Even if a platform provider fails, the stable
+            // FontFamily.Default entry remains usable and discovery is not retried on every menu open.
+            _fontCatalogLoaded = true;
+        }
+    }
+
+    private void PopulateOptionalFontCatalog()
+    {
+        string[] preferredFontNames =
+            ["Consolas", "Courier New", "Fira Code", "Lucida Console", "Cascadia Code", "JetBrains Mono"];
 
         var systemFonts = FontManager.Current?.SystemFonts;
-        var predefinedFontSet = new HashSet<string>(predefinedFonts, StringComparer.OrdinalIgnoreCase);
-        var availablePredefinedFonts = new Dictionary<string, FontFamily>(StringComparer.OrdinalIgnoreCase);
+        var preferredFontSet = new HashSet<string>(preferredFontNames, StringComparer.OrdinalIgnoreCase);
+        var availablePreferredFonts = new Dictionary<string, FontFamily>(StringComparer.OrdinalIgnoreCase);
+        var discoveredFonts = new List<FontFamily>();
         if (systemFonts is not null)
         {
             foreach (var font in systemFonts)
             {
-                if (predefinedFontSet.Contains(font.Name))
-                    availablePredefinedFonts.TryAdd(font.Name, font);
+                discoveredFonts.Add(font);
+                if (preferredFontSet.Contains(font.Name))
+                    availablePreferredFonts.TryAdd(font.Name, font);
 
-                if (availablePredefinedFonts.Count == predefinedFonts.Length)
+                if (availablePreferredFonts.Count == preferredFontNames.Length)
                     break;
             }
         }
 
-        _viewModel.FontFamilies.Add(FontFamily.Default);
-
-        // Add only predefined fonts that exist on system
-        foreach (var fontName in predefinedFonts)
+        foreach (var fontName in preferredFontNames)
         {
-            if (availablePredefinedFonts.TryGetValue(fontName, out var font))
+            if (availablePreferredFonts.TryGetValue(fontName, out var font))
                 _viewModel.FontFamilies.Add(font);
         }
 
-        if (_viewModel.FontFamilies.Count == 1 && systemFonts is not null)
+        if (_viewModel.FontFamilies.Count == 1)
         {
-            foreach (var font in systemFonts
+            foreach (var font in discoveredFonts
                          .DistinctBy(static font => font.Name, StringComparer.OrdinalIgnoreCase)
                          .OrderBy(static font => font.Name, StringComparer.OrdinalIgnoreCase))
                 _viewModel.FontFamilies.Add(font);
         }
-
-        var selected = _viewModel.FontFamilies.FirstOrDefault();
-        _viewModel.SelectedFontFamily = selected;
-        _viewModel.PendingFontFamily = selected;
     }
 
     private void SyncThemeWithSystem()

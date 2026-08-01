@@ -1,5 +1,10 @@
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Platform.Storage;
+using Avalonia.Rendering.Composition;
 using DevProjex.Application.Context;
+using DevProjex.Avalonia.Services;
+using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 
 namespace DevProjex.Avalonia;
 
@@ -240,21 +245,29 @@ public partial class MainWindow
         await YieldUiAsync(DispatcherPriority.Render);
     }
 
-    private void PrepareStartupRevealGate()
+    private void ConfigureStartupRevealGateForTheme()
     {
-        if (!ShouldUseStartupRevealGate())
+        _startupRevealGateActive =
+            _startupBackdropCover is not null &&
+            ShouldUseStartupRevealGate(
+                OperatingSystem.IsWindows(),
+                _viewModel.ActiveThemeEffect) &&
+            WindowsDwmWindowCloak.TrySet(this, cloaked: true);
+        _startupWindowCloaked = _startupRevealGateActive;
+        _startupRevealCompleted = !_startupRevealGateActive;
+
+        if (_startupBackdropCover is null)
             return;
 
-        // Published single-file Windows builds can show the first HWND frame before
-        // DWM/WinUI composition has attached Acrylic/Mica. Keep the top-level invisible
-        // until the first render cycles have completed; the final opacity is restored in
-        // OnOpened before any user-visible startup dialogs or project-load work begin.
-        Opacity = StartupRevealHiddenOpacity;
-        _startupRevealGateActive = true;
+        _startupBackdropCover.Transitions = null;
+        _startupBackdropCover.Opacity = _startupRevealGateActive ? 1 : 0;
+        _startupBackdropCover.IsVisible = _startupRevealGateActive;
     }
 
-    internal static bool ShouldUseStartupRevealGate()
-        => OperatingSystem.IsWindows();
+    internal static bool ShouldUseStartupRevealGate(
+        bool isWindows,
+        ThemeEffectMode effect)
+        => isWindows && effect is ThemeEffectMode.Acrylic or ThemeEffectMode.Mica;
 
     private async Task RevealStartupWindowAfterCompositionWarmupAsync(CancellationToken cancellationToken)
     {
@@ -266,19 +279,142 @@ public partial class MainWindow
             cancellationToken.ThrowIfCancellationRequested();
             await YieldUiAsync(DispatcherPriority.Render);
             await WaitForNextAnimationFrameAsync(cancellationToken);
-            await WaitForNextAnimationFrameAsync(cancellationToken);
-            await YieldUiAsync(DispatcherPriority.Loaded);
-            cancellationToken.ThrowIfCancellationRequested();
+            var visualReadyTask = WaitForStartupVisualTreeReadyAsync(cancellationToken);
+            var backdropReadyTask = WaitForStartupBackdropReadinessAsync(cancellationToken);
+            await Task.WhenAll(visualReadyTask, backdropReadyTask);
+            var firstCompositionRendered =
+                await TryWaitForRenderedCompositionBatchAsync(cancellationToken);
 
-            // The Avalonia frame is ready at this point, but the native Windows backdrop
-            // may still attach one beat later in published builds. This tiny pause hides
-            // that platform-level transparent/square intermediate frame without changing
-            // the steady-state UI.
-            await Task.Delay(StartupBackdropWarmupDelay, cancellationToken);
+            if (await visualReadyTask &&
+                await backdropReadyTask &&
+                firstCompositionRendered)
+            {
+                // Both the native material and the complete Avalonia frame are already
+                // composed. Remove the opaque fallback while still cloaked, commit that
+                // state, then publish the final window atomically without a solid-to-blur
+                // transition. Drivers that cannot prove readiness use the safe fade below.
+                CompleteStartupRevealGate(animate: false);
+                await TryWaitForRenderedCompositionBatchAsync(cancellationToken);
+            }
         }
         finally
         {
+            ReleaseStartupWindowCloak();
             CompleteStartupRevealGate();
+        }
+    }
+
+    private void ReleaseStartupWindowCloak()
+    {
+        if (!_startupWindowCloaked)
+            return;
+
+        _startupWindowCloaked = false;
+        WindowsDwmWindowCloak.TrySet(this, cloaked: false);
+    }
+
+    private async Task<bool> WaitForStartupBackdropReadinessAsync(
+        CancellationToken cancellationToken)
+    {
+        if (IsStartupBackdropReady())
+            return true;
+
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        void HandlePropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs args)
+        {
+            if (args.Property == ActualTransparencyLevelProperty && IsStartupBackdropReady())
+                completion.TrySetResult(true);
+        }
+
+        PropertyChanged += HandlePropertyChanged;
+        try
+        {
+            if (IsStartupBackdropReady())
+                return true;
+
+            // Native backdrop attachment has no synchronous readiness API. Prefer the
+            // observable transparency transition and retain 90 ms only as a bounded escape
+            // hatch for drivers that never report a usable level.
+            var completedTask = await Task.WhenAny(
+                completion.Task,
+                Task.Delay(StartupBackdropFallbackTimeout, cancellationToken));
+            await completedTask;
+            cancellationToken.ThrowIfCancellationRequested();
+            return ReferenceEquals(completedTask, completion.Task);
+        }
+        finally
+        {
+            PropertyChanged -= HandlePropertyChanged;
+        }
+    }
+
+    private bool IsStartupBackdropReady()
+        => ThemeEffectPlatformSupport.ResolveActual(
+               _viewModel.ActiveThemeEffect,
+               ActualTransparencyLevel) is ThemeEffectMode.Acrylic or ThemeEffectMode.Mica;
+
+    private async Task<bool> WaitForStartupVisualTreeReadyAsync(
+        CancellationToken cancellationToken)
+    {
+        if (IsStartupVisualTreeReady())
+            return true;
+
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        void HandleLayoutUpdated(object? sender, EventArgs args)
+        {
+            if (IsStartupVisualTreeReady())
+                completion.TrySetResult(true);
+        }
+
+        LayoutUpdated += HandleLayoutUpdated;
+        try
+        {
+            if (IsStartupVisualTreeReady())
+                return true;
+
+            var completedTask = await Task.WhenAny(
+                completion.Task,
+                Task.Delay(StartupVisualReadyTimeout, cancellationToken));
+            await completedTask;
+            cancellationToken.ThrowIfCancellationRequested();
+            return ReferenceEquals(completedTask, completion.Task);
+        }
+        finally
+        {
+            LayoutUpdated -= HandleLayoutUpdated;
+        }
+    }
+
+    private bool IsStartupVisualTreeReady()
+        => Bounds.Width > 1 &&
+           Bounds.Height > 1 &&
+           _topMenuBar is { Bounds.Width: > 1, Bounds.Height: > 1 } &&
+           _dropZoneContainer is { Bounds.Width: > 1, Bounds.Height: > 1 };
+
+    private async Task<bool> TryWaitForRenderedCompositionBatchAsync(
+        CancellationToken cancellationToken)
+    {
+        var compositionVisual = ElementComposition.GetElementVisual(this);
+        if (compositionVisual is null)
+            return false;
+
+        try
+        {
+            // RequestAnimationFrame is a UI animation tick, not a presentation boundary.
+            // CompositionBatch.Rendered is the public Avalonia contract that confirms the
+            // fully laid-out visual changes reached the render thread before native reveal.
+            var batch = compositionVisual.Compositor.RequestCompositionBatchCommitAsync();
+            await batch.Rendered.WaitAsync(
+                UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250)),
+                cancellationToken);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            // Never strand a startup-cloaked window if a driver stalls rendering.
+            return false;
         }
     }
 
@@ -310,14 +446,29 @@ public partial class MainWindow
         return ReferenceEquals(completedTask, completion.Task);
     }
 
-    private void CompleteStartupRevealGate()
+    private void CompleteStartupRevealGate(bool animate = true)
     {
         if (_startupRevealCompleted)
             return;
 
         _startupRevealCompleted = true;
         _startupRevealGateActive = false;
-        Opacity = StartupRevealVisibleOpacity;
+
+        if (_startupBackdropCover is null)
+            return;
+
+        _startupBackdropCover.Transitions = animate
+            ?
+            [
+                new DoubleTransition
+                {
+                    Property = Visual.OpacityProperty,
+                    Duration = StartupBackdropRevealDuration,
+                    Easing = new CubicEaseOut()
+                }
+            ]
+            : null;
+        _startupBackdropCover.Opacity = 0;
     }
 
     private void OnOpened(object? sender, EventArgs e)
@@ -338,15 +489,19 @@ public partial class MainWindow
         try
         {
             _taskbarProgress.Attach(this);
-            await EnsureDesktopControlServerAsync(cancellationToken);
-
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
 
-            await RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken);
+            // The IPC registration and compositor warmup are independent. Running them
+            // together removes registry/socket IO from the first-visible-frame critical path.
+            await Task.WhenAll(
+                EnsureDesktopControlServerAsync(cancellationToken),
+                RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken));
             cancellationToken.ThrowIfCancellationRequested();
             _themeEffectRuntimeProbeReady = true;
             _themeBrushCoordinator.ScheduleActualEffectSynchronization();
             StartDeferredAppStateBootstrap(cancellationToken);
+            StartDeferredRecentProjectsLoad(cancellationToken);
+            ScheduleOptionalFontCatalogLoad();
 
             if (_startupErrors.Count > 0)
             {
@@ -431,6 +586,8 @@ public partial class MainWindow
 
         if (_desktopStartupRequest?.UseLastProject != true)
             return null;
+
+        await EnsureRecentProjectsLoadedAsync(cancellationToken);
 
         return await FindFirstExistingDirectoryAsync(
             _recentProjectsDb.RecentFolders.Select(static folder => folder.Path),

@@ -134,6 +134,9 @@ public partial class MainWindow
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private RecentProjectsDb _recentProjectsDb = new();
+    private Task<RecentProjectsDb>? _recentProjectsLoadTask;
+    private bool _recentProjectsLoaded;
+    private bool _recentMenuMaterialized;
     private Task? _recentFolderAvailabilityRefreshTask;
     private Border? _dropZoneContainer;
     private bool _dropZoneAcceptsCurrentDrag;
@@ -156,11 +159,18 @@ public partial class MainWindow
     private Button? _previewTreeModeButton;
     private Button? _previewContentModeButton;
     private Button? _previewTreeAndContentModeButton;
-    private const double StartupRevealHiddenOpacity = 0.0;
-    private const double StartupRevealVisibleOpacity = 1.0;
-    private static readonly TimeSpan StartupBackdropWarmupDelay = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(90));
+    private Border? _startupBackdropCover;
+    private static readonly TimeSpan StartupBackdropFallbackTimeout =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(90));
+    private static readonly TimeSpan StartupVisualReadyTimeout =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(500));
+    private static readonly TimeSpan StartupBackdropRevealDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(100));
     private bool _startupRevealGateActive;
     private bool _startupRevealCompleted;
+    private bool _startupWindowCloaked;
+    private bool _fontCatalogLoadScheduled;
+    private bool _fontCatalogLoaded;
     private CancellationTokenSource? _windowLifetimeCts = new();
     private int _startupSequenceStarted;
     private Rect _pendingWindowBounds;
@@ -186,8 +196,6 @@ public partial class MainWindow
         AvaloniaAppServices services,
         IReadOnlyList<string>? startupErrors = null)
     {
-        PrepareStartupRevealGate();
-
         _startupOptions = startupOptions;
         _desktopStartupRequest = startupOptions.OpenRequest;
         _startupErrors = startupErrors ?? [];
@@ -219,6 +227,7 @@ public partial class MainWindow
         _recentFolderAvailabilityService = services.RecentFolderAvailabilityService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
+        InitializeDefaultFont();
         _statusOperations = new StatusOperationCoordinator(
             _viewModel,
             IsBackgroundMetricsActive,
@@ -267,10 +276,13 @@ public partial class MainWindow
         _viewModel.SetToastItems(_toastService.Items);
         _sessionMetrics.SetIdleStateProvider(IsSessionMetricsIdle);
         _sessionMetrics.Start(_startupOptions.EffectiveSessionMetrics.ProjectPath, GetApplicationVersion());
-        LoadRecentProjects();
+        if (_desktopStartupRequest?.UseLastProject == true)
+            LoadRecentProjectsSynchronously();
         DataContext = _viewModel;
 
         InitializeComponent();
+
+        _startupBackdropCover = this.FindControl<Border>("StartupBackdropCover");
 
         // Setup drag & drop for the drop zone
         _dropZoneContainer = this.FindControl<Border>("DropZoneContainer");
@@ -325,7 +337,6 @@ public partial class MainWindow
         _previewLineNumbersControl = this.FindControl<VirtualizedLineNumbersControl>("PreviewLineNumbersControl");
         AttachRecentMenuHandlers();
         AttachTreeFontMenuHandlers();
-        RefreshRecentFoldersMenu();
         RefreshLanguageMenuChecks();
         _settingsContainer = this.FindControl<Border>("SettingsContainer");
         _settingsIsland = this.FindControl<Border>("SettingsIsland");
@@ -513,6 +524,7 @@ public partial class MainWindow
         // Prime the saved material/backdrop before the startup reveal gate waits for the
         // first render frames, otherwise the gate would only hide the default XAML surface.
         ApplyStartupThemePreset();
+        ConfigureStartupRevealGateForTheme();
         Closing += OnWindowClosing;
         Closed += OnWindowClosed;
         Activated += OnActivated;
@@ -532,7 +544,6 @@ public partial class MainWindow
             app.ActualThemeVariantChanged += _themeChangedHandler;
         }
 
-        InitializeFonts();
         RefreshTreeFontMenu();
         _selectionCoordinator.HookOptionListeners(_viewModel.RootFolders);
         _selectionCoordinator.HookOptionListeners(_viewModel.Extensions);

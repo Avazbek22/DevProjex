@@ -66,6 +66,7 @@ public partial class MainWindow
         var projectPath = request.ProjectPath;
         if (request.UseLastProject)
         {
+            await EnsureRecentProjectsLoadedAsync(cancellationToken);
             projectPath = await FindFirstExistingDirectoryAsync(
                 _recentProjectsDb.RecentFolders.Select(static folder => folder.Path),
                 cancellationToken);

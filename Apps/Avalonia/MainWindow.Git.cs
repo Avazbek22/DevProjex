@@ -9,10 +9,20 @@ public partial class MainWindow
 {
     #region Git Operations
 
-    private void OnGitClone(object? sender, RoutedEventArgs e)
+    private async void OnGitClone(object? sender, RoutedEventArgs e)
     {
         if (!_viewModel.CanChangeProjectTree)
             return;
+
+        try
+        {
+            await EnsureRecentProjectsLoadedAsync(
+                _windowLifetimeCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
 
         _viewModel.GitCloneUrl = string.Empty;
         _viewModel.GitCloneStatus = string.Empty;
@@ -27,7 +37,7 @@ public partial class MainWindow
         _gitCloneWindow.StartCloneRequested += OnGitCloneStart;
         _gitCloneWindow.CancelRequested += OnGitCloneCancel;
 
-        _gitCloneWindow.ShowDialog(this);
+        _ = _gitCloneWindow.ShowDialog(this);
         e.Handled = true;
     }
 

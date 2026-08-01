@@ -33,7 +33,9 @@
                   Header="{Binding MenuFileRecent}"
                   IsEnabled="{Binding CanChangeProjectTree}"
                   IsVisible="{Binding RecentFoldersMenuVisible}">
-          <!-- Populated dynamically from the recent-projects store. -->
+          <!-- This lightweight placeholder keeps the submenu addressable until its
+               persisted entries are materialized on the first open. -->
+          <MenuItem Header="{Binding MenuFileRecentEmpty}" IsEnabled="False" />
         </MenuItem>
         <MenuItem Name="RefreshMenuItem"
                   Header="{Binding MenuFileRefresh}"

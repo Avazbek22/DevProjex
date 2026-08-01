@@ -43,6 +43,7 @@
 
     <!-- Brushes -->
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
+    <SolidColorBrush x:Key="StartupBackdropCoverBrush" Color="{StaticResource AppBackgroundColor}" />
     <SolidColorBrush x:Key="AppPanelBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="MainMenuStripBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="MainMenuPopupBrush" Color="{StaticResource AppPanelColor}" />
@@ -121,6 +122,7 @@
 
     <!-- Brushes -->
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}" />
+    <SolidColorBrush x:Key="StartupBackdropCoverBrush" Color="{StaticResource AppBackgroundColor}" />
     <SolidColorBrush x:Key="AppPanelBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="MainMenuStripBrush" Color="{StaticResource AppPanelColor}" />
     <SolidColorBrush x:Key="MainMenuPopupBrush" Color="{StaticResource AppPanelColor}" />

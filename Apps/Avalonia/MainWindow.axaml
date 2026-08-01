@@ -174,8 +174,19 @@
     </Style>
   </Window.Styles>
 
-  <DockPanel LastChildFill="True">
-    <views:TopMenuBarView DockPanel.Dock="Top"
+  <Grid>
+    <!-- The native Windows backdrop is attached independently from Avalonia's visual tree.
+         This opaque layer sits behind the ready UI so startup never exposes a clear/empty
+         backdrop frame. It is removed before atomic reveal, or faded as a safe fallback
+         when a driver cannot report native-material readiness. -->
+    <Border Name="StartupBackdropCover"
+            IsVisible="False"
+            IsHitTestVisible="False"
+            Opacity="0"
+            Background="{DynamicResource StartupBackdropCoverBrush}" />
+
+    <DockPanel LastChildFill="True">
+      <views:TopMenuBarView DockPanel.Dock="Top"
                           Name="TopMenuBar"
                           OpenFolderRequested="OnOpenFolder"
                           OpenNewWindowRequested="OnOpenNewWindow"
@@ -958,5 +969,6 @@
         </ItemsControl.ItemTemplate>
       </ItemsControl>
     </Grid>
-  </DockPanel>
+    </DockPanel>
+  </Grid>
 </Window>
