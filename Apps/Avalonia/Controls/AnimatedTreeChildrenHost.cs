@@ -6,7 +6,7 @@ namespace DevProjex.Avalonia.Controls;
 public sealed class AnimatedTreeChildrenHost : Decorator
 {
     internal static readonly TimeSpan ExpansionDuration =
-        TimeSpan.FromMilliseconds(145);
+        TimeSpan.FromMilliseconds(120);
 
     public static readonly StyledProperty<double> ExpansionProgressProperty =
         AvaloniaProperty.Register<AnimatedTreeChildrenHost, double>(
@@ -37,7 +37,7 @@ public sealed class AnimatedTreeChildrenHost : Decorator
             new DoubleTransition
             {
                 Property = OpacityProperty,
-                Duration = TimeSpan.FromMilliseconds(120),
+                Duration = TimeSpan.FromMilliseconds(100),
                 Easing = new CubicEaseOut()
             }
         ];
