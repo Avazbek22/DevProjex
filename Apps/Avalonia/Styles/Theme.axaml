@@ -1,5 +1,7 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:DevProjex.Avalonia.Controls"
+        xmlns:converters="using:Avalonia.Controls.Converters">
     <Styles.Resources>
         <ResourceDictionary>
             <ResourceDictionary.ThemeDictionaries>
@@ -198,6 +200,57 @@
                 <Style Selector="^:checked /template/ Path#ChevronPath">
                     <Setter Property="RenderTransform" Value="rotate(90deg)" />
                 </Style>
+            </ControlTheme>
+            <ControlTheme x:Key="DevProjexAnimatedTreeViewItemTheme"
+                          TargetType="TreeViewItem"
+                          BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                <!-- Preserve Fluent's public theme contract and template-part names. Only the
+                     binary ItemsPresenter visibility switch is replaced by a measured host. -->
+                <Setter Property="Template">
+                    <ControlTemplate>
+                        <StackPanel>
+                            <Border Name="PART_LayoutRoot"
+                                    Classes="TreeViewItemLayoutRoot"
+                                    Focusable="True"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    MinHeight="{TemplateBinding MinHeight}"
+                                    TemplatedControl.IsTemplateFocusTarget="True">
+                                <Grid Name="PART_Header"
+                                      ColumnDefinitions="Auto,*">
+                                    <Grid.Margin>
+                                        <MultiBinding Converter="{x:Static converters:TreeViewItemIndentConverter.Instance}">
+                                            <Binding Path="Level" RelativeSource="{RelativeSource TemplatedParent}" />
+                                            <DynamicResource ResourceKey="TreeViewItemIndent" />
+                                        </MultiBinding>
+                                    </Grid.Margin>
+                                    <Panel Name="PART_ExpandCollapseChevronContainer"
+                                           Margin="12,0,12,0">
+                                        <ToggleButton Name="PART_ExpandCollapseChevron"
+                                                      Theme="{StaticResource DevProjexTreeExpandCollapseChevronTheme}"
+                                                      Focusable="False"
+                                                      IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}" />
+                                    </Panel>
+                                    <ContentPresenter Name="PART_HeaderPresenter"
+                                                      Grid.Column="1"
+                                                      Focusable="False"
+                                                      Background="Transparent"
+                                                      Content="{TemplateBinding Header}"
+                                                      ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                                      HorizontalAlignment="{TemplateBinding HorizontalAlignment}"
+                                                      VerticalAlignment="{TemplateBinding VerticalAlignment}"
+                                                      Margin="{TemplateBinding Padding}" />
+                                </Grid>
+                            </Border>
+                            <controls:AnimatedTreeChildrenHost Name="PART_AnimatedChildrenHost">
+                                <ItemsPresenter Name="PART_ItemsPresenter"
+                                                ItemsPanel="{TemplateBinding ItemsPanel}" />
+                            </controls:AnimatedTreeChildrenHost>
+                        </StackPanel>
+                    </ControlTemplate>
+                </Setter>
             </ControlTheme>
         </ResourceDictionary>
     </Styles.Resources>

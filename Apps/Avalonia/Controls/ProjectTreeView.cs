@@ -35,20 +35,29 @@ internal sealed class ProjectTreeViewItem : TreeViewItem
         "DevProjexTreeExpandCollapseChevronTheme";
 
     private IDisposable? _chevronVisibilityBinding;
+    private ToggleButton? _chevron;
+    private AnimatedTreeChildrenHost? _childrenHost;
+    private bool _animateNextExpansionChange;
 
     protected override Type StyleKeyOverride => typeof(TreeViewItem);
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
+        DetachChevronInteractionHandlers();
         base.OnApplyTemplate(e);
 
         _chevronVisibilityBinding?.Dispose();
         _chevronVisibilityBinding = null;
+        _childrenHost = e.NameScope.Find<AnimatedTreeChildrenHost>(
+            "PART_AnimatedChildrenHost");
+        _childrenHost?.SetExpanded(IsExpanded, animate: false);
 
         if (e.NameScope.Find<ToggleButton>(
                 "PART_ExpandCollapseChevron") is { } chevron)
         {
+            _chevron = chevron;
             ApplyAnimatedChevronTheme(chevron);
+            AttachChevronInteractionHandlers(chevron);
 
             // Fluent derives chevron visibility from ItemsSource emptiness. A lazy node
             // intentionally has an empty source before expansion, so descriptor metadata
@@ -57,6 +66,34 @@ internal sealed class ProjectTreeViewItem : TreeViewItem
                 IsVisibleProperty,
                 new Binding(nameof(TreeNodeViewModel.HasChildren)));
         }
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (change.Property != IsExpandedProperty)
+            return;
+
+        var animate = _animateNextExpansionChange;
+        _animateNextExpansionChange = false;
+        _childrenHost?.SetExpanded(IsExpanded, animate);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        var previousExpandedState = IsExpanded;
+        var isSingleBranchToggle =
+            e.KeyModifiers == KeyModifiers.None &&
+            e.Key is Key.Left or Key.Right or Key.Enter or Key.Add or Key.Subtract;
+
+        if (isSingleBranchToggle)
+            _animateNextExpansionChange = true;
+
+        base.OnKeyDown(e);
+
+        if (IsExpanded == previousExpandedState)
+            _animateNextExpansionChange = false;
     }
 
     private static void ApplyAnimatedChevronTheme(ToggleButton chevron)
@@ -87,6 +124,46 @@ internal sealed class ProjectTreeViewItem : TreeViewItem
             return;
         }
 
+        var previousExpandedState = IsExpanded;
+        _animateNextExpansionChange = true;
         base.OnHeaderDoubleTapped(e);
+
+        if (IsExpanded == previousExpandedState)
+            _animateNextExpansionChange = false;
     }
+
+    private void AttachChevronInteractionHandlers(ToggleButton chevron)
+    {
+        chevron.AddHandler(
+            PointerPressedEvent,
+            OnChevronPointerPressed,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        chevron.Click += OnChevronClick;
+        chevron.PointerCaptureLost += OnChevronPointerCaptureLost;
+    }
+
+    private void DetachChevronInteractionHandlers()
+    {
+        if (_chevron is null)
+            return;
+
+        _chevron.RemoveHandler(PointerPressedEvent, OnChevronPointerPressed);
+        _chevron.Click -= OnChevronClick;
+        _chevron.PointerCaptureLost -= OnChevronPointerCaptureLost;
+        _chevron = null;
+    }
+
+    private void OnChevronPointerPressed(
+        object? sender,
+        PointerPressedEventArgs e)
+        => _animateNextExpansionChange = true;
+
+    private void OnChevronClick(object? sender, RoutedEventArgs e)
+        => _animateNextExpansionChange = false;
+
+    private void OnChevronPointerCaptureLost(
+        object? sender,
+        PointerCaptureLostEventArgs e)
+        => _animateNextExpansionChange = false;
 }

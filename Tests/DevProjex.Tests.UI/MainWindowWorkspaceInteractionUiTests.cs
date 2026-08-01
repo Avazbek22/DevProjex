@@ -3,6 +3,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using DevProjex.Avalonia.Controls;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Kernel.Abstractions;
 
@@ -222,7 +223,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             var collapsedGeometry = chevronPath.Data;
             var collapsedTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
 
-            Assert.Equal(TimeSpan.FromMilliseconds(140), transition.Duration);
+            Assert.Equal(TimeSpan.FromMilliseconds(120), transition.Duration);
             Assert.Equal(Visual.RenderTransformProperty, transition.Property);
 
             await UiTestDriver.ClickAsync(window, chevron);
@@ -272,6 +273,76 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             var retargetedTransform = chevronPath.RenderTransform?.Value ?? Matrix.Identity;
             AssertMatricesClose(collapsedTransform, retargetedTransform);
             Assert.Same(collapsedGeometry, chevronPath.Data);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TreeBranch_UserToggleAnimatesChildren_ProgrammaticToggleSnaps()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var folderNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "src",
+                    StringComparison.Ordinal));
+            var chevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, folderNode));
+            var childrenHost = Assert.Single(
+                window.GetVisualDescendants().OfType<AnimatedTreeChildrenHost>(),
+                control => ReferenceEquals(control.DataContext, folderNode));
+            var heightTransition = Assert.Single(
+                childrenHost.Transitions!
+                    .OfType<global::Avalonia.Animation.DoubleTransition>(),
+                transition =>
+                    transition.Property ==
+                    AnimatedTreeChildrenHost.ExpansionProgressProperty);
+
+            Assert.Equal(
+                AnimatedTreeChildrenHost.ExpansionDuration,
+                heightTransition.Duration);
+            Assert.False(childrenHost.IsVisible);
+            Assert.Equal(0d, childrenHost.ExpansionProgress);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => folderNode.IsExpanded &&
+                      childrenHost.IsVisible &&
+                      childrenHost.ExpansionProgress >= 0.999d,
+                "tree children expansion animation to finish");
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !folderNode.IsExpanded && !childrenHost.IsVisible,
+                "tree children collapse animation to finish");
+
+            // Search, restore and bulk tree operations update IsExpanded directly. Those
+            // paths must not fan out into many simultaneous layout animations.
+            folderNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+            Assert.True(childrenHost.IsVisible);
+            Assert.Equal(1d, childrenHost.ExpansionProgress);
+
+            folderNode.IsExpanded = false;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+            Assert.False(childrenHost.IsVisible);
+            Assert.Equal(0d, childrenHost.ExpansionProgress);
         }
         finally
         {

@@ -541,6 +541,7 @@
                 <Grid>
                   <controls:ProjectTreeView Name="ProjectTree"
                                             ItemsSource="{Binding TreeNodes}"
+                                            ItemContainerTheme="{StaticResource DevProjexAnimatedTreeViewItemTheme}"
                                             IsEnabled="{Binding CanUseProjectWorkspaceActions}"
                                             Padding="0,0,0,4"
                                             FontFamily="{Binding SelectedFontFamily}"
