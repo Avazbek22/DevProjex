@@ -477,10 +477,12 @@ Icon selection order:
 4) otherwise — unknown
 
 ## 15) Theme and effects
-The Theme section lets you select a light or dark theme and one background effect:
+The Theme section lets you select System, Light, or Dark and one background effect:
 * Transparency
 * Blur
 * Mica
+
+System is selected by default and follows operating-system theme changes. After first launch or a settings reset, a light system theme starts with a regular opaque background, while a dark system theme starts with Blur. If the system preference cannot be determined, DevProjex uses Dark with Blur. Light and Dark remember their effects independently. An explicit Light or Dark selection ignores system changes until System is selected again.
 
 Effects are mutually exclusive. Clicking the selected effect again disables it and restores a regular opaque background.
 
@@ -534,5 +536,4 @@ X button (cancel) in the status bar:
 * for operations without cancellation support, it stops status-bar indication, while the operation itself may still finish in background.
 
 ## 19) Notes
-* By default, the dark theme with Blur is used. If Blur is unavailable, the app tries Mica; if neither effect is available, effects are disabled.
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.

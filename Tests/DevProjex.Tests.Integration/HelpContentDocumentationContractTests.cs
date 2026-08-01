@@ -128,19 +128,19 @@ public sealed class HelpContentDocumentationContractTests
         { "help.en.txt", "JSON export uses this tree format: arrays contain files, objects contain subfolders, `/` contains files in the current folder, and `[]` represents an empty folder." }
     };
 
-    public static TheoryData<string, string, string, string> ThemeFallbackContracts => new()
+    public static TheoryData<string, string, string, string, string, string, string, string> ThemeBehaviorContracts => new()
     {
-        { "help.ru.txt", "сначала пробует другой системный эффект", "фон главного окна", "Если Blur недоступен, приложение пробует Mica" },
-        { "help.en.txt", "first tries the other native effect", "main-window background", "If Blur is unavailable, the app tries Mica" },
-        { "help.de.txt", "zunächst den jeweils anderen nativen Effekt", "Hintergrund des Hauptfensters", "Ist Weichzeichnen nicht verfügbar, versucht die App Mica" },
-        { "help.fr.txt", "essaie d’abord l’autre effet natif", "arrière-plan de la fenêtre principale", "Si le Flou n’est pas disponible, l’application essaie Mica" },
-        { "help.it.txt", "prova prima l’altro effetto nativo", "sfondo della finestra principale", "Se Sfocatura non è disponibile, l’app prova Mica" },
-        { "help.es.txt", "prueba primero el otro efecto nativo", "fondo de la ventana principal", "Si Blur no está disponible, la aplicación prueba Mica" },
-        { "help.pt.txt", "primeiro tenta o outro efeito nativo", "fundo da janela principal", "Se o Blur não estiver disponível, o aplicativo tentará o Mica" },
-        { "help.pt-pt.txt", "tenta primeiro o outro efeito nativo", "fundo da janela principal", "Se o Blur não estiver disponível, a aplicação tentará o Mica" },
-        { "help.kk.txt", "алдымен басқа жүйелік эффектіні қолданып көреді", "негізгі терезенің фоны", "Бұлдырлату қолжетімсіз болса, қолданба Mica-ны қолданып көреді" },
-        { "help.tg.txt", "аввал эффекти дигари системавиро месанҷад", "заминаи равзанаи асосӣ", "Агар Тирагӣ дастрас набошад, барнома Mica-ро месанҷад" },
-        { "help.uz.txt", "avval boshqa tizim effektini sinab ko‘radi", "asosiy oyna foni", "Xiralashtirish mavjud bo‘lmasa, ilova Mica-ni sinab ko‘radi" }
+        { "help.ru.txt", "По умолчанию выбрана «Системная»", "светлая системная тема включается с обычным непрозрачным фоном", "тёмная — с Blur", "запоминают выбранные эффекты независимо", "Если тему системы определить невозможно", "сначала пробует другой системный эффект", "фон главного окна" },
+        { "help.en.txt", "System is selected by default", "light system theme starts with a regular opaque background", "dark system theme starts with Blur", "remember their effects independently", "If the system preference cannot be determined", "first tries the other native effect", "main-window background" },
+        { "help.de.txt", "„System“ ist standardmäßig ausgewählt", "helles System-Theme mit einem normalen undurchsichtigen Hintergrund", "dunkles System-Theme mit Weichzeichnen", "speichern ihre Effekte getrennt", "Kann die Systempräferenz nicht ermittelt werden", "zunächst den jeweils anderen nativen Effekt", "Hintergrund des Hauptfensters" },
+        { "help.fr.txt", "Système est sélectionné par défaut", "thème système clair utilise un arrière-plan opaque normal", "thème système sombre utilise le Flou", "mémorisent leurs effets séparément", "Si la préférence système ne peut pas être déterminée", "essaie d’abord l’autre effet natif", "arrière-plan de la fenêtre principale" },
+        { "help.it.txt", "Sistema è selezionato per impostazione predefinita", "tema di sistema chiaro usa un normale sfondo opaco", "tema di sistema scuro usa Sfocatura", "ricordano i propri effetti separatamente", "Se la preferenza di sistema non può essere determinata", "prova prima l’altro effetto nativo", "sfondo della finestra principale" },
+        { "help.es.txt", "Sistema está seleccionado de forma predeterminada", "tema claro del sistema utiliza un fondo opaco normal", "tema oscuro del sistema utiliza Desenfoque", "recuerdan sus efectos por separado", "Si no se puede determinar la preferencia del sistema", "prueba primero el otro efecto nativo", "fondo de la ventana principal" },
+        { "help.pt.txt", "Sistema é selecionado por padrão", "tema claro do sistema usa um fundo opaco regular", "tema escuro do sistema usa Desfoque", "lembram seus efeitos separadamente", "Se não for possível determinar a preferência do sistema", "primeiro tenta o outro efeito nativo", "fundo da janela principal" },
+        { "help.pt-pt.txt", "Sistema é selecionado por predefinição", "tema claro do sistema utiliza um fundo opaco regular", "tema escuro do sistema utiliza Desfoque", "memorizam os seus efeitos separadamente", "Se não for possível determinar a preferência do sistema", "tenta primeiro o outro efeito nativo", "fundo da janela principal" },
+        { "help.kk.txt", "Әдепкіде Жүйелік режим таңдалады", "жүйенің ашық тақырыбы кәдімгі мөлдір емес фонмен", "қараңғы тақырыбы Бұлдырлатумен", "өз эффектілерін бөлек сақтайды", "Жүйе таңдауын анықтау мүмкін болмаса", "алдымен басқа жүйелік эффектіні қолданып көреді", "негізгі терезенің фоны" },
+        { "help.tg.txt", "Бо нобаёнӣ реҷаи Системавӣ интихоб мешавад", "мавзӯи равшани система бо заминаи одии ношаффоф", "мавзӯи торики система бо Тирагӣ", "эффектҳои худро алоҳида нигоҳ медоранд", "Агар афзалияти система муайян карда нашавад", "аввал эффекти дигари системавиро месанҷад", "заминаи равзанаи асосӣ" },
+        { "help.uz.txt", "Standart holatda Tizim rejimi tanlanadi", "tizimning yorug‘ mavzusi oddiy shaffof bo‘lmagan fon bilan", "qorong‘i mavzusi esa Xiralashtirish bilan", "o‘z effektlarini alohida eslab qoladi", "Tizim tanlovini aniqlab bo‘lmasa", "avval boshqa tizim effektini sinab ko‘radi", "asosiy oyna foni" }
     };
 
     public static TheoryData<string, string, string, string, string, string, string, string> ProjectExportContracts => new()
@@ -315,19 +315,27 @@ public sealed class HelpContentDocumentationContractTests
     }
 
     [Theory]
-    [MemberData(nameof(ThemeFallbackContracts))]
-    public void HelpContent_ThemeSection_DescribesNativeFallbackChainAndTransparentPopupSurfaces(
+    [MemberData(nameof(ThemeBehaviorContracts))]
+    public void HelpContent_ThemeSection_DescribesSystemModeDefaultsAndFallbacks(
         string fileName,
+        string expectedSystemDefaultText,
+        string expectedLightDefaultText,
+        string expectedDarkDefaultText,
+        string expectedIndependentEffectsText,
+        string expectedUnknownSystemFallbackText,
         string expectedNativeFallbackText,
-        string expectedTransparentWindowText,
-        string expectedDefaultFallbackText)
+        string expectedTransparentWindowText)
     {
         var content = ReadHelpFile(fileName);
         var themeSection = ExtractSection(content, "## 15)", "## 16)");
 
+        Assert.Contains(expectedSystemDefaultText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedLightDefaultText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedDarkDefaultText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedIndependentEffectsText, themeSection, StringComparison.Ordinal);
+        Assert.Contains(expectedUnknownSystemFallbackText, themeSection, StringComparison.Ordinal);
         Assert.Contains(expectedNativeFallbackText, themeSection, StringComparison.Ordinal);
         Assert.Contains(expectedTransparentWindowText, themeSection, StringComparison.Ordinal);
-        Assert.Contains(expectedDefaultFallbackText, content, StringComparison.Ordinal);
     }
 
     [Theory]

@@ -425,10 +425,12 @@ Ordre de sélection :
 4) sinon — inconnu
 
 ## 15) Thème et effets
-La section « Thème » permet de choisir un thème clair ou sombre et un effet d’arrière-plan :
+La section « Thème » permet de choisir Système, Clair ou Sombre et un effet d’arrière-plan :
 * Transparence
 * Flou
 * Mica
+
+Système est sélectionné par défaut et suit les changements de thème du système d’exploitation. Après le premier démarrage ou une réinitialisation des paramètres, un thème système clair utilise un arrière-plan opaque normal, tandis qu’un thème système sombre utilise le Flou. Si la préférence système ne peut pas être déterminée, DevProjex utilise Sombre avec le Flou. Les thèmes Clair et Sombre mémorisent leurs effets séparément. Un choix explicite de Clair ou Sombre ignore les changements du système jusqu’à ce que Système soit de nouveau sélectionné.
 
 Les effets sont mutuellement exclusifs. Un nouveau clic sur l’effet sélectionné le désactive et rétablit un arrière-plan opaque normal.
 
@@ -482,5 +484,4 @@ Bouton X (annuler) dans la barre d’état :
 * pour les opérations sans prise en charge de l’annulation, arrête l’indication dans la barre d’état, tandis que l’opération peut se terminer en arrière-plan.
 
 ## 19) Notes
-* Par défaut, le thème sombre avec l’effet Flou est utilisé. Si le Flou n’est pas disponible, l’application essaie Mica ; si aucun des deux effets n’est disponible, les effets sont désactivés.
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.

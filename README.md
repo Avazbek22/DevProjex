@@ -81,8 +81,8 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **Progress bar + operation cancellation** with safe fallback behavior
 * **Modern appearance system**
 
-  * Light / Dark
-  * Transparency & blur where supported
+  * System / Light / Dark
+  * Transparency / blur / Mica where supported
   * Presets stored locally
   * Island-based layout and smooth UI animations
 * **Animated toasts** for user feedback

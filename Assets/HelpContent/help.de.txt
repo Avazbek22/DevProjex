@@ -425,10 +425,12 @@ Auswahlreihenfolge:
 4) sonst — unbekannt
 
 ## 15) Thema und Effekte
-Im Bereich „Thema“ können ein helles oder dunkles Theme und ein Hintergrundeffekt gewählt werden:
+Im Bereich „Thema“ können System, Hell oder Dunkel und ein Hintergrundeffekt gewählt werden:
 * Transparenz
 * Weichzeichnen
 * Mica
+
+„System“ ist standardmäßig ausgewählt und folgt Änderungen des Betriebssystem-Themas. Nach dem ersten Start oder einem Zurücksetzen beginnt ein helles System-Theme mit einem normalen undurchsichtigen Hintergrund, ein dunkles System-Theme mit Weichzeichnen. Kann die Systempräferenz nicht ermittelt werden, verwendet DevProjex Dunkel mit Weichzeichnen. Helles und dunkles Theme speichern ihre Effekte getrennt. Eine ausdrückliche Auswahl von Hell oder Dunkel ignoriert Systemänderungen, bis erneut System gewählt wird.
 
 Die Effekte schließen sich gegenseitig aus. Ein erneuter Klick auf den ausgewählten Effekt deaktiviert ihn und stellt einen normalen undurchsichtigen Hintergrund wieder her.
 
@@ -482,5 +484,4 @@ X-Schaltfläche (Abbrechen) in der Statusleiste:
 * bei Operationen ohne Abbruchunterstützung wird nur die Statusleisten-Anzeige beendet, die Operation selbst kann im Hintergrund weiterlaufen.
 
 ## 19) Hinweise
-* Standardmäßig wird das dunkle Theme mit Weichzeichnen verwendet. Ist Weichzeichnen nicht verfügbar, versucht die App Mica; sind beide Effekte nicht verfügbar, werden die Effekte deaktiviert.
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.

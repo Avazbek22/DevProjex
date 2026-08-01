@@ -425,10 +425,12 @@ Ordine di scelta:
 4) altrimenti — sconosciuto
 
 ## 15) Tema ed effetti
-La sezione «Tema» permette di scegliere un tema chiaro o scuro e un effetto di sfondo:
+La sezione «Tema» permette di scegliere Sistema, Chiaro o Scuro e un effetto di sfondo:
 * Trasparenza
 * Sfocatura
 * Mica
+
+Sistema è selezionato per impostazione predefinita e segue le modifiche del tema del sistema operativo. Dopo il primo avvio o il ripristino delle impostazioni, un tema di sistema chiaro usa un normale sfondo opaco, mentre un tema di sistema scuro usa Sfocatura. Se la preferenza di sistema non può essere determinata, DevProjex usa Scuro con Sfocatura. I temi Chiaro e Scuro ricordano i propri effetti separatamente. Una scelta esplicita di Chiaro o Scuro ignora le modifiche del sistema finché non viene selezionato nuovamente Sistema.
 
 Gli effetti si escludono a vicenda. Un nuovo clic sull’effetto selezionato lo disattiva e ripristina un normale sfondo opaco.
 
@@ -482,5 +484,4 @@ Pulsante X (annulla) nella barra di stato:
 * per operazioni senza supporto annullamento, ferma l’indicazione nella barra di stato, mentre l’operazione può comunque terminare in background.
 
 ## 19) Note
-* Per impostazione predefinita viene usato il tema scuro con Sfocatura. Se Sfocatura non è disponibile, l’app prova Mica; se nessuno dei due effetti è disponibile, gli effetti vengono disattivati.
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.

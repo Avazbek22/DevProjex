@@ -10,13 +10,16 @@
       <StackPanel Spacing="4">
         <TextBlock Classes="popover-section-title" Text="{Binding ThemeModeLabel}" FontSize="12"/>
         <StackPanel Orientation="Horizontal" Spacing="16">
-          <CheckBox Content="{Binding ThemeSystemLabel}"
+          <CheckBox x:Name="SystemThemeCheckBox"
+                    Content="{Binding ThemeSystemLabel}"
                     IsChecked="{Binding IsSystemThemeSelected, Mode=OneWay}"
                     Click="OnSetSystemThemeCheckbox" />
-          <CheckBox Content="{Binding ThemeLightLabel}"
+          <CheckBox x:Name="LightThemeCheckBox"
+                    Content="{Binding ThemeLightLabel}"
                     IsChecked="{Binding IsLightThemeSelected, Mode=OneWay}"
                     Click="OnSetLightThemeCheckbox" />
-          <CheckBox Content="{Binding ThemeDarkLabel}"
+          <CheckBox x:Name="DarkThemeCheckBox"
+                    Content="{Binding ThemeDarkLabel}"
                     IsChecked="{Binding IsDarkThemeSelected, Mode=OneWay}"
                     Click="OnSetDarkThemeCheckbox" />
         </StackPanel>

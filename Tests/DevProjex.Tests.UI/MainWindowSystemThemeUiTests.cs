@@ -1,5 +1,5 @@
-using System.Reflection;
 using DevProjex.Infrastructure.ThemePresets;
+using DevProjex.Avalonia.Views;
 using AvaloniaThemeVariant = Avalonia.Styling.ThemeVariant;
 
 namespace DevProjex.Tests.UI;
@@ -11,9 +11,12 @@ public sealed class MainWindowSystemThemeUiTests
     public async Task FactoryDefaultAndManualRoundTrip_KeepSystemAsARealSelectionMode()
     {
         using var project = UiTestProject.CreateDefault();
+        var appDataPath = Path.Combine(project.AppDataPath, "system-theme-round-trip");
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(
             project,
-            waitForInitialSettingsPane: false);
+            waitForInitialSettingsPane: false,
+            appDataPathOverride: appDataPath);
+        var closed = false;
 
         try
         {
@@ -25,7 +28,7 @@ public sealed class MainWindowSystemThemeUiTests
                 AvaloniaThemeVariant.Default,
                 global::Avalonia.Application.Current!.RequestedThemeVariant);
 
-            InvokeThemeAction(window, "OnSetDarkTheme");
+            await RaiseThemeSelectionClickAsync(window, "DarkThemeCheckBox");
 
             Assert.Equal(ThemeSelectionMode.Dark, viewModel.SelectedThemeMode);
             Assert.True(viewModel.IsDarkThemeSelected);
@@ -34,26 +37,36 @@ public sealed class MainWindowSystemThemeUiTests
                 AvaloniaThemeVariant.Dark,
                 global::Avalonia.Application.Current.RequestedThemeVariant);
 
-            InvokeThemeAction(window, "OnSetSystemTheme");
+            await RaiseThemeSelectionClickAsync(window, "SystemThemeCheckBox");
 
             Assert.Equal(ThemeSelectionMode.System, viewModel.SelectedThemeMode);
             Assert.True(viewModel.IsSystemThemeSelected);
             Assert.Equal(
                 AvaloniaThemeVariant.Default,
                 global::Avalonia.Application.Current.RequestedThemeVariant);
+
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+            closed = true;
+
+            var persisted = new ThemeSettingsStore(() => appDataPath).Load();
+            Assert.Equal(ThemeSelectionMode.System, persisted.SelectedThemeMode);
+            Assert.Equal(ThemeEffectMode.Solid, persisted.LightThemeEffect);
+            Assert.Equal(ThemeEffectMode.Acrylic, persisted.DarkThemeEffect);
         }
         finally
         {
-            await UiTestDriver.CloseWindowAsync(window);
+            if (!closed)
+                await UiTestDriver.CloseWindowAsync(window);
         }
     }
 
-    private static void InvokeThemeAction(MainWindow window, string methodName)
+    private static async Task RaiseThemeSelectionClickAsync(
+        MainWindow window,
+        string controlName)
     {
-        var method = typeof(MainWindow).GetMethod(
-            methodName,
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(method);
-        method.Invoke(window, [null, new global::Avalonia.Interactivity.RoutedEventArgs()]);
+        var popover = UiTestDriver.GetRequiredTopMenuControl<ThemePopoverView>(window, "ThemePopover");
+        var checkBox = Assert.IsType<CheckBox>(popover.FindControl<CheckBox>(controlName));
+        checkBox.RaiseEvent(new global::Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
     }
 }

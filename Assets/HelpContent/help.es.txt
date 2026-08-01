@@ -479,10 +479,12 @@ Orden de selección de iconos:
 4) de lo contrario - desconocido
 
 ## 15) Tema y efectos
-La sección Tema te permite seleccionar un tema claro u oscuro y un efecto de fondo:
+La sección Tema permite seleccionar Sistema, Claro u Oscuro y un efecto de fondo:
 * Transparencia
 * Desenfoque
 * mica
+
+Sistema está seleccionado de forma predeterminada y sigue los cambios de tema del sistema operativo. Después del primer inicio o de restablecer la configuración, un tema claro del sistema utiliza un fondo opaco normal, mientras que un tema oscuro del sistema utiliza Desenfoque. Si no se puede determinar la preferencia del sistema, DevProjex utiliza Oscuro con Desenfoque. Los temas Claro y Oscuro recuerdan sus efectos por separado. Una selección explícita de Claro u Oscuro ignora los cambios del sistema hasta que se vuelva a seleccionar Sistema.
 
 Los efectos son mutuamente excluyentes. Al hacer clic nuevamente en el efecto seleccionado, se desactiva y se restaura un fondo opaco normal.
 
@@ -536,5 +538,4 @@ Botón X (cancelar) en la barra de estado:
 * para operaciones sin soporte de cancelación, detiene la indicación de la barra de estado, mientras que la operación en sí aún puede finalizar en segundo plano.
 
 ## 19) Notas
-* Por defecto se utiliza el tema oscuro con Desenfoque. Si Blur no está disponible, la aplicación prueba Mica; Si ninguno de los efectos está disponible, los efectos se desactivan.
 * Si los permisos son insuficientes, la aplicación puede sugerir reiniciar con elevación; si se rechaza, se muestra una notificación.

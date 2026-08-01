@@ -425,10 +425,12 @@ Ikonka tanlash tartibi:
 4) aks holda — noma’lum
 
 ## 15) Mavzu va effektlar
-«Mavzu» bo‘limida yorug‘ yoki qorong‘i mavzu va bitta fon effektini tanlash mumkin:
+«Mavzu» bo‘limida Tizim, Yorug‘ yoki Qorong‘i rejim va bitta fon effektini tanlash mumkin:
 * Shaffoflik
 * Xiralashtirish
 * Mica
+
+Standart holatda Tizim rejimi tanlanadi va u operatsion tizim mavzusidagi o‘zgarishlarni kuzatadi. Birinchi ishga tushirishdan yoki sozlamalarni tiklashdan keyin tizimning yorug‘ mavzusi oddiy shaffof bo‘lmagan fon bilan, qorong‘i mavzusi esa Xiralashtirish bilan ishga tushadi. Tizim tanlovini aniqlab bo‘lmasa, DevProjex Qorong‘i rejimni Xiralashtirish bilan ishlatadi. Yorug‘ va Qorong‘i mavzular o‘z effektlarini alohida eslab qoladi. Yorug‘ yoki Qorong‘i rejimni aniq tanlash Tizim qayta tanlanmaguncha tizim o‘zgarishlarini e’tiborsiz qoldiradi.
 
 Effektlar bir vaqtda ishlamaydi. Tanlangan effektni qayta bosish uni o‘chiradi va oddiy shaffof bo‘lmagan fonni qaytaradi.
 
@@ -482,5 +484,4 @@ Status-bardagi X (bekor qilish) tugmasi:
 * bekor qilishni qo‘llamaydigan amallarda status-bar indikatsiyasini tugatadi, lekin amal fon rejimida yakunlanishi mumkin.
 
 ## 19) Eslatmalar
-* Standart holatda Xiralashtirish effektli qorong‘i mavzu ishlatiladi. Xiralashtirish mavjud bo‘lmasa, ilova Mica-ni sinab ko‘radi; ikkala effekt ham mavjud bo‘lmasa, effektlar o‘chiriladi.
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.

@@ -44,4 +44,14 @@ public sealed class ThemeSelectionPolicyTests
                 (ThemeSelectionMode)999,
                 ThemeVariant.Light));
     }
+
+    [Theory]
+    [InlineData(ThemeVariant.Light, ThemeSelectionMode.Light)]
+    [InlineData(ThemeVariant.Dark, ThemeSelectionMode.Dark)]
+    public void GetExplicitMode_MapsEveryThemeVariant(
+        ThemeVariant theme,
+        ThemeSelectionMode expected)
+    {
+        Assert.Equal(expected, ThemeSelectionPolicy.GetExplicitMode(theme));
+    }
 }

@@ -233,7 +233,7 @@ internal sealed class AppearanceSettingsController(
             return;
         }
 
-        var systemTheme = ToPresetThemeVariant(application.ActualThemeVariant);
+        var systemTheme = ResolveSystemTheme();
         var previousTheme = session.CurrentTheme;
         var preset = session.SynchronizeSystemTheme(
             systemTheme,
@@ -418,30 +418,12 @@ internal sealed class AppearanceSettingsController(
 
     private ThemePresetVariant? ResolveSystemTheme()
     {
-        var platformTheme = window.GetPlatformSettings()?.GetColorValues().ThemeVariant;
-        if (platformTheme is { } detectedTheme)
-        {
-            return detectedTheme == global::Avalonia.Platform.PlatformThemeVariant.Dark
-                ? ThemePresetVariant.Dark
-                : ThemePresetVariant.Light;
-        }
-
-        if (global::Avalonia.Application.Current is { } application &&
-            application.RequestedThemeVariant == AvaloniaThemeVariant.Default)
-        {
-            return ToPresetThemeVariant(application.ActualThemeVariant);
-        }
-
-        return null;
+        var application = global::Avalonia.Application.Current;
+        return SystemThemeResolver.Resolve(
+            window.GetPlatformSettings()?.GetColorValues().ThemeVariant,
+            application?.ActualThemeVariant,
+            application?.RequestedThemeVariant);
     }
-
-    private static ThemePresetVariant? ToPresetThemeVariant(AvaloniaThemeVariant? themeVariant)
-        => themeVariant switch
-        {
-            var theme when theme == AvaloniaThemeVariant.Light => ThemePresetVariant.Light,
-            var theme when theme == AvaloniaThemeVariant.Dark => ThemePresetVariant.Dark,
-            _ => null
-        };
 
     private ThemePreset NormalizeSessionEffectForPlatform(ThemePreset currentPreset)
     {
