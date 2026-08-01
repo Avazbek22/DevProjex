@@ -20,8 +20,10 @@ public partial class MainWindow
     private void OnToggleCompactMode(object? sender, RoutedEventArgs e)
         => _appearanceSettings.ToggleCompactMode();
 
-    private void OnToggleTreeAnimation(object? sender, RoutedEventArgs e)
-        => _appearanceSettings.ToggleTreeAnimation();
+    private void OnToggleTreeExpansionAnimation(
+        object? sender,
+        RoutedEventArgs e)
+        => _appearanceSettings.ToggleTreeExpansionAnimation();
 
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
     {

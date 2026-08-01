@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.ThemePresets;
 
 public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 {
-    private const int CurrentSchemaVersion = 6;
+    private const int CurrentSchemaVersion = 7;
     private const string FolderName = "DevProjex";
     private const string FileName = "user-settings.json";
 
@@ -129,6 +129,25 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         return database;
     }
 
+    private UserSettingsDb NormalizeAfterRead(UserSettingsDb database)
+    {
+        var sourceSchemaVersion = database.SchemaVersion;
+        Normalize(database);
+
+        if (sourceSchemaVersion < 7)
+        {
+            // Schema 6 stored a hover-only row translation under a similarly named
+            // property. It is intentionally not a preference for the new chevron and
+            // branch expansion motion, so upgrades receive the new v7 default.
+            database.ViewSettings = database.ViewSettings with
+            {
+                IsTreeExpansionAnimationEnabled = true
+            };
+        }
+
+        return database;
+    }
+
     private static AppViewSettings NormalizeViewSettings(AppViewSettings? settings)
     {
         settings ??= DefaultViewSettings;
@@ -169,7 +188,7 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             path,
             SerializerOptions,
             CreateDefaultDb,
-            Normalize,
+            NormalizeAfterRead,
             out database,
             out requiresRewrite);
 

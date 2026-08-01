@@ -241,8 +241,8 @@ Oraliq: 6–28, tiklash — 15.
 Interfeysni zichroq qiladi: daraxt va sozlamalarda oraliqlar kichikroq.
 Preview workspace faol bo‘lganda ixcham rejim avtomatik ravishda yoqiladi.
 
-### Daraxt animatsiyasi
-Daraxt qatorlarini kursorga tutganda silliq siljish animatsiyasini yoqadi.
+### Daraxtni ochish animatsiyasi
+Ko‘rsatkichni silliq aylantiradi va yonma-yon qatorlarni siljitib, daraxt shoxini ochadi yoki yopadi. Standart holatda yoqilgan; o‘chirilganda ochish darhol bajariladi.
 
 ### Daraxt shrifti
 Daraxt shrifti «Ko‘rinish → Daraxt shrifti» orqali tanlanadi.
@@ -447,7 +447,7 @@ Mica platformaning tizim materialidan foydalanadi va fon shaffofligi uchun alohi
 ## 16) Yordam
 
 ### 16.1 Sozlamalarni tiklash
-Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) mavzu, effektlar, ixcham rejim, daraxt animatsiyasi va interfeys tilini standart qiymatlarga qaytaradi. Loyiha profillari, tarix va diskdagi fayllar o‘zgartirilmaydi.
+Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) mavzu, effektlar, ixcham rejim, daraxtni ochish animatsiyasi va interfeys tilini standart qiymatlarga qaytaradi. Loyiha profillari, tarix va diskdagi fayllar o‘zgartirilmaydi.
 
 ### 16.2 Ma’lumotlarni tiklash
 Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha parametrlarining saqlangan profillarini o‘chiradi:

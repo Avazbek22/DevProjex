@@ -4,10 +4,45 @@ namespace DevProjex.Avalonia.Controls;
 
 public class ProjectTreeView : TreeView
 {
+    public static readonly StyledProperty<bool> IsExpansionAnimationEnabledProperty =
+        AvaloniaProperty.Register<ProjectTreeView, bool>(
+            nameof(IsExpansionAnimationEnabled),
+            defaultValue: true);
+
     protected override Type StyleKeyOverride => typeof(TreeView);
 
-    protected override Control CreateContainerForItemOverride(object? item, int index, object? recycleKey)
-        => new ProjectTreeViewItem();
+    public bool IsExpansionAnimationEnabled
+    {
+        get => GetValue(IsExpansionAnimationEnabledProperty);
+        set => SetValue(IsExpansionAnimationEnabledProperty, value);
+    }
+
+    protected override Control CreateContainerForItemOverride(
+        object? item,
+        int index,
+        object? recycleKey)
+    {
+        var container = new ProjectTreeViewItem();
+        container.SetExpansionAnimationEnabled(IsExpansionAnimationEnabled);
+        return container;
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (change.Property != IsExpansionAnimationEnabledProperty)
+            return;
+
+        // Nested TreeViewItem instances are created by this owner as well. Updating the
+        // realized graph keeps the setting immediate without adding a binding per row.
+        foreach (var container in GetRealizedTreeContainers()
+                     .OfType<ProjectTreeViewItem>())
+        {
+            container.SetExpansionAnimationEnabled(
+                IsExpansionAnimationEnabled);
+        }
+    }
 
     protected override bool ShouldTriggerSelection(Visual selectable, PointerEventArgs eventArgs)
     {
@@ -33,11 +68,14 @@ internal sealed class ProjectTreeViewItem : TreeViewItem
 {
     private const string ChevronThemeResourceKey =
         "DevProjexTreeExpandCollapseChevronTheme";
+    private const string ExpansionAnimationClass =
+        "expansion-animation-enabled";
 
     private IDisposable? _chevronVisibilityBinding;
     private ToggleButton? _chevron;
     private AnimatedTreeChildrenHost? _childrenHost;
     private bool _animateNextExpansionChange;
+    private bool _isExpansionAnimationEnabled = true;
 
     protected override Type StyleKeyOverride => typeof(TreeViewItem);
 
@@ -57,6 +95,7 @@ internal sealed class ProjectTreeViewItem : TreeViewItem
         {
             _chevron = chevron;
             ApplyAnimatedChevronTheme(chevron);
+            ApplyChevronAnimationClass();
             AttachChevronInteractionHandlers(chevron);
 
             // Fluent derives chevron visibility from ItemsSource emptiness. A lazy node
@@ -75,9 +114,28 @@ internal sealed class ProjectTreeViewItem : TreeViewItem
         if (change.Property != IsExpandedProperty)
             return;
 
-        var animate = _animateNextExpansionChange;
+        var animate =
+            _animateNextExpansionChange &&
+            _isExpansionAnimationEnabled;
         _animateNextExpansionChange = false;
         _childrenHost?.SetExpanded(IsExpanded, animate);
+    }
+
+    internal void SetExpansionAnimationEnabled(bool enabled)
+    {
+        if (_isExpansionAnimationEnabled == enabled)
+            return;
+
+        _isExpansionAnimationEnabled = enabled;
+        ApplyChevronAnimationClass();
+
+        if (enabled)
+            return;
+
+        // Disabling motion is an immediate contract: finish any in-flight branch at
+        // its logical state and cancel the delayed collapsed-presenter lifetime.
+        _animateNextExpansionChange = false;
+        _childrenHost?.SetExpanded(IsExpanded, animate: false);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -153,6 +211,11 @@ internal sealed class ProjectTreeViewItem : TreeViewItem
         _chevron.PointerCaptureLost -= OnChevronPointerCaptureLost;
         _chevron = null;
     }
+
+    private void ApplyChevronAnimationClass()
+        => _chevron?.Classes.Set(
+            ExpansionAnimationClass,
+            _isExpansionAnimationEnabled);
 
     private void OnChevronPointerPressed(
         object? sender,

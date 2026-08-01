@@ -49,7 +49,7 @@ public sealed class ThemeSettingsDocument
 public sealed record AppViewSettings
 {
     public bool IsCompactMode { get; init; }
-    public bool IsTreeAnimationEnabled { get; init; }
+    public bool IsTreeExpansionAnimationEnabled { get; init; } = true;
     public bool IsTerminalCommandPromptDismissed { get; init; }
     public AppLanguage? PreferredLanguage { get; init; }
 }

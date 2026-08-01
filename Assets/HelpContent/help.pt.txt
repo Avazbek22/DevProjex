@@ -241,8 +241,8 @@ Faixa: 6–28, a redefinição é 15.
 Torna a UI mais densa: menor espaçamento na árvore e nas configurações.
 Enquanto a área de trabalho de visualização estiver ativa, o Modo Compacto será ativado automaticamente.
 
-### Animação de árvore
-Ativa a animação suave do slide ao passar o mouse sobre as linhas das árvores.
+### Animação de expansão da árvore
+Gira suavemente a seta e expande ou recolhe um ramo, deslocando as linhas adjacentes. É ativada por padrão; quando desativada, a expansão é imediata.
 
 ### Fonte de árvore
 A fonte da árvore é selecionada em “Exibir → Fonte da árvore”.
@@ -501,7 +501,7 @@ No modo Transparência, o fundo da janela principal permanece transparente. Menu
 ## 16) Ajuda
 
 ### 16.1 Redefinir configurações
-Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema padrão, efeitos, modo compacto, animação em árvore e idioma da interface. Perfis de projeto, histórico e arquivos em disco não são alterados.
+Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema padrão, efeitos, modo compacto, animação de expansão da árvore e idioma da interface. Perfis de projeto, histórico e arquivos em disco não são alterados.
 
 ### 16.2 Redefinir dados
 Redefinir dados (Ajuda → Redefinir dados) remove perfis de parâmetros de projeto local salvos:

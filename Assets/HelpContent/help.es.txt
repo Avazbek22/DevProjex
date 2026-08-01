@@ -241,8 +241,8 @@ Rango: 6–28, el reinicio es 15.
 Hace que la interfaz de usuario sea más densa: menor espacio en el árbol y la configuración.
 Mientras el espacio de trabajo de vista previa está activo, el modo compacto se habilita automáticamente.
 
-### Animación de árbol
-Habilita una animación de diapositivas fluida al pasar el cursor sobre las filas de los árboles.
+### Animación de expansión del árbol
+Gira suavemente la flecha y expande o contrae una rama desplazando las filas adyacentes. Está habilitada de forma predeterminada; al deshabilitarla, la expansión es inmediata.
 
 ### fuente de árbol
 La fuente del árbol se selecciona mediante “Ver → Fuente del árbol”.
@@ -501,7 +501,7 @@ En el modo Transparencia, el fondo de la ventana principal permanece transparent
 ## 16) Ayuda
 
 ### 16.1 Restablecer configuración
-Restablecer configuración (Ayuda → Restablecer configuración) restaura el tema, los efectos, el modo compacto, la animación del árbol y el idioma de la interfaz predeterminados. Los perfiles, el historial y los archivos del proyecto en el disco no se modifican.
+Restablecer configuración (Ayuda → Restablecer configuración) restaura el tema, los efectos, el modo compacto, la animación de expansión del árbol y el idioma de la interfaz predeterminados. Los perfiles, el historial y los archivos del proyecto en el disco no se modifican.
 
 ### 16.2 Restablecer datos
 Restablecer datos (Ayuda → Restablecer datos) elimina los perfiles de parámetros del proyecto local guardados:

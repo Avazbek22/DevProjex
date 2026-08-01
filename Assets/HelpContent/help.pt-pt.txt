@@ -241,8 +241,8 @@ Intervalo: 6–28, a reposição é 15.
 Torna a UI mais densa: menor espaçamento na árvore e nas definições.
 Enquanto a área de trabalho de visualização estiver ativa, o Modo Compacto será ativado automaticamente.
 
-### Animação de árvore
-Ativa a animação suave do diapositivo ao passar o rato sobre as linhas das árvores.
+### Animação de expansão da árvore
+Roda suavemente a seta e expande ou recolhe um ramo, deslocando as linhas adjacentes. Está ativada por predefinição; quando desativada, a expansão é imediata.
 
 ### Fonte de árvore
 A fonte da árvore é selecionada em “Ver → Fonte da árvore”.
@@ -501,7 +501,7 @@ No modo Transparência, o fundo da janela principal permanece transparente. Os m
 ## 16) Ajuda
 
 ### 16.1 Repor configurações
-Repor definições (Ajuda → Repor definições) restaura o tema predefinido, os efeitos, o modo compacto, a animação em árvore e o idioma da interface. Os perfis de projeto, histórico e ficheiros em disco não são alterados.
+Repor definições (Ajuda → Repor definições) restaura o tema predefinido, os efeitos, o modo compacto, a animação de expansão da árvore e o idioma da interface. Os perfis de projeto, histórico e ficheiros em disco não são alterados.
 
 ### 16.2 Repor dados
 Repor dados (Ajuda → Repor dados) remove os perfis de parâmetros de projeto local guardados:

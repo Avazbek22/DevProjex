@@ -26,7 +26,7 @@ public sealed class UserSettingsStoreBackupTests
         db.ViewSettings = new AppViewSettings
         {
             IsCompactMode = true,
-            IsTreeAnimationEnabled = false,
+            IsTreeExpansionAnimationEnabled = false,
             PreferredLanguage = AppLanguage.De
         };
 
@@ -36,7 +36,7 @@ public sealed class UserSettingsStoreBackupTests
         var recovered = store.Load();
 
         Assert.True(recovered.ViewSettings.IsCompactMode);
-        Assert.False(recovered.ViewSettings.IsTreeAnimationEnabled);
+        Assert.False(recovered.ViewSettings.IsTreeExpansionAnimationEnabled);
         Assert.Equal(AppLanguage.De, recovered.ViewSettings.PreferredLanguage);
         Assert.DoesNotContain("{ invalid", File.ReadAllText(store.GetPath()), StringComparison.Ordinal);
     }

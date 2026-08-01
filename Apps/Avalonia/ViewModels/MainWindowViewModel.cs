@@ -72,7 +72,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isDarkTheme = true;
     private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
-    private bool _isTreeAnimationEnabled;
+    private bool _isTreeExpansionAnimationEnabled = true;
     private bool _filterVisible;
     private ExportFormat _selectedExportFormat = ExportFormat.Ascii;
     private PreviewContentMode _selectedPreviewContentMode = PreviewContentMode.Tree;
@@ -615,13 +615,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RaiseCompactModePropertiesChanged();
     }
 
-    public bool IsTreeAnimationEnabled
+    public bool IsTreeExpansionAnimationEnabled
     {
-        get => _isTreeAnimationEnabled;
+        get => _isTreeExpansionAnimationEnabled;
         set
         {
-            if (_isTreeAnimationEnabled == value) return;
-            _isTreeAnimationEnabled = value;
+            if (_isTreeExpansionAnimationEnabled == value) return;
+            _isTreeExpansionAnimationEnabled = value;
             RaisePropertyChanged();
         }
     }
@@ -1392,7 +1392,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuViewMica { get; private set; } = string.Empty;
     public string MenuViewAcrylic { get; private set; } = string.Empty;
     public string MenuViewCompactMode { get; private set; } = string.Empty;
-    public string MenuViewTreeAnimation { get; private set; } = string.Empty;
+    public string MenuViewTreeExpansionAnimation { get; private set; } = string.Empty;
     public string MenuOptions { get; private set; } = string.Empty;
     public string MenuOptionsTreeSettings { get; private set; } = string.Empty;
     public string MenuLanguage { get; private set; } = string.Empty;
@@ -1553,7 +1553,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         MenuViewMica = _localization["Menu.View.Mica"];
         MenuViewAcrylic = _localization["Menu.View.Acrylic"];
         MenuViewCompactMode = _localization["Menu.View.CompactMode"];
-        MenuViewTreeAnimation = _localization["Menu.View.TreeAnimation"];
+        MenuViewTreeExpansionAnimation =
+            _localization["Menu.View.TreeExpansionAnimation"];
         MenuOptions = _localization["Menu.Options"];
         MenuOptionsTreeSettings = _localization["Menu.Options.TreeSettings"];
         MenuLanguage = _localization["Menu.Language"];
@@ -1697,7 +1698,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuViewMica));
         RaisePropertyChanged(nameof(MenuViewAcrylic));
         RaisePropertyChanged(nameof(MenuViewCompactMode));
-        RaisePropertyChanged(nameof(MenuViewTreeAnimation));
+        RaisePropertyChanged(nameof(MenuViewTreeExpansionAnimation));
         RaisePropertyChanged(nameof(MenuOptions));
         RaisePropertyChanged(nameof(MenuOptionsTreeSettings));
         RaisePropertyChanged(nameof(MenuLanguage));

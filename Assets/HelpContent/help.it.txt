@@ -241,8 +241,8 @@ Intervallo: 6–28, reset: 15.
 Rende l'interfaccia più densa: spazi più piccoli nell'albero e nelle impostazioni.
 Quando l’area di lavoro di anteprima è attiva, la modalità compatta viene abilitata automaticamente.
 
-### Animazione albero
-Attiva un'animazione di scorrimento fluido quando si passa il mouse sulle righe dell'albero.
+### Animazione di espansione dell’albero
+Ruota dolcemente la freccia ed espande o comprime un ramo spostando le righe adiacenti. È attiva per impostazione predefinita; se disattivata, l’espansione è immediata.
 
 ### Font albero
 Il font dell’albero si sceglie da « Visualizza → Font albero ».
@@ -447,7 +447,7 @@ In modalità Trasparenza, lo sfondo della finestra principale rimane trasparente
 ## 16) Aiuto
 
 ### 16.1 Ripristina impostazioni
-Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori predefiniti di tema, effetti, modalità compatta, animazione dell’albero e lingua dell’interfaccia. I profili dei progetti, la cronologia e i file sul disco non vengono modificati.
+Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori predefiniti di tema, effetti, modalità compatta, animazione di espansione dell’albero e lingua dell’interfaccia. I profili dei progetti, la cronologia e i file sul disco non vengono modificati.
 
 ### 16.2 Ripristina dati
 Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:

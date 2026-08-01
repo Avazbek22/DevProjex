@@ -351,6 +351,81 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
     [AvaloniaFact]
+    public async Task TreeExpansionAnimationSetting_ControlsChevronAndBranchMotionTogether()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var tree = UiTestDriver.GetRequiredControl<ProjectTreeView>(window, "ProjectTree");
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var folderNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "src",
+                    StringComparison.Ordinal));
+            var chevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, folderNode));
+            var chevronPath = Assert.Single(
+                chevron.GetVisualDescendants()
+                    .OfType<global::Avalonia.Controls.Shapes.Path>(),
+                path => path.Name == "ChevronPath");
+            var childrenHost = Assert.Single(
+                window.GetVisualDescendants().OfType<AnimatedTreeChildrenHost>(),
+                control => ReferenceEquals(control.DataContext, folderNode));
+            var menuItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+                window,
+                "TreeExpansionAnimationMenuItem");
+            var menuCheckBox = Assert.IsType<CheckBox>(menuItem.Header);
+
+            Assert.True(viewModel.IsTreeExpansionAnimationEnabled);
+            Assert.True(tree.IsExpansionAnimationEnabled);
+            Assert.True(menuCheckBox.IsChecked);
+            Assert.Equal("Tree expansion animation", menuCheckBox.Content);
+            Assert.Single(chevronPath.Transitions!);
+
+            await UiTestDriver.RaiseMenuItemClickAsync(menuItem);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+            Assert.False(viewModel.IsTreeExpansionAnimationEnabled);
+            Assert.False(tree.IsExpansionAnimationEnabled);
+            Assert.False(menuCheckBox.IsChecked);
+            Assert.True(chevronPath.Transitions is null or { Count: 0 });
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+            Assert.True(folderNode.IsExpanded);
+            Assert.True(childrenHost.IsVisible);
+            Assert.Equal(1d, childrenHost.ExpansionProgress);
+
+            await UiTestDriver.ClickAsync(window, chevron);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+            Assert.False(folderNode.IsExpanded);
+            Assert.False(childrenHost.IsVisible);
+            Assert.Equal(0d, childrenHost.ExpansionProgress);
+
+            await UiTestDriver.RaiseMenuItemClickAsync(menuItem);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+            Assert.True(viewModel.IsTreeExpansionAnimationEnabled);
+            Assert.True(tree.IsExpansionAnimationEnabled);
+            Assert.True(menuCheckBox.IsChecked);
+            Assert.Single(chevronPath.Transitions!);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task RecentProjects_AreFlushedOnClose_WhenImmediateSaveFails()
     {
         var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));

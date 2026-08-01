@@ -185,20 +185,21 @@
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center"
                                   RenderTransformOrigin="50%,50%"
-                                  RenderTransform="rotate(0deg)">
-                                <Path.Transitions>
-                                    <Transitions>
-                                        <TransformOperationsTransition Property="RenderTransform"
-                                                                       Duration="0:0:0.12"
-                                                                       Easing="CubicEaseInOut" />
-                                    </Transitions>
-                                </Path.Transitions>
-                            </Path>
+                                  RenderTransform="rotate(0deg)" />
                         </Border>
                     </ControlTemplate>
                 </Setter>
                 <Style Selector="^:checked /template/ Path#ChevronPath">
                     <Setter Property="RenderTransform" Value="rotate(90deg)" />
+                </Style>
+                <Style Selector="^.expansion-animation-enabled /template/ Path#ChevronPath">
+                    <Setter Property="Transitions">
+                        <Transitions>
+                            <TransformOperationsTransition Property="RenderTransform"
+                                                           Duration="0:0:0.12"
+                                                           Easing="CubicEaseInOut" />
+                        </Transitions>
+                    </Setter>
                 </Style>
             </ControlTheme>
             <ControlTheme x:Key="DevProjexAnimatedTreeViewItemTheme"
@@ -777,34 +778,6 @@
     <!-- Highlight checkbox when hovering anywhere on tree row (only direct row, not parent items) -->
     <Style Selector="TreeView Grid:pointerover CheckBox /template/ Border#NormalRectangle">
         <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-    </Style>
-
-    <!-- Tree row content: smooth slide animation on hover (icon and text only, not checkbox) -->
-    <!-- Only active when tree-animation class is set on Window -->
-    <Style Selector="Window.tree-animation TreeView Grid > StackPanel > Image">
-        <Setter Property="RenderTransform" Value="translateX(0)" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.35" Easing="CubicEaseOut" />
-            </Transitions>
-        </Setter>
-    </Style>
-
-    <Style Selector="Window.tree-animation TreeView Grid > StackPanel > TextBlock">
-        <Setter Property="RenderTransform" Value="translateX(0)" />
-        <Setter Property="Transitions">
-            <Transitions>
-                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.35" Easing="CubicEaseOut" />
-            </Transitions>
-        </Setter>
-    </Style>
-
-    <Style Selector="Window.tree-animation TreeView Grid:pointerover > StackPanel > Image">
-        <Setter Property="RenderTransform" Value="translateX(3px)" />
-    </Style>
-
-    <Style Selector="Window.tree-animation TreeView Grid:pointerover > StackPanel > TextBlock">
-        <Setter Property="RenderTransform" Value="translateX(3px)" />
     </Style>
 
     <Style Selector="CheckBox.list-item">

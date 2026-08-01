@@ -241,8 +241,8 @@ Range: 6–28, reset is 15.
 Makes the UI denser: smaller spacing in the tree and settings.
 While the preview workspace is active, Compact Mode is enabled automatically.
 
-### Tree animation
-Enables smooth slide animation when hovering over tree rows.
+### Tree expansion animation
+Smoothly rotates the chevron and expands or collapses a tree branch while moving adjacent rows. Enabled by default; when disabled, expansion is immediate.
 
 ### Tree font
 The tree font is selected via “View → Tree font”.
@@ -499,7 +499,7 @@ In Transparency mode, the main-window background remains transparent. Menus, sub
 ## 16) Help
 
 ### 16.1 Reset settings
-Reset settings (Help → Reset settings) restores the default theme, effects, Compact mode, Tree animation, and interface language. Project profiles, history, and files on disk are not changed.
+Reset settings (Help → Reset settings) restores the default theme, effects, Compact mode, Tree expansion animation, and interface language. Project profiles, history, and files on disk are not changed.
 
 ### 16.2 Reset data
 Reset data (Help → Reset data) removes saved local-project parameter profiles:

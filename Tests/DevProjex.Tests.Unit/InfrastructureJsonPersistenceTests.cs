@@ -178,7 +178,7 @@ public sealed class InfrastructureJsonPersistenceTests
 		db.ViewSettings = new AppViewSettings
 		{
 			IsCompactMode = true,
-			IsTreeAnimationEnabled = true,
+			IsTreeExpansionAnimationEnabled = false,
 			IsTerminalCommandPromptDismissed = true,
 			PreferredLanguage = AppLanguage.Ru
 		};
@@ -206,7 +206,7 @@ public sealed class InfrastructureJsonPersistenceTests
 
 		var loaded = store.Load();
 		Assert.True(loaded.ViewSettings.IsCompactMode);
-		Assert.True(loaded.ViewSettings.IsTreeAnimationEnabled);
+		Assert.False(loaded.ViewSettings.IsTreeExpansionAnimationEnabled);
 		Assert.True(loaded.ViewSettings.IsTerminalCommandPromptDismissed);
 		Assert.Equal(AppLanguage.Ru, loaded.ViewSettings.PreferredLanguage);
 		Assert.Equal(42, themeStore.Load().Presets["Dark.Acrylic"].BackgroundTransparency);

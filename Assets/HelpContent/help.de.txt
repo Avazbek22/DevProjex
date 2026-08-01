@@ -241,8 +241,8 @@ Bereich: 6–28, Reset: 15.
 Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellungen.
 Während der Vorschau-Arbeitsbereich aktiv ist, wird der Kompaktmodus automatisch eingeschaltet.
 
-### Baumanimation
-Aktiviert eine sanfte Schiebe-Animation beim Überfahren von Baumzeilen.
+### Animation beim Aufklappen des Baums
+Dreht den Pfeil sanft und klappt einen Baumzweig auf oder zu, während benachbarte Zeilen verschoben werden. Standardmäßig aktiviert; bei Deaktivierung erfolgt das Aufklappen sofort.
 
 ### Baum-Schrift
 Die Baum-Schrift wird über „Ansicht → Baum-Schrift“ ausgewählt.
@@ -447,7 +447,7 @@ Im Transparenzmodus bleibt der Hintergrund des Hauptfensters transparent. Menüs
 ## 16) Hilfe
 
 ### 16.1 Einstellungen zurücksetzen
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Baumanimation und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Animation beim Aufklappen des Baums und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
 
 ### 16.2 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:

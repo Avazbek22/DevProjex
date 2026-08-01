@@ -138,11 +138,10 @@ internal sealed class AppearanceSettingsController(
         SaveCurrentViewSettings();
     }
 
-    public void ToggleTreeAnimation()
+    public void ToggleTreeExpansionAnimation()
     {
-        viewModel.IsTreeAnimationEnabled =
-            !viewModel.IsTreeAnimationEnabled;
-        ApplyTreeAnimationClass();
+        viewModel.IsTreeExpansionAnimationEnabled =
+            !viewModel.IsTreeExpansionAnimationEnabled;
         SaveCurrentViewSettings();
     }
 
@@ -330,18 +329,9 @@ internal sealed class AppearanceSettingsController(
     private void ApplyViewSettings(AppViewSettings settings)
     {
         viewModel.IsCompactMode = settings.IsCompactMode;
-        viewModel.IsTreeAnimationEnabled =
-            settings.IsTreeAnimationEnabled;
+        viewModel.IsTreeExpansionAnimationEnabled =
+            settings.IsTreeExpansionAnimationEnabled;
         workspace.UpdateCompactModeVisualState();
-        ApplyTreeAnimationClass();
-    }
-
-    private void ApplyTreeAnimationClass()
-    {
-        if (viewModel.IsTreeAnimationEnabled)
-            window.Classes.Add("tree-animation");
-        else
-            window.Classes.Remove("tree-animation");
     }
 
     private void ApplySelectedEffect()
@@ -372,7 +362,8 @@ internal sealed class AppearanceSettingsController(
         _userSettings.ViewSettings = new AppViewSettings
         {
             IsCompactMode = viewModel.IsCompactMode,
-            IsTreeAnimationEnabled = viewModel.IsTreeAnimationEnabled,
+            IsTreeExpansionAnimationEnabled =
+                viewModel.IsTreeExpansionAnimationEnabled,
             IsTerminalCommandPromptDismissed =
                 current.IsTerminalCommandPromptDismissed,
             PreferredLanguage = current.PreferredLanguage
