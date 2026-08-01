@@ -157,6 +157,93 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
         }
     }
 
+    [AvaloniaFact]
+    public async Task PreviewOpenClose_KeepsDividerAndIslandBoundarySynchronized()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var splitter =
+                UiTestDriver.GetRequiredControl<Border>(window, "TreePreviewSplitter");
+
+            var openErrors = await ObservePreviewBoundaryErrorsAsync(
+                window,
+                () => UiTestDriver.OpenPreviewAsync(window));
+            AssertPreviewBoundaryIsSynchronized(openErrors, "open");
+            Assert.InRange(
+                UiTestDriver.GetBoundsInWindow(splitter, window).Width,
+                WorkspacePresentationController.TreePreviewSplitterWidth - 0.01,
+                WorkspacePresentationController.TreePreviewSplitterWidth + 0.01);
+
+            var closeErrors = await ObservePreviewBoundaryErrorsAsync(
+                window,
+                () => UiTestDriver.ClosePreviewAsync(window));
+            AssertPreviewBoundaryIsSynchronized(closeErrors, "close");
+            Assert.False(splitter.IsVisible);
+            Assert.InRange(splitter.Width, 0, 0.01);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task PreviewClose_KeepsLiveSurfaceWidthFixedWhileCarrierClips()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+
+            var previewContainer =
+                UiTestDriver.GetRequiredControl<Border>(window, "PreviewPaneContainer");
+            var previewSurface =
+                UiTestDriver.GetRequiredControl<Grid>(window, "PreviewPaneSurface");
+            var frozenFrames = new List<(double SurfaceWidth, double CarrierWidth)>();
+
+            void CaptureFrozenSurface(object? sender, EventArgs args)
+            {
+                _ = sender;
+                _ = args;
+                if (double.IsNaN(previewSurface.Width))
+                    return;
+
+                frozenFrames.Add(
+                    (previewSurface.Bounds.Width, previewContainer.Bounds.Width));
+            }
+
+            window.LayoutUpdated += CaptureFrozenSurface;
+            try
+            {
+                await UiTestDriver.ClosePreviewAsync(window);
+            }
+            finally
+            {
+                window.LayoutUpdated -= CaptureFrozenSurface;
+            }
+
+            Assert.NotEmpty(frozenFrames);
+            var frozenWidth = frozenFrames[0].SurfaceWidth;
+            Assert.All(
+                frozenFrames,
+                frame =>
+                {
+                    Assert.InRange(Math.Abs(frame.SurfaceWidth - frozenWidth), 0, 0.01);
+                    Assert.True(frame.CarrierWidth <= frozenWidth + 0.01);
+                });
+            Assert.True(previewContainer.ClipToBounds);
+            Assert.True(double.IsNaN(previewSurface.Width));
+            Assert.Equal(HorizontalAlignment.Stretch, previewSurface.HorizontalAlignment);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaTheory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -428,6 +515,55 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
         return errors;
     }
 
+    private static async Task<IReadOnlyList<double>> ObservePreviewBoundaryErrorsAsync(
+        MainWindow window,
+        Func<Task> transition)
+    {
+        var treeContainer =
+            UiTestDriver.GetRequiredControl<Border>(window, "TreePaneContainer");
+        var previewContainer =
+            UiTestDriver.GetRequiredControl<Border>(window, "PreviewPaneContainer");
+        var previewIsland =
+            UiTestDriver.GetRequiredControl<Border>(window, "PreviewIsland");
+        var splitter =
+            UiTestDriver.GetRequiredControl<Border>(window, "TreePreviewSplitter");
+        var errors = new List<double>();
+
+        void CaptureBoundary(object? sender, EventArgs args)
+        {
+            _ = sender;
+            _ = args;
+            var treeBounds = UiTestDriver.GetBoundsInWindow(treeContainer, window);
+            var previewBounds = UiTestDriver.GetBoundsInWindow(previewContainer, window);
+            var previewIslandBounds = UiTestDriver.GetBoundsInWindow(previewIsland, window);
+            var splitterWidth = splitter.IsVisible
+                ? UiTestDriver.GetBoundsInWindow(splitter, window).Width
+                : 0.0;
+            var carrierBoundaryError = Math.Abs(previewBounds.Left - treeBounds.Right);
+            var islandBoundaryError = previewBounds.Width > 0.5
+                ? Math.Abs(
+                    previewIslandBounds.Left -
+                    previewBounds.Left -
+                    splitterWidth)
+                : 0.0;
+            errors.Add(Math.Max(carrierBoundaryError, islandBoundaryError));
+        }
+
+        CaptureBoundary(null, EventArgs.Empty);
+        window.LayoutUpdated += CaptureBoundary;
+        try
+        {
+            await transition();
+            CaptureBoundary(null, EventArgs.Empty);
+        }
+        finally
+        {
+            window.LayoutUpdated -= CaptureBoundary;
+        }
+
+        return errors;
+    }
+
     private static void AssertSettingsBoundaryIsSynchronized(
         IReadOnlyList<double> errors,
         string transitionName,
@@ -443,6 +579,22 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
         Assert.True(
             errors[^1] <= 0.01,
             $"Settings {transitionName} finished with a boundary error of " +
+            $"{errors[^1]:F2}.");
+    }
+
+    private static void AssertPreviewBoundaryIsSynchronized(
+        IReadOnlyList<double> errors,
+        string transitionName)
+    {
+        Assert.NotEmpty(errors);
+        var maximumError = errors.Max();
+        Assert.True(
+            maximumError <= 0.01,
+            $"Preview {transitionName} lost synchronization between its " +
+            $"carrier, divider, and island: maximum boundary error={maximumError:F2}.");
+        Assert.True(
+            errors[^1] <= 0.01,
+            $"Preview {transitionName} finished with a boundary error of " +
             $"{errors[^1]:F2}.");
     }
 

@@ -484,7 +484,7 @@
 
       <!-- Project workspace shown when a project is loaded -->
       <Grid Name="WorkspaceGrid"
-            ColumnDefinitions="*,0,0,Auto"
+            ColumnDefinitions="*,0,Auto"
             IsVisible="{Binding IsProjectLoaded}"
             Margin="4,3,4,3">
         <Border Grid.Column="0"
@@ -657,21 +657,27 @@
           </Grid>
         </Border>
 
+        <!-- Preview owns its divider so both widths can transition in one layout pass. -->
         <Border Grid.Column="1"
-                Name="TreePreviewSplitter"
-                Classes="island-splitter"
-                IsVisible="False"
-                PointerPressed="OnTreePreviewSplitterPointerPressed"
-                PointerMoved="OnWorkspaceSplitterPointerMoved"
-                PointerReleased="OnWorkspaceSplitterPointerReleased"
-                PointerCaptureLost="OnWorkspaceSplitterPointerCaptureLost"
-                PointerExited="OnWorkspaceSplitterPointerExited" />
-
-        <Border Grid.Column="2"
                 Name="PreviewPaneContainer"
-                ClipToBounds="True">
-          <Grid>
-            <Grid Name="PreviewPaneRoot"
+                ClipToBounds="True"
+                UseLayoutRounding="True">
+          <Grid Name="PreviewPaneSurface"
+                ColumnDefinitions="Auto,*">
+            <Border Grid.Column="0"
+                    Name="TreePreviewSplitter"
+                    Classes="island-splitter"
+                    Width="0"
+                    MinWidth="0"
+                    IsVisible="False"
+                    PointerPressed="OnTreePreviewSplitterPointerPressed"
+                    PointerMoved="OnWorkspaceSplitterPointerMoved"
+                    PointerReleased="OnWorkspaceSplitterPointerReleased"
+                    PointerCaptureLost="OnWorkspaceSplitterPointerCaptureLost"
+                    PointerExited="OnWorkspaceSplitterPointerExited" />
+
+            <Grid Grid.Column="1"
+                  Name="PreviewPaneRoot"
                   RowDefinitions="Auto,*">
             <!-- Animated preview bar container -->
             <Border Grid.Row="0"
@@ -864,31 +870,14 @@
               </Grid>
             </Grid>
             </Border>
-            </Grid>
-
-            <Border Name="PreviewPaneAnimationSnapshotHost"
-                    ClipToBounds="True"
-                    IsVisible="False"
-                    IsHitTestVisible="False"
-                    UseLayoutRounding="True"
-                    HorizontalAlignment="Left"
-                    VerticalAlignment="Top"
-                    ZIndex="1000">
-              <Image Name="PreviewPaneAnimationSnapshotImage"
-                     IsVisible="False"
-                     Stretch="None"
-                     UseLayoutRounding="True"
-                     HorizontalAlignment="Left"
-                     VerticalAlignment="Top"
-                     Opacity="0" />
-            </Border>
+              </Grid>
           </Grid>
         </Border>
 
         <!-- The resize splitter belongs to the animated carrier. Keeping it in a
              separate workspace column would add or remove four DIPs in one layout
              pass while the settings island itself is still animating. -->
-        <Border Grid.Column="3"
+        <Border Grid.Column="2"
                 Name="SettingsContainer"
                 ClipToBounds="True"
                 UseLayoutRounding="True"

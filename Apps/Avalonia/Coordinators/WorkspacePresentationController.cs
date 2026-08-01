@@ -10,7 +10,6 @@ internal sealed record WorkspacePresentationControls(
     Border TreePaneContainer,
     Border PreviewPaneContainer,
     ColumnDefinition TreePaneColumn,
-    ColumnDefinition TreePreviewSplitterColumn,
     ColumnDefinition PreviewPaneColumn,
     Border TreePreviewSplitter,
     Border PreviewSettingsSplitter,
@@ -149,7 +148,7 @@ internal sealed class WorkspacePresentationController : IDisposable
                     visible: true,
                     new GridLength(1, GridUnitType.Star),
                     SplitPreviewPaneMinimumWidth);
-                _controls.TreePreviewSplitterColumn.Width = new GridLength(0);
+                SetTreePreviewSplitterState(isVisible: false);
                 if (!IsPreviewPaneAnimating)
                     ApplyPreviewPaneWidth(double.NaN, animate: false);
                 break;
@@ -164,8 +163,8 @@ internal sealed class WorkspacePresentationController : IDisposable
                     _controls.PreviewPaneColumn,
                     visible: true,
                     new GridLength(1, GridUnitType.Star),
-                    SplitPreviewPaneMinimumWidth);
-                _controls.TreePreviewSplitterColumn.Width = new GridLength(TreePreviewSplitterWidth);
+                    SplitPreviewPaneMinimumWidth + TreePreviewSplitterWidth);
+                SetTreePreviewSplitterState(isVisible: true);
                 ApplyPreviewTreePaneWidth(ResolveDesiredPreviewTreePaneWidth(), animate: false);
                 if (!IsPreviewPaneAnimating)
                     ApplyPreviewPaneWidth(double.NaN, animate: false);
@@ -182,7 +181,7 @@ internal sealed class WorkspacePresentationController : IDisposable
                     visible: false,
                     new GridLength(0),
                     minWidth: 0);
-                _controls.TreePreviewSplitterColumn.Width = new GridLength(0);
+                SetTreePreviewSplitterState(isVisible: false);
                 if (!IsTreePaneAnimating)
                     ApplyPreviewTreePaneWidth(double.NaN, animate: false);
                 if (!IsPreviewPaneAnimating)
@@ -192,7 +191,6 @@ internal sealed class WorkspacePresentationController : IDisposable
 
         ClampSettingsPanelWidthToAvailableSpace(ShouldApplySettingsPanelWidthToVisual());
         UpdatePreviewSettingsSplitterState();
-        _controls.TreePreviewSplitter.IsVisible = _viewModel.IsPreviewTreeVisible;
         UpdateAdaptiveWorkspaceChrome();
     }
 
@@ -252,7 +250,10 @@ internal sealed class WorkspacePresentationController : IDisposable
     public void CaptureSplitPaneLayout()
     {
         var treeWidth = ResolvePreviewTreePaneVisibleWidth();
-        var previewWidth = _controls.PreviewPaneColumn.ActualWidth;
+        var previewWidth = Math.Max(
+            0.0,
+            _controls.PreviewPaneColumn.ActualWidth -
+            GetRenderedTreePreviewSplitterWidth());
         var totalWidth = treeWidth + previewWidth;
         if (treeWidth <= 0 || previewWidth <= 0 || totalWidth <= 0)
             return;
@@ -308,14 +309,40 @@ internal sealed class WorkspacePresentationController : IDisposable
     public double ResolvePreviewPaneVisibleWidth()
     {
         if (_controls.PreviewPaneContainer.Width > 0.5)
-            return _controls.PreviewPaneContainer.Width;
+        {
+            return Math.Max(
+                0.0,
+                _controls.PreviewPaneContainer.Width -
+                GetRenderedTreePreviewSplitterWidth());
+        }
 
         if (_controls.PreviewPaneContainer.Bounds.Width > 0.5)
-            return _controls.PreviewPaneContainer.Bounds.Width;
+        {
+            return Math.Max(
+                0.0,
+                _controls.PreviewPaneContainer.Bounds.Width -
+                GetRenderedTreePreviewSplitterWidth());
+        }
 
         return _controls.PreviewPaneColumn.ActualWidth > 0.5
-            ? _controls.PreviewPaneColumn.ActualWidth
+            ? Math.Max(
+                0.0,
+                _controls.PreviewPaneColumn.ActualWidth -
+                GetRenderedTreePreviewSplitterWidth())
             : 0;
+    }
+
+    private double GetRenderedTreePreviewSplitterWidth()
+    {
+        if (!_controls.TreePreviewSplitter.IsVisible)
+            return 0.0;
+
+        if (_controls.TreePreviewSplitter.Bounds.Width > 0.0)
+            return _controls.TreePreviewSplitter.Bounds.Width;
+
+        return double.IsFinite(_controls.TreePreviewSplitter.Width)
+            ? Math.Max(0.0, _controls.TreePreviewSplitter.Width)
+            : 0.0;
     }
 
     public double ResolveDesiredPreviewTreePaneWidth()
@@ -983,6 +1010,15 @@ internal sealed class WorkspacePresentationController : IDisposable
     {
         column.MinWidth = visible ? minWidth : 0;
         column.Width = visible ? width : new GridLength(0);
+    }
+
+    private void SetTreePreviewSplitterState(bool isVisible)
+    {
+        SetWidthWithoutTransition(
+            _controls.TreePreviewSplitter,
+            isVisible ? TreePreviewSplitterWidth : 0.0);
+        _controls.TreePreviewSplitter.IsVisible = isVisible;
+        _controls.TreePreviewSplitter.IsHitTestVisible = isVisible;
     }
 
     private static void SetWorkspaceSplitterDraggingState(

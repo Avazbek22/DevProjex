@@ -104,12 +104,9 @@ public partial class MainWindow
     private Border? _treePaneContainer;
     private Border? _treePaneSnapshotHost;
     private Image? _treePaneSnapshotImage;
-    private Grid? _previewPaneRoot;
     private Border? _previewPaneContainer;
-    private Border? _previewPaneSnapshotHost;
-    private Image? _previewPaneSnapshotImage;
+    private Grid? _previewPaneSurface;
     private ColumnDefinition? _treePaneColumn;
-    private ColumnDefinition? _treePreviewSplitterColumn;
     private ColumnDefinition? _previewPaneColumn;
     private Border? _treePreviewSplitter;
     private Border? _previewSettingsSplitter;
@@ -299,19 +296,16 @@ public partial class MainWindow
         _treePaneSnapshotImage = this.FindControl<Image>("TreePaneAnimationSnapshotImage");
         _treePaneRoot = this.FindControl<Grid>("TreePaneRoot");
         _previewPaneContainer = this.FindControl<Border>("PreviewPaneContainer");
-        _previewPaneRoot = this.FindControl<Grid>("PreviewPaneRoot");
-        _previewPaneSnapshotHost = this.FindControl<Border>("PreviewPaneAnimationSnapshotHost");
-        _previewPaneSnapshotImage = this.FindControl<Image>("PreviewPaneAnimationSnapshotImage");
+        _previewPaneSurface = this.FindControl<Grid>("PreviewPaneSurface");
         _treePreviewSplitter = this.FindControl<Border>("TreePreviewSplitter");
         _previewSettingsSplitter = this.FindControl<Border>("PreviewSettingsSplitter");
         _treeIsland = this.FindControl<Border>("TreeIsland");
         _previewIsland = this.FindControl<Border>("PreviewIsland");
         _toastHost = this.FindControl<ItemsControl>("ToastHost");
-        if (_workspaceGrid is not null && _workspaceGrid.ColumnDefinitions.Count >= 4)
+        if (_workspaceGrid is not null && _workspaceGrid.ColumnDefinitions.Count >= 3)
         {
             _treePaneColumn = _workspaceGrid.ColumnDefinitions[0];
-            _treePreviewSplitterColumn = _workspaceGrid.ColumnDefinitions[1];
-            _previewPaneColumn = _workspaceGrid.ColumnDefinitions[2];
+            _previewPaneColumn = _workspaceGrid.ColumnDefinitions[1];
         }
         _searchBar = this.FindControl<SearchBarView>("SearchBar");
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
@@ -344,7 +338,6 @@ public partial class MainWindow
                 _treePaneContainer ?? throw new InvalidOperationException("Tree pane container was not found."),
                 _previewPaneContainer ?? throw new InvalidOperationException("Preview pane container was not found."),
                 _treePaneColumn ?? throw new InvalidOperationException("Tree pane column was not found."),
-                _treePreviewSplitterColumn ?? throw new InvalidOperationException("Tree splitter column was not found."),
                 _previewPaneColumn ?? throw new InvalidOperationException("Preview pane column was not found."),
                 _treePreviewSplitter ?? throw new InvalidOperationException("Tree splitter was not found."),
                 _previewSettingsSplitter ?? throw new InvalidOperationException("Settings splitter was not found."),
@@ -442,12 +435,9 @@ public partial class MainWindow
                 _treePaneContainer ?? throw new InvalidOperationException("Tree pane container was not found."),
                 _treePaneSnapshotHost ?? throw new InvalidOperationException("Tree snapshot host was not found."),
                 _treePaneSnapshotImage ?? throw new InvalidOperationException("Tree snapshot image was not found."),
-                _previewPaneRoot ?? throw new InvalidOperationException("Preview pane root was not found."),
                 _previewPaneContainer ?? throw new InvalidOperationException("Preview pane container was not found."),
-                _previewPaneSnapshotHost ?? throw new InvalidOperationException("Preview snapshot host was not found."),
-                _previewPaneSnapshotImage ?? throw new InvalidOperationException("Preview snapshot image was not found."),
+                _previewPaneSurface ?? throw new InvalidOperationException("Preview pane surface was not found."),
                 _treePaneColumn ?? throw new InvalidOperationException("Tree pane column was not found."),
-                _treePreviewSplitterColumn ?? throw new InvalidOperationException("Tree splitter column was not found."),
                 _previewPaneColumn ?? throw new InvalidOperationException("Preview pane column was not found."),
                 _treePreviewSplitter ?? throw new InvalidOperationException("Tree splitter was not found."),
                 _previewBar ?? throw new InvalidOperationException("Preview bar was not found."),
