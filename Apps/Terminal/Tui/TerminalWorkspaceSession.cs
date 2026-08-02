@@ -2740,20 +2740,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (_state is null)
 			return;
 		var state = _state;
-		var view = _previewView;
-		var format = _format;
 		var sourcePlan = state.Plan;
 		var selectedPaths = state.BuildSelectedRelativePaths();
 		var expectedRevision = state.Revision;
 		CancelAndDispose(ref _projectionCts);
 		CancelAndDispose(ref _previewCts);
 		var projectionRequestId = Interlocked.Increment(ref _projectionRequestId);
-		var previewRequestId = Interlocked.Increment(ref _previewRequestId);
+		Interlocked.Increment(ref _previewRequestId);
 		_projectionCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		var operationCts = _projectionCts;
 		_projectionTask = Task.Run(async () =>
 		{
-			IPreviewTextDocument? pendingDocument = null;
 			try
 			{
 				await Task.Delay(180, operationCts.Token).ConfigureAwait(false);
@@ -2762,7 +2759,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						selectedPaths,
 						operationCts.Token)
 					.ConfigureAwait(false);
-				var appliedRevision = await InvokeAsync(() =>
+				var applied = await InvokeAsync(() =>
 				{
 					var selectedTreePath = CaptureCurrentTreePath();
 					var treeVerticalOffset = _tree?.VerticalOffset ?? 0;
@@ -2771,54 +2768,33 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						    operationCts,
 						    projectionRequestId))
 					{
-						return -1L;
+						return false;
 					}
 
 					_suppressTreeSelectionTracking = true;
 					try
 					{
 						if (!state.TryReplacePlan(plan, expectedRevision))
-							return -1L;
+							return false;
 						_selectedTreePath = selectedTreePath;
 						RefreshWorkspace();
 						_tree?.RestoreVerticalOffset(
 							treeVerticalOffset,
 							state.VisibleRows.Count);
-						return state.Revision;
 					}
 					finally
 					{
 						_suppressTreeSelectionTracking = false;
 					}
-				}).ConfigureAwait(false);
-				if (appliedRevision < 0)
-					return;
 
-				pendingDocument = await _controller.BuildPreviewDocumentAsync(
-						state,
-						view,
-						format,
-						operationCts.Token,
-						plain: _options.Plain)
-					.ConfigureAwait(false);
-				var document = pendingDocument;
-				var applied = await InvokeAsync(() =>
-				{
-					if (!IsCurrentProjectionRequest(
-						    state,
-						    operationCts,
-						    projectionRequestId) ||
-					    Volatile.Read(ref _previewRequestId) != previewRequestId ||
-					    !state.TrySetPreviewDocument(document, appliedRevision))
-					{
-						return false;
-					}
-
-					RefreshWorkspace();
+					// Reprojection replaces the preview with a temporary tree document. Re-enter
+					// the shared scheduler afterwards so it captures the latest plan revision,
+					// view and format instead of publishing a document built from stale state.
+					SchedulePreviewRefresh();
 					return true;
 				}).ConfigureAwait(false);
-				if (applied)
-					pendingDocument = null;
+				if (!applied)
+					return;
 			}
 			catch (OperationCanceledException)
 			{
@@ -2834,10 +2810,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						"DPX-TUI-PREVIEW-FAILED",
 						L("Terminal.Tui.Error.PreviewFailed")));
 				}
-			}
-			finally
-			{
-				pendingDocument?.Dispose();
 			}
 		}, CancellationToken.None);
 	}
