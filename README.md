@@ -13,14 +13,6 @@
 </p>
 
 <p align="center">
-  <a href="https://boosty.to/avazbek22/donate">
-    <img
-      alt="Support DevProjex on Boosty"
-      src="https://img.shields.io/badge/Support_DevProjex-on_Boosty-F15F2C?style=for-the-badge&logo=boosty&logoColor=white">
-  </a>
-</p>
-
-<p align="center">
   <strong>The fastest way to turn a real codebase into clean, AI-ready context.</strong>
 </p>
 
@@ -47,6 +39,12 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 **Install via WinGet (Windows):** `winget install OlimoffDev.DevProjex`
 
 ---
+
+<p align="center">
+  <a href="https://boosty.to/avazbek22">
+    <img src=".github/assets/boosty-support.svg" width="800" alt="Support DevProjex on Boosty">
+  </a>
+</p>
 
 ## Quick Start ⚡
 
