@@ -5,4 +5,8 @@ public interface ITerminalCommandSetupService
 	TerminalCommandSetupSnapshot Probe();
 
 	TerminalCommandInstallResult InstallOrRepair();
+
+	TerminalCommandPathSetupResult ConfigurePath();
+
+	TerminalCommandInstallResult Reinstall();
 }

@@ -1,4 +1,4 @@
-﻿## 1) Cos’è e a cosa serve
+## 1) Cos’è e a cosa serve
 DevProjex prepara rapidamente il contesto del progetto: mostra la struttura di cartelle/file, permette di selezionare gli elementi e copiare l’albero e/o il contenuto dei file negli appunti. Utile per code review, supporto, formazione e condivisione della struttura con un assistente AI.
 
 Importante: l’app è solo in lettura e non modifica i file.
@@ -18,18 +18,31 @@ Scorciatoie:
 * Apri cartella… — apri la cartella radice (Ctrl+O)
 * Nuova finestra — apri una nuova istanza indipendente di DevProjex
 * Recenti — elenco delle cartelle locali aperte di recente
-* Aggiorna — rileggi e ricostruisci l’albero (F5)
+* Aggiorna — rileggi una cartella locale e ricostruisci l’albero (F5)
 * Esporta su file:
   * Esporta albero
   * Esporta contenuto
   * Esporta albero e contenuto
+* Esporta progetto:
+  * In una cartella…
+  * In un archivio ZIP…
+
+L’esportazione del progetto crea una cartella separata o un archivio ZIP dall’albero corrente, mantenendo la struttura delle directory.
+
+Vengono rispettati le cartelle di primo livello, i tipi di file, le regole di esclusione e gli elementi selezionati. Se non è selezionato nulla, viene esportato l’intero albero corrente.
+
+Vengono copiati i file di testo e binari e conservate le cartelle vuote incluse. I file di origine non vengono modificati. Il risultato non può essere salvato all’interno del progetto di origine.
+
+Durante l’esportazione non è possibile modificare l’albero o le impostazioni, usare il filtro, cambiare formato o modalità di anteprima, eseguire comandi Git, aggiornare o aprire un altro progetto.
 
 Regole di formato:
 * Esporta albero:
   * ASCII -> solo `.txt`.
   * JSON -> predefinito `.json`, con `.json` e `.txt` disponibili nella finestra di salvataggio.
-* Esporta contenuto — sempre formato testo del contenuto, file `.txt` (il selettore ASCII/JSON non influisce).
-* Esporta albero e contenuto — sempre file `.txt`; il selettore ASCII/JSON influisce solo sul formato del blocco albero nel risultato.
+  * XML -> predefinito `.xml`, con `.xml` e `.txt` disponibili nella finestra di salvataggio.
+  * MD -> predefinito `.md`, con `.md` e `.txt` disponibili nella finestra di salvataggio.
+* Esporta contenuto — sempre formato testo del contenuto, file `.txt` (il selettore formato albero non influisce).
+* Esporta albero e contenuto — sempre file `.txt`; il formato albero selezionato influisce solo sul formato del blocco albero nel risultato.
 
 I file esportati vengono scritti in UTF-8 senza BOM.
 
@@ -50,13 +63,13 @@ Regole:
 * nell’elenco vengono aggiunte solo cartelle locali;
 * i repository Git clonati tramite DevProjex non vengono aggiunti a questo elenco;
 * non vengono creati duplicati — riaprire la stessa cartella la sposta in cima;
-* vengono conservate fino a 10 cartelle recenti;
+* vengono conservate fino a 15 cartelle recenti;
 * la cronologia viene mantenuta tra gli avvii dell’applicazione.
 
-Per ogni elemento viene mostrato il nome breve della cartella; il percorso completo è disponibile in un tooltip.
+Per ogni elemento vengono mostrati la cartella padre e il nome del progetto, ad esempio `Projects / App`.
 
 ## 4) Avvio dal terminale
-DevProjex può essere avviato dal terminale.
+DevProjex offre uno spazio di lavoro interattivo nel terminale e comandi diretti per script e CI.
 
 Se il comando è già configurato, apri un terminale ed esegui:
 `devprojex --help`
@@ -64,17 +77,20 @@ Se il comando è già configurato, apri un terminale ed esegui:
 Così vedrai tutti i comandi, le opzioni e gli esempi disponibili.
 
 Esempi:
-* `devprojex .` — aprire la cartella corrente.
-* `devprojex "C:\Projects\App"` — aprire la cartella indicata.
-* `devprojex . --export tree` — stampare l’albero del progetto nel terminale.
-* `devprojex . --export content` — stampare il contenuto dei file nel terminale.
-* `devprojex . --export tree-content` — stampare albero e contenuti nel terminale.
-* `devprojex . --export tree-content -o context.txt` — salvare il risultato in un file.
+* `devprojex` — aprire lo spazio di lavoro interattivo del terminale.
+* `devprojex open . --preview` — aprire la cartella corrente nell’anteprima Desktop.
+* `devprojex analyze . --format json` — analizzare il progetto corrente in formato JSON.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — salvare un contesto pronto per l’IA fuori dal progetto sorgente.
+* `devprojex export project . --as folder -o ../devprojex-submission` — esportare l’albero effettivo in una cartella esatta.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — esportare l’albero effettivo in un archivio ZIP.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analizzare i file tracciati da Git con Smart Ignore.
 
 Note:
 * `.` indica la cartella corrente del terminale;
 * i percorsi con spazi devono essere racchiusi tra virgolette;
-* se non viene indicato un file di output, il risultato viene stampato direttamente nel terminale;
+* `--git-mode` seleziona nessun filtro Git, `.gitignore` o solo i file tracciati da Git;
+* `--exclude` gestisce le esclusioni ordinarie separatamente dal filtro Git;
+* i comandi diretti sono deterministici e non aprono l’interfaccia Desktop;
 * il comando non modifica i file del progetto — DevProjex lavora in sola lettura.
 
 Se il comando `devprojex` non funziona, apri in DevProjex:
@@ -83,11 +99,10 @@ Se il comando `devprojex` non funziona, apri in DevProjex:
 ## 5) Git
 Il menu Git è disponibile solo per i progetti clonati tramite DevProjex (Git Clone). L'app non tocca i tuoi file — lavora solo con la cache.
 
-La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
-`%TEMP%\DevProjex\RepoCache`
+La cache viene archiviata nella directory della cache dell'utente. `devprojex doctor` mostra il percorso effettivamente utilizzato.
 
 * Branch — mostra l’elenco dei branch disponibili con indicazione di quello attivo; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste in locale, viene scaricato (fetch) e creato localmente.
-* Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>.
+* Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>. Per un progetto Git Clone, F5 esegue la stessa azione; il normale comando «File → Aggiorna» è disattivato.
 
 ### Finestra di clonazione
 Nella finestra Git Clone può comparire sotto il campo URL un elenco «Repository recenti».
@@ -104,11 +119,13 @@ Se selezioni un elemento dall’elenco, l’URL viene inserito automaticamente n
 Durante una clonazione attiva l’elenco viene nascosto temporaneamente.
 
 ## 6) Copia
-### Selettore formato albero (ASCII/JSON)
+### Selettore formato albero (ASCII / JSON / XML / MD)
 Il selettore definisce il formato di rappresentazione dell’albero per le operazioni in cui l’albero partecipa al risultato.
 
 * ASCII — albero testuale con rami.
 * JSON — albero strutturato in JSON.
+* XML — albero XML compatto per parser e strumenti.
+* MD — lista Markdown annidata per documentazione e prompt AI.
 
 Il selettore influisce su:
 * Copia albero
@@ -123,7 +140,7 @@ Il selettore non influisce su:
 ### Copia albero
 Copia l’albero del progetto.
 Se ci sono nodi selezionati, l’albero è costruito dalla selezione; se la selezione è vuota o non valida, viene copiato l’albero completo.
-Il formato del risultato è definito dal selettore ASCII/JSON.
+Il formato del risultato è definito dal selettore formato albero.
 Scorciatoie: Ctrl+Shift+C e Ctrl+Alt+C.
 
 ### Copia contenuto
@@ -138,22 +155,31 @@ Scorciatoia: Ctrl+Alt+V.
 Combina albero e contenuto:
 * albero dalla selezione; se la selezione è vuota o non valida, viene usato l’albero completo;
 * contenuto secondo le stesse regole di «Copia contenuto»;
-* il formato del blocco albero è definito dal selettore ASCII/JSON.
+* il formato del blocco albero è definito dal selettore formato albero.
 Scorciatoia: Ctrl+Shift+V.
 
-### Rappresentazione JSON
-In modalità JSON viene usata una struttura compatta dell’albero.
+### Rappresentazioni dell’albero
+I formati albero rappresentano in modi diversi lo stesso albero di progetto selezionato.
 
-Albero (Copia albero / Esporta albero):
-* `rootPath` — percorso radice nel formato di output corrente:
-  * per una cartella locale — percorso locale assoluto;
-  * per un progetto Git — URL del repository.
-* `root` — nodo radice.
-* campi nodo: `name`, `path`, `dirs`, `files`, `accessDenied` (se necessario).
+JSON:
+* `rootPath` — percorso radice assoluto normalizzato con `/`.
+* `tree` — contenuto della cartella radice.
+* L’export JSON usa questo formato albero: gli array contengono i file, gli oggetti contengono le sottocartelle, `/` contiene i file della cartella corrente e `[]` rappresenta una cartella vuota.
+
+XML:
+* il nodo radice è `<t r="...">`;
+* le cartelle sono `<d n="...">`;
+* i file sono `<f>File.cs</f>`.
+
+MD:
+* inizia con `Root: ...`;
+* usa una lista Markdown annidata;
+* le cartelle terminano con `/`.
 
 Albero + contenuto:
-* JSON si applica al blocco albero;
+* il formato albero selezionato si applica al blocco albero;
 * il blocco contenuto resta testuale;
+* le intestazioni dei file nel blocco contenuto usano percorsi relativi con `/`;
 * esportazione in `.txt`.
 
 ## 7) Modalità anteprima
@@ -214,8 +240,8 @@ Intervallo: 6–28, reset: 15.
 Rende l'interfaccia più densa: spazi più piccoli nell'albero e nelle impostazioni.
 Quando l’area di lavoro di anteprima è attiva, la modalità compatta viene abilitata automaticamente.
 
-### Animazione albero
-Attiva un'animazione di scorrimento fluido quando si passa il mouse sulle righe dell'albero.
+### Animazione di espansione dell’albero
+Ruota dolcemente la freccia ed espande o comprime un ramo spostando le righe adiacenti. È attiva per impostazione predefinita; se disattivata, l’espansione è immediata.
 
 ### Font albero
 Il font dell’albero si sceglie da « Visualizza → Font albero ».
@@ -251,17 +277,21 @@ Limitazioni:
 ## 11) Opzioni
 A destra sono disponibili:
 * Applica
-* Ignora
+* Esclusioni
 * Tipi di file
 * Cartelle di primo livello
 
-Le modifiche in « Ignora », « Tipi di file » e « Cartelle di primo livello » vengono preparate nel pannello e applicate dopo aver premuto « Applica ».
+Le modifiche in « Esclusioni », « Tipi di file » e « Cartelle di primo livello » vengono preparate nel pannello e applicate dopo aver premuto « Applica ».
+
+Dopo la modifica di una casella, l’app può aggiornare in background le opzioni disponibili e i relativi contatori. L’albero risultante viene ricostruito solo dopo aver premuto « Applica ».
+
+Se l’aggiornamento delle opzioni disponibili viene annullato con il pulsante X nella barra di stato, le modifiche incomplete non vengono applicate e il pannello torna all’ultimo stato completato.
 
 Ogni lista ha il toggle Tutti.
 
 Nota su « Tipi di file »:
 * in questa lista vengono mostrati solo file con estensione;
-* i file senza estensione non vengono aggiunti a questa lista e sono gestiti da un’opzione separata in « Ignora ».
+* i file senza estensione non vengono aggiunti a questa lista e sono gestiti da un’opzione separata in « Esclusioni ».
 
 Ctrl+P — mostra/nascondi pannello.
 
@@ -269,7 +299,7 @@ Ctrl+P — mostra/nascondi pannello.
 Per le cartelle locali, DevProjex memorizza gli ultimi parametri di progetto applicati:
 * cartelle di primo livello selezionate;
 * tipi di file selezionati;
-* opzioni selezionate nel blocco «Ignora».
+* opzioni selezionate nella sezione «Esclusioni».
 
 Il salvataggio avviene quando fai clic su «Applica».
 Quando si riapre la stessa cartella locale, i parametri vengono ripristinati automaticamente.
@@ -278,98 +308,70 @@ Importante:
 * i profili vengono salvati solo per i progetti locali;
 * per i progetti aperti tramite Git Clone, i profili non vengono salvati;
 * se alcune opzioni salvate non sono più disponibili nel progetto corrente, vengono ignorate e gli altri parametri vengono applicati.
-* se l’aggiornamento o la riapertura mostra una nuova cartella di primo livello, un nuovo tipo di file o una nuova opzione in « Ignora », quel punto viene attivato per impostazione predefinita;
+* se l’aggiornamento o la riapertura mostra una nuova cartella di primo livello, un nuovo tipo di file o una nuova opzione in « Esclusioni », quel punto viene attivato per impostazione predefinita;
 * i punti già noti mantengono la scelta esplicita dell’utente: nuovi file di un tipo disattivato non riattivano quel tipo.
 
-## 12) Ignora
-L’elenco « Ignora » viene generato automaticamente in base al percorso corrente e alle cartelle di primo livello selezionate.
+## 12) Esclusioni
+La sezione «Esclusioni» controlla quali file e cartelle vengono esclusi dall’albero, dal contenuto, dalla copia e dall’esportazione.
 
-Ordine delle opzioni:
-* Smart ignore (se disponibile)
-* Usa .gitignore (se viene trovato almeno un `.gitignore`)
-* Cartelle vuote
-* File vuoti
-* Cartelle nascoste
-* File nascosti
-* Cartelle con punto iniziale
-* File con punto iniziale
-* File senza estensione
+Un elemento viene mostrato solo se la cartella di primo livello e il tipo di file sono selezionati e nessuna regola attiva lo esclude. Le regole si sommano: se almeno una nasconde un elemento, un’altra non può renderlo visibile.
 
-Le opzioni delle regole base (nascosti, con punto, vuoti, senza estensione) vengono mostrate solo se esistono elementi corrispondenti.
-Quando un’opzione in « Ignora » diventa disponibile per la prima volta, viene attivata per impostazione predefinita. Un’opzione disattivata esplicitamente in precedenza mantiene quello stato quando torna disponibile.
+### 12.1 Regole disponibili
+In base al contenuto del progetto possono comparire Smart Ignore, «Usa .gitignore», «Solo file tracciati da Git», cartelle e file vuoti, nascosti o con punto iniziale e file senza estensione.
 
-La linea sotto « Usa .gitignore » separa le regole Git/Smart dalle regole base di visibilità.
+In un repository Git, «Usa .gitignore» e «Solo file tracciati da Git» restano visibili come una coppia stabile. Le altre opzioni appaiono quando possono modificare l’albero corrente. L’elenco può quindi cambiare dopo la modifica di un’altra regola, di una cartella di primo livello o di un tipo di file. Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
 
-### 12.1 Ambito delle regole
-L’app costruisce ambiti di progetto (scope) in cui applicare le regole di ignore:
-* radice (se la radice contiene `.gitignore` o un marker di progetto)
-* cartelle di primo livello
-* sottocartelle di progetto annidate
+### 12.2 Smart Ignore
+Smart Ignore nasconde dipendenze, risultati di build, cache e altri artefatti di servizio. DevProjex identifica il tipo di progetto dalla struttura e da file marker come `.csproj`, `package.json`, `pyproject.toml` o `Cargo.toml`. Le regole dello stack rilevato restano nell’area del progetto e non si estendono ai progetti vicini di un altro stack.
 
-La profondità di ricerca degli ambiti annidati è fissa: 2 livelli.
-Questo limite riguarda solo la scoperta degli ambiti annidati per `.gitignore` e Smart Ignore. Una volta trovato un ambito, le regole vengono applicate al suo contenuto tramite la normale scansione dell’albero.
+Per nomi ambigui come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` viene verificato anche il contenuto. Una normale cartella dell’utente non viene quindi nascosta solo per il nome. Alcuni archivi di dipendenze e cartelle di servizio possono essere riconosciuti dalla loro struttura caratteristica anche fuori da un progetto rilevato esplicitamente.
 
-### 12.2 « Usa .gitignore »
-* Attivo: le regole `.gitignore` sono applicate negli ambiti rilevati.
-* Disattivo: le regole `.gitignore` sono completamente disattivate.
+La ricerca di nuove aree di progetto è limitata per evitare l’analisi ripetuta di ogni directory in una grande cartella utente. Le strutture normali usano una ricerca poco profonda, mentre i monorepo riconosciuti vengono esaminati più in profondità. Dopo il rilevamento, Smart Ignore si applica all’intero sottoalbero senza limite di profondità.
 
-Nelle cartelle multi-progetto, il `.gitignore` di un progetto non si applica ai progetti vicini fuori dal suo ambito.
+### 12.3 Usa .gitignore
+Quando è attiva, l’opzione applica ogni `.gitignore` raggiungibile, non solo quello nella radice. Ogni file agisce sulla cartella che lo contiene e su tutte le sottocartelle accessibili, ma non sulle cartelle superiori o adiacenti.
 
-### 12.3 « Smart ignore »
-* Viene mostrato solo quando è pertinente.
-* Attivo: nasconde anche i tipici artefatti di build e strumenti.
-* Disattivo: le regole smart non vengono applicate.
+Per un percorso, le regole vengono valutate dal `.gitignore` padre verso quelli più profondi; nello stesso file, dall’alto verso il basso. L’ultima regola corrispondente determina il risultato Git.
 
-### 12.4 Regole base
-Opzioni:
-* Cartelle nascoste
-* File nascosti
-* Cartelle con punto iniziale
-* File con punto iniziale
-* Cartelle vuote
-* File vuoti
-* File senza estensione
+Una regola che inizia con `!` annulla solo una precedente esclusione Git nella propria area. Non può ripristinare un file finché la cartella padre rimane esclusa. Un `.gitignore` dentro una cartella completamente esclusa e irraggiungibile non viene valutato.
 
-Quando un’opzione è attiva, nasconde gli elementi corrispondenti nell’albero e nei risultati di copia/esportazione.
-Le regole di base vengono attivate separatamente da `.gitignore` e Smart Ignore, ma il risultato finale viene sempre calcolato sull’albero corrente dopo l’applicazione di tutti i filtri attivi.
+Una riga errata o non supportata viene ignorata singolarmente; le altre regole valide continuano a funzionare. L’opzione comprende solo i file `.gitignore` dell’albero di lavoro. `.git/info/exclude` e le regole di esclusione Git globali non vengono applicati; vengono rispettate le impostazioni effettive del repository per il confronto dei percorsi, come `core.ignoreCase` e, su macOS, `core.precomposeUnicode`. Se è disponibile un indice Git leggibile per l’ambito del repository proprietario del percorso, i file tracciati restano visibili anche quando corrispondono a `.gitignore`; senza tale indice o Git CLI, quell’ambito torna in modo sicuro alla sola valutazione dei pattern.
 
-### 12.5 Comportamento interno: casi tipici
-1. Progetto singolo con `.gitignore`.
-Di norma viene mostrato solo « Usa .gitignore ».
-Quando è attivo, `.gitignore` e Smart Ignore lavorano insieme.
-Quando è disattivo, entrambi vengono disattivati.
+Un collegamento simbolico denominato `.gitignore` non viene seguito, in conformità al comportamento di Git per questo file di controllo. Se un normale `.gitignore` non può essere letto, l’ambito della sua directory viene escluso completamente in modo sicuro e la scansione segnala un accesso parziale invece di includere file senza valutare tutte le regole.
 
-2. Progetto singolo senza `.gitignore`.
-« Usa .gitignore » non viene mostrato.
-« Smart ignore » viene mostrato solo se pertinente.
+Il profilo integrato `standard` seleziona `gitignore` e tutti gli otto gruppi di esclusione: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` e `extensionless-files`.
 
-3. Workspace multi-progetto, alcuni progetti con `.gitignore`, altri senza.
-Vengono mostrati « Usa .gitignore » e « Smart ignore ».
-`.gitignore` opera nel proprio ambito.
-Smart Ignore (se attivo) completa il filtraggio negli ambiti rilevati.
+### 12.4 Solo file tracciati da Git
+«Solo file tracciati da Git» costruisce la fase Git dell’albero dai file esistenti nell’albero di lavoro registrati in ogni indice Git leggibile. I file tracciati modificati e i nuovi file aggiunti all’indice restano inclusi; i file non tracciati vengono esclusi. Questo è l’albero di lavoro corrente, non un’istantanea storica di `HEAD` o di un repository remoto.
 
-4. Workspace multi-progetto, tutti i progetti hanno `.gitignore`.
-Viene mostrato « Usa .gitignore ».
-« Smart ignore » non viene mostrato come opzione separata.
+Ogni repository annidato e ogni worktree raggiungibile vengono elaborati in modo indipendente a qualsiasi livello di annidamento raggiungibile. Un repository figlio non eredita i percorsi tracciati dal repository padre o da uno adiacente. Questa modalità richiede la CLI di Git; un indice vuoto ma leggibile è valido. Se lo spazio di lavoro del terminale (TUI) viene avviato in questa modalità e non è possibile caricare alcun indice applicabile, lo spazio di lavoro non viene aperto. Se la modalità viene selezionata interattivamente in uno spazio di lavoro TUI già aperto e non è possibile caricare alcun indice applicabile, la modifica viene rifiutata e resta attiva l’ultima modalità Git utilizzabile. Nella stessa situazione, i comandi diretti terminano con un errore di criterio o di verifica. DevProjex non passa mai silenziosamente a `.gitignore`. Quando è leggibile un altro indice applicabile, gli ambiti annidati non disponibili vengono esclusi con un avviso.
 
-5. Cartella senza regole pertinenti.
-Se non viene trovato `.gitignore` e Smart Ignore non è pertinente, queste opzioni non vengono mostrate.
-Restano solo le regole base di visibilità.
+In uno spazio di lavoro Desktop già aperto, la selezione esplicita resta visibile e fallisce in modo sicuro: output ed esportazione vengono bloccati se la verifica non riesce, mentre una disponibilità parziale consente di continuare con un avviso localizzato.
 
-### 12.6 Cartelle vuote
-Nasconde le cartelle logicamente vuote dall’albero e dai risultati di copia/esportazione.
-Una cartella logicamente vuota è una cartella nella quale non restano discendenti visibili dopo l’applicazione delle regole di visibilità correnti, di `.gitignore`, di Smart Ignore e dei tipi di file selezionati.
-Se la cartella stessa non è nascosta da altre regole, la sua rimozione dall’albero è controllata proprio da questa opzione.
+«Usa .gitignore» e «Solo file tracciati da Git» si escludono a vicenda: l’attivazione di uno disattiva l’altro. Nei progetti locali che supportano i profili, la modalità scelta viene salvata insieme alle cartelle di primo livello, ai tipi di file e alle altre regole di esclusione.
 
-### 12.7 File vuoti
-Nasconde i file vuoti di dimensione 0 byte dall’albero e dai risultati di copia/esportazione.
+### 12.5 Relazione tra il filtro Git e Smart Ignore
+La modalità Git selezionata e Smart Ignore sono interruttori indipendenti. La modalità Git viene applicata per prima in ogni area Git raggiungibile, poi Smart Ignore elabora gli elementi rimasti e infine agiscono le regole di base.
 
-### 12.8 File senza estensione
-Nasconde i file senza estensione (ad esempio: `Dockerfile`, `Makefile`, `README`) dall’albero e dai risultati di copia/esportazione.
+Smart Ignore può restare nascosto finché la modalità Git selezionata copre già tutti i suoi candidati e comparire dopo un cambio di modalità. In un repository Git, le due modalità Git restano visibili come una coppia stabile.
 
-### 12.9 Contatori nel blocco « Ignora »
-Vicino alle opzioni disponibili viene mostrato il numero nel formato `(N)`.
-Per le regole di base, questo numero mostra quanti elementi vengono nascosti proprio da quella regola nella configurazione corrente dell’albero.
+Una negazione Git con `!` annulla solo il risultato Git. Non disattiva Smart Ignore né una regola di base.
+
+### 12.6 Regole di base
+Le regole per il punto iniziale controllano il nome; quelle per gli elementi nascosti controllano l’attributo di sistema Hidden. A seconda della piattaforma possono riguardare lo stesso elemento oppure elementi diversi.
+
+«File vuoti» nasconde i file di 0 byte. «File senza estensione» nasconde, ad esempio, `Dockerfile`, `Makefile` e `README`.
+
+«Cartelle vuote» nasconde le cartelle logicamente vuote. Una cartella è logicamente vuota quando, dopo i tipi di file selezionati e tutte le altre regole, non rimangono file o sottocartelle visibili. Il relativo contatore può quindi cambiare quando viene modificata un’altra regola.
+
+### 12.7 Contatori
+Un contatore mostra il contributo diretto della regola con le impostazioni correnti, non il numero fisico di elementi simili sul disco. Lo stesso elemento non viene attribuito contemporaneamente a più contatori sovrapposti.
+
+L’ordine stabile di attribuzione è: per le cartelle, `.gitignore`, Smart Ignore, punto iniziale, attributo Hidden; per i file, `.gitignore`, Smart Ignore, punto iniziale, nessuna estensione, file vuoto, attributo Hidden. Questo ordine riguarda solo i contatori. Per la visibilità è sufficiente che un qualsiasi meccanismo attivo escluda l’elemento.
+
+### 12.8 Applicazione delle modifiche
+Le caselle aggiornano prima le opzioni disponibili e i contatori. L’albero finale viene ricostruito dopo «Applica impostazioni». Se la preparazione viene annullata, DevProjex torna all’ultimo stato completato; le regole calcolate solo in parte non vengono applicate.
+
 ## 13) Come vengono calcolati albero e metriche
 Il risultato dipende da:
 * cartelle di primo livello selezionate
@@ -399,7 +401,7 @@ Importante:
 ### 13.2 Come vengono calcolate le metriche
 Metriche albero:
 * sono calcolate dall’output reale dell’albero generato dalla stessa pipeline di export;
-* rispettano il formato ASCII/JSON corrente.
+* rispettano il formato albero corrente.
 
 Metriche contenuto:
 * seguono le stesse regole della copia/export contenuto;
@@ -409,9 +411,9 @@ Metriche contenuto:
 ### 13.3 Quando i contatori vengono aggiornati
 Il ricalcolo avviene:
 * dopo apertura/aggiornamento progetto;
-* dopo applicazione impostazioni (ignore, tipi file, cartelle root);
+* dopo l’applicazione delle impostazioni (esclusioni, tipi di file, cartelle root);
 * quando cambiano le checkbox nell’albero (con debounce);
-* quando si passa ASCII/JSON (per operazioni che usano l’albero).
+* quando si cambia formato albero (per operazioni che usano l’albero).
 * quando il calcolo in background viene annullato, i contatori vengono impostati a 0 fino al successivo ricalcolo completato.
 
 ## 14) Icone
@@ -422,24 +424,38 @@ Ordine di scelta:
 4) altrimenti — sconosciuto
 
 ## 15) Tema ed effetti
-Il popover del tema permette di scegliere:
-* tema chiaro/scuro
-* Trasparente / Mica / Acrylic
-* intensità, blur, contrasto, bordi
+La sezione «Tema» permette di scegliere Sistema, Chiaro o Scuro e un effetto di sfondo:
+* Trasparenza
+* Sfocatura
+* Mica
 
-Gli elementi [Beta] possono cambiare tra versioni.
+Sistema è selezionato per impostazione predefinita e segue le modifiche del tema del sistema operativo. Dopo il primo avvio o il ripristino delle impostazioni, un tema di sistema chiaro usa un normale sfondo opaco, mentre un tema di sistema scuro usa Sfocatura. Se la preferenza di sistema non può essere determinata, DevProjex usa Scuro con Sfocatura. I temi Chiaro e Scuro ricordano i propri effetti separatamente. Una scelta esplicita di Chiaro o Scuro ignora le modifiche del sistema finché non viene selezionato nuovamente Sistema.
+
+Gli effetti si escludono a vicenda. Un nuovo clic sull’effetto selezionato lo disattiva e ripristina un normale sfondo opaco.
+
+Impostazioni disponibili:
+* Trasparenza dello sfondo — disponibile per Trasparenza e Sfocatura.
+* Contrasto barra superiore — regola la barra principale con i comandi di anteprima, ricerca, filtro e formato dell’albero.
+* Trasparenza dei menu — si applica allo stesso modo al menu principale e ai relativi sottomenu.
+* Visibilità dei bordi — regola quanto sono evidenti i bordi dell’interfaccia.
+
+Mica usa il materiale di sistema della piattaforma e non ha un’impostazione separata per la trasparenza dello sfondo. Se l’effetto selezionato, Sfocatura o Mica, non è disponibile, l’app prova prima l’altro effetto nativo. Un normale sfondo opaco viene usato solo quando nessuno dei due effetti è disponibile.
+
+In modalità Trasparenza, lo sfondo della finestra principale rimane trasparente. Menu, sottomenu e altre superfici popup usano Sfocatura, se supportata, affinché l’albero e il contenuto sottostanti non riducano la leggibilità.
 
 ## 16) Aiuto
 
-### 16.1 Ripristina impostazioni
-Ripristina impostazioni (Aiuto → Ripristina impostazioni) reimposta solo i parametri visivi dell’interfaccia (tema, effetti, modalità compatta, animazione albero) e non modifica i dati del progetto.
-Questa azione azzera anche la lingua dell’interfaccia salvata.
+### 16.1 Aggiornamenti
+«Aiuto → Aggiornamenti» confronta la versione corrente con l’ultima versione stabile pubblicata su GitHub. I controlli automatici sono disattivati per impostazione predefinita; se attivati, DevProjex controlla all’avvio quando sono trascorsi almeno sette giorni dall’ultimo controllo riuscito. La casella di controllo viene applicata immediatamente. L’ultimo risultato riuscito viene conservato tra le esecuzioni dell’applicazione e non viene cancellato da un successivo errore di rete. L’installazione resta un’azione dell’utente.
 
-### 16.2 Ripristina dati
+### 16.2 Ripristina impostazioni
+Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori predefiniti di tema, effetti, modalità compatta, animazione di espansione dell’albero e lingua dell’interfaccia. I profili dei progetti, la cronologia e i file sul disco non vengono modificati.
+
+### 16.3 Ripristina dati
 Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
 * cartelle di primo livello selezionate;
 * tipi di file selezionati;
-* opzioni selezionate nel blocco «Ignora».
+* opzioni selezionate nella sezione «Esclusioni».
 
 Importante:
 * la cronologia «Recenti» delle cartelle locali non viene cancellata;
@@ -460,13 +476,14 @@ Modalità progresso:
 Comportamento:
 * durante il calcolo dati in background viene mostrata la percentuale;
 * per alcune operazioni Git la percentuale viene mostrata se la sorgente la fornisce;
-* per operazioni molto rapide il progresso può apparire solo per poco tempo.
+* l’aggiornamento delle opzioni disponibili e l’applicazione delle impostazioni vengono mostrati se l’operazione richiede un tempo percepibile;
+* le operazioni rapide terminano senza mostrare il progresso.
 
 Pulsante X (annulla) nella barra di stato:
 * esegue annullamento best-effort per operazioni che supportano l’annullamento;
 * interrompe il calcolo dati in background;
+* quando viene annullato un aggiornamento delle opzioni disponibili, riporta il pannello all’ultimo stato completato;
 * per operazioni senza supporto annullamento, ferma l’indicazione nella barra di stato, mentre l’operazione può comunque terminare in background.
 
 ## 19) Note
-* Per impostazione predefinita, tema scuro ed effetti di trasparenza sono attivi (se supportati).
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.

@@ -27,6 +27,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "git.exe" : "git";
     private const int CommandOutputBufferChars = 64 * 1024;
     private const int CommandErrorBufferChars = 64 * 1024;
+    private static readonly TimeSpan ProcessTerminationWaitTimeout = TimeSpan.FromSeconds(5);
+    private const int ProcessTerminationFallbackWaitMilliseconds = 1_000;
+    internal const string NonInteractiveSshCommand = "ssh -o BatchMode=yes";
 
     /// <summary>
     /// Checks if Git CLI is available on the system by running "git --version".
@@ -71,11 +74,12 @@ public sealed class GitRepositoryService : IGitRepositoryService
             // Note: progress status is set by caller to show localized message
             // We only report dynamic progress (git output with percentages)
 
-            // SHALLOW CLONE: --depth 1 downloads only 1 commit for speed
-            // This is intentional - we're a read-only viewer, not a full git client
+            // Git suppresses transfer progress when stderr is redirected. --progress is required
+            // here so a long clone cannot look frozen while the external process is still active.
+            // SHALLOW CLONE: --depth 1 downloads only 1 commit for speed.
             var result = await RunGitCommandAsync(
                 null,
-                $"clone --depth 1 \"{url}\" \"{targetDirectory}\"",
+                $"clone --progress --depth 1 \"{url}\" \"{targetDirectory}\"",
                 cancellationToken,
                 progress);
 
@@ -111,7 +115,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
             // Propagate cancellation - caller will clean up the directory
             throw;
         }
-        catch (Exception ex)
+        catch
         {
             return new GitCloneResult(
                 Success: false,
@@ -120,7 +124,34 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 DefaultBranch: null,
                 RepositoryName: repoName,
                 RepositoryUrl: url,
-                ErrorMessage: ex.Message);
+                ErrorMessage: "Clone failed");
+        }
+    }
+
+    public async Task<string?> GetRemoteUrlAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await RunGitCommandAsync(
+                repositoryPath,
+                "config --get remote.origin.url",
+                cancellationToken);
+            if (result.ExitCode != 0)
+                return null;
+
+            return result.Output
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -162,8 +193,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
             return "Connection timeout - repository may be too large or network is slow";
         }
 
-        // Return original error if no specific pattern matched
-        return gitError;
+        // Do not surface arbitrary Git stderr because it may echo authenticated URLs.
+        return "Clone failed";
     }
 
     /// <summary>
@@ -632,20 +663,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
         // cancellation, which makes cancellation behavior platform-timing dependent.
         cancellationToken.ThrowIfCancellationRequested();
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = GitExecutable,
-            Arguments = arguments,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-
-        if (!string.IsNullOrEmpty(workingDirectory))
-            startInfo.WorkingDirectory = workingDirectory;
+        var startInfo = CreateGitCommandStartInfo(
+            workingDirectory,
+            arguments);
 
         using var process = new Process { StartInfo = startInfo };
 
@@ -675,6 +695,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
                         var previousPercent = Interlocked.Exchange(ref lastReportedPercent, percent);
                         if (previousPercent != percent)
                             progress.Report($"{percent}%");
+                        if (IsSafeGitProgressLine(line))
+                            progress.Report(line);
                     }
 
                     // Progress lines can be very noisy during clone/fetch and are not
@@ -684,36 +706,134 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
                 errorBuffer.Add(line);
 
-                if (progress is not null && !string.IsNullOrWhiteSpace(line))
+                if (progress is not null && IsSafeGitProgressLine(line))
                     progress.Report(line);
             }
         };
 
+        process.Start();
+        process.StandardInput.Close();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        await WaitForExitOrTerminateAsync(process, cancellationToken);
+
+        return new GitCommandResult(
+            process.ExitCode,
+            outputBuffer.ToString(),
+            errorBuffer.ToString());
+    }
+
+    internal static ProcessStartInfo CreateGitCommandStartInfo(
+        string? workingDirectory,
+        string arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = GitExecutable,
+            Arguments = arguments,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+        startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        // Git's own prompt switch does not prevent an SSH transport from opening
+        // /dev/tty directly. Use standard OpenSSH configuration and agents, but
+        // force its documented batch policy for GUI/TUI-safe authentication.
+        startInfo.Environment["GIT_SSH_COMMAND"] = NonInteractiveSshCommand;
+        startInfo.Environment["GIT_SSH_VARIANT"] = "ssh";
+        startInfo.Environment["GIT_ASKPASS"] = string.Empty;
+        startInfo.Environment["SSH_ASKPASS"] = string.Empty;
+        startInfo.Environment["SSH_ASKPASS_REQUIRE"] = "never";
+        startInfo.Environment["GCM_INTERACTIVE"] = "Never";
+        startInfo.Environment["GCM_GUI_PROMPT"] = "false";
+
+        if (!string.IsNullOrEmpty(workingDirectory))
+            startInfo.WorkingDirectory = workingDirectory;
+
+        return startInfo;
+    }
+
+    internal static async Task WaitForExitOrTerminateAsync(
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
         try
         {
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            await process.WaitForExitAsync(cancellationToken);
-
-            return new GitCommandResult(
-                process.ExitCode,
-                outputBuffer.ToString(),
-                errorBuffer.ToString());
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Kill the process tree on cancellation
-            try
-            {
-                process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-                // Ignore kill errors - process might have already exited
-            }
+            TryKillProcess(process, entireProcessTree: true);
+            await WaitForKilledProcessExitAsync(process).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    private static async Task WaitForKilledProcessExitAsync(Process process)
+    {
+        using var terminationTimeout = new CancellationTokenSource(ProcessTerminationWaitTimeout);
+        try
+        {
+            // The caller token is already canceled. A separate bounded token lets the OS
+            // finish terminating and reaping the process before redirected handles are disposed.
+            await process.WaitForExitAsync(terminationTimeout.Token).ConfigureAwait(false);
+            return;
+        }
+        catch (OperationCanceledException) when (terminationTimeout.IsCancellationRequested)
+        {
+            // Fall through to one final bounded direct-process termination attempt.
+        }
+        catch (InvalidOperationException)
+        {
+            // The process exited or was detached while cancellation cleanup was starting.
+            return;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Fall through: a final direct kill/wait can still observe a transient handle race.
+        }
+
+        TryKillProcess(process, entireProcessTree: false);
+        TryWaitForExit(process, ProcessTerminationFallbackWaitMilliseconds);
+    }
+
+    private static void TryKillProcess(Process process, bool entireProcessTree)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree);
+        }
+        catch (InvalidOperationException)
+        {
+            // Exit can race the HasExited check.
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Cancellation must remain the observable outcome if the OS rejects a redundant kill.
+        }
+    }
+
+    private static void TryWaitForExit(Process process, int timeoutMilliseconds)
+    {
+        try
+        {
+            process.WaitForExit(timeoutMilliseconds);
+        }
+        catch (InvalidOperationException)
+        {
+            // The process already exited or is no longer associated with this instance.
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // The bounded async wait already expired; preserve the original cancellation.
         }
     }
 
@@ -750,6 +870,18 @@ public sealed class GitRepositoryService : IGitRepositoryService
         }
 
         return false;
+    }
+
+    private static bool IsSafeGitProgressLine(string line)
+    {
+        var trimmed = line.AsSpan().TrimStart();
+        return trimmed.StartsWith("remote: Enumerating objects:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("remote: Counting objects:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("remote: Compressing objects:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Receiving objects:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Resolving deltas:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Checking out files:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("Updating files:", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class BoundedLineBuffer(int maxChars)

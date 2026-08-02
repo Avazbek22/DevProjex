@@ -1,4 +1,3 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 
 namespace DevProjex.Tests.Integration;
@@ -42,12 +41,13 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			services,
 			workspace.Path,
 			CreateDefaultContext(workspace.Path));
+		var scenarioContext = BuildScenarioContext(workspace.Path, baseline, testCase);
 		var fullSnapshot = ComputeConvergedSnapshot(
 			services,
 			workspace.Path,
-			BuildScenarioContext(workspace.Path, baseline, testCase));
+			scenarioContext);
 		var liveSnapshot = services.Engine.ComputeLiveRefreshSnapshot(
-			CreateContextFromSnapshot(workspace.Path, fullSnapshot),
+			BuildConvergedContext(workspace.Path, fullSnapshot, scenarioContext),
 			CollectCheckedRootNames(fullSnapshot),
 			TestContext.Current.CancellationToken);
 
@@ -73,8 +73,38 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			BuildScenarioContext(workspace.Path, baseline, testCase));
 		var profileContext = CreateProfileContextFromSnapshot(workspace.Path, baseline, explicitSnapshot, testCase);
 		var restored = ComputeConvergedSnapshot(services, workspace.Path, profileContext);
+		var profileExpected = testCase with
+		{
+			ExpectedCheckedRoots = testCase.SelectedRoots ?? Set(AllRootNames, PathComparer.Default),
+			ExpectedCheckedExtensions = testCase.SelectedExtensions is not null &&
+			                            testCase.ExpectedCheckedExtensions.Count == 0
+				? testCase.ExpectedVisibleExtensions
+				: testCase.ExpectedCheckedExtensions
+		};
+		if (testCase.Name == "all roots xml extension is absent while dot folders are on")
+		{
+			profileExpected = profileExpected with
+			{
+				ExpectedVisibleExtensions = Set(profileExpected.ExpectedVisibleExtensions.Append(".gitignore")),
+				ExpectedCheckedExtensions = Set(profileExpected.ExpectedVisibleExtensions.Append(".gitignore")),
+				ExpectedIgnoreOptions = profileExpected.ExpectedIgnoreOptions
+					.Where(static option => option.Id != IgnoreOptionId.DotFolders)
+					.Append(ExpectedVisible(IgnoreOptionId.DotFolders, true))
+					.ToArray(),
+				ExpectedCounts = profileExpected.ExpectedCounts is null
+					? null
+					: profileExpected.ExpectedCounts with { DotFolders = 2 }
+			};
+		}
+		else if (testCase.Name == "all roots xml extension appears when dot folders are off")
+		{
+			profileExpected = profileExpected with
+			{
+				ExpectedCheckedRoots = Set(["api"], PathComparer.Default)
+			};
+		}
 
-		AssertGoldenSnapshot(restored, testCase);
+		AssertGoldenSnapshot(restored, profileExpected);
 		AssertGoldenTree(workspace.Path, services, restored, testCase);
 	}
 
@@ -286,7 +316,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			roots: null,
 			extensions: null,
 			forcedStates: AllOffStates(),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".js", ".json", ".log", ".md", ".tmp", ".ts", ".xml"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".js", ".json", ".log", ".md", ".tag", ".tmp", ".ts", ".xml"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
@@ -310,7 +340,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			expectedCounts: null)];
 
 		yield return [CreateCase(
-			"api root defaults hides git and smart-followed artifacts",
+			"api root defaults keeps git and smart controllers independent",
 			roots: ["api"],
 			extensions: null,
 			forcedStates: null,
@@ -318,7 +348,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, true),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore),
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true),
 				ExpectedVisible(IgnoreOptionId.DotFolders, true),
 				ExpectedVisible(IgnoreOptionId.DotFiles, true)
 			],
@@ -343,18 +373,18 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 				DotFolders: 1,
 				DotFiles: 1,
 				MinGitIgnoreImpact: 3,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
-			"api root git off disables smart-following too",
+			"api root git off keeps smart active",
 			roots: ["api"],
 			extensions: null,
 			forcedStates: States((IgnoreOptionId.UseGitIgnore, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".log", ".tmp"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".log", ".tmp"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore),
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true),
 				ExpectedVisible(IgnoreOptionId.DotFolders, true),
 				ExpectedVisible(IgnoreOptionId.DotFiles, true)
 			],
@@ -362,20 +392,20 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			[
 				"api/logs/drop.log",
 				"api/logs/drop.tmp",
-				"api/generated/drop/old.cs",
-				"api/bin/Debug/api.dll"
+				"api/generated/drop/old.cs"
 			],
 			expectedHiddenPaths:
 			[
 				"api/.gitignore",
 				"api/.idea/settings.xml",
+				"api/bin/Debug/api.dll",
 				"web/package.json"
 			],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: 1,
 				DotFiles: 1,
 				MinGitIgnoreImpact: 3,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"api root cs extension preserves git negation branch",
@@ -387,7 +417,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, true),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore),
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true),
 				ExpectedVisible(IgnoreOptionId.DotFolders, true)
 			],
 			expectedVisiblePaths:
@@ -405,20 +435,20 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 				DotFolders: 1,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"api root cs extension with git off exposes ignored cs branch",
 			roots: ["api"],
 			extensions: [".cs"],
 			forcedStates: States((IgnoreOptionId.UseGitIgnore, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".log", ".tmp"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".log", ".tmp"],
 			// Newly discovered extensions default to checked when opening a controller branch.
-			expectedCheckedExtensions: [".cs", ".dll", ".tmp"],
+			expectedCheckedExtensions: [".cs", ".tmp"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore),
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true),
 				ExpectedVisible(IgnoreOptionId.DotFolders, true)
 			],
 			expectedVisiblePaths:
@@ -426,19 +456,19 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 				"api/src/Program.cs",
 				"api/generated/keep/keep.cs",
 				"api/generated/drop/old.cs",
-				"api/logs/drop.tmp",
-				"api/bin/Debug/api.dll"
+				"api/logs/drop.tmp"
 			],
 			expectedHiddenPaths:
 			[
 				"api/logs/keep.log",
-				"api/App.csproj"
+				"api/App.csproj",
+				"api/bin/Debug/api.dll"
 			],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: 1,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"api root dll extension remains absent while git controller is on",
@@ -450,65 +480,70 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, true),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore)
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true)
 			],
 			expectedVisiblePaths: [],
 			expectedHiddenPaths: ["api/bin/Debug/api.dll"],
+			expectedCheckedRoots: [],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: null,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
-			"api root dll extension appears when git controller is off",
+			"api root dll extension remains absent when only git is off",
 			roots: ["api"],
 			extensions: [".dll"],
 			forcedStates: States((IgnoreOptionId.UseGitIgnore, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".log", ".tmp"],
-			// Git-off reveals .tmp alongside the requested .dll; new extensions are checked by default.
-			expectedCheckedExtensions: [".dll", ".tmp"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".log", ".tmp"],
+			// Git-off reveals .tmp, while Smart Ignore continues to own the .dll artifact.
+			expectedCheckedExtensions: [".tmp"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore)
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true)
 			],
-			expectedVisiblePaths: ["api/bin/Debug/api.dll"],
-			expectedHiddenPaths: ["api/logs/keep.log"],
+			expectedVisiblePaths: ["api/logs/drop.tmp"],
+			expectedHiddenPaths:
+			[
+				"api/bin/Debug/api.dll",
+				"api/logs/keep.log"
+			],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: null,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"api root tmp extension appears only after git is off",
 			roots: ["api"],
 			extensions: [".tmp"],
 			forcedStates: States((IgnoreOptionId.UseGitIgnore, false)),
-			expectedVisibleExtensions: [".cs", ".csproj", ".dll", ".gitignore", ".log", ".tmp"],
-			// Git-off reveals .dll alongside the requested .tmp; new extensions are checked by default.
-			expectedCheckedExtensions: [".dll", ".tmp"],
+			expectedVisibleExtensions: [".cs", ".csproj", ".gitignore", ".log", ".tmp"],
+			// Smart Ignore continues to own .dll while Git-off reveals the requested .tmp.
+			expectedCheckedExtensions: [".tmp"],
 			expectedIgnoreOptions:
 			[
 				ExpectedVisible(IgnoreOptionId.UseGitIgnore, false),
-				ExpectedHidden(IgnoreOptionId.SmartIgnore)
+				ExpectedVisible(IgnoreOptionId.SmartIgnore, true)
 			],
 			expectedVisiblePaths:
 			[
-				"api/logs/drop.tmp",
-				"api/bin/Debug/api.dll"
+				"api/logs/drop.tmp"
 			],
 			expectedHiddenPaths:
 			[
 				"api/logs/keep.log",
-				"api/generated/drop/old.cs"
+				"api/generated/drop/old.cs",
+				"api/bin/Debug/api.dll"
 			],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: null,
 				DotFiles: null,
 				MinGitIgnoreImpact: 1,
-				MinSmartIgnoreImpact: null))];
+				MinSmartIgnoreImpact: 1))];
 
 		yield return [CreateCase(
 			"web root defaults exposes only source and package extensions",
@@ -553,6 +588,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			],
 			expectedVisiblePaths: [],
 			expectedHiddenPaths: ["web/node_modules/pkg/index.js"],
+			expectedCheckedRoots: [],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: null,
 				DotFiles: null,
@@ -641,6 +677,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			],
 			expectedVisiblePaths: [],
 			expectedHiddenPaths: ["api/.idea/settings.xml"],
+			expectedCheckedRoots: [],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: 0,
 				DotFiles: null,
@@ -662,6 +699,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			],
 			expectedVisiblePaths: ["api/.idea/settings.xml"],
 			expectedHiddenPaths: ["api/logs/drop.tmp"],
+			expectedCheckedRoots: ["api"],
 			expectedCounts: new ExpectedCountContract(
 				DotFolders: 1,
 				DotFiles: null,
@@ -786,7 +824,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 	private static TemporaryDirectory CreateScopedControllerWorkspace()
 	{
 		var workspace = new TemporaryDirectory();
-		workspace.CreateFile("api/.gitignore", "logs/*\n!logs/keep.log\ngenerated/\n!generated/keep/\n");
+		workspace.CreateFile("api/.gitignore", "logs/*\n!logs/keep.log\ngenerated/*\n!generated/keep/\n");
 		workspace.CreateFile("api/App.csproj", "<Project />\n");
 		workspace.CreateFile("api/src/Program.cs", "Console.WriteLine(\"api\");\n");
 		workspace.CreateFile("api/logs/drop.log", "drop log\n");
@@ -799,6 +837,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		workspace.CreateFile("web/package.json", "{ \"name\": \"web\" }\n");
 		workspace.CreateFile("web/src/app.ts", "export const ok = true;\n");
 		workspace.CreateFile("web/node_modules/pkg/index.js", "module.exports = {};\n");
+		workspace.CreateFile("web/.cache/CACHEDIR.TAG", "Signature: 8a477f597d28d172789f06886806bc55\n");
 		workspace.CreateFile("web/.cache/cache.json", "{}\n");
 		workspace.CreateFile("docs/readme.md", "# docs\n");
 		workspace.CreateFile("docs/.drafts/draft.md", "# draft\n");
@@ -810,14 +849,16 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		string rootPath,
 		SelectionRefreshContext context)
 	{
-		var previous = services.Engine.ComputeFullRefreshSnapshot(context, TestContext.Current.CancellationToken);
+		var currentContext = context;
+		var previous = services.Engine.ComputeFullRefreshSnapshot(currentContext, TestContext.Current.CancellationToken);
 		for (var pass = 0; pass < MaximumConvergencePasses; pass++)
 		{
+			currentContext = BuildConvergedContext(rootPath, previous, currentContext) with
+			{
+				CaptureTreeInventory = context.CaptureTreeInventory
+			};
 			var next = services.Engine.ComputeFullRefreshSnapshot(
-				CreateContextFromSnapshot(rootPath, previous) with
-				{
-					CaptureTreeInventory = context.CaptureTreeInventory
-				},
+				currentContext,
 				TestContext.Current.CancellationToken);
 			if (SnapshotsMatch(previous, next))
 				return next;
@@ -825,12 +866,11 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			previous = next;
 		}
 
-		var final = services.Engine.ComputeFullRefreshSnapshot(
-			CreateContextFromSnapshot(rootPath, previous) with
-			{
-				CaptureTreeInventory = context.CaptureTreeInventory
-			},
-			TestContext.Current.CancellationToken);
+		currentContext = BuildConvergedContext(rootPath, previous, currentContext) with
+		{
+			CaptureTreeInventory = context.CaptureTreeInventory
+		};
+		var final = services.Engine.ComputeFullRefreshSnapshot(currentContext, TestContext.Current.CancellationToken);
 		AssertEquivalentVisibleSnapshots(previous, final);
 		return final;
 	}
@@ -933,17 +973,18 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		SelectionRefreshSnapshot explicitSnapshot,
 		ScopedGoldenCase testCase)
 	{
-		return CreateContextFromSnapshot(rootPath, baseline) with
+		var explicitContext = BuildScenarioContext(rootPath, baseline, testCase);
+		return BuildConvergedContext(rootPath, explicitSnapshot, explicitContext) with
 		{
 			PreparedSelectionMode = PreparedSelectionMode.Profile,
 			AllRootFoldersChecked = testCase.SelectedRoots is null,
 			RootSelectionInitialized = true,
-			RootSelectionCache = CollectCheckedRootNames(explicitSnapshot),
-			RootOptionStateCache = BuildRootOptionStateCache(explicitSnapshot),
+			RootSelectionCache = explicitContext.RootSelectionCache,
+			RootOptionStateCache = explicitContext.RootOptionStateCache,
 			AllExtensionsChecked = testCase.SelectedExtensions is null,
 			ExtensionsSelectionInitialized = true,
-			ExtensionsSelectionCache = CollectCheckedExtensionNames(explicitSnapshot),
-			ExtensionOptionStateCache = BuildExtensionOptionStateCache(explicitSnapshot),
+			ExtensionsSelectionCache = explicitContext.ExtensionsSelectionCache,
+			ExtensionOptionStateCache = explicitContext.ExtensionOptionStateCache,
 			IgnoreSelectionInitialized = true,
 			IgnoreSelectionCache = CollectCheckedIgnoreOptionIds(explicitSnapshot),
 			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>(explicitSnapshot.IgnoreOptionStateCache),
@@ -1121,9 +1162,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			Children: node.Children.Select(ToDescriptor).ToArray());
 
 	private static string NormalizeExportFragment(string fragment) =>
-		fragment.Contains('/', StringComparison.Ordinal)
-			? string.Join(Path.DirectorySeparatorChar, fragment.Split('/'))
-			: fragment;
+		fragment.Replace('\\', '/');
 
 	private static void AssertSetEquals(
 		IReadOnlySet<string> expected,
@@ -1151,7 +1190,8 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		string[] expectedVisiblePaths,
 		string[] expectedHiddenPaths,
 		ExpectedCountContract? expectedCounts,
-		string[]? expectedCheckedExtensions = null)
+		string[]? expectedCheckedExtensions = null,
+		string[]? expectedCheckedRoots = null)
 	{
 		var expectedVisibleSet = Set(expectedVisibleExtensions);
 		var selectedExtensions = extensions is null ? null : Set(extensions);
@@ -1166,7 +1206,11 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			SelectedRoots: roots is null ? null : Set(roots, PathComparer.Default),
 			SelectedExtensions: selectedExtensions,
 			ForcedIgnoreStates: forcedStates,
-			ExpectedCheckedRoots: roots is null ? Set(AllRootNames, PathComparer.Default) : Set(roots, PathComparer.Default),
+			ExpectedCheckedRoots: expectedCheckedRoots is not null
+				? Set(expectedCheckedRoots, PathComparer.Default)
+				: roots is null
+					? Set(AllRootNames, PathComparer.Default)
+					: Set(roots, PathComparer.Default),
 			ExpectedVisibleExtensions: expectedVisibleSet,
 			ExpectedCheckedExtensions: checkedExtensions,
 			ExpectedIgnoreOptions: expectedIgnoreOptions,

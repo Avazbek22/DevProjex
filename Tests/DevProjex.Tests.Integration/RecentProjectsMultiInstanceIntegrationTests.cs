@@ -71,4 +71,44 @@ public sealed class RecentProjectsMultiInstanceIntegrationTests
         Assert.Contains(reloaded.RecentFolders, entry => entry.Path == PathUtility.Normalize(newerFolder));
         Assert.Contains(reloaded.RecentFolders, entry => entry.Path == PathUtility.Normalize(delayedFolder));
     }
+
+    [Fact]
+    public void RemoveFolder_AnotherWindowFlushesStaleSnapshot_RemovalStillWins()
+    {
+        using var temp = new TemporaryDirectory();
+        var firstStore = new RecentProjectsStore(() => temp.Path);
+        var secondStore = new RecentProjectsStore(() => temp.Path);
+        var folderPath = temp.CreateDirectory("Workspace/Removed");
+        var firstWindowState = firstStore.AddFolder(firstStore.Load(), folderPath);
+        var staleSecondWindowState = secondStore.Load();
+
+        firstStore.RemoveFolder(firstWindowState, folderPath);
+        Assert.True(secondStore.TryPersist(staleSecondWindowState));
+
+        var reloaded = new RecentProjectsStore(() => temp.Path).Load();
+        Assert.Empty(reloaded.RecentFolders);
+        Assert.Contains(
+            reloaded.RecentFolderRemovals,
+            removal => PathComparer.Default.Equals(removal.Path, PathUtility.Normalize(folderPath)));
+    }
+
+	[Fact]
+	public void RemoveRepository_AnotherWindowFlushesStaleSnapshot_RemovalStillWins()
+	{
+		using var temp = new TemporaryDirectory();
+		var firstStore = new RecentProjectsStore(() => temp.Path);
+		var secondStore = new RecentProjectsStore(() => temp.Path);
+		var repositoryUrl = "https://github.com/example/removed-repository";
+		var firstWindowState = firstStore.AddRepository(firstStore.Load(), repositoryUrl);
+		var staleSecondWindowState = secondStore.Load();
+
+		firstStore.RemoveRepository(firstWindowState, repositoryUrl);
+		Assert.True(secondStore.TryPersist(staleSecondWindowState));
+
+		var reloaded = new RecentProjectsStore(() => temp.Path).Load();
+		Assert.Empty(reloaded.RecentRepositories);
+		Assert.Contains(
+			reloaded.RecentRepositoryRemovals,
+			removal => RepositoryUrlUtility.AreEquivalent(removal.Url, repositoryUrl));
+	}
 }

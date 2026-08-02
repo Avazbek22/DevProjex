@@ -148,6 +148,37 @@ public sealed class TreeSearchEngineTests
 		Assert.Equal(expectedBetaExpanded, nodes["Beta"].Expanded);
 	}
 
+	[Fact]
+	public void ApplyFilterPresentation_CombinesCountingHighlightingAndExpansionInOneTraversal()
+	{
+		var roots = BuildTree(out var nodes);
+		var childEnumerationCounts = nodes.Values.ToDictionary(node => node.Name, _ => 0);
+		var highlighted = new HashSet<string>(StringComparer.Ordinal);
+
+		var result = TreeSearchEngine.ApplyFilterPresentation(
+			roots,
+			"ta",
+			node => node.Name,
+			node =>
+			{
+				childEnumerationCounts[node.Name]++;
+				return node.Children;
+			},
+			(node, isMatch) =>
+			{
+				if (isMatch)
+					highlighted.Add(node.Name);
+			},
+			(node, expanded) => node.Expanded = expanded);
+
+		Assert.Equal(2, result.MatchCount);
+		Assert.Equal(nodes.Count, result.VisitedCount);
+		Assert.Equal(["Beta", "Delta"], highlighted.Order(StringComparer.Ordinal));
+		Assert.True(nodes["Root"].Expanded);
+		Assert.True(nodes["Beta"].Expanded);
+		Assert.All(childEnumerationCounts.Values, count => Assert.Equal(1, count));
+	}
+
 	private static IReadOnlyList<TestNode> BuildTree(out Dictionary<string, TestNode> nodes)
 	{
 		var root = new TestNode("Root");

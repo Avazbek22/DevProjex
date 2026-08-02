@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class TerminalCommandMenuLocalizationTests
 {
 	[Fact]

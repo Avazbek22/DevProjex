@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.ProjectProfiles;
 
 public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null) : IProjectProfileStore
 {
-	private const int CurrentSchemaVersion = 2;
+	private const int CurrentSchemaVersion = 3;
 	private const int MaxProfiles = 500;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
@@ -18,7 +18,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	};
 
     private readonly object _sync = new();
-    private readonly Func<string> _appDataPathProvider = appDataPathProvider ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+    private readonly Func<string> _appDataPathProvider =
+	    appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
 
     public bool EnsureStorageExists()
 	{
@@ -123,9 +124,90 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
+	public ProjectProfileLookupResult LookupProfile(
+		string localProjectPath,
+		TimeSpan lockTimeout)
+	{
+		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
+		{
+			return new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.InvalidProjectPath,
+				null);
+		}
+
+		lock (_sync)
+		{
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, lockTimeout, out var heldLock))
+			{
+				return new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.TemporarilyUnavailable,
+					null);
+			}
+
+			using var _ = heldLock;
+			if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+			{
+				if (primaryRequiresRewrite)
+					TrySaveInternal(fileSet, primaryDb);
+				return ResolveLookup(primaryDb, normalizedPath);
+			}
+
+			if (TryLoadFromPath(
+				    fileSet.BackupPath,
+				    out var backupDb,
+				    out var backupRequiresRewrite))
+			{
+				TrySaveInternal(fileSet, backupDb);
+				return ResolveLookup(backupDb, normalizedPath);
+			}
+
+			var status = File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath)
+				? ProjectProfileLookupStatus.InvalidStorage
+				: ProjectProfileLookupStatus.Missing;
+			return new ProjectProfileLookupResult(status, null);
+		}
+	}
+
+	public bool TryDeleteProfile(string localProjectPath)
+	{
+		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
+			return false;
+
+		lock (_sync)
+		{
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				return false;
+
+			using var _ = heldLock;
+			var db = LoadInternal(fileSet);
+			if (!db.Profiles.Remove(normalizedPath))
+				return true;
+
+			return TrySaveInternal(fileSet, db);
+		}
+	}
+
 	public string GetPath()
 	{
 		return GetFileSet().PrimaryPath;
+	}
+
+	private static ProjectProfileLookupResult ResolveLookup(
+		ProjectProfileDb database,
+		string normalizedPath)
+	{
+		if (!database.Profiles.TryGetValue(normalizedPath, out var entry) || entry is null)
+		{
+			return new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.Missing,
+				null);
+		}
+
+		return new ProjectProfileLookupResult(
+			ProjectProfileLookupStatus.Found,
+			ToProfile(entry));
 	}
 
 	private JsonStoreFileSet GetFileSet()
@@ -186,7 +268,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		};
 	}
 
-	private static ProjectProfileDb Normalize(ProjectProfileDb db)
+	private static ProjectProfileDb Normalize(ProjectProfileDb db, int sourceSchemaVersion)
 	{
 		db.SchemaVersion = CurrentSchemaVersion;
 		db.Profiles ??= new Dictionary<string, PersistedProjectProfile>(PathComparer.Default);
@@ -200,14 +282,16 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			if (value is null)
 				continue;
 
-			normalized[normalizedPath] = NormalizePersistedProfile(value);
+			normalized[normalizedPath] = NormalizePersistedProfile(value, sourceSchemaVersion);
 		}
 
 		db.Profiles = normalized;
 		return db;
 	}
 
-	private static PersistedProjectProfile NormalizePersistedProfile(PersistedProjectProfile profile)
+	private static PersistedProjectProfile NormalizePersistedProfile(
+		PersistedProjectProfile profile,
+		int sourceSchemaVersion)
 	{
 		profile.SelectedRootFolders ??= [];
 		profile.SelectedExtensions ??= [];
@@ -215,6 +299,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.RootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default);
 		profile.ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		profile.IgnoreOptionStates ??= [];
+		profile.SelectedPaths ??= [];
 
 		profile.SelectedRootFolders = profile.SelectedRootFolders
 			.Where(static item => !string.IsNullOrWhiteSpace(item))
@@ -227,6 +312,48 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.SelectedIgnoreOptions = profile.SelectedIgnoreOptions
 			.Distinct()
 			.ToList();
+		profile.SelectedPaths = profile.SelectedPaths
+			.Where(static item => !string.IsNullOrWhiteSpace(item))
+			.Select(static item => item.Trim().Replace('\\', '/'))
+			.Distinct(PathComparer.Default)
+			.OrderBy(static item => item, PathComparer.Default)
+			.ToList();
+
+		if (sourceSchemaVersion < 3 &&
+		    !profile.IgnoreOptionStates.ContainsKey(IgnoreOptionId.SmartIgnore))
+		{
+			var gitIgnoreWasEnabled = profile.IgnoreOptionStates.TryGetValue(
+				IgnoreOptionId.UseGitIgnore,
+				out var persistedGitIgnoreState)
+				? persistedGitIgnoreState
+				: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.UseGitIgnore);
+			var smartIgnoreWasEnabled =
+				profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.SmartIgnore) ||
+				gitIgnoreWasEnabled;
+			if (smartIgnoreWasEnabled)
+			{
+				profile.IgnoreOptionStates[IgnoreOptionId.SmartIgnore] = true;
+				if (!profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.SmartIgnore))
+					profile.SelectedIgnoreOptions.Add(IgnoreOptionId.SmartIgnore);
+			}
+		}
+
+		// Persisted state maps are authoritative because they retain unchecked rows.
+		// Older selected-only documents have no map entries, so each selected value is
+		// promoted once to a true entry. TryAdd deliberately preserves an explicit false
+		// from a modern profile instead of resurrecting a stale compatibility projection.
+		ReconcileSelectedStringValues(
+			profile.SelectedRootFolders,
+			profile.RootFolderStates,
+			PathComparer.Default);
+		ReconcileSelectedStringValues(
+			profile.SelectedExtensions,
+			profile.ExtensionStates,
+			StringComparer.OrdinalIgnoreCase);
+		ReconcileSelectedIgnoreOptions(
+			profile.SelectedIgnoreOptions,
+			profile.IgnoreOptionStates);
+		NormalizeGitFilteringState(profile.SelectedIgnoreOptions, profile.IgnoreOptionStates);
 
 		if (profile.UpdatedUtc <= DateTimeOffset.UnixEpoch)
 			profile.UpdatedUtc = DateTimeOffset.UtcNow;
@@ -236,24 +363,43 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private static PersistedProjectProfile ToPersistedProfile(ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
 	{
+		var selectedRootFolders = profile.SelectedRootFolders
+			.Where(static item => !string.IsNullOrWhiteSpace(item))
+			.Distinct(PathComparer.Default)
+			.ToList();
+		var selectedExtensions = profile.SelectedExtensions
+			.Where(static item => !string.IsNullOrWhiteSpace(item))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
+		var selectedIgnoreOptions = profile.SelectedIgnoreOptions
+			.Distinct()
+			.ToList();
+		var rootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default);
+		var extensionStates = NormalizeStringStateDictionary(
+			profile.ExtensionStates,
+			StringComparer.OrdinalIgnoreCase);
+		var ignoreOptionStates = profile.IgnoreOptionStates is null
+			? []
+			: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
+		ReconcileSelectedStringValues(selectedRootFolders, rootFolderStates, PathComparer.Default);
+		ReconcileSelectedStringValues(selectedExtensions, extensionStates, StringComparer.OrdinalIgnoreCase);
+		ReconcileSelectedIgnoreOptions(selectedIgnoreOptions, ignoreOptionStates);
+		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreOptionStates);
+
 		return new PersistedProjectProfile
 		{
-			SelectedRootFolders = profile.SelectedRootFolders
+			SelectedRootFolders = selectedRootFolders,
+			SelectedExtensions = selectedExtensions,
+			SelectedIgnoreOptions = selectedIgnoreOptions,
+			RootFolderStates = rootFolderStates,
+			ExtensionStates = extensionStates,
+			IgnoreOptionStates = ignoreOptionStates,
+			SelectedPaths = (profile.SelectedPaths ?? [])
 				.Where(static item => !string.IsNullOrWhiteSpace(item))
+				.Select(static item => item.Trim().Replace('\\', '/'))
 				.Distinct(PathComparer.Default)
+				.OrderBy(static item => item, PathComparer.Default)
 				.ToList(),
-			SelectedExtensions = profile.SelectedExtensions
-				.Where(static item => !string.IsNullOrWhiteSpace(item))
-				.Distinct(StringComparer.OrdinalIgnoreCase)
-				.ToList(),
-			SelectedIgnoreOptions = profile.SelectedIgnoreOptions
-				.Distinct()
-				.ToList(),
-			RootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default),
-			ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
-			IgnoreOptionStates = profile.IgnoreOptionStates is null
-				? []
-				: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates),
 			UpdatedUtc = updatedUtc
 		};
 	}
@@ -262,12 +408,15 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	{
 		var rootFolders = new HashSet<string>(profile.SelectedRootFolders, PathComparer.Default);
 		var extensions = new HashSet<string>(profile.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
-		var ignoreOptions = new HashSet<IgnoreOptionId>(profile.SelectedIgnoreOptions);
-		// Empty state maps still carry v2 semantics: options first seen after reopen
-		// use current defaults instead of being treated as unchecked legacy misses.
+		var selectedIgnoreOptions = profile.SelectedIgnoreOptions.ToList();
+		// Local persistence always exposes a complete-map contract. Selected-only input is
+		// promoted at the storage boundary, so all surfaces give newly discovered rows the
+		// same current default without losing historical positive selections.
 		var rootStates = new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default);
 		var extensionStates = new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		var ignoreStates = new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
+		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreStates);
+		var ignoreOptions = new HashSet<IgnoreOptionId>(selectedIgnoreOptions);
 
 		return new ProjectSelectionProfile(
 			SelectedRootFolders: rootFolders,
@@ -275,7 +424,33 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			SelectedIgnoreOptions: ignoreOptions,
 			RootFolderStates: rootStates,
 			ExtensionStates: extensionStates,
-			IgnoreOptionStates: ignoreStates);
+			IgnoreOptionStates: ignoreStates,
+			SelectedPaths: profile.SelectedPaths.ToArray());
+	}
+
+	private static void NormalizeGitFilteringState(
+		List<IgnoreOptionId> selectedIgnoreOptions,
+		Dictionary<IgnoreOptionId, bool> ignoreOptionStates)
+	{
+		var selected = new HashSet<IgnoreOptionId>(selectedIgnoreOptions);
+		var hasPersistedGitState =
+			ignoreOptionStates.ContainsKey(IgnoreOptionId.UseGitIgnore) ||
+			ignoreOptionStates.ContainsKey(IgnoreOptionId.TrackedGitFilesOnly);
+		var preferredMode = hasPersistedGitState
+			? GitFilteringModeResolver.Resolve(ignoreOptionStates)
+			: GitFilteringModeResolver.Resolve(selected);
+
+		GitFilteringModeResolver.Normalize(selected, preferredMode);
+		GitFilteringModeResolver.Normalize(ignoreOptionStates, preferredMode);
+		selected.Remove(IgnoreOptionId.UseGitIgnore);
+		selected.Remove(IgnoreOptionId.TrackedGitFilesOnly);
+		if (preferredMode == GitFilteringMode.RespectGitIgnore)
+			selected.Add(IgnoreOptionId.UseGitIgnore);
+		else if (preferredMode == GitFilteringMode.TrackedFilesOnly)
+			selected.Add(IgnoreOptionId.TrackedGitFilesOnly);
+
+		selectedIgnoreOptions.Clear();
+		selectedIgnoreOptions.AddRange(selected);
 	}
 
 	private static Dictionary<string, bool> NormalizeStringStateDictionary(
@@ -293,6 +468,35 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 
 		return normalized;
+	}
+
+	private static void ReconcileSelectedStringValues(
+		List<string> selectedValues,
+		Dictionary<string, bool> states,
+		StringComparer comparer)
+	{
+		foreach (var selectedValue in selectedValues)
+			states.TryAdd(selectedValue, true);
+
+		selectedValues.Clear();
+		selectedValues.AddRange(states
+			.Where(static pair => pair.Value)
+			.Select(static pair => pair.Key)
+			.OrderBy(static value => value, comparer));
+	}
+
+	private static void ReconcileSelectedIgnoreOptions(
+		List<IgnoreOptionId> selectedOptions,
+		Dictionary<IgnoreOptionId, bool> states)
+	{
+		foreach (var selectedOption in selectedOptions)
+			states.TryAdd(selectedOption, true);
+
+		selectedOptions.Clear();
+		selectedOptions.AddRange(states
+			.Where(static pair => pair.Value)
+			.Select(static pair => pair.Key)
+			.OrderBy(static option => (int)option));
 	}
 
 	private static void PruneProfiles(ProjectProfileDb db)
@@ -345,7 +549,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			// Only normalize payloads that were parsed successfully.
 			// If parsing fails, keep the file untouched and let the backup act as the recovery source.
 			var originalSnapshot = JsonSerializer.Serialize(deserialized, SerializerOptions);
-			var normalized = Normalize(deserialized);
+			var sourceSchemaVersion = deserialized.SchemaVersion;
+			var normalized = Normalize(deserialized, sourceSchemaVersion);
 			var normalizedSnapshot = JsonSerializer.Serialize(normalized, SerializerOptions);
 			requiresRewrite = !string.Equals(originalSnapshot, normalizedSnapshot, StringComparison.Ordinal);
 			db = normalized;

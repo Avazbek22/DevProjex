@@ -18,17 +18,22 @@ public sealed class ExportOutputMetricsCalculatorFromTextTheoryTests
 			"alpha beta",
 			"line1\nline2",
 			"line1\r\nline2",
+			"line1\rline2",
 			" \t ",
-			"x\r\ny\nz"
+			"x\r\ny\nz",
+			"x\r\ny\rz\n"
 		};
 
 		var suffixes = new[]
 		{
 			string.Empty,
 			"\n",
+			"\r",
 			"\r\n",
 			"\n\n",
+			"\r\r",
 			"\r\n\r\n",
+			"\r\n\r",
 			"\n\r\n",
 			" \n",
 			" \r\n"

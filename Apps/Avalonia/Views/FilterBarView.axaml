@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:DevProjex.Avalonia.ViewModels"
+             x:Class="DevProjex.Avalonia.Views.FilterBarView"
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
+  <Border Classes="filter-panel"
+          IsEnabled="{Binding IsProjectLoaded}"
+          UseLayoutRounding="True"
+          MinWidth="328">
+    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="12,6">
+      <TextBox Name="FilterBox"
+               Grid.Column="0"
+               PlaceholderText="{Binding FilterByNamePlaceholder}"
+               Text="{Binding NameFilter, Mode=TwoWay}"
+               Width="260"
+               FocusAdorner="{x:Null}"
+               KeyDown="OnFilterKeyDown" />
+      <TextBlock Grid.Column="1"
+                 Text="{Binding FilterMatchSummaryText}"
+                 IsVisible="{Binding FilterMatchSummaryVisible}"
+                 FontSize="16"
+                 Opacity="0.92"
+                 VerticalAlignment="Center"
+                 HorizontalAlignment="Right"
+                 Margin="12,0,4,0" />
+      <Button Name="FilterCloseButton"
+              Grid.Column="2"
+              Content="✕"
+              Width="32"
+              Click="OnFilterClose" />
+    </Grid>
+  </Border>
+</UserControl>

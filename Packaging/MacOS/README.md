@@ -56,27 +56,37 @@ png2icns Assets/AppIcon/MacOS/app.icns \
     Assets/AppIcon/MacOS/AppIconSet/1024.png
 ```
 
-## Creating an App Bundle
+## Raw Portable Publish and an Unprepared App Bundle
 
-For distribution on macOS, you need to create an `.app` bundle:
+Release validation produces one raw self-contained `DevProjex` executable. It is
+the portable artifact used for CLI/TUI and advanced direct GUI launch, but it is
+not a prepared Finder distribution.
+
+The following maintainer example wraps that executable in an unprepared `.app`.
+The current release scripts do not build, sign, notarize, or execute this bundle,
+so do not present the example output as an official macOS distribution. DevProjex
+targets .NET 10 and therefore requires macOS 14 or newer.
 
 ```bash
 # Build for macOS
-dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj \
+dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj \
     -c Release \
     -r osx-x64 \
     --self-contained true \
     /p:PublishSingleFile=true \
+    /p:IncludeNativeLibrariesForSelfExtract=true \
     /p:PublishReadyToRun=true \
     /p:PublishTrimmed=false \
-    -o ./publish/macos
+    /p:DebugType=None \
+    /p:DebugSymbols=false \
+    -o ./publish/osx-x64
 
 # Create app bundle structure
 mkdir -p "DevProjex.app/Contents/MacOS"
 mkdir -p "DevProjex.app/Contents/Resources"
 
 # Copy executable
-cp ./publish/macos/* "DevProjex.app/Contents/MacOS/"
+cp ./publish/osx-x64/DevProjex "DevProjex.app/Contents/MacOS/DevProjex"
 
 # Copy icon
 cp Assets/AppIcon/MacOS/app.icns "DevProjex.app/Contents/Resources/app.icns"
@@ -104,13 +114,20 @@ cat > "DevProjex.app/Contents/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>10.15</string>
+    <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
 </plist>
 EOF
 ```
+
+The raw publish directory must contain exactly one file named `DevProjex`; that is
+the artifact checked by release validation. The subsequent `.app` also contains
+bundle metadata and an icon and is not the one-file portable artifact. Native
+libraries can be extracted by the .NET single-file host at startup; set
+`DOTNET_BUNDLE_EXTRACT_BASE_DIR` to a private writable directory if the process
+has no usable home directory.
 
 ## Optional Terminal Alias
 
@@ -124,6 +141,7 @@ cat > ~/.local/bin/devprojex <<'EOF'
 #!/bin/sh
 # DevProjex terminal command wrapper
 # target: /Applications/DevProjex.app/Contents/MacOS/DevProjex
+export DEVPROJEX_TERMINAL_HOST=1
 exec '/Applications/DevProjex.app/Contents/MacOS/DevProjex' "$@"
 EOF
 chmod +x ~/.local/bin/devprojex

@@ -105,12 +105,24 @@ public sealed class ProjectAnalysisReportWriterTests
 	}
 
 	[Fact]
-	public void StartupReportOptions_WriteToStandardOutputRecognizesTrimmedDashOnly()
+	public async Task WriteAsync_WorkspaceMetricsBeyondInt32RemainExactJsonNumbers()
 	{
-		Assert.True(new StartupReportOptions(true, "-", StartupReportFormat.Json).WriteToStandardOutput);
-		Assert.True(new StartupReportOptions(true, " - ", StartupReportFormat.Json).WriteToStandardOutput);
-		Assert.False(new StartupReportOptions(true, "./-", StartupReportFormat.Json).WriteToStandardOutput);
-		Assert.False(StartupReportOptions.Disabled.WriteToStandardOutput);
+		var writer = new ProjectAnalysisReportWriter();
+		using var output = new StringWriter();
+		var report = CreateReport("large-workspace") with
+		{
+			Metrics = new ProjectAnalysisOutputMetricsReport(
+				Tree: new ProjectOutputMetricsReport(100_000_000, 1_000_000_000, 250_000_000),
+				Content: new ProjectOutputMetricsReport(2_400_000_006, 3_000_000_015, 750_000_004))
+		};
+
+		await writer.WriteAsync(report, output, TestContext.Current.CancellationToken);
+
+		using var document = JsonDocument.Parse(output.ToString());
+		var content = document.RootElement.GetProperty("metrics").GetProperty("content");
+		Assert.Equal(2_400_000_006L, content.GetProperty("lines").GetInt64());
+		Assert.Equal(3_000_000_015L, content.GetProperty("chars").GetInt64());
+		Assert.Equal(750_000_004L, content.GetProperty("tokens").GetInt64());
 	}
 
 	private static ProjectAnalysisReport CreateReport(string rootPath) =>

@@ -1,5 +1,7 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
+using DevProjex.Avalonia.Coordinators;
+using DevProjex.Application.Context;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Contracts;
@@ -27,9 +29,13 @@ internal static class UiTestDriver
         bool waitForInitialSettingsPane = true,
         string? appDataPathOverride = null,
         Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices = null,
-        bool waitForStatusIdle = true)
+        bool waitForStatusIdle = true,
+        ProjectSourceType projectSourceType = ProjectSourceType.LocalFolder,
+        string? managedClonePath = null,
+        string? repositoryUrl = null)
     {
-        var options = new CommandLineOptions(project.RootPath, AppLanguage.En, false);
+        var options = new DesktopStartupOptions(
+            new DesktopOpenRequest(project.RootPath, Language: AppLanguage.En));
         var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);
 
@@ -41,6 +47,17 @@ internal static class UiTestDriver
             Width = 1500,
             Height = 920
         };
+
+        if (projectSourceType == ProjectSourceType.GitClone)
+        {
+            var clonePath = managedClonePath ?? project.RootPath;
+            var viewModel = GetViewModel(window);
+            viewModel.ProjectSourceType = ProjectSourceType.GitClone;
+            viewModel.CurrentBranch = "main";
+            SetRequiredPrivateField(window, "_currentCachedRepoPath", clonePath);
+            SetRequiredPrivateField(window, "_currentRepositoryUrl", repositoryUrl);
+        }
+
         TrackTopLevelWindow(window);
         WindowAppDataPaths[window] = appDataPath;
 
@@ -79,7 +96,7 @@ internal static class UiTestDriver
 
                     var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
                     return GetActualWidth(settingsContainer) >= 200 &&
-                           !GetRequiredPrivateField<bool>(window, "_settingsAnimating");
+                           !GetWorkspacePresentationController(window).IsSettingsAnimating;
                 },
                 "initial settings pane to become visually available");
         }
@@ -105,7 +122,8 @@ internal static class UiTestDriver
         // teardown does not race app work that would still be running for a real user.
         await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
-        await WaitForSettledFramesAsync(frameCount: 10);
+        await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+        await WaitForSettledFramesAsync(frameCount: 2);
         UntrackTopLevelWindow(window);
         if (cleanupAppData)
             CleanupWindowAppData(window);
@@ -258,6 +276,11 @@ internal static class UiTestDriver
 
     public static async Task ClickRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
     {
+        await ScrollSettingsItemIntoViewAsync(
+            window,
+            "RootFoldersList",
+            GetViewModel(window).RootFolders.FirstOrDefault(option =>
+                string.Equals(option.Name, rootFolderName, StringComparison.Ordinal)));
         await ClickResolvedControlAsync(
             window,
             () => FindRootFolderCheckBox(window, rootFolderName),
@@ -266,6 +289,11 @@ internal static class UiTestDriver
 
     public static async Task ClickExtensionCheckBoxAsync(MainWindow window, string extensionName)
     {
+        await ScrollSettingsItemIntoViewAsync(
+            window,
+            "ExtensionsList",
+            GetViewModel(window).Extensions.FirstOrDefault(option =>
+                string.Equals(option.Name, extensionName, StringComparison.Ordinal)));
         await ClickResolvedControlAsync(
             window,
             () => FindExtensionCheckBox(window, extensionName),
@@ -274,6 +302,10 @@ internal static class UiTestDriver
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
+        await ScrollSettingsItemIntoViewAsync(
+            window,
+            "IgnoreOptionsList",
+            GetViewModel(window).IgnoreOptions.FirstOrDefault(option => option.Id == optionId));
         await ClickResolvedControlAsync(
             window,
             () => FindIgnoreOptionCheckBox(window, optionId),
@@ -281,7 +313,19 @@ internal static class UiTestDriver
     }
 
     public static async Task ClickApplySettingsAsync(MainWindow window)
-        => await ClickAsync(window, GetRequiredApplySettingsButton(window));
+    {
+        var previousApplyTask = window.LatestApplySettingsTask;
+        // Selection workflow tests own the routed Apply contract; pointer hit-testing is
+        // covered separately. Raising Button.Click avoids coupling every semantic matrix
+        // to stale headless pointer capture from an unrelated test window.
+        await RaiseButtonClickAsync(GetRequiredApplySettingsButton(window));
+        await WaitForConditionAsync(
+            window,
+            () => !ReferenceEquals(window.LatestApplySettingsTask, previousApplyTask),
+            "the routed Apply command to publish its owned operation");
+        await window.LatestApplySettingsTask.WaitAsync(TimeSpan.FromSeconds(30));
+        await WaitForSelectionRefreshIdleAsync(window);
+    }
 
     public static async Task RaiseButtonClickAsync(Button button)
     {
@@ -446,6 +490,36 @@ internal static class UiTestDriver
         await ClickAsync(window, previewCopyButton);
     }
 
+    public static async Task CopyContentToClipboardAsync(MainWindow window, string expectedContent)
+        => await InvokeClipboardActionAsync(window, "OnCopyContent", expectedContent);
+
+    public static async Task CopyTreeToClipboardAsync(MainWindow window, string expectedContent)
+        => await InvokeClipboardActionAsync(window, "OnCopyTree", expectedContent);
+
+    public static async Task CopyTreeAndContentToClipboardAsync(MainWindow window, string expectedContent)
+        => await InvokeClipboardActionAsync(window, "OnCopyTreeAndContent", expectedContent);
+
+    private static async Task InvokeClipboardActionAsync(
+        MainWindow window,
+        string methodName,
+        string expectedContent)
+    {
+        var method = typeof(MainWindow).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        await SetClipboardTextAsync(window, $"copy-content-pending-{Guid.NewGuid():N}");
+        await window.Dispatcher.InvokeAsync(
+            () => method!.Invoke(window, [window, new RoutedEventArgs()]),
+            DispatcherPriority.Normal);
+
+        await WaitForClipboardTextAsync(window, expectedContent, TimeSpan.FromSeconds(10));
+        await WaitForConditionAsync(
+            window,
+            () => !GetViewModel(window).StatusBusy,
+            $"{methodName} operation to finish",
+            timeout: TimeSpan.FromSeconds(10));
+    }
+
     public static async Task ClickPreviewStickyHeaderCopyButtonAsync(MainWindow window)
     {
         var stickyHeaderCopyButton = GetRequiredControl<Button>(window, "PreviewStickyHeaderCopyButton");
@@ -522,7 +596,8 @@ internal static class UiTestDriver
                 var viewModel = GetViewModel(window);
                 var settingsContainer = GetRequiredControl<Border>(window, "SettingsContainer");
                 var isEffectivelyVisible = IsActuallyVisibleHorizontally(settingsContainer);
-                var settingsAnimating = GetRequiredPrivateField<bool>(window, "_settingsAnimating");
+                var settingsAnimating =
+                    GetWorkspacePresentationController(window).IsSettingsAnimating;
 
                 return viewModel.SettingsVisible == visible &&
                        isEffectivelyVisible == visible &&
@@ -619,7 +694,9 @@ internal static class UiTestDriver
         var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
         var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
         var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
-        var selectedPaths = InvokePrivateMethod<HashSet<string>>(window, "GetCheckedPaths");
+        var selectedPaths = InvokePrivateMethodAssignable<IReadOnlySet<string>>(
+            window,
+            "GetCheckedPaths");
         var hasSelection = selectedPaths.Count > 0;
         var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
         var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
@@ -662,47 +739,20 @@ internal static class UiTestDriver
     {
         await WaitForSelectionRefreshIdleAsync(window);
 
-        var currentTree = GetRequiredPrivateField<BuildTreeResult>(window, "_currentTree");
-        var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
-        var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
-        var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
-        var treeAndContentExport = GetRequiredPrivateField<TreeAndContentExportService>(window, "_treeAndContentExport");
-        var selectedPaths = InvokePrivateMethod<HashSet<string>>(window, "GetCheckedPaths");
-        var hasSelection = selectedPaths.Count > 0;
-        var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
-        var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
-
-        return mode switch
+        var pipeline = GetRequiredPrivateField<ProjectTextOutputPipeline>(window, "_textOutputPipeline");
+        var snapshot = InvokePrivateMethod<ProjectTextOutputSnapshot>(
+            window,
+            "CaptureProjectTextOutputSnapshot");
+        var outputMode = mode switch
         {
-            PreviewContentMode.Tree => hasSelection
-                ? treeExport.BuildSelectedTree(
-                    currentPath,
-                    currentTree.Root,
-                    selectedPaths,
-                    treeFormat,
-                    pathPresentation?.DisplayRootPath,
-                    pathPresentation?.DisplayRootName)
-                : treeExport.BuildFullTree(
-                    currentPath,
-                    currentTree.Root,
-                    treeFormat,
-                    pathPresentation?.DisplayRootPath,
-                    pathPresentation?.DisplayRootName),
-            PreviewContentMode.Content => await contentExport.BuildAsync(
-                hasSelection
-                    ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths)
-                    : BuildOrderedAllFilePaths(currentTree.Root),
-                cancellationToken,
-                pathPresentation?.MapFilePath),
-            PreviewContentMode.TreeAndContent => await treeAndContentExport.BuildAsync(
-                currentPath,
-                currentTree.Root,
-                selectedPaths,
-                treeFormat,
-                cancellationToken,
-                pathPresentation),
+            PreviewContentMode.Tree => ProjectTextOutputMode.Tree,
+            PreviewContentMode.Content => ProjectTextOutputMode.Content,
+            PreviewContentMode.TreeAndContent => ProjectTextOutputMode.TreeAndContent,
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
+
+        var result = await pipeline.BuildAsync(outputMode, snapshot, cancellationToken);
+        return result.Content;
     }
 
     public static string ComputeCurrentPreviewCopyPayload(MainWindow window)
@@ -825,6 +875,11 @@ internal static class UiTestDriver
         return GetSelectionCoordinator(window).GetSelectedIgnoreOptionIds();
     }
 
+    public static ContextDiagnostic? GetAppliedGitReadinessDiagnostic(
+        MainWindow window,
+        string projectPath) =>
+        GetSelectionCoordinator(window).GetAppliedGitReadinessDiagnostic(projectPath);
+
     public static async Task WaitForSelectionRefreshIdleAsync(MainWindow window, TimeSpan? timeout = null)
     {
         var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
@@ -842,6 +897,26 @@ internal static class UiTestDriver
             effectiveTimeout);
 
         await WaitForSettledFramesAsync(frameCount: 6);
+    }
+
+    public static async Task WaitForInitialMetricsBaselineAsync(
+        MainWindow window,
+        TimeSpan? timeout = null)
+    {
+        var metrics = GetRequiredPrivateField<MetricsPipeline>(
+            window,
+            "_metrics");
+
+        // Project load can be idle briefly before deferred post-load metrics become eligible.
+        // Tests that take ownership of StatusBusy must wait for the baseline itself, otherwise a
+        // later metrics completion can overwrite their synthetic status operation.
+        await WaitForConditionAsync(
+            window,
+            () => metrics.HasCompleteBaseline &&
+                  !metrics.IsBackgroundActive &&
+                  !GetViewModel(window).StatusBusy,
+            "initial metrics baseline to finish",
+            timeout);
     }
 
     public static bool TryGetCurrentStatusMetrics(
@@ -908,6 +983,7 @@ internal static class UiTestDriver
 
                 return viewModel.IsPreviewMode &&
                        previewIsland.IsVisible &&
+                       !IsPreviewPaneTransitionInProgress(window) &&
                        !viewModel.IsPreviewLoading &&
                        previewDocument is not null &&
                        IsPreviewPipelineIdle(window);
@@ -915,6 +991,10 @@ internal static class UiTestDriver
             "preview workspace to become ready");
         await WaitForSettledFramesAsync(frameCount: 18);
     }
+
+    private static bool IsPreviewPaneTransitionInProgress(MainWindow window) =>
+        GetWorkspacePresentationController(window).IsPreviewPaneAnimating ||
+        GetWorkspacePresentationController(window).IsTreePaneAnimating;
 
     public static async Task WaitForFilterAppliedAsync(MainWindow window, string query)
     {
@@ -1134,6 +1214,19 @@ internal static class UiTestDriver
             await WaitForSettledFramesAsync(frameCount: 6);
     }
 
+    private static async Task ScrollSettingsItemIntoViewAsync(
+        MainWindow window,
+        string listName,
+        object? item)
+    {
+        if (item is null)
+            return;
+
+        var list = GetRequiredControl<ListBox>(window, listName);
+        await window.Dispatcher.InvokeAsync(() => list.ScrollIntoView(item));
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
     private static async Task WaitForControlReadyForPointerAsync(MainWindow window, Control control)
     {
         await WaitForConditionAsync(
@@ -1254,6 +1347,7 @@ internal static class UiTestDriver
                 $"TreeNodes={viewModel.TreeNodes.Count}",
                 $"PreviewMode={viewModel.PreviewWorkspaceMode}",
                 $"PreviewLoading={viewModel.IsPreviewLoading}",
+                $"PreviewTransitioning={IsPreviewPaneTransitionInProgress(window)}",
                 $"SettingsVisible={viewModel.SettingsVisible}",
                 $"SettingsWidth={settingsWidth:F2}",
                 $"SearchVisible={viewModel.SearchVisible}",
@@ -1356,6 +1450,16 @@ internal static class UiTestDriver
         return Assert.IsType<Avalonia.Coordinators.SelectionSyncCoordinator>(field?.GetValue(window));
     }
 
+    private static Avalonia.Coordinators.WorkspacePresentationController
+        GetWorkspacePresentationController(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_workspacePresentation",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsType<Avalonia.Coordinators.WorkspacePresentationController>(
+            field?.GetValue(window));
+    }
+
     private static bool IsPreviewPipelineIdle(MainWindow window)
     {
         // Preview mode switching is a two-step pipeline: the selected mode changes first,
@@ -1376,10 +1480,23 @@ internal static class UiTestDriver
         return Assert.IsType<T>(field?.GetValue(window));
     }
 
+    private static void SetRequiredPrivateField(MainWindow window, string fieldName, object? value)
+    {
+        var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        field!.SetValue(window, value);
+    }
+
     private static T InvokePrivateMethod<T>(MainWindow window, string methodName)
     {
         var method = typeof(MainWindow).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<T>(method?.Invoke(window, null));
+    }
+
+    private static T InvokePrivateMethodAssignable<T>(MainWindow window, string methodName)
+    {
+        var method = typeof(MainWindow).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsAssignableFrom<T>(method?.Invoke(window, null));
     }
 
     private static T? InvokePrivateMethodAllowNull<T>(MainWindow window, string methodName)
@@ -1454,7 +1571,7 @@ internal static class UiTestDriver
         }
     }
 
-    private static bool TryParseMetricNumber(string text, out int value)
+    private static bool TryParseMetricNumber(string text, out long value)
     {
         value = 0;
         if (string.IsNullOrWhiteSpace(text))
@@ -1480,7 +1597,7 @@ internal static class UiTestDriver
             // Integer status values use localized group separators only. We deliberately
             // keep digits and drop every separator so 4,698 / 4 698 / 4.698 all become 4698.
             normalized = string.Concat(normalized.Where(char.IsDigit));
-            if (normalized.Length == 0 || !int.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out value))
+            if (normalized.Length == 0 || !long.TryParse(normalized, NumberStyles.None, CultureInfo.InvariantCulture, out value))
                 return false;
 
             return true;
@@ -1512,7 +1629,11 @@ internal static class UiTestDriver
             return false;
         }
 
-        value = (int)Math.Round(parsed * multiplier, MidpointRounding.AwayFromZero);
+        var scaled = Math.Round(parsed * multiplier, MidpointRounding.AwayFromZero);
+        if (scaled < 0 || scaled > long.MaxValue)
+            return false;
+
+        value = (long)scaled;
         return true;
     }
 }

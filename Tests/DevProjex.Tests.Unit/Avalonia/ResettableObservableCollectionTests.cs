@@ -32,4 +32,5 @@ public sealed class ResettableObservableCollectionTests
         Assert.Single(events);
         Assert.Equal(NotifyCollectionChangedAction.Reset, events[0].Action);
     }
+
 }

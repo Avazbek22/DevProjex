@@ -110,6 +110,177 @@ public sealed class AppInstancePackagingContractTests
     }
 
     [Fact]
+    public void Repository_DoesNotDirectlyOverrideTmdsDbusProtocolAnywhere()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var packageFiles = Directory
+            .EnumerateFiles(repositoryRoot, "*.*", SearchOption.AllDirectories)
+            .Where(static path =>
+                path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".props", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".targets", StringComparison.OrdinalIgnoreCase))
+            .Where(static path =>
+                !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) &&
+                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        var directOverrides = packageFiles
+            .SelectMany(packageFile =>
+            {
+                var document = XDocument.Load(packageFile);
+                return document
+                    .Descendants()
+                    .Where(static element =>
+                        element.Name.LocalName is "PackageReference" or "PackageVersion" &&
+                        element.Attribute("Include")?.Value == "Tmds.DBus.Protocol")
+                    .Select(_ => Path.GetRelativePath(repositoryRoot, packageFile));
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.Empty(directOverrides);
+    }
+
+    [Fact]
+    public void AvaloniaProject_DoesNotOverrideAvaloniaFreeDesktopTmdsDbusProtocolVersion()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var avaloniaProjectPath = Path.Combine(
+            repositoryRoot,
+            "Apps",
+            "Avalonia",
+            "DevProjex.Avalonia.csproj");
+        var centralPackagesPath = Path.Combine(repositoryRoot, "Directory.Packages.props");
+
+        var avaloniaProject = XDocument.Load(avaloniaProjectPath);
+        var centralPackages = XDocument.Load(centralPackagesPath);
+
+        var directTmdsReferences = avaloniaProject
+            .Descendants("PackageReference")
+            .Where(element => element.Attribute("Include")?.Value == "Tmds.DBus.Protocol")
+            .ToArray();
+        var centralTmdsVersions = centralPackages
+            .Descendants("PackageVersion")
+            .Where(element => element.Attribute("Include")?.Value == "Tmds.DBus.Protocol")
+            .ToArray();
+
+        // Avalonia.FreeDesktop owns the DBus compatibility boundary. A direct Tmds
+        // override can recreate the Linux/X11 startup TypeLoadException we saw on Arch.
+        Assert.Empty(directTmdsReferences);
+        Assert.Empty(centralTmdsVersions);
+    }
+
+    [Fact]
+    public void AvaloniaRestoreGraph_UsesTmdsDbusProtocolCompatibleWithAvaloniaFreeDesktop()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var assetsPath = Path.Combine(
+            repositoryRoot,
+            "Apps",
+            "Avalonia",
+            "obj",
+            "project.assets.json");
+
+        Assert.True(
+            File.Exists(assetsPath),
+            $"Project assets were not found. Run dotnet restore before this packaging contract test: {assetsPath}");
+
+        using var document = JsonDocument.Parse(File.ReadAllText(assetsPath));
+        var libraries = document.RootElement.GetProperty("libraries");
+        var resolvedAvaloniaFreeDesktopVersions = libraries
+            .EnumerateObject()
+            .Where(static property => property.Name.StartsWith("Avalonia.FreeDesktop/", StringComparison.Ordinal))
+            .Select(static property => property.Name["Avalonia.FreeDesktop/".Length..])
+            .ToArray();
+        var resolvedTmdsVersions = libraries
+            .EnumerateObject()
+            .Where(static property => property.Name.StartsWith("Tmds.DBus.Protocol/", StringComparison.Ordinal))
+            .Select(static property => property.Name["Tmds.DBus.Protocol/".Length..])
+            .ToArray();
+
+        var resolvedAvaloniaFreeDesktopVersion = Assert.Single(resolvedAvaloniaFreeDesktopVersions);
+        var resolvedVersion = Assert.Single(resolvedTmdsVersions);
+        Assert.True(
+            Version.Parse(resolvedAvaloniaFreeDesktopVersion) >= new Version(12, 1, 0),
+            $"Avalonia.FreeDesktop 12.1.0+ is required for the updated DBus API boundary. Resolved: {resolvedAvaloniaFreeDesktopVersion}");
+        Assert.True(
+            Version.Parse(resolvedVersion) >= new Version(0, 94, 0),
+            $"Avalonia.FreeDesktop 12.1.0+ should resolve the updated Tmds.DBus.Protocol graph. Resolved: {resolvedVersion}");
+    }
+
+    [Fact]
+    public void DirectoryBuildProps_DoesNotDisableReferenceAssembliesForCiBuilds()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var propsPath = Path.Combine(repositoryRoot, "Directory.Build.props");
+        var document = XDocument.Load(propsPath);
+
+        var ciReferenceAssemblyDisables = document
+            .Descendants()
+            .Where(static element => element.Name.LocalName == "ProduceReferenceAssembly")
+            .Where(static element => string.Equals(element.Value.Trim(), "false", StringComparison.OrdinalIgnoreCase))
+            .Where(static element => (element.Attribute("Condition")?.Value ?? string.Empty)
+                .Contains("CI", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        // Project-reference builds must keep SDK reference assemblies enabled. Disabling
+        // them makes downstream projects compile against bin output and can race on macOS CI.
+        Assert.Empty(ciReferenceAssemblyDisables);
+    }
+
+    [Fact]
+    public void ReleaseValidationWorkflow_CatchesLinuxX11DbusStartupRegressions()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var workflowPath = Path.Combine(repositoryRoot, ".github", "workflows", "release-validate.yml");
+        var workflow = File.ReadAllText(workflowPath);
+
+        Assert.Contains("linux-x64", workflow, StringComparison.Ordinal);
+        Assert.Contains("linux-arm64", workflow, StringComparison.Ordinal);
+        Assert.Contains("Validate Linux DBus Dependency Graph", workflow, StringComparison.Ordinal);
+        Assert.Contains("Tmds.DBus.Protocol/*", workflow, StringComparison.Ordinal);
+        Assert.Contains("Do not override Tmds.DBus.Protocol directly", workflow, StringComparison.Ordinal);
+        Assert.Contains("Avalonia.FreeDesktop/*", workflow, StringComparison.Ordinal);
+        Assert.Contains("[Version]\"12.1.0\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("[Version]\"0.94.0\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Startup Smoke (Linux X11)", workflow, StringComparison.Ordinal);
+        Assert.Contains("xvfb-run -a", workflow, StringComparison.Ordinal);
+        Assert.Contains("env -u CI \"$2\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("Portable Launcher ConPTY TUI Smoke", workflow, StringComparison.Ordinal);
+        Assert.Contains("DEVPROJEX_TUI_TEST_BINARY", workflow, StringComparison.Ordinal);
+        Assert.Contains("/p:PublishSingleFile=true", workflow, StringComparison.Ordinal);
+        Assert.Contains("/p:IncludeNativeLibrariesForSelfExtract=true", workflow, StringComparison.Ordinal);
+        Assert.Contains("/p:PublishTrimmed=false", workflow, StringComparison.Ordinal);
+        Assert.Contains("Directory.Packages.props", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReleaseScript_PublishesLinuxArtifactsWithAvaloniaSafeSingleFileSettings()
+    {
+        var repositoryRoot = ResolveRepositoryRoot();
+        var releaseScriptPath = Path.Combine(repositoryRoot, "Scripts", "release-all.ps1");
+        var releaseScript = File.ReadAllText(releaseScriptPath);
+
+        Assert.Contains("Rid = \"linux-x64\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Rid = \"linux-arm64\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/p:PublishSingleFile=true\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/p:IncludeNativeLibrariesForSelfExtract=true\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/p:PublishReadyToRun=true\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/p:PublishTrimmed=false\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains(
+            "Get-ChildItem -LiteralPath $ridOutDir -File -Recurse",
+            releaseScript,
+            StringComparison.Ordinal);
+        Assert.Contains("$publishedFiles.Count -ne 1", releaseScript, StringComparison.Ordinal);
+        Assert.Contains(
+            "[System.IO.Path]::GetRelativePath($ridOutDir, $_.FullName)",
+            releaseScript,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("\"/p:PublishTrimmed=true\"", releaseScript, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WindowsStoreManifest_TargetsWindowsVersionSupportingExecutionAliases()
     {
         var manifestPath = ResolveStoreManifestPath();
@@ -138,8 +309,9 @@ public sealed class AppInstancePackagingContractTests
 
         Assert.Contains($"/usr/local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"~/.local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
-        Assert.Contains($"Exec={CommandLineExecutableAliases.UnixCommand} %F", desktopEntry, StringComparison.Ordinal);
+        Assert.Contains($"Exec={CommandLineExecutableAliases.UnixCommand} open %f", desktopEntry, StringComparison.Ordinal);
         Assert.Contains($"Icon={CommandLineExecutableAliases.UnixCommand}", desktopEntry, StringComparison.Ordinal);
+        Assert.Contains("always open DevProjex Desktop", readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsPortableExecutable, readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, desktopEntry, StringComparison.Ordinal);
     }
@@ -154,6 +326,9 @@ public sealed class AppInstancePackagingContractTests
 
         Assert.Contains($"~/.local/bin/{CommandLineExecutableAliases.UnixCommand}", readme, StringComparison.Ordinal);
         Assert.Contains($"/Applications/{CommandLineExecutableAliases.DisplayName}.app/Contents/MacOS/{CommandLineExecutableAliases.DisplayName}", readme, StringComparison.Ordinal);
+        Assert.Contains("DEVPROJEX_TERMINAL_HOST=1", readme, StringComparison.Ordinal);
+        Assert.Contains("<string>14.0</string>", readme, StringComparison.Ordinal);
+        Assert.Contains("unprepared `.app`", readme, StringComparison.Ordinal);
         Assert.Contains("does not modify shell profiles or global environment variables", readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, readme, StringComparison.Ordinal);
     }

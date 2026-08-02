@@ -49,7 +49,7 @@ public sealed class InfrastructureJsonPersistenceTests
 			.ToArray();
 
 		Assert.Contains("useGitIgnore", selectedIgnoreOptions);
-		Assert.Contains("dotFolders", selectedIgnoreOptions);
+		Assert.DoesNotContain("dotFolders", selectedIgnoreOptions);
 		Assert.False(storedProfile.GetProperty("rootFolderStates").GetProperty("docs").GetBoolean());
 		Assert.False(storedProfile.GetProperty("extensionStates").GetProperty(".csv").GetBoolean());
 		Assert.False(storedProfile.GetProperty("ignoreOptionStates").GetProperty("dotFolders").GetBoolean());
@@ -77,12 +77,9 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Contains("src", loaded.SelectedRootFolders);
 		Assert.Contains(".cs", loaded.SelectedExtensions);
 		Assert.Contains(IgnoreOptionId.SmartIgnore, loaded.SelectedIgnoreOptions);
-		Assert.NotNull(loaded.RootFolderStates);
-		Assert.NotNull(loaded.ExtensionStates);
-		Assert.NotNull(loaded.IgnoreOptionStates);
-		Assert.Empty(loaded.RootFolderStates);
-		Assert.Empty(loaded.ExtensionStates);
-		Assert.Empty(loaded.IgnoreOptionStates);
+		Assert.True(loaded.RootFolderStates!["src"]);
+		Assert.True(loaded.ExtensionStates![".cs"]);
+		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.SmartIgnore]);
 
 		store.SaveProfile(projectPath, loaded);
 
@@ -93,53 +90,126 @@ public sealed class InfrastructureJsonPersistenceTests
 			.Single()
 			.Value;
 
-		Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("rootFolderStates").ValueKind);
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("extensionStates").ValueKind);
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("ignoreOptionStates").ValueKind);
 	}
 
 	[Fact]
-	public void UserSettingsStore_WritesCamelCaseEnumValuesAndLoadsViewSettings()
+	public void ProjectProfileStore_MigratesLegacyHiddenSmartControllerFromEnabledGitState()
 	{
 		using var temp = new TemporaryDirectory();
-		var store = new UserSettingsStore(() => Path.Combine(temp.Path, "appdata"));
+		var store = new ProjectProfileStore(() => Path.Combine(temp.Path, "appdata"));
+		var projectPath = Path.Combine(temp.Path, "RepoHybrid");
+		var storePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+		var normalizedPath = JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
+		File.WriteAllText(storePath, $$"""
+			{
+			  "schemaVersion": 2,
+			  "profiles": {
+			    {{normalizedPath}}: {
+			      "selectedRootFolders": [],
+			      "selectedExtensions": [],
+			      "selectedIgnoreOptions": [ "useGitIgnore" ],
+			      "rootFolderStates": {},
+			      "extensionStates": {},
+			      "ignoreOptionStates": { "useGitIgnore": true },
+			      "updatedUtc": "2026-01-01T00:00:00+00:00"
+			    }
+			  }
+			}
+			""");
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Contains(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
+		Assert.Contains(IgnoreOptionId.SmartIgnore, loaded.SelectedIgnoreOptions);
+		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.UseGitIgnore]);
+		Assert.True(loaded.IgnoreOptionStates[IgnoreOptionId.SmartIgnore]);
+
+		using var document = JsonDocument.Parse(File.ReadAllText(storePath));
+		Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+	}
+
+	[Fact]
+	public void ProjectProfileStore_MigrationPreservesExplicitIndependentSmartState()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new ProjectProfileStore(() => Path.Combine(temp.Path, "appdata"));
+		var projectPath = Path.Combine(temp.Path, "RepoIndependent");
+		var storePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+		var normalizedPath = JsonSerializer.Serialize(PathUtility.Normalize(projectPath));
+		File.WriteAllText(storePath, $$"""
+			{
+			  "schemaVersion": 2,
+			  "profiles": {
+			    {{normalizedPath}}: {
+			      "selectedRootFolders": [],
+			      "selectedExtensions": [],
+			      "selectedIgnoreOptions": [ "useGitIgnore" ],
+			      "rootFolderStates": {},
+			      "extensionStates": {},
+			      "ignoreOptionStates": {
+			        "useGitIgnore": true,
+			        "smartIgnore": false
+			      },
+			      "updatedUtc": "2026-01-01T00:00:00+00:00"
+			    }
+			  }
+			}
+			""");
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.UseGitIgnore]);
+		Assert.False(loaded.IgnoreOptionStates[IgnoreOptionId.SmartIgnore]);
+		Assert.DoesNotContain(IgnoreOptionId.SmartIgnore, loaded.SelectedIgnoreOptions);
+	}
+
+	[Fact]
+	public void UserAndThemeSettingsStores_WriteIndependentCleanCamelCaseDocuments()
+	{
+		using var temp = new TemporaryDirectory();
+		var appDataPath = Path.Combine(temp.Path, "appdata");
+		var store = new UserSettingsStore(() => appDataPath);
+		var themeStore = new ThemeSettingsStore(() => appDataPath);
 		var db = store.Load();
-		db.LastSelected = "Dark.Acrylic";
 		db.ViewSettings = new AppViewSettings
 		{
 			IsCompactMode = true,
-			IsTreeAnimationEnabled = true,
-			IsAdvancedIgnoreCountsEnabled = false,
+			IsTreeExpansionAnimationEnabled = false,
 			IsTerminalCommandPromptDismissed = true,
 			PreferredLanguage = AppLanguage.Ru
 		};
-		db.Presets["Dark.Acrylic"] = db.Presets["Dark.Acrylic"] with
+		var themeDocument = themeStore.Load();
+		themeDocument.SelectedPreset = "Dark.Acrylic";
+		themeDocument.Presets["Dark.Acrylic"] = themeDocument.Presets["Dark.Acrylic"] with
 		{
-			Theme = ThemeVariant.Dark,
-			Effect = ThemeEffectMode.Acrylic,
-			MaterialIntensity = 42
+			BackgroundTransparency = 42
 		};
 
 		store.Save(db);
+		Assert.True(themeStore.TrySave(themeDocument));
 
-		using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
-		var preset = document.RootElement.GetProperty("presets").GetProperty("Dark.Acrylic");
-		var viewSettings = document.RootElement.GetProperty("viewSettings");
+		using var userDocument = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
+		using var themeJson = JsonDocument.Parse(File.ReadAllText(themeStore.GetPath()));
+		var preset = themeJson.RootElement.GetProperty("presets").GetProperty("Dark.Acrylic");
+		var viewSettings = userDocument.RootElement.GetProperty("viewSettings");
 
-		Assert.Equal("dark", preset.GetProperty("theme").GetString());
-		Assert.Equal("acrylic", preset.GetProperty("effect").GetString());
+		Assert.Equal(42, preset.GetProperty("backgroundTransparency").GetDouble());
+		Assert.False(preset.TryGetProperty("theme", out _));
+		Assert.False(preset.TryGetProperty("effect", out _));
 		Assert.True(viewSettings.GetProperty("isTerminalCommandPromptDismissed").GetBoolean());
 		Assert.Equal("ru", viewSettings.GetProperty("preferredLanguage").GetString());
-		Assert.True(viewSettings.GetProperty("isAdvancedIgnoreCountsEnabled").GetBoolean());
+		Assert.False(userDocument.RootElement.TryGetProperty("presets", out _));
 
 		var loaded = store.Load();
 		Assert.True(loaded.ViewSettings.IsCompactMode);
-		Assert.True(loaded.ViewSettings.IsTreeAnimationEnabled);
-		Assert.True(loaded.ViewSettings.IsAdvancedIgnoreCountsEnabled);
+		Assert.False(loaded.ViewSettings.IsTreeExpansionAnimationEnabled);
 		Assert.True(loaded.ViewSettings.IsTerminalCommandPromptDismissed);
 		Assert.Equal(AppLanguage.Ru, loaded.ViewSettings.PreferredLanguage);
-		Assert.Equal(ThemeEffectMode.Acrylic, loaded.Presets["Dark.Acrylic"].Effect);
+		Assert.Equal(42, themeStore.Load().Presets["Dark.Acrylic"].BackgroundTransparency);
 	}
 
 	[Fact]

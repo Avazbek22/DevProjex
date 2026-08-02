@@ -75,6 +75,50 @@ public sealed class FileSystemScannerTests
 		Assert.Contains("src", result.Value);
 	}
 
+	[Fact]
+	public void GetRootFolderNames_ExcludedRootFolderName_DoesNotChangeNestedIgnoreSemantics()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".git/objects/pack.dat", "metadata");
+		temp.CreateFile("src/.git/keep.txt", "project content");
+		temp.CreateFile("src/App.cs", "class App {}");
+		var scanner = new FileSystemScanner();
+		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>())
+		{
+			ExcludedRootFolderName = ".git"
+		};
+
+		var roots = scanner.GetRootFolderNames(
+			temp.Path,
+			rules,
+			TestContext.Current.CancellationToken);
+		var nestedExtensions = scanner.GetExtensions(
+			Path.Combine(temp.Path, "src"),
+			rules,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(["src"], roots.Value);
+		Assert.Contains(".txt", nestedExtensions.Value);
+		Assert.Contains(".cs", nestedExtensions.Value);
+	}
+
+	[Fact]
+	public void GetRootFolderNames_WithoutExplicitExclusion_KeepsDotGitAvailable()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateDirectory(".git");
+		temp.CreateDirectory("src");
+		var scanner = new FileSystemScanner();
+		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>());
+
+		var roots = scanner.GetRootFolderNames(
+			temp.Path,
+			rules,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([".git", "src"], roots.Value);
+	}
+
 	// Verifies CanReadRoot returns true for accessible directories.
 	[Fact]
 	public void CanReadRoot_ReturnsTrueForExistingFolder()
@@ -187,7 +231,7 @@ public sealed class FileSystemScannerTests
 		temp.CreateFile("build/keep.txt", "keep");
 		temp.CreateFile("build/drop.log", "drop");
 
-		var matcher = GitIgnoreMatcher.Build(temp.Path, ["build/", "!build/keep.txt"]);
+		var matcher = GitIgnoreMatcher.Build(temp.Path, ["build/*", "!build/keep.txt"]);
 		var rules = new IgnoreRules(false, false, false, false, new HashSet<string>(), new HashSet<string>())
 		{
 			UseGitIgnore = true,
@@ -258,6 +302,49 @@ public sealed class FileSystemScannerTests
 		Assert.Contains(".cs", result.Value);
 		Assert.DoesNotContain(".exe", result.Value);
 		Assert.DoesNotContain(".txt", result.Value);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void GetExtensions_GenericDependencyStoreAndUserState_FollowSmartIgnoreToggle(bool useSmartIgnore)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/App.cs", "class App {}");
+		temp.CreateFile("packages.config", "<packages />");
+		temp.CreateFile("App.sln.DotSettings", "shared settings");
+		temp.CreateFile("App.sln.DotSettings.user", "local settings");
+		temp.CreateFile("packages/Alpha.1.0.0/Alpha.1.0.0.nupkg", "package");
+		temp.CreateFile("packages/Alpha.1.0.0/lib/Alpha.dll", "binary");
+		temp.CreateFile("packages/Beta.2.0.0/Beta.2.0.0.nupkg", "package");
+		temp.CreateFile("packages/Beta.2.0.0/ref/Beta.xml", "<doc />");
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = useSmartIgnore,
+			SmartArtifactIgnoreMatcher = useSmartIgnore
+				? SmartArtifactIgnoreMatcher.Default
+				: SmartArtifactIgnoreMatcher.Empty,
+			SmartArtifactIgnoreCandidateMatcher = SmartArtifactIgnoreMatcher.Default
+		};
+
+		var result = new FileSystemScanner().GetExtensions(
+			temp.Path,
+			rules,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(".cs", result.Value);
+		Assert.Contains(".config", result.Value);
+		Assert.Contains(".DotSettings", result.Value);
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".user"));
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".nupkg"));
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".dll"));
+		Assert.Equal(!useSmartIgnore, result.Value.Contains(".xml"));
 	}
 }
 

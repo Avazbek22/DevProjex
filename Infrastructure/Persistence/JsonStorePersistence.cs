@@ -2,6 +2,15 @@ namespace DevProjex.Infrastructure.Persistence;
 
 internal static class JsonStorePersistence
 {
+    // A future backup is authoritative even when the primary is missing, corrupt or older.
+    // Treating the complete file set as read-only prevents recovery from downgrading both copies.
+    public static bool ContainsFutureDocument(
+        JsonStoreFileSet fileSet,
+        int currentSchemaVersion,
+        int? currentDefaultsRevision = null) =>
+        IsFutureDocument(fileSet.PrimaryPath, currentSchemaVersion, currentDefaultsRevision) ||
+        IsFutureDocument(fileSet.BackupPath, currentSchemaVersion, currentDefaultsRevision);
+
     public static bool TryReadNormalized<TDocument>(
         string path,
         JsonSerializerOptions serializerOptions,
@@ -89,6 +98,41 @@ internal static class JsonStorePersistence
         catch
         {
             // Best effort only. The primary file remains authoritative.
+        }
+    }
+
+    private static bool IsFutureDocument(
+        string path,
+        int currentSchemaVersion,
+        int? currentDefaultsRevision)
+    {
+        if (!File.Exists(path))
+            return false;
+
+        try
+        {
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var document = JsonDocument.Parse(stream);
+            var root = document.RootElement;
+            var schemaVersion = root.TryGetProperty("schemaVersion", out var schemaElement) &&
+                                schemaElement.TryGetInt32(out var schema)
+                ? schema
+                : 0;
+            if (schemaVersion > currentSchemaVersion)
+                return true;
+
+            return currentDefaultsRevision is { } currentRevision &&
+                   root.TryGetProperty("defaultsRevision", out var revisionElement) &&
+                   revisionElement.TryGetInt32(out var revision) &&
+                   revision > currentRevision;
+        }
+        catch
+        {
+            return false;
         }
     }
 }

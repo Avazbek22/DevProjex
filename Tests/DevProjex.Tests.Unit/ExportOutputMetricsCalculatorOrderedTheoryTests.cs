@@ -154,6 +154,8 @@ public sealed class ExportOutputMetricsCalculatorOrderedTheoryTests
 		ContentVariant.FromRaw("line-1\nline-2"),
 		ContentVariant.FromRaw("line-1\r\nline-2\r\n"),
 		ContentVariant.FromRaw("line-1\nline-2\n"),
+		ContentVariant.FromRaw("line-1\rline-2\r"),
+		ContentVariant.FromRaw("line-1\r\nline-2\rline-3\n"),
 		ContentVariant.FromRaw("Привет\nмир"),
 		ContentVariant.Estimated()
 	];
@@ -187,7 +189,7 @@ public sealed class ExportOutputMetricsCalculatorOrderedTheoryTests
 		{
 			var isEmpty = rawText.Length == 0;
 			var isWhitespaceOnly = rawText.Length > 0 && string.IsNullOrWhiteSpace(rawText);
-			var lineCount = rawText.Length == 0 ? 0 : 1 + rawText.Count(ch => ch == '\n');
+			var lineCount = rawText.Length == 0 ? 0 : 1 + CountLineBreaks(rawText);
 			var crLfPairs = CountCrLfPairs(rawText);
 			var trailing = CountTrailingNewlineInfo(rawText);
 			var rendered = isEmpty || isWhitespaceOnly
@@ -234,20 +236,31 @@ public sealed class ExportOutputMetricsCalculatorOrderedTheoryTests
 
 		private static (int Chars, int LineBreaks) CountTrailingNewlineInfo(string text)
 		{
-			var chars = 0;
-			var lineBreaks = 0;
-			for (var i = text.Length - 1; i >= 0; i--)
-			{
-				var current = text[i];
-				if (current is not ('\r' or '\n'))
-					break;
+			var start = text.Length;
+			while (start > 0 && text[start - 1] is '\r' or '\n')
+				start--;
 
-				chars++;
-				if (current == '\n')
-					lineBreaks++;
+			return (text.Length - start, CountLineBreaks(text[start..]));
+		}
+
+		private static int CountLineBreaks(string text)
+		{
+			var count = 0;
+			for (var index = 0; index < text.Length; index++)
+			{
+				if (text[index] == '\r')
+				{
+					count++;
+					if (index + 1 < text.Length && text[index + 1] == '\n')
+						index++;
+				}
+				else if (text[index] == '\n')
+				{
+					count++;
+				}
 			}
 
-			return (chars, lineBreaks);
+			return count;
 		}
 	}
 }

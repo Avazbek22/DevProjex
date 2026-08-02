@@ -1,5 +1,8 @@
 ﻿namespace DevProjex.Tests.Unit.Avalonia;
 
+using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
+using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
+
 public sealed class MainWindowViewModelTests
 {
     private static MainWindowViewModel CreateViewModel(IReadOnlyDictionary<string, string>? strings = null)
@@ -27,13 +30,80 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void Constructor_Defaults_ShowTransparencyAndBlur()
+    public void Constructor_Defaults_ShowBackgroundTransparencyForTransparentEffect()
     {
         var viewModel = CreateViewModel();
 
         Assert.True(viewModel.HasAnyEffect);
-        Assert.True(viewModel.ShowTransparencySliders);
-        Assert.True(viewModel.ShowBlurSlider);
+        Assert.True(viewModel.ShowBackgroundTransparencySlider);
+    }
+
+    [Fact]
+    public void UpdateLocalization_FormatsAboutCopyrightWithCurrentYear()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Help.About.Body"] = "Copyright © 2025–{0} Avazbek Olimov"
+        });
+
+        viewModel.UpdateLocalization();
+
+        Assert.Equal($"Copyright © 2025–{DateTime.Now.Year} Avazbek Olimov", viewModel.HelpAboutBody);
+    }
+
+    [Fact]
+    public void UpdateHelpPopoverMaxSize_LeavesLargePopoversInsideMinimumWindowViewport()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.UpdateHelpPopoverMaxSize(new Size(850, 600));
+
+        Assert.InRange(viewModel.HelpPopoverMaxWidth, 360, 834);
+        Assert.InRange(viewModel.HelpPopoverMaxHeight, 260, 550);
+        Assert.InRange(viewModel.AboutPopoverMaxWidth, 456, 834);
+        Assert.InRange(viewModel.AboutPopoverMaxHeight, 288, 550);
+    }
+
+    [Theory]
+    [InlineData(ExportFormat.Ascii, true, false, false, false)]
+    [InlineData(ExportFormat.Json, false, true, false, false)]
+    [InlineData(ExportFormat.Xml, false, false, true, false)]
+    [InlineData(ExportFormat.Markdown, false, false, false, true)]
+    public void SelectedExportFormat_UpdatesAllFormatFlags(
+        ExportFormat format,
+        bool asciiSelected,
+        bool jsonSelected,
+        bool xmlSelected,
+        bool markdownSelected)
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.SelectedExportFormat = format;
+
+        Assert.Equal(asciiSelected, viewModel.IsAsciiFormatSelected);
+        Assert.Equal(jsonSelected, viewModel.IsJsonFormatSelected);
+        Assert.Equal(xmlSelected, viewModel.IsXmlFormatSelected);
+        Assert.Equal(markdownSelected, viewModel.IsMarkdownFormatSelected);
+    }
+
+    [Fact]
+    public void SelectedExportFormat_RaisesFormatFlagChangesForAllSegments()
+    {
+        var viewModel = CreateViewModel();
+        var raised = new HashSet<string>();
+        viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is not null)
+                raised.Add(e.PropertyName);
+        };
+
+        viewModel.SelectedExportFormat = ExportFormat.Markdown;
+
+        Assert.Contains(nameof(MainWindowViewModel.SelectedExportFormat), raised);
+        Assert.Contains(nameof(MainWindowViewModel.IsAsciiFormatSelected), raised);
+        Assert.Contains(nameof(MainWindowViewModel.IsJsonFormatSelected), raised);
+        Assert.Contains(nameof(MainWindowViewModel.IsXmlFormatSelected), raised);
+        Assert.Contains(nameof(MainWindowViewModel.IsMarkdownFormatSelected), raised);
     }
 
     [Fact]
@@ -142,6 +212,104 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void CanApplySettings_RequiresLoadedIdleProjectAndRaisesForBothDependencies()
+    {
+        var viewModel = CreateViewModel();
+        var raisedCount = 0;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.CanApplySettings))
+                raisedCount++;
+        };
+
+        Assert.False(viewModel.CanApplySettings);
+
+        viewModel.IsProjectLoaded = true;
+        Assert.True(viewModel.CanApplySettings);
+
+        viewModel.StatusBusy = true;
+        Assert.True(viewModel.CanApplySettings);
+
+        viewModel.StatusBusy = false;
+        Assert.True(viewModel.CanApplySettings);
+
+        viewModel.IsProjectLoaded = false;
+        Assert.False(viewModel.CanApplySettings);
+        Assert.Equal(2, raisedCount);
+    }
+
+    [Fact]
+    public void StatusPresentation_CanStayHiddenWhileOperationRemainsLogicallyBusy()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.StatusPresentationReady = false;
+        viewModel.StatusProgressIsIndeterminate = true;
+        viewModel.StatusBusy = true;
+
+        Assert.True(viewModel.StatusBusy);
+        Assert.False(viewModel.StatusOperationVisible);
+        Assert.False(viewModel.StatusProgressVisible);
+        Assert.False(viewModel.StatusProgressIsIndeterminate);
+
+        viewModel.StatusPresentationReady = true;
+
+        Assert.True(viewModel.StatusOperationVisible);
+        Assert.True(viewModel.StatusProgressVisible);
+        Assert.True(viewModel.StatusProgressIsIndeterminate);
+    }
+
+    [Fact]
+    public void ApplySettingsAttention_RequiresPendingChangesAndPausesDuringBusyOperations()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+
+        viewModel.SetPendingFilterSettingsChanges(true);
+        Assert.True(viewModel.HasPendingFilterSettingsChanges);
+        Assert.True(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.StatusBusy = true;
+        Assert.False(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.StatusBusy = false;
+        Assert.True(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.IsProjectCopyExportInProgress = true;
+        Assert.False(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.IsProjectCopyExportInProgress = false;
+        Assert.True(viewModel.IsApplySettingsAttentionActive);
+
+        viewModel.SetPendingFilterSettingsChanges(false);
+        Assert.False(viewModel.IsApplySettingsAttentionActive);
+    }
+
+    [Fact]
+    public void ApplySettingsAttention_RaisesWhenAvailabilityChanges()
+    {
+        var viewModel = CreateViewModel();
+        var attentionPropertyRaised = false;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.IsApplySettingsAttentionActive))
+                attentionPropertyRaised = true;
+        };
+
+        AssertRaisesAttentionChange(() => viewModel.IsProjectLoaded = true);
+        AssertRaisesAttentionChange(() => viewModel.SetPendingFilterSettingsChanges(true));
+        AssertRaisesAttentionChange(() => viewModel.StatusBusy = true);
+        AssertRaisesAttentionChange(() => viewModel.StatusBusy = false);
+        AssertRaisesAttentionChange(() => viewModel.IsProjectCopyExportInProgress = true);
+
+        void AssertRaisesAttentionChange(Action mutation)
+        {
+            attentionPropertyRaised = false;
+            mutation();
+            Assert.True(attentionPropertyRaised);
+        }
+    }
+
+    [Fact]
     public void IsProjectLoaded_CanToggleFalse()
     {
         var viewModel = CreateViewModel();
@@ -150,6 +318,98 @@ public sealed class MainWindowViewModelTests
         viewModel.IsProjectLoaded = false;
 
         Assert.False(viewModel.IsProjectLoaded);
+    }
+
+    [Theory]
+    [InlineData(ProjectSourceType.LocalFolder, true, false)]
+    [InlineData(ProjectSourceType.GitClone, false, true)]
+    [InlineData(ProjectSourceType.ZipDownload, true, false)]
+    public void ProjectRefreshAvailability_FollowsLoadedSource(
+        ProjectSourceType sourceType,
+        bool canRefreshLocalProject,
+        bool canGetGitUpdates)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.ProjectSourceType = sourceType;
+
+        Assert.Equal(canRefreshLocalProject, viewModel.CanRefreshLocalProject);
+        Assert.Equal(canGetGitUpdates, viewModel.CanGetGitUpdates);
+
+        viewModel.IsProjectLoaded = false;
+
+        Assert.False(viewModel.CanRefreshLocalProject);
+        Assert.False(viewModel.CanGetGitUpdates);
+    }
+
+    [Fact]
+    public void ProjectSourceType_RaisesRefreshAvailabilityChanges()
+    {
+        var viewModel = CreateViewModel();
+        var raised = new HashSet<string>();
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is not null)
+                raised.Add(args.PropertyName);
+        };
+
+        viewModel.ProjectSourceType = ProjectSourceType.GitClone;
+
+        Assert.Contains(nameof(MainWindowViewModel.CanRefreshLocalProject), raised);
+        Assert.Contains(nameof(MainWindowViewModel.CanGetGitUpdates), raised);
+    }
+
+    [Theory]
+    [InlineData(ProjectSourceType.LocalFolder)]
+    [InlineData(ProjectSourceType.GitClone)]
+    public void ProjectCopyExport_DisablesEveryTreeChangingSurface(ProjectSourceType sourceType)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.ProjectSourceType = sourceType;
+
+        viewModel.IsProjectCopyExportInProgress = true;
+
+        Assert.False(viewModel.CanChangeProjectTree);
+        Assert.False(viewModel.CanExportProjectCopy);
+        Assert.False(viewModel.CanUseProjectWorkspaceActions);
+        Assert.False(viewModel.CanTogglePreview);
+        Assert.True(viewModel.IsSearchAvailable);
+        Assert.False(viewModel.IsSearchFilterAvailable);
+        Assert.False(viewModel.AreFilterSettingsEnabled);
+        Assert.False(viewModel.CanApplySettings);
+        Assert.False(viewModel.CanRefreshLocalProject);
+        Assert.False(viewModel.CanGetGitUpdates);
+
+        viewModel.IsProjectCopyExportInProgress = false;
+
+        Assert.True(viewModel.CanChangeProjectTree);
+        Assert.True(viewModel.CanExportProjectCopy);
+        Assert.True(viewModel.CanUseProjectWorkspaceActions);
+        Assert.True(viewModel.CanTogglePreview);
+        Assert.True(viewModel.IsSearchAvailable);
+        Assert.True(viewModel.IsSearchFilterAvailable);
+        Assert.True(viewModel.AreFilterSettingsEnabled);
+    }
+
+    [Fact]
+    public void ProjectCopyExport_AllowsClosingExistingPreviewButBlocksReopeningIt()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+
+        viewModel.IsProjectCopyExportInProgress = true;
+
+        Assert.True(viewModel.CanTogglePreview);
+
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.Off;
+
+        Assert.False(viewModel.CanTogglePreview);
+
+        viewModel.IsProjectCopyExportInProgress = false;
+
+        Assert.True(viewModel.CanTogglePreview);
     }
 
     [Fact]
@@ -397,6 +657,39 @@ public sealed class MainWindowViewModelTests
 
         Assert.False(viewModel.IsDarkTheme);
         Assert.True(viewModel.IsLightTheme);
+    }
+
+    [Theory]
+    [InlineData(ThemeSelectionMode.System, true, false, false)]
+    [InlineData(ThemeSelectionMode.Light, false, true, false)]
+    [InlineData(ThemeSelectionMode.Dark, false, false, true)]
+    public void SelectedThemeMode_ExposesExactlyOneSelectedMode(
+        ThemeSelectionMode mode,
+        bool systemSelected,
+        bool lightSelected,
+        bool darkSelected)
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.SelectedThemeMode = mode;
+
+        Assert.Equal(systemSelected, viewModel.IsSystemThemeSelected);
+        Assert.Equal(lightSelected, viewModel.IsLightThemeSelected);
+        Assert.Equal(darkSelected, viewModel.IsDarkThemeSelected);
+    }
+
+    [Fact]
+    public void SelectedThemeMode_ReassertsDerivedSelectionWhenCurrentModeIsChosenAgain()
+    {
+        var viewModel = CreateViewModel();
+        var notifications = new List<string?>();
+        viewModel.PropertyChanged += (_, args) => notifications.Add(args.PropertyName);
+
+        viewModel.SelectedThemeMode = ThemeSelectionMode.System;
+
+        Assert.Contains(nameof(MainWindowViewModel.IsSystemThemeSelected), notifications);
+        Assert.Contains(nameof(MainWindowViewModel.IsLightThemeSelected), notifications);
+        Assert.Contains(nameof(MainWindowViewModel.IsDarkThemeSelected), notifications);
     }
 
     [Fact]
@@ -897,6 +1190,152 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void SetMicaAvailability_WhenUnavailable_FallsBackToAvailableBlurAndBlocksRetoggle()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsMicaEnabled = true;
+
+        viewModel.SetMicaAvailability(false);
+        viewModel.ToggleMica();
+
+        Assert.False(viewModel.IsMicaAvailable);
+        Assert.False(viewModel.IsMicaEnabled);
+        Assert.True(viewModel.IsAcrylicEnabled);
+        Assert.False(viewModel.IsTransparentEnabled);
+        Assert.Equal(ThemeEffectMode.Acrylic, viewModel.ActiveThemeEffect);
+    }
+
+    [Fact]
+    public void SetEffectAvailability_WhenMicaAndBlurAreUnavailable_DisablesEffectsAndBlocksRetoggle()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsMicaEnabled = true;
+
+        viewModel.SetAcrylicAvailability(false);
+        viewModel.SetMicaAvailability(false);
+        viewModel.ToggleMica();
+        viewModel.ToggleAcrylic();
+
+        Assert.False(viewModel.IsMicaAvailable);
+        Assert.False(viewModel.IsAcrylicAvailable);
+        Assert.False(viewModel.HasAnyEffect);
+        Assert.Equal(ThemeEffectMode.Solid, viewModel.ActiveThemeEffect);
+    }
+
+    [Fact]
+    public void SetAcrylicAvailability_WhenUnavailable_FallsBackToAvailableMicaAndBlocksRetoggle()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsAcrylicEnabled = true;
+
+        viewModel.SetAcrylicAvailability(false);
+        viewModel.ToggleAcrylic();
+
+        Assert.False(viewModel.IsAcrylicAvailable);
+        Assert.False(viewModel.IsAcrylicEnabled);
+        Assert.True(viewModel.IsMicaEnabled);
+        Assert.False(viewModel.IsTransparentEnabled);
+        Assert.Equal(ThemeEffectMode.Mica, viewModel.ActiveThemeEffect);
+    }
+
+    [Fact]
+    public void SetThemeEffects_PublishesOnlyTheFinalConvergedState()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.SetThemeEffects(transparent: true, mica: false, acrylic: false);
+        var observedStates = new List<(bool Transparent, bool Mica, bool Acrylic)>();
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(MainWindowViewModel.IsTransparentEnabled)
+                or nameof(MainWindowViewModel.IsMicaEnabled)
+                or nameof(MainWindowViewModel.IsAcrylicEnabled))
+            {
+                observedStates.Add((
+                    viewModel.IsTransparentEnabled,
+                    viewModel.IsMicaEnabled,
+                    viewModel.IsAcrylicEnabled));
+            }
+        };
+
+        viewModel.SetThemeEffects(transparent: false, mica: true, acrylic: false);
+
+        Assert.NotEmpty(observedStates);
+        Assert.All(observedStates, state => Assert.Equal((false, true, false), state));
+    }
+
+    [Fact]
+    public void SetThemeEffects_MultipleActiveEffects_ThrowsWithoutChangingState()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.SetThemeEffects(transparent: false, mica: false, acrylic: true);
+
+        Assert.Throws<ArgumentException>(() =>
+            viewModel.SetThemeEffects(transparent: true, mica: true, acrylic: false));
+        Assert.False(viewModel.IsTransparentEnabled);
+        Assert.False(viewModel.IsMicaEnabled);
+        Assert.True(viewModel.IsAcrylicEnabled);
+    }
+
+    [Theory]
+    [InlineData(false, false, false, ThemeEffectMode.Solid)]
+    [InlineData(true, false, false, ThemeEffectMode.Transparent)]
+    [InlineData(false, true, false, ThemeEffectMode.Mica)]
+    [InlineData(false, false, true, ThemeEffectMode.Acrylic)]
+    public void SetThemeEffects_ExposesUnambiguousActiveEffect(
+        bool transparent,
+        bool mica,
+        bool acrylic,
+        ThemeEffectMode expected)
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.SetThemeEffects(transparent, mica, acrylic);
+
+        Assert.Equal(expected, viewModel.ActiveThemeEffect);
+    }
+
+    [Theory]
+    [InlineData(false, ThemeEffectMode.Solid, 0.06)]
+    [InlineData(false, ThemeEffectMode.Mica, 0.06)]
+    [InlineData(false, ThemeEffectMode.Transparent, 0.15)]
+    [InlineData(false, ThemeEffectMode.Acrylic, 0.15)]
+    [InlineData(true, ThemeEffectMode.Solid, 0.15)]
+    [InlineData(true, ThemeEffectMode.Mica, 0.15)]
+    [InlineData(true, ThemeEffectMode.Transparent, 0.15)]
+    [InlineData(true, ThemeEffectMode.Acrylic, 0.15)]
+    public void DropZoneShadeOpacity_AdaptsToThemeSurface(
+        bool isDark,
+        ThemeEffectMode effect,
+        double expectedOpacity)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsDarkTheme = isDark;
+        viewModel.SetThemeEffects(
+            transparent: effect == ThemeEffectMode.Transparent,
+            mica: effect == ThemeEffectMode.Mica,
+            acrylic: effect == ThemeEffectMode.Acrylic);
+
+        Assert.Equal(expectedOpacity, viewModel.DropZoneShadeOpacity);
+    }
+
+    [Fact]
+    public void DropZoneShadeOpacity_NotifiesWhenThemeOrEffectChanges()
+    {
+        var viewModel = CreateViewModel();
+        var notifications = 0;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.DropZoneShadeOpacity))
+                notifications++;
+        };
+
+        viewModel.IsDarkTheme = false;
+        viewModel.SetThemeEffects(transparent: false, mica: true, acrylic: false);
+
+        Assert.Equal(2, notifications);
+    }
+
+    [Fact]
     public void HasAnyEffect_TrueWhenAnyEffectEnabled()
     {
         var viewModel = CreateViewModel();
@@ -908,51 +1347,21 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void ShowTransparencySliders_TrueWhenAnyEffectEnabled()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.IsTransparentEnabled = false;
-
-        viewModel.IsAcrylicEnabled = true;
-
-        Assert.True(viewModel.ShowTransparencySliders);
-    }
-
-    [Fact]
-    public void ShowTransparencySliders_FalseWhenNoEffects()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.IsTransparentEnabled = false;
-
-        viewModel.IsAcrylicEnabled = false;
-        viewModel.IsMicaEnabled = false;
-
-        Assert.False(viewModel.ShowTransparencySliders);
-    }
-
-    [Fact]
-    public void ShowBlurSlider_TrueOnlyWhenTransparentEnabled()
+    public void ShowBackgroundTransparencySlider_TrueForTransparentAndBlur()
     {
         var viewModel = CreateViewModel();
         viewModel.IsTransparentEnabled = false;
         viewModel.IsMicaEnabled = true;
 
-        Assert.False(viewModel.ShowBlurSlider);
+        Assert.False(viewModel.ShowBackgroundTransparencySlider);
 
         viewModel.IsTransparentEnabled = true;
 
-        Assert.True(viewModel.ShowBlurSlider);
-    }
-
-    [Fact]
-    public void ShowBlurSlider_FalseWhenAcrylicEnabled()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.IsTransparentEnabled = false;
+        Assert.True(viewModel.ShowBackgroundTransparencySlider);
 
         viewModel.IsAcrylicEnabled = true;
 
-        Assert.False(viewModel.ShowBlurSlider);
+        Assert.True(viewModel.ShowBackgroundTransparencySlider);
     }
 
     [Fact]
@@ -977,43 +1386,23 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void MaterialIntensity_ChangesBeyondThreshold()
+    public void BackgroundTransparency_ChangesBeyondThreshold()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.MaterialIntensity = 80;
+        viewModel.BackgroundTransparency = 80;
 
-        Assert.Equal(80, viewModel.MaterialIntensity);
+        Assert.Equal(80, viewModel.BackgroundTransparency);
     }
 
     [Fact]
-    public void MaterialIntensity_AllowsNegativeValues()
+    public void BackgroundTransparency_AllowsNegativeValues()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.MaterialIntensity = -5;
+        viewModel.BackgroundTransparency = -5;
 
-        Assert.Equal(-5, viewModel.MaterialIntensity);
-    }
-
-    [Fact]
-    public void BlurRadius_ChangesBeyondThreshold()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.BlurRadius = 40;
-
-        Assert.Equal(40, viewModel.BlurRadius);
-    }
-
-    [Fact]
-    public void BlurRadius_AllowsNegativeValues()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.BlurRadius = -10;
-
-        Assert.Equal(-10, viewModel.BlurRadius);
+        Assert.Equal(-5, viewModel.BackgroundTransparency);
     }
 
     [Fact]
@@ -1037,43 +1426,43 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void BorderStrength_ChangesBeyondThreshold()
+    public void BorderVisibility_ChangesBeyondThreshold()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.BorderStrength = 70;
+        viewModel.BorderVisibility = 70;
 
-        Assert.Equal(70, viewModel.BorderStrength);
+        Assert.Equal(70, viewModel.BorderVisibility);
     }
 
     [Fact]
-    public void BorderStrength_AllowsNegativeValues()
+    public void BorderVisibility_AllowsNegativeValues()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.BorderStrength = -2;
+        viewModel.BorderVisibility = -2;
 
-        Assert.Equal(-2, viewModel.BorderStrength);
+        Assert.Equal(-2, viewModel.BorderVisibility);
     }
 
     [Fact]
-    public void MenuChildIntensity_ChangesBeyondThreshold()
+    public void MenuTransparency_ChangesBeyondThreshold()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.MenuChildIntensity = 70;
+        viewModel.MenuTransparency = 70;
 
-        Assert.Equal(70, viewModel.MenuChildIntensity);
+        Assert.Equal(70, viewModel.MenuTransparency);
     }
 
     [Fact]
-    public void MenuChildIntensity_AllowsNegativeValues()
+    public void MenuTransparency_AllowsNegativeValues()
     {
         var viewModel = CreateViewModel();
 
-        viewModel.MenuChildIntensity = -3;
+        viewModel.MenuTransparency = -3;
 
-        Assert.Equal(-3, viewModel.MenuChildIntensity);
+        Assert.Equal(-3, viewModel.MenuTransparency);
     }
 
     [Theory]
@@ -1215,17 +1604,17 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void EffectToggle_SwitchesShowBlurSlider()
+    public void EffectToggle_SwitchesBackgroundTransparencySlider()
     {
         var viewModel = CreateViewModel();
 
         viewModel.ToggleMica();
 
-        Assert.False(viewModel.ShowBlurSlider);
+        Assert.False(viewModel.ShowBackgroundTransparencySlider);
 
         viewModel.ToggleTransparent();
 
-        Assert.True(viewModel.ShowBlurSlider);
+        Assert.True(viewModel.ShowBackgroundTransparencySlider);
     }
 
     [Fact]

@@ -1,0 +1,214 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:DevProjex.Avalonia.ViewModels"
+             x:Class="DevProjex.Avalonia.Views.SettingsPanelView"
+             Name="SettingsPanelViewRoot"
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
+  <UserControl.Styles>
+    <Style Selector="CheckBox.settings-list-entry">
+      <Setter Property="Margin" Value="0,1,0,-2" />
+    </Style>
+    <Style Selector="Window.compact-mode CheckBox.settings-list-entry">
+      <Setter Property="Margin" Value="0,0,0,-5" />
+    </Style>
+    <Style Selector="ListBox.settings-list">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Border.checklist-border">
+      <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="ListBox.settings-list /template/ ScrollViewer">
+      <Setter Property="Padding" Value="5" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.settings-list /template/ ScrollViewer /template/ ScrollBar#PART_VerticalScrollBar">
+      <Setter Property="Grid.RowSpan" Value="2" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ListBox.settings-list /template/ ScrollViewer /template/ Panel#PART_ScrollBarsSeparator">
+      <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="ListBox.settings-list > ListBoxItem">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Focusable" Value="False" />
+    </Style>
+    <Style Selector="ListBox.settings-list > ListBoxItem:selected">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.settings-list > ListBoxItem:pointerover">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ListBox.settings-list > ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter,
+                     ListBox.settings-list > ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter,
+                     ListBox.settings-list > ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+    </Style>
+    <Style Selector="Button#ApplySettingsButton:disabled">
+      <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+      <Setter Property="Opacity" Value="0.65" />
+      <Setter Property="RenderTransform" Value="scale(1)" />
+    </Style>
+    <Style Selector="Button#ApplySettingsButton:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+    </Style>
+    <Style Selector="Button#ApplySettingsButton:disabled TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+    </Style>
+    <!-- The class is removed when staged selections match the applied tree,
+         preventing an idle infinite animation from keeping the renderer active. -->
+    <Style Selector="Button#ApplySettingsButton.apply-attention">
+      <Style.Animations>
+        <Animation Duration="0:0:1.8"
+                   IterationCount="INFINITE"
+                   PlaybackBehavior="OnlyIfVisible"
+                   Easing="SineEaseInOut">
+          <KeyFrame Cue="0%">
+            <Setter Property="Opacity" Value="1" />
+          </KeyFrame>
+          <KeyFrame Cue="50%">
+            <Setter Property="Opacity" Value="0.48" />
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="Opacity" Value="1" />
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+  </UserControl.Styles>
+  <Border Name="PanelRoot"
+          MinWidth="285"
+          HorizontalAlignment="Stretch"
+          Classes="panel"
+          Background="Transparent"
+          BorderThickness="0"
+          IsEnabled="{Binding AreFilterSettingsEnabled}">
+    <Grid RowDefinitions="Auto,*,*,*">
+      <!-- Apply stays at the top because filter options remain intentionally staged. -->
+      <Button Name="ApplySettingsButton"
+              Grid.Row="0"
+              Content="{Binding SettingsApply}"
+              IsEnabled="{Binding CanApplySettings}"
+              Click="OnApplySettings"
+              Margin="0,5,0,1"
+              HorizontalAlignment="Left"
+              HorizontalContentAlignment="Center"
+              Classes="primary-action"
+              Classes.apply-attention="{Binding IsApplySettingsAttentionActive}"
+              CornerRadius="3"/>
+
+      <!-- Ignore section - equal star height -->
+      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,2,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+        <Grid Name="IgnoreHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
+          <TextBlock Name="IgnoreHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsIgnoreTitle}" Margin="0" FontSize="15"/>
+          <CheckBox Name="IgnoreAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllIgnore}"
+                    IsChecked="{Binding AllIgnoreChecked, Mode=TwoWay}"
+                    IsCheckedChanged="OnIgnoreAllChanged" />
+        </Grid>
+        <Border Grid.Row="1" Classes="checklist-border">
+          <ListBox Name="IgnoreOptionsList"
+                   Classes="settings-list"
+                   ItemsSource="{Binding IgnoreOptions}"
+                   SelectionMode="Multiple"
+                   ScrollViewer.IsScrollInertiaEnabled="True"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <VirtualizingStackPanel />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:IgnoreOptionViewModel">
+                <Border Classes="ignore-option-item">
+                  <Grid RowDefinitions="Auto,Auto">
+                    <CheckBox Grid.Row="0"
+                              Classes="list-item settings-list-entry"
+                              Content="{Binding Label}"
+                              IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+                    <Border Grid.Row="1"
+                            Classes="ignore-option-separator"
+                            IsVisible="{Binding IsControllerGroupEnd}" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Border>
+      </Grid>
+
+      <!-- Extensions section - equal star height -->
+      <Grid Grid.Row="2" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+        <Grid Name="ExtensionsHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
+          <TextBlock Name="ExtensionsHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsExtensions}" Margin="0" FontSize="15"/>
+          <CheckBox Name="ExtensionsAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllExtensions}"
+                    IsChecked="{Binding AllExtensionsChecked, Mode=TwoWay}"
+                    IsCheckedChanged="OnExtensionsAllChanged" />
+        </Grid>
+        <Border Grid.Row="1" Classes="checklist-border">
+          <ListBox Name="ExtensionsList"
+                   Classes="settings-list"
+                   ItemsSource="{Binding Extensions}"
+                   SelectionMode="Multiple"
+                   ScrollViewer.IsScrollInertiaEnabled="True"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <VirtualizingStackPanel />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:SelectionOptionViewModel">
+                <CheckBox Classes="list-item settings-list-entry" Content="{Binding Name}"
+                          IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Border>
+      </Grid>
+
+      <!-- RootFolders section - equal star height -->
+      <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+        <Grid Name="RootFoldersHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
+          <TextBlock Name="RootFoldersHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsRootFolders}" Margin="0" FontSize="15"/>
+          <CheckBox Name="RootFoldersAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"
+                    IsChecked="{Binding AllRootFoldersChecked, Mode=TwoWay}"
+                    IsEnabled="{Binding HasRootFolderOptions}"
+                    IsCheckedChanged="OnRootAllChanged" />
+        </Grid>
+        <Border Grid.Row="1" Classes="checklist-border">
+          <ListBox Name="RootFoldersList"
+                   Classes="settings-list"
+                   ItemsSource="{Binding RootFolders}"
+                   SelectionMode="Multiple"
+                   ScrollViewer.IsScrollInertiaEnabled="True"
+                   ScrollViewer.VerticalScrollBarVisibility="Auto"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <VirtualizingStackPanel />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:SelectionOptionViewModel">
+                <CheckBox Classes="list-item settings-list-entry" Content="{Binding Name}"
+                          IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Border>
+      </Grid>
+    </Grid>
+  </Border>
+</UserControl>

@@ -4,6 +4,7 @@ using CompositionBackdropCornerRadiusCoordinator = DevProjex.Avalonia.Services.C
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Collection("AvaloniaUI")]
 public sealed class GitCloneWindowBackdropTests
 {
     [AvaloniaFact]
@@ -45,7 +46,8 @@ public sealed class GitCloneWindowBackdropTests
         }
         finally
         {
-            window.Close();
+            if (window.IsVisible)
+                window.Close();
         }
     }
 

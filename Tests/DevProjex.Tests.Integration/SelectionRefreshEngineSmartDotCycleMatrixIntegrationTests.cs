@@ -86,7 +86,7 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
     }
 
     [Fact]
-    public void ComputeFullRefreshSnapshot_SingleGitIgnoreProject_UsesGitIgnoreAsSmartControllerAndKeepsDotFoldersIndependent()
+    public void ComputeFullRefreshSnapshot_SingleGitIgnoreProject_KeepsGitSmartAndDotFoldersIndependent()
     {
         using var temp = new TemporaryDirectory();
         temp.CreateFile(".gitignore", "logs/\n");
@@ -103,7 +103,7 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
             CreateDefaultContext(temp.Path));
 
         AssertIgnoreOption(initial, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: true);
-        AssertIgnoreOption(initial, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+        AssertIgnoreOption(initial, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
         AssertIgnoreOption(initial, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
         AssertRootOptionVisible(initial, ".idea", expectedVisible: false, "single-gitignore-python");
         AssertRootOptionVisible(initial, "logs", expectedVisible: false, "single-gitignore-python");
@@ -113,7 +113,7 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
             temp.Path,
             CreateGitAndDotToggleContext(temp.Path, initial, gitIgnoreChecked: false, dotChecked: true));
         AssertIgnoreOption(gitOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
-        AssertIgnoreOption(gitOff, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+        AssertIgnoreOption(gitOff, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
         AssertIgnoreOption(gitOff, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
         AssertRootOptionVisible(gitOff, ".idea", expectedVisible: false, "single-gitignore-python");
         AssertRootOptionVisible(gitOff, "logs", expectedVisible: true, "single-gitignore-python");
@@ -132,9 +132,60 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
             temp.Path,
             CreateGitAndDotToggleContext(temp.Path, dotOff, gitIgnoreChecked: true, dotChecked: true));
         AssertIgnoreOption(restored, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: true);
-        AssertIgnoreOption(restored, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+        AssertIgnoreOption(restored, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
         AssertIgnoreOption(restored, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
         AssertEquivalentVisibleSnapshots(initial, restored);
+    }
+
+    [Fact]
+    public void ComputeFullRefreshSnapshot_GitFullyCoversSmartCandidate_SmartAppearsOnlyAfterGitIsDisabled()
+    {
+        using var temp = new TemporaryDirectory();
+        temp.CreateFile(".gitignore", "__pycache__/\n");
+        temp.CreateFile("requirements.txt", "pytest\n");
+        temp.CreateFile("src/app.py", "print('ok')\n");
+        temp.CreateFile("__pycache__/app.pyc", "binary");
+
+        var services = CreateServices();
+        var initial = ComputeConvergedSnapshot(
+            services,
+            temp.Path,
+            CreateDefaultContext(temp.Path));
+
+        AssertIgnoreOption(initial, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: true);
+        AssertIgnoreOption(initial, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+        AssertRootOptionVisible(initial, "__pycache__", expectedVisible: false, "git-covers-smart");
+
+        var gitOff = ComputeConvergedSnapshot(
+            services,
+            temp.Path,
+            CreateManualIgnoreContext(
+                temp.Path,
+                initial,
+                new Dictionary<IgnoreOptionId, bool>
+                {
+                    [IgnoreOptionId.UseGitIgnore] = false
+                }));
+
+        AssertIgnoreOption(gitOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+        AssertIgnoreOption(gitOff, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+        AssertRootOptionVisible(gitOff, "__pycache__", expectedVisible: false, "git-covers-smart");
+
+        var allControllersOff = ComputeConvergedSnapshot(
+            services,
+            temp.Path,
+            CreateManualIgnoreContext(
+                temp.Path,
+                gitOff,
+                new Dictionary<IgnoreOptionId, bool>
+                {
+                    [IgnoreOptionId.UseGitIgnore] = false,
+                    [IgnoreOptionId.SmartIgnore] = false
+                }));
+
+        AssertIgnoreOption(allControllersOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+        AssertIgnoreOption(allControllersOff, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+        AssertRootOptionVisible(allControllersOff, "__pycache__", expectedVisible: true, "git-covers-smart");
     }
 
     [Fact]
@@ -389,7 +440,7 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
             CreateNestedStackProfileContextWithStaleHiddenStates(temp.Path, "requirements.txt"));
 
         AssertIgnoreOption(initial, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: true);
-        AssertIgnoreOption(initial, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+        AssertIgnoreOption(initial, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
         AssertIgnoreOption(initial, IgnoreOptionId.DotFolders, expectedVisible: false, expectedChecked: null);
         AssertNestedTreeState(
             temp.Path,
@@ -413,7 +464,7 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
                     [IgnoreOptionId.DotFolders] = false
                 }));
         AssertIgnoreOption(gitOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
-        AssertIgnoreOption(gitOff, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+        AssertIgnoreOption(gitOff, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
         AssertIgnoreOption(gitOff, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: false);
         AssertNestedTreeState(
             temp.Path,
@@ -421,10 +472,9 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
             visiblePaths:
             [
                 "project/.idea/workspace.xml",
-                "project/src/app.py",
-                "project/__pycache__/app.pyc"
+                "project/src/app.py"
             ],
-            hiddenPaths: []);
+            hiddenPaths: ["project/__pycache__/app.pyc"]);
     }
 
     [Fact]
@@ -572,11 +622,11 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
         yield return ["frontend", "package.json", "node_modules", "index.js"];
         yield return ["dotnet", "App.csproj", "bin", "app.dll"];
         yield return ["python", "requirements.txt", "__pycache__", "app.pyc"];
-        yield return ["jvm", "settings.gradle", "build", "classes.bin"];
-        yield return ["rust", "Cargo.toml", "target", "app.bin"];
-        yield return ["go", "go.work", "vendor", "module.go"];
+        yield return ["jvm", "settings.gradle", "build", "classes/App.class"];
+        yield return ["rust", "Cargo.toml", "target", "debug/app.bin"];
+        yield return ["go", "go.work", "vendor", "modules.txt"];
         yield return ["php", "composer.json", "vendor", "autoload.php"];
-        yield return ["ruby", "Gemfile.lock", "tmp", "cache.txt"];
+        yield return ["ruby", "Gemfile.lock", "tmp", "cache/payload.txt"];
     }
 
     private static TemporaryDirectory CreateStackWorkspace(

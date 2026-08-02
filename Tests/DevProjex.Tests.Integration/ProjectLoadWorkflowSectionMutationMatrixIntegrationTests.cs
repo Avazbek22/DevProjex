@@ -17,12 +17,20 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
         var baselineSnapshot = services.Engine.ComputeFullRefreshSnapshot(
             CreateDefaultsContext(rootPath),
             CancellationToken.None);
+        SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+            rootPath,
+            services.IgnoreRulesService,
+            baselineSnapshot);
         var baselineMetrics = await ComputeMetricsFromSnapshotAsync(rootPath, baselineSnapshot);
 
         var mutatedSnapshot = services.Engine.ComputeFullRefreshSnapshot(
             mutationCase.CreateContext(rootPath, baselineSnapshot),
             CancellationToken.None);
 
+        SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+            rootPath,
+            services.IgnoreRulesService,
+            mutatedSnapshot);
         mutationCase.AssertSnapshot(mutatedSnapshot);
         AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(mutatedSnapshot);
 
@@ -30,6 +38,10 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
             BuildConvergedContext(rootPath, mutatedSnapshot),
             CancellationToken.None);
 
+        SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+            rootPath,
+            services.IgnoreRulesService,
+            convergedSnapshot);
         // A real refresh bug often looks "fine" on the first snapshot and only leaks out
         // after the coordinator feeds the updated caches back into the next pass.
         AssertEquivalentSnapshots(mutatedSnapshot, convergedSnapshot);
@@ -197,7 +209,8 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
             IgnoreSelectionCache: new HashSet<IgnoreOptionId>(),
             IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>(),
             IgnoreAllPreference: null,
-            CurrentSnapshotState: EmptySnapshotState);
+            CurrentSnapshotState: EmptySnapshotState,
+            CaptureTreeInventory: true);
 
     private static SelectionRefreshContext CreateEditableContext(
         string rootPath,
@@ -224,7 +237,8 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
                 snapshot.IgnoreOptionCounts,
                 snapshot.ControllerImpactCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
-                snapshot.ExtensionlessEntriesCount),
+                snapshot.ExtensionlessEntriesCount,
+                snapshot.GitEvidence),
             RootOptionStateCache: snapshot.RootOptions?.ToDictionary(
                 option => option.Name,
                 option => option.IsChecked,
@@ -233,7 +247,8 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
                 option => option.Name,
                 option => option.IsChecked,
                 StringComparer.OrdinalIgnoreCase),
-            IgnoreOptionStateCacheIsComplete: true);
+            IgnoreOptionStateCacheIsComplete: true,
+            CaptureTreeInventory: true);
     }
 
     private static SelectionRefreshContext BuildConvergedContext(
@@ -401,7 +416,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
                 ShowAdvancedCounts = true
             });
 
-        return new WorkflowServices(engine);
+        return new WorkflowServices(engine, ignoreRulesService);
     }
 
     private static readonly IgnoreSectionSnapshotState EmptySnapshotState =
@@ -413,5 +428,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
         Action<SelectionRefreshSnapshot> AssertSnapshot,
         bool RequiresAppliedMetricsChange = true);
 
-    private sealed record WorkflowServices(SelectionRefreshEngine Engine);
+    private sealed record WorkflowServices(
+        SelectionRefreshEngine Engine,
+        IgnoreRulesService IgnoreRulesService);
 }

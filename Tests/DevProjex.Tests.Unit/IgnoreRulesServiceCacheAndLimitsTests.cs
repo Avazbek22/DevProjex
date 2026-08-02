@@ -50,7 +50,7 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 
 		var gitOnly = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-git"]);
 		Assert.True(gitOnly.IncludeGitIgnore);
-		Assert.False(gitOnly.IncludeSmartIgnore);
+		Assert.True(gitOnly.IncludeSmartIgnore);
 	}
 
 	[Fact]
@@ -72,12 +72,14 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 
 		Assert.False(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
-		Assert.False(rules.UseGitIgnore);
+		// Availability controls whether a dynamic checkbox is shown; it never rewrites
+		// an already selected Git mode into None.
+		Assert.True(rules.UseGitIgnore);
 		Assert.True(rules.UseSmartIgnore);
 	}
 
 	[Fact]
-	public void GetIgnoreOptionsAvailability_UsesScopeCacheWithinTtl_ThenRefreshes()
+	public void GetIgnoreOptionsAvailability_UsesScopeCacheWithinTtl_ThenExplicitInvalidationRefreshes()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("proj-no-git/package.json", "{}");
@@ -89,15 +91,39 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 
 		temp.CreateFile("proj-no-git/.gitignore", "bin/");
 
-		// Must still read from scope cache before TTL expires.
+		// Interactive toggles keep the hot scope cache until an external refresh boundary invalidates it.
 		var withinTtl = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-no-git"]);
 		Assert.False(withinTtl.IncludeGitIgnore);
 
-		ExpireScopeCacheEntry(service, temp.Path, ["proj-no-git"]);
+		service.InvalidateCaches(temp.Path);
 
-		var afterTtl = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-no-git"]);
+		var afterInvalidation = service.GetIgnoreOptionsAvailability(temp.Path, ["proj-no-git"]);
 
-		Assert.True(afterTtl.IncludeGitIgnore);
+		Assert.True(afterInvalidation.IncludeGitIgnore);
+	}
+
+	[Fact]
+	public void Build_GitIgnoreRewriteWithSameLengthAndTimestamp_InvalidatesMatcher()
+	{
+		using var temp = new TemporaryDirectory();
+		var gitIgnorePath = temp.CreateFile(".gitignore", "old/\n");
+		temp.CreateFile("old/file.txt", "old");
+		temp.CreateFile("new/file.txt", "new");
+		var service = CreateServiceWithSmartIgnore([]);
+		var originalTimestamp = File.GetLastWriteTimeUtc(gitIgnorePath);
+
+		var before = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], ["old", "new"]);
+		Assert.True(before.IsGitIgnored(Path.Combine(temp.Path, "old"), isDirectory: true, "old"));
+		Assert.False(before.IsGitIgnored(Path.Combine(temp.Path, "new"), isDirectory: true, "new"));
+
+		File.WriteAllText(gitIgnorePath, "new/\n");
+		File.SetLastWriteTimeUtc(gitIgnorePath, originalTimestamp);
+		Assert.Equal(5, new FileInfo(gitIgnorePath).Length);
+
+		var after = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], ["old", "new"]);
+
+		Assert.False(after.IsGitIgnored(Path.Combine(temp.Path, "old"), isDirectory: true, "old"));
+		Assert.True(after.IsGitIgnored(Path.Combine(temp.Path, "new"), isDirectory: true, "new"));
 	}
 
 	[Fact]
@@ -192,6 +218,138 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 	}
 
 	[Fact]
+	public void Build_RepeatedInteractiveStatesReuseScopeWork_ExternalInvalidationRecomputesOnce()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("workspace/package.json", "{}");
+		temp.CreateFile("workspace/node_modules/lib/index.js", "x");
+		var rule = new CountingSmartIgnoreRule(["node_modules"]);
+		var service = new IgnoreRulesService(new SmartIgnoreService([rule]));
+
+		for (var iteration = 0; iteration < 64; iteration++)
+		{
+			var selectedOptions = iteration % 2 == 0
+				? new[] { IgnoreOptionId.SmartIgnore }
+				: Array.Empty<IgnoreOptionId>();
+			_ = service.GetIgnoreOptionsAvailability(temp.Path, ["workspace"]);
+			_ = service.Build(temp.Path, selectedOptions, ["workspace"]);
+		}
+
+		Assert.Equal(1, rule.EvaluateCallCount);
+
+		service.InvalidateCaches(temp.Path);
+		_ = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["workspace"]);
+
+		Assert.Equal(2, rule.EvaluateCallCount);
+	}
+
+	[Fact]
+	public void RevalidateCaches_RepeatedUnchangedRefreshesReuseScopeAndSmartIgnoreWork()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("workspace/package.json", "{}");
+		temp.CreateFile("workspace/node_modules/lib/index.js", "x");
+		var rule = new CountingSmartIgnoreRule(["node_modules"]);
+		var service = new IgnoreRulesService(new SmartIgnoreService([rule]));
+
+		_ = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["workspace"]);
+		for (var refresh = 0; refresh < 32; refresh++)
+		{
+			Assert.True(service.RevalidateCaches(temp.Path, TestContext.Current.CancellationToken));
+			_ = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["workspace"]);
+		}
+
+		Assert.Equal(1, rule.EvaluateCallCount);
+	}
+
+	[Fact]
+	public void RevalidateCaches_SameMetadataGitIgnoreRewriteInvalidatesRuleCache()
+	{
+		using var temp = new TemporaryDirectory();
+		var gitIgnorePath = temp.CreateFile(".gitignore", "old/\n");
+		temp.CreateFile("old/file.txt", "old");
+		temp.CreateFile("new/file.txt", "new");
+		var service = CreateServiceWithSmartIgnore([]);
+		var originalTimestamp = File.GetLastWriteTimeUtc(gitIgnorePath);
+		var before = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], ["old", "new"]);
+
+		File.WriteAllText(gitIgnorePath, "new/\n");
+		File.SetLastWriteTimeUtc(gitIgnorePath, originalTimestamp);
+		var canReuseRuleCaches = service.RevalidateCaches(temp.Path, TestContext.Current.CancellationToken);
+		var after = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], ["old", "new"]);
+
+		Assert.False(canReuseRuleCaches);
+		Assert.True(before.IsGitIgnored(Path.Combine(temp.Path, "old"), true, "old"));
+		Assert.False(before.IsGitIgnored(Path.Combine(temp.Path, "new"), true, "new"));
+		Assert.False(after.IsGitIgnored(Path.Combine(temp.Path, "old"), true, "old"));
+		Assert.True(after.IsGitIgnored(Path.Combine(temp.Path, "new"), true, "new"));
+	}
+
+	[Fact]
+	public void RevalidateCaches_ChangedGitIgnoreBeyondMatcherCacheLimitInvalidatesReadyRules()
+	{
+		using var temp = new TemporaryDirectory();
+		var selectedRoots = new List<string>();
+		for (var scopeIndex = 0; scopeIndex < 80; scopeIndex++)
+		{
+			var scope = $"scope-{scopeIndex:D2}";
+			selectedRoots.Add(scope);
+			temp.CreateFile($"{scope}/.gitignore", "*.old\n");
+			temp.CreateFile($"{scope}/probe.old", "old");
+			temp.CreateFile($"{scope}/probe.new", "new");
+		}
+
+		var service = CreateServiceWithSmartIgnore([]);
+		var before = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], selectedRoots);
+		var changedGitIgnore = Path.Combine(temp.Path, "scope-00", ".gitignore");
+		var originalTimestamp = File.GetLastWriteTimeUtc(changedGitIgnore);
+		File.WriteAllText(changedGitIgnore, "*.new\n");
+		File.SetLastWriteTimeUtc(changedGitIgnore, originalTimestamp);
+
+		var canReuseRuleCaches = service.RevalidateCaches(temp.Path, TestContext.Current.CancellationToken);
+		var after = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], selectedRoots);
+
+		Assert.True(before.IsGitIgnored(Path.Combine(temp.Path, "scope-00", "probe.old"), false, "probe.old"));
+		Assert.False(canReuseRuleCaches);
+		Assert.False(after.IsGitIgnored(Path.Combine(temp.Path, "scope-00", "probe.old"), false, "probe.old"));
+		Assert.True(after.IsGitIgnored(Path.Combine(temp.Path, "scope-00", "probe.new"), false, "probe.new"));
+	}
+
+	[Fact]
+	public void Build_CaseDistinctScopes_DoNotLeakGitIgnoreRulesOnCaseSensitiveFileSystems()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("App/.gitignore", "*.upper\n");
+		temp.CreateFile("App/source.upper", "ignored");
+		temp.CreateFile("App/source.lower", "visible");
+		temp.CreateFile("app/.gitignore", "*.lower\n");
+		temp.CreateFile("app/source.upper", "visible");
+		temp.CreateFile("app/source.lower", "ignored");
+
+		// A default case-insensitive macOS volume cannot create both roots; its native
+		// path semantics are already covered by the case-insensitive matcher matrix.
+		if (Directory.EnumerateDirectories(temp.Path)
+			.Select(Path.GetFileName)
+			.Distinct(StringComparer.Ordinal)
+			.Count() < 2)
+		{
+			return;
+		}
+
+		var service = CreateServiceWithSmartIgnore([]);
+		var rules = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], ["App", "app"]);
+
+		Assert.Equal(2, rules.ScopedGitIgnoreMatchers.Count);
+		Assert.True(rules.IsGitIgnored(Path.Combine(temp.Path, "App", "source.upper"), false, "source.upper"));
+		Assert.False(rules.IsGitIgnored(Path.Combine(temp.Path, "App", "source.lower"), false, "source.lower"));
+		Assert.False(rules.IsGitIgnored(Path.Combine(temp.Path, "app", "source.upper"), false, "source.upper"));
+		Assert.True(rules.IsGitIgnored(Path.Combine(temp.Path, "app", "source.lower"), false, "source.lower"));
+	}
+
+	[Fact]
 	public void Build_IgnoresReparsePointRootCandidatesDuringScopeDiscovery()
 	{
 		using var temp = new TemporaryDirectory();
@@ -206,7 +364,7 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		var rules = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore], ["linked"]);
 
 		Assert.False(availability.IncludeSmartIgnore);
-		Assert.False(rules.UseSmartIgnore);
+		Assert.True(rules.UseSmartIgnore);
 	}
 
 	[Fact]
@@ -223,7 +381,7 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 
 		Assert.False(availability.IncludeGitIgnore);
 		Assert.False(availability.IncludeSmartIgnore);
-		Assert.False(rules.UseSmartIgnore);
+		Assert.True(rules.UseSmartIgnore);
 	}
 
 	private static void SeedMixedWorkspace(TemporaryDirectory temp)
@@ -238,11 +396,13 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		temp.CreateFile("proj-no-git/src/main.ts", "export {}");
 	}
 
-	private static IgnoreRulesService CreateServiceWithSmartIgnore(IReadOnlyCollection<string> smartFolders)
+	private static IgnoreRulesService CreateServiceWithSmartIgnore(
+		IReadOnlyCollection<string> smartFolders,
+		ProjectRootFactsProvider? rootFactsProvider = null)
 	{
 		var smartService = new SmartIgnoreService([
 			new FixedSmartIgnoreRule(smartFolders)
-		]);
+		], rootFactsProvider);
 
 		return new IgnoreRulesService(smartService);
 	}
@@ -286,68 +446,4 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		}
 	}
 
-	private static void ExpireScopeCacheEntry(
-		IgnoreRulesService service,
-		string rootPath,
-		IReadOnlyCollection<string> selectedRootFolders)
-	{
-		var discoveryField = typeof(IgnoreRulesService).GetField(
-			"_projectScopeDiscovery",
-			BindingFlags.Instance | BindingFlags.NonPublic);
-		Assert.NotNull(discoveryField);
-
-		var discovery = discoveryField.GetValue(service);
-		Assert.NotNull(discovery);
-
-		var discoveryType = discovery.GetType();
-		var buildScopeCacheKey = discoveryType.GetMethod(
-			"BuildScopeCacheKey",
-			BindingFlags.Static | BindingFlags.NonPublic);
-		Assert.NotNull(buildScopeCacheKey);
-
-		var cacheKey = (string?)buildScopeCacheKey.Invoke(
-			null,
-			[
-				Path.GetFullPath(rootPath),
-				selectedRootFolders
-			]);
-		Assert.False(string.IsNullOrWhiteSpace(cacheKey));
-
-		var scopeCacheField = discoveryType.GetField(
-			"_scopeCache",
-			BindingFlags.Instance | BindingFlags.NonPublic);
-		Assert.NotNull(scopeCacheField);
-
-		var scopeCache = scopeCacheField.GetValue(discovery);
-		Assert.NotNull(scopeCache);
-
-		var dictionaryType = scopeCache.GetType();
-		var tryGetValueMethod = dictionaryType.GetMethod("TryGetValue");
-		Assert.NotNull(tryGetValueMethod);
-
-		var arguments = new object?[] { cacheKey, null };
-		var found = (bool)tryGetValueMethod.Invoke(scopeCache, arguments)!;
-		Assert.True(found);
-
-		var existingEntry = arguments[1];
-		Assert.NotNull(existingEntry);
-
-		var entryType = existingEntry.GetType();
-		var contextProperty = entryType.GetProperty("Context");
-		Assert.NotNull(contextProperty);
-		var context = contextProperty.GetValue(existingEntry);
-		Assert.NotNull(context);
-
-		var constructor = entryType.GetConstructor([typeof(DateTime), context.GetType()]);
-		Assert.NotNull(constructor);
-
-		var expiredEntry = constructor.Invoke([
-			DateTime.UtcNow.AddSeconds(-30),
-			context
-		]);
-
-		var indexer = dictionaryType.GetProperty("Item");
-		Assert.NotNull(indexer);
-		indexer.SetValue(scopeCache, expiredEntry, [cacheKey]);
-	}
 }

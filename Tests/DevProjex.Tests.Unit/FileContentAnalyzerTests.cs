@@ -93,7 +93,7 @@ public sealed class FileContentAnalyzerTests
 
 		// TaskCanceledException inherits from OperationCanceledException
 		await Assert.ThrowsAnyAsync<OperationCanceledException>(
-			() => _analyzer.IsTextFileAsync(file, cts.Token));
+			() => _analyzer.IsTextFileAsync(file, cts.Token).AsTask());
 	}
 
 	#endregion
@@ -178,8 +178,13 @@ public sealed class FileContentAnalyzerTests
 		var file = temp.CreateBinaryFile("binary.bin", [0x00, 0x01, 0x02]);
 
 		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
+		var classified = await _analyzer.ReadClassifiedAsync(
+			file,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
+		Assert.Equal(FileContentClassification.Binary, classified.Classification);
 	}
 
 	[Fact]
@@ -200,8 +205,13 @@ public sealed class FileContentAnalyzerTests
 		var file = temp.CreateBinaryFile("hidden_binary.txt", withNull);
 
 		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
+		var classified = await _analyzer.ReadClassifiedAsync(
+			file,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
 
 		Assert.Null(result);
+		Assert.Equal(FileContentClassification.Binary, classified.Classification);
 	}
 
 	[Fact]
@@ -278,7 +288,7 @@ public sealed class FileContentAnalyzerTests
 
 		// TaskCanceledException inherits from OperationCanceledException
 		await Assert.ThrowsAnyAsync<OperationCanceledException>(
-			() => _analyzer.TryReadAsTextAsync(file, cts.Token));
+			() => _analyzer.TryReadAsTextAsync(file, cts.Token).AsTask());
 	}
 
 	#endregion
@@ -409,6 +419,114 @@ public sealed class FileContentAnalyzerTests
 	}
 
 	[Fact]
+	public async Task SupportedBomEncodingsAreClassifiedAndDecodedAsText()
+	{
+		using var temp = new TemporaryDirectory();
+		const string source = "namespace EncodingFixture;\ninternal sealed class Пример { }";
+		(string Name, Encoding Encoding)[] encodings =
+		[
+			("utf8-bom", new UTF8Encoding(true, true)),
+			("utf16-le", new UnicodeEncoding(false, true, true)),
+			("utf16-be", new UnicodeEncoding(true, true, true)),
+			("utf32-le", new UTF32Encoding(false, true, true)),
+			("utf32-be", new UTF32Encoding(true, true, true))
+		];
+
+		foreach (var fixture in encodings)
+		{
+			var path = Path.Combine(temp.Path, $"{fixture.Name}.cs");
+			var payload = fixture.Encoding.GetPreamble()
+				.Concat(fixture.Encoding.GetBytes(source))
+				.ToArray();
+			File.WriteAllBytes(path, payload);
+
+			var classified = await _analyzer.ReadClassifiedAsync(
+				path,
+				long.MaxValue,
+				TestContext.Current.CancellationToken);
+			var metrics = await _analyzer.GetTextFileMetricsAsync(
+				path,
+				TestContext.Current.CancellationToken);
+			var classifiedMetrics = await _analyzer.GetClassifiedMetricsAsync(
+				path,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(FileContentClassification.Text, classified.Classification);
+			Assert.Equal(FileContentClassification.Text, classifiedMetrics.Classification);
+			Assert.Equal(source, classified.Content?.Content);
+			Assert.True(await _analyzer.IsTextFileAsync(
+				path,
+				TestContext.Current.CancellationToken));
+			Assert.Equal(source.Length, metrics?.CharCount);
+			Assert.Equal(source.Length, classifiedMetrics.Metrics?.CharCount);
+		}
+	}
+
+	[Fact]
+	public async Task SvgUsesContentClassificationInsteadOfBinaryExtensionShortcut()
+	{
+		using var temp = new TemporaryDirectory();
+		const string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>Пример</text></svg>";
+		var path = temp.CreateFile("diagram.svg", svg);
+
+		var result = await _analyzer.ReadClassifiedAsync(
+			path,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Text, result.Classification);
+		Assert.Equal(svg, result.Content?.Content);
+	}
+
+	[Fact]
+	public async Task ClassifiedReadPreservesUnavailableContentReasons()
+	{
+		using var temp = new TemporaryDirectory();
+		var binary = temp.CreateBinaryFile("payload.custom", [0x41, 0x00, 0x42]);
+		var tooLarge = temp.CreateFile("large.cs", "class LargeFixture { }");
+		var invalidUtf8 = temp.CreateBinaryFile("invalid.cs", [0xC3, 0x28]);
+		var missing = Path.Combine(temp.Path, "missing.cs");
+
+		var binaryResult = await _analyzer.ReadClassifiedAsync(
+			binary,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+		var tooLargeResult = await _analyzer.ReadClassifiedAsync(
+			tooLarge,
+			1,
+			TestContext.Current.CancellationToken);
+		var invalidResult = await _analyzer.ReadClassifiedAsync(
+			invalidUtf8,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+		var missingResult = await _analyzer.ReadClassifiedAsync(
+			missing,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+		var binaryMetrics = await _analyzer.GetClassifiedMetricsAsync(
+			binary,
+			TestContext.Current.CancellationToken);
+		var invalidMetrics = await _analyzer.GetClassifiedMetricsAsync(
+			invalidUtf8,
+			TestContext.Current.CancellationToken);
+		var missingMetrics = await _analyzer.GetClassifiedMetricsAsync(
+			missing,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Binary, binaryResult.Classification);
+		Assert.Equal(FileContentClassification.TooLarge, tooLargeResult.Classification);
+		Assert.True(tooLargeResult.Content?.IsEstimated);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding, invalidResult.Classification);
+		Assert.Equal(FileContentClassification.Missing, missingResult.Classification);
+		Assert.Equal(FileContentClassification.Binary, binaryMetrics.Classification);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding, invalidMetrics.Classification);
+		Assert.Equal(FileContentClassification.Missing, missingMetrics.Classification);
+		Assert.Null(binaryMetrics.Metrics);
+		Assert.Null(invalidMetrics.Metrics);
+		Assert.Null(missingMetrics.Metrics);
+	}
+
+	[Fact]
 	public async Task TryReadAsTextAsync_TrailingNewline_CountsCorrectLines()
 	{
 		using var temp = new TemporaryDirectory();
@@ -435,7 +553,7 @@ public sealed class FileContentAnalyzerTests
 	}
 
 	[Fact]
-	public async Task TryReadAsTextAsync_MixedLineEndings_CountsNewlinesOnly()
+	public async Task TryReadAsTextAsync_MixedLineEndings_CountsLogicalLineBreaks()
 	{
 		using var temp = new TemporaryDirectory();
 		var content = "Line 1\nLine 2\r\nLine 3\rLine 4";
@@ -444,9 +562,99 @@ public sealed class FileContentAnalyzerTests
 		var result = await _analyzer.TryReadAsTextAsync(file, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.NotNull(result);
-		// Counts \n only: after "Line 1", after "Line 2\r", and none more
-		// So: "Line 1\n" (1), "Line 2\r\n" (1), "Line 3\rLine 4" (0) = 3 lines total (1 + newline count)
-		Assert.Equal(3, result.LineCount);
+		Assert.Equal(4, result.LineCount);
+	}
+
+	[Fact]
+	public async Task GetTextFileMetricsAsync_CrLfAcrossStreamingBufferBoundary_CountsSingleLineBreak()
+	{
+		using var temp = new TemporaryDirectory();
+		var content = new string('a', 8191) + "\r\nb";
+		var file = temp.CreateFile("buffer-boundary.txt", content);
+
+		var result = await _analyzer.GetTextFileMetricsAsync(
+			file,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(result);
+		Assert.Equal(2, result.LineCount);
+		Assert.Equal(content.Length, result.CharCount);
+		Assert.Equal(1, result.CrLfPairCount);
+		Assert.Equal(0, result.TrailingNewlineChars);
+		Assert.Equal(0, result.TrailingNewlineLineBreaks);
+	}
+
+	[Theory]
+	[InlineData("single line")]
+	[InlineData("line 1\nline 2\n")]
+	[InlineData("line 1\rline 2\r")]
+	[InlineData("line 1\r\nline 2\nline 3\r")]
+	[InlineData(" \t\r\n\u2003")]
+	[InlineData("Привет\n世界\r\n")]
+	public async Task GetTextFileMetricsAsync_TextMatrix_MatchesFullContentMetrics(string content)
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile("matrix.txt", content);
+
+		var metrics = await _analyzer.GetTextFileMetricsAsync(
+			file,
+			TestContext.Current.CancellationToken);
+		var fullContent = await _analyzer.TryReadAsTextAsync(
+			file,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(metrics);
+		Assert.NotNull(fullContent);
+		Assert.Equal(fullContent.SizeBytes, metrics.SizeBytes);
+		Assert.Equal(fullContent.LineCount, metrics.LineCount);
+		Assert.Equal(fullContent.CharCount, metrics.CharCount);
+		Assert.Equal(fullContent.IsEmpty, metrics.IsEmpty);
+		Assert.Equal(fullContent.IsWhitespaceOnly, metrics.IsWhitespaceOnly);
+		Assert.Equal(fullContent.IsEstimated, metrics.IsEstimated);
+		Assert.Equal(fullContent.TrailingNewlineChars, metrics.TrailingNewlineChars);
+		Assert.Equal(fullContent.TrailingNewlineLineBreaks, metrics.TrailingNewlineLineBreaks);
+	}
+
+	[Fact]
+	public async Task GetTextFileMetricsAsync_FileOpenForConcurrentReads_RemainsReadable()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile("shared.txt", "line 1\nline 2");
+		await using var otherReader = new FileStream(
+			file,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read);
+
+		var metrics = await _analyzer.GetTextFileMetricsAsync(
+			file,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(metrics);
+		Assert.Equal(2, metrics.LineCount);
+		Assert.Equal(13, metrics.CharCount);
+	}
+
+	[Fact]
+	public async Task GetTextFileMetricsAsync_ConcurrentFiles_PreservesEveryResult()
+	{
+		using var temp = new TemporaryDirectory();
+		var files = Enumerable.Range(0, 32)
+			.Select(index => temp.CreateFile($"file-{index:D2}.txt", $"value-{index}\nnext"))
+			.ToArray();
+
+		var tasks = files.Select(path => Task.Run(
+			async () => await _analyzer
+				.GetTextFileMetricsAsync(path, TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken));
+		var results = await Task.WhenAll(tasks);
+
+		Assert.All(results, result =>
+		{
+			Assert.NotNull(result);
+			Assert.Equal(2, result.LineCount);
+			Assert.False(result.IsEstimated);
+		});
 	}
 
 	#endregion

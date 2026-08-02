@@ -121,6 +121,48 @@ public sealed class PreviewDocumentBuilderTests
     }
 
     [Fact]
+    public async Task CreateDocumentAsync_LargePayloadUsesFileBackingAndPreservesFinalLine()
+    {
+        var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+
+        using var document = await builder.CreateDocumentAsync(
+            async (stream, cancellationToken) =>
+            {
+                await using var writer = new StreamWriter(
+                    stream,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    bufferSize: 8192,
+                    leaveOpen: true);
+                await writer.WriteLineAsync(new string('x', 600_000));
+                await writer.WriteAsync("final-marker".AsMemory(), cancellationToken);
+                await writer.FlushAsync(cancellationToken);
+            },
+            TestContext.Current.CancellationToken);
+
+        var fileBacked = Assert.IsType<FileBackedPreviewTextDocument>(document);
+        Assert.Equal(2, fileBacked.LineCount);
+        Assert.Equal("final-marker", fileBacked.GetLineText(2));
+    }
+
+    [Fact]
+    public async Task CreateDocumentAsync_FailedWriterDeletesTemporaryBackingFile()
+    {
+        var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+        string? storagePath = null;
+
+        await Assert.ThrowsAsync<IOException>(() => builder.CreateDocumentAsync(
+            (stream, _) =>
+            {
+                storagePath = Assert.IsType<FileStream>(stream).Name;
+                throw new IOException("deterministic test failure");
+            },
+            TestContext.Current.CancellationToken));
+
+        Assert.NotNull(storagePath);
+        Assert.False(File.Exists(storagePath));
+    }
+
+    [Fact]
     public async Task BuildContentDocumentAsync_PopulatesSectionMetadata()
     {
         using var temp = new TemporaryDirectory();
@@ -240,20 +282,24 @@ public sealed class PreviewDocumentBuilderTests
 
         public List<string> RequestedPaths { get; } = [];
 
-        public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
+        public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default)
+        public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+            string path,
+            CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default)
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            CancellationToken cancellationToken = default)
         {
             RequestedPaths.Add(path);
             contentByPath.TryGetValue(path, out var content);
-            return Task.FromResult(content);
+            return ValueTask.FromResult(content);
         }
 
-        public Task<TextFileContent?> TryReadAsTextAsync(
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
             string path,
             long maxSizeForFullRead,
             CancellationToken cancellationToken = default)

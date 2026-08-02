@@ -8,6 +8,29 @@ public class GitRepositoryServiceUnitTests
 {
     private readonly GitRepositoryService _service = new();
 
+    [Fact]
+    public void GitCommandsUseNonInteractiveStandardTransports()
+    {
+        var startInfo = GitRepositoryService.CreateGitCommandStartInfo(
+            workingDirectory: null,
+            arguments: "--version");
+
+        Assert.False(startInfo.UseShellExecute);
+        Assert.True(startInfo.RedirectStandardInput);
+        Assert.True(startInfo.RedirectStandardOutput);
+        Assert.True(startInfo.RedirectStandardError);
+        Assert.Equal("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
+        Assert.Equal(
+            GitRepositoryService.NonInteractiveSshCommand,
+            startInfo.Environment["GIT_SSH_COMMAND"]);
+        Assert.Equal("ssh", startInfo.Environment["GIT_SSH_VARIANT"]);
+        Assert.Equal(string.Empty, startInfo.Environment["GIT_ASKPASS"]);
+        Assert.Equal(string.Empty, startInfo.Environment["SSH_ASKPASS"]);
+        Assert.Equal("never", startInfo.Environment["SSH_ASKPASS_REQUIRE"]);
+        Assert.Equal("Never", startInfo.Environment["GCM_INTERACTIVE"]);
+        Assert.Equal("false", startInfo.Environment["GCM_GUI_PROMPT"]);
+    }
+
     #region Repository Name Extraction Tests
 
     [Theory]

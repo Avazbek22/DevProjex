@@ -12,15 +12,23 @@ This folder contains resources for packaging DevProjex on Linux.
 ### 1. Build the application
 
 ```bash
-dotnet publish Apps/Avalonia/DevProjex.Avalonia/DevProjex.Avalonia.csproj \
+dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj \
     -c Release \
     -r linux-x64 \
     --self-contained true \
     /p:PublishSingleFile=true \
+    /p:IncludeNativeLibrariesForSelfExtract=true \
     /p:PublishReadyToRun=true \
     /p:PublishTrimmed=false \
+    /p:DebugType=None \
+    /p:DebugSymbols=false \
     -o ./publish/linux-x64
 ```
+
+This is the same single-file recipe used by release validation. It must produce
+exactly one primary file named `DevProjex`. Native libraries can be extracted by
+the .NET single-file host at startup; set `DOTNET_BUNDLE_EXTRACT_BASE_DIR` to a
+private writable directory in environments without a usable home directory.
 
 ### 2. Install the executable
 
@@ -65,9 +73,7 @@ sudo gtk-update-icon-cache /usr/share/icons/hicolor
 
 The application window icon is set automatically via Avalonia's `Window.Icon` property using the embedded PNG resource. This works independently of the desktop entry and hicolor icons.
 
-## Future: DEB/RPM Packages
-
-For proper distribution packages (`.deb`, `.rpm`, Flatpak, Snap), additional configuration files will be needed. The icon assets and desktop entry in this folder serve as the foundation for those packages.
+The desktop entry invokes `devprojex open`, so graphical launchers always open DevProjex Desktop. Running `devprojex` from an interactive terminal opens DevProjex Terminal instead.
 
 ## GitHub Release Asset Naming
 

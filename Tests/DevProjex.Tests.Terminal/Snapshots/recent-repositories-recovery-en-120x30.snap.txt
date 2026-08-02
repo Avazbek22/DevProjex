@@ -1,0 +1,30 @@
+
+  DevProjex Terminal                                                                                              v<VERSION>
+  Choose a workspace action. No folder is scanned until you open it.
+
+  Current directory                                                                            Current folder is ready
+  <WELCOME_ROOT>
+
+  ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
+  │  Open current directory                │  │ Open a recent local folder or Git repository from one shared         │
+  │> Recent workspa┌┤Recent workspaces├────────────────────────────────────────────────────────────┐                 │
+  │  Browse folder │ The repository is still in history, but its local cache is missing. A         │                 │
+  │  Clone reposito│ network clone is required before it can be opened.                            │                 │
+  │  Open Desktop  │                                                                               │                 │
+  │  Help          │ https://github.com/Avazbek22/DevProjex                                        │                 │
+  │  Exit          │                                                                               │                 │
+  └────────────────│                                                                               │─────────────────┘
+                   │                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Clone again ◄⟧▖                 │
+  Direct automation│                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘                 │
+                   └───────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

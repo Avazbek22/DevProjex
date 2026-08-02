@@ -16,6 +16,7 @@ public sealed class MainWindowTaskbarProgressUiTests
 
         try
         {
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             Assert.Equal(1, taskbarProgress.AttachCount);
 
             taskbarProgress.Calls.Clear();
@@ -40,6 +41,104 @@ public sealed class MainWindowTaskbarProgressUiTests
     }
 
     [AvaloniaFact]
+    public async Task DelayedStatusPresentation_DoesNotFlashForFastOperation()
+    {
+        using var project = UiTestProject.CreateDefault();
+        var taskbarProgress = new RecordingTaskbarProgressService();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            configureServices: services => services with { TaskbarProgressService = taskbarProgress });
+
+        try
+        {
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+            taskbarProgress.Calls.Clear();
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var statusOperations = GetStatusOperationCoordinator(window);
+
+            var operationId = statusOperations.Begin(
+                "Preparing preview",
+                operationType: StatusOperationType.PreviewBuild,
+                presentation: StatusOperationPresentation.ExtendedDelay);
+
+            Assert.True(viewModel.StatusBusy);
+            Assert.False(viewModel.StatusOperationVisible);
+
+            statusOperations.Complete(operationId);
+            await Task.Delay(
+                StatusOperationCoordinator.ExtendedDelayedPresentationThreshold +
+                TimeSpan.FromMilliseconds(100));
+
+            Assert.False(viewModel.StatusBusy);
+            Assert.False(viewModel.StatusOperationVisible);
+            Assert.DoesNotContain(
+                taskbarProgress.Calls,
+                call => call.Kind is
+                    TaskbarProgressCallKind.Indeterminate or
+                    TaskbarProgressCallKind.Progress);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task DelayedStatusPresentation_ShowsStatusBarAndTaskbarTogetherForLongOperation()
+    {
+        using var project = UiTestProject.CreateDefault();
+        var taskbarProgress = new RecordingTaskbarProgressService();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            configureServices: services => services with { TaskbarProgressService = taskbarProgress });
+
+        try
+        {
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+            taskbarProgress.Calls.Clear();
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var statusOperations = GetStatusOperationCoordinator(window);
+
+            var operationId = statusOperations.Begin(
+                "Calculating data",
+                indeterminate: false,
+                operationType: StatusOperationType.MetricsCalculation,
+                presentation: StatusOperationPresentation.ExtendedDelay);
+
+            Assert.True(viewModel.StatusBusy);
+            Assert.False(viewModel.StatusOperationVisible);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => viewModel.StatusOperationVisible,
+                "delayed progress presentation to become visible");
+
+            Assert.Equal(TaskbarProgressCall.Progress(0), taskbarProgress.Calls[^1]);
+
+            statusOperations.UpdateProgress(48, operationId: operationId);
+
+            Assert.True(viewModel.StatusProgressVisible);
+            Assert.Equal(TaskbarProgressCall.Progress(48), taskbarProgress.Calls[^1]);
+
+            var replacementOperationId = statusOperations.Begin(
+                "Preparing preview",
+                operationType: StatusOperationType.PreviewBuild,
+                presentation: StatusOperationPresentation.ExtendedDelay);
+
+            Assert.True(viewModel.StatusOperationVisible);
+            Assert.Equal(TaskbarProgressCall.Indeterminate(), taskbarProgress.Calls[^1]);
+
+            statusOperations.Complete(replacementOperationId);
+
+            Assert.False(viewModel.StatusOperationVisible);
+            Assert.Equal(TaskbarProgressCall.Clear(), taskbarProgress.Calls[^1]);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task GitCloneDialogProgress_UsesMainTaskbarIcon()
     {
         using var project = UiTestProject.CreateDefault();
@@ -50,6 +149,7 @@ public sealed class MainWindowTaskbarProgressUiTests
 
         try
         {
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             taskbarProgress.Calls.Clear();
             var initialAttachCount = taskbarProgress.AttachCount;
 
@@ -86,6 +186,7 @@ public sealed class MainWindowTaskbarProgressUiTests
 
         try
         {
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             var viewModel = UiTestDriver.GetViewModel(window);
 
             viewModel.StatusProgressIsIndeterminate = false;
@@ -149,6 +250,7 @@ public sealed class MainWindowTaskbarProgressUiTests
 
         try
         {
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             taskbarProgress.Calls.Clear();
 
             InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "Receiving objects: 42%");
@@ -210,6 +312,15 @@ public sealed class MainWindowTaskbarProgressUiTests
             BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.NotNull(field);
         return (TaskbarProgressCoordinator)field.GetValue(window)!;
+    }
+
+    private static StatusOperationCoordinator GetStatusOperationCoordinator(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_statusOperations",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return (StatusOperationCoordinator)field.GetValue(window)!;
     }
 
     private sealed class RecordingTaskbarProgressService : ITaskbarProgressService

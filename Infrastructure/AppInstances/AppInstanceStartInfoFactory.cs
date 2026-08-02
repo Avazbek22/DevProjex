@@ -4,6 +4,7 @@ internal readonly record struct AppInstanceLaunchContext(
     bool IsWindows,
     string? ProcessPath,
     string? EntryAssemblyPath,
+    string? AppHostPath,
     string WorkingDirectory,
     string? WindowsPackageFamilyName);
 
@@ -13,7 +14,7 @@ internal static class AppInstanceStartInfoFactory
 
     public static IReadOnlyList<ProcessStartInfo> CreateCandidates(AppInstanceLaunchContext context)
     {
-        var candidates = new List<ProcessStartInfo>(capacity: 2);
+        var candidates = new List<ProcessStartInfo>(capacity: 3);
 
         if (context.IsWindows && !string.IsNullOrWhiteSpace(context.WindowsPackageFamilyName))
         {
@@ -30,14 +31,29 @@ internal static class AppInstanceStartInfoFactory
         if (string.IsNullOrWhiteSpace(context.ProcessPath))
             return candidates;
 
-        if (IsDotnetHost(context.ProcessPath) && !string.IsNullOrWhiteSpace(context.EntryAssemblyPath))
+        if (IsDotnetHost(context.ProcessPath))
         {
+            if (string.IsNullOrWhiteSpace(context.EntryAssemblyPath))
+                return candidates;
+
+            if (!string.IsNullOrWhiteSpace(context.AppHostPath))
+            {
+                candidates.Add(new ProcessStartInfo
+                {
+                    FileName = context.AppHostPath,
+                    UseShellExecute = false,
+                    CreateNoWindow = context.IsWindows,
+                    WorkingDirectory = context.WorkingDirectory
+                });
+            }
+
             // Development runs can execute under the dotnet host instead of an apphost executable.
             // Launching another independent process must replay the entry assembly explicitly there.
             var dotnetHostStartInfo = new ProcessStartInfo
             {
                 FileName = context.ProcessPath,
                 UseShellExecute = false,
+                CreateNoWindow = context.IsWindows,
                 WorkingDirectory = context.WorkingDirectory
             };
             dotnetHostStartInfo.ArgumentList.Add(context.EntryAssemblyPath);

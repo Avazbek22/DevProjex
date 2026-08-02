@@ -12,7 +12,8 @@ public sealed class AvaloniaCompiledBindingContractTests
 		"HelpPopoverView.axaml",
 		"SearchBarView.axaml",
 		"SettingsPanelView.axaml",
-		"ThemePopoverView.axaml"
+		"ThemePopoverView.axaml",
+		"UpdatePopoverView.axaml"
 	];
 
 	[Fact]
@@ -22,7 +23,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"DevProjex.Avalonia.csproj");
 
 		var document = XDocument.Load(projectFile);
@@ -40,7 +40,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			FindRepositoryRoot(),
 			"Apps",
 			"Avalonia",
-			"DevProjex.Avalonia",
 			"Views",
 			fileName);
 
@@ -64,6 +63,443 @@ public sealed class AvaloniaCompiledBindingContractTests
 		return data;
 	}
 
+	[Fact]
+	public void SettingsPanel_UsesVirtualizedListsForChecklistSections()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"SettingsPanelView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+
+		Assert.Equal(3, root.Descendants(avaloniaNamespace + "ListBox").Count());
+		Assert.Equal(3, root.Descendants(avaloniaNamespace + "VirtualizingStackPanel").Count());
+		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsControl"));
+		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsRepeater"));
+	}
+
+	[Fact]
+	public void HelpMenu_PlacesUpdatesImmediatelyAfterAbout()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"TopMenuBarView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var helpMenu = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => string.Equals(
+				element.Attribute("Name")?.Value,
+				"HelpMenuItem",
+				StringComparison.Ordinal));
+		var children = helpMenu.Elements().ToList();
+		var aboutIndex = children.FindIndex(element => string.Equals(
+			element.Attribute("Name")?.Value,
+			"AboutMenuItem",
+			StringComparison.Ordinal));
+		var updatesIndex = children.FindIndex(element => string.Equals(
+			element.Attribute("Name")?.Value,
+			"UpdateMenuItem",
+			StringComparison.Ordinal));
+
+		Assert.True(aboutIndex >= 0);
+		Assert.Equal(aboutIndex + 1, updatesIndex);
+	}
+
+	[Fact]
+	public void HelpMenu_UpdateIndicatorUsesKnownAvailabilityAndAccentColor()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"TopMenuBarView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var updateMenuItem = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => element.Attribute("Name")?.Value == "UpdateMenuItem");
+		var indicator = updateMenuItem
+			.Descendants(avaloniaNamespace + "Ellipse")
+			.Single(element => element.Attribute("Name")?.Value == "UpdateAvailableIndicator");
+
+		Assert.Equal("8", indicator.Attribute("Width")?.Value);
+		Assert.Equal("8", indicator.Attribute("Height")?.Value);
+		Assert.Equal("{Binding IsKnownUpdateAvailable}", indicator.Attribute("IsVisible")?.Value);
+		Assert.Equal("{DynamicResource AppAccentBrush}", indicator.Attribute("Fill")?.Value);
+		Assert.Equal("False", indicator.Attribute("IsHitTestVisible")?.Value);
+	}
+
+	[Fact]
+	public void SettingsPanel_ApplyAttentionUsesConditionalIdleSafeFadeContract()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"SettingsPanelView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var applyButton = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Button"),
+			element => element.Attribute("Name")?.Value == "ApplySettingsButton");
+
+		Assert.Equal(
+			"{Binding IsApplySettingsAttentionActive}",
+			applyButton.Attribute("Classes.apply-attention")?.Value);
+
+		var attentionStyle = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Style"),
+			element => element.Attribute("Selector")?.Value == "Button#ApplySettingsButton.apply-attention");
+		var animation = Assert.Single(attentionStyle.Descendants(avaloniaNamespace + "Animation"));
+		Assert.Equal("0:0:1.8", animation.Attribute("Duration")?.Value);
+		Assert.Equal("INFINITE", animation.Attribute("IterationCount")?.Value);
+		Assert.Equal("OnlyIfVisible", animation.Attribute("PlaybackBehavior")?.Value);
+		Assert.Equal("SineEaseInOut", animation.Attribute("Easing")?.Value);
+
+		var opacityValues = animation
+			.Descendants(avaloniaNamespace + "Setter")
+			.Where(element => element.Attribute("Property")?.Value == "Opacity")
+			.Select(element => element.Attribute("Value")?.Value ?? string.Empty)
+			.ToArray();
+		Assert.Equal(["1", "0.48", "1"], opacityValues);
+	}
+
+	[Fact]
+	public void ThemePopover_ExposesOnlyMeaningfulEffectControls()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"ThemePopoverView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var xamlNamespace = XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml");
+		var namedEffectControls = root
+			.Descendants(avaloniaNamespace + "CheckBox")
+			.Select(element => element.Attribute(xamlNamespace + "Name")?.Value)
+			.Where(name => name?.EndsWith("EffectCheckBox", StringComparison.Ordinal) == true)
+			.OfType<string>()
+			.ToArray();
+		var sliderBindings = root
+			.Descendants(avaloniaNamespace + "Slider")
+			.Select(element => element.Attribute("Value")?.Value ?? string.Empty)
+			.ToArray();
+
+		Assert.Equal(
+			["TransparentEffectCheckBox", "BlurEffectCheckBox", "MicaEffectCheckBox"],
+			namedEffectControls);
+		Assert.Equal(
+			"{Binding IsAcrylicAvailable}",
+			root.Descendants(avaloniaNamespace + "CheckBox")
+				.Single(element => element.Attribute(xamlNamespace + "Name")?.Value == "BlurEffectCheckBox")
+				.Attribute("IsVisible")?.Value);
+		Assert.Equal(
+			"{Binding IsMicaAvailable}",
+			root.Descendants(avaloniaNamespace + "CheckBox")
+				.Single(element => element.Attribute(xamlNamespace + "Name")?.Value == "MicaEffectCheckBox")
+				.Attribute("IsVisible")?.Value);
+		Assert.Contains(sliderBindings, binding => binding.Contains("BackgroundTransparency", StringComparison.Ordinal));
+		Assert.Contains(sliderBindings, binding => binding.Contains("MenuTransparency", StringComparison.Ordinal));
+		Assert.DoesNotContain(sliderBindings, binding => binding.Contains("MaterialIntensity", StringComparison.Ordinal));
+		Assert.Contains(
+			root.Descendants(avaloniaNamespace + "Slider"),
+			slider => slider.Attribute(xamlNamespace + "Name")?.Value == "MenuTransparencySlider");
+		Assert.DoesNotContain(sliderBindings, binding => binding.Contains("BorderStrength", StringComparison.Ordinal));
+		Assert.Empty(root.Descendants(avaloniaNamespace + "Expander"));
+	}
+
+	[Fact]
+	public void ThemePopover_ExposesSystemLightAndDarkAsExclusiveSelectionBindings()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"ThemePopoverView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var selectionBindings = root
+			.Descendants(avaloniaNamespace + "CheckBox")
+			.Select(element => element.Attribute("IsChecked")?.Value)
+			.Where(value => value?.Contains("ThemeSelected", StringComparison.Ordinal) == true)
+			.OfType<string>()
+			.ToArray();
+
+		Assert.Equal(
+			[
+				"{Binding IsSystemThemeSelected, Mode=OneWay}",
+				"{Binding IsLightThemeSelected, Mode=OneWay}",
+				"{Binding IsDarkThemeSelected, Mode=OneWay}"
+			],
+			selectionBindings);
+	}
+
+	[Fact]
+	public void ThemeStyles_MainMenuUsesDedicatedPopupBrushAtEveryDepth()
+	{
+		var styleFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Styles",
+			"Theme.axaml");
+		var document = XDocument.Load(styleFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var styles = root.Descendants(avaloniaNamespace + "Style").ToArray();
+
+		AssertStyleBackground(
+			styles,
+			"Menu.main-menu-strip MenuItem /template/ Popup > Border",
+			"MainMenuPopupBrush",
+			avaloniaNamespace);
+		AssertStyleBackground(styles, "ContextMenu", "MenuPopupBrush", avaloniaNamespace);
+		AssertStyleBackground(
+			styles,
+			"MenuItem MenuItem /template/ Popup > Border",
+			"MenuChildPopupBrush",
+			avaloniaNamespace);
+	}
+
+	[Fact]
+	public void ThemeStyles_UnavailableRecentFolderRemainsEnabledButVisuallyMuted()
+	{
+		var styleFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Styles",
+			"Theme.axaml");
+		var document = XDocument.Load(styleFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var style = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Style"),
+			element => element.Attribute("Selector")?.Value == "MenuItem.recent-folder-unavailable");
+
+		var opacity = Assert.Single(
+			style.Elements(avaloniaNamespace + "Setter"),
+			element => element.Attribute("Property")?.Value == "Opacity");
+		Assert.Equal("0.5", opacity.Attribute("Value")?.Value);
+		Assert.DoesNotContain(
+			style.Elements(avaloniaNamespace + "Setter"),
+			element => element.Attribute("Property")?.Value == "IsEnabled");
+	}
+
+	[Fact]
+	public void PreviewTextCursor_IsStableWhileScrollbarRetainsArrowCursor()
+	{
+		var repositoryRoot = FindRepositoryRoot();
+		var styleDocument = XDocument.Load(Path.Combine(
+			repositoryRoot,
+			"Apps",
+			"Avalonia",
+			"Styles",
+			"Theme.axaml"));
+		var styleRoot = Assert.IsType<XElement>(styleDocument.Root);
+		var avaloniaNamespace = styleRoot.Name.Namespace;
+		var styles = styleRoot
+			.Descendants(avaloniaNamespace + "Style")
+			.ToArray();
+
+		AssertCursorSetter(
+			styles,
+			"ScrollViewer.preview-scroll",
+			"Ibeam",
+			avaloniaNamespace);
+		foreach (var selector in new[]
+		         {
+			         "ScrollViewer.preview-scroll ScrollBar",
+			         "ScrollViewer.preview-scroll RepeatButton",
+			         "ScrollViewer.preview-scroll Thumb"
+		         })
+		{
+			AssertCursorSetter(
+				styles,
+				selector,
+				"Arrow",
+				avaloniaNamespace);
+		}
+
+		var windowDocument = XDocument.Load(Path.Combine(
+			repositoryRoot,
+			"Apps",
+			"Avalonia",
+			"MainWindow.axaml"));
+		var windowRoot = Assert.IsType<XElement>(windowDocument.Root);
+		var previewScrollViewer = Assert.Single(
+			windowRoot.Descendants(avaloniaNamespace + "ScrollViewer"),
+			element => element.Attribute("Name")?.Value ==
+			           "PreviewTextScrollViewer");
+		Assert.Null(previewScrollViewer.Attribute("Cursor"));
+	}
+
+	[Fact]
+	public void MainWindow_StartsWithoutSpeculativeBackdropBeforePresetLoading()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+
+		Assert.Equal("None", root.Attribute("TransparencyLevelHint")?.Value);
+	}
+
+	[Fact]
+	public void MainWindow_DeclaresThreeIslandMinimumWidthBeforeRuntimeLayout()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+
+		Assert.Equal("1063", root.Attribute("MinWidth")?.Value);
+	}
+
+	[Fact]
+	public void MainWindow_StaticTextUsesStablePixelAlignedHintingContract()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+
+		Assert.Equal("Strong", root.Attribute("TextOptions.TextHintingMode")?.Value);
+		Assert.Equal("Aligned", root.Attribute("TextOptions.BaselinePixelAlignment")?.Value);
+	}
+
+	[Fact]
+	public void ThemeStyles_CompactSectionAllKeepsTextAtNativeRasterScale()
+	{
+		var styleFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Styles",
+			"Theme.axaml");
+		var document = XDocument.Load(styleFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var styles = root.Descendants(avaloniaNamespace + "Style").ToArray();
+		var compactSectionAll = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Window.compact-mode CheckBox.section-all");
+		var compactBullet = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Window.compact-mode CheckBox.section-all /template/ Border#NormalRectangle");
+
+		Assert.DoesNotContain(
+			compactSectionAll.Descendants(avaloniaNamespace + "Setter"),
+			setter => setter.Attribute("Property")?.Value == "RenderTransform");
+		Assert.DoesNotContain(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Window.compact-mode CheckBox.section-all /template/ ContentPresenter");
+		Assert.Equal(
+			"18",
+			compactBullet.Elements(avaloniaNamespace + "Setter")
+				.Single(setter => setter.Attribute("Property")?.Value == "Width")
+				.Attribute("Value")?.Value);
+		Assert.Equal(
+			"18",
+			compactBullet.Elements(avaloniaNamespace + "Setter")
+				.Single(setter => setter.Attribute("Property")?.Value == "Height")
+				.Attribute("Value")?.Value);
+	}
+
+	[Fact]
+	public void MainWindow_DropZoneAnimationsUseSmoothIdleSafeContract()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var styles = root
+			.Descendants(avaloniaNamespace + "Style")
+			.ToArray();
+
+		var borderStyle = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Border.drop-zone-animating Rectangle.drop-zone-border");
+		var borderAnimation = Assert.Single(
+			borderStyle.Descendants(avaloniaNamespace + "Animation"));
+		Assert.Equal("0:0:0.8", borderAnimation.Attribute("Duration")?.Value);
+		Assert.Equal("INFINITE", borderAnimation.Attribute("IterationCount")?.Value);
+		Assert.Equal("OnlyIfVisible", borderAnimation.Attribute("PlaybackBehavior")?.Value);
+		Assert.Equal("LinearEasing", borderAnimation.Attribute("Easing")?.Value);
+		Assert.Equal(
+			["0", "-14"],
+			GetAnimationValues(
+				borderAnimation,
+				"StrokeDashOffset",
+				avaloniaNamespace));
+
+		var border = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Rectangle"),
+			element => element.Attribute("Classes")?.Value == "drop-zone-border");
+		Assert.Equal("8,6", border.Attribute("StrokeDashArray")?.Value);
+
+		var iconStyle = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Border.drop-zone-animating Viewbox.drop-zone-icon");
+		var iconAnimation = Assert.Single(
+			iconStyle.Descendants(avaloniaNamespace + "Animation"));
+		Assert.Equal("0:0:2.1", iconAnimation.Attribute("Duration")?.Value);
+		Assert.Equal("INFINITE", iconAnimation.Attribute("IterationCount")?.Value);
+		Assert.Equal("OnlyIfVisible", iconAnimation.Attribute("PlaybackBehavior")?.Value);
+
+		var iconKeyFrames = iconAnimation
+			.Elements(avaloniaNamespace + "KeyFrame")
+			.ToArray();
+		Assert.Equal(["0%", "25%", "75%", "100%"], iconKeyFrames
+			.Select(element => element.Attribute("Cue")?.Value ?? string.Empty)
+			.ToArray());
+		Assert.Equal(["", "0,0,0.58,1", "0.42,0,0.58,1", "0.42,0,1,1"], iconKeyFrames
+			.Select(element => element.Attribute("KeySpline")?.Value ?? string.Empty)
+			.ToArray());
+		Assert.Equal(
+			["5", "10.5", "-0.5", "5"],
+			GetAnimationValues(
+				iconAnimation,
+				"TranslateTransform.Y",
+				avaloniaNamespace));
+	}
+
 	private static string FindRepositoryRoot()
 	{
 		var directory = AppContext.BaseDirectory;
@@ -81,4 +517,43 @@ public sealed class AvaloniaCompiledBindingContractTests
 
 		throw new InvalidOperationException("Repository root not found.");
 	}
+
+	private static void AssertStyleBackground(
+		IEnumerable<XElement> styles,
+		string selector,
+		string brushKey,
+		XNamespace avaloniaNamespace)
+	{
+		var style = Assert.Single(styles, element => element.Attribute("Selector")?.Value == selector);
+		var backgroundSetter = Assert.Single(
+			style.Elements(avaloniaNamespace + "Setter"),
+			element => element.Attribute("Property")?.Value == "Background");
+
+		Assert.Contains(brushKey, backgroundSetter.Attribute("Value")?.Value, StringComparison.Ordinal);
+	}
+
+	private static void AssertCursorSetter(
+		IEnumerable<XElement> styles,
+		string selector,
+		string expectedCursor,
+		XNamespace avaloniaNamespace)
+	{
+		var style = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value == selector);
+		var cursorSetter = Assert.Single(
+			style.Elements(avaloniaNamespace + "Setter"),
+			element => element.Attribute("Property")?.Value == "Cursor");
+		Assert.Equal(expectedCursor, cursorSetter.Attribute("Value")?.Value);
+	}
+
+	private static string[] GetAnimationValues(
+		XElement animation,
+		string propertyName,
+		XNamespace avaloniaNamespace)
+		=> animation
+			.Descendants(avaloniaNamespace + "Setter")
+			.Where(element => element.Attribute("Property")?.Value == propertyName)
+			.Select(element => element.Attribute("Value")?.Value ?? string.Empty)
+			.ToArray();
 }

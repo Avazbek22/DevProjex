@@ -1,13 +1,61 @@
 using System.Collections.ObjectModel;
+using Avalonia.Controls.Presenters;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Controls;
+using DevProjex.Avalonia.Coordinators;
 
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture workspace)
 {
+	[AvaloniaFact]
+	public async Task LoadedWindow_PreservesThreeIslandMinimumWidthAcrossPreviewLayout()
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+		try
+		{
+			AssertWindowMinimumWidth(window);
+			await UiTestDriver.OpenPreviewAsync(window);
+			AssertWindowMinimumWidth(window);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task CompactSettingsAllCheckBox_KeepsLabelAtNativeRasterScale()
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+		try
+		{
+			window.Classes.Add("compact-mode");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+			var checkBox = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
+			var contentPresenter = Assert.Single(
+				checkBox.GetVisualDescendants().OfType<ContentPresenter>(),
+				presenter => presenter.Name == "PART_ContentPresenter");
+			var box = Assert.Single(
+				checkBox.GetVisualDescendants().OfType<Border>(),
+				border => border.Name == "NormalRectangle");
+
+			Assert.Null(checkBox.RenderTransform);
+			Assert.Null(contentPresenter.RenderTransform);
+			Assert.Equal(18, box.Bounds.Width, precision: 3);
+			Assert.Equal(18, box.Bounds.Height, precision: 3);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task LoadedProject_BindsWindowMenuTreeStatusAndSettingsSurfaces()
     {
@@ -27,7 +75,9 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
             var filterToggleButton = UiTestDriver.GetRequiredTopMenuControl<Button>(window, "FilterToggleButton");
 
             Assert.Equal(viewModel.Title, window.Title);
-            Assert.Same(viewModel.TreeNodes, projectTree.ItemsSource);
+            Assert.Same(
+                viewModel.TreeNodes,
+                projectTree.ItemsSource);
             Assert.Equal(viewModel.SelectedFontFamily, projectTree.FontFamily);
             Assert.Equal(viewModel.TreeFontSize, projectTree.FontSize);
 
@@ -44,6 +94,66 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
             Assert.Equal(viewModel.SettingsAllIgnore, ignoreAllCheckBox.Content);
             AssertVisibleText(window, viewModel.StatusTreeLabel);
             AssertVisibleText(window, viewModel.StatusContentLabel);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ApplySettingsButton_DisablesWhileStatusOperationIsActiveAndRecoversAfterCompletion()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+            Assert.True(applyButton.IsEnabled);
+
+            viewModel.StatusBusy = true;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !applyButton.IsEnabled,
+                "Apply settings button to disable while a status operation is active");
+
+            viewModel.StatusBusy = false;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => applyButton.IsEnabled,
+                "Apply settings button to recover after the status operation completes");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ApplySettingsButton_AttentionClassTracksPendingStateAndDetachesWhenClean()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+            Assert.DoesNotContain("apply-attention", applyButton.Classes);
+
+            viewModel.SetPendingFilterSettingsChanges(true);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => applyButton.Classes.Contains("apply-attention"),
+                "Apply settings attention class to attach for pending filter changes");
+
+            viewModel.SetPendingFilterSettingsChanges(false);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !applyButton.Classes.Contains("apply-attention") &&
+                      Math.Abs(applyButton.Opacity - 1) < 0.01,
+                "Apply settings attention class and animated opacity to reset when selections are clean");
         }
         finally
         {
@@ -112,6 +222,15 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
 
     private static bool HeaderEquals(MenuItem menuItem, string expected)
         => string.Equals(menuItem.Header?.ToString(), expected, StringComparison.Ordinal);
+
+	private static void AssertWindowMinimumWidth(MainWindow window)
+	{
+		var alignedMinimum = WorkspacePresentationController.AlignWindowConstraintToPhysicalPixels(
+			WorkspacePresentationController.MinimumWindowWidth,
+			window.RenderScaling);
+
+		Assert.Equal(alignedMinimum, window.MinWidth, precision: 6);
+	}
 
     private static void AssertVisibleText(MainWindow window, string expected)
     {

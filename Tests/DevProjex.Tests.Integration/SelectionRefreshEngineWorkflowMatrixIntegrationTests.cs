@@ -30,6 +30,13 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
         if (RequiresDeferredProfileReconciliation(workflowCaseName))
         {
             workflowCase.AssertSnapshot(secondSnapshot);
+            if (workflowCaseName == "profile-stale-hidden-roots")
+            {
+                Assert.Contains(firstSnapshot.RootOptions!, option =>
+                    string.Equals(option.Name, "node_modules", StringComparison.Ordinal) && option.IsChecked);
+                Assert.DoesNotContain(secondSnapshot.RootOptions!, option =>
+                    string.Equals(option.Name, "node_modules", StringComparison.Ordinal));
+            }
             AssertDeferredProfileReconciliation(firstSnapshot, secondSnapshot, workflowCaseName);
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(secondSnapshot);
 
@@ -154,8 +161,7 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             CreateProfileWithUnavailableRootSelectionsContext,
             snapshot =>
             {
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "node_modules", StringComparison.Ordinal) && option.IsChecked);
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "docs", StringComparison.Ordinal) && !option.IsChecked);
+				Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "docs", StringComparison.Ordinal) && !option.IsChecked);
                 Assert.DoesNotContain(snapshot.RootOptions!, option => string.Equals(option.Name, "generated", StringComparison.Ordinal));
             }),
         new WorkflowCase(
@@ -381,7 +387,8 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
                 snapshot.IgnoreOptionCounts,
                 snapshot.ControllerImpactCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
-                snapshot.ExtensionlessEntriesCount),
+                snapshot.ExtensionlessEntriesCount,
+                snapshot.GitEvidence),
             RootOptionStateCache: snapshot.RootOptions?.ToDictionary(
                 option => option.Name,
                 option => option.IsChecked,

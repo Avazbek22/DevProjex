@@ -1,0 +1,12 @@
+global using System.Text;
+global using System.Text.Json;
+global using DevProjex.Application.Context;
+global using DevProjex.Application.Services;
+global using DevProjex.Kernel;
+global using DevProjex.Kernel.Contracts;
+global using DevProjex.Kernel.Models;
+global using DevProjex.Terminal.CommandLine;
+global using DevProjex.Terminal.Execution;
+global using DevProjex.Terminal.Tui;
+global using DevProjex.Tests.Terminal.Progress;
+global using Xunit;

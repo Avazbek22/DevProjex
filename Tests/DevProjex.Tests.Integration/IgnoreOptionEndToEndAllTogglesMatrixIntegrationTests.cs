@@ -5,8 +5,6 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 {
-	private const int MaximumExternalConvergencePasses = 4;
-
 	[Fact]
 	public void FullRefresh_AllIgnoreOptionsOff_RevealsEveryIgnoreCandidateAcrossSections()
 	{
@@ -80,7 +78,7 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 	}
 
 	[Fact]
-	public void FullRefresh_ExtensionFilterOffAndEmptyFoldersOn_RemovesGitIgnoreWhenItNoLongerChangesTree()
+	public void FullRefresh_ExtensionFilterOffAndEmptyFoldersOn_HidesZeroImpactGitIgnoreButKeepsIntent()
 	{
 		using var workspace = CreateComprehensiveWorkspace();
 		var services = CreateServices();
@@ -98,7 +96,12 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 
 		AssertExtensionOption(logExtensionOffAndEmptyFoldersOn, ".log", expectedChecked: false);
 		AssertIgnoreOption(logExtensionOffAndEmptyFoldersOn, IgnoreOptionId.EmptyFolders, expectedVisible: true, expectedChecked: true);
-		AssertIgnoreOption(logExtensionOffAndEmptyFoldersOn, IgnoreOptionId.UseGitIgnore, expectedVisible: false, expectedChecked: null);
+		AssertIgnoreOption(
+			logExtensionOffAndEmptyFoldersOn,
+			IgnoreOptionId.UseGitIgnore,
+			expectedVisible: false,
+			expectedChecked: null);
+		Assert.False(logExtensionOffAndEmptyFoldersOn.IgnoreOptionStateCache[IgnoreOptionId.UseGitIgnore]);
 		AssertTreeState(
 			workspace.Path,
 			logExtensionOffAndEmptyFoldersOn,
@@ -146,6 +149,49 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 				"general/empty.txt",
 				"general/README"
 			]);
+	}
+
+	[Fact]
+	public void FullRefresh_EveryIgnorePowerSetState_MatchesIndependentGoldenPathsInOnePass()
+	{
+		using var workspace = CreateComprehensiveWorkspace();
+		var services = CreateServices();
+		var defaults = ComputeConvergedSnapshot(services, workspace.Path, CreateDefaultContext(workspace.Path));
+		var allOff = ComputeConvergedSnapshot(
+			services,
+			workspace.Path,
+			CreateAllIgnoreOptionsOffContext(workspace.Path, defaults));
+		var cases = SingleToggleCases()
+			.Select(static row => Assert.IsType<SingleToggleCase>(row[0]))
+			.ToArray();
+		var allPaths = AllCandidatePaths();
+		var stateCount = 1 << cases.Length;
+
+		for (var mask = 0; mask < stateCount; mask++)
+		{
+			var selected = new HashSet<IgnoreOptionId>();
+			var hiddenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			for (var bit = 0; bit < cases.Length; bit++)
+			{
+				if ((mask & (1 << bit)) == 0)
+					continue;
+
+				selected.Add(cases[bit].OptionId);
+				hiddenPaths.UnionWith(cases[bit].HiddenPaths);
+			}
+
+			var snapshot = ComputeConvergedSnapshot(
+				services,
+				workspace.Path,
+				CreateIgnoreStateContext(workspace.Path, allOff, selected));
+			var visiblePaths = allPaths.Where(path => !hiddenPaths.Contains(path)).ToArray();
+
+			AssertTreeState(workspace.Path, snapshot, visiblePaths, hiddenPaths);
+			SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
+				workspace.Path,
+				services.IgnoreRulesService,
+				snapshot);
+		}
 	}
 
 	public static IEnumerable<object[]> SingleToggleCases()
@@ -234,38 +280,17 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 		string rootPath,
 		SelectionRefreshContext context)
 	{
-		var previous = services.Engine.ComputeFullRefreshSnapshot(context, TestContext.Current.CancellationToken);
-		for (var pass = 0; pass < MaximumExternalConvergencePasses; pass++)
-		{
-			var next = services.Engine.ComputeFullRefreshSnapshot(
-				CreateContextFromSnapshot(rootPath, previous),
-				TestContext.Current.CancellationToken);
-			if (AreEquivalentSnapshots(previous, next))
-				return next;
-
-			previous = next;
-		}
-
-		var final = services.Engine.ComputeFullRefreshSnapshot(
-			CreateContextFromSnapshot(rootPath, previous),
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			context,
 			TestContext.Current.CancellationToken);
-		AssertEquivalentSnapshots(previous, final);
-		return final;
-	}
+		var repeated = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextFromSnapshot(rootPath, snapshot),
+			TestContext.Current.CancellationToken);
 
-	private static bool AreEquivalentSnapshots(
-		SelectionRefreshSnapshot expected,
-		SelectionRefreshSnapshot actual)
-	{
-		try
-		{
-			AssertEquivalentSnapshots(expected, actual);
-			return true;
-		}
-		catch (Xunit.Sdk.XunitException)
-		{
-			return false;
-		}
+		// A single user action must publish the final state. Repeated external refreshes here
+		// would hide the exact "checkbox appears only after F5" regression this matrix guards.
+		AssertEquivalentSnapshots(snapshot, repeated);
+		return snapshot;
 	}
 
 	private static SelectionRefreshContext CreateAllIgnoreOptionsOffContext(
@@ -305,6 +330,28 @@ public sealed class IgnoreOptionEndToEndAllTogglesMatrixIntegrationTests
 			IgnoreSelectionCache = new HashSet<IgnoreOptionId> { optionId },
 			IgnoreOptionStateCache = stateCache,
 			IgnoreAllPreference = null
+		};
+	}
+
+	private static SelectionRefreshContext CreateIgnoreStateContext(
+		string rootPath,
+		SelectionRefreshSnapshot snapshot,
+		IReadOnlySet<IgnoreOptionId> selectedOptions)
+	{
+		var stateCache = snapshot.IgnoreOptionStateCache.ToDictionary(
+			static pair => pair.Key,
+			pair => selectedOptions.Contains(pair.Key));
+		foreach (var option in snapshot.IgnoreOptions)
+			stateCache[option.Id] = selectedOptions.Contains(option.Id);
+
+		return CreateContextFromSnapshot(rootPath, snapshot) with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(selectedOptions),
+			IgnoreOptionStateCache = stateCache,
+			IgnoreAllPreference = null,
+			IgnoreOptionStateCacheIsComplete = true,
+			CaptureTreeInventory = true
 		};
 	}
 

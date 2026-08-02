@@ -1,0 +1,30 @@
+
+  DevProjex Terminal                                                                                              v<VERSION>
+  Choose a workspace action. No folder is scanned until you open it.
+
+  Current directory                                                                            Current folder is ready
+  <WELCOME_ROOT>
+
+  ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
+  │> Open current directory                │  │ Open the current folder and prepare its effective context.           │
+  │  Recent workspaces                     │  │                                                                      │
+  │  Browse folder                         │  │                                                                      │
+  │  Clone repository                      │  │                                                                      │
+  │  Open Desktop                          │  │                                                                      │
+  │  Help                                  │  │                                                                      │
+  │  Exit                                  │  │                                                                      │
+  └────────────────────────────────────────┘  └──────────────────────────────────────────────────────────────────────┘
+
+  Operation canceled
+
+
+
+
+
+
+
+
+
+
+
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

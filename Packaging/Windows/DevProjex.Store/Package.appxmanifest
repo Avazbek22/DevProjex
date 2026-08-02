@@ -13,12 +13,15 @@
   <Resources>
     <Resource Language="en-us" />
     <Resource Language="ru-ru" />
+    <Resource Language="es-es" />
+    <Resource Language="pt-br" />
+    <Resource Language="pt-pt" />
     <Resource Language="de-de" />
     <Resource Language="fr-fr" />
     <Resource Language="it-it" />
-    <Resource Language="kk-kz" />
-    <Resource Language="uz-Latn-UZ" />
     <Resource Language="tg-Cyrl-TJ" />
+    <Resource Language="uz-Latn-UZ" />
+    <Resource Language="kk-kz" />
   </Resources>
   <Applications>
     <Application Id="App" Executable="DevProjex.Avalonia.exe" EntryPoint="Windows.FullTrustApplication">

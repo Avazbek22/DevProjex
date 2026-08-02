@@ -1,0 +1,52 @@
+using Terminal.Gui.Input;
+using Terminal.Gui.Views;
+
+namespace DevProjex.Terminal.Tui;
+
+internal sealed class TerminalParameterListView : ListView
+{
+	private const long PointerEventDeduplicationWindowMilliseconds = 1_000;
+	private int _lastPressedViewportColumn = -1;
+	private int _lastPressedViewportRow = -1;
+	private long _lastPressedAt;
+
+	public event EventHandler? SelectionToggleRequested;
+
+	protected override bool OnMouseEvent(Mouse mouse)
+	{
+		if (mouse.Flags.HasFlag(MouseFlags.WheeledUp) ||
+		    mouse.Flags.HasFlag(MouseFlags.WheeledDown))
+		{
+			return base.OnMouseEvent(mouse);
+		}
+
+		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
+		var released = mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased);
+		var clicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
+		if ((!pressed && !released && !clicked) || mouse.Position is not { } position)
+			return base.OnMouseEvent(mouse);
+
+		SetFocus();
+		var row = Viewport.Y + position.Y;
+		SelectedItem = row;
+		EnsureSelectedItemVisible();
+		var now = Environment.TickCount64;
+		if (!pressed &&
+		    _lastPressedViewportRow == position.Y &&
+		    _lastPressedViewportColumn == position.X &&
+		    now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
+		{
+			return true;
+		}
+		if (pressed)
+		{
+			// A settings refresh can move the viewport before the matching release event.
+			_lastPressedViewportRow = position.Y;
+			_lastPressedViewportColumn = position.X;
+			_lastPressedAt = now;
+		}
+		if (position.X is >= 2 and <= 4)
+			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
+		return true;
+	}
+}

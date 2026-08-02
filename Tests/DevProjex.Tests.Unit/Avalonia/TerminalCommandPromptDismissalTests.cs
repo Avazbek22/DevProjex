@@ -2,6 +2,7 @@ using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class TerminalCommandPromptDismissalTests
 {
 	[Theory]
@@ -11,6 +12,10 @@ public sealed class TerminalCommandPromptDismissalTests
 	[InlineData((int)TerminalCommandDialogAction.DismissPrompt, true, true)]
 	[InlineData((int)TerminalCommandDialogAction.InstallOrRepair, false, false)]
 	[InlineData((int)TerminalCommandDialogAction.InstallOrRepair, true, false)]
+	[InlineData((int)TerminalCommandDialogAction.Reinstall, false, false)]
+	[InlineData((int)TerminalCommandDialogAction.Reinstall, true, false)]
+	[InlineData((int)TerminalCommandDialogAction.ConfigurePath, false, false)]
+	[InlineData((int)TerminalCommandDialogAction.ConfigurePath, true, false)]
 	public void ShouldPersistTerminalCommandPromptDismissal_OnlyPersistsRealDismissals(
 		int actionValue,
 		bool dontShowAgain,
@@ -26,6 +31,7 @@ public sealed class TerminalCommandPromptDismissalTests
 	[InlineData((int)TerminalCommandInstallOutcome.AlreadyInstalled)]
 	[InlineData((int)TerminalCommandInstallOutcome.Created)]
 	[InlineData((int)TerminalCommandInstallOutcome.Repaired)]
+	[InlineData((int)TerminalCommandInstallOutcome.Reinstalled)]
 	public void ResolveTerminalCommandPostInstallUiAction_SuccessDoesNotShowFollowUpDialog(int outcomeValue)
 	{
 		var result = new TerminalCommandInstallResult(
@@ -53,6 +59,20 @@ public sealed class TerminalCommandPromptDismissalTests
 		var action = MainWindow.ResolveTerminalCommandPostInstallUiAction(result);
 
 		Assert.Equal(MainWindow.TerminalCommandPostInstallUiAction.ShowError, action);
+	}
+
+	[Theory]
+	[InlineData(TerminalCommandSetupState.InstalledPathMissing, true)]
+	[InlineData(TerminalCommandSetupState.CommandShadowed, true)]
+	[InlineData(TerminalCommandSetupState.Installed, false)]
+	[InlineData(TerminalCommandSetupState.Stale, false)]
+	public void RequiresTerminalCommandPathConfiguration_ContinuesOnlyForRecoverablePathStates(
+		TerminalCommandSetupState state,
+		bool expected)
+	{
+		var snapshot = CreateInstalledSnapshot() with { State = state };
+
+		Assert.Equal(expected, MainWindow.RequiresTerminalCommandPathConfiguration(snapshot));
 	}
 
 	private static TerminalCommandSetupSnapshot CreateInstalledSnapshot() =>

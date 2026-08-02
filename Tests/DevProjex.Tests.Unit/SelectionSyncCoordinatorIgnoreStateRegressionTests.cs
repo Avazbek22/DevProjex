@@ -8,94 +8,6 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 	private const string NextProjectPath = @"C:\Workspace\ProjectB";
 
 	[Fact]
-	public void PopulateIgnoreOptionsForRootSelection_NewlyVisibleOption_UsesDefaultCheckedAfterManualSelectionChange()
-	{
-		var viewModel = CreateViewModel();
-		using var coordinator = CreateCoordinator(viewModel);
-		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
-
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1));
-		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
-
-		GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked = false;
-
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1, ExtensionlessFiles: 2));
-		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
-
-		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked);
-		Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFiles).IsChecked);
-		Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked);
-		Assert.False(viewModel.AllIgnoreChecked);
-	}
-
-	[Fact]
-	public void PopulateIgnoreOptionsForRootSelection_TransientlyHiddenUncheckedOption_RestoresUncheckedState()
-	{
-		var viewModel = CreateViewModel();
-		using var coordinator = CreateCoordinator(viewModel);
-		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
-
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFiles: 1, ExtensionlessFiles: 2));
-		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
-
-		GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked = false;
-
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFiles: 1));
-		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
-		Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.ExtensionlessFiles);
-
-		GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFiles).IsChecked = false;
-
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFiles: 1, ExtensionlessFiles: 2));
-		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
-
-		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked);
-		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFiles).IsChecked);
-		Assert.False(viewModel.AllIgnoreChecked);
-	}
-
-	[Fact]
-	public void ResetProjectProfileSelections_NewProject_RestoresExtensionlessDefaultCheckedState()
-	{
-		var viewModel = CreateViewModel();
-		using var coordinator = CreateCoordinator(viewModel);
-		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
-
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, ExtensionlessFiles: 2));
-		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
-
-		GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked = false;
-
-		coordinator.ResetProjectProfileSelections(NextProjectPath);
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, ExtensionlessFiles: 2));
-		coordinator.PopulateIgnoreOptionsForRootSelection([], NextProjectPath);
-
-		Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked);
-		Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked);
-		Assert.True(viewModel.AllIgnoreChecked);
-	}
-
-	[Fact]
-	public void HandleIgnoreAllChanged_NewlyVisibleOptionRespectsAllOffIntent()
-	{
-		var viewModel = CreateViewModel();
-		using var coordinator = CreateCoordinator(viewModel);
-		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
-
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1));
-		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
-
-		coordinator.HandleIgnoreAllChanged(false, currentPath: null);
-
-		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, ExtensionlessFiles: 2));
-		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
-
-		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked);
-		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked);
-		Assert.False(viewModel.AllIgnoreChecked);
-	}
-
-	[Fact]
 	public void HandleIgnoreAllChanged_NewlyVisibleOptionRespectsAllOffIntentWhenNoKnownOptionsExist()
 	{
 		var viewModel = CreateViewModel();
@@ -180,21 +92,76 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 		Assert.True(coordinator.SnapshotIgnoreOptionStatesForPersistence()![IgnoreOptionId.EmptyFolders]);
 	}
 
+	[Fact]
+	public void PopulateIgnoreOptionsForRootSelection_StandaloneUncheckedGitController_HidesAtZeroImpactAndKeepsIntent()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, includeGitIgnore: true);
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+
+		ApplyIgnoreCounts(
+			coordinator,
+			IgnoreOptionCounts.Empty,
+			new IgnoreControllerImpactCounts(GitIgnore: 1));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		var gitIgnore = GetIgnoreOption(viewModel, IgnoreOptionId.UseGitIgnore);
+		Assert.True(gitIgnore.IsChecked);
+
+		gitIgnore.IsChecked = false;
+
+		ApplyIgnoreCounts(coordinator, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty);
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
+		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.False(coordinator.SnapshotIgnoreOptionStatesForPersistence()![IgnoreOptionId.UseGitIgnore]);
+	}
+
+	[Fact]
+	public void PopulateIgnoreOptionsForRootSelection_CheckedGitController_HidesWhenImpactDropsToZero()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, includeGitIgnore: true);
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+
+		ApplyIgnoreCounts(
+			coordinator,
+			IgnoreOptionCounts.Empty,
+			new IgnoreControllerImpactCounts(GitIgnore: 1));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.UseGitIgnore).IsChecked);
+
+		ApplyIgnoreCounts(coordinator, IgnoreOptionCounts.Empty, IgnoreControllerImpactCounts.Empty);
+		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+
+		Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
+		Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, coordinator.GetSelectedIgnoreOptionIds());
+		Assert.True(coordinator.SnapshotIgnoreOptionStatesForPersistence()![IgnoreOptionId.UseGitIgnore]);
+	}
+
 	private static IgnoreOptionViewModel GetIgnoreOption(MainWindowViewModel viewModel, IgnoreOptionId id)
 	{
 		return Assert.Single(viewModel.IgnoreOptions, option => option.Id == id);
 	}
 
-	private static void ApplyIgnoreCounts(SelectionSyncCoordinator coordinator, IgnoreOptionCounts ignoreCounts)
+	private static void ApplyIgnoreCounts(
+		SelectionSyncCoordinator coordinator,
+		IgnoreOptionCounts ignoreCounts,
+		IgnoreControllerImpactCounts controllerImpactCounts = default)
 	{
 		var method = typeof(SelectionSyncCoordinator).GetMethod(
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, IgnoreControllerImpactCounts.Empty, true]);
+		method!.Invoke(coordinator, [Array.Empty<SelectionOption>(), 0, ignoreCounts, controllerImpactCounts, true]);
 	}
 
-	private static SelectionSyncCoordinator CreateCoordinator(MainWindowViewModel viewModel)
+	private static SelectionSyncCoordinator CreateCoordinator(
+		MainWindowViewModel viewModel,
+		bool includeGitIgnore = false,
+		bool includeSmartIgnore = false)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		var scanner = new StubFileSystemScanner();
@@ -215,8 +182,8 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 				SmartIgnoredFolders: new HashSet<string>(),
 				SmartIgnoredFiles: new HashSet<string>()),
 			(_, _) => new IgnoreOptionsAvailability(
-				IncludeGitIgnore: false,
-				IncludeSmartIgnore: false,
+				IncludeGitIgnore: includeGitIgnore,
+				IncludeSmartIgnore: includeSmartIgnore,
 				ShowAdvancedCounts: true),
 			_ => false,
 			() => null);
@@ -236,6 +203,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
+				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",
 				["Settings.Ignore.DotFolders"] = "dot folders",

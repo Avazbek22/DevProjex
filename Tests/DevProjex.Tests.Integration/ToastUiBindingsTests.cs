@@ -5,7 +5,7 @@ public sealed class ToastUiBindingsTests
 	[Fact]
 	public void MainWindow_ContainsToastItemsControl()
 	{
-		var file = Path.Combine(FindRepositoryRoot(), "Apps", "Avalonia", "DevProjex.Avalonia", "MainWindow.axaml");
+		var file = Path.Combine(FindRepositoryRoot(), "Apps", "Avalonia", "MainWindow.axaml");
 		var content = File.ReadAllText(file);
 
 		Assert.Contains("ItemsSource=\"{Binding ToastItems}\"", content);
@@ -16,6 +16,8 @@ public sealed class ToastUiBindingsTests
 		Assert.Contains("Foreground=\"{DynamicResource AppTextBrush}\"", content);
 		Assert.Contains("HorizontalAlignment=\"Center\"", content);
 		Assert.Contains("TextAlignment=\"Center\"", content);
+		Assert.Contains("MaxWidth=\"560\"", content);
+		Assert.Contains("TextWrapping=\"Wrap\"", content);
 	}
 
 	private static string FindRepositoryRoot()

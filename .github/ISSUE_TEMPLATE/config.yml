@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage questions and ideas
+    url: https://github.com/Avazbek22/DevProjex/discussions
+    about: Ask for help or discuss an idea before filing an actionable bug.
+  - name: Security vulnerability
+    url: https://github.com/Avazbek22/DevProjex/security/policy
+    about: Follow the private reporting instructions; do not disclose vulnerabilities publicly.

@@ -1,5 +1,8 @@
+using DevProjex.Application.Diagnostics;
+
 namespace DevProjex.Tests.Integration;
 
+[Trait("Category", "LocalPerformance")]
 public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 {
 	[Fact]
@@ -9,7 +12,7 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		var elapsed = MeasureIgnoreSnapshot(temp.Path);
 
 		Assert.True(
-			elapsed < TimeSpan.FromSeconds(30),
+			elapsed < TimeSpan.FromSeconds(5),
 			$"10k ignore snapshot smoke exceeded budget: {elapsed}.");
 	}
 
@@ -31,8 +34,64 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		var retainedBytes = Math.Max(0, GC.GetTotalMemory(forceFullCollection: true) - baselineBytes);
 
 		Assert.True(
-			retainedBytes < 128L * 1024 * 1024,
+			retainedBytes < 64L * 1024 * 1024,
 			$"Repeated ignore scans retained too much managed memory: {retainedBytes:N0} bytes.");
+	}
+
+	[Fact]
+	public void HierarchicalGitIgnore_OneHundredTwentyEightScopesAndEightThousandRules_CompletesWithinSmokeBudget()
+	{
+		using var temp = CreateHierarchicalGitIgnoreWorkspace(scopeCount: 128, rulesPerScope: 64);
+		var observation = MeasureHierarchicalGitIgnore(temp.Path, expectedScopeCount: 128);
+
+		Assert.True(
+			observation.Elapsed < TimeSpan.FromSeconds(10),
+			$"Hierarchical GitIgnore smoke exceeded budget: {observation.Elapsed}.");
+		Assert.DoesNotContain("repo/scope-000/drop.cache", observation.Paths);
+		Assert.DoesNotContain("repo/scope-127/drop.cache", observation.Paths);
+		Assert.Contains("repo/scope-000/keep.cache", observation.Paths);
+		Assert.Contains("repo/scope-127/visible.txt", observation.Paths);
+	}
+
+	[Fact]
+	public void RootDirectoryToggleCandidates_ReuseOneGitScopeBootstrapPerOperation()
+	{
+		const int candidateCount = 300;
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "*.generated\n");
+		temp.CreateFile("src/App.cs", "public sealed class App {}\n");
+		for (var index = 0; index < candidateCount; index++)
+			temp.CreateDirectory($".candidate-{index:D3}");
+
+		var service = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
+		var selectedOptions = new[] { IgnoreOptionId.UseGitIgnore, IgnoreOptionId.DotFolders };
+		var selectedRoots = new[] { "src" };
+		var rules = service.Build(temp.Path, selectedOptions, selectedRoots);
+		var scanner = new ScanOptionsUseCase(new FileSystemScanner());
+
+		using var measurement = IgnorePipelineDiagnostics.BeginMeasurement();
+		var stopwatch = Stopwatch.StartNew();
+		var result = scanner.GetProjectWorkspaceSnapshotForRootFolders(
+			temp.Path,
+			selectedRoots,
+			IgnoreRulesProjection.ForExtensionAvailability(rules),
+			rules,
+			effectiveExtensionPolicy: null,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: TestContext.Current.CancellationToken,
+			includeControllerImpactProbeRoots: true);
+		stopwatch.Stop();
+		var diagnostics = measurement.Capture();
+
+		TestContext.Current.TestOutputHelper?.WriteLine(
+			$"Root-candidate Git bootstrap benchmark: {stopwatch.Elapsed.TotalMilliseconds:F3} ms for {candidateCount} candidates.");
+		Assert.Equal(candidateCount, result.Value.IgnoreSection.EffectiveIgnoreOptionCounts.DotFolders);
+		Assert.Equal(0, diagnostics.GitIgnoreLoadExecutions);
+		Assert.Equal(0, diagnostics.GitIgnoreSourceReadRequests);
+		Assert.True(diagnostics.GitIgnoreLoadReuses >= 1);
+		Assert.True(
+			stopwatch.Elapsed < TimeSpan.FromSeconds(5),
+			$"Root-candidate ignore scan exceeded smoke budget: {stopwatch.Elapsed}.");
 	}
 
 	[Theory]
@@ -47,7 +106,7 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 			    "1",
 			    StringComparison.Ordinal))
 		{
-			return;
+			Assert.Skip("Set DEVPROJEX_RUN_LARGE_PERF_TESTS=1 for the pre-release performance gate.");
 		}
 
 		using var temp = CreateSyntheticWorkspace(fileCount);
@@ -56,6 +115,55 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		Assert.True(
 			elapsed < TimeSpan.FromSeconds(maxSeconds),
 			$"{fileCount:N0} ignore snapshot smoke exceeded budget: {elapsed}.");
+	}
+
+	[Fact]
+	public void HierarchicalGitIgnore_OneThousandScopesAndOneHundredThousandRules_CompletesWithinOptInSmokeBudget()
+	{
+		if (!string.Equals(
+			    Environment.GetEnvironmentVariable("DEVPROJEX_RUN_LARGE_PERF_TESTS"),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			Assert.Skip("Set DEVPROJEX_RUN_LARGE_PERF_TESTS=1 for the pre-release performance gate.");
+		}
+
+		using var temp = CreateHierarchicalGitIgnoreWorkspace(scopeCount: 1_000, rulesPerScope: 100);
+		var observation = MeasureHierarchicalGitIgnore(temp.Path, expectedScopeCount: 1_000);
+
+		Assert.True(
+			observation.Elapsed < TimeSpan.FromSeconds(60),
+			$"100k hierarchical GitIgnore rule smoke exceeded budget: {observation.Elapsed}.");
+		Assert.DoesNotContain("repo/scope-999/drop.cache", observation.Paths);
+		Assert.Contains("repo/scope-999/keep.cache", observation.Paths);
+	}
+
+	[Fact]
+	public void HierarchicalGitIgnore_NestedScopeChains_PreserveInheritedRulesWithinSmokeBudget()
+	{
+		if (!string.Equals(
+			    Environment.GetEnvironmentVariable("DEVPROJEX_RUN_LARGE_PERF_TESTS"),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			Assert.Skip("Set DEVPROJEX_RUN_LARGE_PERF_TESTS=1 for the pre-release performance gate.");
+		}
+
+		const int chainCount = 24;
+		const int depthPerChain = 16;
+		using var temp = CreateNestedGitIgnoreWorkspace(chainCount, depthPerChain, rulesPerScope: 32);
+		var observation = MeasureHierarchicalGitIgnore(
+			temp.Path,
+			expectedScopeCount: chainCount * depthPerChain);
+		var deepestScope = "repo/chain-00/" + string.Join(
+			'/',
+			Enumerable.Range(0, depthPerChain).Select(static depth => $"d{depth:D2}"));
+
+		Assert.True(
+			observation.Elapsed < TimeSpan.FromSeconds(60),
+			$"Nested GitIgnore scope smoke exceeded budget: {observation.Elapsed}.");
+		Assert.DoesNotContain($"{deepestScope}/drop.cache", observation.Paths);
+		Assert.Contains($"{deepestScope}/keep.cache", observation.Paths);
 	}
 
 	private static TimeSpan MeasureIgnoreSnapshot(string rootPath)
@@ -83,6 +191,38 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		Assert.True(snapshot.Value.EffectiveIgnoreOptionCounts.DotFolders >= 1);
 	}
 
+	private static HierarchicalGitIgnoreObservation MeasureHierarchicalGitIgnore(
+		string rootPath,
+		int expectedScopeCount)
+	{
+		var selectedRoots = new HashSet<string>(["repo"], PathComparer.Default);
+		var extensions = new HashSet<string>([".cache", ".txt"], StringComparer.OrdinalIgnoreCase);
+		var rules = CreateHierarchicalGitIgnoreRules();
+		var stopwatch = Stopwatch.StartNew();
+		var scan = new FileSystemScanner().ScanProjectWorkspace(
+			new ProjectWorkspaceScanRequest(
+				rootPath,
+				selectedRoots,
+				rules,
+				rules,
+				new ExtensionSetInclusionPolicy(extensions),
+				CaptureTreeInventory: true,
+				IncludeDirectoryToggleProbeRoots: false,
+				IncludeControllerImpactProbeRoots: false),
+			TestContext.Current.CancellationToken);
+		var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(scan.Value.TreeInventory);
+		var tree = new TreeBuilder().Build(
+			inventory,
+			new TreeFilterOptions(extensions, selectedRoots, rules),
+			TestContext.Current.CancellationToken);
+		stopwatch.Stop();
+
+		Assert.Equal(expectedScopeCount, inventory.DiscoveredGitIgnoreMatchers.Count);
+		return new HierarchicalGitIgnoreObservation(
+			stopwatch.Elapsed,
+			FlattenRelativePaths(rootPath, tree.Root));
+	}
+
 	private static IgnoreRules CreateIgnoreRules()
 		=> new(
 			IgnoreHiddenFolders: false,
@@ -96,6 +236,19 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 			IgnoreEmptyFiles = true,
 			IgnoreExtensionlessFiles = true,
 			UseSmartIgnore = true
+		};
+
+	private static IgnoreRules CreateHierarchicalGitIgnoreRules() =>
+		new(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			EnableGitIgnoreTraversal = true,
+			GitIgnoreCandidateMatchesActiveRules = true
 		};
 
 	private static void ForceFullCollection()
@@ -125,4 +278,76 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 
 		return temp;
 	}
+
+	private static TemporaryDirectory CreateHierarchicalGitIgnoreWorkspace(
+		int scopeCount,
+		int rulesPerScope)
+	{
+		var temp = new TemporaryDirectory();
+		for (var scopeIndex = 0; scopeIndex < scopeCount; scopeIndex++)
+		{
+			var scope = $"repo/scope-{scopeIndex:D3}";
+			var rules = new StringBuilder()
+				.AppendLine("*.cache")
+				.AppendLine("!keep.cache");
+			for (var ruleIndex = 2; ruleIndex < rulesPerScope; ruleIndex++)
+				rules.Append("unused-").Append(scopeIndex).Append('-').Append(ruleIndex).AppendLine(".artifact");
+
+			temp.CreateFile($"{scope}/.gitignore", rules.ToString());
+			temp.CreateFile($"{scope}/drop.cache", "ignored");
+			temp.CreateFile($"{scope}/keep.cache", "visible");
+			temp.CreateFile($"{scope}/visible.txt", "visible");
+		}
+
+		return temp;
+	}
+
+	private static TemporaryDirectory CreateNestedGitIgnoreWorkspace(
+		int chainCount,
+		int depthPerChain,
+		int rulesPerScope)
+	{
+		var temp = new TemporaryDirectory();
+		for (var chainIndex = 0; chainIndex < chainCount; chainIndex++)
+		{
+			var scope = $"repo/chain-{chainIndex:D2}";
+			for (var depth = 0; depth < depthPerChain; depth++)
+			{
+				scope += $"/d{depth:D2}";
+				var rules = new StringBuilder()
+					.AppendLine("*.cache")
+					.AppendLine("!keep.cache");
+				for (var ruleIndex = 2; ruleIndex < rulesPerScope; ruleIndex++)
+					rules.Append("unused-").Append(chainIndex).Append('-').Append(depth).Append('-')
+						.Append(ruleIndex).AppendLine(".artifact");
+
+				temp.CreateFile($"{scope}/.gitignore", rules.ToString());
+				temp.CreateFile($"{scope}/drop.cache", "ignored");
+				temp.CreateFile($"{scope}/keep.cache", "visible");
+				temp.CreateFile($"{scope}/visible.txt", "visible");
+			}
+		}
+
+		return temp;
+	}
+
+	private static List<string> FlattenRelativePaths(string rootPath, FileSystemNode root)
+	{
+		var paths = new List<string>();
+		var pending = new Stack<FileSystemNode>();
+		pending.Push(root);
+		while (pending.Count > 0)
+		{
+			var node = pending.Pop();
+			paths.Add(Path.GetRelativePath(rootPath, node.FullPath).Replace('\\', '/'));
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				pending.Push(node.Children[index]);
+		}
+
+		return paths;
+	}
+
+	private sealed record HierarchicalGitIgnoreObservation(
+		TimeSpan Elapsed,
+		IReadOnlyList<string> Paths);
 }

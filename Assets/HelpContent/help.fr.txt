@@ -1,4 +1,4 @@
-﻿## 1) Qu’est‑ce que c’est et pourquoi
+## 1) Qu’est‑ce que c’est et pourquoi
 DevProjex prépare rapidement le contexte d’un projet : affiche la structure dossiers/fichiers, permet de sélectionner des éléments et de copier l’arborescence et/ou le contenu des fichiers dans le presse‑papiers. Utile pour code review, support, formation et partage de structure avec un assistant IA.
 
 Important : l’application est en lecture seule et ne modifie jamais les fichiers.
@@ -18,18 +18,31 @@ Raccourcis :
 * Ouvrir le dossier… — ouvrir le dossier racine (Ctrl+O)
 * Nouvelle fenêtre — ouvrir une nouvelle instance indépendante de DevProjex
 * Récents — liste des dossiers locaux ouverts récemment
-* Actualiser — relire et reconstruire l’arborescence (F5)
+* Actualiser — relire un dossier local et reconstruire l’arborescence (F5)
 * Exporter vers un fichier :
   * Exporter l’arborescence
   * Exporter le contenu
   * Exporter arborescence et contenu
+* Exporter le projet :
+  * Vers un dossier…
+  * Vers une archive ZIP…
+
+L’export du projet crée un dossier distinct ou une archive ZIP à partir de l’arborescence actuelle, tout en conservant la structure des répertoires.
+
+Les dossiers de premier niveau, types de fichiers, règles d’exclusion et éléments cochés sont pris en compte. Si rien n’est coché, toute l’arborescence actuelle est exportée.
+
+Les fichiers texte et binaires sont copiés, et les dossiers vides inclus sont conservés. Les fichiers sources ne sont pas modifiés. Le résultat ne peut pas être enregistré dans le projet source.
+
+Pendant l’export, vous ne pouvez pas modifier l’arborescence ou les paramètres, utiliser le filtre, changer le format ou le mode d’aperçu, lancer des commandes Git, actualiser ou ouvrir un autre projet.
 
 Règles de format :
 * Exporter l’arborescence :
   * ASCII -> uniquement `.txt`.
   * JSON -> `.json` par défaut, avec `.json` et `.txt` disponibles dans la boîte de sauvegarde.
-* Exporter le contenu — toujours au format texte du contenu, fichier `.txt` (le sélecteur ASCII/JSON n’influence pas).
-* Exporter arborescence et contenu — toujours fichier `.txt` ; le sélecteur ASCII/JSON n’influence que le format du bloc arborescence dans le résultat.
+  * XML -> `.xml` par défaut, avec `.xml` et `.txt` disponibles dans la boîte de sauvegarde.
+  * MD -> `.md` par défaut, avec `.md` et `.txt` disponibles dans la boîte de sauvegarde.
+* Exporter le contenu — toujours au format texte du contenu, fichier `.txt` (le sélecteur de format d’arborescence n’influence pas).
+* Exporter arborescence et contenu — toujours fichier `.txt` ; le format d’arborescence choisi n’influence que le format du bloc arborescence dans le résultat.
 
 Les fichiers exportés sont écrits en UTF-8 sans BOM.
 
@@ -50,13 +63,13 @@ Règles :
 * seuls les dossiers locaux sont ajoutés à la liste ;
 * les dépôts Git clonés via DevProjex ne sont pas ajoutés à cette liste ;
 * aucun doublon n’est créé — rouvrir le même dossier le remonte en haut de la liste ;
-* jusqu’à 10 derniers dossiers sont conservés ;
+* jusqu’à 15 derniers dossiers sont conservés ;
 * l’historique est conservé entre les démarrages de l’application.
 
-Pour chaque élément, le nom court du dossier est affiché ; le chemin complet est disponible dans une info-bulle.
+Pour chaque élément, le dossier parent et le nom du projet sont affichés, par exemple `Projects / App`.
 
 ## 4) Lancement depuis le terminal
-DevProjex peut être lancé depuis le terminal.
+DevProjex fournit un espace de travail interactif dans le terminal et des commandes directes pour les scripts et la CI.
 
 Si la commande est déjà configurée, ouvrez un terminal et exécutez :
 `devprojex --help`
@@ -64,17 +77,20 @@ Si la commande est déjà configurée, ouvrez un terminal et exécutez :
 Vous verrez ainsi toutes les commandes, options et exemples disponibles.
 
 Exemples :
-* `devprojex .` — ouvrir le dossier courant.
-* `devprojex "C:\Projects\App"` — ouvrir le dossier indiqué.
-* `devprojex . --export tree` — afficher l’arborescence du projet dans le terminal.
-* `devprojex . --export content` — afficher le contenu des fichiers dans le terminal.
-* `devprojex . --export tree-content` — afficher l’arborescence et le contenu dans le terminal.
-* `devprojex . --export tree-content -o context.txt` — enregistrer le résultat dans un fichier.
+* `devprojex` — ouvrir l’espace de travail interactif du terminal.
+* `devprojex open . --preview` — ouvrir le dossier courant dans l’aperçu Desktop.
+* `devprojex analyze . --format json` — analyser le projet courant au format JSON.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — enregistrer un contexte prêt pour l’IA hors du projet source.
+* `devprojex export project . --as folder -o ../devprojex-submission` — exporter l’arborescence effective vers un dossier exact.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — exporter l’arborescence effective vers une archive ZIP.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analyser les fichiers suivis par Git avec Smart Ignore.
 
 Particularités :
 * `.` désigne le dossier courant du terminal ;
 * les chemins contenant des espaces doivent être placés entre guillemets ;
-* si aucun fichier de sortie n’est indiqué, le résultat est affiché directement dans le terminal ;
+* `--git-mode` choisit aucune filtration Git, `.gitignore` ou uniquement les fichiers suivis par Git ;
+* `--exclude` gère les exclusions ordinaires séparément de la filtration Git ;
+* les commandes directes sont déterministes et n’ouvrent pas l’interface Desktop ;
 * la commande ne modifie pas les fichiers du projet — DevProjex fonctionne en lecture seule.
 
 Si la commande `devprojex` ne fonctionne pas, ouvrez dans DevProjex :
@@ -83,11 +99,10 @@ Si la commande `devprojex` ne fonctionne pas, ouvrez dans DevProjex :
 ## 5) Git
 Le menu Git n’est disponible que pour les projets clonés via DevProjex (Git Clone). L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
 
-Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’est généralement :
-`%TEMP%\DevProjex\RepoCache`
+Le cache est stocké dans le répertoire de cache de l’utilisateur. `devprojex doctor` affiche le chemin effectivement utilisé.
 
 * Branche — affiche la liste des branches disponibles avec indication de la branche active ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement se fait hors ligne (sans mise à jour). Si elle n’existe pas localement, elle est récupérée (fetch) et créée localement.
-* Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>.
+* Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>. Pour un projet Git Clone, F5 effectue la même action ; la commande normale « Fichier → Actualiser » est désactivée.
 
 ### Fenêtre de clonage
 Dans la fenêtre Git Clone, une liste « Dépôts récents » peut apparaître sous le champ URL.
@@ -104,11 +119,13 @@ Si vous choisissez un élément dans la liste, l’URL est automatiquement insé
 Pendant un clonage actif, la liste est temporairement masquée.
 
 ## 6) Copier
-### Sélecteur de format de l’arborescence (ASCII/JSON)
+### Sélecteur de format de l’arborescence (ASCII / JSON / XML / MD)
 Le sélecteur définit le format de représentation de l’arborescence pour les opérations où l’arbre participe au résultat.
 
 * ASCII — arborescence textuelle avec branches.
 * JSON — arborescence structurée en JSON.
+* XML — arborescence XML compacte pour les parseurs et outils.
+* MD — liste Markdown imbriquée pour la documentation et les prompts IA.
 
 Le sélecteur influence :
 * Copier l’arborescence
@@ -123,7 +140,7 @@ Le sélecteur n’influence pas :
 ### Copier l’arborescence
 Copie l’arborescence du projet.
 S’il y a des nœuds cochés, l’arborescence est construite à partir de la sélection ; si la sélection est vide ou invalide, l’arborescence complète est copiée.
-Le format du résultat est défini par le sélecteur ASCII/JSON.
+Le format du résultat est défini par le sélecteur de format d’arborescence.
 Raccourcis : Ctrl+Shift+C et Ctrl+Alt+C.
 
 ### Copier le contenu
@@ -138,22 +155,31 @@ Raccourci : Ctrl+Alt+V.
 Combine arborescence et contenu :
 * arborescence depuis la sélection ; si la sélection est vide ou invalide, l’arborescence complète est utilisée ;
 * contenu selon les mêmes règles que « Copier le contenu » ;
-* le format du bloc arborescence est défini par le sélecteur ASCII/JSON.
+* le format du bloc arborescence est défini par le sélecteur de format d’arborescence.
 Raccourci : Ctrl+Shift+V.
 
-### Représentation JSON
-Le mode JSON utilise une structure compacte de l’arborescence.
+### Représentations de l’arborescence
+Les formats représentent différemment la même arborescence de projet sélectionnée.
 
-Arborescence (Copier l’arborescence / Exporter l’arborescence) :
-* `rootPath` — chemin racine dans le format de sortie actuel :
-  * pour un dossier local — chemin local absolu ;
-  * pour un projet Git — URL du dépôt.
-* `root` — nœud racine.
-* champs du nœud : `name`, `path`, `dirs`, `files`, `accessDenied` (si nécessaire).
+JSON :
+* `rootPath` — chemin racine absolu normalisé avec `/`.
+* `tree` — contenu du dossier racine.
+* L’export JSON utilise ce format d’arborescence : les tableaux contiennent les fichiers, les objets contiennent les sous-dossiers, `/` contient les fichiers du dossier courant, et `[]` représente un dossier vide.
+
+XML :
+* le nœud racine est `<t r="...">` ;
+* les dossiers sont `<d n="...">` ;
+* les fichiers sont `<f>File.cs</f>`.
+
+MD :
+* commence par `Root: ...` ;
+* utilise une liste Markdown imbriquée ;
+* les dossiers se terminent par `/`.
 
 Arborescence + contenu :
-* JSON s’applique au bloc arborescence ;
+* le format d’arborescence choisi s’applique au bloc arborescence ;
 * le bloc contenu reste textuel ;
+* les en-têtes de fichiers du bloc contenu utilisent des chemins relatifs avec `/` ;
 * export en `.txt`.
 
 ## 7) Mode aperçu
@@ -214,8 +240,8 @@ Plage : 6–28, reset : 15.
 Rend l’interface plus dense : moins d’espaces dans l’arbre et les paramètres.
 Quand l’espace de travail d’aperçu est actif, le mode compact est activé automatiquement.
 
-### Animation de l'arborescence
-Active une animation de glissement fluide au survol des lignes de l'arborescence.
+### Animation de déploiement de l’arborescence
+Fait pivoter la flèche et déploie ou replie une branche en déplaçant les lignes voisines. Activée par défaut ; lorsqu’elle est désactivée, le déploiement est immédiat.
 
 ### Police de l’arborescence
 La police de l’arborescence se choisit via « Affichage → Police de l’arborescence ».
@@ -251,17 +277,21 @@ Limitations :
 ## 11) Options
 À droite sont disponibles :
 * Appliquer
-* Ignorer
+* Exclusions
 * Types de fichiers
 * Dossiers de premier niveau
 
-Les changements dans « Ignorer », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
+Les changements dans « Exclusions », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
+
+Après la modification d’une case, l’application peut actualiser en arrière-plan les options disponibles et leurs compteurs. L’arborescence résultante n’est reconstruite qu’après un clic sur « Appliquer ».
+
+Si l’actualisation des options disponibles est annulée avec le bouton X de la barre d’état, les changements inachevés ne sont pas appliqués et le panneau revient à son dernier état terminé.
 
 Chaque liste a un bouton Tous.
 
 Remarque sur « Types de fichiers » :
 * cette liste affiche uniquement les fichiers avec extension ;
-* les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Ignorer ».
+* les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Exclusions ».
 
 Ctrl+P — afficher/masquer le panneau.
 
@@ -269,7 +299,7 @@ Ctrl+P — afficher/masquer le panneau.
 Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
-* options sélectionnées dans le bloc « Ignorer ».
+* options sélectionnées dans la section « Exclusions ».
 
 L’enregistrement est effectué après clic sur « Appliquer ».
 Lors de la réouverture du même dossier local, les paramètres sont restaurés automatiquement.
@@ -278,98 +308,70 @@ Important :
 * les profils sont enregistrés uniquement pour les projets locaux ;
 * pour les projets ouverts via Git Clone, les profils ne sont pas enregistrés ;
 * si certaines options enregistrées ne sont plus disponibles dans le projet actuel, elles sont ignorées, les autres paramètres sont appliqués.
-* si l’actualisation ou la réouverture fait apparaître un nouveau dossier de premier niveau, un nouveau type de fichiers ou une nouvelle option dans « Ignorer », cet élément est activé par défaut ;
+* si l’actualisation ou la réouverture fait apparaître un nouveau dossier de premier niveau, un nouveau type de fichiers ou une nouvelle option dans « Exclusions », cet élément est activé par défaut ;
 * les éléments déjà connus conservent le choix explicite de l’utilisateur : de nouveaux fichiers d’un type désactivé ne réactivent pas ce type.
 
-## 12) Ignorer
-La liste « Ignorer » est générée automatiquement à partir du chemin actuel et des dossiers de premier niveau sélectionnés.
+## 12) Exclusions
+La section « Exclusions » détermine les fichiers et dossiers exclus de l’arbre, du contenu, de la copie et de l’export.
 
-Ordre des options :
-* Smart ignore (si disponible)
-* Utiliser .gitignore (si au moins un `.gitignore` est trouvé)
-* Dossiers vides
-* Fichiers vides
-* Dossiers cachés
-* Fichiers cachés
-* Dossiers commençant par un point
-* Fichiers commençant par un point
-* Fichiers sans extension
+Un élément n’est affiché que si son dossier de premier niveau et son type de fichier sont sélectionnés et si aucune règle active ne l’exclut. Les règles se cumulent : si l’une d’elles masque un élément, une autre ne peut pas le rendre visible.
 
-Les options des règles de base (cachés, avec point, vides, sans extension) sont affichées uniquement si des éléments correspondants existent.
-Quand une option dans « Ignorer » devient disponible pour la première fois, elle est activée par défaut. Une option explicitement désactivée auparavant conserve cet état lorsqu’elle redevient disponible.
+### 12.1 Règles disponibles
+Selon le contenu du projet, Smart Ignore, « Utiliser .gitignore », « Uniquement les fichiers suivis par Git », les dossiers et fichiers vides, cachés ou commençant par un point, ainsi que les fichiers sans extension peuvent être proposés.
 
-La ligne sous « Utiliser .gitignore » sépare les règles Git/Smart des règles de visibilité de base.
+Dans un dépôt Git, « Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » restent visibles sous la forme d’une paire stable. Les autres options apparaissent lorsqu’elles peuvent modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle, d’un dossier de premier niveau ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
 
-### 12.1 Portée des règles
-L’application construit des zones de projet (scopes) où les règles d’ignore sont appliquées :
-* racine (si la racine contient `.gitignore` ou un marqueur de projet)
-* dossiers du premier niveau
-* sous-dossiers de projet imbriqués
+### 12.2 Smart Ignore
+Smart Ignore masque les dépendances, résultats de build, caches et autres artefacts de service. DevProjex identifie le type du projet à partir de sa structure et de fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml`. Les règles de la technologie reconnue restent dans la zone du projet et ne s’étendent pas aux projets voisins d’une autre technologie.
 
-La profondeur de recherche des zones de projet imbriquées est fixe : 2 niveaux.
-Cette limite concerne uniquement la détection des zones imbriquées pour `.gitignore` et Smart Ignore. Une fois la zone trouvée, les règles sont appliquées à son contenu par le parcours normal de l’arbre.
+Pour les noms ambigus comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library`, le contenu est également vérifié. Un dossier utilisateur ordinaire n’est donc pas masqué uniquement à cause de son nom. Certains magasins de dépendances et dossiers de service peuvent aussi être reconnus hors d’un projet explicite grâce à leur structure caractéristique.
 
-### 12.2 « Utiliser .gitignore »
-* Activé : les règles `.gitignore` sont appliquées dans les zones détectées.
-* Désactivé : les règles `.gitignore` sont entièrement désactivées.
+La détection de nouvelles zones de projet est limitée afin d’éviter une analyse répétée de chaque dossier dans un grand répertoire utilisateur. La recherche reste peu profonde dans une structure normale et va plus loin dans un monorepo reconnu. Une fois la zone détectée, Smart Ignore s’applique à tout son sous-arbre sans limite de profondeur.
 
-Dans un dossier multi-projets, le `.gitignore` d’un projet ne s’applique pas aux projets voisins hors de sa zone.
+### 12.3 Utiliser .gitignore
+Lorsqu’elle est activée, l’option applique chaque `.gitignore` accessible, et pas seulement celui de la racine. Chaque fichier s’applique à son propre dossier et à tous ses sous-dossiers accessibles, jamais aux dossiers parents ou voisins.
 
-### 12.3 « Smart ignore »
-* Affiché uniquement lorsqu’il est pertinent.
-* Activé : les artefacts courants de build/outils sont masqués en plus.
-* Désactivé : les règles smart ne sont pas appliquées.
+Pour un chemin donné, les règles sont évaluées du `.gitignore` parent vers les fichiers plus profonds ; dans un même fichier, de haut en bas. La dernière règle correspondante détermine le résultat Git.
 
-### 12.4 Règles de base
-Options :
-* Dossiers cachés
-* Fichiers cachés
-* Dossiers commençant par un point
-* Fichiers commençant par un point
-* Dossiers vides
-* Fichiers vides
-* Fichiers sans extension
+Une règle commençant par `!` annule uniquement une exclusion Git antérieure dans sa zone. Elle ne peut pas restaurer un fichier tant que son dossier parent reste exclu. Un `.gitignore` situé dans un dossier entièrement exclu et inaccessible n’est pas évalué.
 
-Quand une option est activée, elle masque les éléments correspondants dans l’arbre et dans les résultats de copie/export.
-Les règles de base s’activent séparément de `.gitignore` et de Smart Ignore, mais le résultat final est toujours calculé à partir de l’arbre courant après application de tous les filtres actifs.
+Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude` et les règles d’exclusion Git globales ne sont pas appliqués ; les paramètres effectifs du dépôt pour la comparaison des chemins, tels que `core.ignoreCase` et, sous macOS, `core.precomposeUnicode`, sont respectés. Lorsqu’un index Git lisible existe pour la zone du dépôt propriétaire du chemin, les fichiers suivis restent visibles même s’ils correspondent à `.gitignore` ; sans cet index ou Git CLI, cette zone revient en toute sécurité à l’évaluation des motifs seuls.
 
-### 12.5 Fonctionnement interne : cas typiques
-1. Projet unique avec `.gitignore`.
-En général, seule l’option « Utiliser .gitignore » est affichée.
-Quand elle est activée, `.gitignore` et Smart Ignore fonctionnent ensemble.
-Quand elle est désactivée, les deux sont désactivés.
+Un lien symbolique nommé `.gitignore` n’est pas suivi, conformément au comportement de Git pour ce fichier de contrôle. Si un fichier `.gitignore` ordinaire ne peut pas être lu, la zone de son répertoire est entièrement exclue de manière sûre et l’analyse signale un accès partiel au lieu d’inclure des fichiers sans évaluer toutes les règles.
 
-2. Projet unique sans `.gitignore`.
-« Utiliser .gitignore » n’est pas affiché.
-« Smart ignore » n’est affiché que s’il est pertinent.
+Le profil intégré `standard` sélectionne `gitignore` et les huit groupes d’exclusion : `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` et `extensionless-files`.
 
-3. Espace multi-projets, certains projets ont `.gitignore`, d’autres non.
-« Utiliser .gitignore » et « Smart ignore » sont affichés.
-`.gitignore` agit dans sa propre zone.
-Smart Ignore (s’il est activé) complète le filtrage dans les zones détectées.
+### 12.4 Uniquement les fichiers suivis par Git
+« Uniquement les fichiers suivis par Git » construit l’étape Git de l’arbre à partir des fichiers existants de l’arbre de travail enregistrés dans chaque index Git lisible. Les fichiers suivis modifiés et les nouveaux fichiers ajoutés à l’index restent inclus ; les fichiers non suivis sont exclus. Il s’agit de l’arbre de travail actuel, et non d’un instantané historique de `HEAD` ou d’un dépôt distant.
 
-4. Espace multi-projets, tous les projets ont `.gitignore`.
-« Utiliser .gitignore » est affiché.
-« Smart ignore » n’est pas affiché comme option séparée.
+Chaque dépôt imbriqué et chaque worktree accessible sont traités indépendamment à chaque niveau d’imbrication accessible. Un dépôt enfant n’hérite pas des chemins suivis de son parent ni d’un dépôt voisin. Ce mode nécessite la CLI Git ; un index vide mais lisible est valide. Si l’espace de travail interactif du terminal (TUI) démarre dans ce mode et qu’aucun index applicable ne peut être chargé, l’espace de travail ne s’ouvre pas. Si ce mode est sélectionné de manière interactive dans un espace de travail TUI déjà ouvert et qu’aucun index applicable ne peut être chargé, la modification est refusée et le dernier mode Git utilisable reste actif. Dans la même situation, les commandes directes renvoient une erreur de stratégie ou de vérification. DevProjex ne bascule jamais silencieusement vers `.gitignore`. Lorsqu’un autre index applicable est lisible, les zones imbriquées indisponibles sont exclues avec un avertissement.
 
-5. Dossier sans règles pertinentes.
-Si aucun `.gitignore` n’est trouvé et que Smart Ignore n’est pas pertinent, ces options sont masquées.
-Seules les règles de visibilité de base restent actives.
+Dans un espace de travail Desktop déjà ouvert, la sélection explicite reste visible et échoue de façon sûre : la sortie et l’exportation sont bloquées si la disponibilité échoue, tandis qu’une disponibilité partielle permet de continuer avec un avertissement localisé.
 
-### 12.6 Dossiers vides
-Masque les dossiers logiquement vides dans l’arbre et dans les résultats de copie/export.
-Un dossier logiquement vide est un dossier dans lequel il ne reste plus aucun descendant visible après application des règles de visibilité actuelles, de `.gitignore`, de Smart Ignore et des types de fichiers sélectionnés.
-Si le dossier lui-même n’est pas masqué par d’autres règles, sa suppression de l’arbre est contrôlée précisément par cette option.
+« Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » s’excluent mutuellement : activer l’un désactive l’autre. Pour les projets locaux prenant en charge les profils, le mode choisi est enregistré avec les dossiers de premier niveau, les types de fichiers et les autres règles d’exclusion.
 
-### 12.7 Fichiers vides
-Masque les fichiers vides de taille 0 octet dans l’arbre et dans les résultats de copie/export.
+### 12.5 Relation entre le filtrage Git et Smart Ignore
+Le mode Git sélectionné et Smart Ignore sont des interrupteurs indépendants. Le mode Git est appliqué en premier dans chaque zone Git accessible, puis Smart Ignore traite les éléments restants et les règles de base s’appliquent en dernier.
 
-### 12.8 Fichiers sans extension
-Masque les fichiers sans extension (par exemple : `Dockerfile`, `Makefile`, `README`) dans l’arbre et dans les résultats de copie/export.
+Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déjà tous ses candidats, puis apparaître après un changement de mode. Dans un dépôt Git, les deux modes Git restent visibles sous la forme d’une paire stable.
 
-### 12.9 Compteurs dans le bloc « Ignorer »
-Le nombre est affiché à côté des options disponibles au format `(N)`.
-Pour les règles de base, ce nombre indique combien d’éléments sont masqués précisément par cette règle dans la configuration actuelle de l’arbre.
+Une négation Git avec `!` annule uniquement le résultat Git. Elle ne désactive ni Smart Ignore ni une règle de base.
+
+### 12.6 Règles de base
+Les règles « commençant par un point » vérifient le nom ; les règles « caché » vérifient l’attribut système Hidden. Selon la plateforme, elles peuvent viser le même élément ou des éléments différents.
+
+« Fichiers vides » masque les fichiers de 0 octet. « Fichiers sans extension » masque par exemple `Dockerfile`, `Makefile` et `README`.
+
+« Dossiers vides » masque les dossiers logiquement vides. Un dossier est logiquement vide lorsqu’aucun fichier ou sous-dossier visible ne reste après l’application des types sélectionnés et de toutes les autres règles. Son compteur peut donc changer lorsqu’une autre règle est modifiée.
+
+### 12.7 Compteurs
+Un compteur indique la contribution directe d’une règle avec les paramètres actuels, et non le nombre physique d’éléments similaires sur le disque. Un élément n’est pas attribué simultanément à plusieurs compteurs qui se recouvrent.
+
+L’ordre stable d’attribution est : pour les dossiers, `.gitignore`, Smart Ignore, nom commençant par un point, attribut Hidden ; pour les fichiers, `.gitignore`, Smart Ignore, nom commençant par un point, absence d’extension, fichier vide, attribut Hidden. Cet ordre ne concerne que les compteurs. Pour la visibilité, tout mécanisme actif peut exclure l’élément.
+
+### 12.8 Application des modifications
+Les cases à cocher mettent d’abord à jour les options disponibles et leurs compteurs. L’arbre final est reconstruit après « Appliquer les paramètres ». Si la préparation est annulée, DevProjex revient au dernier état entièrement terminé ; aucune règle partiellement calculée n’est appliquée.
+
 ## 13) Comment l'arbre et les métriques sont calculés
 Le résultat dépend de :
 * dossiers de premier niveau sélectionnés
@@ -399,7 +401,7 @@ Important :
 ### 13.2 Comment les métriques sont calculées
 Métriques de l’arbre :
 * sont calculées à partir de la sortie réelle de l’arbre générée par le même pipeline d’export ;
-* respectent le format ASCII/JSON courant.
+* respectent le format d’arborescence courant.
 
 Métriques du contenu :
 * suivent les mêmes règles que la copie/export du contenu ;
@@ -409,9 +411,9 @@ Métriques du contenu :
 ### 13.3 Quand les compteurs sont mis à jour
 Le recalcul est effectué :
 * après ouverture/actualisation d’un projet ;
-* après application des paramètres (ignore, types de fichiers, dossiers racine) ;
+* après application des paramètres (exclusions, types de fichiers, dossiers racine) ;
 * lors des changements de cases à cocher dans l’arbre (avec debounce) ;
-* lors du basculement ASCII/JSON (pour les opérations utilisant l’arbre).
+* lors du basculement du format d’arborescence (pour les opérations utilisant l’arbre).
 * si le calcul en arrière-plan est annulé, les compteurs sont remis à 0 jusqu’au prochain recalcul terminé.
 
 ## 14) Icônes
@@ -422,24 +424,38 @@ Ordre de sélection :
 4) sinon — inconnu
 
 ## 15) Thème et effets
-Le popover de thème permet :
-* thème clair/sombre
-* Transparent / Mica / Acrylic
-* intensité, flou, contraste, bordures
+La section « Thème » permet de choisir Système, Clair ou Sombre et un effet d’arrière-plan :
+* Transparence
+* Flou
+* Mica
 
-Les éléments [Beta] peuvent évoluer entre versions.
+Système est sélectionné par défaut et suit les changements de thème du système d’exploitation. Après le premier démarrage ou une réinitialisation des paramètres, un thème système clair utilise un arrière-plan opaque normal, tandis qu’un thème système sombre utilise le Flou. Si la préférence système ne peut pas être déterminée, DevProjex utilise Sombre avec le Flou. Les thèmes Clair et Sombre mémorisent leurs effets séparément. Un choix explicite de Clair ou Sombre ignore les changements du système jusqu’à ce que Système soit de nouveau sélectionné.
+
+Les effets sont mutuellement exclusifs. Un nouveau clic sur l’effet sélectionné le désactive et rétablit un arrière-plan opaque normal.
+
+Paramètres disponibles :
+* Transparence de l’arrière-plan — disponible pour Transparence et Flou.
+* Contraste de la barre supérieure — règle la barre principale contenant les commandes d’aperçu, de recherche, de filtre et de format d’arborescence.
+* Transparence des menus — s’applique de la même manière au menu principal et à ses sous-menus.
+* Visibilité des bordures — règle l’intensité des bordures de l’interface.
+
+Mica utilise le matériau système de la plateforme et ne possède pas de réglage séparé pour la transparence de l’arrière-plan. Si l’effet sélectionné, Flou ou Mica, n’est pas disponible, l’application essaie d’abord l’autre effet natif. Un arrière-plan opaque normal n’est utilisé que si aucun des deux effets n’est disponible.
+
+En mode Transparence, l’arrière-plan de la fenêtre principale reste transparent. Les menus, sous-menus et autres surfaces contextuelles utilisent le Flou lorsqu’il est pris en charge, afin que l’arborescence et le contenu situés derrière ne gênent pas la lecture.
 
 ## 16) Aide
 
-### 16.1 Réinitialiser les paramètres
-Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) réinitialise uniquement les paramètres visuels de l’interface (thème, effets, mode compact, animation de l'arborescence) et ne modifie pas les données du projet.
-Cette action efface aussi le choix de langue de l’interface enregistré.
+### 16.1 Mises à jour
+« Aide → Mises à jour » compare la version actuelle à la dernière version stable publiée sur GitHub. La vérification automatique est désactivée par défaut ; lorsqu’elle est activée, DevProjex effectue la vérification au démarrage si au moins sept jours se sont écoulés depuis la dernière vérification réussie. La case à cocher est appliquée immédiatement. Le dernier résultat réussi est conservé entre les exécutions de l’application et n’est pas effacé par une erreur réseau ultérieure. L’installation reste une action de l’utilisateur.
 
-### 16.2 Réinitialiser les données
+### 16.2 Réinitialiser les paramètres
+Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, de l’animation de déploiement de l’arborescence et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
+
+### 16.3 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
-* options sélectionnées dans le bloc « Ignorer ».
+* options sélectionnées dans la section « Exclusions ».
 
 Important :
 * l’historique « Récents » des dossiers locaux n’est pas effacé ;
@@ -460,13 +476,14 @@ Modes de progression :
 Comportement :
 * pendant le calcul de données en arrière-plan, une progression en pourcentage est affichée ;
 * pour certaines opérations Git, le pourcentage est affiché si la source de progression le fournit ;
-* pour les opérations très rapides, la progression peut n’apparaître que brièvement.
+* la mise à jour des options disponibles et l’application des paramètres sont affichées si l’opération prend un temps perceptible ;
+* les opérations rapides se terminent sans afficher de progression.
 
 Bouton X (annuler) dans la barre d’état :
 * exécute une annulation best-effort pour les opérations qui prennent en charge l’annulation ;
 * arrête le calcul de données en arrière-plan ;
+* lors de l’annulation d’une actualisation des options disponibles, rétablit le dernier état terminé du panneau ;
 * pour les opérations sans prise en charge de l’annulation, arrête l’indication dans la barre d’état, tandis que l’opération peut se terminer en arrière-plan.
 
 ## 19) Notes
-* Par défaut, le thème sombre et les effets de transparence sont activés (si supportés).
 * Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.

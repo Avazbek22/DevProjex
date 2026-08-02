@@ -3,14 +3,18 @@ using DevProjex.Application.Services;
 using DevProjex.Application.Models;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 internal static class ProjectLoadWorkflowRefreshHarness
 {
-    public static WorkflowServices CreateServices()
+    public static WorkflowServices CreateServices(
+        IFileSystemScanner? scanner = null,
+        Func<IgnoreRules, IgnoreRules>? transformRules = null)
     {
-        var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
+        var scanOptions = new ScanOptionsUseCase(
+            LegacyWorkspaceScannerTestAdapter.Adapt(scanner ?? new FileSystemScanner()));
         var filterSelectionService = new FilterOptionSelectionService();
         var ignoreOptionsService = ProjectLoadWorkflowRuntime.CreateIgnoreOptionsService();
         var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
@@ -19,7 +23,11 @@ internal static class ProjectLoadWorkflowRefreshHarness
             scanOptions,
             filterSelectionService,
             ignoreOptionsService,
-            (path, selectedIgnoreOptions, selectedRoots) => ignoreRulesService.Build(path, selectedIgnoreOptions, selectedRoots),
+            (path, selectedIgnoreOptions, selectedRoots) =>
+            {
+                var rules = ignoreRulesService.Build(path, selectedIgnoreOptions, selectedRoots);
+                return transformRules?.Invoke(rules) ?? rules;
+            },
             (path, selectedRoots) => ignoreRulesService.GetIgnoreOptionsAvailability(path, selectedRoots) with
             {
                 ShowAdvancedCounts = true
@@ -102,9 +110,21 @@ internal static class ProjectLoadWorkflowRefreshHarness
 
     public static SelectionRefreshContext BuildConvergedContext(
         string rootPath,
-        SelectionRefreshSnapshot snapshot)
+        SelectionRefreshSnapshot snapshot,
+        SelectionRefreshContext previousContext)
     {
-        return CreateContextFromSnapshot(rootPath, snapshot);
+        var context = CreateContextFromSnapshot(rootPath, snapshot);
+        return context with
+        {
+            RootOptionStateCache = MergeOptionStates(
+                previousContext.RootOptionStateCache,
+                snapshot.RootOptions,
+                PathComparer.Default),
+            ExtensionOptionStateCache = MergeOptionStates(
+                previousContext.ExtensionOptionStateCache,
+                snapshot.EffectiveExtensionOptions,
+                StringComparer.OrdinalIgnoreCase)
+        };
     }
 
     public static SelectionRefreshContext CreateContextFromSnapshot(
@@ -132,10 +152,12 @@ internal static class ProjectLoadWorkflowRefreshHarness
                 snapshot.IgnoreOptionCounts,
                 snapshot.ControllerImpactCounts,
                 snapshot.ExtensionlessEntriesCount > 0,
-                snapshot.ExtensionlessEntriesCount),
+                snapshot.ExtensionlessEntriesCount,
+                snapshot.GitEvidence),
             RootOptionStateCache: BuildRootOptionStateCache(snapshot),
             ExtensionOptionStateCache: BuildExtensionOptionStateCache(snapshot),
-            IgnoreOptionStateCacheIsComplete: true);
+            IgnoreOptionStateCacheIsComplete: true,
+            CurrentRootOptions: snapshot.RootOptions);
     }
 
     public static SelectionRefreshContext ApplyScenarioStep(
@@ -224,6 +246,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
         Assert.Equal(expected.HasIgnoreOptionCounts, actual.HasIgnoreOptionCounts);
         Assert.Equal(expected.IgnoreOptionCounts, actual.IgnoreOptionCounts);
         Assert.Equal(expected.ControllerImpactCounts, actual.ControllerImpactCounts);
+        Assert.True(expected.EffectiveIgnoreOptions.SetEquals(actual.EffectiveIgnoreOptions));
         Assert.Equal(expected.IgnoreOptionStateCache.Count, actual.IgnoreOptionStateCache.Count);
         foreach (var pair in expected.IgnoreOptionStateCache.OrderBy(pair => pair.Key))
         {
@@ -262,8 +285,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
             StringComparer.OrdinalIgnoreCase);
 
     public static HashSet<IgnoreOptionId> CollectCheckedIgnoreOptionIds(SelectionRefreshSnapshot snapshot) =>
-        new(
-            snapshot.IgnoreOptions.Where(option => option.IsChecked).Select(option => option.Id));
+        new(snapshot.EffectiveIgnoreOptions);
 
     private static IReadOnlySet<string> BuildRequestedRootNames(WorkflowRootScenario scenario)
     {
@@ -399,6 +421,24 @@ internal static class ProjectLoadWorkflowRefreshHarness
             cache[option.Name] = option.IsChecked;
 
         return cache;
+    }
+
+    private static Dictionary<string, bool> MergeOptionStates(
+        IReadOnlyDictionary<string, bool>? previousStates,
+        IEnumerable<SelectionOption>? visibleOptions,
+        StringComparer comparer)
+    {
+        var merged = previousStates is null
+            ? new Dictionary<string, bool>(comparer)
+            : new Dictionary<string, bool>(previousStates, comparer);
+
+        if (visibleOptions is null)
+            return merged;
+
+        foreach (var option in visibleOptions)
+            merged[option.Name] = option.IsChecked;
+
+        return merged;
     }
 
     private static Dictionary<string, bool> BuildExtensionOptionStateCache(
@@ -564,8 +604,27 @@ internal static class ProjectLoadWorkflowRefreshHarness
         if (ignoreOptions.Count == 0)
             return null;
 
-        if (ignoreOptions.All(option => option.IsChecked))
+        var hasGitFilteringOptions = false;
+        var hasSelectedGitFilteringMode = false;
+        var allOrdinaryOptionsChecked = true;
+        foreach (var option in ignoreOptions)
+        {
+            if (GitFilteringModeResolver.IsGitFilteringOption(option.Id))
+            {
+                hasGitFilteringOptions = true;
+                hasSelectedGitFilteringMode |= option.IsChecked;
+                continue;
+            }
+
+            allOrdinaryOptionsChecked &= option.IsChecked;
+        }
+
+        if (allOrdinaryOptionsChecked &&
+            (!hasGitFilteringOptions || hasSelectedGitFilteringMode))
+        {
             return true;
+        }
+
         if (ignoreOptions.All(option => !option.IsChecked))
             return false;
 

@@ -23,12 +23,10 @@ public sealed class UserSettingsStoreBackupTests
         using var temp = new TemporaryDirectory();
         var store = new UserSettingsStore(() => temp.Path);
         var db = store.Load();
-        db.LastSelected = "Light.Acrylic";
         db.ViewSettings = new AppViewSettings
         {
             IsCompactMode = true,
-            IsTreeAnimationEnabled = false,
-            IsAdvancedIgnoreCountsEnabled = false,
+            IsTreeExpansionAnimationEnabled = false,
             PreferredLanguage = AppLanguage.De
         };
 
@@ -37,10 +35,8 @@ public sealed class UserSettingsStoreBackupTests
 
         var recovered = store.Load();
 
-        Assert.Equal("Light.Acrylic", recovered.LastSelected);
         Assert.True(recovered.ViewSettings.IsCompactMode);
-        Assert.False(recovered.ViewSettings.IsTreeAnimationEnabled);
-        Assert.True(recovered.ViewSettings.IsAdvancedIgnoreCountsEnabled);
+        Assert.False(recovered.ViewSettings.IsTreeExpansionAnimationEnabled);
         Assert.Equal(AppLanguage.De, recovered.ViewSettings.PreferredLanguage);
         Assert.DoesNotContain("{ invalid", File.ReadAllText(store.GetPath()), StringComparison.Ordinal);
     }

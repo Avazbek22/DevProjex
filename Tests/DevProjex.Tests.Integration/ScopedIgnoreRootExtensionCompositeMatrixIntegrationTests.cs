@@ -235,6 +235,7 @@ public sealed class ScopedIgnoreRootExtensionCompositeMatrixIntegrationTests
 		temp.CreateFile("web/package.json", "{}\n");
 		temp.CreateFile("web/src/app.ts", "export const ok = true;\n");
 		temp.CreateFile("web/node_modules/pkg/index.js", "module.exports = {};\n");
+		temp.CreateFile("web/.cache/CACHEDIR.TAG", "Signature: 8a477f597d28d172789f06886806bc55\n");
 		temp.CreateFile("web/.cache/cache.json", "{}\n");
 
 		temp.CreateFile("docs/readme.md", "# docs\n");

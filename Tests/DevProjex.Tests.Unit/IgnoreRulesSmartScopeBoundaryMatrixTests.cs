@@ -17,15 +17,15 @@ public sealed class IgnoreRulesSmartScopeBoundaryMatrixTests
 
 		var upper = inside.ToUpperInvariant();
 		var lower = inside.ToLowerInvariant();
-		var expectedCaseMatch = !OperatingSystem.IsLinux();
+		var expectedCaseMatch = OperatingSystem.IsWindows();
 		yield return [upper, expectedCaseMatch];
 		yield return [lower, expectedCaseMatch];
 
 		if (Path.DirectorySeparatorChar != Path.AltDirectorySeparatorChar)
 		{
-			// Alternate separator style is not normalized by IgnoreRules path checks.
+			// Both Windows directory separators identify the same absolute scope.
 			var alt = inside.Replace(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-			yield return [alt, false];
+			yield return [alt, true];
 		}
 	}
 

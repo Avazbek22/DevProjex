@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  checks: read
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
@@ -21,36 +22,48 @@ concurrency:
 
 jobs:
   prepare-matrix:
-    name: Prepare CI Matrix
+    name: Plan CI
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      matrix: ${{ steps.plan.outputs.test_matrix }}
+      has_test_matrix: ${{ steps.plan.outputs.has_test_matrix }}
+      run_terminal_command: ${{ steps.plan.outputs.run_terminal_command }}
+      run_ignore_scanner: ${{ steps.plan.outputs.run_ignore_scanner }}
+      run_documentation: ${{ steps.plan.outputs.run_documentation }}
 
     steps:
-      - name: Select CI matrix
-        id: set-matrix
-        shell: pwsh
-        run: |
-          $matrix = @{
-            include = @(
-              @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
-              @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
-              @{ os_name = 'Windows'; runner = 'windows-latest'; os_id = 'windows'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
-              @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
-              @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
-              @{ os_name = 'Linux'; runner = 'ubuntu-latest'; os_id = 'linux'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' },
-              @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Unit'; suite_id = 'unit'; project_path = 'Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj'; trx_name = 'unit.trx' },
-              @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'Integration'; suite_id = 'integration'; project_path = 'Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj'; trx_name = 'integration.trx' },
-              @{ os_name = 'macOS'; runner = 'macos-latest'; os_id = 'macos'; suite_name = 'UI'; suite_id = 'ui'; project_path = 'Tests/DevProjex.Tests.UI/DevProjex.Tests.UI.csproj'; trx_name = 'ui.trx' }
-            )
-          }
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-          "matrix=$($matrix | ConvertTo-Json -Compress -Depth 5)" >> $env:GITHUB_OUTPUT
+      - name: Validate CI planner contracts
+        shell: pwsh
+        run: ./Scripts/ci/Test-CiChangePlanner.ps1
+
+      - name: Select CI plan
+        id: plan
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIOUS_GATE_NAME: CI Gate
+        run: >
+          ./Scripts/ci/Select-CiPlan.ps1
+          -GitHubEventPath $env:GITHUB_EVENT_PATH
+          -GitHubEventName $env:GITHUB_EVENT_NAME
+          -PreviousGateName $env:PREVIOUS_GATE_NAME
+          -GitHubOutputPath $env:GITHUB_OUTPUT
+
+      - name: Report selected plan
+        shell: pwsh
+        env:
+          CI_PLAN_SUMMARY: ${{ steps.plan.outputs.summary }}
+        run: Write-Host $env:CI_PLAN_SUMMARY
 
   test-suite:
     name: CI (${{ matrix.os_name }} / ${{ matrix.suite_name }})
     needs: prepare-matrix
+    if: ${{ needs.prepare-matrix.outputs.has_test_matrix == 'true' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -69,7 +82,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
@@ -85,9 +98,13 @@ jobs:
         if: ${{ matrix.os_id == 'linux' }}
         shell: bash
         run: |
-          if ! command -v xvfb-run >/dev/null 2>&1; then
+          missing_packages=()
+          command -v xvfb-run >/dev/null 2>&1 || missing_packages+=(xvfb)
+          command -v zsh >/dev/null 2>&1 || missing_packages+=(zsh)
+          command -v fish >/dev/null 2>&1 || missing_packages+=(fish)
+          if (( ${#missing_packages[@]} > 0 )); then
             sudo apt-get update
-            sudo apt-get install -y xvfb
+            sudo apt-get install -y "${missing_packages[@]}"
           fi
 
       - name: Run ${{ matrix.suite_name }} Tests
@@ -98,8 +115,12 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
+          ${{ matrix.test_filter_args }}
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
+          --blame-hang
+          --blame-hang-timeout 8m
+          --blame-hang-dump-type mini
 
       - name: Run ${{ matrix.suite_name }} Tests (Linux headless)
         if: ${{ matrix.os_id == 'linux' }}
@@ -109,8 +130,12 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
+          ${{ matrix.test_filter_args }}
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
+          --blame-hang
+          --blame-hang-timeout 8m
+          --blame-hang-dump-type mini
 
       - name: Print Test Runner Logs
         if: ${{ failure() }}
@@ -136,6 +161,8 @@ jobs:
 
   terminal-command-cross-platform:
     name: Terminal Command Matrix (${{ matrix.os_name }})
+    needs: prepare-matrix
+    if: ${{ needs.prepare-matrix.outputs.run_terminal_command == 'true' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -164,7 +191,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-terminal-command-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          key: nuget-terminal-command-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
           restore-keys: |
             nuget-terminal-command-${{ runner.os }}-
             nuget-${{ runner.os }}-
@@ -185,10 +212,18 @@ jobs:
         if: ${{ matrix.os_id == 'linux' }}
         shell: bash
         run: |
-          if ! command -v xvfb-run >/dev/null 2>&1; then
+          missing_packages=()
+          command -v xvfb-run >/dev/null 2>&1 || missing_packages+=(xvfb)
+          command -v zsh >/dev/null 2>&1 || missing_packages+=(zsh)
+          command -v fish >/dev/null 2>&1 || missing_packages+=(fish)
+          if (( ${#missing_packages[@]} > 0 )); then
             sudo apt-get update
-            sudo apt-get install -y xvfb
+            sudo apt-get install -y "${missing_packages[@]}"
           fi
+
+          command -v xvfb-run
+          zsh --version
+          fish --version
 
       - name: Run terminal command unit tests
         if: ${{ matrix.os_id != 'linux' }}
@@ -198,7 +233,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineOptions|FullyQualifiedName~ReportPathResolver"
+          --filter "Category=TerminalCommand"
           --logger "trx;LogFileName=terminal-command-unit.trx"
           --results-directory "TestResults/terminal-command-unit"
 
@@ -210,7 +245,7 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineOptions|FullyQualifiedName~ReportPathResolver"
+          --filter "Category=TerminalCommand"
           --logger "trx;LogFileName=terminal-command-unit.trx"
           --results-directory "TestResults/terminal-command-unit"
 
@@ -222,19 +257,21 @@ jobs:
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineProcessSmoke|FullyQualifiedName~CommandLineDocumentation"
+          --filter "Category=TerminalCommand"
           --logger "trx;LogFileName=terminal-command-integration.trx"
           --results-directory "TestResults/terminal-command-integration"
 
       - name: Run terminal command integration tests (Linux headless)
         if: ${{ matrix.os_id == 'linux' }}
         shell: bash
+        env:
+          DEVPROJEX_REQUIRE_TERMINAL_SHELL_MATRIX: 1
         run: >
           xvfb-run -a dotnet test Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~TerminalCommand|FullyQualifiedName~CommandLineAutomationRunner|FullyQualifiedName~CommandLineProcessSmoke|FullyQualifiedName~CommandLineDocumentation"
+          --filter "Category=TerminalCommand"
           --logger "trx;LogFileName=terminal-command-integration.trx"
           --results-directory "TestResults/terminal-command-integration"
 
@@ -262,6 +299,8 @@ jobs:
 
   ignore-scanner-cross-platform:
     name: Ignore/Scanner Matrix (${{ matrix.os_name }})
+    needs: prepare-matrix
+    if: ${{ needs.prepare-matrix.outputs.run_ignore_scanner == 'true' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -271,12 +310,15 @@ jobs:
           - os_name: Windows
             runner: windows-latest
             os_id: windows
+            run_large_perf_tests: "0"
           - os_name: Linux
             runner: ubuntu-latest
             os_id: linux
+            run_large_perf_tests: "1"
           - os_name: macOS
             runner: macos-latest
             os_id: macos
+            run_large_perf_tests: "0"
 
     steps:
       - uses: actions/checkout@v4
@@ -305,12 +347,14 @@ jobs:
 
       - name: Run ignore/scanner integration tests
         shell: pwsh
+        env:
+          DEVPROJEX_RUN_LARGE_PERF_TESTS: ${{ matrix.run_large_perf_tests }}
         run: >
           dotnet test Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj
           -c Release
           --no-build
           --verbosity minimal
-          --filter "FullyQualifiedName~Ignore|FullyQualifiedName~Scanner|FullyQualifiedName~ReparsePoint|FullyQualifiedName~FileSystemMutation"
+          --filter "Category=IgnoreContract|FullyQualifiedName~Ignore|FullyQualifiedName~Scanner|FullyQualifiedName~ReparsePoint|FullyQualifiedName~FileSystemMutation"
           --logger "trx;LogFileName=ignore-scanner.trx"
           --results-directory "TestResults/ignore-scanner"
 
@@ -335,3 +379,68 @@ jobs:
             TestResults/**
             **/TestResults/**
           if-no-files-found: ignore
+
+  documentation-contracts:
+    name: Documentation Contracts
+    needs: prepare-matrix
+    if: ${{ needs.prepare-matrix.outputs.run_documentation == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-documentation-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
+          restore-keys: |
+            nuget-documentation-${{ runner.os }}-
+            nuget-${{ runner.os }}-
+
+      - name: Run documentation contract tests
+        shell: pwsh
+        run: |
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~DocumentationAndPackagingContractTests|FullyQualifiedName~DocumentationExecutionRegressionTests"
+          dotnet test Tests/DevProjex.Tests.Integration/DevProjex.Tests.Integration.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~ReadmeFeatureDocumentationContractTests"
+          dotnet test Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~AppInstancePackagingContractTests"
+
+  ci-gate:
+    name: CI Gate
+    needs:
+      - prepare-matrix
+      - test-suite
+      - terminal-command-cross-platform
+      - ignore-scanner-cross-platform
+      - documentation-contracts
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify selected jobs
+        shell: pwsh
+        env:
+          PREPARE_RESULT: ${{ needs.prepare-matrix.result }}
+          TEST_RESULT: ${{ needs.test-suite.result }}
+          TERMINAL_COMMAND_RESULT: ${{ needs.terminal-command-cross-platform.result }}
+          IGNORE_SCANNER_RESULT: ${{ needs.ignore-scanner-cross-platform.result }}
+          DOCUMENTATION_RESULT: ${{ needs.documentation-contracts.result }}
+        run: |
+          $results = @{
+            plan = $env:PREPARE_RESULT
+            tests = $env:TEST_RESULT
+            terminalCommand = $env:TERMINAL_COMMAND_RESULT
+            ignoreScanner = $env:IGNORE_SCANNER_RESULT
+            documentation = $env:DOCUMENTATION_RESULT
+          }
+          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
+          if ($failed.Count -gt 0) {
+            throw "Selected CI jobs failed: $($failed.ForEach({ \"$($_.Key)=$($_.Value)\" }) -join ', ')"
+          }

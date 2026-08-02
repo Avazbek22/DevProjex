@@ -9,6 +9,7 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 		temp.CreateFile("pyproject.toml", "[project]\nname = \"api\"\n");
 		temp.CreateFile("src/app.py", "print('ok')\n");
 		temp.CreateFile("src/__pycache__/app.pyc", "binary");
+		temp.CreateFile("src/.venv/pyvenv.cfg", "home = python\n");
 		temp.CreateFile("src/.venv/bin/python", "binary");
 
 		var rulesService = new IgnoreRulesService(new SmartIgnoreService([
@@ -69,6 +70,7 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 		temp.CreateFile("src/app.py", "print('ok')\n");
 		temp.CreateFile(".venv/pyvenv.cfg", "home = python\n");
 		temp.CreateFile("frontend/package.json", "{}");
+		temp.CreateFile("frontend/node_modules/.package-lock.json", "{}");
 		temp.CreateFile("frontend/node_modules/pkg/index.js", "module.exports = {};");
 		temp.CreateFile("plain-data/node_modules/pkg/index.js", "must stay visible");
 
@@ -98,18 +100,137 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 	}
 
 	[Fact]
+	public void TreeBuilder_DeepMonorepoSmartScope_HidesArtifactsWithoutBleedingIntoSibling()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - apps/**\n");
+		temp.CreateFile("apps/domain/team/python-worker/pyproject.toml", "[project]\nname = \"worker\"\n");
+		temp.CreateFile("apps/domain/team/python-worker/app.py", "print('ok')\n");
+		temp.CreateFile("apps/domain/team/python-worker/__pycache__/app.pyc", "binary");
+		temp.CreateFile("apps/domain/team/plain-data/notes.py", "print('visible')\n");
+		temp.CreateFile("apps/domain/team/plain-data/__pycache__/snapshot.pyc", "must stay visible");
+
+		var rulesService = new IgnoreRulesService(new SmartIgnoreService([
+			new PythonArtifactsIgnoreRule()
+		]));
+		var availability = rulesService.GetIgnoreOptionsAvailability(temp.Path, []);
+		var rules = rulesService.Build(temp.Path, [IgnoreOptionId.SmartIgnore], selectedRootFolders: []);
+
+		var tree = new TreeBuilder().Build(temp.Path, new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".yaml", ".toml", ".py", ".pyc" },
+			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "apps" },
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(availability.IncludeSmartIgnore);
+		Assert.True(rules.UseSmartIgnore);
+		Assert.Contains(rules.SmartIgnoreScopeRoots, scope =>
+			scope.EndsWith(
+				NormalizeRelativePath("apps/domain/team/python-worker"),
+				StringComparison.OrdinalIgnoreCase));
+		Assert.True(ContainsPath(tree.Root, "apps/domain/team/python-worker/app.py"));
+		Assert.False(ContainsPath(tree.Root, "apps/domain/team/python-worker/__pycache__"));
+		Assert.True(ContainsPath(tree.Root, "apps/domain/team/plain-data/__pycache__/snapshot.pyc"));
+	}
+
+	[Fact]
+	public void TreeBuilder_DeepMonorepoGitAndSmartOptions_ComposeWithoutChangingSiblingVisibility()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - apps/**\n");
+		temp.CreateFile("apps/domain/team/api/.gitignore", "generated/\n");
+		temp.CreateFile("apps/domain/team/api/src/app.cs", "class App {}");
+		temp.CreateFile("apps/domain/team/api/generated/drop.cs", "class Drop {}");
+		temp.CreateFile("apps/domain/team/python-worker/pyproject.toml", "[project]\nname = \"worker\"\n");
+		temp.CreateFile("apps/domain/team/python-worker/app.py", "print('ok')\n");
+		temp.CreateFile("apps/domain/team/python-worker/__pycache__/app.pyc", "binary");
+		temp.CreateFile("apps/domain/team/plain-data/generated/drop.cs", "class Visible {}");
+		temp.CreateFile("apps/domain/team/plain-data/__pycache__/snapshot.pyc", "visible");
+
+		var rulesService = new IgnoreRulesService(new SmartIgnoreService([
+			new PythonArtifactsIgnoreRule()
+		]));
+		var availability = rulesService.GetIgnoreOptionsAvailability(temp.Path, []);
+		var rules = rulesService.Build(
+			temp.Path,
+			[IgnoreOptionId.UseGitIgnore, IgnoreOptionId.SmartIgnore],
+			selectedRootFolders: []);
+
+		var tree = new TreeBuilder().Build(temp.Path, new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".yaml", ".toml", ".cs", ".py", ".pyc" },
+			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "apps" },
+			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+		Assert.True(rules.UseGitIgnore);
+		Assert.True(rules.UseSmartIgnore);
+		Assert.True(ContainsPath(tree.Root, "apps/domain/team/api/src/app.cs"));
+		Assert.False(ContainsPath(tree.Root, "apps/domain/team/api/generated"));
+		Assert.False(ContainsPath(tree.Root, "apps/domain/team/python-worker/__pycache__"));
+		Assert.True(ContainsPath(tree.Root, "apps/domain/team/plain-data/generated/drop.cs"));
+		Assert.True(ContainsPath(tree.Root, "apps/domain/team/plain-data/__pycache__/snapshot.pyc"));
+	}
+
+	[Fact]
+	public void ScanOptions_DeepMonorepoScopes_ReportGitAndSmartControllerImpact()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - apps/**\n");
+		temp.CreateFile("apps/domain/team/api/.gitignore", "generated/\n");
+		temp.CreateFile("apps/domain/team/api/src/app.cs", "class App {}");
+		temp.CreateFile("apps/domain/team/api/generated/drop.cs", "class Drop {}");
+		temp.CreateFile("apps/domain/team/python-worker/pyproject.toml", "[project]\nname = \"worker\"\n");
+		temp.CreateFile("apps/domain/team/python-worker/app.py", "print('ok')\n");
+		temp.CreateFile("apps/domain/team/python-worker/__pycache__/app.pyc", "binary");
+
+		var selectedRoots = new HashSet<string>(PathComparer.Default) { "apps" };
+		var selectedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		{
+			".cs",
+			".py",
+			".pyc",
+			".toml",
+			".yaml"
+		};
+		var rulesService = new IgnoreRulesService(new SmartIgnoreService([
+			new PythonArtifactsIgnoreRule()
+		]));
+		var rules = rulesService.Build(
+			temp.Path,
+			[IgnoreOptionId.UseGitIgnore, IgnoreOptionId.SmartIgnore],
+			selectedRoots);
+		var scanner = new ScanOptionsUseCase(new FileSystemScanner());
+
+		var snapshot = scanner.GetProjectWorkspaceSnapshotForRootFolders(
+			temp.Path,
+			selectedRoots,
+			extensionDiscoveryRules: rules,
+			effectiveRules: rules,
+			effectiveExtensionPolicy: new ExtensionSetInclusionPolicy(selectedExtensions),
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: TestContext.Current.CancellationToken,
+			includeControllerImpactProbeRoots: true);
+
+		Assert.NotNull(snapshot.Value.TreeInventory);
+		Assert.True(snapshot.Value.IgnoreSection.ControllerImpactCounts.GitIgnore > 0);
+		Assert.True(snapshot.Value.IgnoreSection.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(".cs", snapshot.Value.IgnoreSection.Extensions);
+		Assert.Contains(".py", snapshot.Value.IgnoreSection.Extensions);
+	}
+
+	[Fact]
 	public void IgnoreRulesService_AllSupportedStackMarkersExposeSmartOptionAndScopedArtifacts()
 	{
 		var cases = new[]
 		{
-			new StackCase("frontend", "package.json", "node_modules", "index.js", new FrontendArtifactsIgnoreRule()),
+			new StackCase("frontend", "package.json", "node_modules", ".package-lock.json", new FrontendArtifactsIgnoreRule()),
 			new StackCase("dotnet", "App.csproj", "bin", "app.dll", new DotNetArtifactsIgnoreRule()),
 			new StackCase("python", "requirements.txt", "__pycache__", "app.pyc", new PythonArtifactsIgnoreRule()),
-			new StackCase("jvm", "settings.gradle", "build", "classes.bin", new JvmArtifactsIgnoreRule()),
-			new StackCase("rust", "Cargo.toml", "target", "app.bin", new RustArtifactsIgnoreRule()),
-			new StackCase("go", "go.work", "vendor", "module.go", new GoArtifactsIgnoreRule()),
+			new StackCase("jvm", "settings.gradle", "build", "classes/App.class", new JvmArtifactsIgnoreRule()),
+			new StackCase("rust", "Cargo.toml", "target", "debug/app", new RustArtifactsIgnoreRule()),
+			new StackCase("go", "go.work", "vendor", "modules.txt", new GoArtifactsIgnoreRule()),
 			new StackCase("php", "composer.json", "vendor", "autoload.php", new PhpArtifactsIgnoreRule()),
-			new StackCase("ruby", "Gemfile.lock", "tmp", "cache.txt", new RubyArtifactsIgnoreRule())
+			new StackCase("ruby", "Gemfile.lock", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule())
 		};
 
 		foreach (var testCase in cases)
@@ -134,14 +255,14 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 	{
 		var cases = new[]
 		{
-			new StackCase("frontend", "package.json", "node_modules", "index.js", new FrontendArtifactsIgnoreRule()),
+			new StackCase("frontend", "package.json", "node_modules", ".package-lock.json", new FrontendArtifactsIgnoreRule()),
 			new StackCase("dotnet", "App.csproj", "bin", "app.dll", new DotNetArtifactsIgnoreRule()),
 			new StackCase("python", "requirements.txt", "__pycache__", "app.pyc", new PythonArtifactsIgnoreRule()),
-			new StackCase("jvm", "settings.gradle", "build", "classes.bin", new JvmArtifactsIgnoreRule()),
-			new StackCase("rust", "Cargo.toml", "target", "app.bin", new RustArtifactsIgnoreRule()),
-			new StackCase("go", "go.work", "vendor", "module.go", new GoArtifactsIgnoreRule()),
+			new StackCase("jvm", "settings.gradle", "build", "classes/App.class", new JvmArtifactsIgnoreRule()),
+			new StackCase("rust", "Cargo.toml", "target", "debug/app", new RustArtifactsIgnoreRule()),
+			new StackCase("go", "go.work", "vendor", "modules.txt", new GoArtifactsIgnoreRule()),
 			new StackCase("php", "composer.json", "vendor", "autoload.php", new PhpArtifactsIgnoreRule()),
-			new StackCase("ruby", "Gemfile.lock", "tmp", "cache.txt", new RubyArtifactsIgnoreRule())
+			new StackCase("ruby", "Gemfile.lock", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule())
 		};
 
 		foreach (var testCase in cases)
@@ -202,6 +323,11 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 
 		return true;
 	}
+
+	private static string NormalizeRelativePath(string relativePath) =>
+		relativePath
+			.Replace('/', Path.DirectorySeparatorChar)
+			.Replace('\\', Path.DirectorySeparatorChar);
 
 	private static TreeBuildResult BuildStackCycleTree(
 		string rootPath,

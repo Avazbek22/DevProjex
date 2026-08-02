@@ -25,7 +25,8 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		ApplyScanState(
 			coordinator,
 			BuildSingleCount(optionCase.Id, effectiveCount),
-			hasIgnoreCounts: true);
+			hasIgnoreCounts: true,
+			gitIgnoreImpact: 0);
 
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
@@ -66,7 +67,8 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		ApplyScanState(
 			coordinator,
 			BuildSingleCount(optionCase.Id, 3),
-			hasIgnoreCounts: true);
+			hasIgnoreCounts: true,
+			gitIgnoreImpact: 0);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
 		var option = Assert.Single(viewModel.IgnoreOptions);
@@ -77,14 +79,16 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		ApplyScanState(
 			coordinator,
 			IgnoreOptionCounts.Empty,
-			hasIgnoreCounts: true);
+			hasIgnoreCounts: true,
+			gitIgnoreImpact: 0);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 		Assert.DoesNotContain(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
 
 		ApplyScanState(
 			coordinator,
 			BuildSingleCount(optionCase.Id, reappearingCount),
-			hasIgnoreCounts: true);
+			hasIgnoreCounts: true,
+			gitIgnoreImpact: 0);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
 		option = Assert.Single(viewModel.IgnoreOptions);
@@ -199,7 +203,8 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 	private static void ApplyScanState(
 		SelectionSyncCoordinator coordinator,
 		IgnoreOptionCounts ignoreCounts,
-		bool hasIgnoreCounts)
+		bool hasIgnoreCounts,
+		int gitIgnoreImpact = 1)
 	{
 		var filterService = new FilterOptionSelectionService();
 		var options = filterService.BuildExtensionOptions([".cs"], new HashSet<string>(StringComparer.OrdinalIgnoreCase));
@@ -208,7 +213,9 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			"ApplyExtensionOptions",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
-		method!.Invoke(coordinator, [options, 0, ignoreCounts, new IgnoreControllerImpactCounts(GitIgnore: 1), hasIgnoreCounts]);
+		method!.Invoke(
+			coordinator,
+			[options, 0, ignoreCounts, new IgnoreControllerImpactCounts(GitIgnore: gitIgnoreImpact), hasIgnoreCounts]);
 	}
 
 	private static SelectionSyncCoordinator CreateCoordinator(

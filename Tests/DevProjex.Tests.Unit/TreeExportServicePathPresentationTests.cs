@@ -49,10 +49,38 @@ public sealed class TreeExportServicePathPresentationTests
 
 		using var doc = JsonDocument.Parse(result);
 		Assert.Equal("https://github.com/user/repo", doc.RootElement.GetProperty("rootPath").GetString());
+		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void BuildFullTree_StructuredFormat_UsesDisplayRootPathWhenProvided(TreeTextFormat format)
+	{
+		var service = new TreeExportService();
+		var root = CreateSimpleRoot();
+
+		var result = service.BuildFullTree(
+			@"C:\repo",
+			root,
+			format,
+			displayRootPath: "https://github.com/user/repo");
+
+		if (format == TreeTextFormat.Xml)
+		{
+			var document = XmlTreeExportTestHelper.Parse(result);
+			Assert.Equal("https://github.com/user/repo", document.Root!.Attribute("r")?.Value);
+		}
+		else
+		{
+			Assert.StartsWith("Root: https://github.com/user/repo", result, StringComparison.Ordinal);
+		}
+
+		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
 	}
 
 	[Fact]
-	public void BuildFullTree_Json_UsesDisplayRootNameWhenProvided()
+	public void BuildFullTree_Json_DoesNotWriteRootDisplayNameMetadata()
 	{
 		var service = new TreeExportService();
 		var root = CreateSimpleRoot();
@@ -65,8 +93,54 @@ public sealed class TreeExportServicePathPresentationTests
 			displayRootName: "repo-clean");
 
 		using var doc = JsonDocument.Parse(result);
-		var rootName = doc.RootElement.GetProperty("root").GetProperty("name").GetString();
-		Assert.Equal("repo-clean", rootName);
+		JsonTreeExportTestHelper.AssertOnlyRootPathAndTree(doc.RootElement);
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/main.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.False(doc.RootElement.TryGetProperty("root", out _));
+	}
+
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
+	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void BuildFullTree_WithoutRootPath_KeepsCleanRootIdentityAndValidFormat(
+		TreeTextFormat format)
+	{
+		var service = new TreeExportService();
+		var root = CreateSimpleRoot();
+
+		var result = service.BuildFullTree(
+			@"C:\repo",
+			root,
+			format,
+			displayRootPath: "https://github.com/user/repo",
+			displayRootName: "repo-clean",
+			includeRootPath: false);
+
+		Assert.DoesNotContain(
+			"https://github.com/user/repo",
+			result,
+			StringComparison.Ordinal);
+		Assert.Contains("repo-clean", result, StringComparison.Ordinal);
+		switch (format)
+		{
+			case TreeTextFormat.Json:
+				using (var document = JsonDocument.Parse(result))
+					Assert.True(document.RootElement.TryGetProperty("repo-clean", out _));
+				break;
+			case TreeTextFormat.Xml:
+				var xml = System.Xml.Linq.XDocument.Parse(result);
+				Assert.Equal("repo-clean", xml.Root!.Attribute("n")?.Value);
+				break;
+			case TreeTextFormat.Markdown:
+				Assert.StartsWith("- repo-clean/", result, StringComparison.Ordinal);
+				break;
+			default:
+				Assert.StartsWith("repo-clean", result, StringComparison.Ordinal);
+				break;
+		}
 	}
 
 	[Fact]
@@ -88,6 +162,43 @@ public sealed class TreeExportServicePathPresentationTests
 
 		using var doc = JsonDocument.Parse(result);
 		Assert.Equal("https://github.com/user/repo", doc.RootElement.GetProperty("rootPath").GetString());
+		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void BuildSelectedTree_StructuredFormat_UsesDisplayRootPathWhenProvided(TreeTextFormat format)
+	{
+		var service = new TreeExportService();
+		var root = CreateSimpleRoot();
+		var selected = new HashSet<string>(PathComparer.Default)
+		{
+			@"C:\repo\src\main.cs"
+		};
+
+		var result = service.BuildSelectedTree(
+			@"C:\repo",
+			root,
+			selected,
+			format,
+			displayRootPath: "https://github.com/user/repo",
+			displayRootName: "repo-clean");
+
+		if (format == TreeTextFormat.Xml)
+		{
+			var document = XmlTreeExportTestHelper.Parse(result);
+			Assert.Equal("https://github.com/user/repo", document.Root!.Attribute("r")?.Value);
+			Assert.Equal(["src/main.cs"], XmlTreeExportTestHelper.ExtractFilePaths(document));
+		}
+		else
+		{
+			Assert.StartsWith("Root: https://github.com/user/repo", result, StringComparison.Ordinal);
+			Assert.Equal(["src/main.cs"], MarkdownTreeExportTestHelper.ExtractFilePaths(result));
+		}
+
+		Assert.DoesNotContain("C:/repo", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("repo-clean", result, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -112,7 +223,7 @@ public sealed class TreeExportServicePathPresentationTests
 	}
 
 	[Fact]
-	public void BuildSelectedTree_Json_UsesDisplayRootNameWhenProvided()
+	public void BuildSelectedTree_Json_DoesNotWriteDisplayRootNameMetadata()
 	{
 		var service = new TreeExportService();
 		var root = CreateSimpleRoot();
@@ -130,13 +241,13 @@ public sealed class TreeExportServicePathPresentationTests
 			displayRootName: "repo-clean");
 
 		using var doc = JsonDocument.Parse(result);
-		var rootNode = doc.RootElement.GetProperty("root");
-		Assert.Equal("repo-clean", rootNode.GetProperty("name").GetString());
-		Assert.Equal("src", rootNode.GetProperty("dirs")[0].GetProperty("name").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(["src/main.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.False(doc.RootElement.TryGetProperty("root", out _));
 	}
 
 	[Fact]
-	public void BuildFullTree_Json_KeepsOriginalRootName_WhenDisplayRootNameIsNull()
+	public void BuildFullTree_Json_UsesTreeContentsWithoutRootNode_WhenDisplayRootNameIsNull()
 	{
 		var service = new TreeExportService();
 		var root = CreateSimpleRoot();
@@ -149,7 +260,10 @@ public sealed class TreeExportServicePathPresentationTests
 			displayRootName: null);
 
 		using var doc = JsonDocument.Parse(result);
-		Assert.Equal("repo", doc.RootElement.GetProperty("root").GetProperty("name").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("src").ValueKind);
+		Assert.Equal(["src/main.cs"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.False(tree.TryGetProperty("repo", out _));
 	}
 
 	private static TreeNodeDescriptor CreateSimpleRoot()

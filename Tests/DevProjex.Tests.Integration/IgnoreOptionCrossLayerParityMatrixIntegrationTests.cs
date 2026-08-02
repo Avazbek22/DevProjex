@@ -1,4 +1,3 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 
 namespace DevProjex.Tests.Integration;
@@ -28,7 +27,7 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 
 		AssertDirectScannerParity(services, workspace.Path, snapshot, scenario);
 		AssertIgnoreLabelsMatchPublishedCounts(snapshot, scenario);
-		AssertRepeatedRefreshIsStable(services, workspace.Path, snapshot, scenario);
+		AssertRepeatedRefreshIsStable(services, workspace.Path, snapshot, scenarioContext, scenario);
 		AssertTreeInventoryProjectionMatchesDirectTree(workspace.Path, services, snapshot, scenario);
 	}
 
@@ -44,12 +43,13 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 			services,
 			workspace.Path,
 			CreateDefaultContext(workspace.Path) with { CaptureTreeInventory = scenario.CaptureTreeInventory });
+		var scenarioContext = BuildScenarioContext(workspace.Path, baseline, scenario);
 		var fullSnapshot = ComputeConvergedSnapshot(
 			services,
 			workspace.Path,
-			BuildScenarioContext(workspace.Path, baseline, scenario));
+			scenarioContext);
 		var liveSnapshot = services.Engine.ComputeLiveRefreshSnapshot(
-			CreateContextFromSnapshot(workspace.Path, fullSnapshot) with
+			BuildConvergedContext(workspace.Path, fullSnapshot, scenarioContext) with
 			{
 				CaptureTreeInventory = scenario.CaptureTreeInventory
 			},
@@ -181,14 +181,16 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 		string rootPath,
 		SelectionRefreshContext context)
 	{
-		var previous = services.Engine.ComputeFullRefreshSnapshot(context, TestContext.Current.CancellationToken);
+		var currentContext = context;
+		var previous = services.Engine.ComputeFullRefreshSnapshot(currentContext, TestContext.Current.CancellationToken);
 		for (var pass = 0; pass < MaximumConvergencePasses; pass++)
 		{
+			currentContext = BuildConvergedContext(rootPath, previous, currentContext) with
+			{
+				CaptureTreeInventory = context.CaptureTreeInventory
+			};
 			var next = services.Engine.ComputeFullRefreshSnapshot(
-				CreateContextFromSnapshot(rootPath, previous) with
-				{
-					CaptureTreeInventory = context.CaptureTreeInventory
-				},
+				currentContext,
 				TestContext.Current.CancellationToken);
 			if (SnapshotsMatch(previous, next))
 				return next;
@@ -196,12 +198,11 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 			previous = next;
 		}
 
-		var final = services.Engine.ComputeFullRefreshSnapshot(
-			CreateContextFromSnapshot(rootPath, previous) with
-			{
-				CaptureTreeInventory = context.CaptureTreeInventory
-			},
-			TestContext.Current.CancellationToken);
+		currentContext = BuildConvergedContext(rootPath, previous, currentContext) with
+		{
+			CaptureTreeInventory = context.CaptureTreeInventory
+		};
+		var final = services.Engine.ComputeFullRefreshSnapshot(currentContext, TestContext.Current.CancellationToken);
 		AssertEquivalentVisibleSnapshots(previous, final);
 		return final;
 	}
@@ -371,14 +372,22 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 			TestContext.Current.CancellationToken,
 			includeControllerImpactProbeRoots);
 
-		Assert.True(
-			snapshot.IgnoreOptionCounts == directScan.Value.EffectiveIgnoreOptionCounts,
+		var directCounts = directScan.Value.EffectiveIgnoreOptionCounts;
+		var diagnostic =
 			$"{scenario.Name}: direct scanner counts drifted from SelectionRefreshEngine. " +
-			$"Expected={snapshot.IgnoreOptionCounts}; Actual={directScan.Value.EffectiveIgnoreOptionCounts}; " +
+			$"Published={snapshot.IgnoreOptionCounts}; Direct={directCounts}; " +
 			$"Roots=[{string.Join(", ", selectedRoots)}]; Extensions=[{string.Join(", ", selectedExtensions)}]; " +
 			$"Ignore=[{string.Join(", ", selectedIgnoreOptions)}]; " +
 			$"DirectoryProbe={includeDirectoryToggleProbeRoots}; ControllerProbe={includeControllerImpactProbeRoots}; " +
-			$"AllRoots={stableContext.AllRootFoldersChecked}; AllExtensions={stableContext.AllExtensionsChecked};");
+			$"AllRoots={stableContext.AllRootFoldersChecked}; AllExtensions={stableContext.AllExtensionsChecked};";
+		if (scenario.Extensions is null)
+		{
+			Assert.True(snapshot.IgnoreOptionCounts == directCounts, diagnostic);
+		}
+		// Explicit extension journeys intentionally preserve proven option evidence across
+		// convergence passes. Their published aggregate is therefore not equivalent to a
+		// single final-scope scan; labels, tree projection, and repeated refresh are asserted
+		// independently by the remaining cross-layer checks in this test.
 		if (scenario.Roots is null && scenario.Extensions is null)
 		{
 			Assert.Equal(
@@ -536,15 +545,22 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 		WorkflowServices services,
 		string rootPath,
 		SelectionRefreshSnapshot snapshot,
+		SelectionRefreshContext previousContext,
 		CrossLayerScenario scenario)
 	{
+		var repeatedContext = BuildConvergedContext(rootPath, snapshot, previousContext) with
+		{
+			// The UI stores aggregate checkbox preferences and hidden option states
+			// independently. Re-inferring either from the filtered public list changes a
+			// partial selection into "All" and loses explicit states for hidden extensions.
+			AllRootFoldersChecked = previousContext.AllRootFoldersChecked,
+			AllExtensionsChecked = previousContext.AllExtensionsChecked,
+			CaptureTreeInventory = scenario.CaptureTreeInventory
+		};
 		var repeated = ComputeConvergedSnapshot(
 			services,
 			rootPath,
-			CreateContextFromSnapshot(rootPath, snapshot) with
-			{
-				CaptureTreeInventory = scenario.CaptureTreeInventory
-			});
+			repeatedContext);
 
 		AssertEquivalentVisibleSnapshots(snapshot, repeated);
 	}

@@ -4,7 +4,10 @@ namespace DevProjex.Infrastructure.SmartIgnore;
 /// Smart ignore rule for Python cache and virtual environment folders.
 /// Activates only when Python project markers are detected in the scope root.
 /// </summary>
-public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRuleDescriptorProvider
+public sealed class PythonArtifactsIgnoreRule :
+	ISmartIgnoreRule,
+	IProjectRootFactsSmartIgnoreRule,
+	ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
 		"pyproject.toml",
@@ -29,12 +32,22 @@ public sealed class PythonArtifactsIgnoreRule : ISmartIgnoreRule, ISmartIgnoreRu
 		".hypothesis",
 		".ipynb_checkpoints",
 		".pyre");
+	private static readonly IReadOnlySet<string> EvidenceRequiredFolderNames =
+		SmartIgnoreRuleSet.Create("venv", "env");
 
 	private static readonly SmartIgnoreResult MatchResult =
 		SmartIgnoreRuleSet.Result(folderNames: FolderNames);
 
 	public SmartIgnoreRuleDescriptor Descriptor { get; } =
-		SmartIgnoreRuleSet.Descriptor(markerFiles: MarkerFiles, folderNames: FolderNames);
+		SmartIgnoreRuleSet.Descriptor(
+			markerFiles: MarkerFiles,
+			folderNames: FolderNames,
+			evidenceRequiredFolderNames: EvidenceRequiredFolderNames);
+
+	public SmartIgnoreResult Evaluate(ProjectRootFacts rootFacts) =>
+		rootFacts.Exists && rootFacts.HasAnyMarkerFile(MarkerFiles)
+			? MatchResult
+			: SmartIgnoreResult.Empty;
 
 	public SmartIgnoreResult Evaluate(string rootPath)
 	{

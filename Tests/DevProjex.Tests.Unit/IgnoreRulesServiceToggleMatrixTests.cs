@@ -10,7 +10,7 @@ public sealed class IgnoreRulesServiceToggleMatrixTests
 
 	[Theory]
 	[MemberData(nameof(OptionMatrix))]
-	public void Build_SingleProjectWithGitIgnore_SmartFollowsUseGitIgnore(int bits)
+	public void Build_SingleProjectWithGitIgnore_ControllersRemainIndependent(int bits)
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "*.log");
@@ -25,10 +25,12 @@ public sealed class IgnoreRulesServiceToggleMatrixTests
 		var selected = BuildSelectedOptions(bits);
 		var rules = service.Build(temp.Path, selected);
 		var useGitIgnoreSelected = selected.Contains(IgnoreOptionId.UseGitIgnore);
-		var expectedUseSmartIgnore = useGitIgnoreSelected;
+		var expectedUseSmartIgnore = selected.Contains(IgnoreOptionId.SmartIgnore);
 
 		Assert.Equal(useGitIgnoreSelected, rules.UseGitIgnore);
 		Assert.Equal(expectedUseSmartIgnore, rules.UseSmartIgnore);
+		Assert.Equal(rules.UseGitIgnore, rules.GitIgnoreCandidateMatchesActiveRules);
+		Assert.Equal(rules.UseSmartIgnore, rules.SmartIgnoreCandidateMatchesActiveRules);
 		Assert.Equal(selected.Contains(IgnoreOptionId.HiddenFolders), rules.IgnoreHiddenFolders);
 		Assert.Equal(selected.Contains(IgnoreOptionId.HiddenFiles), rules.IgnoreHiddenFiles);
 		Assert.Equal(selected.Contains(IgnoreOptionId.DotFolders), rules.IgnoreDotFolders);
@@ -49,6 +51,30 @@ public sealed class IgnoreRulesServiceToggleMatrixTests
 			Assert.Empty(rules.SmartIgnoredFolders);
 			Assert.Empty(rules.SmartIgnoredFiles);
 		}
+	}
+
+	[Fact]
+	public void Build_SingleProjectWithGitIgnore_GenericArtifactsRequireSmartIgnoreSelection()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "*.log");
+		temp.CreateFile("Sample.csproj", "<Project />");
+		var obj = temp.CreateFolder("obj");
+		temp.CreateFile("obj/project.assets.json", "{}");
+		var service = new IgnoreRulesService(new SmartIgnoreService([]));
+
+		var smartOnly = service.Build(temp.Path, [IgnoreOptionId.SmartIgnore]);
+		var gitEnabled = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+
+		Assert.False(smartOnly.UseGitIgnore);
+		Assert.True(smartOnly.UseSmartIgnore);
+		Assert.True(smartOnly.SmartArtifactIgnoreMatcher.HasRules);
+		Assert.True(smartOnly.IsSmartIgnoredDirectory(obj, "obj"));
+
+		Assert.True(gitEnabled.UseGitIgnore);
+		Assert.False(gitEnabled.UseSmartIgnore);
+		Assert.False(gitEnabled.SmartArtifactIgnoreMatcher.HasRules);
+		Assert.False(gitEnabled.IsSmartIgnoredDirectory(obj, "obj"));
 	}
 
 	private static IReadOnlyCollection<IgnoreOptionId> BuildSelectedOptions(int bits)

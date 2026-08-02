@@ -1283,20 +1283,24 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 
         public void Release() => _releaseMetrics.TrySetResult(true);
 
-        public Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+        public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
             innerAnalyzer.IsTextFileAsync(path, cancellationToken);
 
-        public async Task<TextFileMetrics?> GetTextFileMetricsAsync(string path, CancellationToken cancellationToken = default)
+        public async ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+            string path,
+            CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _metricsRequestCount);
             await _releaseMetrics.Task.WaitAsync(cancellationToken);
             return await innerAnalyzer.GetTextFileMetricsAsync(path, cancellationToken);
         }
 
-        public Task<TextFileContent?> TryReadAsTextAsync(string path, CancellationToken cancellationToken = default) =>
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
+            string path,
+            CancellationToken cancellationToken = default) =>
             innerAnalyzer.TryReadAsTextAsync(path, cancellationToken);
 
-        public Task<TextFileContent?> TryReadAsTextAsync(
+        public ValueTask<TextFileContent?> TryReadAsTextAsync(
             string path,
             long maxSizeForFullRead,
             CancellationToken cancellationToken = default) =>

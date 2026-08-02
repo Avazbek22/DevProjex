@@ -11,13 +11,6 @@ public sealed class IgnoreRulesPolyglotScopeSelectionStressTests
 		"go-tool"
 	];
 
-	private static readonly HashSet<string> NonGitScopes = new(StringComparer.OrdinalIgnoreCase)
-	{
-		"service-dotnet",
-		"python-worker",
-		"go-tool"
-	};
-
 	public static IEnumerable<object[]> SelectedScopeSubsets()
 	{
 		var max = 1 << ScopeNames.Length;
@@ -42,7 +35,7 @@ public sealed class IgnoreRulesPolyglotScopeSelectionStressTests
 			("rust-target-file", "workspace/rust-core/target/debug/app.dll", false, true),
 			("rust-source", "workspace/rust-core/src/main.rs", false, false),
 			("web-generated-dir", "workspace/web-app/generated", true, true),
-			("web-generated-keep", "workspace/web-app/generated/keep.txt", false, false),
+			("web-generated-keep-stays-hidden-with-parent", "workspace/web-app/generated/keep.txt", false, true),
 			("web-node-modules-dir", "workspace/web-app/node_modules", true, true),
 			("web-source", "workspace/web-app/src/main.tsx", false, false),
 			("web-cache-negation", "workspace/web-app/src/keep.cache", false, false),
@@ -96,11 +89,8 @@ public sealed class IgnoreRulesPolyglotScopeSelectionStressTests
 		var availability = service.GetIgnoreOptionsAvailability(Path.Combine(temp.Path, "workspace"), selectedScopes);
 
 		var hasGit = true;
-		var hasNonGit = selectedScopes.Any(scope => NonGitScopes.Contains(scope));
-		var isSingleGitScope = false;
-
 		Assert.Equal(hasGit, availability.IncludeGitIgnore);
-		Assert.Equal(!isSingleGitScope && hasNonGit, availability.IncludeSmartIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
 	}
 
 	[Theory]

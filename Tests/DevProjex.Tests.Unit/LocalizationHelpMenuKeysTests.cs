@@ -6,9 +6,25 @@ public sealed class LocalizationHelpMenuKeysTests
 	[
 		"Menu.Help",
 		"Menu.Help.Help",
+		"Menu.Help.CheckUpdates",
 		"Menu.Help.About",
 		"Menu.Help.ResetSettings",
-		"Menu.Help.ResetData"
+		"Menu.Help.ResetData",
+		"Update.Title",
+		"Update.Prompt",
+		"Update.AutomaticWeekly",
+		"Update.Available",
+		"Update.UpToDate",
+		"Update.CurrentVersionNewer",
+		"Update.Failed",
+		"Update.FailedMessage",
+		"Update.Check",
+		"Update.CheckAgain",
+		"Update.Checking",
+		"Update.Retry",
+		"Update.OpenRepository",
+		"Update.CurrentVersion",
+		"Update.LatestVersion"
 	];
 
 	[Fact]
@@ -40,6 +56,24 @@ public sealed class LocalizationHelpMenuKeysTests
 				Assert.True(map.TryGetValue(required, out var value), $"Missing {required} in {Path.GetFileName(file)}");
 				Assert.False(string.IsNullOrWhiteSpace(value), $"{required} is empty in {Path.GetFileName(file)}");
 			}
+		}
+	}
+
+	[Fact]
+	public void AboutBody_UsesDynamicCopyrightYearAndDeveloperHandleInEveryLanguage()
+	{
+		var localizationDir = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
+		var files = Directory.GetFiles(localizationDir, "*.json");
+
+		foreach (var file in files)
+		{
+			var values = ReadKeyValues(File.ReadAllText(file));
+			var body = values["Help.About.Body"];
+
+			Assert.Contains("{0}", body, StringComparison.Ordinal);
+			Assert.Contains("Avazbek Olimov (Avazbek22)", body, StringComparison.Ordinal);
+			Assert.DoesNotContain("2025–2026", body, StringComparison.Ordinal);
+			Assert.DoesNotContain("GPL-3.0", body, StringComparison.OrdinalIgnoreCase);
 		}
 	}
 

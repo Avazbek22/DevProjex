@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  checks: read
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
@@ -17,8 +18,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan-store:
+    name: Plan Store Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_store: ${{ steps.plan.outputs.run_store }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate CI planner contracts
+        shell: pwsh
+        run: ./Scripts/ci/Test-CiChangePlanner.ps1
+
+      - name: Select Store validation plan
+        id: plan
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIOUS_GATE_NAME: Store Gate
+        run: >
+          ./Scripts/ci/Select-CiPlan.ps1
+          -GitHubEventPath $env:GITHUB_EVENT_PATH
+          -GitHubEventName $env:GITHUB_EVENT_NAME
+          -PreviousGateName $env:PREVIOUS_GATE_NAME
+          -GitHubOutputPath $env:GITHUB_OUTPUT
+
   store-package-smoke:
     name: Store Package Smoke
+    needs: plan-store
+    if: ${{ needs.plan-store.outputs.run_store == 'true' }}
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
 
@@ -41,3 +73,28 @@ jobs:
       - name: Build Store package and validate execution alias
         shell: pwsh
         run: ./Scripts/release-all.ps1 -SmokeStoreBuildOnly
+
+  store-gate:
+    name: Store Gate
+    needs:
+      - plan-store
+      - store-package-smoke
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify selected Store jobs
+        shell: pwsh
+        env:
+          PLAN_RESULT: ${{ needs.plan-store.result }}
+          STORE_RESULT: ${{ needs.store-package-smoke.result }}
+        run: |
+          $results = @{
+            plan = $env:PLAN_RESULT
+            store = $env:STORE_RESULT
+          }
+          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
+          if ($failed.Count -gt 0) {
+            throw "Selected Store jobs failed: $($failed.ForEach({ \"$($_.Key)=$($_.Value)\" }) -join ', ')"
+          }

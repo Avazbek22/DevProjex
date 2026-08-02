@@ -1,0 +1,22 @@
+
+  DevProjex Terminal
+
+
+
+
+
+               ┌┤Cloning repository · CombatRepository├─────────────────────────────────────────────────┐
+               │                                                                                        │
+               │  Connecting                                                                            │
+               │  file:///<ORIGIN_ROOT>/CombatRepository │
+               │                                                                                        │
+               │                                                                                        │
+               │  <SPINNER>                                                                                     │
+               │                                                                                        │
+               │  Git operation in progress                                                             │
+               │  Starting the existing Git clone engine.                                               │
+               │  Elapsed: <ELAPSED>                                                                         │
+               │                                                                                        │
+               │                                                                                        │
+               │  Esc or Ctrl+C cancels this operation                                                  │
+               └────────────────────────────────────────────────────────────────────────────────────────┘

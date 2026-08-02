@@ -2,7 +2,7 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ScanOptionsUseCasePathSemanticsTests
 {
-	private static IgnoreRules CreateRules() => new(
+	private static readonly IgnoreRules Rules = new(
 		IgnoreHiddenFolders: false,
 		IgnoreHiddenFiles: false,
 		IgnoreDotFolders: false,
@@ -11,20 +11,18 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		SmartIgnoredFiles: new HashSet<string>());
 
 	[Fact]
-	public void GetRootFolders_SortsUsingPathComparerDefault()
+	public void GetRootFolders_SortsUsingPlatformPathSemantics()
 	{
 		var returnedFolders = new[] { "a-src", "B-src", "C-src" };
-		var scanner = new StubFileSystemScanner
+		var scanner = new RecordingScanner
 		{
-			GetRootFolderNamesHandler = (_, _) => new ScanResult<List<string>>(
-				[..returnedFolders],
-				RootAccessDenied: false,
-				HadAccessDenied: false)
+			RootFolders = new ScanResult<List<string>>([.. returnedFolders], false, false)
 		};
 
-		var useCase = new ScanOptionsUseCase(scanner);
-		var result = useCase.GetRootFolders(CreateRootPath(), CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
-
+		var result = new ScanOptionsUseCase(scanner).GetRootFolders(
+			SyntheticTestPaths.CreateMissingRoot(),
+			Rules,
+			TestContext.Current.CancellationToken);
 		var expected = returnedFolders.ToList();
 		expected.Sort(PathComparer.Default);
 
@@ -32,143 +30,59 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 	}
 
 	[Fact]
-	public void GetExtensionsForRootFolders_PassesOriginalFolderPathsToScanner()
+	public void WorkspaceProjection_ForwardsLogicalRootNamesWithoutHostSpecificRewriting()
 	{
-		var rootPath = CreateRootPath();
-		var folderCalls = new System.Collections.Concurrent.ConcurrentBag<string>();
-		var scanner = new StubFileSystemScanner
-		{
-			GetRootFileExtensionsHandler = (_, _) => new ScanResult<HashSet<string>>(
-				[],
-				RootAccessDenied: false,
-				HadAccessDenied: false),
-			GetExtensionsHandler = (path, _) =>
-			{
-				folderCalls.Add(path);
-				return new ScanResult<HashSet<string>>(
-					[],
-					RootAccessDenied: false,
-					HadAccessDenied: false);
-			}
-		};
-
-		var useCase = new ScanOptionsUseCase(scanner);
-		_ = useCase.GetExtensionsForRootFolders(rootPath, ["Src", "docs"], CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
-
-		AssertSamePathsIgnoringParallelOrder(
-			[
-				Path.Combine(rootPath, "Src"),
-				Path.Combine(rootPath, "docs")
-			],
-			folderCalls);
-	}
-
-	[Fact]
-	public void GetExtensionsAndIgnoreCountsForRootFolders_AdvancedScanner_PassesOriginalFolderPathsToScanner()
-	{
-		var rootPath = CreateRootPath();
-		var scanner = new RecordingAdvancedScanner();
+		var scanner = new RecordingScanner();
 		var useCase = new ScanOptionsUseCase(scanner);
 
-		_ = useCase.GetExtensionsAndIgnoreCountsForRootFolders(rootPath, ["Src", "docs"], CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
-
-		Assert.Equal(rootPath, scanner.RootFilePath);
-		AssertSamePathsIgnoringParallelOrder(
-			[
-				Path.Combine(rootPath, "Src"),
-				Path.Combine(rootPath, "docs")
-			],
-			scanner.FolderPaths);
-	}
-
-	[Fact]
-	public void GetExtensionsForRootFolders_WhenRootExists_SkipsMissingRootedAndEscapingSelections()
-	{
-		using var temp = new TemporaryDirectory();
-		temp.CreateFolder("src");
-		var rootedSelection = Path.Combine(temp.Path, "absolute");
-		var folderCalls = new List<string>();
-		var scanner = new StubFileSystemScanner
-		{
-			GetRootFileExtensionsHandler = (_, _) => new ScanResult<HashSet<string>>(
-				[],
-				RootAccessDenied: false,
-				HadAccessDenied: false),
-			GetExtensionsHandler = (path, _) =>
-			{
-				folderCalls.Add(path);
-				return new ScanResult<HashSet<string>>(
-					[],
-					RootAccessDenied: false,
-					HadAccessDenied: false);
-			}
-		};
-
-		var useCase = new ScanOptionsUseCase(scanner);
 		_ = useCase.GetExtensionsForRootFolders(
-			temp.Path,
-			["src", "missing", ".", "..", rootedSelection],
-			CreateRules(), cancellationToken: TestContext.Current.CancellationToken);
+			SyntheticTestPaths.CreateMissingRoot(),
+			["Src", "docs", ".config"],
+			Rules,
+			TestContext.Current.CancellationToken);
 
-		Assert.Equal([Path.Combine(temp.Path, "src")], folderCalls);
+		Assert.Equal(["Src", "docs", ".config"], Assert.Single(scanner.Requests).SelectedRootFolders);
 	}
 
-	private static void AssertSamePathsIgnoringParallelOrder(
-		IEnumerable<string> expected,
-		IEnumerable<string> actual)
+	private sealed class RecordingScanner : IFileSystemScannerProjectWorkspaceScanner
 	{
-		// Folder scans run in parallel, so call order is intentionally not part of this contract.
-		Assert.Equal(
-			expected.OrderBy(static path => path, PathComparer.Default),
-			actual.OrderBy(static path => path, PathComparer.Default));
-	}
-
-	private static string CreateRootPath() => SyntheticTestPaths.CreateMissingRoot();
-
-	private sealed class RecordingAdvancedScanner : IFileSystemScanner, IFileSystemScannerAdvanced
-	{
-		public string? RootFilePath { get; private set; }
-		public System.Collections.Concurrent.ConcurrentBag<string> FolderPaths { get; } = [];
+		public List<ProjectWorkspaceScanRequest> Requests { get; } = [];
+		public ScanResult<List<string>> RootFolders { get; init; } = new([], false, false);
 
 		public bool CanReadRoot(string rootPath) => true;
 
 		public ScanResult<HashSet<string>> GetExtensions(
 			string rootPath,
 			IgnoreRules rules,
-			CancellationToken cancellationToken = default) => new([], false, false);
+			CancellationToken cancellationToken = default) =>
+			throw new InvalidOperationException("Granular scans must not be used.");
 
 		public ScanResult<HashSet<string>> GetRootFileExtensions(
 			string rootPath,
 			IgnoreRules rules,
-			CancellationToken cancellationToken = default) => new([], false, false);
+			CancellationToken cancellationToken = default) =>
+			throw new InvalidOperationException("Granular scans must not be used.");
 
 		public ScanResult<List<string>> GetRootFolderNames(
 			string rootPath,
 			IgnoreRules rules,
-			CancellationToken cancellationToken = default) => new([], false, false);
+			CancellationToken cancellationToken = default) =>
+			RootFolders;
 
-		public ScanResult<ExtensionsScanData> GetExtensionsWithIgnoreOptionCounts(
-			string rootPath,
-			IgnoreRules rules,
+		public ScanResult<ProjectWorkspaceScanSnapshot> ScanProjectWorkspace(
+			ProjectWorkspaceScanRequest request,
 			CancellationToken cancellationToken = default)
 		{
-			FolderPaths.Add(rootPath);
-			return new ScanResult<ExtensionsScanData>(
-				new ExtensionsScanData(new HashSet<string>(StringComparer.OrdinalIgnoreCase), IgnoreOptionCounts.Empty),
-				RootAccessDenied: false,
-				HadAccessDenied: false);
-		}
-
-		public ScanResult<ExtensionsScanData> GetRootFileExtensionsWithIgnoreOptionCounts(
-			string rootPath,
-			IgnoreRules rules,
-			CancellationToken cancellationToken = default)
-		{
-			RootFilePath = rootPath;
-			return new ScanResult<ExtensionsScanData>(
-				new ExtensionsScanData(new HashSet<string>(StringComparer.OrdinalIgnoreCase), IgnoreOptionCounts.Empty),
-				RootAccessDenied: false,
-				HadAccessDenied: false);
+			cancellationToken.ThrowIfCancellationRequested();
+			Requests.Add(request);
+			var section = new IgnoreSectionScanData(
+				[],
+				IgnoreOptionCounts.Empty,
+				IgnoreOptionCounts.Empty);
+			return new ScanResult<ProjectWorkspaceScanSnapshot>(
+				new ProjectWorkspaceScanSnapshot(section, TreeInventory: null),
+				false,
+				false);
 		}
 	}
 }

@@ -15,11 +15,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Application\Application.csproj" />
-    <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj" />
+    <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia.csproj" />
     <ProjectReference Include="..\..\Kernel\Kernel.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="..\Shared\StoreListing\**\*.cs" LinkBase="StoreListing" />
+    <Compile Include="..\Shared\ProjectLoadWorkflow\**\*.cs" LinkBase="ProjectLoadWorkflow" />
   </ItemGroup>
 </Project>

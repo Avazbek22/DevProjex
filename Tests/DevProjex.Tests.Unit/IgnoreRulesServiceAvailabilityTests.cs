@@ -3,7 +3,7 @@ namespace DevProjex.Tests.Unit;
 public sealed class IgnoreRulesServiceAvailabilityTests
 {
 	[Fact]
-	public void GetIgnoreOptionsAvailability_SingleProjectWithGitIgnore_HidesSmartOption()
+	public void GetIgnoreOptionsAvailability_SingleProjectWithGitIgnore_KeepsControllersIndependent()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "bin/");
@@ -13,7 +13,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		var availability = service.GetIgnoreOptionsAvailability(temp.Path, []);
 
 		Assert.True(availability.IncludeGitIgnore);
-		Assert.False(availability.IncludeSmartIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
 	}
 
 	[Fact]
@@ -24,6 +24,34 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		var service = new IgnoreRulesService(new SmartIgnoreService([]));
 		var availability = service.GetIgnoreOptionsAvailability(temp.Path, []);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void GetIgnoreOptionsAvailability_SourcePackagesNameAlone_DoesNotShowSmartOption()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("workspace/packages/domain/Order.cs", "class Order {}");
+		temp.CreateFile("workspace/packages/api/Controller.cs", "class Controller {}");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["workspace"]);
+
+		Assert.False(availability.IncludeGitIgnore);
+		Assert.False(availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void GetIgnoreOptionsAvailability_ConfirmedLegacyPackageStore_ShowsSmartOption()
+	{
+		using var temp = new TemporaryDirectory();
+		CreateLegacyNuGetPackage(temp, "Alpha.1.0.0", "lib");
+		CreateLegacyNuGetPackage(temp, "Beta.2.0.0", "ref");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["workspace"]);
 
 		Assert.False(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
@@ -74,7 +102,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 	}
 
 	[Fact]
-	public void GetIgnoreOptionsAvailability_SingleGitIgnoreProjectWithExplicitRootSelection_HidesSmartOption()
+	public void GetIgnoreOptionsAvailability_SingleGitIgnoreProjectWithExplicitRootSelection_ShowsBothControllers()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "*.log");
@@ -87,11 +115,11 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		var availability = service.GetIgnoreOptionsAvailability(temp.Path, ["src"]);
 
 		Assert.True(availability.IncludeGitIgnore);
-		Assert.False(availability.IncludeSmartIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
 	}
 
 	[Fact]
-	public void Build_SingleGitIgnoreProjectWithExplicitRootSelection_UseGitIgnoreControlsSmartArtifacts()
+	public void Build_SingleGitIgnoreProjectWithExplicitRootSelection_UseGitIgnoreDoesNotControlSmartArtifacts()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "*.log");
@@ -109,9 +137,9 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 			selectedRootFolders: ["src"]);
 
 		Assert.True(rules.UseGitIgnore);
-		Assert.True(rules.UseSmartIgnore);
-		Assert.Contains(temp.Path, rules.SmartIgnoreScopeRoots, PathComparer.Default);
-		Assert.True(rules.IsSmartIgnoredDirectory(
+		Assert.False(rules.UseSmartIgnore);
+		Assert.Empty(rules.SmartIgnoreScopeRoots);
+		Assert.False(rules.IsSmartIgnoredDirectory(
 			Path.Combine(temp.Path, "src", "__pycache__"),
 			"__pycache__"));
 	}
@@ -129,6 +157,27 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
+	}
+
+	[Fact]
+	public void GetIgnoreOptionsAvailability_DeepMonorepoGitAndSmartScopes_ShowBothPrimaryOptions()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("pnpm-workspace.yaml", "packages:\n  - apps/**\n");
+		temp.CreateFile("apps/domain/team/api/.gitignore", "generated/\n");
+		temp.CreateFile("apps/domain/team/worker/pyproject.toml", "[project]\nname = \"worker\"\n");
+
+		var service = new IgnoreRulesService(new SmartIgnoreService([
+			new PythonArtifactsIgnoreRule()
+		]));
+		var availability = service.GetIgnoreOptionsAvailability(temp.Path, []);
+		var options = CreateIgnoreOptionsService().GetOptions(availability);
+
+		Assert.True(availability.IncludeGitIgnore);
+		Assert.True(availability.IncludeSmartIgnore);
+		Assert.Equal(6, options.Count);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
+		Assert.Equal(IgnoreOptionId.SmartIgnore, options[1].Id);
 	}
 
 	[Fact]
@@ -300,5 +349,34 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		{
 			throw new UnauthorizedAccessException("Access denied.");
 		}
+	}
+
+	private static void CreateLegacyNuGetPackage(
+		TemporaryDirectory temp,
+		string packageDirectoryName,
+		string layoutDirectoryName)
+	{
+		temp.CreateFile(
+			$"workspace/packages/{packageDirectoryName}/{packageDirectoryName}.nupkg",
+			"package");
+		temp.CreateFolder($"workspace/packages/{packageDirectoryName}/{layoutDirectoryName}");
+	}
+
+	private static IgnoreOptionsService CreateIgnoreOptionsService()
+	{
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>
+			{
+				["Settings.Ignore.SmartIgnore"] = "Smart Ignore",
+				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
+				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
+				["Settings.Ignore.HiddenFiles"] = "Hidden files",
+				["Settings.Ignore.DotFolders"] = "Dot folders",
+				["Settings.Ignore.DotFiles"] = "Dot files"
+			}
+		});
+		var localization = new LocalizationService(catalog, AppLanguage.En);
+		return new IgnoreOptionsService(localization);
 	}
 }

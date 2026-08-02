@@ -132,13 +132,13 @@ public sealed class RecentProjectsPersistenceIntegrationTests
 		var normalizedValidFolder = PathUtility.Normalize(validFolder);
 
 		Assert.NotNull(persisted);
-		Assert.Equal(1, loaded.SchemaVersion);
+		Assert.Equal(3, loaded.SchemaVersion);
 		Assert.Single(loaded.RecentFolders);
 		Assert.Single(loaded.RecentRepositories);
 		Assert.Equal(normalizedValidFolder, loaded.RecentFolders[0].Path);
 		Assert.Equal("https://github.com/user/repo.git", loaded.RecentRepositories[0].Url);
 
-		Assert.Equal(1, persisted!.SchemaVersion);
+		Assert.Equal(3, persisted!.SchemaVersion);
 		Assert.Single(persisted.RecentFolders);
 		Assert.Single(persisted.RecentRepositories);
 		Assert.Equal(normalizedValidFolder, persisted.RecentFolders[0].Path);
@@ -168,10 +168,10 @@ public sealed class RecentProjectsPersistenceIntegrationTests
 		});
 
 		Assert.NotNull(persisted);
-		Assert.Equal(1, loaded.SchemaVersion);
+		Assert.Equal(3, loaded.SchemaVersion);
 		Assert.Empty(loaded.RecentFolders);
 		Assert.Empty(loaded.RecentRepositories);
-		Assert.Equal(1, persisted!.SchemaVersion);
+		Assert.Equal(3, persisted!.SchemaVersion);
 		Assert.Empty(persisted.RecentFolders);
 		Assert.Empty(persisted.RecentRepositories);
 	}

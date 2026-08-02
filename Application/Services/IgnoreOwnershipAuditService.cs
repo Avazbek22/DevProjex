@@ -11,6 +11,14 @@ public sealed class IgnoreOwnershipAuditService
 		var physicalDotDirectories = 0;
 		var rootAccessDenied = false;
 		var hadAccessDenied = false;
+		if (Directory.Exists(rootPath) && !FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
+		{
+			return new IgnoreOwnershipAuditResult(
+				physicalDotDirectories,
+				counts,
+				RootAccessDenied: true,
+				HadAccessDenied: true);
+		}
 
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext;
 		try
@@ -38,7 +46,7 @@ public sealed class IgnoreOwnershipAuditService
 				if (isDot)
 					physicalDotDirectories++;
 
-				var gitIgnore = rules.UseGitIgnore
+				var gitIgnore = rules.IsGitIgnoreTraversalEnabled
 					? gitIgnoreContext.Evaluate(directoryPath, name, isDirectory: true, name)
 					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 				var owner = IgnoreDecisionEngine

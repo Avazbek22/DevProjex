@@ -1,0 +1,30 @@
+ DevProjex Terminal · <ID>
+ <PROJECTS_ROOT>
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Content · ASCII├──────────────────────────┐
+│v [x] <ID>               ││global.json:                                                  ▲│
+│  > [x] src                                          ││                                                              ┃│
+│    [x] global.json                                  ││{}                                                            ·│
+│                                                     ││                                                              ·│
+│                                                     ││                                                              ·│
+│                                                     ││src/Feature001.cs:                                            ·│
+│                                                     ││                                                              ·│
+│                                                     ││internal sealed class ContentMarker001 { }                    ·│
+│                                                     ││                                                              ·│
+│                                                     ││                                                              ·│
+│                                                     ││src/Feature002.cs:                                            ·│
+│                                                     ││                                                              ·│
+│                                                     ││internal sealed class ContentMarker002 { }                    ·│
+│                                                     ││                                                              ·│
+│                                                     ││                                                              ·│
+│                                                     ││src/Feature003.cs:                                            ·│
+│                                                     ││                                                              ·│
+│                                                     ││internal sealed class ContentMarker003 { }                    ·│
+│                                                     ││                                                              ·│
+│                                                     ││                                                              ·│
+│                                                     ││src/Feature004.cs:                                            ·│
+│                                                     ││                                                              ▼│
+│                                                     ││ Files 1-5/61  |  Lines 1-22/303                               │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 61 · Folders 2 · 2.46 KB · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

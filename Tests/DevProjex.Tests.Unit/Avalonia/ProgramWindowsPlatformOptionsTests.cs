@@ -2,6 +2,7 @@ using CompositionBackdropCornerRadiusCoordinator = DevProjex.Avalonia.Services.C
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Collection("AvaloniaUI")]
 public sealed class ProgramWindowsPlatformOptionsTests
 {
     [Fact]

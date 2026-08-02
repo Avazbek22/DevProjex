@@ -6,30 +6,41 @@ public sealed partial class FileSystemScanner
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public MutableIgnoreOptionCounts Counts;
+        public int GitIgnoreImpactCount;
     }
 
     private sealed class IgnoreSectionSnapshotLocalState
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> EffectiveExtensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public MutableIgnoreOptionCounts RawCounts;
         public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
     }
 
-    private sealed class ProjectWorkspaceScanLocalState(bool captureTreeInventory)
+    private sealed class ProjectWorkspaceScanLocalState(
+        bool captureTreeInventory,
+        bool captureRootScanBreakdown)
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> EffectiveExtensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public MutableIgnoreOptionCounts RawCounts;
         public IgnoreOptionCounts EffectiveCounts { get; set; } = IgnoreOptionCounts.Empty;
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
+        public GitWorkspaceEvidence GitEvidence { get; set; }
         public List<ProjectTreeInventorySnapshot>? TreeInventories { get; } = captureTreeInventory ? [] : null;
+        public List<KeyValuePair<string, ProjectWorkspaceRootScanSnapshot>>? RootSnapshots { get; } =
+            captureRootScanBreakdown ? [] : null;
 
         public bool IsEmpty =>
             Extensions.Count == 0 &&
+            EffectiveExtensions.Count == 0 &&
             RawCounts.IsEmpty &&
             EffectiveCounts == IgnoreOptionCounts.Empty &&
             ControllerImpactCounts == IgnoreControllerImpactCounts.Empty &&
-            (TreeInventories is null || TreeInventories.Count == 0);
+            GitEvidence == GitWorkspaceEvidence.Empty &&
+            (TreeInventories is null || TreeInventories.Count == 0) &&
+            (RootSnapshots is null || RootSnapshots.Count == 0);
     }
 
     private sealed class ProjectTreeInventoryCapture
@@ -38,8 +49,8 @@ public sealed partial class FileSystemScanner
     }
 
     private sealed record RootSelectionScanPlan(
-        List<string> SelectedRootPaths,
-        List<FileSystemDirectoryEntry> DirectoryToggleCandidates,
+        List<FileSystemDirectoryEntry> SelectedRoots,
+        List<DirectoryScanFacts> DirectoryToggleCandidates,
         List<DirectoryScanFacts> ControllerImpactCandidates,
         bool RootAccessDenied,
         bool HadAccessDenied);
@@ -51,12 +62,20 @@ public sealed partial class FileSystemScanner
         public bool IsEmpty => HiddenFolders == 0 && DotFolders == 0;
     }
 
-    private struct DirectoryScanNode(string path, string relativePath, int parentIndex, bool isAccessDenied)
+    private struct DirectoryScanNode(
+        string path,
+        string relativePath,
+        int parentIndex,
+        bool isAccessDenied,
+        IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+        IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
     {
         public string Path { get; } = path;
         public string RelativePath { get; } = relativePath;
         public int ParentIndex { get; } = parentIndex;
         public bool IsAccessDenied { get; set; } = isAccessDenied;
+        public IgnoreRules.GitIgnoreScanContext GitIgnoreContext { get; } = gitIgnoreContext;
+        public IgnoreRules.GitIgnoreScanContext GitIgnoreCandidateContext { get; } = gitIgnoreCandidateContext;
     }
 
     private readonly record struct DirectoryToggleRuleState(
@@ -77,7 +96,7 @@ public sealed partial class FileSystemScanner
     private readonly record struct FileScanFacts(
         string Name,
         string RelativePath,
-        string Extension,
+        int ExtensionStart,
         bool IsHidden,
         bool IsDot,
         bool IsEmpty,
@@ -109,7 +128,9 @@ public sealed partial class FileSystemScanner
         DirectoryToggleRuleState extensionDiscoveryRuleState,
         DirectoryToggleRuleState baseRuleState,
         DirectoryToggleRuleState hiddenFoldersRuleState,
-        DirectoryToggleRuleState dotFoldersRuleState)
+        DirectoryToggleRuleState dotFoldersRuleState,
+        IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+        IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
     {
         public string Path { get; } = path;
         public string RelativePath { get; } = relativePath;
@@ -123,6 +144,8 @@ public sealed partial class FileSystemScanner
         public DirectoryToggleRuleState BaseRuleState { get; } = baseRuleState;
         public DirectoryToggleRuleState HiddenFoldersRuleState { get; } = hiddenFoldersRuleState;
         public DirectoryToggleRuleState DotFoldersRuleState { get; } = dotFoldersRuleState;
+        public IgnoreRules.GitIgnoreScanContext GitIgnoreContext { get; } = gitIgnoreContext;
+        public IgnoreRules.GitIgnoreScanContext GitIgnoreCandidateContext { get; } = gitIgnoreCandidateContext;
 
         public bool CanAnyVariantTraverseChildren =>
             ExtensionDiscoveryRuleState.CanTraverseChildren ||
@@ -130,6 +153,12 @@ public sealed partial class FileSystemScanner
             HiddenFoldersRuleState.CanTraverseChildren ||
             DotFoldersRuleState.CanTraverseChildren;
     }
+
+    private sealed record EffectiveIgnoreScanDiscovery(
+        List<EffectiveIgnoreScanNode> Nodes,
+        IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers,
+        IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes,
+        GitWorkspaceEvidence GitEvidence);
 
     private struct EffectiveIgnoreNodeFileMetrics
     {

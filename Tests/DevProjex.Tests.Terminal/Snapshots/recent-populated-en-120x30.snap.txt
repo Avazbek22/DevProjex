@@ -1,0 +1,30 @@
+
+  DevProjex Terminal                                                                                              v<VERSION>
+  Choose a workspace action. No folder is scanned until you open it.
+
+  Current directory                                                                            Current folder is ready
+  <TEMP_ROOT>/<ID>
+       ┌┤Recent workspaces├────────────────────────────────────────────────────────────────────────────────────┐
+  ┌┤Act│ Open a recent local folder or Git repository from one shared history.                                 │─────┐
+  │  Op│                                                                                                       │     │
+  │> Re│ > Folder     AlphaProject                 Today                                                       │     │
+  │  Br│   Folder     Beta Project                 Today                                                       │     │
+  │  Cl│                                                                                                       │     │
+  │  Op│ Folder · AlphaProject                                                                                 │     │
+  │  He│ <PROJECTS_ROOT>/AlphaProject │     │
+  │  Ex│ Last opened: <TIMESTAMP>│     │
+  └────│                                                                                                       │─────┘
+       │                                                                                                       │
+  Direc│                                                                                                       │
+       │                                                                                                       │
+       │                                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                                │
+       │                                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                                │
+       └───────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit

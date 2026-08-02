@@ -24,6 +24,42 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper)
+		=> await BuildCoreAsync(
+			filePaths,
+			cancellationToken,
+			displayPathMapper,
+			maxFileCount: null,
+			maxFileSizeForFullRead: null,
+			maxOutputCharacters: null).ConfigureAwait(false);
+
+	public async Task<string> BuildBoundedPreviewAsync(
+		IEnumerable<string> filePaths,
+		int maxFileCount,
+		long maxFileSizeForFullRead,
+		int maxOutputCharacters,
+		CancellationToken cancellationToken,
+		Func<string, string>? displayPathMapper)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileCount);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileSizeForFullRead);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxOutputCharacters);
+
+		return await BuildCoreAsync(
+			filePaths,
+			cancellationToken,
+			displayPathMapper,
+			maxFileCount,
+			maxFileSizeForFullRead,
+			maxOutputCharacters).ConfigureAwait(false);
+	}
+
+	private async Task<string> BuildCoreAsync(
+		IEnumerable<string> filePaths,
+		CancellationToken cancellationToken,
+		Func<string, string>? displayPathMapper,
+		int? maxFileCount,
+		long? maxFileSizeForFullRead,
+		int? maxOutputCharacters)
 	{
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
@@ -43,16 +79,22 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		var sb = new StringBuilder();
 		bool anyWritten = false;
 
+		var processedFileCount = 0;
 		foreach (var file in files)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			if (maxFileCount is { } fileLimit && processedFileCount >= fileLimit)
+				break;
 
-			var content = await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
+			var content = maxFileSizeForFullRead is { } sizeLimit
+				? await contentAnalyzer.TryReadAsTextAsync(file, sizeLimit, cancellationToken).ConfigureAwait(false)
+				: await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
 
 			// Skip binary files (null result)
 			if (content is null)
 				continue;
 
+			processedFileCount++;
 			if (anyWritten)
 			{
 				AppendClipboardBlankLine(sb);
@@ -78,6 +120,12 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				// Trim trailing newlines for clipboard-friendly output
 				var text = content.Content.TrimEnd('\r', '\n');
 				sb.AppendLine(text);
+			}
+
+			if (maxOutputCharacters is { } characterLimit && sb.Length >= characterLimit)
+			{
+				sb.Length = characterLimit;
+				break;
 			}
 		}
 

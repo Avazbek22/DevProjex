@@ -31,6 +31,19 @@ public sealed class SelectionSessionStateTests
     }
 
     [Fact]
+    public void SelectionOptionStateCache_UpdateFromVisibleOptions_ReusesSelectedNamesSet()
+    {
+        var cache = new SelectionOptionStateCache(StringComparer.OrdinalIgnoreCase);
+        cache.UpdateFromVisibleOptions([new(".cs", true), new(".md", false)]);
+        var selectedNames = cache.SelectedNames;
+
+        cache.UpdateFromVisibleOptions([new(".cs", false), new(".md", true)]);
+
+        Assert.Same(selectedNames, cache.SelectedNames);
+        Assert.Equal([".md"], cache.SelectedNames);
+    }
+
+    [Fact]
     public void SelectionOptionStateCache_LegacyProfile_DoesNotPretendToHaveFullState()
     {
         var cache = new SelectionOptionStateCache(PathComparer.Default);
@@ -95,6 +108,64 @@ public sealed class SelectionSessionStateTests
         Assert.False(session.Extensions.IsInitialized);
         Assert.False(session.IgnoreOptions.IsInitialized);
         Assert.False(session.IgnoreOptionStateCacheIsComplete);
+    }
+
+    [Fact]
+    public void ProjectSelectionSessionState_SnapshotRoundTrip_PreservesExactPreparedAndGitPreferenceState()
+    {
+        var session = new ProjectSelectionSessionState
+        {
+            LastLoadedPath = @"C:\ProjectA"
+        };
+        session.ApplyProfile(
+            @"C:\ProjectA",
+            new ProjectSelectionProfile(
+                SelectedRootFolders: ["src"],
+                SelectedExtensions: [".cs"],
+                SelectedIgnoreOptions: [IgnoreOptionId.TrackedGitFilesOnly],
+                RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+                {
+                    ["src"] = true,
+                    ["hidden-root"] = false
+                },
+                ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [".cs"] = true,
+                    [".hidden"] = false
+                },
+                IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+                {
+                    [IgnoreOptionId.UseGitIgnore] = false,
+                    [IgnoreOptionId.TrackedGitFilesOnly] = true,
+                    [IgnoreOptionId.SmartIgnore] = false
+                }));
+        session.IgnoreOptions.AllPreference = false;
+        session.IgnoreOptions.ApplyAllPreferenceToKnownStates(false);
+        session.RootSelectionIsExplicit = true;
+        session.ExtensionSelectionIsExplicit = true;
+        session.AdvanceRevision();
+        var snapshot = session.CaptureSnapshot();
+
+        session.ResetToDefaultsForProject(@"C:\ProjectB");
+        session.LastLoadedPath = @"C:\ProjectB";
+        var revisionBeforeRestore = session.AdvanceRevision();
+
+        session.RestoreSnapshot(snapshot);
+
+        Assert.Equal(revisionBeforeRestore, session.Revision);
+        Assert.Equal(@"C:\ProjectA", session.LastLoadedPath);
+        Assert.Equal(@"C:\ProjectA", session.PreparedPath);
+        Assert.Equal(PreparedSelectionMode.Profile, session.PreparedMode);
+        Assert.False(session.RootFolders.OptionStates["hidden-root"]);
+        Assert.False(session.Extensions.OptionStates[".hidden"]);
+        Assert.False(session.IgnoreOptions.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
+        Assert.True(session.RootSelectionIsExplicit);
+        Assert.True(session.ExtensionSelectionIsExplicit);
+
+        session.IgnoreOptions.ApplyAllPreferenceToKnownStates(true);
+
+        Assert.False(session.IgnoreOptions.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
+        Assert.True(session.IgnoreOptions.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
     }
 
     [Fact]

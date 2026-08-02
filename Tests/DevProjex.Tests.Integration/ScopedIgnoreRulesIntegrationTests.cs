@@ -5,7 +5,7 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
-	public void SingleProjectWithGitIgnore_SmartIgnoreFollowsUseGitIgnoreToggle(bool useGitIgnore)
+	public void SingleProjectWithGitIgnore_SmartIgnoreRemainsIndependentFromGitIgnore(bool useGitIgnore)
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".gitignore", "# marker");
@@ -29,11 +29,8 @@ public sealed class ScopedIgnoreRulesIntegrationTests
 			IgnoreRules: rules), cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(useGitIgnore, rules.UseGitIgnore);
-		Assert.Equal(useGitIgnore, rules.UseSmartIgnore);
-		if (useGitIgnore)
-			Assert.DoesNotContain(result.Root.Children, child => child.Name == "bin");
-		else
-			Assert.Contains(result.Root.Children, child => child.Name == "bin");
+		Assert.True(rules.UseSmartIgnore);
+		Assert.DoesNotContain(result.Root.Children, child => child.Name == "bin");
 	}
 
 	[Fact]

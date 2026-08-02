@@ -49,7 +49,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 		temp.CreateFile("vanishing/generated.ts", "export {}");
 
 		var scanner = new DeletingFolderSnapshotScanner("vanishing");
-		var scanOptions = new ScanOptionsUseCase(scanner);
+		var scanOptions = new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner));
 		var rules = CreateIgnoreRules();
 
 		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
@@ -79,7 +79,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 				Directory.CreateDirectory(Path.Combine(srcPath, "generated"));
 				File.WriteAllText(Path.Combine(srcPath, "generated", "feature.ts"), "export {}");
 			});
-		var scanOptions = new ScanOptionsUseCase(scanner);
+		var scanOptions = new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner));
 		var rules = CreateIgnoreRules();
 
 		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
@@ -111,7 +111,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 		var scanner = new MutatingFolderSnapshotScanner(
 			"generated",
 			_ => File.WriteAllText(Path.Combine(temp.Path, ".gitignore"), "*.log\n"));
-		var scanOptions = new ScanOptionsUseCase(scanner);
+		var scanOptions = new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner));
 
 		var currentSnapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
 			temp.Path,
@@ -147,7 +147,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 		temp.CreateFile("restricted/secret.ts", "export {}");
 
 		var scanner = new AccessDeniedFolderSnapshotScanner("restricted");
-		var scanOptions = new ScanOptionsUseCase(scanner);
+		var scanOptions = new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner));
 		var rules = CreateIgnoreRules();
 
 		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
@@ -183,7 +183,7 @@ public sealed class FileSystemMutationDuringScanIntegrationTests
 				Directory.Delete(Path.Combine(srcPath, "folder-to-file"), recursive: true);
 				File.WriteAllText(Path.Combine(srcPath, "folder-to-file"), "new extensionless file shape");
 			});
-		var scanOptions = new ScanOptionsUseCase(scanner);
+		var scanOptions = new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner));
 		var rules = CreateIgnoreRules();
 
 		var snapshot = scanOptions.GetIgnoreSectionSnapshotForRootFolders(

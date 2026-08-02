@@ -1,6 +1,6 @@
 namespace DevProjex.Infrastructure.FileSystem;
 
-public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
+public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IProjectTreeCompositeInventoryBuilder
 {
 	private const int RootProjectionParallelThreshold = 24;
 
@@ -18,12 +18,96 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootPath);
 		return ProjectTreeInventoryScanner.Read(
 			rootPath,
-			(entry, isProjectRootChild) => ShouldTraverseDirectoryInInventory(
+			ProjectTreeGitIgnoreContexts.Create(
+				gitIgnoreContext,
+				gitIgnoreContext,
+				RequiresWorkingTreeGitIgnore(options.IgnoreRules),
+				options.IgnoreRules.ScopedGitIgnoreMatchers),
+			(entry, isProjectRootChild, contexts) => ShouldTraverseDirectoryInInventory(
 				entry,
 				isProjectRootChild,
 				options,
-				gitIgnoreContext),
+				contexts.Primary),
 			cancellationToken);
+	}
+
+	public ProjectTreeInventorySnapshot ReadCompositeInventory(
+		string rootPath,
+		IReadOnlySet<string> allowedRootFolders,
+		IgnoreRules discoveryRules,
+		IgnoreRules projectionRules,
+		CancellationToken cancellationToken = default)
+	{
+		var discoveryGitIgnoreContext = discoveryRules.CreateGitIgnoreScanContext(rootPath);
+		var projectionGitIgnoreContext = projectionRules.CreateGitIgnoreScanContext(rootPath);
+		return ProjectTreeInventoryScanner.Read(
+			rootPath,
+			ProjectTreeGitIgnoreContexts.Create(
+				discoveryGitIgnoreContext,
+				projectionGitIgnoreContext,
+				RequiresWorkingTreeGitIgnore(discoveryRules) ||
+				RequiresWorkingTreeGitIgnore(projectionRules),
+				MergeGitIgnoreMatcherSeeds(discoveryRules, projectionRules)),
+			(entry, isProjectRootChild, contexts) =>
+			{
+				if (isProjectRootChild && !allowedRootFolders.Contains(entry.Name))
+					return false;
+
+				var discoveryGitIgnore = discoveryRules.IsGitIgnoreTraversalEnabled
+					? contexts.Primary.Evaluate(
+						entry.FullPath,
+						entry.RelativePath,
+						isDirectory: true,
+						entry.Name)
+					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				if (!ShouldSkipDirectory(entry, discoveryRules, discoveryGitIgnore))
+					return true;
+
+				var projectionGitIgnore = projectionRules.IsGitIgnoreTraversalEnabled
+					? contexts.Secondary.Evaluate(
+						entry.FullPath,
+						entry.RelativePath,
+						isDirectory: true,
+						entry.Name)
+					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				return !ShouldSkipDirectory(entry, projectionRules, projectionGitIgnore);
+			},
+			cancellationToken);
+	}
+
+	private static bool RequiresWorkingTreeGitIgnore(IgnoreRules rules) =>
+		rules.EnableGitIgnoreTraversal && !rules.UseTrackedGitFilesOnly;
+
+	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeGitIgnoreMatcherSeeds(
+		IgnoreRules discoveryRules,
+		IgnoreRules projectionRules)
+	{
+		if (ReferenceEquals(discoveryRules, projectionRules) ||
+		    ReferenceEquals(
+			    discoveryRules.ScopedGitIgnoreMatchers,
+			    projectionRules.ScopedGitIgnoreMatchers) ||
+		    projectionRules.ScopedGitIgnoreMatchers.Count == 0)
+		{
+			return discoveryRules.ScopedGitIgnoreMatchers;
+		}
+		if (discoveryRules.ScopedGitIgnoreMatchers.Count == 0)
+			return projectionRules.ScopedGitIgnoreMatchers;
+
+		var merged = new List<ScopedGitIgnoreMatcher>(
+			discoveryRules.ScopedGitIgnoreMatchers.Count + projectionRules.ScopedGitIgnoreMatchers.Count);
+		var seenScopes = new HashSet<string>(PathComparer.Default);
+		foreach (var matcher in discoveryRules.ScopedGitIgnoreMatchers)
+		{
+			if (seenScopes.Add(matcher.ScopeRootPath))
+				merged.Add(matcher);
+		}
+		foreach (var matcher in projectionRules.ScopedGitIgnoreMatchers)
+		{
+			if (seenScopes.Add(matcher.ScopeRootPath))
+				merged.Add(matcher);
+		}
+
+		return merged;
 	}
 
 	public TreeBuildResult Build(
@@ -33,7 +117,10 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 	{
 		var allowedExtensions = new AllowedExtensionLookup(options.AllowedExtensions);
 		ref readonly var rootEntry = ref inventory.GetEntryRef(0);
-		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootEntry.FullPath);
+		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(
+			rootEntry.FullPath,
+			inventory.DiscoveredGitIgnoreMatchers,
+			inventory.DiscoveredGitTrackedPathIndexes);
 		var hasNameFilter = !string.IsNullOrWhiteSpace(options.NameFilter);
 		var root = new FileSystemNode(
 			name: rootEntry.Name,
@@ -65,7 +152,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 			return false;
 
 		var ignore = options.IgnoreRules;
-		var directoryGitIgnore = ignore.UseGitIgnore
+		var directoryGitIgnore = ignore.IsGitIgnoreTraversalEnabled
 			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: true, entry.Name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 
@@ -92,6 +179,9 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		var childEntries = inventory.GetChildren(parentIndex);
 		if (childEntries.Length == 0)
 			return;
+		var shouldApplySmartIgnoreForFiles = options.IgnoreRules.ShouldApplySmartIgnore(
+			parentEntry.FullPath,
+			isDirectory: true);
 
 		if (parentIndex == 0)
 		{
@@ -103,6 +193,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 				allowedExtensions,
 				gitIgnoreContext,
 				hasNameFilter,
+				shouldApplySmartIgnoreForFiles,
 				cancellationToken);
 			return;
 		}
@@ -118,6 +209,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 				allowedExtensions,
 				gitIgnoreContext,
 				hasNameFilter,
+				shouldApplySmartIgnoreForFiles,
 				cancellationToken);
 			if (node is not null)
 				children.Add(node);
@@ -132,6 +224,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool hasNameFilter,
+		bool shouldApplySmartIgnoreForFiles,
 		CancellationToken cancellationToken)
 	{
 		var firstChildIndex = inventory.GetEntry(0).FirstChildIndex;
@@ -151,6 +244,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 					allowedExtensions,
 					gitIgnoreContext,
 					hasNameFilter,
+					shouldApplySmartIgnoreForFiles,
 					cancellationToken);
 				if (node is not null)
 					children.Add(node);
@@ -175,6 +269,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 				allowedExtensions,
 				gitIgnoreContext,
 				hasNameFilter,
+				shouldApplySmartIgnoreForFiles,
 				parallelOptions.CancellationToken);
 		});
 
@@ -202,6 +297,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool hasNameFilter,
+		bool shouldApplySmartIgnoreForFiles,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -219,12 +315,12 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 				cancellationToken);
 
 		return ProjectFile(
-			inventory,
 			in entry,
 			options,
 			allowedExtensions,
 			gitIgnoreContext,
-			hasNameFilter);
+			hasNameFilter,
+			shouldApplySmartIgnoreForFiles);
 	}
 
 	private static FileSystemNode? ProjectDirectory(
@@ -237,7 +333,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 		bool hasNameFilter,
 		CancellationToken cancellationToken)
 	{
-		var directoryGitIgnore = options.IgnoreRules.UseGitIgnore
+		var directoryGitIgnore = options.IgnoreRules.IsGitIgnoreTraversalEnabled
 			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: true, entry.Name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 		if (ShouldSkipDirectory(in entry, options.IgnoreRules, directoryGitIgnore))
@@ -292,20 +388,17 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder
 	}
 
 	private static FileSystemNode? ProjectFile(
-		ProjectTreeInventorySnapshot inventory,
 		in ProjectTreeInventoryEntry entry,
 		TreeFilterOptions options,
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
-		bool hasNameFilter)
+		bool hasNameFilter,
+		bool shouldApplySmartIgnoreForFiles)
 	{
 		var ignore = options.IgnoreRules;
-		var fileGitIgnore = ignore.UseGitIgnore
+		var fileGitIgnore = ignore.IsGitIgnoreTraversalEnabled
 			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: false, entry.Name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
-		ref readonly var parentEntry = ref inventory.GetEntryRef(entry.ParentIndex);
-		var shouldApplySmartIgnoreForFiles = ignore.ShouldApplySmartIgnore(parentEntry.FullPath, isDirectory: true);
-
 		if (ShouldSkipFile(entry, ignore, shouldApplySmartIgnoreForFiles, fileGitIgnore))
 			return null;
 

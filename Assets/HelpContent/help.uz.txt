@@ -1,4 +1,4 @@
-﻿## 1) Nima va nima uchun
+## 1) Nima va nima uchun
 DevProjex loyiha kontekstini tez tayyorlaydi: papka/fayl tuzilmasini ko‘rsatadi, elementlarni belgilash va daraxtni va/yoki fayl mazmunini buferga nusxalash imkonini beradi. Code review, qo‘llab‑quvvatlash, o‘qitish va loyiha tuzilmasini AI‑yordamchiga berish uchun qulay.
 
 Muhim: ilova faqat o‘qish rejimida ishlaydi va fayllarni o‘zgartirmaydi.
@@ -18,18 +18,31 @@ Issiq tugmalar:
 * Jildni ochish… — ildiz papkani ochish (Ctrl+O)
 * Yangi oyna — DevProjex’ning yangi mustaqil nusxasini ochish
 * So‘nggilar — yaqinda ochilgan lokal jildlar ro‘yxati
-* Yangilash — daraxtni qayta o‘qish va qayta qurish (F5)
+* Yangilash — lokal jildni qayta o‘qish va daraxtni qayta qurish (F5)
 * Faylga eksport:
   * Daraxtni eksport qilish
   * Mazmunni eksport qilish
   * Daraxt va mazmunni eksport qilish
+* Loyihani eksport qilish:
+  * Jildga…
+  * ZIP arxivga…
+
+Loyihani eksport qilish joriy daraxtdan kataloglar tuzilmasini saqlagan holda alohida jild yoki ZIP arxiv yaratadi.
+
+Tanlangan yuqori darajadagi jildlar, fayl turlari, istisno qoidalari va belgilangan elementlar hisobga olinadi. Hech narsa belgilanmasa, butun joriy daraxt eksport qilinadi.
+
+Matnli va binar fayllar nusxalanadi, kiritilgan bo‘sh jildlar ham saqlanadi. Asl fayllar o‘zgartirilmaydi. Natijani boshlang‘ich loyiha ichiga saqlab bo‘lmaydi.
+
+Eksport paytida daraxt yoki parametrlarni o‘zgartirish, filtrdan foydalanish, format yoki ko‘rib chiqish rejimini almashtirish, Git buyruqlarini, yangilashni yoki boshqa loyihani ochishni ishga tushirish mumkin emas.
 
 Format qoidalari:
 * Daraxtni eksport qilish:
   * ASCII -> faqat `.txt`.
   * JSON -> standart `.json`, saqlash oynasida `.json` va `.txt` mavjud.
-* Mazmunni eksport qilish — har doim mazmunning matn formati, `.txt` fayl (ASCII/JSON tumbleri ta’sir qilmaydi).
-* Daraxt va mazmunni eksport qilish — har doim `.txt` fayl; ASCII/JSON tumbleri faqat natijadagi daraxt blokining formatiga ta’sir qiladi.
+  * XML -> standart `.xml`, saqlash oynasida `.xml` va `.txt` mavjud.
+  * MD -> standart `.md`, saqlash oynasida `.md` va `.txt` mavjud.
+* Mazmunni eksport qilish — har doim mazmunning matn formati, `.txt` fayl (daraxt formati tumbleri ta’sir qilmaydi).
+* Daraxt va mazmunni eksport qilish — har doim `.txt` fayl; tanlangan daraxt formati faqat natijadagi daraxt blokining formatiga ta’sir qiladi.
 
 Eksport fayllari UTF-8 (BOMsiz) formatida yoziladi.
 
@@ -50,13 +63,13 @@ Qoidalar:
 * ro‘yxatga faqat lokal jildlar qo‘shiladi;
 * DevProjex orqali klonlangan Git repozitoriylari bu ro‘yxatga qo‘shilmaydi;
 * dublikatlar yaratilmaydi — bir xil jildni qayta ochish uni ro‘yxatning yuqorisiga olib chiqadi;
-* 10 tagacha so‘nggi jild saqlanadi;
+* 15 tagacha so‘nggi jild saqlanadi;
 * tarix ilova qayta ishga tushirilganda ham saqlanadi.
 
-Har bir element uchun jildning qisqa nomi ko‘rsatiladi, to‘liq yo‘l esa tooltip’da mavjud bo‘ladi.
+Har bir elementda yuqori jild va loyiha nomi ko‘rsatiladi, masalan `Projects / App`.
 
 ## 4) Terminaldan ishga tushirish
-DevProjex-ni terminaldan ishga tushirish mumkin.
+DevProjex interaktiv terminal ish maydoni hamda skriptlar va CI uchun to‘g‘ridan-to‘g‘ri buyruqlarni taqdim etadi.
 
 Agar buyruq allaqachon sozlangan bo‘lsa, terminalni ochib bajaring:
 `devprojex --help`
@@ -64,17 +77,20 @@ Agar buyruq allaqachon sozlangan bo‘lsa, terminalni ochib bajaring:
 Shunda barcha mavjud buyruqlar, parametrlar va misollarni ko‘rasiz.
 
 Misollar:
-* `devprojex .` — joriy papkani ochish.
-* `devprojex "C:\Projects\App"` — ko‘rsatilgan papkani ochish.
-* `devprojex . --export tree` — loyiha daraxtini terminalga chiqarish.
-* `devprojex . --export content` — fayllar mazmunini terminalga chiqarish.
-* `devprojex . --export tree-content` — daraxt va mazmunni terminalga chiqarish.
-* `devprojex . --export tree-content -o context.txt` — natijani faylga saqlash.
+* `devprojex` — interaktiv terminal ish maydonini ochish.
+* `devprojex open . --preview` — joriy papkani Desktop ko‘rib chiqish rejimida ochish.
+* `devprojex analyze . --format json` — joriy loyihani JSON sifatida tahlil qilish.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — AI uchun tayyor kontekstni manba loyihasidan tashqarida saqlash.
+* `devprojex export project . --as folder -o ../devprojex-submission` — samarali loyiha daraxtini aniq papkaga eksport qilish.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — samarali loyiha daraxtini ZIP arxiviga eksport qilish.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — Git kuzatuvidagi fayllarni Smart Ignore bilan tahlil qilish.
 
 Xususiyatlar:
 * `.` terminaldagi joriy papkani bildiradi;
 * bo‘sh joyli yo‘llar qo‘shtirnoqqa olinishi kerak;
-* chiqish fayli ko‘rsatilmasa, natija bevosita terminalga chiqariladi;
+* `--git-mode` Git filtrlashsiz, `.gitignore` yoki faqat Git kuzatuvidagi fayllarni tanlaydi;
+* `--exclude` oddiy istisnolarni Git filtrlashdan alohida boshqaradi;
+* to‘g‘ridan-to‘g‘ri buyruqlar deterministik va Desktop interfeysini ochmaydi;
 * buyruq loyiha fayllarini o‘zgartirmaydi — DevProjex read-only rejimida ishlaydi.
 
 Agar `devprojex` buyrug‘i ishlamasa, DevProjex ichida oching:
@@ -83,11 +99,10 @@ Agar `devprojex` buyrug‘i ishlamasa, DevProjex ichida oching:
 ## 5) Git
 Git menyusi faqat DevProjex orqali klonlangan loyihalarda mavjud (Git Clone). Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
 
-Kesh tizimning vaqtinchalik papkasida saqlanadi. Windows’da odatda:
-`%TEMP%\DevProjex\RepoCache`
+Kesh foydalanuvchining tizim kesh katalogida saqlanadi. Haqiqiy yo‘lni `devprojex doctor` buyrug‘i ko‘rsatadi.
 
 * Tarmoq — mavjud tarmoqlar ro‘yxatini faol tarmoq belgisi bilan ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon lokal bo‘lsa, almashish tarmoqsiz (yangilanishsiz) bo‘ladi. Agar tarmoq lokalda bo‘lmasa, u fetch orqali yuklanib, lokal yaratiladi.
-* Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset.
+* Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset. Git Clone loyihasida F5 xuddi shu amalni bajaradi; odatiy «Fayl → Yangilash» buyrug‘i o‘chirilgan bo‘ladi.
 
 ### Klonlash oynasi
 Git Clone oynasida URL maydoni ostida “So‘nggi repozitoriylar” ro‘yxati ko‘rsatilishi mumkin.
@@ -104,11 +119,13 @@ Ro‘yxatdan element tanlansa, URL avtomatik ravishda kiritish maydoniga qo‘yi
 Faol klonlash vaqtida ro‘yxat vaqtincha yashiriladi.
 
 ## 6) Nusxa
-### Daraxt formati tumbleri (ASCII/JSON)
+### Daraxt formati tumbleri (ASCII / JSON / XML / MD)
 Tumbler natijada daraxt ishtirok etadigan amallar uchun daraxt ko‘rinishi formatini belgilaydi.
 
 * ASCII — shoxlari bor matnli daraxt.
 * JSON — JSON formatidagi strukturali daraxt.
+* XML — parserlar va vositalar uchun ixcham XML daraxt.
+* MD — hujjatlar va AI promptlar uchun ichma-ich Markdown ro‘yxat.
 
 Tumbler quyidagilarga ta’sir qiladi:
 * Daraxtni nusxalash
@@ -123,7 +140,7 @@ Tumbler quyidagilarga ta’sir qilmaydi:
 ### Daraxtni nusxalash
 Loyiha daraxtini nusxalaydi.
 Agar belgilangan tugunlar bo‘lsa, daraxt tanlov bo‘yicha quriladi; tanlov bo‘sh yoki yaroqsiz bo‘lsa, to‘liq daraxt nusxalanadi.
-Natija formati ASCII/JSON tumbleri bilan aniqlanadi.
+Natija formati daraxt formati tumbleri bilan aniqlanadi.
 Tugmalar: Ctrl+Shift+C va Ctrl+Alt+C.
 
 ### Mazmunni nusxalash
@@ -138,22 +155,31 @@ Tugma: Ctrl+Alt+V.
 Daraxt va mazmunni birlashtiradi:
 * daraxt tanlov bo‘yicha; agar tanlov bo‘sh yoki yaroqsiz bo‘lsa — to‘liq daraxt;
 * mazmun «Mazmunni nusxalash» qoidalari bo‘yicha;
-* daraxt blokining formati ASCII/JSON tumbleri bilan aniqlanadi.
+* daraxt blokining formati daraxt formati tumbleri bilan aniqlanadi.
 Tugma: Ctrl+Shift+V.
 
-### JSON ko‘rinishi
-JSON rejimida daraxtning ixcham tuzilmasi ishlatiladi.
+### Daraxt ko‘rinishlari
+Daraxt formatlari bir xil tanlangan loyiha daraxtini turlicha ko‘rsatadi.
 
-Daraxt (Daraxtni nusxalash / Daraxtni eksport qilish):
-* `rootPath` — joriy chiqish formatidagi ildiz yo‘li:
-  * lokal papka uchun — absolyut lokal yo‘l;
-  * Git loyihasi uchun — repository URL.
-* `root` — ildiz tugun.
-* tugun maydonlari: `name`, `path`, `dirs`, `files`, `accessDenied` (zarurat bo‘lsa).
+JSON:
+* `rootPath` — `/` orqali normallashtirilgan absolyut ildiz yo‘li.
+* `tree` — ildiz papkaning mazmuni.
+* JSON eksport shu daraxt formatidan foydalanadi: massivlar fayllarni, obyektlar ichki papkalarni, `/` joriy papkadagi fayllarni saqlaydi, `[]` esa bo‘sh papkani bildiradi.
+
+XML:
+* ildiz tugun — `<t r="...">`;
+* papkalar — `<d n="...">`;
+* fayllar — `<f>File.cs</f>`.
+
+MD:
+* `Root: ...` bilan boshlanadi;
+* ichma-ich Markdown ro‘yxatidan foydalanadi;
+* papkalar `/` bilan tugaydi.
 
 Daraxt + mazmun:
-* JSON daraxt blokiga qo‘llanadi;
+* tanlangan daraxt formati daraxt blokiga qo‘llanadi;
 * mazmun bloki matn bo‘lib qoladi;
+* mazmun blokidagi fayl sarlavhalari `/` orqali relative yo‘llardan foydalanadi;
 * eksport `.txt` formatida saqlanadi.
 
 ## 7) Preview rejimi
@@ -214,8 +240,8 @@ Oraliq: 6–28, tiklash — 15.
 Interfeysni zichroq qiladi: daraxt va sozlamalarda oraliqlar kichikroq.
 Preview workspace faol bo‘lganda ixcham rejim avtomatik ravishda yoqiladi.
 
-### Daraxt animatsiyasi
-Daraxt qatorlarini kursorga tutganda silliq siljish animatsiyasini yoqadi.
+### Daraxtni ochish animatsiyasi
+Ko‘rsatkichni silliq aylantiradi va yonma-yon qatorlarni siljitib, daraxt shoxini ochadi yoki yopadi. Standart holatda yoqilgan; o‘chirilganda ochish darhol bajariladi.
 
 ### Daraxt shrifti
 Daraxt shrifti «Ko‘rinish → Daraxt shrifti» orqali tanlanadi.
@@ -251,17 +277,21 @@ Cheklovlar:
 ## 11) Sozlamalar
 O‘ng tomonda mavjud:
 * Sozlamalarni qo‘llash
-* E’tiborsiz qoldirish
+* Istisnolar
 * Fayl turlari
 * Yuqori darajadagi jildlar
 
-«E’tiborsiz qoldirish», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi va «Sozlamalarni qo‘llash» bosilgandan keyin qo‘llanadi.
+«Istisnolar», «Fayl turlari» va «Yuqori darajadagi jildlar» o‘zgarishlari panelda tayyorlanadi va «Sozlamalarni qo‘llash» bosilgandan keyin qo‘llanadi.
+
+Belgilash katagi o‘zgargandan keyin ilova mavjud bandlar va ularning hisoblagichlarini fonda yangilashi mumkin. Yakuniy daraxt faqat «Sozlamalarni qo‘llash» bosilgandan keyin qayta quriladi.
+
+Mavjud parametrlarni yangilash status-bardagi X tugmasi bilan bekor qilinsa, tugallanmagan o‘zgarishlar qo‘llanmaydi va panel oxirgi yakunlangan holatiga qaytadi.
 
 Har bir ro‘yxatda Barchasi tugmasi bor.
 
 «Fayl turlari» bo‘yicha izoh:
 * bu ro‘yxatda faqat kengaytmali fayllar ko‘rsatiladi;
-* kengaytmasiz fayllar bu ro‘yxatga qo‘shilmaydi va «E’tiborsiz qoldirish» ichidagi alohida band orqali boshqariladi.
+* kengaytmasiz fayllar bu ro‘yxatga qo‘shilmaydi va «Istisnolar» ichidagi alohida band orqali boshqariladi.
 
 Ctrl+P — panelni ko‘rsatish/yashirish.
 
@@ -269,7 +299,7 @@ Ctrl+P — panelni ko‘rsatish/yashirish.
 Mahalliy jildlar uchun DevProjex loyihaning oxirgi qo‘llangan parametrlarini eslab qoladi:
 * tanlangan yuqori darajadagi jildlar;
 * tanlangan fayl turlari;
-* «E’tiborsiz qoldirish» blokidagi tanlangan qoidalar.
+* «Istisnolar» bo‘limidagi tanlangan qoidalar.
 
 Saqlash «Sozlamalarni qo‘llash» tugmasi bosilganda bajariladi.
 Xuddi shu mahalliy jild qayta ochilganda parametrlar avtomatik tiklanadi.
@@ -278,98 +308,70 @@ Muhim:
 * profillar faqat mahalliy loyihalar uchun saqlanadi;
 * Git Clone orqali ochilgan loyihalar uchun profillar saqlanmaydi;
 * agar joriy loyihada saqlangan ayrim bandlar endi mavjud bo‘lmasa, ular o‘tkazib yuboriladi, qolgan parametrlar qo‘llanadi.
-* yangilash yoki qayta ochishdan keyin yangi yuqori darajadagi jild, yangi fayl turi yoki «E’tiborsiz qoldirish» ichida yangi band paydo bo‘lsa, u odatda yoqilgan bo‘ladi;
+* yangilash yoki qayta ochishdan keyin yangi yuqori darajadagi jild, yangi fayl turi yoki «Istisnolar» ichida yangi band paydo bo‘lsa, u odatda yoqilgan bo‘ladi;
 * avvaldan ma’lum bandlar foydalanuvchining aniq tanlovini saqlaydi: o‘chirilgan turdagi yangi fayllar bu turni qayta yoqmaydi.
 
-## 12) Ignorlash
-"Ignorlash" roʻyxati joriy yoʻl va tanlangan yuqori darajadagi papkalar asosida avtomatik shakllanadi.
+## 12) Istisnolar
+«Istisnolar» bo‘limi daraxt, kontent, nusxalash va eksportdan qaysi fayl hamda papkalar chiqarilishini boshqaradi.
 
-Variantlar tartibi:
-* Smart ignore (mavjud bo‘lsa)
-* .gitignore dan foydalanish (kamida bitta `.gitignore` topilsa)
-* Bo‘sh papkalar
-* Bo‘sh fayllar
-* Yashirin papkalar
-* Yashirin fayllar
-* Boshida nuqtali papkalar
-* Boshida nuqtali fayllar
-* Kengaytmasiz fayllar
+Element faqat uning yuqori darajadagi papkasi va fayl turi tanlangan, shuningdek hech bir faol qoida uni yashirmagan bo‘lsa ko‘rsatiladi. Qoidalar birgalikda ishlaydi: kamida bittasi elementni yashirsa, boshqa qoida uni ko‘rsata olmaydi.
 
-Asosiy qoidalar bandlari (yashirin, nuqtali, bo‘sh, kengaytmasiz) faqat mos elementlar mavjud bo‘lganda ko‘rsatiladi.
-«E’tiborsiz qoldirish» ichidagi band birinchi marta mavjud bo‘lsa, u odatda yoqilgan bo‘ladi. Avval aniq o‘chirilgan band qayta mavjud bo‘lganda o‘sha holatini saqlaydi.
+### 12.1 Mavjud qoidalar
+Loyiha mazmuniga qarab Smart Ignore, «.gitignore dan foydalanish», «Faqat Git kuzatadigan fayllar», bo‘sh, yashirin yoki nuqta bilan boshlanuvchi papka va fayllar hamda kengaytmasiz fayllar ko‘rsatilishi mumkin.
 
-".gitignore dan foydalanish" ostidagi chiziq Git/Smart qoidalarni asosiy ko‘rinish qoidalaridan ajratadi.
+Git repozitoriyasida «.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» barqaror almashtirgichlar juftligi sifatida ko‘rinib turadi. Boshqa bandlar joriy daraxtni o‘zgartira olganda paydo bo‘ladi. Shu sababli boshqa qoida, yuqori darajadagi papka yoki fayl turi almashtirilganda ro‘yxat o‘zgarishi mumkin. Yangi band birinchi paydo bo‘lganda odatda yoqiladi; avvaldan ma’lum band vaqtincha yo‘qolsa ham foydalanuvchi tanlovini saqlaydi.
 
-### 12.1 Qoidalar qo‘llanadigan hudud
-Ilova ignore qoidalari ishlaydigan loyiha hududlarini (scope) tuzadi:
-* root (agar root’da `.gitignore` yoki loyiha belgisi bo‘lsa)
-* birinchi darajadagi papkalar
-* ichki loyiha papkalari
+### 12.2 Smart Ignore
+Smart Ignore bog‘liqliklar, build natijalari, keshlar va boshqa xizmat artefaktlarini yashiradi. DevProjex loyiha turini tuzilma va `.csproj`, `package.json`, `pyproject.toml`, `Cargo.toml` kabi marker fayllar orqali aniqlaydi. Tegishli stek qoidalari faqat topilgan loyiha hududida ishlaydi va qo‘shni boshqa stek loyihasiga yoyilmaydi.
 
-Ichki loyiha hududlarini qidirish chuqurligi qat’iy: 2 daraja.
-Bu cheklov faqat `.gitignore` va Smart Ignore uchun ichki hududlarni topishga tegishli. Hudud topilgach, qoidalar uning ichidagi kontentga oddiy daraxt skani orqali qo‘llanadi.
+`build`, `vendor`, `packages`, `cache`, `pkg`, `Library` kabi noaniq nomlarda papka mazmuni ham tekshiriladi. Oddiy foydalanuvchi papkasi faqat nomi sababli yashirilmaydi. Ayrim bog‘liqlik omborlari va xizmat papkalari aniq topilgan loyihadan tashqarida ham ichki tuzilishi orqali tanilishi mumkin.
 
-### 12.2 ".gitignore dan foydalanish"
-* Yoqilgan: `.gitignore` qoidalari aniqlangan hududlarda qo‘llanadi.
-* O‘chirilgan: `.gitignore` qoidalari to‘liq o‘chiriladi.
+Katta foydalanuvchi papkasidagi har bir katalogni qayta tahlil qilmaslik uchun yangi loyiha hududlarini izlash cheklangan. Oddiy tuzilma sayoz, tanilgan monorepo esa chuqurroq tekshiriladi. Hudud topilgach, Smart Ignore uning butun ichki daraxtiga chuqurlik cheklovisiz qo‘llanadi.
 
-Ko‘p loyihali papkada bir loyiha `.gitignore` qoidasi o‘z hududidan tashqaridagi qo‘shni loyihalarga qo‘llanmaydi.
+### 12.3 .gitignore dan foydalanish
+Yoqilganda DevProjex faqat root faylini emas, barcha yetib boriladigan `.gitignore` fayllarini qo‘llaydi. Har bir fayl o‘z papkasi va uning barcha ochiq ichki papkalariga ta’sir qiladi, lekin ota yoki qo‘shni papkalarga emas.
 
-### 12.3 "Smart ignore"
-* Faqat mos holatda ko‘rsatiladi.
-* Yoqilgan: build/tool artefaktlari qo‘shimcha yashiriladi.
-* O‘chirilgan: smart-qoidalar qo‘llanmaydi.
+Muayyan yo‘l uchun qoidalar ota `.gitignore` faylidan chuqurroq fayllarga, bitta fayl ichida esa yuqoridan pastga qarab ishlanadi. Oxirgi mos qoida Git natijasini belgilaydi.
 
-### 12.4 Asosiy qoidalar
-Variantlar:
-* Yashirin papkalar
-* Yashirin fayllar
-* Boshida nuqtali papkalar
-* Boshida nuqtali fayllar
-* Bo‘sh papkalar
-* Bo‘sh fayllar
-* Kengaytmasiz fayllar
+`!` bilan boshlangan qoida faqat o‘z hududidagi oldingi Git istisnosini bekor qiladi. Ota papka hali ham chiqarilgan bo‘lsa, faylni qaytara olmaydi. To‘liq chiqarilgan va yetib bo‘lmaydigan papka ichidagi `.gitignore` ishlanmaydi.
 
-Band yoqilganda mos elementlar daraxtdan va nusxalash/eksport natijalaridan yashiriladi.
-Asosiy qoidalar `.gitignore` va Smart Ignore’dan alohida yoqiladi, ammo yakuniy natija har doim barcha faol filtrlardan keyingi joriy daraxt bo‘yicha hisoblanadi.
+Buzilgan yoki qo‘llanmaydigan satr alohida o‘tkazib yuboriladi, qolgan to‘g‘ri qoidalar ishlashda davom etadi. Bu band faqat ishchi daraxtdagi `.gitignore` fayllariga tegishli; `.git/info/exclude` va global Git istisno qoidalari qo‘llanmaydi, lekin yo‘llarni taqqoslash uchun `core.ignoreCase` hamda macOS tizimidagi `core.precomposeUnicode` kabi repozitoriyaning amaldagi sozlamalari hisobga olinadi. Yo‘l tegishli bo‘lgan repozitoriya sohasi uchun o‘qiladigan Git indeksi mavjud bo‘lsa, kuzatiladigan fayllar `.gitignore` ga mos kelsa ham ko‘rinadi; ushbu indeks yoki Git CLI bo‘lmasa, bu soha xavfsiz tarzda faqat andozalarni baholashga qaytadi.
 
-### 12.5 Ichki ishlash: odatiy holatlar
-1. Bitta loyiha, `.gitignore` bor.
-Odatda faqat ".gitignore dan foydalanish" ko‘rinadi.
-Yoqilganda, `.gitignore` va Smart Ignore birga ishlaydi.
-O‘chirilganda, ikkalasi ham o‘chadi.
+`.gitignore` nomli ramziy havola o‘qilmaydi — bu Gitning ushbu boshqaruv fayliga nisbatan xatti-harakatiga mos keladi. Oddiy `.gitignore` faylini o‘qib bo‘lmasa, uning katalog doirasi xavfsiz tarzda to‘liq chiqariladi va tekshiruv barcha qoidalarni baholamasdan fayllarni yashirincha kiritish o‘rniga qisman kirish haqida xabar beradi.
 
-2. Bitta loyiha, `.gitignore` yo‘q.
-".gitignore dan foydalanish" ko‘rinmaydi.
-"Smart ignore" faqat mos bo‘lsa ko‘rinadi.
+Ichki `standard` profili `gitignore` rejimini va barcha sakkizta istisno guruhini tanlaydi: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` va `extensionless-files`.
 
-3. Ko‘p loyihali workspace: bir qismida `.gitignore` bor, bir qismida yo‘q.
-".gitignore dan foydalanish" va "Smart ignore" ko‘rinadi.
-`.gitignore` o‘z hududida ishlaydi.
-Smart Ignore (yoqilgan bo‘lsa) aniqlangan hududlarda filtrlashni to‘ldiradi.
+### 12.4 Faqat Git kuzatadigan fayllar
+«Faqat Git kuzatadigan fayllar» daraxtning Git bosqichini har bir o‘qiladigan Git indeksida qayd etilgan, ishchi daraxtda mavjud fayllardan tuzadi. O‘zgartirilgan kuzatiladigan fayllar va indeksga qo‘shilgan yangi fayllar kiritiladi; kuzatilmaydigan fayllar chiqariladi. Bu `HEAD` yoki masofaviy repozitoriyaning tarixiy nusxasi emas, joriy ishchi daraxtdir.
 
-4. Ko‘p loyihali workspace: barcha loyihalarda `.gitignore` bor.
-".gitignore dan foydalanish" ko‘rinadi.
-"Smart ignore" alohida variant sifatida ko‘rinmaydi.
+Har bir yetib boriladigan ichki repozitoriya va worktree istalgan erishiladigan chuqurlikda mustaqil qayta ishlanadi. Ichki repozitoriya ota yoki qo‘shni repozitoriyaning kuzatiladigan yo‘llarini meros qilib olmaydi. Bu rejim uchun Git CLI kerak; o‘qiladigan bo‘sh indeks yaroqli. Terminal ish maydoni (TUI) shu rejimda ishga tushirilib, hech bir mos indeks yuklanmasa, ish maydoni ochilmaydi. Rejim allaqachon ochiq TUI ish maydonida interaktiv tarzda tanlanib, hech bir mos indeks yuklanmasa, o‘zgarish rad etiladi va oxirgi ishlaydigan Git rejimi faol qoladi. Xuddi shu holatda to‘g‘ridan-to‘g‘ri buyruqlar siyosat yoki tekshiruv xatosi bilan tugaydi. DevProjex hech qachon yashirincha `.gitignore` ga o‘tmaydi. Boshqa mos indeks o‘qilsa, indeksini o‘qib bo‘lmaydigan ichki sohalar ogohlantirish bilan chiqariladi.
 
-5. Mos qoidalarsiz papka.
-Agar `.gitignore` topilmasa va Smart Ignore mos bo‘lmasa, bu variantlar ko‘rsatilmaydi.
-Faqat asosiy ko‘rinish qoidalari qoladi.
+Allaqachon ochiq Desktop ish maydonida aniq tanlov ko‘rinib turadi va fail-closed ishlaydi: tayyorlik xatosida chiqarish va eksport bloklanadi, qisman tayyorlikda esa amal mahalliylashtirilgan ogohlantirish bilan davom etadi.
 
-### 12.6 Bo‘sh papkalar
-Mantiqan bo‘sh papkalarni daraxtdan va nusxalash/eksport natijalaridan yashiradi.
-Mantiqan bo‘sh papka — joriy ko‘rinish qoidalari, `.gitignore`, Smart Ignore va tanlangan fayl turlari qo‘llangandan keyin ichida ko‘rinadigan avlodlar qolmaydigan papka.
-Agar papkaning o‘zi boshqa qoidalar bilan yashirilmagan bo‘lsa, uni daraxtdan olib tashlash aynan shu band bilan boshqariladi.
+«.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» o‘zaro istisno qilinadi: birini yoqish ikkinchisini o‘chiradi. Profillarni qo‘llaydigan mahalliy loyihalarda tanlangan rejim yuqori darajadagi papkalar, fayl turlari va boshqa istisno sozlamalari bilan birga saqlanadi.
 
-### 12.7 Bo‘sh fayllar
-Hajmi 0 bayt bo‘lgan bo‘sh fayllarni daraxtdan va nusxalash/eksport natijalaridan yashiradi.
+### 12.5 Git filtrlashi va Smart Ignore aloqasi
+Tanlangan Git rejimi va Smart Ignore mustaqil almashtirgichlardir. Avval har bir erishiladigan Git hududida Git rejimi, keyin qolgan elementlarga Smart Ignore, oxirida esa asosiy qoidalar qo‘llanadi.
 
-### 12.8 Kengaytmasiz fayllar
-Kengaytmasi yo‘q fayllarni (masalan: `Dockerfile`, `Makefile`, `README`) daraxtdan va nusxalash/eksport natijalaridan yashiradi.
+Tanlangan Git rejimi barcha Smart Ignore nomzodlarini qamrab turganda Smart Ignore yashirin bo‘lishi va Git rejimi o‘zgartirilgach paydo bo‘lishi mumkin. Git repozitoriyasida ikkala Git rejimi ham barqaror juftlik sifatida ko‘rinib turadi.
 
-### 12.9 «E’tiborsiz qoldirish» blokidagi hisoblagichlar
-Mavjud bandlar yonida son `(N)` formatida ko‘rsatiladi.
-Asosiy qoidalar uchun bu son joriy daraxt konfiguratsiyasida aynan shu qoida nechta elementni yashirishini ko‘rsatadi.
+`!` Git inkori faqat Git natijasini bekor qiladi; u Smart Ignore yoki asosiy qoidani o‘chirmaydi.
+
+### 12.6 Asosiy qoidalar
+Nuqta bilan boshlanish qoidalari nomni, yashirin element qoidalari esa tizimdagi Hidden atributini tekshiradi. Platformaga qarab ular bir xil yoki turli elementlarga tegishli bo‘lishi mumkin.
+
+«Bo‘sh fayllar» 0 baytli fayllarni, «Kengaytmasiz fayllar» esa `Dockerfile`, `Makefile`, `README` kabi fayllarni yashiradi.
+
+«Bo‘sh papkalar» mantiqan bo‘sh papkalarni yashiradi. Tanlangan fayl turlari va barcha boshqa qoidalar qo‘llangach ko‘rinadigan fayl yoki ichki papka qolmasa, papka mantiqan bo‘sh hisoblanadi. Shu sababli boshqa qoida o‘zgarganda uning hisoblagichi ham o‘zgarishi mumkin.
+
+### 12.7 Hisoblagichlar
+Hisoblagich diskdagi fizik sonni emas, joriy sozlamalarda qoidaning bevosita hissasini ko‘rsatadi. Bir element bir vaqtning o‘zida bir nechta ustma-ust hisoblagichga yozilmaydi.
+
+Barqaror tartib: papkalar uchun `.gitignore`, Smart Ignore, nomdagi nuqta, Hidden atributi; fayllar uchun `.gitignore`, Smart Ignore, nomdagi nuqta, kengaytma yo‘qligi, bo‘sh fayl, Hidden atributi. Bu tartib faqat hisoblagichlarga ta’sir qiladi. Ko‘rinish uchun istalgan faol mexanizm elementni chiqarishi mumkin.
+
+### 12.8 O‘zgarishlarni qo‘llash
+Belgilarni almashtirish avval mavjud parametrlar va hisoblagichlarni yangilaydi. Yakuniy daraxt «Sozlamalarni qo‘llash» bosilgach qayta quriladi. Tayyorlash bekor qilinsa, DevProjex oxirgi to‘liq tugallangan holatga qaytadi; qisman hisoblangan qoidalar qo‘llanmaydi.
+
 ## 13) Daraxt va metrikalar qanday hisoblanadi
 Natija quyidagilarga bog‘liq:
 * tanlangan yuqori darajadagi jildlar
@@ -399,7 +401,7 @@ Muhim:
 ### 13.2 Metrikalar qanday hisoblanadi
 Daraxt metrikalari:
 * aynan eksport pipeline’i yaratadigan real daraxt matni bo‘yicha hisoblanadi;
-* joriy ASCII/JSON formatini hisobga oladi.
+* joriy daraxt formatini hisobga oladi.
 
 Mazmun metrikalari:
 * mazmunni nusxalash/eksport qilish qoidalari bilan bir xil hisoblanadi;
@@ -409,9 +411,9 @@ Mazmun metrikalari:
 ### 13.3 Hisoblagichlar qachon yangilanadi
 Qayta hisoblash quyidagi holatlarda bajariladi:
 * loyiha ochilgandan/yangilangandan keyin;
-* sozlamalar qo‘llangandan keyin (ignore, fayl turlari, root jildlar);
+* sozlamalar qo‘llangandan keyin (istisnolar, fayl turlari, root jildlar);
 * daraxtdagi checkboxlar o‘zgarganda (debounce bilan);
-* ASCII/JSON almashtirilganda (daraxt ishlatiladigan amallar uchun).
+* daraxt formati almashtirilganda (daraxt ishlatiladigan amallar uchun).
 * fon hisoblash bekor qilinsa, keyingi to‘liq yakunlangan qayta hisoblashgacha hisoblagichlar 0 ga o‘rnatiladi.
 
 ## 14) Ikonkalar
@@ -422,24 +424,38 @@ Ikonka tanlash tartibi:
 4) aks holda — noma’lum
 
 ## 15) Mavzu va effektlar
-Tema popoveri quyilarni almashtiradi:
-* yorug'/qorong'i mavzu
-* Shaffof / Mica / Acrylic
-* intensivlik, blur, kontrast, chegara sozlamalari
+«Mavzu» bo‘limida Tizim, Yorug‘ yoki Qorong‘i rejim va bitta fon effektini tanlash mumkin:
+* Shaffoflik
+* Xiralashtirish
+* Mica
 
-[Beta] belgilari versiyalar oralig‘ida o‘zgarishi mumkin.
+Standart holatda Tizim rejimi tanlanadi va u operatsion tizim mavzusidagi o‘zgarishlarni kuzatadi. Birinchi ishga tushirishdan yoki sozlamalarni tiklashdan keyin tizimning yorug‘ mavzusi oddiy shaffof bo‘lmagan fon bilan, qorong‘i mavzusi esa Xiralashtirish bilan ishga tushadi. Tizim tanlovini aniqlab bo‘lmasa, DevProjex Qorong‘i rejimni Xiralashtirish bilan ishlatadi. Yorug‘ va Qorong‘i mavzular o‘z effektlarini alohida eslab qoladi. Yorug‘ yoki Qorong‘i rejimni aniq tanlash Tizim qayta tanlanmaguncha tizim o‘zgarishlarini e’tiborsiz qoldiradi.
+
+Effektlar bir vaqtda ishlamaydi. Tanlangan effektni qayta bosish uni o‘chiradi va oddiy shaffof bo‘lmagan fonni qaytaradi.
+
+Mavjud sozlamalar:
+* Fon shaffofligi — Shaffoflik va Xiralashtirish rejimlarida mavjud.
+* Yuqori panel kontrasti — preview, qidiruv, filtr va daraxt formati buyruqlari joylashgan asosiy panelni sozlaydi.
+* Menyu shaffofligi — asosiy menyu va uning ichki menyulariga bir xil qo‘llanadi.
+* Chegaralar ko‘rinishi — interfeys chegaralarining qanchalik aniq ko‘rinishini sozlaydi.
+
+Mica platformaning tizim materialidan foydalanadi va fon shaffofligi uchun alohida sozlamaga ega emas. Tanlangan Xiralashtirish yoki Mica effekti mavjud bo‘lmasa, ilova avval boshqa tizim effektini sinab ko‘radi. Oddiy shaffof bo‘lmagan fon faqat ikkala effekt ham mavjud bo‘lmaganda ishlatiladi.
+
+«Shaffoflik» rejimida asosiy oyna foni shaffof bo‘lib qoladi. Menyular, ichki menyular va boshqa ochiluvchi yuzalar, agar qo‘llab-quvvatlansa, Xiralashtirishdan foydalanadi, shunda ularning ortidagi daraxt va kontent o‘qishga xalaqit bermaydi.
 
 ## 16) Yordam
 
-### 16.1 Sozlamalarni tiklash
-Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) faqat interfeysning vizual sozlamalarini tiklaydi (tema, effektlar, ixcham rejim, daraxt animatsiyasi) va loyiha ma’lumotlarini o‘zgartirmaydi.
-Bu amal interfeys tilining saqlangan tanlovini ham tozalaydi.
+### 16.1 Yangilanishlar
+«Yordam → Yangilanishlar» joriy versiyani GitHub’dagi eng so‘nggi barqaror reliz bilan taqqoslaydi. Avtomatik tekshiruv standart holatda o‘chirilgan; u yoqilsa, DevProjex oxirgi muvaffaqiyatli tekshiruvdan kamida yetti kun o‘tganda ishga tushish vaqtida tekshiradi. Belgilash katagi darhol qo‘llanadi. Oxirgi muvaffaqiyatli natija dastur qayta ishga tushirilganda saqlanadi va keyingi tarmoq xatosi tufayli o‘chirilmaydi. O‘rnatishni foydalanuvchi o‘zi bajaradi.
 
-### 16.2 Ma’lumotlarni tiklash
+### 16.2 Sozlamalarni tiklash
+Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) mavzu, effektlar, ixcham rejim, daraxtni ochish animatsiyasi va interfeys tilini standart qiymatlarga qaytaradi. Loyiha profillari, tarix va diskdagi fayllar o‘zgartirilmaydi.
+
+### 16.3 Ma’lumotlarni tiklash
 Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha parametrlarining saqlangan profillarini o‘chiradi:
 * tanlangan yuqori darajadagi jildlar;
 * tanlangan fayl turlari;
-* «E’tiborsiz qoldirish» blokidagi tanlangan qoidalar.
+* «Istisnolar» bo‘limidagi tanlangan qoidalar.
 
 Muhim:
 * lokal jildlar uchun “So‘nggilar” tarixi tozalanmaydi;
@@ -460,13 +476,14 @@ Progress rejimlari:
 Xulq-atvor:
 * fon rejimida ma’lumot hisoblash vaqtida foizli progress ko‘rsatiladi;
 * ayrim Git amallarida progress manbasi foiz berganda foiz ko‘rsatiladi;
-* juda tez amallarda progress juda qisqa ko‘rinishi mumkin.
+* mavjud parametrlarni yangilash va sozlamalarni qo‘llash amal sezilarli vaqt olsa ko‘rsatiladi;
+* tez amallar progressni ko‘rsatmasdan yakunlanadi.
 
 Status-bardagi X (bekor qilish) tugmasi:
 * bekor qilishni qo‘llaydigan amallar uchun best-effort bekor qilishni bajaradi;
 * fon rejimidagi ma’lumot hisoblashni to‘xtatadi;
+* mavjud parametrlarni yangilash bekor qilinganda panelni oxirgi yakunlangan holatiga qaytaradi;
 * bekor qilishni qo‘llamaydigan amallarda status-bar indikatsiyasini tugatadi, lekin amal fon rejimida yakunlanishi mumkin.
 
 ## 19) Eslatmalar
-* Odatiy holatda qorong'i mavzu va shaffoflik effektlari yoqilgan (mavjud bo‘lsa).
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.

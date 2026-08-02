@@ -64,7 +64,7 @@ public sealed class StoreListingImportFolderIntegrationTests
     }
 
     [Fact]
-    public void ImportFolder_LocaleColumnsStayAlignedWithLatestTemplate()
+    public void ImportFolder_PreservesTemplateLocalesAndAppendsNewListings()
     {
         var repositoryRoot = RepoRoot.Value;
         var importDocument = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(repositoryRoot));
@@ -73,7 +73,8 @@ public sealed class StoreListingImportFolderIntegrationTests
         var importLocales = StoreListingPaths.GetLocaleColumns(importDocument.Headers);
         var templateLocales = StoreListingPaths.GetLocaleColumns(templateDocument.Headers);
 
-        Assert.Equal(templateLocales, importLocales);
+        Assert.Equal(templateLocales, importLocales.Take(templateLocales.Length));
+        Assert.Equal(["es-es", "pt-br", "pt-pt"], importLocales.Skip(templateLocales.Length));
     }
 
     [Fact]
@@ -115,6 +116,35 @@ public sealed class StoreListingImportFolderIntegrationTests
                 Assert.Equal(value.Trim(), value);
             }
         }
+    }
+
+    [Fact]
+    public void ImportFolder_FeatureSummaryAdvertisesBothGitAwareFilteringModes()
+    {
+        var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(RepoRoot.Value));
+        var feature = document.RowsByField["Feature4"];
+        var expectedValues = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["en-us"] = "Smart Ignore, .gitignore, and Git-tracked mode",
+            ["en"] = "Smart Ignore, .gitignore, and Git-tracked mode",
+            ["ru"] = "Smart Ignore, .gitignore и режим отслеживаемых Git-файлов",
+            ["ru-ru"] = "Smart Ignore, .gitignore и режим отслеживаемых Git-файлов",
+            ["kk-kz"] = "Smart Ignore, .gitignore және Git бақылайтын файлдар режимі",
+            ["de-de"] = "Smart Ignore, .gitignore und Git-Tracked-Modus",
+            ["it-it"] = "Smart Ignore, .gitignore e modalità file tracciati da Git",
+            ["tg-cyrl-tj"] = "Smart Ignore, .gitignore ва реҷаи файлҳои пайгиришавандаи Git",
+            ["uz-latn-uz"] = "Smart Ignore, .gitignore va Git kuzatadigan fayllar rejimi",
+            ["fr-fr"] = "Smart Ignore, .gitignore et mode fichiers suivis par Git",
+            ["es-es"] = "Smart Ignore, .gitignore y modo de archivos seguidos por Git",
+            ["pt-br"] = "Smart Ignore, .gitignore e arquivos rastreados pelo Git",
+            ["pt-pt"] = "Smart Ignore, .gitignore e ficheiros controlados pelo Git"
+        };
+
+        Assert.Equal(
+            expectedValues.Keys,
+            StoreListingPaths.GetLocaleColumns(document.Headers));
+        foreach (var (locale, expectedValue) in expectedValues)
+            Assert.Equal(expectedValue, feature.GetValue(locale));
     }
 
     [Fact]

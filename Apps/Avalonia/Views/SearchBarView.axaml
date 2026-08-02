@@ -1,0 +1,45 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:DevProjex.Avalonia.ViewModels"
+             x:Class="DevProjex.Avalonia.Views.SearchBarView"
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
+  <Border Classes="search-panel"
+          IsEnabled="{Binding IsProjectLoaded}"
+          UseLayoutRounding="True"
+          MinWidth="408">
+    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" Margin="12,6">
+      <TextBox Name="SearchBox"
+               Grid.Column="0"
+               PlaceholderText="{Binding MenuSearch}"
+               Text="{Binding SearchQuery, Mode=TwoWay}"
+               Width="260"
+               FocusAdorner="{x:Null}"
+               KeyDown="OnSearchKeyDown" />
+      <TextBlock Grid.Column="1"
+                 Text="{Binding SearchMatchSummaryText}"
+                 IsVisible="{Binding SearchMatchSummaryVisible}"
+                 FontSize="16"
+                 Opacity="0.92"
+                 VerticalAlignment="Center"
+                 HorizontalAlignment="Right"
+                 Margin="12,0,4,0" />
+      <StackPanel Grid.Column="2"
+                  Orientation="Horizontal"
+                  Spacing="8">
+        <Button Name="SearchPreviousButton"
+                Content="▲"
+                Width="32"
+                Click="OnSearchPrev" />
+        <Button Name="SearchNextButton"
+                Content="▼"
+                Width="32"
+                Click="OnSearchNext" />
+        <Button Name="SearchCloseButton"
+                Content="✕"
+                Width="32"
+                Click="OnSearchClose" />
+      </StackPanel>
+    </Grid>
+  </Border>
+</UserControl>

@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Unit;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class TerminalCommandLocalizationTests
 {
 	private static readonly string[] RequiredKeys =
@@ -13,6 +14,8 @@ public sealed class TerminalCommandLocalizationTests
 		"Dialog.TerminalCommand.Body.HomeMissing",
 		"Dialog.TerminalCommand.Body.NotInstalled",
 		"Dialog.TerminalCommand.Body.Installed",
+		"Dialog.TerminalCommand.Body.InstalledPathMissing",
+		"Dialog.TerminalCommand.Body.CommandShadowed",
 		"Dialog.TerminalCommand.Body.Stale",
 		"Dialog.TerminalCommand.Body.Conflict",
 		"Dialog.TerminalCommand.Body.PermissionDenied",
@@ -22,10 +25,12 @@ public sealed class TerminalCommandLocalizationTests
 		"Dialog.TerminalCommand.Detail.CommandPath",
 		"Dialog.TerminalCommand.Detail.Target",
 		"Dialog.TerminalCommand.Detail.InstalledTarget",
+		"Dialog.TerminalCommand.Detail.ResolvedCommand",
 		"Dialog.TerminalCommand.Detail.PathHint",
 		"Dialog.TerminalCommand.CommandLine",
 		"Dialog.TerminalCommand.CopyCommand",
-		"Dialog.TerminalCommand.Enable",
+		"Dialog.TerminalCommand.Setup",
+		"Dialog.TerminalCommand.AddToPath",
 		"Dialog.TerminalCommand.Repair",
 		"Dialog.TerminalCommand.NotNow",
 		"Dialog.TerminalCommand.DontShowAgain",
@@ -67,6 +72,7 @@ public sealed class TerminalCommandLocalizationTests
 			"Dialog.TerminalCommand.Detail.CommandPath",
 			"Dialog.TerminalCommand.Detail.Target",
 			"Dialog.TerminalCommand.Detail.InstalledTarget",
+			"Dialog.TerminalCommand.Detail.ResolvedCommand",
 			"Dialog.TerminalCommand.Detail.PathHint",
 			"Dialog.TerminalCommand.CommandLine"
 		};

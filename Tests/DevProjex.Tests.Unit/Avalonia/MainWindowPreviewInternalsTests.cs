@@ -1,9 +1,58 @@
+using Avalonia.Platform.Storage;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowPreviewInternalsTests
 {
+    [Theory]
+    [InlineData(TreeTextFormat.Ascii, "txt")]
+    [InlineData(TreeTextFormat.Json, "json")]
+    [InlineData(TreeTextFormat.Xml, "xml")]
+    [InlineData(TreeTextFormat.Markdown, "md")]
+    public void GetTreeExportFileExtension_ReturnsExpectedDesktopExtension(TreeTextFormat format, string expected)
+    {
+        var method = typeof(MainWindow).GetMethod(
+            "GetTreeExportFileExtension",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        Assert.Equal(expected, method!.Invoke(null, [format]));
+    }
+
+    [Theory]
+    [InlineData(TreeTextFormat.Ascii, "TXT", "*.txt")]
+    [InlineData(TreeTextFormat.Json, "JSON", "*.json")]
+    [InlineData(TreeTextFormat.Xml, "XML", "*.xml")]
+    [InlineData(TreeTextFormat.Markdown, "Markdown", "*.md")]
+    public void CreateTreeExportFileTypeChoices_OffersNativeFormatAndTextFallback(
+        TreeTextFormat format,
+        string expectedName,
+        string expectedPattern)
+    {
+        var method = typeof(MainWindow).GetMethod(
+            "CreateTreeExportFileTypeChoices",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        var choices = Assert.IsAssignableFrom<IReadOnlyList<FilePickerFileType>>(
+            method!.Invoke(null, [format]));
+        var nativeChoice = choices[0];
+
+        Assert.Equal(expectedName, nativeChoice.Name);
+        Assert.Equal([expectedPattern], nativeChoice.Patterns);
+
+        if (format == TreeTextFormat.Ascii)
+        {
+            Assert.Single(choices);
+            return;
+        }
+
+        Assert.Equal(2, choices.Count);
+        Assert.Equal("TXT", choices[1].Name);
+        Assert.Equal(["*.txt"], choices[1].Patterns);
+    }
+
     [Theory]
     [InlineData("", 1)]
     [InlineData("one", 1)]
@@ -25,19 +74,6 @@ public sealed class MainWindowPreviewInternalsTests
         var result = PreviewFileCollectionPolicy.CountPreviewLines(text);
 
         Assert.Equal(200_000, result);
-    }
-
-    [Theory]
-    [InlineData(0, 0, false)]
-    [InlineData(1_499_999, 34_999, false)]
-    [InlineData(1_500_000, 10, true)]
-    [InlineData(10, 35_000, true)]
-    [InlineData(2_000_000, 100_000, true)]
-    public void ShouldForcePreviewMemoryCleanup_UsesThresholdPolicy(int textLength, int lineCount, bool expected)
-    {
-        var result = PreviewFileCollectionPolicy.ShouldForcePreviewMemoryCleanup(textLength, lineCount);
-
-        Assert.Equal(expected, result);
     }
 
     [Fact]
@@ -327,6 +363,50 @@ public sealed class MainWindowPreviewInternalsTests
         var keyB = PreviewFileCollectionPolicy.BuildPreviewCacheKey("/root", root, PreviewContentMode.Content, TreeTextFormat.Json, selected);
 
         Assert.Equal(keyA, keyB);
+    }
+
+    [Fact]
+    public void BuildPreviewCacheKey_ImplicitAndCheckedRootSelectionProduceEqualKey()
+    {
+        var root = CreateTree("root");
+        var implicitSelection = new HashSet<string>(PathComparer.Default);
+        var checkedRoot = new HashSet<string>(PathComparer.Default)
+        {
+            root.FullPath
+        };
+
+        var implicitKey = PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+            "/root",
+            root,
+            PreviewContentMode.Content,
+            TreeTextFormat.Ascii,
+            implicitSelection);
+        var checkedRootKey = PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+            "/root",
+            root,
+            PreviewContentMode.Content,
+            TreeTextFormat.Ascii,
+            checkedRoot);
+
+        Assert.Equal(implicitKey, checkedRootKey);
+        Assert.Equal(0, checkedRootKey.SelectedCount);
+        Assert.Equal(0, checkedRootKey.SelectedHash);
+    }
+
+    [Fact]
+    public void CollectOrderedPreviewFiles_CheckedRootMatchesImplicitFullTree()
+    {
+        var root = CreateTree("root");
+        var implicitFiles = PreviewFileCollectionPolicy.CollectOrderedPreviewFiles(
+            new HashSet<string>(PathComparer.Default),
+            hasSelection: false,
+            root);
+        var checkedRootFiles = PreviewFileCollectionPolicy.CollectOrderedPreviewFiles(
+            new HashSet<string>(PathComparer.Default) { root.FullPath },
+            hasSelection: true,
+            root);
+
+        Assert.Equal(implicitFiles, checkedRootFiles);
     }
 
     [Fact]

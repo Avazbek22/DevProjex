@@ -119,6 +119,56 @@ public sealed class TreeAndContentExportServiceTests
 		Assert.Contains("B", result);
 	}
 
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
+	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void Build_AllFormatsUseRelativeContentHeadersAndPayloadMetricsStayEfficient(TreeTextFormat format)
+	{
+		using var temp = new TemporaryDirectory();
+		var mainFile = temp.CreateFile(Path.Combine("src", "main.cs"), "class Program {}");
+		var readmeFile = temp.CreateFile("README.md", "# Readme");
+		var root = new TreeNodeDescriptor(
+			DisplayName: "root",
+			FullPath: temp.Path,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children:
+			[
+				new TreeNodeDescriptor(
+					"src",
+					Path.Combine(temp.Path, "src"),
+					true,
+					false,
+					"folder",
+					[new TreeNodeDescriptor("main.cs", mainFile, false, false, "text", [])]),
+				new TreeNodeDescriptor("README.md", readmeFile, false, false, "text", [])
+			]);
+		var service = new TreeAndContentExportService(
+			new TreeExportService(),
+			new SelectedContentExportService(new FileContentAnalyzer()));
+
+		var result = service.Build(temp.Path, root, new HashSet<string>(), format);
+
+		var (_, contentPart) = SplitTreeAndContent(result);
+		Assert.Contains("src/main.cs:", contentPart, StringComparison.Ordinal);
+		Assert.Contains("README.md:", contentPart, StringComparison.Ordinal);
+		Assert.DoesNotContain(mainFile.Replace('\\', '/'), contentPart.Replace('\\', '/'), StringComparison.Ordinal);
+		Assert.DoesNotContain(readmeFile.Replace('\\', '/'), contentPart.Replace('\\', '/'), StringComparison.Ordinal);
+
+		var oldAbsolutePayload = result
+			.Replace("src/main.cs:", $"{mainFile}:", StringComparison.Ordinal)
+			.Replace("README.md:", $"{readmeFile}:", StringComparison.Ordinal);
+
+		var actualMetrics = ExportOutputMetricsCalculator.FromText(result);
+		var oldAbsoluteMetrics = ExportOutputMetricsCalculator.FromText(oldAbsolutePayload);
+		Assert.Equal(oldAbsoluteMetrics.Lines, actualMetrics.Lines);
+		Assert.True(actualMetrics.Chars < oldAbsoluteMetrics.Chars);
+		Assert.True(actualMetrics.Tokens <= oldAbsoluteMetrics.Tokens);
+	}
+
 	// Verifies clipboard spacing separates tree and content sections.
 	[Fact]
 	public void Build_IncludesClipboardSpacingBetweenTreeAndContent()
@@ -147,9 +197,8 @@ public sealed class TreeAndContentExportServiceTests
 		Assert.Contains($"\u00A0{nl}\u00A0{nl}", result);
 	}
 
-	// Verifies selecting a directory yields tree output but no content.
 	[Fact]
-	public void Build_ReturnsTreeOnlyWhenSelectionIsDirectory()
+	public void Build_SelectedDirectoryIncludesDescriptorDescendantContent()
 	{
 		using var temp = new TemporaryDirectory();
 		var folder = temp.CreateFolder("src");
@@ -179,7 +228,8 @@ public sealed class TreeAndContentExportServiceTests
 		var result = service.Build(temp.Path, root, new HashSet<string> { folder });
 
 		Assert.Contains("src", result);
-		Assert.DoesNotContain("main.cs:", result);
+		Assert.Contains("src/main.cs:", result);
+		Assert.Contains("class C {}", result);
 	}
 
 	// Verifies a file root is treated as a file when no selection is provided.
@@ -231,10 +281,18 @@ public sealed class TreeAndContentExportServiceTests
 		var contentPart = result[separatorIndex..];
 
 		using var doc = JsonDocument.Parse(jsonPart);
-		Assert.Equal(temp.Path, doc.RootElement.GetProperty("rootPath").GetString());
-		Assert.True(doc.RootElement.TryGetProperty("root", out var treeElement));
-		Assert.Equal("root", treeElement.GetProperty("name").GetString());
-		Assert.Equal(".", treeElement.GetProperty("path").GetString());
+		Assert.Equal(Path.GetFullPath(temp.Path).Replace('\\', '/'), doc.RootElement.GetProperty("rootPath").GetString());
+		var tree = JsonTreeExportTestHelper.GetTree(doc);
+		Assert.Equal(JsonValueKind.Array, tree.GetProperty("/").ValueKind);
+		Assert.Equal(["note.txt"], JsonTreeExportTestHelper.ExtractFilePaths(tree));
+		Assert.False(doc.RootElement.TryGetProperty("root", out _));
 		Assert.Contains("note.txt", contentPart);
+	}
+
+	private static (string TreePart, string ContentPart) SplitTreeAndContent(string export)
+	{
+		var separatorIndex = export.IndexOf('\u00A0');
+		Assert.True(separatorIndex > 0, "Tree + Content export must contain the NBSP separator.");
+		return (export[..separatorIndex].TrimEnd('\r', '\n'), export[separatorIndex..]);
 	}
 }

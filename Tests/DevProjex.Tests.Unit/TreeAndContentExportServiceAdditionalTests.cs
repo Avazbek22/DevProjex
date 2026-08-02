@@ -29,8 +29,9 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 
 		var output = service.Build(temp.Path, root, selected);
 
-		Assert.Contains($"{file}:", output);
+		Assert.Contains("alpha.txt:", output, StringComparison.Ordinal);
 		Assert.Contains("Alpha", output);
+		Assert.DoesNotContain($"{file}:", output, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -62,8 +63,9 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 		var output = service.Build(temp.Path, root, selected);
 
 		Assert.Contains("├── Root", output);
-		Assert.Contains($"{file}:", output);
+		Assert.Contains("alpha.txt:", output, StringComparison.Ordinal);
 		Assert.Contains("[No Content, 0 bytes]", output);
+		Assert.DoesNotContain($"{file}:", output, StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -1,3 +1,5 @@
+using DevProjex.Application.Selection;
+
 namespace DevProjex.Application.Services;
 
 public sealed class TreeAndContentExportService(
@@ -5,6 +7,7 @@ public sealed class TreeAndContentExportService(
 	SelectedContentExportService contentExport)
 {
 	private const string ClipboardBlankLine = "\u00A0"; // NBSP: looks empty but won't collapse on paste
+	private static readonly IReadOnlySet<string> EmptySelection = new HashSet<string>(PathComparer.Default);
 
 	public string Build(string rootPath, TreeNodeDescriptor root, IReadOnlySet<string> selectedPaths)
 		=> Build(rootPath, root, selectedPaths, TreeTextFormat.Ascii);
@@ -46,18 +49,20 @@ public sealed class TreeAndContentExportService(
 		if (hasSelection && string.IsNullOrWhiteSpace(tree))
 			tree = treeExport.BuildFullTree(rootPath, root, format, displayRootPath, displayRootName);
 
-		var files = hasSelection
-			? GetSelectedFiles(selectedPaths)
-			: GetAllFilePaths(root);
+		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+			root,
+			hasSelection ? selectedPaths : EmptySelection,
+			ensureExists: hasSelection);
+		var contentPathMapper = CreateRelativeContentHeaderPathMapper(rootPath);
 
-		var content = await contentExport.BuildAsync(files, cancellationToken, pathPresentation?.MapFilePath).ConfigureAwait(false);
+		var content = await contentExport.BuildAsync(files, cancellationToken, contentPathMapper).ConfigureAwait(false);
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;
 
-		// For both ASCII and JSON: tree + separator + content
-		// JSON format applies only to tree structure, content remains plain text
+		// The selected format applies only to the tree block; file content stays plain text.
 		var sb = new StringBuilder();
 		sb.Append(tree.TrimEnd('\r', '\n'));
+		sb.AppendLine();
 		AppendClipboardBlankLine(sb);
 		AppendClipboardBlankLine(sb);
 		sb.Append(content);
@@ -65,26 +70,75 @@ public sealed class TreeAndContentExportService(
 		return sb.ToString();
 	}
 
-	private static IEnumerable<string> GetSelectedFiles(IReadOnlySet<string> selectedPaths)
+	public static Func<string, string> CreateRelativeContentHeaderPathMapper(string rootPath)
 	{
-		foreach (var path in selectedPaths)
+		string? normalizedRootPath;
+		try
 		{
-			if (File.Exists(path))
-				yield return path;
+			// The mapper runs once per exported file. Resolve the invariant root once instead
+			// of repeating Path.GetFullPath throughout large preview and metrics traversals.
+			normalizedRootPath = Path.GetFullPath(rootPath);
 		}
+		catch
+		{
+			normalizedRootPath = null;
+		}
+
+		return filePath => MapRelativeContentHeaderPathFromNormalizedRoot(normalizedRootPath, filePath);
 	}
 
-	private static IEnumerable<string> GetAllFilePaths(TreeNodeDescriptor node)
+	public static string MapRelativeContentHeaderPath(string rootPath, string filePath)
 	{
-		if (!node.IsDirectory)
-			yield return node.FullPath;
-
-		foreach (var child in node.Children)
+		string? normalizedRootPath;
+		try
 		{
-			foreach (var path in GetAllFilePaths(child))
-				yield return path;
+			normalizedRootPath = Path.GetFullPath(rootPath);
 		}
+		catch
+		{
+			normalizedRootPath = null;
+		}
+
+		return MapRelativeContentHeaderPathFromNormalizedRoot(normalizedRootPath, filePath);
 	}
+
+	private static string MapRelativeContentHeaderPathFromNormalizedRoot(
+		string? normalizedRootPath,
+		string filePath)
+	{
+		try
+		{
+			if (normalizedRootPath is null)
+				return GetFallbackContentHeaderPath(filePath);
+
+			var relativePath = Path.GetRelativePath(normalizedRootPath, filePath);
+			if (!string.IsNullOrWhiteSpace(relativePath) &&
+			    relativePath != "." &&
+			    !IsOutsideRoot(relativePath) &&
+			    !Path.IsPathRooted(relativePath))
+			{
+				return relativePath.Replace('\\', '/');
+			}
+		}
+		catch
+		{
+			// Tree + Content already carries the root path in the tree block, so file
+			// sections should stay short and portable even when relative path calculation fails.
+		}
+
+		return GetFallbackContentHeaderPath(filePath);
+	}
+
+	private static string GetFallbackContentHeaderPath(string filePath)
+	{
+		var fileName = Path.GetFileName(filePath);
+		return string.IsNullOrWhiteSpace(fileName) ? filePath.Replace('\\', '/') : fileName;
+	}
+
+	private static bool IsOutsideRoot(string relativePath) =>
+		relativePath.Equals("..", StringComparison.Ordinal) ||
+		relativePath.StartsWith("../", StringComparison.Ordinal) ||
+		relativePath.StartsWith(@"..\", StringComparison.Ordinal);
 
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
 }

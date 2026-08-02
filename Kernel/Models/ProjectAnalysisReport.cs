@@ -33,9 +33,9 @@ public sealed record ProjectAnalysisOutputMetricsReport(
 	ProjectOutputMetricsReport Content);
 
 public sealed record ProjectOutputMetricsReport(
-	int Lines,
-	int Chars,
-	int Tokens)
+	long Lines,
+	long Chars,
+	long Tokens)
 {
 	public static ProjectOutputMetricsReport Empty { get; } = new(0, 0, 0);
 }

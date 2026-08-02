@@ -247,9 +247,9 @@ public sealed class ProjectProfileStoreAdditionalTests
 			store.SaveProfile(
 				projectPath,
 				new ProjectSelectionProfile(
-					SelectedRootFolders: ["src"],
-					SelectedExtensions: [".cs"],
-					SelectedIgnoreOptions: [IgnoreOptionId.DotFiles],
+					SelectedRootFolders: ["src", "docs"],
+					SelectedExtensions: [".cs", ".csv"],
+					SelectedIgnoreOptions: [IgnoreOptionId.DotFiles, IgnoreOptionId.EmptyFiles],
 					RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
 					{
 						["src"] = true,
@@ -276,6 +276,9 @@ public sealed class ProjectProfileStoreAdditionalTests
 			Assert.False(loaded.ExtensionStates![".csv"]);
 			Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.DotFiles]);
 			Assert.False(loaded.IgnoreOptionStates![IgnoreOptionId.EmptyFiles]);
+			Assert.DoesNotContain("docs", loaded.SelectedRootFolders, PathComparer.Default);
+			Assert.DoesNotContain(".csv", loaded.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
+			Assert.DoesNotContain(IgnoreOptionId.EmptyFiles, loaded.SelectedIgnoreOptions);
 		}
 		finally
 		{
@@ -284,7 +287,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void LegacySelectedOnlyProfile_LoadThenSave_UpgradesToFullStateSchemaV2()
+	public void LegacySelectedOnlyProfile_LoadThenSave_UpgradesToFullStateSchemaV3()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -299,15 +302,12 @@ public sealed class ProjectProfileStoreAdditionalTests
 			Assert.Contains("docs", legacyProfile.SelectedRootFolders);
 			Assert.Contains(".csv", legacyProfile.SelectedExtensions);
 			Assert.Contains(IgnoreOptionId.EmptyFiles, legacyProfile.SelectedIgnoreOptions);
-			Assert.NotNull(legacyProfile.RootFolderStates);
-			Assert.NotNull(legacyProfile.ExtensionStates);
-			Assert.NotNull(legacyProfile.IgnoreOptionStates);
-			Assert.Empty(legacyProfile.RootFolderStates);
-			Assert.Empty(legacyProfile.ExtensionStates);
-			Assert.Empty(legacyProfile.IgnoreOptionStates);
+			Assert.True(legacyProfile.RootFolderStates!["docs"]);
+			Assert.True(legacyProfile.ExtensionStates![".csv"]);
+			Assert.True(legacyProfile.IgnoreOptionStates![IgnoreOptionId.EmptyFiles]);
 
-			// Empty legacy state maps keep checked legacy entries available but allow
-			// entries first seen after reopen to use the current checked defaults.
+			// Selected-only input is promoted to complete maps at the storage boundary.
+			// This preserves checked legacy rows while letting unseen rows use defaults.
 			store.SaveProfile(
 				projectPath,
 				new ProjectSelectionProfile(
@@ -332,7 +332,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			using var document = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
 			var root = document.RootElement;
-			Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
+			Assert.Equal(3, root.GetProperty("schemaVersion").GetInt32());
 			var persisted = root.GetProperty("profiles").GetProperty(PathUtility.Normalize(projectPath));
 			Assert.False(persisted.GetProperty("rootFolderStates").GetProperty("docs").GetBoolean());
 			Assert.False(persisted.GetProperty("extensionStates").GetProperty(".csv").GetBoolean());
@@ -585,6 +585,80 @@ public sealed class ProjectProfileStoreAdditionalTests
 			var store = CreateStore(tempRoot);
 			var path = store.GetPath();
 			Assert.StartsWith(Path.Combine(tempRoot, "appdata"), path, StringComparison.OrdinalIgnoreCase);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void LookupProfile_CorruptPrimaryRecoversValidProfileFromBackup()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RecoveredProfile");
+			store.SaveProfile(projectPath, CreateProfile());
+			File.WriteAllText(store.GetPath(), "{ invalid");
+
+			var result = store.LookupProfile(projectPath, TimeSpan.Zero);
+
+			Assert.Equal(ProjectProfileLookupStatus.Found, result.Status);
+			Assert.NotNull(result.Profile);
+			Assert.Contains(".cs", result.Profile.SelectedExtensions);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void LookupProfile_CorruptPrimaryAndBackupReportsInvalidStorage()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			Assert.True(store.EnsureStorageExists());
+			File.WriteAllText(store.GetPath(), "{ invalid-primary");
+			File.WriteAllText(store.GetPath() + ".bak", "{ invalid-backup");
+
+			var result = store.LookupProfile(
+				Path.Combine(tempRoot, "InvalidProfile"),
+				TimeSpan.Zero);
+
+			Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, result.Status);
+			Assert.Null(result.Profile);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void LookupProfile_HeldStoreLockReportsTemporaryUnavailability()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			Assert.True(store.EnsureStorageExists());
+			using var heldLock = new FileStream(
+				store.GetPath() + ".lock",
+				FileMode.OpenOrCreate,
+				FileAccess.ReadWrite,
+				FileShare.None);
+
+			var result = store.LookupProfile(
+				Path.Combine(tempRoot, "LockedProfile"),
+				TimeSpan.Zero);
+
+			Assert.Equal(ProjectProfileLookupStatus.TemporarilyUnavailable, result.Status);
+			Assert.Null(result.Profile);
 		}
 		finally
 		{

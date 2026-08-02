@@ -5,75 +5,56 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{
 		var options = new List<IgnoreOptionDescriptor>();
-		if (availability.IncludeSmartIgnore)
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering)
 		{
-			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.SmartIgnore,
-				localization["Settings.Ignore.SmartIgnore"],
-				true));
+			if (descriptor.LegacyOptionId is not { } optionId)
+				continue;
+			var (included, isSelected) = descriptor.Id switch
+			{
+				GitFilteringMode.RespectGitIgnore =>
+					(availability.IncludeGitIgnore, true),
+				GitFilteringMode.TrackedFilesOnly =>
+					(availability.IncludeTrackedGitFilesOnly, false),
+				_ => (false, false)
+			};
+			if (included)
+			{
+				options.Add(new IgnoreOptionDescriptor(
+					optionId,
+					localization[descriptor.LabelKey],
+					isSelected));
+			}
 		}
 
-		if (availability.IncludeGitIgnore)
+		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
 		{
+			var (included, count) = descriptor.Id switch
+			{
+				ProjectExclusion.SmartIgnore => (availability.IncludeSmartIgnore, 0),
+				ProjectExclusion.HiddenFolders =>
+					(availability.IncludeHiddenFolders, availability.HiddenFoldersCount),
+				ProjectExclusion.HiddenFiles =>
+					(availability.IncludeHiddenFiles, availability.HiddenFilesCount),
+				ProjectExclusion.DotFolders =>
+					(availability.IncludeDotFolders, availability.DotFoldersCount),
+				ProjectExclusion.DotFiles =>
+					(availability.IncludeDotFiles, availability.DotFilesCount),
+				ProjectExclusion.EmptyFolders =>
+					(availability.IncludeEmptyFolders, availability.EmptyFoldersCount),
+				ProjectExclusion.EmptyFiles =>
+					(availability.IncludeEmptyFiles, availability.EmptyFilesCount),
+				ProjectExclusion.ExtensionlessFiles =>
+					(availability.IncludeExtensionlessFiles, availability.ExtensionlessFilesCount),
+				_ => throw new ArgumentOutOfRangeException()
+			};
+			if (!included)
+				continue;
 			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.UseGitIgnore,
-				localization["Settings.Ignore.UseGitIgnore"],
-				true));
-		}
-
-		if (availability.IncludeEmptyFolders)
-		{
-			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.EmptyFolders,
-				FormatLabelWithCount(localization["Settings.Ignore.EmptyFolders"], availability.EmptyFoldersCount, availability.ShowAdvancedCounts),
-				true));
-		}
-
-		if (availability.IncludeEmptyFiles)
-		{
-			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.EmptyFiles,
-				FormatLabelWithCount(localization["Settings.Ignore.EmptyFiles"], availability.EmptyFilesCount, availability.ShowAdvancedCounts),
-				true));
-		}
-
-		if (availability.IncludeHiddenFolders)
-		{
-			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.HiddenFolders,
-				FormatLabelWithCount(localization["Settings.Ignore.HiddenFolders"], availability.HiddenFoldersCount, availability.ShowAdvancedCounts),
-				true));
-		}
-
-		if (availability.IncludeHiddenFiles)
-		{
-			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.HiddenFiles,
-				FormatLabelWithCount(localization["Settings.Ignore.HiddenFiles"], availability.HiddenFilesCount, availability.ShowAdvancedCounts),
-				true));
-		}
-
-		if (availability.IncludeDotFolders)
-		{
-			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.DotFolders,
-				FormatLabelWithCount(localization["Settings.Ignore.DotFolders"], availability.DotFoldersCount, availability.ShowAdvancedCounts),
-				true));
-		}
-
-		if (availability.IncludeDotFiles)
-		{
-			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.DotFiles,
-				FormatLabelWithCount(localization["Settings.Ignore.DotFiles"], availability.DotFilesCount, availability.ShowAdvancedCounts),
-				true));
-		}
-
-		if (availability.IncludeExtensionlessFiles)
-		{
-			options.Add(new IgnoreOptionDescriptor(
-				IgnoreOptionId.ExtensionlessFiles,
-				FormatLabelWithCount(localization["Settings.Ignore.ExtensionlessFiles"], availability.ExtensionlessFilesCount, availability.ShowAdvancedCounts),
+				descriptor.LegacyOptionId,
+				FormatLabelWithCount(
+					localization[descriptor.LabelKey],
+					count,
+					availability.ShowAdvancedCounts),
 				true));
 		}
 

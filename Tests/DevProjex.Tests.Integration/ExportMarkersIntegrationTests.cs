@@ -17,11 +17,11 @@ public sealed class ExportMarkersIntegrationTests
 
 		var output = service.Build(temp.Path, root, new HashSet<string>());
 
-		Assert.Contains($"{empty}:", output);
+		Assert.Contains("empty.json:", output);
 		Assert.Contains("[No Content, 0 bytes]", output);
-		Assert.Contains($"{whitespace}:", output);
+		Assert.Contains("space.txt:", output);
 		Assert.Contains("[Whitespace, 3 bytes]", output);
-		Assert.Contains($"{text}:", output);
+		Assert.Contains("note.txt:", output);
 		Assert.Contains("Hello", output);
 		Assert.DoesNotContain($"{binary}:", output);
 	}
@@ -39,7 +39,7 @@ public sealed class ExportMarkersIntegrationTests
 
 		var output = service.Build(temp.Path, root, selected);
 
-		Assert.Contains($"{empty}:", output);
+		Assert.Contains("empty.json:", output);
 		Assert.Contains("[No Content, 0 bytes]", output);
 		Assert.DoesNotContain($"{text}:", output);
 	}

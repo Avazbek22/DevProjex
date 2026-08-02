@@ -8,6 +8,8 @@ public enum TerminalCommandSetupState
 	HomeDirectoryUnavailable,
 	NotInstalled,
 	Installed,
+	InstalledPathMissing,
+	CommandShadowed,
 	Stale,
 	ConflictingCommand,
 	PermissionDenied,
@@ -19,6 +21,7 @@ public enum TerminalCommandInstallOutcome
 	AlreadyInstalled,
 	Created,
 	Repaired,
+	Reinstalled,
 	NotSupported,
 	ConflictingCommand,
 	Failed
@@ -34,15 +37,34 @@ public sealed record TerminalCommandSetupSnapshot(
 	bool UserBinDirectoryIsInPath,
 	bool CanInstall,
 	bool CanRepair,
-	string? ShellProfileHint)
+	string? ShellProfileHint,
+	string? PathSetupCommand = null,
+	string? ResolvedCommandPath = null)
 {
-	public bool IsReady => State is TerminalCommandSetupState.ManagedByOperatingSystem or TerminalCommandSetupState.Installed;
+	public bool IsReady =>
+		State == TerminalCommandSetupState.ManagedByOperatingSystem ||
+		(State == TerminalCommandSetupState.Installed && UserBinDirectoryIsInPath);
 
 	public bool IsActionable => CanInstall || CanRepair;
+
+	public bool CanReinstall =>
+		State == TerminalCommandSetupState.Installed &&
+		UserBinDirectoryIsInPath &&
+		!string.IsNullOrWhiteSpace(CommandPath) &&
+		!string.IsNullOrWhiteSpace(TargetExecutablePath);
 }
 
 public sealed record TerminalCommandInstallResult(
 	bool Success,
 	TerminalCommandInstallOutcome Outcome,
 	TerminalCommandSetupSnapshot Snapshot,
+	string? ErrorMessage = null);
+
+public sealed record TerminalCommandPathSetupResult(
+	bool Success,
+	TerminalCommandSetupSnapshot Snapshot,
+	string? ErrorMessage = null);
+
+public sealed record TerminalCommandValidationResult(
+	bool Success,
 	string? ErrorMessage = null);

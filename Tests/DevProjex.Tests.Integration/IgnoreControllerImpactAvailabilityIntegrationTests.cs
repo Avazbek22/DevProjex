@@ -41,7 +41,7 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 	}
 
 	[Fact]
-	public void GitIgnoreController_IsHiddenWhenOnlyMatchedFileIsAlreadyMaskedByDotFiles()
+	public void GitIgnoreController_OwnsMatchedDotFileBeforeDotFilesRule()
 	{
 		using var project = new TemporaryDirectory();
 		project.CreateFile(".gitignore", ".env\n");
@@ -51,8 +51,9 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 
 		var snapshot = ComputeDefaultSnapshot(project.Path);
 
-		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedVisible: false, expectedChecked: null);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: true);
 		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFiles, expectedVisible: true, expectedChecked: true);
+		Assert.Equal(1, snapshot.IgnoreOptionCounts.DotFiles);
 	}
 
 	[Fact]
@@ -94,6 +95,249 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 
 		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
 		Assert.DoesNotContain(snapshot.ExtensionOptions, option => option.Name == ".pyc");
+	}
+
+	[Fact]
+	public void SmartController_IsVisibleForTopLevelSignatureArtifactWithoutKnownStackMarker()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("obj/project.assets.json", "{}\n");
+
+		var snapshot = ComputeDefaultSnapshot(project.Path);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.UseGitIgnore, expectedVisible: false, expectedChecked: null);
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.DoesNotContain(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".json", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void SmartController_ExplicitUncheckedStateStaysVisibleForSignatureArtifact()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("obj/project.assets.json", "{}\n");
+		var services = CreateServices();
+		var baseline = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithForcedIgnoreOptions(
+				project.Path,
+				baseline,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.SmartIgnore] = false
+				}),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".json", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void SmartController_AllIgnoreOptionsOff_StaysVisibleUncheckedForSignatureArtifact()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("obj/project.assets.json", "{}\n");
+		var services = CreateServices();
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateAllIgnoreOptionsOffContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".json", StringComparison.OrdinalIgnoreCase));
+		Assert.Contains(snapshot.RootOptions!, option => option.Name == "obj" && option.IsChecked);
+	}
+
+	[Fact]
+	public void SmartController_LegacyDependencyStore_IsVisibleAndRemovesOnlyArtifactExtensions()
+	{
+		using var project = new TemporaryDirectory();
+		CreateLegacyPackageStoreWorkspace(project);
+		var services = CreateServices();
+		var rules = services.IgnoreRulesService.Build(
+			project.Path,
+			[IgnoreOptionId.SmartIgnore],
+			["src"]);
+		var localStatePath = Path.Combine(project.Path, "App.sln.DotSettings.user");
+
+		Assert.True(rules.UseSmartIgnore);
+		Assert.True(rules.IsSmartIgnoredFile(
+			localStatePath,
+			Path.GetFileName(localStatePath),
+			shouldApplySmartIgnore: true));
+		var rootFileScan = new FileSystemScanner().GetRootFileIgnoreSectionSnapshot(
+			project.Path,
+			rules,
+			rules,
+			effectiveAllowedExtensions: null,
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(".user", rootFileScan.Value.VisibleExtensions);
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".cs");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".config");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".dotsettings");
+		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".nupkg");
+		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".dll");
+		Assert.DoesNotContain(snapshot.EffectiveExtensionOptions, option => option.Name == ".user");
+	}
+
+	[Fact]
+	public void SmartController_LegacyDependencyStore_AllOptionsOffKeepsImpactAndArtifactExtensions()
+	{
+		using var project = new TemporaryDirectory();
+		CreateLegacyPackageStoreWorkspace(project);
+		var services = CreateServices();
+
+		var snapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateAllIgnoreOptionsOffContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(snapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".nupkg");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".dll");
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".user");
+	}
+
+	[Fact]
+	public void SmartController_ReusedRefreshEngineDetectsArtifactSignatureAddedAfterInitialScan()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("packages/README.md", "source packages\n");
+		var services = CreateServices();
+		var sourceSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(sourceSnapshot, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+		Assert.Contains(sourceSnapshot.EffectiveExtensionOptions, option => option.Name == ".md");
+
+		project.CreateFile("packages/repositories.config", "<repositories />\n");
+		var artifactSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextFromSnapshot(project.Path, sourceSnapshot),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(artifactSnapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.True(artifactSnapshot.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.DoesNotContain(artifactSnapshot.EffectiveExtensionOptions, option => option.Name == ".md");
+		Assert.DoesNotContain(artifactSnapshot.EffectiveExtensionOptions, option => option.Name == ".config");
+	}
+
+	[Fact]
+	public void SmartController_ReusedRefreshEngineRevealsSourceAfterArtifactSignatureIsRemoved()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("packages/README.md", "source packages\n");
+		var markerPath = project.CreateFile("packages/repositories.config", "<repositories />\n");
+		var services = CreateServices();
+		var artifactSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(artifactSnapshot, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.DoesNotContain(artifactSnapshot.EffectiveExtensionOptions, option => option.Name == ".md");
+
+		File.Delete(markerPath);
+		var sourceSnapshot = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextFromSnapshot(project.Path, artifactSnapshot),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(sourceSnapshot, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+		Assert.Equal(0, sourceSnapshot.ControllerImpactCounts.SmartIgnore);
+		Assert.Contains(sourceSnapshot.EffectiveExtensionOptions, option => option.Name == ".md");
+	}
+
+	[Fact]
+	public void SmartController_UserSpecificProjectStateAloneHasBidirectionalToggleImpact()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("App.csproj", "<Project />\n");
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("App.csproj.user", "local state\n");
+		var services = CreateServices();
+
+		var enabled = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+		var disabled = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithForcedIgnoreOptions(
+				project.Path,
+				enabled,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.SmartIgnore] = false
+				}),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(enabled, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		Assert.True(enabled.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.DoesNotContain(enabled.EffectiveExtensionOptions, option => option.Name == ".user");
+		AssertIgnoreOption(disabled, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(disabled.ControllerImpactCounts.SmartIgnore > 0);
+		Assert.Contains(disabled.EffectiveExtensionOptions, option => option.Name == ".user");
+	}
+
+	[Fact]
+	public void SmartController_SourcePackagesWithoutArtifactFingerprint_RemainsHidden()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("packages/domain/Order.cs", "class Order {}\n");
+		project.CreateFile("packages/api/Controller.cs", "class Controller {}\n");
+
+		var snapshot = ComputeDefaultSnapshot(project.Path);
+
+		AssertIgnoreOption(snapshot, IgnoreOptionId.SmartIgnore, expectedVisible: false, expectedChecked: null);
+		Assert.Equal(0, snapshot.ControllerImpactCounts.SmartIgnore);
+		Assert.Contains(snapshot.EffectiveExtensionOptions, option => option.Name == ".cs");
+	}
+
+	[Fact]
+	public void SmartArtifactRootOwnership_DoesNotStealDotFolderCountsWhenSmartIsDisabled()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("obj/project.assets.json", "{}\n");
+		project.CreateFile(".idea/workspace.xml", "<project />\n");
+		var services = CreateServices();
+		var baseline = services.Engine.ComputeFullRefreshSnapshot(
+			CreateDefaultContext(project.Path),
+			TestContext.Current.CancellationToken);
+
+		var smartOff = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithForcedIgnoreOptions(
+				project.Path,
+				baseline,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.SmartIgnore] = false,
+					[IgnoreOptionId.DotFolders] = true
+				}),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(baseline, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: true);
+		AssertIgnoreOption(baseline, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+		Assert.Equal(1, baseline.IgnoreOptionCounts.DotFolders);
+
+		AssertIgnoreOption(smartOff, IgnoreOptionId.SmartIgnore, expectedVisible: true, expectedChecked: false);
+		AssertIgnoreOption(smartOff, IgnoreOptionId.DotFolders, expectedVisible: true, expectedChecked: true);
+		Assert.Equal(1, smartOff.IgnoreOptionCounts.DotFolders);
+		Assert.Contains(smartOff.ExtensionOptions, option => string.Equals(option.Name, ".json", StringComparison.OrdinalIgnoreCase));
 	}
 
 	[Fact]
@@ -140,6 +384,37 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 		Assert.Equal(2, snapshot.IgnoreOptionCounts.DotFolders);
 		Assert.Contains("(2)", dotFolders.Label);
 		Assert.DoesNotContain(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".xml", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void DotFileOnlyGitIgnoreController_ExplicitUncheckedStateStaysVisibleWhenDotFilesTakesOver()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile(".gitignore", ".env\n");
+		project.CreateFile("App.csproj", "<Project />\n");
+		project.CreateFile("Program.cs", "Console.WriteLine(\"ok\");\n");
+		project.CreateFile(".env", "SECRET=1\n");
+
+		var services = CreateServices();
+		var allOff = services.Engine.ComputeFullRefreshSnapshot(
+			CreateAllIgnoreOptionsOffContext(project.Path),
+			TestContext.Current.CancellationToken);
+		var dotFilesOn = services.Engine.ComputeFullRefreshSnapshot(
+			CreateContextWithForcedIgnoreOptions(
+				project.Path,
+				allOff,
+				new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.UseGitIgnore] = false,
+					[IgnoreOptionId.DotFiles] = true
+				}),
+			TestContext.Current.CancellationToken);
+
+		AssertIgnoreOption(allOff, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+		Assert.True(allOff.ControllerImpactCounts.GitIgnore > 0);
+		Assert.True(dotFilesOn.ControllerImpactCounts.GitIgnore > 0);
+		AssertIgnoreOption(dotFilesOn, IgnoreOptionId.UseGitIgnore, expectedVisible: true, expectedChecked: false);
+		AssertIgnoreOption(dotFilesOn, IgnoreOptionId.DotFiles, expectedVisible: true, expectedChecked: true);
 	}
 
 	[Fact]
@@ -190,6 +465,18 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 		project.CreateFile("logs/runtime.log", "ignored\n");
 		project.CreateFile(".idea/settings.xml", "<settings />\n");
 		project.CreateFile(".run/App.run.xml", "<component />\n");
+	}
+
+	private static void CreateLegacyPackageStoreWorkspace(TemporaryDirectory project)
+	{
+		project.CreateFile("src/App.cs", "class App {}\n");
+		project.CreateFile("packages.config", "<packages />\n");
+		project.CreateFile("App.sln.DotSettings", "shared settings\n");
+		project.CreateFile("App.sln.DotSettings.user", "local settings\n");
+		project.CreateFile("packages/Alpha.1.0.0/Alpha.1.0.0.nupkg", "package\n");
+		project.CreateFile("packages/Alpha.1.0.0/lib/Alpha.dll", "binary\n");
+		project.CreateFile("packages/Beta.2.0.0/Beta.2.0.0.nupkg", "package\n");
+		project.CreateFile("packages/Beta.2.0.0/ref/Beta.dll", "binary\n");
 	}
 
 	private static void CreateRiderProjectsStyleWorkspace(
@@ -278,6 +565,46 @@ public sealed class IgnoreControllerImpactAvailabilityIntegrationTests
 				.Where(optionId => !disabled.Contains(optionId))
 				.ToHashSet(),
 			IgnoreOptionStateCache = stateCache
+		};
+	}
+
+	private static SelectionRefreshContext CreateAllIgnoreOptionsOffContext(string projectPath) =>
+		CreateDefaultContext(projectPath) with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId>(),
+			IgnoreOptionStateCache = Enum.GetValues<IgnoreOptionId>()
+				.ToDictionary(optionId => optionId, _ => false),
+			IgnoreAllPreference = false,
+			IgnoreOptionStateCacheIsComplete = true
+		};
+
+	private static SelectionRefreshContext CreateContextWithForcedIgnoreOptions(
+		string projectPath,
+		SelectionRefreshSnapshot snapshot,
+		IReadOnlyDictionary<IgnoreOptionId, bool> forcedStates)
+	{
+		var stateCache = snapshot.IgnoreOptionStateCache.ToDictionary(pair => pair.Key, pair => pair.Value);
+		var selected = snapshot.IgnoreOptions
+			.Where(option => option.IsChecked)
+			.Select(option => option.Id)
+			.ToHashSet();
+		foreach (var (optionId, isChecked) in forcedStates)
+		{
+			stateCache[optionId] = isChecked;
+			if (isChecked)
+				selected.Add(optionId);
+			else
+				selected.Remove(optionId);
+		}
+
+		return CreateContextFromSnapshot(projectPath, snapshot) with
+		{
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = selected,
+			IgnoreOptionStateCache = stateCache,
+			IgnoreAllPreference = null,
+			IgnoreOptionStateCacheIsComplete = true
 		};
 	}
 

@@ -1,0 +1,118 @@
+namespace DevProjex.Infrastructure.FileSystem;
+
+internal static class GitIgnoreAncestorScopeBootstrapper
+{
+	public static GitIgnoreAncestorScopeBootstrapResult Apply(
+		string scanRootPath,
+		IgnoreRules.GitIgnoreScanContext activeContext,
+		IgnoreRules.GitIgnoreScanContext candidateContext,
+		CancellationToken cancellationToken,
+		List<ScopedGitIgnoreMatcher>? discoveredMatchers = null,
+		GitIgnoreMatcherLoadSession? loadSession = null)
+	{
+		loadSession ??= new GitIgnoreMatcherLoadSession();
+		cancellationToken.ThrowIfCancellationRequested();
+		if (!GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
+			    scanRootPath,
+			    cancellationToken,
+			    out var repositoryRootPath))
+		{
+			return new GitIgnoreAncestorScopeBootstrapResult(
+				activeContext,
+				candidateContext,
+				GitIgnoreMatcherLoadStatus.NotFound);
+		}
+
+		string normalizedScanRoot;
+		try
+		{
+			normalizedScanRoot = PathUtility.Normalize(scanRootPath);
+		}
+		catch
+		{
+			return new GitIgnoreAncestorScopeBootstrapResult(
+				activeContext,
+				candidateContext,
+				GitIgnoreMatcherLoadStatus.NotFound);
+		}
+
+		var scopePaths = BuildScopePathChain(repositoryRootPath, normalizedScanRoot);
+		if (scopePaths.Count == 0)
+		{
+			return new GitIgnoreAncestorScopeBootstrapResult(
+				activeContext,
+				candidateContext,
+				GitIgnoreMatcherLoadStatus.NotFound);
+		}
+
+		var lastStatus = GitIgnoreMatcherLoadStatus.NotFound;
+		foreach (var scopePath in scopePaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var loadResult = loadSession.Load(
+				scopePath,
+				Path.Combine(scopePath, ".gitignore"));
+			lastStatus = loadResult.Status;
+			if (loadResult.Status == GitIgnoreMatcherLoadStatus.ReadFailure)
+			{
+				return new GitIgnoreAncestorScopeBootstrapResult(
+					activeContext,
+					candidateContext,
+					loadResult.Status);
+			}
+
+			if (loadResult.Matcher is not { } matcher)
+				continue;
+
+			activeContext = activeContext.WithAncestorScope(matcher, normalizedScanRoot);
+			candidateContext = candidateContext.WithAncestorScope(matcher, normalizedScanRoot);
+			AddDiscoveredMatcher(discoveredMatchers, matcher);
+		}
+
+		return new GitIgnoreAncestorScopeBootstrapResult(
+			activeContext,
+			candidateContext,
+			lastStatus);
+	}
+
+	private static List<string> BuildScopePathChain(string repositoryRootPath, string scanRootPath)
+	{
+		var paths = new List<string>();
+		var currentPath = scanRootPath;
+		while (true)
+		{
+			paths.Add(currentPath);
+			if (PathComparer.Default.Equals(currentPath, repositoryRootPath))
+				break;
+
+			var parentPath = Path.GetDirectoryName(currentPath);
+			if (string.IsNullOrWhiteSpace(parentPath) || PathComparer.Default.Equals(parentPath, currentPath))
+				return [];
+			currentPath = parentPath;
+		}
+
+		paths.Reverse();
+		return paths;
+	}
+
+	private static void AddDiscoveredMatcher(
+		List<ScopedGitIgnoreMatcher>? discoveredMatchers,
+		ScopedGitIgnoreMatcher matcher)
+	{
+		if (discoveredMatchers is null)
+			return;
+
+		foreach (var discovered in discoveredMatchers)
+		{
+			if (PathComparer.Default.Equals(discovered.ScopeRootPath, matcher.ScopeRootPath))
+				return;
+		}
+
+		discoveredMatchers.Add(matcher);
+	}
+}
+
+internal readonly record struct GitIgnoreAncestorScopeBootstrapResult(
+	IgnoreRules.GitIgnoreScanContext Active,
+	IgnoreRules.GitIgnoreScanContext Candidate,
+	GitIgnoreMatcherLoadStatus LoadStatus);

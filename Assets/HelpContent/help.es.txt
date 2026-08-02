@@ -1,0 +1,543 @@
+## 1) Qué es y por qué
+DevProjex prepara rápidamente el contexto del proyecto: muestra la estructura de carpetas/archivos, le permite seleccionar elementos con casillas de verificación y copiar el contenido del árbol y/o del archivo al portapapeles. Útil para revisión de código, soporte, aprendizaje y compartir la estructura del proyecto con un asistente de IA.
+
+Importante: la aplicación es de solo lectura y nunca modifica archivos.
+
+## 2) árbol de proyectos
+* Iconos de tipo de archivo/carpeta.
+* Casillas de verificación en los nodos.
+* Expandir/contraer.
+
+Casillas de verificación: la selección de un nodo se aplica a sus hijos; El estado principal se recalcula automáticamente.
+
+Teclas de acceso rápido:
+* Ctrl+E: expandir todo
+* Ctrl+W: contrae todo (la raíz permanece expandida)
+
+## 3) Archivo
+* Abrir carpeta… — abrir carpeta raíz (Ctrl+O)
+* Nueva ventana: abre una nueva instancia independiente de DevProjex
+* Reciente: lista de carpetas locales abiertas recientemente
+* Actualizar: vuelve a escanear una carpeta local y reconstruye el árbol (F5)
+* Exportar a archivo:
+  * Árbol de exportación
+  * Exportar contenido
+  * Exportar árbol y contenido
+* Exportar proyecto:
+  * A una carpeta…
+  * A un archivo ZIP…
+
+La exportación del proyecto crea una carpeta independiente o un archivo ZIP a partir del árbol actual y conserva la estructura de directorios.
+
+Se respetan las carpetas raíz seleccionadas, los tipos de archivo, las reglas de exclusión y los elementos marcados. Si no hay ninguno marcado, se exporta todo el árbol actual.
+
+Se copian archivos de texto y binarios, y se conservan las carpetas vacías incluidas. Los archivos de origen no se modifican. El resultado no puede guardarse dentro del proyecto de origen.
+
+Durante la exportación no se puede cambiar el árbol ni la configuración, usar el filtro, cambiar el formato o el modo de vista previa, ejecutar comandos de Git, actualizar ni abrir otro proyecto.
+
+Reglas de formato:
+* Árbol de exportación:
+  * ASCII -> `.txt` únicamente.
+  * JSON -> `.json` predeterminado, con `.json` y `.txt` disponibles en el cuadro de diálogo Guardar.
+  * XML -> `.xml` predeterminado, con `.xml` y `.txt` disponibles en el cuadro de diálogo Guardar.
+  * MD -> predeterminado `.md`, con `.md` y `.txt` disponibles en el cuadro de diálogo Guardar.
+* Exportar contenido: siempre formato de contenido de texto, archivo `.txt` (no se aplica la alternancia de formato de árbol).
+* Exportar árbol y contenido: siempre archivo `.txt`; el formato de árbol seleccionado afecta solo al formato de bloque de árbol dentro del resultado.
+
+Los archivos de exportación están escritos en UTF-8 sin BOM.
+
+### Arrastrar y soltar
+Arrastrar y soltar funciona en el área de inicio (Zona de colocación) cuando no hay ningún proyecto cargado.
+
+Reglas:
+* puedes soltar una carpeta;
+* puede soltar un archivo; en este caso se abre la carpeta que lo contiene;
+* si se descartan varios elementos, se utiliza la primera ruta local adecuada;
+* si una ruta no está disponible o no existe, se aplican las mismas comprobaciones de acceso que en "Abrir carpeta...";
+* Los elementos no compatibles o no locales se ignoran.
+
+### Reciente
+El elemento "Archivo → Reciente" muestra el historial de carpetas locales abiertas recientemente.
+
+Reglas:
+* sólo se agregan carpetas locales a la lista;
+* Los repositorios Git clonados mediante DevProjex no se agregan a esta lista;
+* no se crean duplicados: abrir la misma carpeta nuevamente la mueve a la parte superior;
+* se almacenan hasta 15 carpetas recientes;
+* El historial se conserva entre los lanzamientos de la aplicación.
+
+Cada elemento muestra la carpeta principal y el nombre del proyecto, por ejemplo `Projects / App`.
+
+## 4) Iniciar desde la terminal
+DevProjex ofrece un espacio de trabajo interactivo en la terminal y comandos directos para scripts y CI.
+
+Si el comando ya está configurado, abra una terminal y ejecute:
+`devprojex --help`
+
+Esto muestra todos los comandos, opciones y ejemplos disponibles.
+
+Ejemplos:
+* `devprojex`: abre el espacio de trabajo interactivo de la terminal.
+* `devprojex open . --preview`: abre la carpeta actual en la vista previa de Desktop.
+* `devprojex analyze . --format json`: analiza el proyecto actual como JSON.
+* `devprojex export context . --format markdown -o ../devprojex-context.md`: guarda contexto listo para IA fuera del proyecto de origen.
+* `devprojex export project . --as folder -o ../devprojex-submission`: exporta el árbol efectivo a una carpeta exacta.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip`: exporta el árbol efectivo a un archivo ZIP.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore`: analiza archivos seguidos por Git con Smart Ignore.
+
+Notas:
+* `.` significa la carpeta del terminal actual;
+* las rutas con espacios deben estar entre comillas;
+* `--git-mode` selecciona sin filtrado Git, `.gitignore` o solo archivos seguidos por Git;
+* `--exclude` controla las exclusiones normales por separado del filtrado Git;
+* los comandos directos son deterministas y no abren la interfaz Desktop;
+* el comando no modifica los archivos del proyecto: DevProjex funciona en modo de solo lectura.
+
+Si el comando `devprojex` no funciona, ábralo en DevProjex:
+“Ayuda → Iniciar desde terminal”.
+
+## 5) Git
+El menú Git está disponible solo para proyectos clonados a través de DevProjex (Git Clone). La aplicación no toca tus archivos, solo funciona con el caché.
+
+La caché se almacena en el directorio de caché del usuario. `devprojex doctor` muestra la ruta efectiva.
+
+* Sucursal: muestra la lista de sucursales disponibles con la activa marcada; El cambio actualiza el árbol a la rama seleccionada. Si la sucursal ya existe localmente, el cambio está fuera de línea (sin actualización). Si no existe localmente, se busca y se crea.
+* Obtener actualizaciones: actualiza solo la rama actual: buscar y restablecer al origen/<rama>. Para un proyecto Git Clone, F5 realiza la misma acción; el comando normal “Archivo → Actualizar” está deshabilitado.
+
+### Clonar ventana
+En la ventana Git Clone, puede aparecer una lista de "Repositorios recientes" debajo del campo URL.
+
+Reglas:
+* la lista aparece sólo si el historial ya contiene repositorios clonados recientemente;
+* sólo se agregan a la lista las URL del repositorio;
+* las carpetas locales no se agregan a esta lista;
+* no se crean duplicados: clonar nuevamente el mismo repositorio lo mueve a la parte superior;
+* se almacenan hasta 7 repositorios recientes;
+* El historial se conserva entre los lanzamientos de la aplicación.
+
+Al seleccionar un elemento, se llena automáticamente el campo URL.
+Mientras se realiza la clonación, la lista permanece oculta temporalmente.
+
+## 6) Copiar
+### Alternancia de formato de árbol (ASCII / JSON / XML / MD)
+La palanca define el formato de representación del árbol para operaciones donde el árbol es parte de la salida.
+
+* ASCII: árbol de texto con ramas.
+* JSON: árbol estructurado en JSON.
+* XML: árbol XML compacto para analizadores y herramientas.
+* MD: lista anidada de Markdown para documentación y mensajes de IA.
+
+La palanca afecta:
+* Copiar árbol
+* Copiar árbol + contenido
+* Árbol de exportación
+* Exportar árbol y contenido
+
+La alternancia no afecta:
+* Copiar contenido
+* Exportar contenido
+
+### Copiar árbol
+Copia el árbol del proyecto.
+Si hay nodos marcados, el árbol se construye a partir de la selección; si la selección está vacía o no es válida, se copia el árbol completo.
+El formato del resultado se define mediante la palanca de formato de árbol.
+Teclas de acceso rápido: Ctrl+Shift+C y Ctrl+Alt+C.
+
+### Copiar contenido
+Copia el contenido del archivo:
+* si se comprueban los archivos, sólo esos; en caso contrario, todos los archivos del proyecto;
+* los archivos que no son de texto se ignoran (incluidos los binarios);
+* para archivos de texto vacíos, se muestran la ruta y la línea `[No Content, 0 bytes]`;
+* para archivos que contienen solo espacios en blanco/saltos de línea, se generan la ruta y la línea `[Whitespace, N bytes]`.
+Tecla de acceso rápido: Ctrl+Alt+V.
+
+### Copiar árbol + contenido
+Combina árbol y contenido:
+* el árbol se construye a partir de la selección; si la selección está vacía/no es válida, se utiliza el árbol completo;
+* el contenido sigue las mismas reglas que "Copiar contenido";
+* El formato del bloque de árbol se define mediante la palanca de formato de árbol.
+Tecla de acceso rápido: Ctrl+Mayús+V.
+
+### Representaciones de árboles
+Los formatos de árbol utilizan diferentes representaciones para el mismo árbol de proyecto seleccionado.
+
+JSON:
+* `rootPath`: ruta raíz absoluta normalizada con `/`.
+* `tree`: contenido de la carpeta raíz.
+* La exportación JSON utiliza este formato de árbol: las matrices contienen archivos, los objetos contienen subcarpetas, `/` contiene archivos en la carpeta actual y `[]` representa una carpeta vacía.
+
+XML:
+* el nodo raíz es `<t r="...">`;
+* las carpetas son `<d n="...">`;
+* Los archivos son `<f>File.cs</f>`.
+
+Médico:
+* comienza con `Root: ...`;
+* utiliza una lista anidada de Markdown;
+* Las carpetas terminan con `/`.
+
+Árbol + contenido:
+* el formato de árbol seleccionado se aplica al bloque de árbol;
+* el bloque de contenido sigue siendo texto;
+* los encabezados de archivo en el bloque de contenido utilizan rutas relativas con `/`;
+* exportado como `.txt`.
+
+## 7) Modo de vista previa
+Se abre con el botón del icono del ojo en la barra superior o con Ctrl+B.
+
+Muestra el resultado final en un espacio de trabajo separado al lado del árbol. Este modo no copia al portapapeles ni exporta a un archivo por sí solo: es un modo de visualización.
+
+De forma predeterminada, el espacio de trabajo se abre como:
+* izquierda: árbol del proyecto;
+* centro: panel de vista previa;
+* derecha: panel de configuración, si estaba abierto.
+
+Modos disponibles:
+* árbol
+* Contenido
+* Árbol y contenido
+
+Se aplican las mismas reglas que copiar y exportar:
+* se respetan los nodos marcados;
+* si la selección está vacía, se utiliza el conjunto de datos completo;
+* Se aplican las reglas de ignorado y las opciones de selección actuales.
+
+Además:
+* los archivos en vista previa están separados por líneas horizontales;
+* mientras se desplaza, la ruta del archivo actual se fija en la parte superior;
+* El árbol y el zoom de vista previa pueden vivir de forma independiente.
+* en el modo Vista previa, puede copiar el resultado actual completo o el bloque de archivo visible actual sin abrir el menú Copiar.
+
+Botones:
+* Botón copiar en el lado izquierdo de la isla de vista previa superior: copia el modo de vista previa actual:
+  * árbol
+  * Contenido
+  * Árbol y contenido
+* X en el panel del árbol: oculta el árbol y deja solo el panel de vista previa;
+* X en el panel de vista previa superior: cierra completamente el modo Vista previa;
+* pequeño botón de copia en el encabezado del archivo fijado: copia el bloque de archivo visible actual exactamente como se muestra en Vista previa;
+* Al presionar el ícono del ojo nuevamente o Ctrl+B también se cierra el modo Vista previa.
+
+Buscar y Filtrar están disponibles mientras el panel de árbol está visible en Vista previa.
+Si el árbol está oculto, Buscar y Filtrar no estarán disponibles temporalmente hasta que salga del modo de solo vista previa.
+
+## 8) Ver
+### Ampliar
+* Ctrl++ / Ctrl+= — acercar
+* Ctrl+- - alejar
+* Ctrl+0 — restablecer
+* Ctrl + rueda del mouse: zoom suave en el panel debajo del cursor
+
+Comportamiento:
+* en modo normal, el árbol se amplía;
+* en Vista previa con el árbol visible, Acercar, Alejar y Restablecer del menú se aplican tanto al árbol como a la vista previa;
+* con Ctrl + rueda del ratón, árbol y zoom de vista previa de forma independiente dependiendo de dónde esté el cursor;
+* en el modo de solo vista previa, solo se amplía el panel de vista previa.
+
+Rango: 6–28, el reinicio es 15.
+
+### Modo compacto
+Hace que la interfaz de usuario sea más densa: menor espacio en el árbol y la configuración.
+Mientras el espacio de trabajo de vista previa está activo, el modo compacto se habilita automáticamente.
+
+### Animación de expansión del árbol
+Gira suavemente la flecha y expande o contrae una rama desplazando las filas adyacentes. Está habilitada de forma predeterminada; al deshabilitarla, la expansión es inmediata.
+
+### fuente de árbol
+La fuente del árbol se selecciona mediante “Ver → Fuente del árbol”.
+"Predeterminado" restaura la fuente de árbol estándar.
+La fuente seleccionada se aplica después de hacer clic en "Aplicar configuración" en el panel de configuración.
+
+## 9) Búsqueda (árbol)
+Abre la barra de búsqueda, resalta coincidencias y permite la navegación.
+* Ctrl+F: mostrar/ocultar
+* Ingresar: siguiente resultado
+* Mayús+Entrar — anterior
+* Esc-cerrar
+
+La búsqueda expande automáticamente solo las ramas necesarias; borrar la consulta colapsa el árbol (excepto la raíz).
+Para conjuntos de coincidencias muy grandes, la aplicación puede limitar la expansión automática y el resaltado global para mantener la interfaz de usuario receptiva.
+Cuando se cierra la barra de búsqueda, la consulta se borra una vez que se completa la animación de cierre.
+
+Restricciones:
+* al abrir la búsqueda se cierra el filtro automáticamente;
+* La búsqueda está disponible en Vista previa mientras el panel de árbol está visible;
+* si el árbol está oculto, la búsqueda no está disponible temporalmente.
+
+## 10) Filtrar (por nombre)
+Muestra solo los nodos que coinciden con la cadena de filtro y sus padres. Las actualizaciones son rechazadas.
+* Ctrl+Shift+N — mostrar/ocultar filtro
+* Esc — cerrar filtro
+
+Restricciones:
+* al abrir el filtro se cierra la búsqueda automáticamente;
+* El filtro está disponible en Vista previa mientras el panel de árbol está visible;
+* si el árbol está oculto, el filtro no está disponible temporalmente.
+
+## 11) Opciones (panel de configuración)
+Disponible a la derecha:
+* Aplicar configuración
+* Exclusiones
+* Extensiones
+* Carpetas raíz
+
+Los cambios en "Exclusiones", "Extensiones" y "Carpetas raíz" se organizan en el panel y se aplican después de hacer clic en "Aplicar configuración".
+
+Después de que cambia una casilla de verificación, la aplicación puede actualizar las opciones disponibles y sus recuentos en segundo plano. El árbol resultante se reconstruye sólo después de hacer clic en "Aplicar configuración".
+
+Si se cancela una actualización de opciones disponibles con el botón X en la barra de estado, los cambios no finalizados no se aplican y el panel regresa a su último estado completado.
+
+Cada lista tiene un conmutador Todo.
+
+Nota sobre las "Extensiones":
+* esta lista muestra sólo archivos que tienen una extensión;
+* Los archivos sin extensión no se agregan a esta lista y se controlan mediante una opción separada en "Exclusiones".
+
+Ctrl+P: muestra/oculta el panel.
+
+### 11.1 Perfiles de parámetros del proyecto local
+Para las carpetas locales, DevProjex recuerda los últimos parámetros del proyecto aplicados:
+* carpetas de nivel superior seleccionadas;
+* tipos de archivos seleccionados;
+* opciones seleccionadas en la sección "Exclusiones".
+
+El guardado se realiza al hacer clic en "Aplicar configuración".
+Cuando se vuelve a abrir la misma carpeta local, los parámetros se restauran automáticamente.
+
+Importante:
+* los perfiles se guardan sólo para proyectos locales;
+* para proyectos abiertos mediante Git Clone, los perfiles no se guardan;
+* Si algunas opciones guardadas ya no están disponibles en el proyecto actual, se omiten y se aplican los parámetros restantes.
+* si la actualización o la reapertura revelan una nueva carpeta de nivel superior, tipo de archivo u opción en "Exclusiones", está habilitado de forma predeterminada;
+* Las opciones ya vistas mantienen la elección explícita del usuario: los archivos nuevos de un tipo deshabilitado no habilitan ese tipo nuevamente.
+
+## 12) Exclusiones
+La sección "Exclusiones" controla qué archivos y carpetas se excluyen del árbol, el contenido, la copia y los resultados de exportación.
+
+Un elemento se muestra solo cuando se cumplen todas estas condiciones:
+* su carpeta de nivel superior está seleccionada;
+* se selecciona su tipo de archivo, si el archivo tiene un tipo;
+* ninguna regla de ignorar habilitada lo excluye.
+
+Las reglas de ignorar son acumulativas. Si al menos una regla habilitada oculta un elemento, otra regla no puede hacerlo visible.
+
+### 12.1 Reglas disponibles
+Dependiendo del contenido del proyecto, se pueden mostrar las siguientes opciones:
+
+* Ignorar inteligentemente
+* Usar .gitignore
+* Solo archivos rastreados por Git
+* Carpetas vacias
+* Archivos vacios
+* Carpetas ocultas
+* Archivos ocultos
+* Carpetas con prefijo de punto
+* Archivos con prefijo de punto
+* Archivos sin extensión
+
+Dentro de un repositorio Git, "Usar .gitignore" y "Solo archivos rastreados por Git" permanecen visibles como un par estable de opciones. Las demás opciones se muestran cuando sus reglas pueden cambiar el árbol actual. Por lo tanto, la lista puede cambiar después de cambiar otra regla, una carpeta de nivel superior o un tipo de archivo.
+
+Una nueva opción está habilitada de forma predeterminada cuando aparece por primera vez. Una opción conocida mantiene la elección del usuario incluso si desaparece temporalmente de la lista.
+
+### 12.2 Smart Ignore
+Smart Ignore oculta dependencias, resultados de compilación, cachés y otros artefactos del servicio del proyecto.
+
+DevProjex primero identifica el tipo de proyecto a partir de su estructura y archivos de marcador, por ejemplo:
+
+* `.csproj`
+* `package.json`
+* `pyproject.toml`
+* `Cargo.toml`
+
+Luego se aplican las reglas para la pila correspondiente dentro del alcance del proyecto detectado. Por ejemplo, las reglas de .NET no se extienden a un proyecto vecino de Python o JavaScript.
+
+Un nombre de carpeta por sí solo no siempre es suficiente. Los nombres ambiguos como `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` también se verifican por su contenido. Esto evita que una carpeta de usuario normal se oculte sólo porque tiene un nombre similar.
+
+Algunos almacenes de dependencias y directorios de servicios pueden reconocerse por su estructura interna característica incluso fuera de un proyecto detectado explícitamente.
+
+El descubrimiento del alcance del proyecto está limitado, por lo que cargar una carpeta de usuario grande no se convierte en un análisis completo y repetido de cada directorio. Las estructuras regulares utilizan un descubrimiento superficial, mientras que los monorepos reconocidos se buscan más profundamente. Una vez que se encuentra un alcance, Smart Ignore se aplica a todo su subárbol sin límite de profundidad.
+
+### 12.3 Usar .gitignore
+Cuando está habilitado, DevProjex aplica todos los `.gitignore` accesibles, no solo el archivo en la raíz de la carpeta abierta.
+
+Cada `.gitignore` aplica:
+
+* a la carpeta que lo contiene;
+* a todas las carpetas accesibles debajo de él;
+* sólo dentro de ese alcance.
+
+Las reglas de un `.gitignore` anidado no afectan las carpetas principales o hermanas.
+
+Para una ruta particular, las reglas se procesan desde el `.gitignore` principal hacia archivos más profundos. Dentro de un archivo, las reglas se procesan de arriba a abajo. La última regla coincidente determina el resultado de Git.
+
+Una regla que comienza con `!` cancela una exclusión de Git anterior solo dentro de su alcance. No puede restaurar un archivo mientras su carpeta principal permanezca excluida. Un `.gitignore` dentro de una carpeta completamente excluida e inalcanzable no participa en la evaluación.
+
+Una línea con formato incorrecto o sin soporte se omite de forma independiente. Otras reglas válidas en ese archivo y las reglas en ámbitos vecinos continúan funcionando.
+
+Esta opción cubre únicamente los archivos `.gitignore` del árbol de trabajo. No se aplican las reglas de exclusión de `.git/info/exclude` ni las reglas de exclusión globales de Git; sí se respetan los ajustes efectivos del repositorio para comparar rutas, como `core.ignoreCase` y, en macOS, `core.precomposeUnicode`. Si hay un índice de Git legible para el ámbito del repositorio propietario de la ruta, los archivos con seguimiento permanecen visibles aunque coincidan con `.gitignore`; sin ese índice o la CLI de Git, dicho ámbito vuelve de forma segura a evaluar solo los patrones.
+
+No se sigue un enlace simbólico llamado `.gitignore`, de acuerdo con el comportamiento de Git para este archivo de control. Si no se puede leer un `.gitignore` normal, el ámbito de su directorio se excluye por completo de forma segura y el análisis informa de acceso parcial en lugar de incluir archivos sin evaluar todas las reglas.
+
+El perfil integrado `standard` selecciona `gitignore` y los ocho grupos de exclusión: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` y `extensionless-files`.
+
+### 12.4 Solo archivos rastreados por Git
+"Solo archivos rastreados por Git" construye la etapa Git del árbol a partir de los archivos existentes del árbol de trabajo registrados en cada índice Git legible. Los archivos rastreados modificados y los archivos nuevos añadidos al índice siguen incluidos; los archivos no rastreados quedan excluidos. Se trata del árbol de trabajo actual, no de una instantánea histórica de `HEAD` ni de un repositorio remoto.
+
+Cada repositorio anidado y cada worktree accesible se procesan de forma independiente en cualquier nivel de anidamiento accesible. Un repositorio secundario no hereda las rutas rastreadas de su repositorio principal ni de uno hermano. Este modo requiere la CLI de Git; un índice vacío pero legible es válido. Si el espacio de trabajo de terminal (TUI) se inicia en este modo y no puede cargarse ningún índice aplicable, el espacio de trabajo no se abre. Si el modo se selecciona de forma interactiva en un espacio de trabajo TUI ya abierto y no puede cargarse ningún índice aplicable, el cambio se rechaza y permanece activo el último modo Git utilizable. En la misma situación, los comandos directos terminan con un fallo de política o comprobación. DevProjex nunca cambia silenciosamente a `.gitignore`. Cuando puede leerse otro índice aplicable, los ámbitos anidados no disponibles se excluyen con una advertencia.
+
+En un espacio de trabajo Desktop ya abierto, la selección explícita permanece visible y falla de forma segura: la salida y la exportación se bloquean si falla la disponibilidad, mientras que una disponibilidad parcial permite continuar con una advertencia localizada.
+
+"Usar .gitignore" y "Solo archivos rastreados por Git" se excluyen mutuamente: al activar uno se desactiva el otro. En los proyectos locales que admiten perfiles, el modo elegido se guarda junto con las carpetas de nivel superior, los tipos de archivo y las demás reglas de exclusión.
+
+### 12.5 Relación entre el filtrado Git y Smart Ignore
+El modo Git seleccionado y Smart Ignore son interruptores independientes. El modo Git se aplica primero en cada ámbito Git accesible; después Smart Ignore procesa los elementos restantes y, por último, actúan las reglas básicas.
+
+Smart Ignore puede permanecer oculto mientras el modo Git seleccionado ya cubra todos sus candidatos y aparecer después de cambiar dicho modo. Dentro de un repositorio Git, los dos modos Git permanecen visibles como un par estable.
+
+Una regla de negación de Git que comienza con `!` cancela solo un resultado de Git. No desactiva Smart Ignore ni una regla básica.
+
+### 12.6 Reglas básicas
+Las "carpetas con prefijo de punto" y los "archivos con prefijo de punto" inspeccionan el nombre del elemento.
+
+"Carpetas ocultas" y "Archivos ocultos" inspeccionan el atributo oculto del sistema. En algunas plataformas, un nombre con prefijo de punto y el atributo del sistema pueden describir el mismo elemento o elementos diferentes.
+
+"Archivos vacíos" oculta archivos cuyo tamaño es 0 bytes.
+
+"Archivos sin extensión" oculta archivos como `Dockerfile`, `Makefile` y `README`.
+
+"Carpetas vacías" oculta carpetas lógicamente vacías. Una carpeta está lógicamente vacía cuando no queda ningún archivo o subcarpeta visible después de aplicar los tipos de archivos seleccionados y todas las demás reglas.
+
+Por lo tanto, el recuento de carpetas vacías puede cambiar después de que se cambia otra regla: ocultar archivos puede hacer que las carpetas que los contienen estén lógicamente vacías.
+
+### 12.7 Contadores
+El recuento junto a una regla muestra su contribución directa según la configuración actual, no la cantidad física de elementos similares en el disco.
+
+Un artículo no se atribuye a varios contadores superpuestos al mismo tiempo. Por ejemplo, la carpeta `.git` puede tener un nombre con prefijo de punto y el atributo Oculto del sistema, pero su exclusión se atribuye a una sola regla.
+
+Se utiliza un orden estable para seleccionar el propietario de una exclusión:
+
+* carpetas: `.gitignore`, Smart Ignore, nombre con prefijo de punto, atributo oculto del sistema;
+* archivos: `.gitignore`, Smart Ignore, nombre con prefijo de punto, sin extensión, archivo vacío, atributo oculto del sistema.
+
+Esta orden afecta sólo a los contadores. La visibilidad final sigue una regla más simple: un elemento está oculto si algún mecanismo habilitado lo excluye.
+
+### 12.8 Aplicar cambios
+Al cambiar las casillas de verificación, primero se actualizan las configuraciones y los contadores disponibles en el panel. El árbol final se reconstruye después de seleccionar "Aplicar configuración".
+
+Si se cancela la preparación de la configuración, DevProjex devuelve el panel al último estado completamente completado. No se aplican reglas parcialmente calculadas.
+
+## 13) Cómo se calculan el árbol y las métricas
+El resultado depende de:
+* carpetas raíz seleccionadas
+* Extensiones seleccionadas
+* ignorar las reglas
+* Filtro activo
+* nodos de árbol marcados (para operaciones basadas en selección)
+
+Si se deniega el acceso, el nodo se marca como Acceso denegado.
+
+### 13.1 Qué muestran los contadores de la barra de estado
+La barra de estado tiene dos bloques:
+* Árbol: métricas de la salida de texto del árbol;
+* Contenido: métricas de salida del contenido del archivo exportado.
+
+Formato:
+* Líneas
+* caracteres
+* ~Tokens (aproximados)
+
+Los valores grandes se muestran con sufijos compactos (K/M).
+
+Importante:
+* "Líneas" en el bloque "Árbol" significa el número de líneas en la representación final del árbol, no el número de archivos en el disco;
+* este valor incluye carpetas, archivos y elementos de servicios de árbol (por ejemplo, nodos de acceso denegado).
+
+### 13.2 Cómo se calculan las métricas
+Métricas del árbol:
+* se calculan a partir de la producción real del árbol generada por el mismo canal de exportación;
+* respetar el formato de árbol actual.
+
+Métricas de contenido:
+* siga las mismas reglas que la copia/exportación de contenido;
+* los archivos binarios están excluidos;
+* Los archivos vacíos y con solo espacios en blanco se cuentan mediante marcadores de servicio (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
+
+### 13.3 Cuando se actualizan los contadores
+El recálculo se ejecuta:
+* después de abrir/actualizar un proyecto;
+* después de aplicar la configuración (exclusiones, extensiones, carpetas raíz);
+* cuando cambian las casillas de verificación del árbol (con rebote);
+* al cambiar el formato del árbol (para operaciones donde se utiliza la salida del árbol).
+* cuando se cancela el cálculo en segundo plano, los contadores se establecen en 0 hasta el siguiente recálculo completo.
+
+## 14) Iconos
+Orden de selección de iconos:
+1) tipo de nodo (carpeta/archivo)
+2) nombre exacto (si existe la regla)
+3) extensión
+4) de lo contrario - desconocido
+
+## 15) Tema y efectos
+La sección Tema permite seleccionar Sistema, Claro u Oscuro y un efecto de fondo:
+* Transparencia
+* Desenfoque
+* mica
+
+Sistema está seleccionado de forma predeterminada y sigue los cambios de tema del sistema operativo. Después del primer inicio o de restablecer la configuración, un tema claro del sistema utiliza un fondo opaco normal, mientras que un tema oscuro del sistema utiliza Desenfoque. Si no se puede determinar la preferencia del sistema, DevProjex utiliza Oscuro con Desenfoque. Los temas Claro y Oscuro recuerdan sus efectos por separado. Una selección explícita de Claro u Oscuro ignora los cambios del sistema hasta que se vuelva a seleccionar Sistema.
+
+Los efectos son mutuamente excluyentes. Al hacer clic nuevamente en el efecto seleccionado, se desactiva y se restaura un fondo opaco normal.
+
+Configuraciones disponibles:
+* Transparencia de fondo: disponible para Transparencia y Desenfoque.
+* Contraste del panel superior: ajusta el panel principal que contiene los comandos de vista previa, búsqueda, filtro y formato de árbol.
+* Transparencia del menú: se aplica igualmente al menú principal y sus submenús.
+* Visibilidad de los bordes: ajusta la intensidad con la que se muestran los bordes de la interfaz.
+
+Mica utiliza el material del sistema de la plataforma y no tiene una configuración de transparencia de fondo separada. Si el efecto Desenfoque o Mica seleccionado no está disponible, la aplicación prueba primero el otro efecto nativo. Se utiliza un fondo opaco normal sólo cuando no están disponibles Blur ni Mica.
+
+En el modo Transparencia, el fondo de la ventana principal permanece transparente. Los menús, submenús y otras superficies emergentes utilizan Desenfoque cuando son compatibles, de modo que los elementos de árbol y contenido detrás de ellos no interfieran con la legibilidad.
+
+## 16) Ayuda
+
+### 16.1 Actualizaciones
+«Ayuda → Actualizaciones» compara la versión actual con la última versión estable publicada en GitHub. Las comprobaciones automáticas están desactivadas de forma predeterminada; si se activan, DevProjex comprueba al iniciarse cuando han pasado al menos siete días desde la última comprobación correcta. La casilla se aplica inmediatamente. El último resultado correcto se conserva entre ejecuciones de la aplicación y no se borra por un error de red posterior. La instalación sigue siendo una acción del usuario.
+
+### 16.2 Restablecer configuración
+Restablecer configuración (Ayuda → Restablecer configuración) restaura el tema, los efectos, el modo compacto, la animación de expansión del árbol y el idioma de la interfaz predeterminados. Los perfiles, el historial y los archivos del proyecto en el disco no se modifican.
+
+### 16.3 Restablecer datos
+Restablecer datos (Ayuda → Restablecer datos) elimina los perfiles de parámetros del proyecto local guardados:
+* carpetas de nivel superior seleccionadas;
+* tipos de archivos seleccionados;
+* opciones seleccionadas en la sección "Exclusiones".
+
+Importante:
+* El historial reciente de las carpetas locales no se borra;
+* El historial de repositorios recientes en la ventana Git Clone no se borra;
+* Los archivos y carpetas del disco no se modifican ni eliminan.
+
+## 17) Idiomas
+El idioma se selecciona a través del menú Idioma.
+El idioma seleccionado se guarda entre lanzamientos. “Ayuda → Restablecer configuración” borra la opción de idioma guardada y devuelve el idioma de la interfaz al predeterminado.
+
+## 18) Barra de progreso y cancelar
+El centro de la barra de estado muestra la operación activa y su progreso.
+
+Modos de progreso:
+* Indeterminado: ningún porcentaje (se desconoce la duración de la operación).
+* Determinado: con porcentaje (0–100).
+
+Comportamiento:
+* durante el cálculo de los datos de fondo, se muestra el porcentaje de progreso;
+* para algunas operaciones de Git, el porcentaje se muestra cuando la fuente de progreso lo proporciona;
+* las actualizaciones de opciones disponibles y la aplicación de configuración se muestran cuando la operación lleva un tiempo considerable;
+* Las operaciones rápidas terminan sin mostrar progreso.
+
+Botón X (cancelar) en la barra de estado:
+* realiza la cancelación con el mejor esfuerzo para las operaciones que respaldan la cancelación;
+* detiene el cálculo de datos en segundo plano;
+* cuando se cancela una actualización de opciones disponibles, devuelve el panel a su último estado completado;
+* para operaciones sin soporte de cancelación, detiene la indicación de la barra de estado, mientras que la operación en sí aún puede finalizar en segundo plano.
+
+## 19) Notas
+* Si los permisos son insuficientes, la aplicación puede sugerir reiniciar con elevación; si se rechaza, se muestra una notificación.

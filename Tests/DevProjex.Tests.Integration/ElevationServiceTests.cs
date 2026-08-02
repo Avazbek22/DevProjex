@@ -19,6 +19,6 @@ public sealed class ElevationServiceTests
 		var service = new ElevationService();
 
 		if (!OperatingSystem.IsWindows())
-			Assert.False(service.TryRelaunchAsAdministrator(CommandLineOptions.Empty));
+			Assert.False(service.TryRelaunchAsAdministrator([]));
 	}
 }

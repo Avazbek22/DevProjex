@@ -9,11 +9,21 @@ namespace DevProjex.Kernel.Models;
 public sealed class ProjectTreeInventorySnapshot(
 	List<ProjectTreeInventoryEntry> entries,
 	bool rootAccessDenied,
-	bool hadAccessDenied)
+	bool hadAccessDenied,
+	IReadOnlyList<ScopedGitIgnoreMatcher>? discoveredGitIgnoreMatchers = null,
+	IReadOnlyList<GitTrackedPathIndex>? discoveredGitTrackedPathIndexes = null)
 {
 	public IReadOnlyList<ProjectTreeInventoryEntry> Entries => entries;
 	public bool RootAccessDenied { get; } = rootAccessDenied;
 	public bool HadAccessDenied { get; } = hadAccessDenied;
+
+	// Inventory projections do not touch the filesystem again, so they must carry every
+	// reachable per-directory rule that affected discovery and can affect later selections.
+	public IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers { get; } =
+		discoveredGitIgnoreMatchers ?? [];
+
+	public IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes { get; } =
+		discoveredGitTrackedPathIndexes ?? [];
 
 	public ProjectTreeInventoryEntry GetEntry(int index) => entries[index];
 

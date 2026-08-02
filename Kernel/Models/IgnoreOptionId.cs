@@ -10,5 +10,6 @@ public enum IgnoreOptionId
 	DotFiles,
 	EmptyFolders,
 	EmptyFiles,
-	ExtensionlessFiles
+	ExtensionlessFiles,
+	TrackedGitFilesOnly
 }

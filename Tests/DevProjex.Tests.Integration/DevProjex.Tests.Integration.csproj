@@ -21,7 +21,8 @@
     <ProjectReference Include="..\..\Kernel\Kernel.csproj" />
     <ProjectReference Include="..\..\Assets\Assets.csproj" />
     <ProjectReference Include="..\..\Application\Application.csproj" />
-    <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia\DevProjex.Avalonia.csproj" />
+    <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia.csproj" />
+    <ProjectReference Include="..\..\Apps\Terminal\DevProjex.Terminal.csproj" />
   </ItemGroup>
 
   <ItemGroup>

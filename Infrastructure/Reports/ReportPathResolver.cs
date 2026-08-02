@@ -22,10 +22,10 @@ public sealed class ReportPathResolver(
 	private readonly Func<string> _currentDirectoryProvider = currentDirectoryProvider ?? Directory.GetCurrentDirectory;
 	private readonly Func<Guid> _reportIdProvider = reportIdProvider ?? Guid.NewGuid;
 
-	public string Resolve(StartupReportOptions reportOptions)
+	public string Resolve(string? reportPath = null)
 	{
-		if (!string.IsNullOrWhiteSpace(reportOptions.Path))
-			return ResolveExplicitPath(reportOptions.Path);
+		if (!string.IsNullOrWhiteSpace(reportPath))
+			return ResolveExplicitPath(reportPath);
 
 		var baseDirectory = ResolveBaseDirectory();
 		var timestamp = _utcNowProvider().ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture);

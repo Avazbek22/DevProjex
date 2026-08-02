@@ -2,6 +2,7 @@ using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.Unit;
 
+[Trait("Category", "TerminalCommand")]
 public sealed class UserSettingsStoreTerminalCommandTests
 {
 	[Fact]
@@ -33,10 +34,11 @@ public sealed class UserSettingsStoreTerminalCommandTests
 	}
 
 	[Fact]
-	public void ResetToDefaults_ReenablesTerminalCommandPrompt()
+	public void ThemeReset_DoesNotReenableTerminalCommandPrompt()
 	{
 		using var temp = new TemporaryDirectory();
 		var store = new UserSettingsStore(() => temp.Path);
+		var themeStore = new ThemeSettingsStore(() => temp.Path);
 		var db = store.Load();
 		db.ViewSettings = db.ViewSettings with
 		{
@@ -44,8 +46,9 @@ public sealed class UserSettingsStoreTerminalCommandTests
 		};
 		store.Save(db);
 
-		var reset = store.ResetToDefaults();
+		themeStore.ResetToDefaults();
+		var reloaded = store.Load();
 
-		Assert.False(reset.ViewSettings.IsTerminalCommandPromptDismissed);
+		Assert.True(reloaded.ViewSettings.IsTerminalCommandPromptDismissed);
 	}
 }

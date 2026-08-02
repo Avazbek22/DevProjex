@@ -8,15 +8,24 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture workspace)
 {
     [AvaloniaFact]
-    public async Task DropZone_KeepsAnimationClassStatic_WhenProjectIsLoaded()
+    public async Task DropZone_AnimationRunsOnlyWhileDropZoneIsVisible()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
 
         try
         {
             var dropZone = UiTestDriver.GetRequiredControl<Border>(window, "DropZoneContainer");
+            var viewModel = UiTestDriver.GetViewModel(window);
 
+            // This is an idle-performance contract: a hidden drop zone must not retain
+            // the selector that owns its infinite animations.
             Assert.False(dropZone.IsVisible);
+            Assert.DoesNotContain("drop-zone-animating", dropZone.Classes);
+
+            viewModel.IsProjectLoaded = false;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            Assert.True(dropZone.IsVisible);
             Assert.Contains("drop-zone-animating", dropZone.Classes);
         }
         finally
@@ -35,6 +44,7 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             var themePopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "ThemePopup");
             var helpPopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "HelpPopup");
             var helpDocsPopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "HelpDocsPopup");
+            var updatePopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "UpdatePopup");
             var themeMenuItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "ThemeMenuItem");
             var helpMenuItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "HelpMenuItem");
             var expectedAdjustment =
@@ -49,6 +59,7 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             Assert.False(themePopup.OverlayDismissEventPassThrough);
             Assert.False(themePopup.ShouldUseOverlayLayer);
             Assert.False(themePopup.WindowManagerAddShadowHint);
+            Assert.Equal(expectedAdjustment, themePopup.PlacementConstraintAdjustment);
             Assert.Same(themeMenuItem, themePopup.PlacementTarget);
 
             Assert.True(helpPopup.IsLightDismissEnabled);
@@ -56,6 +67,9 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             Assert.False(helpPopup.ShouldUseOverlayLayer);
             Assert.False(helpPopup.WindowManagerAddShadowHint);
             Assert.Equal(expectedAdjustment, helpPopup.PlacementConstraintAdjustment);
+            Assert.Equal(PlacementMode.Custom, helpPopup.Placement);
+            Assert.NotNull(helpPopup.CustomPopupPlacementCallback);
+            Assert.Equal(4, helpPopup.VerticalOffset);
             Assert.Same(helpMenuItem, helpPopup.PlacementTarget);
 
             Assert.True(helpDocsPopup.IsLightDismissEnabled);
@@ -63,7 +77,20 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             Assert.False(helpDocsPopup.ShouldUseOverlayLayer);
             Assert.False(helpDocsPopup.WindowManagerAddShadowHint);
             Assert.Equal(expectedAdjustment, helpDocsPopup.PlacementConstraintAdjustment);
+            Assert.Equal(PlacementMode.Custom, helpDocsPopup.Placement);
+            Assert.NotNull(helpDocsPopup.CustomPopupPlacementCallback);
+            Assert.Equal(4, helpDocsPopup.VerticalOffset);
             Assert.Same(helpMenuItem, helpDocsPopup.PlacementTarget);
+
+            Assert.True(updatePopup.IsLightDismissEnabled);
+            Assert.False(updatePopup.OverlayDismissEventPassThrough);
+            Assert.False(updatePopup.ShouldUseOverlayLayer);
+            Assert.False(updatePopup.WindowManagerAddShadowHint);
+            Assert.Equal(expectedAdjustment, updatePopup.PlacementConstraintAdjustment);
+            Assert.Equal(PlacementMode.Custom, updatePopup.Placement);
+            Assert.NotNull(updatePopup.CustomPopupPlacementCallback);
+            Assert.Equal(4, updatePopup.VerticalOffset);
+            Assert.Same(helpMenuItem, updatePopup.PlacementTarget);
         }
         finally
         {
@@ -83,6 +110,7 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<ThemePopoverView>(window, "ThemePopover"));
             AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<AboutPopoverView>(window, "HelpPopover"));
             AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<HelpPopoverView>(window, "HelpDocsPopover"));
+            AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<UpdatePopoverView>(window, "UpdatePopover"));
         }
         finally
         {

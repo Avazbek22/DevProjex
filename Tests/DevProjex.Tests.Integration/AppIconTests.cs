@@ -126,9 +126,52 @@ public sealed class AppIconTests
 
         var sizes = ReadIcoSizes(icoFile);
 
-        // Windows taskbar uses 32x32 or 48x48
-        var hasTaskbarSize = sizes.Any(s => s is 32 or 48);
-        Assert.True(hasTaskbarSize, "ICO should contain 32x32 or 48x48 for Windows taskbar");
+        // Windows taskbar uses several DPI-specific sizes. 24/30/36/48 cover
+        // the common 100/125/150/200 percent scale factors without resampling.
+        foreach (var expectedSize in new[] { 24, 30, 36, 48 })
+            Assert.Contains(expectedSize, sizes);
+    }
+
+    [Fact]
+    public void WindowsIcoFile_ContainsExactWindowsDpiSizes()
+    {
+        var icoFile = FindFileByPattern(RepoRoot.Value, "app.ico");
+        Assert.NotNull(icoFile);
+
+        var sizes = ReadIcoSizes(icoFile).ToHashSet();
+        var requiredSizes = new[] { 16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 128, 256 };
+        var missingSizes = requiredSizes.Where(size => !sizes.Contains(size)).ToArray();
+
+        Assert.True(
+            missingSizes.Length == 0,
+            $"ICO is missing Windows DPI-specific sizes: {string.Join(", ", missingSizes)}");
+    }
+
+    [Fact]
+    public void WindowsIcoFile_EntriesAreOrderedLargestToSmallest()
+    {
+        var icoFile = FindFileByPattern(RepoRoot.Value, "app.ico");
+        Assert.NotNull(icoFile);
+
+        var sizes = ReadIcoSizes(icoFile);
+        var orderedSizes = sizes.OrderByDescending(size => size).ToArray();
+
+        Assert.Equal(orderedSizes, sizes);
+    }
+
+    [Fact]
+    public void WindowsIcoFile_EntriesUsePngPayloads()
+    {
+        var icoFile = FindFileByPattern(RepoRoot.Value, "app.ico");
+        Assert.NotNull(icoFile);
+
+        var entries = ReadIcoEntries(icoFile);
+
+        Assert.All(entries, entry =>
+        {
+            Assert.True(entry.PayloadLength > 8, $"{entry.Size}x{entry.Size} payload is too small");
+            Assert.Equal([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], entry.Signature);
+        });
     }
 
     [Fact]
@@ -201,7 +244,12 @@ public sealed class AppIconTests
 
     private static List<int> ReadIcoSizes(string icoPath)
     {
-        var sizes = new List<int>();
+        return ReadIcoEntries(icoPath).Select(entry => entry.Size).ToList();
+    }
+
+    private static List<IcoEntry> ReadIcoEntries(string icoPath)
+    {
+        var entries = new List<IcoEntry>();
         using var stream = File.OpenRead(icoPath);
         using var reader = new BinaryReader(stream);
 
@@ -212,20 +260,29 @@ public sealed class AppIconTests
         for (int i = 0; i < count; i++)
         {
             var width = reader.ReadByte();
-            reader.ReadByte();  // height
+            var height = reader.ReadByte();
             reader.ReadByte();  // colors
             reader.ReadByte();  // reserved
             reader.ReadUInt16(); // planes
             reader.ReadUInt16(); // bpp
-            reader.ReadUInt32(); // size
-            reader.ReadUInt32(); // offset
+            var payloadLength = reader.ReadUInt32();
+            var payloadOffset = reader.ReadUInt32();
 
-            // 0 means 256
-            sizes.Add(width == 0 ? 256 : width);
+            var size = width == 0 ? 256 : width;
+            Assert.Equal(size, height == 0 ? 256 : height);
+
+            var originalPosition = stream.Position;
+            stream.Position = payloadOffset;
+            var signature = reader.ReadBytes(8);
+            stream.Position = originalPosition;
+
+            entries.Add(new IcoEntry(size, payloadLength, signature));
         }
 
-        return sizes;
+        return entries;
     }
+
+    private sealed record IcoEntry(int Size, uint PayloadLength, byte[] Signature);
 
     #endregion
 
@@ -325,13 +382,16 @@ public sealed class AppIconTests
         var csproj = FindAvaloniaMainProject();
         Assert.NotNull(csproj);
 
-        var content = File.ReadAllText(csproj);
+        var doc = XDocument.Load(csproj);
+        var iconResources = doc.Descendants()
+            .Where(e => e.Name.LocalName == "AvaloniaResource")
+            .Select(e => (string?)e.Attribute("Include") ?? "")
+            .ToArray();
 
-        // Should have AvaloniaResource for window icon
-        var hasResource = content.Contains("AvaloniaResource") &&
-                          (content.Contains(".png") || content.Contains("icon"));
+        var hasWindowsIcoResource = iconResources.Any(include =>
+            include.EndsWith(@"Assets\AppIcon\Windows\app.ico", StringComparison.OrdinalIgnoreCase));
 
-        Assert.True(hasResource, "Avalonia project should have AvaloniaResource for window icon");
+        Assert.True(hasWindowsIcoResource, "Avalonia project should expose the Windows multi-resolution ICO as a Window.Icon resource");
     }
 
     [Fact]
@@ -370,6 +430,26 @@ public sealed class AppIconTests
 
         var iconValue = iconMatch.Groups[1].Value;
         Assert.StartsWith("avares://", iconValue);
+        Assert.EndsWith("/AppIcon/app.ico", iconValue, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("icon-256.png", iconValue, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GitCloneWindow_UsesSameMultiResolutionWindowIcon()
+    {
+        var csproj = FindAvaloniaMainProject();
+        Assert.NotNull(csproj);
+
+        var projectDir = Path.GetDirectoryName(csproj)!;
+        var gitCloneWindowFile = FindFileByPattern(projectDir, "GitCloneWindow.axaml");
+
+        Assert.NotNull(gitCloneWindowFile);
+
+        var content = File.ReadAllText(gitCloneWindowFile);
+        var iconMatch = Regex.Match(content, @"Icon\s*=\s*""([^""]+)""");
+
+        Assert.True(iconMatch.Success, "GitCloneWindow should have Icon attribute");
+        Assert.EndsWith("/AppIcon/app.ico", iconMatch.Groups[1].Value, StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion

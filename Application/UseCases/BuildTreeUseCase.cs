@@ -2,6 +2,26 @@ namespace DevProjex.Application.UseCases;
 
 public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentationService presenter)
 {
+	public bool SupportsCompositeInventory => treeBuilder is IProjectTreeCompositeInventoryBuilder;
+
+	public ProjectTreeInventorySnapshot ReadCompositeInventory(
+		string rootPath,
+		IReadOnlySet<string> allowedRootFolders,
+		IgnoreRules discoveryRules,
+		IgnoreRules projectionRules,
+		CancellationToken cancellationToken = default)
+	{
+		if (treeBuilder is not IProjectTreeCompositeInventoryBuilder compositeBuilder)
+			throw new NotSupportedException("The configured tree builder does not support composite inventory.");
+
+		return compositeBuilder.ReadCompositeInventory(
+			rootPath,
+			allowedRootFolders,
+			discoveryRules,
+			projectionRules,
+			cancellationToken);
+	}
+
 	public BuildTreeResult Execute(BuildTreeRequest request, CancellationToken cancellationToken = default)
 	{
 		var result = treeBuilder.Build(request.RootPath, request.Filter, cancellationToken);

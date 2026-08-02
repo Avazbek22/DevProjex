@@ -1,9 +1,12 @@
 using System.IO.Enumeration;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Infrastructure.FileSystem;
 
 internal static class FileSystemEntryEnumerator
 {
+	private static readonly StringComparison FileNameComparison = PathComparer.Comparison;
+
 	private static readonly EnumerationOptions SingleLevelOptions = new()
 	{
 		RecurseSubdirectories = false,
@@ -19,6 +22,7 @@ internal static class FileSystemEntryEnumerator
 
 	public static IEnumerable<FileSystemDirectoryEntry> EnumerateDirectories(string path, string relativeDirectory)
 	{
+		IgnorePipelineDiagnostics.RecordDirectoryEnumeration();
 		var enumerable = new FileSystemEnumerable<FileSystemDirectoryEntry>(
 			path,
 			(ref FileSystemEntry entry) =>
@@ -36,6 +40,59 @@ internal static class FileSystemEntryEnumerator
 		return enumerable;
 	}
 
+	public static DirectoryEnumerationBatch ReadDirectoriesAndGitIgnore(
+		string path,
+		string relativeDirectory,
+		CancellationToken cancellationToken)
+	{
+		IgnorePipelineDiagnostics.RecordCombinedEntryEnumeration();
+		var enumerable = new FileSystemEnumerable<DirectoryDiscoveryEntry>(
+			path,
+			(ref FileSystemEntry entry) =>
+			{
+				var name = entry.FileName.ToString();
+				return new DirectoryDiscoveryEntry(
+					name,
+					entry.ToSpecifiedFullPath(),
+					entry.IsDirectory,
+					entry.IsHidden);
+			},
+			SingleLevelOptions);
+		enumerable.ShouldIncludePredicate = (ref FileSystemEntry entry) =>
+			!IsReparsePoint(ref entry) &&
+			(entry.IsDirectory ||
+			 entry.FileName.Equals(".gitignore", FileNameComparison) ||
+			 entry.FileName.Equals(".git", FileNameComparison));
+
+		List<FileSystemDirectoryEntry>? directories = null;
+		string? gitIgnorePath = null;
+		string? gitMetadataPath = null;
+		foreach (var entry in enumerable)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (entry.Name.Equals(".git", FileNameComparison))
+			{
+				gitMetadataPath ??= entry.FullPath;
+				if (!entry.IsDirectory)
+					continue;
+			}
+
+			if (!entry.IsDirectory)
+			{
+				gitIgnorePath ??= entry.FullPath;
+				continue;
+			}
+
+			(directories ??= []).Add(new FileSystemDirectoryEntry(
+				entry.Name,
+				entry.FullPath,
+				CombineRelativePath(relativeDirectory, entry.Name),
+				entry.IsHidden));
+		}
+
+		return new DirectoryEnumerationBatch(directories ?? [], gitIgnorePath, gitMetadataPath);
+	}
+
 	public static IEnumerable<FileSystemFileEntry> EnumerateFiles(string path)
 	{
 		return EnumerateFiles(path, relativeDirectory: string.Empty);
@@ -43,6 +100,7 @@ internal static class FileSystemEntryEnumerator
 
 	public static IEnumerable<FileSystemFileEntry> EnumerateFiles(string path, string relativeDirectory)
 	{
+		IgnorePipelineDiagnostics.RecordFileEnumeration();
 		var enumerable = new FileSystemEnumerable<FileSystemFileEntry>(
 			path,
 			(ref FileSystemEntry entry) =>
@@ -68,6 +126,7 @@ internal static class FileSystemEntryEnumerator
 
 	public static IEnumerable<FileSystemTreeEntry> EnumerateEntries(string path, string relativeDirectory)
 	{
+		IgnorePipelineDiagnostics.RecordCombinedEntryEnumeration();
 		var enumerable = new FileSystemEnumerable<FileSystemTreeEntry>(
 			path,
 			(ref FileSystemEntry entry) =>
@@ -97,4 +156,15 @@ internal static class FileSystemEntryEnumerator
 	{
 		return (entry.Attributes & FileAttributes.ReparsePoint) != 0;
 	}
+
+	private readonly record struct DirectoryDiscoveryEntry(
+		string Name,
+		string FullPath,
+		bool IsDirectory,
+		bool IsHidden);
 }
+
+internal readonly record struct DirectoryEnumerationBatch(
+	IReadOnlyList<FileSystemDirectoryEntry> Directories,
+	string? GitIgnorePath,
+	string? GitMetadataPath);

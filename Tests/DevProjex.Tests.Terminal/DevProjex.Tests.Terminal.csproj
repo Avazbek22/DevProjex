@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>DevProjex.Tests.Terminal</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Hex1b" />
+    <PackageReference Include="Spectre.Console.Testing" />
+    <PackageReference Include="XTerm.NET" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference
+      Include="..\..\Apps\Avalonia\DevProjex.Avalonia.csproj"
+      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\Apps\Terminal\DevProjex.Terminal.csproj" />
+    <ProjectReference
+      Include="..\DevProjex.Tests.Terminal.ProgressHost\DevProjex.Tests.Terminal.ProgressHost.csproj"
+      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Snapshots\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="..\Shared\TerminalProgress\**\*.cs" LinkBase="TerminalProgress" />
+  </ItemGroup>
+</Project>

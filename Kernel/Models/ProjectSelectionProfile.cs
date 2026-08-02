@@ -6,4 +6,5 @@ public sealed record ProjectSelectionProfile(
 	IReadOnlyCollection<IgnoreOptionId> SelectedIgnoreOptions,
 	IReadOnlyDictionary<string, bool>? RootFolderStates = null,
 	IReadOnlyDictionary<string, bool>? ExtensionStates = null,
-	IReadOnlyDictionary<IgnoreOptionId, bool>? IgnoreOptionStates = null);
+	IReadOnlyDictionary<IgnoreOptionId, bool>? IgnoreOptionStates = null,
+	IReadOnlyCollection<string>? SelectedPaths = null);

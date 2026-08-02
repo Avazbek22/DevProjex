@@ -1,16 +1,26 @@
 using System.Diagnostics;
+using DevProjex.Application.Selection;
 
 namespace DevProjex.Application.Services;
 
 public sealed class ProjectAnalysisService(
 	ScanOptionsUseCase scanOptions,
 	BuildTreeUseCase buildTree,
+	FilterOptionSelectionService filterSelectionService,
 	IgnoreOptionsService ignoreOptions,
 	IgnoreRulesService ignoreRules,
 	TreeExportService treeExport,
 	IFileContentAnalyzer fileContentAnalyzer,
 	Func<DateTimeOffset>? utcNowProvider = null)
 {
+	private const int MaximumConcurrentContentMetricReads = 4;
+	private const int ContentMetricBatchSize = 1024;
+	private static readonly IReadOnlySet<string> EmptyRootSelection = new HashSet<string>(PathComparer.Default);
+	private static readonly IReadOnlySet<string> EmptyExtensionSelection =
+		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	private static readonly IReadOnlySet<IgnoreOptionId> EmptyIgnoreSelection = new HashSet<IgnoreOptionId>();
+	private static readonly IReadOnlyDictionary<IgnoreOptionId, bool> EmptyIgnoreState =
+		new Dictionary<IgnoreOptionId, bool>();
 	private readonly Func<DateTimeOffset> _utcNowProvider = utcNowProvider ?? (() => DateTimeOffset.UtcNow);
 
 	public async Task<ProjectAnalysisReport> AnalyzeAsync(
@@ -33,6 +43,16 @@ public sealed class ProjectAnalysisService(
 			throw new DirectoryNotFoundException($"Project path was not found: {request.RootPath}");
 
 		var loadingStopwatch = Stopwatch.StartNew();
+		if (CanUseUnifiedSelectionPipeline(request) &&
+		    buildTree.SupportsCompositeInventory)
+		{
+			return LoadWithUnifiedSelection(
+				rootPath,
+				request,
+				loadingStopwatch,
+				cancellationToken);
+		}
+
 		var selectedRootFolders = NormalizeRootFolders(request.SelectedRootFolders);
 		var selectedIgnoreOptions = ResolveSelectedIgnoreOptions(
 			rootPath,
@@ -40,37 +60,316 @@ public sealed class ProjectAnalysisService(
 			useAllRootFoldersForDefaults: request.SelectedRootFolders is null,
 			request.SelectedIgnoreOptions,
 			cancellationToken);
-		var rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
-		var scan = scanOptions.Execute(new ScanOptionsRequest(rootPath, rules), cancellationToken);
+		var discoveryRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		ScanOptionsResult scan;
+		ProjectTreeInventorySnapshot? treeInventory = null;
+		IReadOnlyList<string> allowedRootFolders;
+		IgnoreRules rules;
+		if (request.SelectedRootFolders is null &&
+		    buildTree.SupportsCompositeInventory)
+		{
+			var rootFolders = scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken);
+			var rootProjectionRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, rootFolders.Value);
+			allowedRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
+				rootPath,
+				rootFolders.Value,
+				rootProjectionRules,
+				cancellationToken);
+			rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
+			var allowedRootFolderSet = allowedRootFolders.ToHashSet(PathComparer.Default);
+			treeInventory = buildTree.ReadCompositeInventory(
+				rootPath,
+				allowedRootFolderSet,
+				discoveryRules,
+				rules,
+				cancellationToken);
 
-		var allowedRootFolders = request.SelectedRootFolders is null
-			? scan.RootFolders.ToArray()
-			: selectedRootFolders.ToArray();
+			var availableExtensions = new List<string>(
+				ProjectTreeInventoryExtensionDiscovery.GetVisibleExtensions(
+					treeInventory,
+					discoveryRules,
+					cancellationToken));
+			availableExtensions.Sort(StringComparer.OrdinalIgnoreCase);
+			scan = new ScanOptionsResult(
+				Extensions: availableExtensions,
+				RootFolders: allowedRootFolders,
+				RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
+				HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied);
+		}
+		else
+		{
+			if (request.SelectedRootFolders is null)
+			{
+				scan = scanOptions.Execute(
+					new ScanOptionsRequest(rootPath, discoveryRules),
+					cancellationToken);
+				var rootProjectionRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, scan.RootFolders);
+				allowedRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
+					rootPath,
+					scan.RootFolders,
+					rootProjectionRules,
+					cancellationToken);
+				scan = scan with { RootFolders = allowedRootFolders };
+				rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
+			}
+			else
+			{
+				allowedRootFolders = selectedRootFolders.ToArray();
+				var rootFolders = scanOptions.GetRootFolders(
+					rootPath,
+					discoveryRules,
+					cancellationToken);
+				rules = discoveryRules;
+				if (buildTree.SupportsCompositeInventory)
+				{
+					// Explicit CLI/TUI selections do not need the interactive convergence loop.
+					// Reuse one composite inventory for extension discovery and tree projection
+					// so the optimized path remains exact without scanning every file twice.
+					treeInventory = buildTree.ReadCompositeInventory(
+						rootPath,
+						allowedRootFolders.ToHashSet(PathComparer.Default),
+						discoveryRules,
+						rules,
+						cancellationToken);
+					var extensions = ProjectTreeInventoryExtensionDiscovery.GetVisibleExtensions(
+						treeInventory,
+						discoveryRules,
+						cancellationToken);
+					scan = new ScanOptionsResult(
+						Extensions: extensions
+							.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase)
+							.ToArray(),
+						RootFolders: rootFolders.Value,
+						RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
+						HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied);
+				}
+				else
+				{
+					var extensions = scanOptions.GetExtensionsForRootFolders(
+						rootPath,
+						allowedRootFolders,
+						discoveryRules,
+						cancellationToken);
+					scan = new ScanOptionsResult(
+						Extensions: extensions.Value
+							.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase)
+							.ToArray(),
+						RootFolders: rootFolders.Value,
+						RootAccessDenied: rootFolders.RootAccessDenied || extensions.RootAccessDenied,
+						HadAccessDenied: rootFolders.HadAccessDenied || extensions.HadAccessDenied);
+				}
+			}
+		}
+
 		var allowedExtensions = request.SelectedExtensions is null
 			? scan.Extensions.ToArray()
 			: NormalizeExtensions(request.SelectedExtensions).ToArray();
 
-		rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
-		var treeResult = buildTree.Execute(new BuildTreeRequest(
+		var treeRequest = new BuildTreeRequest(
 			rootPath,
 			new TreeFilterOptions(
 				AllowedExtensions: allowedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
 				AllowedRootFolders: allowedRootFolders.ToHashSet(PathComparer.Default),
-				IgnoreRules: rules)),
-			cancellationToken);
+				IgnoreRules: rules));
+		BuildTreeSnapshotResult treeResult;
+		if (treeInventory is not null)
+		{
+			treeResult = buildTree.ExecuteWithInventory(treeRequest, treeInventory, cancellationToken);
+		}
+		else if (selectedIgnoreOptions.Contains(IgnoreOptionId.TrackedGitFilesOnly))
+		{
+			// Tracked mode needs inventory evidence to distinguish a valid empty index
+			// from an unreadable repository. Other explicit selections retain the
+			// bounded direct-build path and avoid an unnecessary inventory projection.
+			treeResult = buildTree.ExecuteWithInventory(treeRequest, cancellationToken);
+			treeInventory = treeResult.Inventory;
+		}
+		else
+		{
+			treeResult = new BuildTreeSnapshotResult(
+				buildTree.Execute(treeRequest, cancellationToken),
+				Inventory: null);
+		}
+		if (request.SelectedRootFolders is null)
+		{
+			allowedRootFolders = GetVisibleRootFolderNames(treeResult.Tree.Root);
+			scan = scan with { RootFolders = allowedRootFolders };
+		}
 		loadingStopwatch.Stop();
 
 		return new LoadedProjectAnalysisRequest(
 			RootPath: rootPath,
-			Tree: treeResult,
+			Tree: treeResult.Tree,
 			AvailableRootFolders: scan.RootFolders,
 			AvailableExtensions: scan.Extensions,
 			SelectedRootFolders: allowedRootFolders,
 			SelectedExtensions: allowedExtensions,
 			SelectedIgnoreOptions: selectedIgnoreOptions,
-			RootAccessDenied: scan.RootAccessDenied || treeResult.RootAccessDenied,
-			HadAccessDenied: scan.HadAccessDenied || treeResult.HadAccessDenied,
-			KnownLoadingElapsed: loadingStopwatch.Elapsed);
+			RootAccessDenied: scan.RootAccessDenied || treeResult.Tree.RootAccessDenied,
+			HadAccessDenied: scan.HadAccessDenied || treeResult.Tree.HadAccessDenied,
+			KnownLoadingElapsed: loadingStopwatch.Elapsed,
+			DiscoveredGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count ?? 0,
+			UnavailableGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count(
+				static index => !index.IsAvailable) ?? 0,
+			TreeInventory: treeInventory);
+	}
+
+	private static bool CanUseUnifiedSelectionPipeline(ProjectAnalysisRequest request) =>
+		request.LocalProfileState is not null ||
+		(request.SelectedRootFolders is null &&
+		 request.SelectedExtensions is null &&
+		 request.SelectedIgnoreOptions is null);
+
+	private LoadedProjectAnalysisRequest LoadWithUnifiedSelection(
+		string rootPath,
+		ProjectAnalysisRequest request,
+		Stopwatch loadingStopwatch,
+		CancellationToken cancellationToken)
+	{
+		var selectionRefreshEngine = new SelectionRefreshEngine(
+			scanOptions,
+			filterSelectionService,
+			ignoreOptions,
+			(candidateRootPath, selectedOptions, selectedRootFolders) =>
+				ignoreRules.Build(candidateRootPath, selectedOptions, selectedRootFolders),
+			(candidateRootPath, selectedRootFolders) =>
+				ignoreRules.GetIgnoreOptionsAvailability(candidateRootPath, selectedRootFolders));
+		var selectionContext = BuildUnifiedSelectionContext(rootPath, request);
+		var snapshot = selectionRefreshEngine.ComputeFullRefreshSnapshot(
+			selectionContext,
+			cancellationToken);
+		var inventory = snapshot.TreeInventory ??
+		                throw new InvalidOperationException(
+			                "The unified project selection scan did not produce a tree inventory.");
+		var rootOptions = snapshot.RootOptions ?? [];
+		var selectedRootFolders = rootOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Name)
+			.ToArray();
+		var extensionOptions = snapshot.EffectiveExtensionOptions;
+		var selectedExtensions = extensionOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Name)
+			.ToArray();
+		var selectedIgnoreOptions = snapshot.EffectiveIgnoreOptions.ToArray();
+		var rules = snapshot.EffectiveRules ??
+		            ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		var treeRequest = new BuildTreeRequest(
+			rootPath,
+			new TreeFilterOptions(
+				AllowedExtensions: selectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
+				AllowedRootFolders: selectedRootFolders.ToHashSet(PathComparer.Default),
+				IgnoreRules: rules));
+		var treeResult = buildTree.ExecuteWithInventory(
+			treeRequest,
+			inventory,
+			cancellationToken).Tree;
+		loadingStopwatch.Stop();
+
+		return new LoadedProjectAnalysisRequest(
+			RootPath: rootPath,
+			Tree: treeResult,
+			AvailableRootFolders: rootOptions.Select(static option => option.Name).ToArray(),
+			AvailableExtensions: extensionOptions.Select(static option => option.Name).ToArray(),
+			SelectedRootFolders: selectedRootFolders,
+			SelectedExtensions: selectedExtensions,
+			SelectedIgnoreOptions: selectedIgnoreOptions,
+			RootAccessDenied: snapshot.RootAccessDenied || treeResult.RootAccessDenied,
+			HadAccessDenied: snapshot.HadAccessDenied || treeResult.HadAccessDenied,
+			KnownLoadingElapsed: loadingStopwatch.Elapsed,
+			DiscoveredGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count,
+			UnavailableGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count(
+				static index => !index.IsAvailable),
+			TreeInventory: inventory)
+		{
+			// The refresh snapshot intentionally contains only effective rows. Keep the
+			// requested selection separately so stale profile/CLI values still produce the
+			// same actionable diagnostics without leaking into the tree filter or output plan.
+			RequestedRootFoldersForDiagnostics = selectionContext.RootSelectionInitialized
+				? selectionContext.RootSelectionCache
+				: selectedRootFolders,
+			RequestedExtensionsForDiagnostics = selectionContext.ExtensionsSelectionInitialized
+				? selectionContext.ExtensionsSelectionCache
+				: selectedExtensions,
+			ResolvedIgnoreOptionStates = snapshot.IgnoreOptionStateCache
+		};
+	}
+
+	private static SelectionRefreshContext BuildUnifiedSelectionContext(
+		string rootPath,
+		ProjectAnalysisRequest request)
+	{
+		if (request.LocalProfileState is not { } localState)
+		{
+			return new SelectionRefreshContext(
+				Path: rootPath,
+				PreparedSelectionMode: PreparedSelectionMode.Defaults,
+				AllRootFoldersChecked: true,
+				AllExtensionsChecked: true,
+				RootSelectionInitialized: false,
+				RootSelectionCache: EmptyRootSelection,
+				ExtensionsSelectionInitialized: false,
+				ExtensionsSelectionCache: EmptyExtensionSelection,
+				IgnoreSelectionInitialized: false,
+				IgnoreSelectionCache: EmptyIgnoreSelection,
+				IgnoreOptionStateCache: EmptyIgnoreState,
+				IgnoreAllPreference: null,
+				CurrentSnapshotState: default,
+				CaptureTreeInventory: true);
+		}
+
+		var profile = localState.Profile;
+		var selectedRoots = request.SelectedRootFolders ?? profile.SelectedRootFolders;
+		var selectedExtensions = request.SelectedExtensions ?? profile.SelectedExtensions;
+		var selectedIgnoreOptions = request.SelectedIgnoreOptions ?? profile.SelectedIgnoreOptions;
+		var ignoreState = localState.IgnoreOptionsOverridden
+			? BuildExplicitIgnoreState(selectedIgnoreOptions)
+			: profile.IgnoreOptionStates ?? EmptyIgnoreState;
+
+		// The three settings islands share one snapshot contract. Complete modern maps
+		// preserve every known checkbox and let genuinely new rows use current defaults;
+		// explicit CLI overrides remain exact and never mutate the persisted profile.
+		return new SelectionRefreshContext(
+			Path: rootPath,
+			PreparedSelectionMode: PreparedSelectionMode.Profile,
+			AllRootFoldersChecked: false,
+			AllExtensionsChecked: false,
+			RootSelectionInitialized: true,
+			RootSelectionCache: selectedRoots.ToHashSet(PathComparer.Default),
+			ExtensionsSelectionInitialized: true,
+			ExtensionsSelectionCache: selectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
+			IgnoreSelectionInitialized: true,
+			IgnoreSelectionCache: selectedIgnoreOptions.ToHashSet(),
+			IgnoreOptionStateCache: ignoreState,
+			IgnoreAllPreference: null,
+			CurrentSnapshotState: default,
+			RootOptionStateCache: localState.RootsOverridden ? null : profile.RootFolderStates,
+			ExtensionOptionStateCache: localState.ExtensionsOverridden ? null : profile.ExtensionStates,
+			IgnoreOptionStateCacheIsComplete:
+				localState.IgnoreOptionsOverridden || profile.IgnoreOptionStates is not null,
+			CaptureTreeInventory: true,
+			RootSelectionIsExplicit: localState.RootsOverridden,
+			ExtensionSelectionIsExplicit: localState.ExtensionsOverridden);
+	}
+
+	private static IReadOnlyDictionary<IgnoreOptionId, bool> BuildExplicitIgnoreState(
+		IReadOnlyCollection<IgnoreOptionId> selectedOptions)
+	{
+		var selected = selectedOptions.ToHashSet();
+		return Enum.GetValues<IgnoreOptionId>()
+			.ToDictionary(static option => option, selected.Contains);
+	}
+
+	private static IReadOnlyList<string> GetVisibleRootFolderNames(TreeNodeDescriptor root)
+	{
+		var names = new List<string>();
+		foreach (var child in root.Children)
+		{
+			if (child.IsDirectory)
+				names.Add(child.DisplayName);
+		}
+
+		return names;
 	}
 
 	public async Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
@@ -96,7 +395,7 @@ public sealed class ProjectAnalysisService(
 			RootPath: request.RootPath,
 			Selection: new ProjectAnalysisSelectionReport(
 				SelectedRootFolders: NormalizeRootFolders(request.SelectedRootFolders).ToArray(),
-				SelectedExtensions: NormalizeExtensions(request.SelectedExtensions).ToArray(),
+				SelectedExtensions: NormalizeResolvedExtensionNames(request.SelectedExtensions).ToArray(),
 				SelectedIgnoreOptions: request.SelectedIgnoreOptions.OrderBy(static option => (int)option).ToArray()),
 			Inventory: new ProjectAnalysisInventoryReport(
 				AvailableRootFolders: request.AvailableRootFolders.OrderBy(static value => value, PathComparer.Default).ToArray(),
@@ -137,25 +436,30 @@ public sealed class ProjectAnalysisService(
 		var discoveryRootFolders = useAllRootFoldersForDefaults
 			? scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken).Value
 			: selectedRootFolders;
-		var scan = scanOptions.GetExtensionsAndIgnoreCountsForRootFolders(
+		var extensionDiscoveryRules = IgnoreRulesProjection.ForExtensionAvailability(discoveryRules);
+		var scan = scanOptions.GetIgnoreSectionSnapshotForRootFolders(
 			rootPath,
 			discoveryRootFolders,
-			discoveryRules,
-			cancellationToken);
-		var counts = scan.Value.IgnoreOptionCounts;
-
-		// Headless automation has to start from the same dynamic defaults as the UI.
-		// Git/smart/dot/hidden availability is structural, while empty and extensionless
-		// options only exist when the current root selection exposes matching entries.
-		var dynamicAvailability = availability with
-		{
-			IncludeEmptyFolders = counts.EmptyFolders > 0,
-			EmptyFoldersCount = counts.EmptyFolders,
-			IncludeEmptyFiles = counts.EmptyFiles > 0,
-			EmptyFilesCount = counts.EmptyFiles,
-			IncludeExtensionlessFiles = counts.ExtensionlessFiles > 0,
-			ExtensionlessFilesCount = counts.ExtensionlessFiles
-		};
+			extensionDiscoveryRules,
+			effectiveRules: discoveryRules,
+			effectiveAllowedExtensions: (IReadOnlySet<string>?)null,
+			includeDirectoryToggleProbeRoots: true,
+			cancellationToken: cancellationToken,
+			includeControllerImpactProbeRoots: true);
+		var counts = scan.Value.EffectiveIgnoreOptionCounts;
+		var controllerImpactCounts = scan.Value.ControllerImpactCounts;
+		var snapshotState = new IgnoreSectionSnapshotState(
+			HasIgnoreOptionCounts: true,
+			IgnoreOptionCounts: counts,
+			ControllerImpactCounts: controllerImpactCounts,
+			HasExtensionlessEntries: counts.ExtensionlessFiles > 0,
+			ExtensionlessEntriesCount: counts.ExtensionlessFiles,
+			GitEvidence: scan.Value.GitEvidence);
+		var dynamicAvailability = IgnoreOptionsAvailabilityResolver.Resolve(
+			availability,
+			snapshotState,
+			new Dictionary<IgnoreOptionId, bool>(),
+			stateCacheIsComplete: false);
 
 		return ignoreOptions.GetOptions(dynamicAvailability)
 			.Where(static option => option.DefaultChecked)
@@ -171,29 +475,54 @@ public sealed class ProjectAnalysisService(
 		if (orderedFilePaths is null || orderedFilePaths.Count == 0)
 			return ExportOutputMetrics.Empty;
 
-		var metricsInputs = new List<ContentFileMetrics>(orderedFilePaths.Count);
-		foreach (var path in orderedFilePaths)
+		var parallelOptions = new ParallelOptions
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var metrics = await fileContentAnalyzer.GetTextFileMetricsAsync(path, cancellationToken)
-				.ConfigureAwait(false);
-			if (metrics is null)
-				continue;
+			MaxDegreeOfParallelism = Math.Min(
+				MaximumConcurrentContentMetricReads,
+				ScanParallelismPolicy.MaxDegreeOfParallelism),
+			CancellationToken = cancellationToken
+		};
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		var batchMetrics = new FileContentMetricsResult?[Math.Min(ContentMetricBatchSize, orderedFilePaths.Count)];
+		for (var batchStart = 0; batchStart < orderedFilePaths.Count; batchStart += batchMetrics.Length)
+		{
+			var batchCount = Math.Min(batchMetrics.Length, orderedFilePaths.Count - batchStart);
+			await Parallel.ForAsync(
+				0,
+				batchCount,
+				parallelOptions,
+				async (batchIndex, token) =>
+				{
+					batchMetrics[batchIndex] = await fileContentAnalyzer
+						.GetClassifiedMetricsAsync(orderedFilePaths[batchStart + batchIndex], token)
+						.ConfigureAwait(false);
+				}).ConfigureAwait(false);
 
-			metricsInputs.Add(new ContentFileMetrics(
-				Path: path,
-				SizeBytes: metrics.SizeBytes,
-				LineCount: metrics.LineCount,
-				CharCount: metrics.CharCount,
-				IsEmpty: metrics.IsEmpty,
-				IsWhitespaceOnly: metrics.IsWhitespaceOnly,
-				IsEstimated: metrics.IsEstimated,
-				CrLfPairCount: metrics.CrLfPairCount,
-				TrailingNewlineChars: metrics.TrailingNewlineChars,
-				TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
+			for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var result = batchMetrics[batchIndex];
+				var metrics = result?.IsText == true ? result.Metrics : null;
+				if (metrics is null)
+					continue;
+
+				accumulator.AppendFile(new ContentFileMetrics(
+					Path: orderedFilePaths[batchStart + batchIndex],
+					SizeBytes: metrics.SizeBytes,
+					LineCount: metrics.LineCount,
+					CharCount: metrics.CharCount,
+					IsEmpty: metrics.IsEmpty,
+					IsWhitespaceOnly: metrics.IsWhitespaceOnly,
+					IsEstimated: metrics.IsEstimated,
+					CrLfPairCount: metrics.CrLfPairCount,
+					TrailingNewlineChars: metrics.TrailingNewlineChars,
+					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
+			}
+
+			Array.Clear(batchMetrics, 0, batchCount);
 		}
 
-		return ExportOutputMetricsCalculator.FromOrderedContentFiles(metricsInputs);
+		return accumulator.ToMetrics();
 	}
 
 	private static ProjectTreeSummaryReport CountTree(TreeNodeDescriptor root)
@@ -227,13 +556,15 @@ public sealed class ProjectAnalysisService(
 
 	private static IEnumerable<string> BuildWarnings(LoadedProjectAnalysisRequest request)
 	{
-		foreach (var root in request.SelectedRootFolders)
+		var requestedRoots = request.RequestedRootFoldersForDiagnostics ?? request.SelectedRootFolders;
+		foreach (var root in requestedRoots)
 		{
 			if (!request.AvailableRootFolders.Contains(root, PathComparer.Default))
 				yield return $"Selected root folder was not found in the current project: {root}";
 		}
 
-		foreach (var extension in request.SelectedExtensions)
+		var requestedExtensions = request.RequestedExtensionsForDiagnostics ?? request.SelectedExtensions;
+		foreach (var extension in requestedExtensions)
 		{
 			if (!request.AvailableExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
 				yield return $"Selected extension was not found in the current project: {extension}";
@@ -246,8 +577,8 @@ public sealed class ProjectAnalysisService(
 			return [];
 
 		return rootFolders
+			// Root folder names come from the filesystem. Do not trim legal POSIX names.
 			.Where(static value => !string.IsNullOrWhiteSpace(value))
-			.Select(static value => value.Trim())
 			.Distinct(PathComparer.Default)
 			.OrderBy(static value => value, PathComparer.Default)
 			.ToArray();
@@ -262,6 +593,20 @@ public sealed class ProjectAnalysisService(
 			.Where(static value => !string.IsNullOrWhiteSpace(value))
 			.Select(NormalizeExtension)
 			.Where(static value => value.Length > 0)
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+	}
+
+	private static IReadOnlyCollection<string> NormalizeResolvedExtensionNames(
+		IReadOnlyCollection<string>? extensions)
+	{
+		if (extensions is null || extensions.Count == 0)
+			return [];
+
+		return extensions
+			.Where(static value => !string.IsNullOrWhiteSpace(value))
+			.Select(static value => value.Trim())
 			.Distinct(StringComparer.OrdinalIgnoreCase)
 			.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
 			.ToArray();
@@ -287,7 +632,10 @@ public sealed record ProjectAnalysisRequest(
 	string RootPath,
 	IReadOnlyCollection<string>? SelectedRootFolders = null,
 	IReadOnlyCollection<string>? SelectedExtensions = null,
-	IReadOnlyCollection<IgnoreOptionId>? SelectedIgnoreOptions = null);
+	IReadOnlyCollection<IgnoreOptionId>? SelectedIgnoreOptions = null)
+{
+	internal LocalProjectSelectionState? LocalProfileState { get; init; }
+}
 
 public sealed record LoadedProjectAnalysisRequest(
 	string RootPath,
@@ -299,4 +647,12 @@ public sealed record LoadedProjectAnalysisRequest(
 	IReadOnlyCollection<IgnoreOptionId> SelectedIgnoreOptions,
 	bool RootAccessDenied,
 	bool HadAccessDenied,
-	TimeSpan? KnownLoadingElapsed = null);
+	TimeSpan? KnownLoadingElapsed = null,
+	int DiscoveredGitTrackedIndexCount = 0,
+	int UnavailableGitTrackedIndexCount = 0,
+	ProjectTreeInventorySnapshot? TreeInventory = null)
+{
+	internal IReadOnlyCollection<string>? RequestedRootFoldersForDiagnostics { get; init; }
+	internal IReadOnlyCollection<string>? RequestedExtensionsForDiagnostics { get; init; }
+	internal IReadOnlyDictionary<IgnoreOptionId, bool>? ResolvedIgnoreOptionStates { get; init; }
+}

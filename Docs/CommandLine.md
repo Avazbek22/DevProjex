@@ -1,72 +1,114 @@
 # DevProjex Command Line
 
-DevProjex can be launched from a terminal to open a project folder, preselect filters, generate automation reports, and export tree/content text.
+DevProjex Desktop, Terminal, and CLI follow the same
+inspect -> select -> verify -> export product workflow. Terminal Workspace and
+direct CLI share terminal planning and document services; Desktop keeps its
+established presentation and export orchestration. They are not one
+interchangeable implementation pipeline.
 
-The desktop UI remains the primary experience. CLI options are for startup automation, repeatable checks, machine-readable project analysis reports, and script-friendly text exports.
+The portable distribution contains one primary executable per RID:
+`DevProjex.exe` on Windows and `DevProjex` on Linux and macOS.
 
-## Usage
+## Getting Started
 
-```text
-DevProjex --path <folder> [options]
-DevProjex.exe --path <folder> [options]
-devprojex --path <folder> [options]
-devprojex.exe --path <folder> [options]
-DevProjex <folder> [options]
+After enabling **Help > Launch from terminal**:
+
+```shell
+devprojex --help
+devprojex
+devprojex analyze .
+devprojex export context . -o ../devprojex-context.md
+devprojex open . --preview
 ```
 
-Options with values support both separated and inline assignment forms:
+`devprojex` opens the interactive Terminal Workspace when stdin and stdout are
+interactive. With redirected streams it prints plain root help and exits. A
+desktop shortcut or direct launch without an attached terminal opens Avalonia.
+
+The executable name is shown as `devprojex` throughout this document. Portable
+users should install or generate the platform launcher and use that command.
+Direct invocation of the physical Windows WinExe path is an advanced diagnostic
+detail and is not the supported shell entry point.
+
+## Command Tree
 
 ```text
---path <folder>
---path=<folder>
+devprojex
+├── tui
+├── open
+├── analyze
+├── export
+│   ├── context
+│   └── project
+├── profile
+│   ├── show
+│   ├── export
+│   ├── import
+│   ├── validate
+│   └── reset
+├── ui
+│   ├── list
+│   ├── status
+│   ├── activate
+│   ├── preview
+│   ├── tree
+│   ├── filter
+│   └── search
+├── doctor
+├── completion
+└── dev
+    ├── benchmark
+    │   ├── analysis
+    │   └── ui
+    └── session
 ```
 
-## Executable Names And Aliases
+`dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
+diagnostic workflows.
 
-| Platform/package | Command |
-| --- | --- |
-| Windows portable folder | `devprojex` after enabling **Help → Launch from terminal**, or `.\DevProjex.exe` / the full path to `DevProjex.exe` before setup. |
-| Windows Microsoft Store/MSIX | `devprojex.exe` through Windows App Execution Alias. The alias starts the packaged DevProjex UI executable; `--no-ui` is a mode of the same app, not a separate CLI binary. |
-| Linux installed manually/package | `devprojex` when the executable is installed or symlinked into `PATH`. |
-| macOS terminal automation | `devprojex` when a symlink/wrapper is installed into `PATH`, or the direct executable path inside the `.app` bundle. |
+Commands, option names, enum tokens, JSON properties, and XML element names are
+stable English identifiers. `--language CODE` localizes human-readable help,
+status, diagnostics, and Terminal Workspace labels.
 
-Portable builds ask before changing terminal setup. Store/MSIX uses the OS-supported App Execution Alias mechanism instead of self-modifying environment variables. DevProjex intentionally ships one desktop executable; automation arguments and silent mode are handled by that executable's startup pipeline.
+## Common Selection Options
 
-## Terminal Command Setup
+`analyze`, `export context`, `export project`, and `open` accept the same typed
+selection. `open` additionally accepts `auto`:
 
-Use **Help → Launch from terminal** in the desktop app to inspect or enable the terminal command for the current package.
+```text
+--profile <standard|local|FILE>
+--root <PATH>                 repeatable
+--extension <EXT>            repeatable
+--select <RELATIVE_PATH>     repeatable
+--git-mode <none|gitignore|tracked>
+--exclude <NAME>             repeatable
+```
 
-- Windows Store/MSIX: DevProjex relies on the Windows App Execution Alias `devprojex.exe`. The alias is controlled by Windows and can be disabled by the user in Windows Settings.
-- Windows portable: DevProjex can create a user-level launcher at `%LOCALAPPDATA%\DevProjex\bin\devprojex.cmd` and add that folder to the current user's `PATH`. It never edits the machine-wide `PATH` and does not require administrator rights.
-- Linux/macOS: DevProjex can create a small user-level wrapper at `~/.local/bin/devprojex`. If `~/.local/bin` is not in `PATH`, the dialog shows the shell profile hint instead of editing profile files automatically.
-- If the app is moved, the launcher/wrapper can become stale. DevProjex detects that state and repairs it silently on startup when the launcher is managed by DevProjex.
+For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
+default is `auto`. Direct analyze/export commands default to `standard`.
 
-## Options
+Git filtering is independent from ordinary Exclusions.
 
-| Option | Description |
-| --- | --- |
-| `--path <folder>` | Opens a project folder. |
-| `<folder>` | Opens a project folder as a positional argument. |
-| `--lang <code>` | Sets UI language: `en`, `ru`, `uz`, `tg`, `kk`, `fr`, `de`, `it`. |
-| `--report [file]` | Writes a JSON analysis report. If `file` is omitted, DevProjex writes to the default report folder. Use `--report -` to write JSON to stdout. |
-| `--report-path <file>` | Writes a JSON analysis report to a specific file. |
-| `--report-format json` | Selects the report format. JSON is the v1 format. |
-| `--export <mode>` | Exports project text and exits without showing the window. Supported modes: `tree`, `content`, `tree-content`. |
-| `--output <file\|->`, `-o <file\|->` | Writes export text to a specific file, or to stdout when `-` is used. If omitted, export writes to stdout. |
-| `--export-format ascii\|json`, `--format ascii\|json` | Selects tree format for `tree` and `tree-content` exports. Content remains plain text. `--format json` is the short practical form for the rare JSON tree export. |
-| `--include-root <name>`, `--roots <name>` | Includes one root folder. Can be repeated. |
-| `--include-extension <ext>`, `--ext <ext>` | Includes one extension. Can be repeated. `cs` and `.cs` are equivalent. |
-| `--ignore <name\|none>` | Uses exact ignore options for automation. Can be repeated. |
-| `--strict` | Returns a failure exit code when the generated report contains diagnostics such as missing selected roots/extensions or access-denied folders. The report is still written first. |
-| `--no-ui`, `--silent` | Runs analysis without showing the window. Without an explicit report or export target, writes the JSON analysis report to stdout. |
-| `--version` | Prints application version and exits. |
-| `--help`, `-h`, `/?` | Prints help and exits. |
+Git modes:
 
-## Ignore Option Names
+| Token | Behavior |
+|---|---|
+| `none` | No Git-based filtering |
+| `gitignore` | Respect applicable hierarchical `.gitignore` rules |
+| `tracked` | Include only paths returned from applicable indexes by the installed Git CLI; no readable index fails closed with exit `3` |
+
+A readable empty index is a valid tracked view with zero files. If at least one index
+loads but a nested index does not, that nested scope is excluded and reported with
+`DPX-GIT-TRACKED-INDEX-PARTIAL`. If none load, commands report
+`DPX-GIT-TRACKED-INDEX-UNAVAILABLE`; they never reinterpret `tracked` as `gitignore`.
+An absent `.gitignore` is an active empty rule set, not a fallback to `none`.
+The administrative path named exactly `.git` remains excluded; `.github` and other
+`.git*` names are not treated as Git metadata.
+
+Exclusion tokens:
 
 ```text
 smart-ignore
-git-ignore
 hidden-folders
 hidden-files
 dot-folders
@@ -77,174 +119,307 @@ extensionless-files
 none
 ```
 
-`--ignore none` means "use an explicit empty ignore set". It is different from omitting `--ignore`, where DevProjex uses the current default ignore behavior.
+If at least one `--exclude` is present, the supplied values are the exact ordinary
+exclusion set. `--exclude none` selects an empty set and cannot be combined with
+another exclusion. If an option is absent, its value comes from the selected
+profile.
 
-## Reports
+Modern local profiles retain checked and unchecked states across roots, extensions,
+and Exclusions. Newly discovered rows use current defaults in Desktop, CLI, and TUI;
+explicit CLI collections remain exact and invocation-only.
 
-Reports are JSON documents with:
+Selected paths are relative to the project root. A file selects that file; a
+directory selects its effective subtree. Parent/child overlaps are deduplicated.
+An empty selected-path set means the complete effective tree. Absolute paths,
+`..`, and link-based escapes are rejected.
 
-- selected root folders, extensions, and ignore options;
-- available root folders and extensions discovered in the project;
-- resulting tree summary;
-- output metrics for tree/content;
-- loading, analysis, and total timing in milliseconds;
-- diagnostics and warnings.
+## Terminal Workspace
 
-When `--report` is explicitly provided without a file path, the report is written to:
+```shell
+devprojex
+devprojex tui [PROJECT]
+```
+
+Options:
 
 ```text
-<Documents>/DevProjex/reports/devprojex-report-YYYY-MM-DD_HH-mm-ss-<unique-id>.json
+--profile <auto|standard|local|FILE>
+--screen <auto|alternate|inline>
+--mouse
+--no-mouse
+--color <auto|always|never>
+--plain
+--language <CODE>
 ```
 
-The unique suffix prevents reports created during the same second from overwriting each other.
+The TUI default `auto` profile uses the local project profile when one exists,
+otherwise the standard profile. It provides recent local and Git workspaces, a lazy project tree,
+readable and exact Raw Preview, Context Controls, a searchable Action Palette,
+selection, search, roots, extensions, Git filtering, Exclusions, metrics,
+profiles, and context/folder/ZIP export.
+See [TerminalWorkspace.md](TerminalWorkspace.md).
 
-If the documents folder cannot be resolved, DevProjex falls back to the user profile folder, then the system temp folder.
+## Open Desktop
 
-Headless analysis writes the report directly to stdout by default, so the short form is:
-
-```bash
-devprojex --silent --path "/home/me/projects/app"
+```shell
+devprojex open [PROJECT] [options]
 ```
 
-For an explicit stdout target that is convenient in scripts, `-` remains supported:
+Useful options:
 
-```bash
-devprojex --no-ui --path "/home/me/projects/app" --report -
+```text
+--last
+--new-window
+--wait
+--preview
+--view <tree|content|tree-content>
+--tree-format <text|markdown|json|xml>
+--filter <QUERY>
+--search <QUERY>
 ```
 
-In that mode stdout contains only the JSON report. If `--strict` is also used and diagnostics are present, the JSON is still written to stdout before DevProjex returns a failure exit code and writes diagnostic messages to stderr.
+`PROJECT` defaults to the current directory. `--last` cannot be combined with a
+project argument or selection/profile overrides. `--filter` and `--search` are
+mutually exclusive. `--view` and `--search` imply `--preview`.
 
-## Exports
+Without `--new-window`, DevProjex reuses a suitable desktop instance through
+local per-user IPC. The default returns after the desktop accepts the request;
+`--wait` waits until the requested project and state are applied.
 
-Exports are human-readable text payloads that match the app's copy/export behavior:
+Examples:
 
-- `tree`: project tree only;
-- `content`: text file contents only;
-- `tree-content`: tree followed by file contents.
-
-Export commands run headlessly even when `--no-ui` is omitted:
-
-```bash
-devprojex "/home/me/projects/app" --export tree -o -
-devprojex "/home/me/projects/app" --export tree-content -o ./context.txt
-devprojex "/home/me/projects/app" --export content --roots src --ext cs -o ./src-content.md
+```shell
+devprojex open .
+devprojex open . --preview --view tree-content
+devprojex open . --search "Program"
+devprojex open --last
 ```
 
-`--format json` changes only the tree part. File contents remain plain text so the result is still easy to paste into tools that expect source context.
-`--format` and `--export-format` are valid for `tree` and `tree-content`; `content` exports are always plain text.
+## Analyze
 
-When `--output` is omitted, export writes to stdout. When `--output` points to a file, DevProjex creates parent folders when needed, writes UTF-8 without BOM, prints the absolute output path to stdout, and never modifies the opened project folder unless that folder is explicitly chosen as the output location.
-When report and export are requested together, `--report-path` and `--output` must point to different files.
-
-## Output Contract
-
-Automation-friendly output is kept strict:
-
-- `stdout`: help text, version text, generated file paths, implicit or explicit JSON report payloads, or export payloads.
-- `stderr`: parse errors, invalid command combinations, runtime failures, and cancellation messages.
-- no UI is created for `--help`, `--version`, `--no-ui`, or `--export`.
-- only one stdout payload can be produced by one command. Do not combine `--report -` with `--export`, and do not combine stdout export with report output in the same command.
-
-## Windows Portable EXE Note
-
-The Windows desktop executable is built as a GUI-subsystem app so double-clicking DevProjex does not open an extra console window.
-
-Because of that Windows shell behavior, a plain PowerShell call to the portable GUI executable may return control to the shell before a longer `--no-ui` analysis finishes. For reliable Windows automation, use `Start-Process -Wait` and redirect output explicitly:
-
-```powershell
-$process = Start-Process `
-  -FilePath ".\DevProjex.exe" `
-  -ArgumentList @("--no-ui", "--path", "C:\Projects\App", "--report-path", "C:\Reports\app.json") `
-  -Wait `
-  -PassThru `
-  -NoNewWindow `
-  -RedirectStandardOutput ".\devprojex.stdout.txt" `
-  -RedirectStandardError ".\devprojex.stderr.txt"
-
-exit $process.ExitCode
+```shell
+devprojex analyze [PROJECT] [options]
 ```
 
-Framework-dependent builds can also be invoked through the .NET host, which behaves like a normal console command:
+Defaults:
 
-```powershell
-dotnet .\DevProjex.dll --no-ui --path "C:\Projects\App" --report-path "C:\Reports\app.json"
+- project: current directory;
+- format: `text`;
+- output: stdout;
+- profile: `standard`.
+
+Specific options:
+
+```text
+--format <text|json>
+-o, --output <PATH|->
+--strict
+--color <auto|always|never>
+--progress <auto|always|never>
+--verbosity <quiet|minimal|normal|detailed|diagnostic>
+--plain
 ```
 
-Linux and macOS terminal launches use the published executable directly.
+Text is a human-readable project summary. JSON is a stable machine document with
+`schemaVersion`. `--strict` still writes the report, then returns exit code `3`
+when policy diagnostics exist. Analysis is already read-only and therefore has
+no `--dry-run` option. A file destination must be outside the source project and
+must not already exist. Its parent directory must already exist.
 
-## Exit Codes
+Examples:
+
+```shell
+devprojex analyze .
+devprojex analyze . --format json -o -
+devprojex analyze ./app --format json -o report.json --strict
+devprojex analyze . --git-mode tracked --exclude smart-ignore
+```
+
+## Export Context
+
+```shell
+devprojex export context [PROJECT] [options]
+```
+
+Defaults:
+
+- view: `tree-content`;
+- format: `markdown`;
+- output: stdout;
+- profile: `standard`.
+
+Specific options:
+
+```text
+--view <tree|content|tree-content>
+--format <text|markdown|json|xml>
+-o, --output <PATH|->
+--force
+--dry-run
+```
+
+The format applies to the entire document. JSON and XML are parseable structured
+documents; Markdown contains headings, a fenced tree, and fenced text-file
+content. Binary bytes are never embedded in context output. Machine documents
+mark binary entries with metadata.
+
+When output is stdout, stdout contains only the context document. When output is a
+file, stdout contains one absolute result path. Existing files are conflicts
+unless `--force` is used; replacement is atomic. The destination parent directory
+must already exist.
+
+`--force` is valid only for a file destination, never for stdout. `--dry-run`
+performs planning and destination preflight but does not generate a document,
+create an artifact, or print a result path. Its operational plan is written to
+stderr.
+
+Examples:
+
+```shell
+devprojex export context .
+devprojex export context . --view tree --format json -o -
+devprojex export context . --view content --format xml -o ../devprojex-context.xml
+devprojex export context . --format markdown -o ../devprojex-context.md --force
+```
+
+## Export Project
+
+```shell
+devprojex export project [PROJECT] --as <folder|zip> -o <PATH> [options]
+```
+
+The destination is exact:
+
+```shell
+devprojex export project . --as folder -o ../devprojex-submission
+devprojex export project . --as zip -o ../devprojex-submission.zip
+```
+
+The first command creates exactly `../devprojex-submission`; it does not create an
+additional project-name child or `(2)` suffix. The folder must not exist. A ZIP path must end
+in `.zip` and must not exist unless `--force` is supplied. `--force` is not valid
+for folder exports. In both cases the destination parent directory must already
+exist.
+
+Folder and ZIP exports preserve selected binary bytes, timestamps, directory
+structure, and included empty directories. Staging is cleaned after cancellation
+or failure. Canonical destination checks reject destinations equal to or inside
+the source, including paths reached through symlinks or junctions.
+
+On success stdout contains exactly one absolute result path. Measured progress and
+warnings use stderr.
+
+## Profiles
+
+```shell
+devprojex profile show [PROJECT] [--profile standard|local|FILE] [--format text|json]
+devprojex profile export [PROJECT] [--profile standard|local|FILE] -o FILE [--force]
+devprojex profile import FILE [PROJECT] [--apply]
+devprojex profile validate FILE
+devprojex profile reset [PROJECT]
+```
+
+Direct commands default to `standard`. Terminal Workspace uses `local` when
+available, then `standard`. Explicit CLI selection options override profile
+fields. See [CLI-Profiles.md](CLI-Profiles.md).
+
+Portable profile output must resolve outside the source project, including
+filesystem aliases, and its parent directory must already exist. Source safety is
+validated before conflicts. An existing file requires `--force` for atomic
+replacement; an existing directory is always a destination conflict. On success
+stdout contains one absolute committed path. Errors and diagnostics use stderr.
+
+## Desktop Control
+
+```shell
+devprojex ui list [--format text|json]
+devprojex ui status
+devprojex ui activate
+devprojex ui preview open [--view tree|content|tree-content]
+devprojex ui preview close
+devprojex ui preview set-view <tree|content|tree-content>
+devprojex ui tree set-format <text|markdown|json|xml>
+devprojex ui filter set <QUERY>
+devprojex ui filter clear
+devprojex ui search set <QUERY>
+devprojex ui search next
+devprojex ui search previous
+devprojex ui search clear
+```
+
+Targetable actions accept:
+
+```text
+--instance <ID>
+--project <PATH>
+--timeout <DURATION>
+```
+
+IPC is local-only and per-user. It exposes semantic actions, not arbitrary method
+invocation. See [Desktop-Control.md](Desktop-Control.md).
+
+## Doctor
+
+```shell
+devprojex doctor
+devprojex doctor --format json
+```
+
+Doctor inspects version/runtime, package type, terminal capabilities, launcher and
+PATH resolution, Git, current directory, profile/data/cache/temp access, desktop
+IPC registrations, and tracked-mode readiness. It reports fixes as hints but does
+not change the system. Desktop IPC is reported as skipped until a Desktop session
+initializes it; an existing inaccessible or path-conflicted registry is a failure.
+
+## Completion
+
+Completion scripts are generated from the same command tree:
+
+```shell
+devprojex completion bash
+devprojex completion zsh
+devprojex completion fish
+devprojex completion powershell
+```
+
+The generated script queries the production command tree using the current
+command line and cursor position. Suggestions are scoped to the active command,
+option values, repeatability, conflicts, and path arguments. It does not execute
+Avalonia or require another DevProjex executable. Evaluate or install it using
+the shell's normal completion mechanism.
+
+## Streams and Exit Codes
+
+stdout is reserved for payloads, one result path, help/version, and completion.
+Progress, warnings, diagnostics, migration guidance, and errors use stderr. JSON
+and XML never contain ANSI, animation frames, or extra summary lines.
 
 | Code | Meaning |
-| --- | --- |
-| `0` | Success, help, or version output. |
-| `1` | Runtime failure, strict-mode diagnostics, unavailable project path, or failed report/export write. |
-| `2` | Invalid arguments or invalid command combination. |
-| `130` | Operation canceled. |
+|---:|---|
+| 0 | Success, help, or version |
+| 1 | Runtime or I/O failure |
+| 2 | Invalid syntax, option, value, or combination |
+| 3 | Policy/check failure |
+| 4 | Destination conflict |
+| 5 | Desktop target unavailable or ambiguous |
+| 130 | Canceled |
 
-## Examples
+Human errors include a stable `DPX-*` code. Normal output does not expose raw
+platform exception messages. See [CLI-Output-Contract.md](CLI-Output-Contract.md).
 
-Open a folder in the UI:
+## Legacy Syntax
 
-```powershell
-DevProjex --path "C:\Projects\App"
-```
+The experimental flat CLI is no longer executed. A small set of unambiguous
+legacy action/value shapes returns exit code `2` and prints an exact replacement
+argument vector to stderr. Malformed, incomplete, duplicated, or unsupported
+legacy shapes do not receive a speculative replacement. See
+[CLI-Migration.md](CLI-Migration.md).
 
-Open a folder using a positional path:
+## More Detail
 
-```bash
-devprojex "/home/me/projects/app"
-```
-
-Open the UI and write a startup report after the project loads:
-
-```powershell
-DevProjex --path "C:\Projects\App" --report
-```
-
-Run without UI and print a report:
-
-```bash
-devprojex --path "/home/me/projects/app" --no-ui
-```
-
-Run without UI with exact selection overrides:
-
-```powershell
-DevProjex --path "C:\Projects\App" --no-ui --report-path "C:\Reports\app.json" --roots src --ext cs --ignore none
-```
-
-Export tree and content to a file:
-
-```bash
-devprojex "/home/me/projects/app" --export tree-content -o ./context.txt --roots src --ext cs --ignore none
-```
-
-Print an ASCII tree to stdout:
-
-```bash
-devprojex "/home/me/projects/app" --export tree -o -
-```
-
-Print a JSON tree to stdout:
-
-```bash
-devprojex "/home/me/projects/app" --export tree --format json
-```
-
-Pipe the JSON report to stdout:
-
-```bash
-devprojex --no-ui --path "/home/me/projects/app" --report -
-```
-
-Fail CI when the selected report contract has warnings:
-
-```bash
-devprojex --no-ui --path "/home/me/projects/app" --report ./devprojex-report.json --roots src --ext cs --strict
-```
-
-Run with selected ignore options:
-
-```bash
-devprojex "/home/me/projects/app" --no-ui --report ./devprojex-report.json --ignore smart-ignore --ignore git-ignore --ignore dot-folders
-```
+- [CLI-V1-Contract.md](CLI-V1-Contract.md): normative public contract
+- [CLI-Architecture.md](CLI-Architecture.md): layers and one-EXE routing
+- [CLI-Output-Contract.md](CLI-Output-Contract.md): streams and schemas
+- [CLI-Profiles.md](CLI-Profiles.md): portable profiles and precedence
+- [Desktop-Control.md](Desktop-Control.md): local IPC
+- [TerminalWorkspace.md](TerminalWorkspace.md): interactive TUI
