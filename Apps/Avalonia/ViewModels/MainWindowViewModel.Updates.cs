@@ -16,6 +16,7 @@ public sealed partial class MainWindowViewModel
 {
     private bool _updatePopoverOpen;
     private bool _automaticUpdateChecksEnabled;
+    private bool _isKnownUpdateAvailable;
     private UpdateCheckPresentationState _updateCheckState;
     private string _currentApplicationVersion = string.Empty;
     private string _latestApplicationVersion = string.Empty;
@@ -67,6 +68,7 @@ public sealed partial class MainWindowViewModel
     public bool IsCurrentApplicationVersionNewer =>
         UpdateCheckState == UpdateCheckPresentationState.CurrentVersionNewer;
     public bool HasUpdateCheckFailed => UpdateCheckState == UpdateCheckPresentationState.Failed;
+    public bool IsKnownUpdateAvailable => _isKnownUpdateAvailable;
     public bool IsUpdateCheckButtonVisible => true;
     public bool IsLatestApplicationVersionVisible =>
         IsUpdateAvailable || IsApplicationUpToDate || IsCurrentApplicationVersionNewer;
@@ -124,6 +126,17 @@ public sealed partial class MainWindowViewModel
     {
         _currentApplicationVersion = result.CurrentVersion;
         _latestApplicationVersion = result.LatestVersion ?? string.Empty;
+        if (result.Availability != ApplicationUpdateAvailability.CheckFailed)
+        {
+            var isKnownUpdateAvailable =
+                result.Availability == ApplicationUpdateAvailability.UpdateAvailable;
+            if (_isKnownUpdateAvailable != isKnownUpdateAvailable)
+            {
+                _isKnownUpdateAvailable = isKnownUpdateAvailable;
+                RaisePropertyChanged(nameof(IsKnownUpdateAvailable));
+            }
+        }
+
         UpdateCheckState = result.Availability switch
         {
             ApplicationUpdateAvailability.UpdateAvailable =>

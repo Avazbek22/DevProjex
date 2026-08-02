@@ -1,6 +1,8 @@
 using Avalonia.Interactivity;
+using Avalonia.Controls.Shapes;
 using Avalonia.VisualTree;
 using DevProjex.Application.Services;
+using DevProjex.Application.Updates;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
 
@@ -8,6 +10,52 @@ namespace DevProjex.Tests.UI;
 
 public sealed class TopMenuBarFormatSwitcherUiTests
 {
+	[AvaloniaFact]
+	public async Task UpdateIndicator_TracksSuccessfulAvailabilityAndSurvivesFailure()
+	{
+		var viewModel = CreateViewModel();
+		var view = new TopMenuBarView { DataContext = viewModel };
+		var window = new Window
+		{
+			Content = view,
+			Width = 520,
+			Height = 90
+		};
+
+		try
+		{
+			window.Show();
+			await FlushUiAsync();
+			var indicator = Assert.IsType<Ellipse>(
+				view.FindControl<Ellipse>("UpdateAvailableIndicator"));
+			Assert.False(indicator.IsVisible);
+
+			viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
+				ApplicationUpdateAvailability.UpdateAvailable,
+				"5.0",
+				"5.1"));
+			await FlushUiAsync();
+			Assert.True(indicator.IsVisible);
+
+			viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
+				ApplicationUpdateAvailability.CheckFailed,
+				"5.0"));
+			await FlushUiAsync();
+			Assert.True(indicator.IsVisible);
+
+			viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
+				ApplicationUpdateAvailability.UpToDate,
+				"5.1",
+				"5.1"));
+			await FlushUiAsync();
+			Assert.False(indicator.IsVisible);
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task FormatSwitcher_RendersFourFormatsInOrderAndUpdatesSelection()
 	{

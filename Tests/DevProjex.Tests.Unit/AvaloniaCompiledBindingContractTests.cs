@@ -115,6 +115,32 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void HelpMenu_UpdateIndicatorUsesKnownAvailabilityAndAccentColor()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"TopMenuBarView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var updateMenuItem = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => element.Attribute("Name")?.Value == "UpdateMenuItem");
+		var indicator = updateMenuItem
+			.Descendants(avaloniaNamespace + "Ellipse")
+			.Single(element => element.Attribute("Name")?.Value == "UpdateAvailableIndicator");
+
+		Assert.Equal("8", indicator.Attribute("Width")?.Value);
+		Assert.Equal("8", indicator.Attribute("Height")?.Value);
+		Assert.Equal("{Binding IsKnownUpdateAvailable}", indicator.Attribute("IsVisible")?.Value);
+		Assert.Equal("{DynamicResource AppAccentBrush}", indicator.Attribute("Fill")?.Value);
+		Assert.Equal("False", indicator.Attribute("IsHitTestVisible")?.Value);
+	}
+
+	[Fact]
 	public void SettingsPanel_ApplyAttentionUsesConditionalIdleSafeFadeContract()
 	{
 		var viewFile = Path.Combine(

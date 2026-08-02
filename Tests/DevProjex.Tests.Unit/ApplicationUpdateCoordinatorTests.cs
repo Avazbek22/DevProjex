@@ -25,6 +25,37 @@ public sealed class ApplicationUpdateCoordinatorTests
     }
 
     [Fact]
+    public async Task Startup_RestoresCachedUpdateIndicatorWithoutNetworkWhenChecksAreDisabled()
+    {
+        using var temp = new TemporaryDirectory();
+        var settingsStore = new UserSettingsStore(() => temp.Path);
+        Assert.True(settingsStore.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = false,
+                LastCheckUtc = new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero),
+                LatestKnownVersion = "5.1",
+                LastNotifiedVersion = "5.1"
+            }
+        }));
+        var service = new RecordingUpdateService(UpdateAvailable("5.2"));
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel,
+            service,
+            settingsStore,
+            "5.0");
+
+        await coordinator.RunAutomaticCheckIfDueAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, service.CallCount);
+        Assert.True(viewModel.IsKnownUpdateAvailable);
+        Assert.Equal(UpdateCheckPresentationState.UpdateAvailable, viewModel.UpdateCheckState);
+        Assert.False(viewModel.UpdatePopoverOpen);
+    }
+
+    [Fact]
     public async Task AutomaticPreference_AppliesImmediatelyAndOptOutPreventsRequests()
     {
         using var temp = new TemporaryDirectory();
@@ -81,6 +112,7 @@ public sealed class ApplicationUpdateCoordinatorTests
 
         Assert.Equal(1, service.CallCount);
         Assert.True(viewModel.UpdatePopoverOpen);
+        Assert.True(viewModel.IsKnownUpdateAvailable);
         Assert.Equal(UpdateCheckPresentationState.UpdateAvailable, viewModel.UpdateCheckState);
         var persisted = settingsStore.Load();
         Assert.Equal(now, persisted.UpdateCheckSettings.LastCheckUtc);
@@ -93,6 +125,7 @@ public sealed class ApplicationUpdateCoordinatorTests
 
         Assert.Equal(2, service.CallCount);
         Assert.False(viewModel.UpdatePopoverOpen);
+        Assert.True(viewModel.IsKnownUpdateAvailable);
         Assert.Equal(now, settingsStore.Load().UpdateCheckSettings.LastCheckUtc);
     }
 
@@ -412,6 +445,7 @@ public sealed class ApplicationUpdateCoordinatorTests
         await coordinator.CheckManuallyAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(UpdateCheckPresentationState.Failed, viewModel.UpdateCheckState);
+        Assert.True(viewModel.IsKnownUpdateAvailable);
         var persisted = settingsStore.Load().UpdateCheckSettings;
         Assert.Equal(checkedAt, persisted.LastCheckUtc);
         Assert.Equal("4.10.0", persisted.LatestKnownVersion);

@@ -210,7 +210,22 @@
         <MenuItem Header="{Binding MenuHelpHelp}" Click="OnHelp" />
         <MenuItem Header="{Binding MenuHelpTerminalCommand}" Click="OnTerminalCommandSetup" />
         <MenuItem Name="AboutMenuItem" Header="{Binding MenuHelpAbout}" Click="OnAbout" />
-        <MenuItem Name="UpdateMenuItem" Header="{Binding MenuHelpCheckUpdates}" Click="OnCheckForUpdates" />
+        <MenuItem Name="UpdateMenuItem"
+                  Click="OnCheckForUpdates">
+          <MenuItem.Header>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="{Binding MenuHelpCheckUpdates}"
+                         VerticalAlignment="Center" />
+              <Ellipse Name="UpdateAvailableIndicator"
+                       Width="8"
+                       Height="8"
+                       Fill="{DynamicResource AppAccentBrush}"
+                       IsVisible="{Binding IsKnownUpdateAvailable}"
+                       IsHitTestVisible="False"
+                       VerticalAlignment="Center" />
+            </StackPanel>
+          </MenuItem.Header>
+        </MenuItem>
         <Separator />
         <MenuItem Header="{Binding MenuHelpResetSettings}" Click="OnResetSettings" />
         <MenuItem Header="{Binding MenuHelpResetData}" Click="OnResetData" />

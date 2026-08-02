@@ -115,6 +115,10 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
             var settings = await EnsureSettingsLoadedAsync(cancellationToken);
             var preferences = settings.UpdateCheckSettings;
             _viewModel.AutomaticUpdateChecksEnabled = preferences.IsAutomaticCheckEnabled;
+            // Hydrate the passive update indicator from the last successful result even
+            // when automatic network checks are disabled or not due yet. The stored
+            // release version remains the source of truth; no separate UI flag is saved.
+            RestoreLastSuccessfulResult(preferences);
             if (!ApplicationUpdateSchedule.IsDue(
                     preferences.IsAutomaticCheckEnabled,
                     preferences.LastCheckUtc,
@@ -132,6 +136,9 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
                 result,
                 markAvailableVersionAsNotified: false,
                 cancellationToken);
+            if (result.Availability != ApplicationUpdateAvailability.CheckFailed)
+                _viewModel.CompleteUpdateCheck(result);
+
             if (result.Availability != ApplicationUpdateAvailability.UpdateAvailable ||
                 wasAlreadyNotified)
             {
@@ -143,7 +150,6 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
                 LastNotifiedVersion = result.LatestVersion ?? string.Empty
             };
             await PersistSettingsAsync(settings, cancellationToken);
-            _viewModel.CompleteUpdateCheck(result);
             _viewModel.UpdatePopoverOpen = true;
         }
         finally

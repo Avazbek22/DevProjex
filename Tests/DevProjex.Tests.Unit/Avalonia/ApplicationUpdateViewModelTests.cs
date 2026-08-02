@@ -25,10 +25,36 @@ public sealed class ApplicationUpdateViewModelTests
             "4.10.0"));
 
         Assert.True(viewModel.IsUpdateAvailable);
+        Assert.True(viewModel.IsKnownUpdateAvailable);
         Assert.True(viewModel.IsLatestApplicationVersionVisible);
         Assert.Equal("Latest version: v4.10.0", viewModel.LatestApplicationVersionText);
         Assert.True(viewModel.IsUpdateCheckButtonVisible);
         Assert.Equal("Check again", viewModel.UpdateCheckActionText);
+    }
+
+    [Fact]
+    public void KnownUpdateIndicator_SurvivesFailureAndClearsAfterSuccessfulCurrentResult()
+    {
+        using var viewModel = CreateViewModel();
+        viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
+            ApplicationUpdateAvailability.UpdateAvailable,
+            "5.0",
+            "5.1"));
+
+        viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
+            ApplicationUpdateAvailability.CheckFailed,
+            "5.0"));
+
+        Assert.True(viewModel.IsKnownUpdateAvailable);
+        Assert.True(viewModel.HasUpdateCheckFailed);
+
+        viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
+            ApplicationUpdateAvailability.UpToDate,
+            "5.1",
+            "5.1"));
+
+        Assert.False(viewModel.IsKnownUpdateAvailable);
+        Assert.True(viewModel.IsApplicationUpToDate);
     }
 
     [Theory]
