@@ -202,10 +202,14 @@ function Validate-HeaderAndSchema(
         Add-ValidationError $errors "SLP024" "Import CSV contains a duplicate header column: '$duplicateHeader'."
     }
 
-    # Do not try to be clever here. The export template is the contract.
-    # If the header drifts, it is safer to fail now than to guess what Partner Center wants.
-    if (-not ($importHeaders.Count -eq $templateHeaders.Count -and (@($importHeaders | ForEach-Object { $_ }) -join $separator) -ceq (@($templateHeaders | ForEach-Object { $_ }) -join $separator))) {
-        Add-ValidationError $errors "SLP004" "Import CSV header does not match the latest Partner Center export template."
+    # Microsoft explicitly allows new Store listings to be created by appending locale
+    # columns to an exported CSV. The exported header must therefore remain an exact
+    # prefix, while additional locales are allowed only after every template column.
+    $preservesTemplatePrefix = $importHeaders.Count -ge $templateHeaders.Count -and
+        (@($importHeaders[0..($templateHeaders.Count - 1)] | ForEach-Object { $_ }) -join $separator) -ceq
+        (@($templateHeaders | ForEach-Object { $_ }) -join $separator)
+    if (-not $preservesTemplatePrefix) {
+        Add-ValidationError $errors "SLP004" "Import CSV does not preserve the latest Partner Center export header prefix."
     }
 
     $importRows = @(Get-CsvRows -path $importCsvPath)

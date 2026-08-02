@@ -1,524 +1,558 @@
-Field,ID,Type (Тип),default,en-us,en,ru,ru-ru,kk-kz,de-de,it-it,tg-cyrl-tj,uz-latn-uz,fr-fr
-Description,2,Текст,,"Preparing project context for an AI chat takes more time than it should. DevProjex speeds that up: open a folder or repository, choose what to include, and get a project tree or file contents with a live preview before copying.
+Field,ID,Type (Тип),default,en-us,en,ru,ru-ru,kk-kz,de-de,it-it,tg-cyrl-tj,uz-latn-uz,fr-fr,es-es,pt-br,pt-pt
+Description,2,Текст,,"DevProjex turns any folder or Git repository into clean, AI-ready context — project structure, file contents, or both. Before copying or exporting, you can check the result in a live preview.
 
-Smart Ignore and .gitignore support filter out noise automatically — dependencies, system folders, build artifacts. The tree exports to ASCII or JSON. Works with any stack and any codebase size.
+Smart Ignore removes dependencies, caches, and build files automatically. It follows your project's .gitignore rules, or you can choose to include only Git-tracked files. You can turn folders, file types, and single files on or off — each one works independently.
 
-For Git repositories: clone, switch branches, pull updates to local cache. For large projects: search and filtering, a progress bar with cancellation, and live metrics in the status bar — lines, characters, and estimated token count.
+Choose how you want to work: GUI for a visual view, TUI for the terminal, or CLI for scripts and CI. Export your result as ASCII, Markdown, JSON, or XML — or save the selected files to a folder or ZIP archive.
 
-Local profiles let you save different settings for different projects.
-Read-only by design: source files are never modified, no telemetry is collected, no account required. Source code is available on GitHub.","Preparing project context for an AI chat takes more time than it should. DevProjex speeds that up: open a folder or repository, choose what to include, and get a project tree or file contents with a live preview before copying.
+Search and filters help you handle big codebases. Metrics show file count, lines, characters, and an estimated token count. Local profiles save your project settings. Built-in Git tools let you clone repos, switch branches, and update the cache.
 
-Smart Ignore and .gitignore support filter out noise automatically — dependencies, system folders, build artifacts. The tree exports to ASCII or JSON. Works with any stack and any codebase size.
+DevProjex runs locally and never changes your files — read-only mode keeps everything safe. No telemetry. No account needed. Available on Windows, Linux, and macOS. Source code is open on GitHub.","DevProjex turns any folder or Git repository into clean, AI-ready context — project structure, file contents, or both. Before copying or exporting, you can check the result in a live preview.
 
-For Git repositories: clone, switch branches, pull updates to local cache. For large projects: search and filtering, a progress bar with cancellation, and live metrics in the status bar — lines, characters, and estimated token count.
+Smart Ignore removes dependencies, caches, and build files automatically. It follows your project's .gitignore rules, or you can choose to include only Git-tracked files. You can turn folders, file types, and single files on or off — each one works independently.
 
-Local profiles let you save different settings for different projects.
-Read-only by design: source files are never modified, no telemetry is collected, no account required. Source code is available on GitHub.","Подготовить контекст проекта для ИИ-чата — задача, которая занимает больше времени, чем хотелось бы. DevProjex ускоряет её: открываете папку или репозиторий, выбираете что включить — и получаете готовое дерево или содержимое файлов с превью перед копированием.
+Choose how you want to work: GUI for a visual view, TUI for the terminal, or CLI for scripts and CI. Export your result as ASCII, Markdown, JSON, or XML — or save the selected files to a folder or ZIP archive.
 
-Smart Ignore и поддержка .gitignore убирают лишнее автоматически: системные папки, зависимости, мусор. Дерево экспортируется в ASCII или JSON. Работает с любым стеком и любым размером кодовой базы.
+Search and filters help you handle big codebases. Metrics show file count, lines, characters, and an estimated token count. Local profiles save your project settings. Built-in Git tools let you clone repos, switch branches, and update the cache.
 
-Для Git-репозиториев: клонирование, переключение веток, обновление локального кэша. Для больших проектов — поиск и фильтрация, прогресс-бар с отменой, живые метрики в статус-баре: строки, символы, примерное число токенов.
+DevProjex runs locally and never changes your files — read-only mode keeps everything safe. No telemetry. No account needed. Available on Windows, Linux, and macOS. Source code is open on GitHub.","DevProjex собирает чистый контекст проекта для работы с ИИ — из папки или Git-репозитория: структуру, содержимое файлов или всё сразу. Перед копированием или экспортом результат можно проверить в живом превью.
 
-Локальные профили позволяют сохранять разные настройки для разных проектов.
-Приложение работает в режиме только чтения: файлы не изменяются, телеметрия не собирается, аккаунт не нужен.
-Исходный код открыт на GitHub.","Подготовить контекст проекта для ИИ-чата — задача, которая занимает больше времени, чем хотелось бы. DevProjex ускоряет её: открываете папку или репозиторий, выбираете что включить — и получаете готовое дерево или содержимое файлов с превью перед копированием.
+Smart Ignore автоматически убирает зависимости, кэши и артефакты сборки. Поддерживаются правила .gitignore, а режим отслеживаемых Git-файлов исключает всё, что не входит в индекс. Корневые папки, расширения, исключения и отдельные файлы дерева выбираются независимо друг от друга.
 
-Smart Ignore и поддержка .gitignore убирают лишнее автоматически: системные папки, зависимости, мусор. Дерево экспортируется в ASCII или JSON. Работает с любым стеком и любым размером кодовой базы.
+GUI подходит для наглядной работы с проектом, TUI — для терминала и клавиатуры, CLI — для скриптов и CI. Результат копируется или экспортируется в ASCII, Markdown, JSON и XML. Выбранные файлы также можно скопировать в отдельную папку или упаковать в ZIP-архив.
 
-Для Git-репозиториев: клонирование, переключение веток, обновление локального кэша. Для больших проектов — поиск и фильтрация, прогресс-бар с отменой, живые метрики в статус-баре: строки, символы, примерное число токенов.
+Поиск и фильтрация помогают работать с большими кодовыми базами. Метрики показывают количество строк, символов и примерное число токенов. Локальные профили запоминают параметры проектов, а встроенные Git-инструменты поддерживают клонирование, переключение веток и обновление кэша.
 
-Локальные профили позволяют сохранять разные настройки для разных проектов.
-Приложение работает в режиме только чтения: файлы не изменяются, телеметрия не собирается, аккаунт не нужен. Исходный код открыт на GitHub.","AI чат үшін жоба контекстін дайындау қажет болғаннан көп уақыт алады. DevProjex мұны жылдамдатады: қалтаны немесе репозиторийді ашасыз, нені қосу керегін таңдайсыз және көшіру алдында live preview арқылы жоба ағашын не файл мазмұнын аласыз.
+DevProjex работает локально и в режиме read-only: исходные файлы не изменяются, телеметрия не собирается, аккаунт не требуется. Приложение доступно на Windows, Linux и macOS. Исходный код открыт на GitHub.","DevProjex собирает чистый контекст проекта для работы с ИИ — из папки или Git-репозитория: структуру, содержимое файлов или всё сразу. Перед копированием или экспортом результат можно проверить в живом превью.
 
-Smart Ignore және .gitignore қолдауы артық нәрсені автоматты түрде сүзеді - тәуелділіктер, жүйелік қалталар, build артефактілері. Ағаш ASCII немесе JSON пішімінде экспортталады. Кез келген стекпен және кез келген көлемдегі codebase-пен жұмыс істейді.
+Smart Ignore автоматически убирает зависимости, кэши и артефакты сборки. Поддерживаются правила .gitignore, а режим отслеживаемых Git-файлов исключает всё, что не входит в индекс. Корневые папки, расширения, исключения и отдельные файлы дерева выбираются независимо друг от друга.
 
-Git репозиторийлері үшін: клондау, branch ауыстыру, жаңартуларды жергілікті кэшке алу. Үлкен жобалар үшін: іздеу және сүзгілеу, болдырмауы бар progress bar және status bar-дағы тірі метрикалар - жолдар, таңбалар және токендердің шамамен саны.
+GUI подходит для наглядной работы с проектом, TUI — для терминала и клавиатуры, CLI — для скриптов и CI. Результат копируется или экспортируется в ASCII, Markdown, JSON и XML. Выбранные файлы также можно скопировать в отдельную папку или упаковать в ZIP-архив.
 
-Жергілікті профильдер әртүрлі жобалар үшін әртүрлі параметрлерді сақтауға мүмкіндік береді.
-Қолданба тек оқу режимінде жұмыс істейді: бастапқы файлдар ешқашан өзгертілмейді, телеметрия жиналмайды, аккаунт қажет емес. Бастапқы код GitHub-та ашық.","Die Vorbereitung von Projektkontext für einen KI-Chat kostet mehr Zeit, als sie sollte. DevProjex beschleunigt das: Öffnen Sie einen Ordner oder ein Repository, wählen Sie aus, was einbezogen werden soll, und erhalten Sie einen Projektbaum oder Dateiinhalte mit Live-Vorschau vor dem Kopieren.
+Поиск и фильтрация помогают работать с большими кодовыми базами. Метрики показывают количество строк, символов и примерное число токенов. Локальные профили запоминают параметры проектов, а встроенные Git-инструменты поддерживают клонирование, переключение веток и обновление кэша.
 
-Smart Ignore und die Unterstützung für .gitignore filtern unnötiges Rauschen automatisch heraus - Abhängigkeiten, Systemordner, Build-Artefakte. Der Baum lässt sich als ASCII oder JSON exportieren. Funktioniert mit jedem Stack und jeder Größe von Codebasen.
-Für Git-Repositories: klonen, Branches wechseln, Updates in den lokalen Cache laden. Für große Projekte: Suche und Filterung, eine Fortschrittsleiste mit Abbruch sowie Live-Metriken in der Statusleiste - Zeilen, Zeichen und geschätzte Tokenzahl.
+DevProjex работает локально и в режиме read-only: исходные файлы не изменяются, телеметрия не собирается, аккаунт не требуется. Приложение доступно на Windows, Linux и macOS. Исходный код открыт на GitHub.","DevProjex кез келген бума немесе Git репозиторийін ЖИ-мен жұмыс істеуге дайын таза жоба контекстіне айналдырады — жоба құрылымы, файл мазмұны немесе екеуі бірге. Көшіру не экспорттау алдында нәтижені тікелей алдын ала қарау режимінде тексеруге болады.
 
-Lokale Profile ermöglichen es, unterschiedliche Einstellungen für unterschiedliche Projekte zu speichern.
-Standardmäßig schreibgeschützt: Quelldateien werden nie verändert, es wird keine Telemetrie erfasst und kein Konto benötigt. Der Quellcode ist auf GitHub verfügbar.","Preparare il contesto di un progetto per una chat IA richiede più tempo del dovuto. DevProjex accelera il processo: apri una cartella o un repository, scegli cosa includere e ottieni l'albero del progetto o il contenuto dei file con anteprima live prima della copia.
+Smart Ignore тәуелділіктерді, кэштерді және құрастыру артефактілерін автоматты түрде алып тастайды. Жобаның .gitignore ережелері қолданылады немесе тек Git бақылайтын файлдарды қосуға болады. Түбірлік бумалар, файл түрлері, ерекшеліктер және ағаштағы жеке файлдар бір-бірінен тәуелсіз таңдалады.
 
-Smart Ignore e il supporto a .gitignore filtrano automaticamente il rumore inutile - dipendenze, cartelle di sistema, artefatti di build. L'albero si esporta in ASCII o JSON. Funziona con qualsiasi stack e con codebase di qualsiasi dimensione.
+Әр жұмыс тәсіліне өз интерфейсі бар: GUI көрнекі жұмысқа, TUI терминал мен пернетақтаға, CLI скрипттер мен CI-ге арналған. Нәтижені көшіруге немесе ASCII, Markdown, JSON және XML пішімдеріне экспорттауға болады. Таңдалған файлдарды бөлек бумаға көшіруге не ZIP мұрағатына жинауға да болады.
 
-Per i repository Git: clonazione, cambio di branch, aggiornamento della cache locale. Per i progetti grandi: ricerca e filtraggio, barra di avanzamento con annullamento e metriche live nella barra di stato - righe, caratteri e numero stimato di token.
+Іздеу мен сүзгілер үлкен код базаларымен жұмысты жеңілдетеді. Метрикалар файлдар санын, жолдарды, таңбаларды және токендердің шамамен санын көрсетеді. Жергілікті профильдер жоба параметрлерін сақтайды. Кірістірілген Git құралдары репозиторийлерді клондауды, тармақтарды ауыстыруды және кэшті жаңартуды қолдайды.
 
-I profili locali consentono di salvare impostazioni diverse per progetti diversi.
-Read-only by design: i file sorgente non vengono mai modificati, non viene raccolta telemetria e non serve alcun account. Il codice sorgente è disponibile su GitHub.","Омода кардани контексти лоиҳа барои AI-чат бештар аз он вақт мегирад, ки мехостед. DevProjex инро тез мекунад: ҷузвдон ё репозиториро мекушоед, интихоб мекунед, ки чӣ ворид шавад, ва пеш аз нусха бо пешнамоиши зинда дарахти лоиҳа ё мундариҷаи файлҳоро мегиред.
+DevProjex жергілікті әрі тек оқу режимінде жұмыс істейді: бастапқы файлдар өзгертілмейді, телеметрия жиналмайды, тіркелгі қажет емес. Windows, Linux және macOS жүйелерінде қолжетімді. Бастапқы код GitHub-та ашық.","DevProjex verwandelt jeden Ordner oder jedes Git-Repository in sauberen, KI-fertigen Projektkontext — Projektstruktur, Dateiinhalte oder beides. Vor dem Kopieren oder Exportieren lässt sich das Ergebnis in einer Live-Vorschau prüfen.
 
-Smart Ignore ва дастгирии .gitignore чизҳои зиёдатиро худкор хориҷ мекунанд - вобастагиҳо, ҷузвдонҳои система, артефактҳои build. Дарахт ба ASCII ё JSON содир мешавад. Бо ҳар гуна стек ва бо ҳар андозаи codebase кор мекунад.
+Smart Ignore entfernt Abhängigkeiten, Caches und Build-Artefakte automatisch. Die .gitignore-Regeln des Projekts werden berücksichtigt; alternativ können ausschließlich von Git verfolgte Dateien einbezogen werden. Stammordner, Dateitypen, Ausschlüsse und einzelne Dateien lassen sich unabhängig voneinander auswählen.
 
-Барои репозиторийҳои Git: клон кардан, иваз кардани branch, гирифтани навсозиҳо ба кеши маҳаллӣ. Барои лоиҳаҳои калон: ҷустуҷӯ ва филтркунӣ, progress bar бо имкони бекоркунӣ ва метрикаҳои зинда дар status bar - сатрҳо, аломатҳо ва шумораи тахминии токенҳо.
+Für jede Arbeitsweise gibt es die passende Oberfläche: GUI für den visuellen Überblick, TUI für Terminal und Tastatur, CLI für Skripte und CI. Das Ergebnis kann kopiert oder als ASCII, Markdown, JSON oder XML exportiert werden. Ausgewählte Dateien lassen sich außerdem in einen separaten Ordner kopieren oder als ZIP-Archiv speichern.
 
-Профилҳои маҳаллӣ имкон медиҳанд, ки барои лоиҳаҳои гуногун танзимоти гуногун нигоҳ дошта шаванд.
-Барнома дар реҷаи танҳо хондан кор мекунад: файлҳои манбаъ ҳеҷ гоҳ тағйир дода намешаванд, телеметрия ҷамъ намешавад ва аккаунт лозим нест. Коди манбаъ дар GitHub дастрас аст.","AI chat uchun loyiha kontekstini tayyorlash ko‘pincha kerakligidan ko‘proq vaqt oladi. DevProjex buni tezlashtiradi: papka yoki repozitoriyani ochasiz, nimani kiritishni tanlaysiz va nusxalashdan oldin live preview bilan loyiha daraxti yoki fayl mazmunini olasiz.
+Suche und Filter erleichtern die Arbeit mit großen Codebasen. Metriken zeigen Dateianzahl, Zeilen, Zeichen und eine geschätzte Tokenzahl. Lokale Profile speichern projektspezifische Einstellungen. Integrierte Git-Werkzeuge unterstützen das Klonen von Repositories, den Wechsel von Branches und die Aktualisierung des Caches.
 
-Smart Ignore va .gitignore qo‘llovi keraksiz narsalarni avtomatik olib tashlaydi - bog‘liqliklar, tizim papkalari, build artefaktlari. Daraxt ASCII yoki JSON ko‘rinishida eksport qilinadi. Istalgan stek va istalgan hajmdagi codebase bilan ishlaydi.
+DevProjex arbeitet lokal und schreibgeschützt: Die Quelldateien werden nicht verändert, es wird keine Telemetrie erfasst und kein Konto benötigt. Verfügbar für Windows, Linux und macOS. Der Quellcode ist auf GitHub offen.","DevProjex trasforma qualsiasi cartella o repository Git in un contesto di progetto pulito e pronto per l’IA — struttura, contenuto dei file o entrambi. Prima della copia o dell’esportazione, il risultato può essere controllato in un’anteprima live.
 
-Git repozitoriylari uchun: klonlash, branch almashtirish, yangilanishlarni lokal keshga olish. Katta loyihalar uchun: qidiruv va filtrlash, bekor qilish imkoniga ega progress bar va status barda jonli metrikalar - satrlar, belgilar va taxminiy tokenlar soni.
+Smart Ignore rimuove automaticamente dipendenze, cache e artefatti di build. Rispetta le regole .gitignore del progetto oppure consente di includere solo i file tracciati da Git. Cartelle radice, tipi di file, esclusioni e singoli file si selezionano in modo indipendente.
 
-Lokal profillar turli loyihalar uchun turli sozlamalarni saqlashga imkon beradi.
-Ilova read-only rejimida ishlaydi: manba fayllar o‘zgartirilmaydi, telemetriya yig‘ilmaydi, akkaunt kerak emas. Manba kod GitHub’da ochiq.","Préparer le contexte d’un projet pour un chat IA prend plus de temps que nécessaire. DevProjex accélère cela : ouvrez un dossier ou un dépôt, choisissez ce qu’il faut inclure et obtenez une arborescence du projet ou le contenu des fichiers avec un aperçu en direct avant la copie.
+Ogni modalità di lavoro ha la sua interfaccia: GUI per la vista grafica, TUI per terminale e tastiera, CLI per script e CI. Il risultato può essere copiato o esportato in ASCII, Markdown, JSON o XML. I file selezionati possono anche essere copiati in una cartella separata o raccolti in un archivio ZIP.
 
-Smart Ignore et la prise en charge de .gitignore filtrent automatiquement le bruit inutile - dépendances, dossiers système, artefacts de build. L’arborescence s’exporte en ASCII ou en JSON. Fonctionne avec n’importe quelle stack et pour toute taille de base de code.
+Ricerca e filtri facilitano il lavoro con codebase di grandi dimensioni. Le metriche mostrano numero di file, righe, caratteri e una stima dei token. I profili locali memorizzano le impostazioni dei progetti. Gli strumenti Git integrati consentono di clonare repository, cambiare branch e aggiornare la cache.
 
-Pour les dépôts Git : clonage, changement de branche, récupération des mises à jour dans le cache local. Pour les grands projets : recherche et filtrage, barre de progression avec annulation, et métriques en direct dans la barre d’état - lignes, caractères et estimation du nombre de tokens.
+DevProjex funziona localmente e in sola lettura: i file sorgente non vengono modificati, non viene raccolta telemetria e non serve alcun account. Disponibile per Windows, Linux e macOS. Il codice sorgente è aperto su GitHub.","DevProjex ҳар ҷузвдон ё репозитории Git-ро ба контексти тоза ва омода барои кор бо зеҳни сунъӣ табдил медиҳад — сохтори лоиҳа, мундариҷаи файлҳо ё ҳар ду. Пеш аз нусхабардорӣ ё содирот натиҷаро дар пешнамоиши зинда санҷидан мумкин аст.
 
-Les profils locaux permettent d’enregistrer des paramètres différents pour différents projets.
-Conçu en lecture seule : les fichiers source ne sont jamais modifiés, aucune télémétrie n’est collectée et aucun compte n’est requis. Le code source est disponible sur GitHub."
-ReleaseNotes,3,Текст,,Improved UI smoothness and stability on large projects. Updated help content.,Improved UI smoothness and stability on large projects. Updated help content.,Улучшена плавность интерфейса и стабильность на больших проектах. Обновлена справка.,Улучшена плавность интерфейса и стабильность на больших проектах. Обновлена справка.,Интерфейс тегістігі мен үлкен жобалардағы тұрақтылық жақсарды. Анықтама жаңартылды.,Die UI läuft flüssiger und ist bei großen Projekten stabiler. Die Hilfe wurde aktualisiert.,Migliorate fluidità dell’interfaccia e stabilità sui progetti grandi. Guida aggiornata.,Ҳамвории интерфейс ва устуворӣ дар лоиҳаҳои калон беҳтар гардид. Ёрӣ нав шуд.,Kontekst tayyorlash jarayoni aniqroq qilindi. Interfeys silliqligi va katta loyihalardagi barqarorlik yaxshilandi. Yordam yangilandi.,L’interface est plus fluide et plus stable sur les grands projets. L’aide a été mise à jour.
-Title,4,Текст,,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex
-ShortTitle,5,Текст,,,,,,,,,,,
-SortTitle,6,Текст,,,,,,,,,,,
-VoiceTitle,7,Текст,,,,,,,,,,,
-ShortDescription,8,Текст,,"Project tree and file contents — ready context for AI chat. ASCII/JSON export, Smart Ignore, .gitignore, Git support. Preview before copying. Read-only, no telemetry.","Project tree and file contents — ready context for AI chat. ASCII/JSON export, Smart Ignore, .gitignore, Git support. Preview before copying. Read-only, no telemetry.","Дерево проекта и содержимое файлов — готовый контекст для ИИ-чата. ASCII/JSON-экспорт, Smart Ignore, .gitignore, Git-поддержка. Превью перед копированием. Только чтение, без телеметрии.","Дерево проекта и содержимое файлов — готовый контекст для ИИ-чата. ASCII/JSON-экспорт, Smart Ignore, .gitignore, Git-поддержка. Превью перед копированием. Только чтение, без телеметрии.","Жоба ағашы мен файл мазмұны - AI чатқа дайын контекст. ASCII/JSON экспорт, Smart Ignore, .gitignore, Git қолдауы. Көшіру алдында алдын ала қарау. Тек оқу, телеметриясыз.","Projektbaum und Dateiinhalte - fertiger Kontext für einen KI-Chat. ASCII/JSON-Export, Smart Ignore, .gitignore, Git-Unterstützung. Vorschau vor dem Kopieren. Nur Lesen, keine Telemetrie.","Albero del progetto e contenuto dei file - contesto pronto per una chat IA. Export ASCII/JSON, Smart Ignore, .gitignore, supporto Git. Anteprima prima della copia. Sola lettura, senza telemetria.","Дарахти лоиҳа ва мундариҷаи файлҳо - контексти тайёр барои AI-чат. Содироти ASCII/JSON, Smart Ignore, .gitignore, дастгирии Git. Пешнамоиш пеш аз нусха. Танҳо хондан, бе телеметрия.","Loyiha daraxti va fayl mazmuni - AI chat uchun tayyor kontekst. ASCII/JSON eksport, Smart Ignore, .gitignore, Git qo‘llovi. Nusxalashdan oldin preview. Faqat o‘qish, telemetriyasiz.","Arborescence du projet et contenu des fichiers - contexte prêt pour un chat IA. Export ASCII/JSON, Smart Ignore, .gitignore, prise en charge Git. Aperçu avant copie. Lecture seule, sans télémétrie."
-DevStudio,9,Текст,,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov
-CopyrightTrademarkInformation,12,Текст,,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov
-AdditionalLicenseTerms,13,Текст,,,,,,,,,,,
-DesktopScreenshot1,100,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/1_Main/EN.png,ImportFolder/Screenshots/1_Main/EN.png,ImportFolder/Screenshots/1_Main/RU.png,ImportFolder/Screenshots/1_Main/RU.png,ImportFolder/Screenshots/1_Main/KK.png,ImportFolder/Screenshots/1_Main/DE.png,ImportFolder/Screenshots/1_Main/IT.png,ImportFolder/Screenshots/1_Main/TG.png,ImportFolder/Screenshots/1_Main/UZ.png,ImportFolder/Screenshots/1_Main/FR.png
-DesktopScreenshot2,101,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/2_Loaded_Project/EN.png,ImportFolder/Screenshots/2_Loaded_Project/EN.png,ImportFolder/Screenshots/2_Loaded_Project/RU.png,ImportFolder/Screenshots/2_Loaded_Project/RU.png,ImportFolder/Screenshots/2_Loaded_Project/KK.png,ImportFolder/Screenshots/2_Loaded_Project/DE.png,ImportFolder/Screenshots/2_Loaded_Project/IT.png,ImportFolder/Screenshots/2_Loaded_Project/TG.png,ImportFolder/Screenshots/2_Loaded_Project/UZ.png,ImportFolder/Screenshots/2_Loaded_Project/FR.png
-DesktopScreenshot3,102,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/3_Tree_Preview/EN.png,ImportFolder/Screenshots/3_Tree_Preview/EN.png,ImportFolder/Screenshots/3_Tree_Preview/RU.png,ImportFolder/Screenshots/3_Tree_Preview/RU.png,ImportFolder/Screenshots/3_Tree_Preview/KK.png,ImportFolder/Screenshots/3_Tree_Preview/DE.png,ImportFolder/Screenshots/3_Tree_Preview/IT.png,ImportFolder/Screenshots/3_Tree_Preview/TG.png,ImportFolder/Screenshots/3_Tree_Preview/UZ.png,ImportFolder/Screenshots/3_Tree_Preview/FR.png
-DesktopScreenshot4,103,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/4_Filter_Preview/EN.png,ImportFolder/Screenshots/4_Filter_Preview/EN.png,ImportFolder/Screenshots/4_Filter_Preview/RU.png,ImportFolder/Screenshots/4_Filter_Preview/RU.png,ImportFolder/Screenshots/4_Filter_Preview/KK.png,ImportFolder/Screenshots/4_Filter_Preview/DE.png,ImportFolder/Screenshots/4_Filter_Preview/IT.png,ImportFolder/Screenshots/4_Filter_Preview/TG.png,ImportFolder/Screenshots/4_Filter_Preview/UZ.png,ImportFolder/Screenshots/4_Filter_Preview/FR.png
-DesktopScreenshot5,104,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/5_Tree_Preview_Settings/EN.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/EN.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/RU.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/RU.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/KK.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/DE.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/IT.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/TG.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/UZ.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/FR.png
-DesktopScreenshot6,105,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot7,106,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot8,107,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot9,108,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot10,109,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot11,110,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot12,111,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot13,112,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot14,113,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot15,114,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot16,115,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot17,116,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot18,117,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot19,118,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot20,119,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot21,120,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot22,121,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot23,122,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot24,123,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot25,124,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot26,125,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot27,126,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot28,127,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot29,128,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshot30,129,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-DesktopScreenshotCaption1,150,Текст,,,,,,,,,,,
-DesktopScreenshotCaption2,151,Текст,,,,,,,,,,,
-DesktopScreenshotCaption3,152,Текст,,,,,,,,,,,
-DesktopScreenshotCaption4,153,Текст,,,,,,,,,,,
-DesktopScreenshotCaption5,154,Текст,,,,,,,,,,,
-DesktopScreenshotCaption6,155,Текст,,,,,,,,,,,
-DesktopScreenshotCaption7,156,Текст,,,,,,,,,,,
-DesktopScreenshotCaption8,157,Текст,,,,,,,,,,,
-DesktopScreenshotCaption9,158,Текст,,,,,,,,,,,
-DesktopScreenshotCaption10,159,Текст,,,,,,,,,,,
-DesktopScreenshotCaption11,160,Текст,,,,,,,,,,,
-DesktopScreenshotCaption12,161,Текст,,,,,,,,,,,
-DesktopScreenshotCaption13,162,Текст,,,,,,,,,,,
-DesktopScreenshotCaption14,163,Текст,,,,,,,,,,,
-DesktopScreenshotCaption15,164,Текст,,,,,,,,,,,
-DesktopScreenshotCaption16,165,Текст,,,,,,,,,,,
-DesktopScreenshotCaption17,166,Текст,,,,,,,,,,,
-DesktopScreenshotCaption18,167,Текст,,,,,,,,,,,
-DesktopScreenshotCaption19,168,Текст,,,,,,,,,,,
-DesktopScreenshotCaption20,169,Текст,,,,,,,,,,,
-DesktopScreenshotCaption21,170,Текст,,,,,,,,,,,
-DesktopScreenshotCaption22,171,Текст,,,,,,,,,,,
-DesktopScreenshotCaption23,172,Текст,,,,,,,,,,,
-DesktopScreenshotCaption24,173,Текст,,,,,,,,,,,
-DesktopScreenshotCaption25,174,Текст,,,,,,,,,,,
-DesktopScreenshotCaption26,175,Текст,,,,,,,,,,,
-DesktopScreenshotCaption27,176,Текст,,,,,,,,,,,
-DesktopScreenshotCaption28,177,Текст,,,,,,,,,,,
-DesktopScreenshotCaption29,178,Текст,,,,,,,,,,,
-DesktopScreenshotCaption30,179,Текст,,,,,,,,,,,
-MobileScreenshot1,200,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot2,201,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot3,202,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot4,203,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot5,204,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot6,205,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot7,206,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot8,207,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot9,208,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot10,209,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot11,210,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot12,211,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot13,212,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot14,213,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot15,214,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot16,215,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot17,216,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot18,217,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot19,218,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot20,219,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot21,220,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot22,221,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot23,222,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot24,223,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot25,224,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot26,225,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot27,226,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot28,227,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot29,228,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshot30,229,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-MobileScreenshotCaption1,250,Текст,,,,,,,,,,,
-MobileScreenshotCaption2,251,Текст,,,,,,,,,,,
-MobileScreenshotCaption3,252,Текст,,,,,,,,,,,
-MobileScreenshotCaption4,253,Текст,,,,,,,,,,,
-MobileScreenshotCaption5,254,Текст,,,,,,,,,,,
-MobileScreenshotCaption6,255,Текст,,,,,,,,,,,
-MobileScreenshotCaption7,256,Текст,,,,,,,,,,,
-MobileScreenshotCaption8,257,Текст,,,,,,,,,,,
-MobileScreenshotCaption9,258,Текст,,,,,,,,,,,
-MobileScreenshotCaption10,259,Текст,,,,,,,,,,,
-MobileScreenshotCaption11,260,Текст,,,,,,,,,,,
-MobileScreenshotCaption12,261,Текст,,,,,,,,,,,
-MobileScreenshotCaption13,262,Текст,,,,,,,,,,,
-MobileScreenshotCaption14,263,Текст,,,,,,,,,,,
-MobileScreenshotCaption15,264,Текст,,,,,,,,,,,
-MobileScreenshotCaption16,265,Текст,,,,,,,,,,,
-MobileScreenshotCaption17,266,Текст,,,,,,,,,,,
-MobileScreenshotCaption18,267,Текст,,,,,,,,,,,
-MobileScreenshotCaption19,268,Текст,,,,,,,,,,,
-MobileScreenshotCaption20,269,Текст,,,,,,,,,,,
-MobileScreenshotCaption21,270,Текст,,,,,,,,,,,
-MobileScreenshotCaption22,271,Текст,,,,,,,,,,,
-MobileScreenshotCaption23,272,Текст,,,,,,,,,,,
-MobileScreenshotCaption24,273,Текст,,,,,,,,,,,
-MobileScreenshotCaption25,274,Текст,,,,,,,,,,,
-MobileScreenshotCaption26,275,Текст,,,,,,,,,,,
-MobileScreenshotCaption27,276,Текст,,,,,,,,,,,
-MobileScreenshotCaption28,277,Текст,,,,,,,,,,,
-MobileScreenshotCaption29,278,Текст,,,,,,,,,,,
-MobileScreenshotCaption30,279,Текст,,,,,,,,,,,
-XboxScreenshot1,300,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot2,301,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot3,302,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot4,303,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot5,304,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot6,305,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot7,306,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot8,307,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot9,308,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot10,309,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot11,310,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot12,311,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot13,312,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot14,313,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot15,314,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot16,315,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot17,316,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot18,317,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot19,318,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot20,319,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot21,320,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot22,321,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot23,322,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot24,323,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot25,324,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot26,325,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot27,326,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot28,327,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot29,328,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshot30,329,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxScreenshotCaption1,350,Текст,,,,,,,,,,,
-XboxScreenshotCaption2,351,Текст,,,,,,,,,,,
-XboxScreenshotCaption3,352,Текст,,,,,,,,,,,
-XboxScreenshotCaption4,353,Текст,,,,,,,,,,,
-XboxScreenshotCaption5,354,Текст,,,,,,,,,,,
-XboxScreenshotCaption6,355,Текст,,,,,,,,,,,
-XboxScreenshotCaption7,356,Текст,,,,,,,,,,,
-XboxScreenshotCaption8,357,Текст,,,,,,,,,,,
-XboxScreenshotCaption9,358,Текст,,,,,,,,,,,
-XboxScreenshotCaption10,359,Текст,,,,,,,,,,,
-XboxScreenshotCaption11,360,Текст,,,,,,,,,,,
-XboxScreenshotCaption12,361,Текст,,,,,,,,,,,
-XboxScreenshotCaption13,362,Текст,,,,,,,,,,,
-XboxScreenshotCaption14,363,Текст,,,,,,,,,,,
-XboxScreenshotCaption15,364,Текст,,,,,,,,,,,
-XboxScreenshotCaption16,365,Текст,,,,,,,,,,,
-XboxScreenshotCaption17,366,Текст,,,,,,,,,,,
-XboxScreenshotCaption18,367,Текст,,,,,,,,,,,
-XboxScreenshotCaption19,368,Текст,,,,,,,,,,,
-XboxScreenshotCaption20,369,Текст,,,,,,,,,,,
-XboxScreenshotCaption21,370,Текст,,,,,,,,,,,
-XboxScreenshotCaption22,371,Текст,,,,,,,,,,,
-XboxScreenshotCaption23,372,Текст,,,,,,,,,,,
-XboxScreenshotCaption24,373,Текст,,,,,,,,,,,
-XboxScreenshotCaption25,374,Текст,,,,,,,,,,,
-XboxScreenshotCaption26,375,Текст,,,,,,,,,,,
-XboxScreenshotCaption27,376,Текст,,,,,,,,,,,
-XboxScreenshotCaption28,377,Текст,,,,,,,,,,,
-XboxScreenshotCaption29,378,Текст,,,,,,,,,,,
-XboxScreenshotCaption30,379,Текст,,,,,,,,,,,
-HolographicScreenshot1,400,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot2,401,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot3,402,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot4,403,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot5,404,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot6,405,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot7,406,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot8,407,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot9,408,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot10,409,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot11,410,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot12,411,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot13,412,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot14,413,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot15,414,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot16,415,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot17,416,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot18,417,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot19,418,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot20,419,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot21,420,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot22,421,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot23,422,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot24,423,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot25,424,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot26,425,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot27,426,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot28,427,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot29,428,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshot30,429,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-HolographicScreenshotCaption1,450,Текст,,,,,,,,,,,
-HolographicScreenshotCaption2,451,Текст,,,,,,,,,,,
-HolographicScreenshotCaption3,452,Текст,,,,,,,,,,,
-HolographicScreenshotCaption4,453,Текст,,,,,,,,,,,
-HolographicScreenshotCaption5,454,Текст,,,,,,,,,,,
-HolographicScreenshotCaption6,455,Текст,,,,,,,,,,,
-HolographicScreenshotCaption7,456,Текст,,,,,,,,,,,
-HolographicScreenshotCaption8,457,Текст,,,,,,,,,,,
-HolographicScreenshotCaption9,458,Текст,,,,,,,,,,,
-HolographicScreenshotCaption10,459,Текст,,,,,,,,,,,
-HolographicScreenshotCaption11,460,Текст,,,,,,,,,,,
-HolographicScreenshotCaption12,461,Текст,,,,,,,,,,,
-HolographicScreenshotCaption13,462,Текст,,,,,,,,,,,
-HolographicScreenshotCaption14,463,Текст,,,,,,,,,,,
-HolographicScreenshotCaption15,464,Текст,,,,,,,,,,,
-HolographicScreenshotCaption16,465,Текст,,,,,,,,,,,
-HolographicScreenshotCaption17,466,Текст,,,,,,,,,,,
-HolographicScreenshotCaption18,467,Текст,,,,,,,,,,,
-HolographicScreenshotCaption19,468,Текст,,,,,,,,,,,
-HolographicScreenshotCaption20,469,Текст,,,,,,,,,,,
-HolographicScreenshotCaption21,470,Текст,,,,,,,,,,,
-HolographicScreenshotCaption22,471,Текст,,,,,,,,,,,
-HolographicScreenshotCaption23,472,Текст,,,,,,,,,,,
-HolographicScreenshotCaption24,473,Текст,,,,,,,,,,,
-HolographicScreenshotCaption25,474,Текст,,,,,,,,,,,
-HolographicScreenshotCaption26,475,Текст,,,,,,,,,,,
-HolographicScreenshotCaption27,476,Текст,,,,,,,,,,,
-HolographicScreenshotCaption28,477,Текст,,,,,,,,,,,
-HolographicScreenshotCaption29,478,Текст,,,,,,,,,,,
-HolographicScreenshotCaption30,479,Текст,,,,,,,,,,,
-SurfaceHubScreenshot11,510,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot12,511,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot13,512,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot14,513,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot15,514,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot16,515,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot17,516,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot18,517,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot19,518,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot20,519,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot21,520,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot22,521,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot23,522,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot24,523,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot25,524,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot26,525,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot27,526,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot28,527,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot29,528,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshot30,529,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-SurfaceHubScreenshotCaption11,560,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption12,561,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption13,562,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption14,563,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption15,564,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption16,565,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption17,566,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption18,567,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption19,568,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption20,569,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption21,570,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption22,571,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption23,572,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption24,573,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption25,574,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption26,575,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption27,576,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption28,577,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption29,578,Текст,,,,,,,,,,,
-SurfaceHubScreenshotCaption30,579,Текст,,,,,,,,,,,
-StoreLogo720x1080,600,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-StoreLogo1080x1080,601,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-StoreLogo300x300,602,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701563228/listings/1152922700024380166/listingassets/3030968744615288149,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701563228/listings/1152922700024380168/listingassets/3030968744615288149,,,,
-OverrideLogosForWin10,603,True/False,,False,False,False,False,False,False,False,False,False,False
-StoreLogoOverride150x150,604,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-StoreLogoOverride71x71,605,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-PromoImage1920x1080,606,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-PromoImage2400x1200,607,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxBrandedKeyArt584x800,608,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxTitledHero1920x1080,609,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-XboxFeaturedPromo1080x1080,610,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-OptionalPromo358x358,611,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-OptionalPromo1000x800,612,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-OptionalPromo414x180,613,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Feature1,700,Текст,,Live preview before copying or exporting,Live preview before copying or exporting,Превью результата перед копированием или экспортом,Превью результата перед копированием или экспортом,Көшіру немесе экспорт алдында live preview,Live-Vorschau vor dem Kopieren oder Exportieren,Anteprima live prima della copia o dell’esportazione,Пешнамоиши зинда пеш аз нусха ё содирот,Nusxalash yoki eksportdan oldin live preview,Aperçu en direct avant copie ou export
-Feature2,701,Текст,,"Copy and export: Tree, Contents, or Tree + Contents","Copy and export: Tree, Contents, or Tree + Contents","Копирование и экспорт: Дерево, Содержимое или Дерево + Содержимое","Копирование и экспорт: Дерево, Содержимое или Дерево + Содержимое","Көшіру және экспорт: Ағаш, Мазмұн немесе Ағаш + мазмұн","Kopieren und Exportieren: Baum, Inhalt oder Baum + Inhalt","Copia ed export: Albero, Contenuto o Albero + Contenuto","Нусха ва содирот: Дарахт, Мундариҷа ё Дарахт + мундариҷа","Nusxalash va eksport: Daraxt, Kontent yoki Daraxt + kontent","Copie et export : arborescence, contenu ou arborescence + contenu"
-Feature3,702,Текст,,Tree formats: ASCII and JSON,Tree formats: ASCII and JSON,Форматы дерева: ASCII и JSON,Форматы дерева: ASCII и JSON,Ағаш форматтары: ASCII және JSON,Baumformate: ASCII und JSON,Formati dell’albero: ASCII e JSON,Форматҳои дарахт: ASCII ва JSON,Daraxt formatlari: ASCII va JSON,Formats d’arborescence : ASCII et JSON
-Feature4,703,Текст,,Smart Ignore and .gitignore support,Smart Ignore and .gitignore support,Smart Ignore и поддержка .gitignore,Smart Ignore и поддержка .gitignore,Smart Ignore және .gitignore қолдауы,Smart Ignore und .gitignore-Unterstützung,Smart Ignore e supporto a .gitignore,Smart Ignore ва дастгирии .gitignore,Smart Ignore va .gitignore qo‘llovi,Smart Ignore et prise en charge de .gitignore
-Feature5,704,Текст,,"Git: clone, branches, updates","Git: clone, branches, updates","Git: клонирование, ветки, обновления","Git: клонирование, ветки, обновления","Git: клондау, branch-тар, жаңартулар","Git: Klonen, Branches, Updates","Git: clonazione, branch, aggiornamenti","Git: клон кардан, branch-ҳо, навсозиҳо","Git: klonlash, branchlar, yangilanishlar","Git : clonage, branches, mises à jour"
-Feature6,705,Текст,,Search and filtering for large codebases,Search and filtering for large codebases,Поиск и фильтрация для больших кодовых баз,Поиск и фильтрация для больших кодовых баз,Үлкен codebase үшін іздеу және сүзгілеу,Suche und Filterung für große Codebasen,Ricerca e filtraggio per codebase di grandi dimensioni,Ҷустуҷӯ ва филтркунӣ барои codebase-ҳои калон,Katta codebase uchun qidiruv va filtrlash,Recherche et filtrage pour les grandes bases de code
-Feature7,706,Текст,,"Metrics: lines, characters, ~tokens","Metrics: lines, characters, ~tokens","Метрики: строки, символы, ~токены","Метрики: строки, символы, ~токены","Метрикалар: жолдар, таңбалар, ~токендер","Metriken: Zeilen, Zeichen, ~Token","Metriche: righe, caratteri, ~token","Метрикаҳо: сатрҳо, аломатҳо, ~токенҳо","Metrikalar: satrlar, belgilar, ~tokenlar","Métriques : lignes, caractères, ~tokens"
-Feature8,707,Текст,,Local settings profiles per project,Local settings profiles per project,Локальные профили параметров для разных проектов,Локальные профили параметров для разных проектов,Әр жобаға жергілікті параметр профильдері,Lokale Einstellungsprofile pro Projekt,Profili locali delle impostazioni per progetto,Профилҳои маҳаллии танзимот барои ҳар лоиҳа,Har bir loyiha uchun lokal sozlama profillari,Profils de paramètres locaux par projet
-Feature9,708,Текст,,"Read-only, no telemetry, no cloud","Read-only, no telemetry, no cloud","Только чтение, без телеметрии и облака","Только чтение, без телеметрии и облака","Тек оқу, телеметриясыз, бұлтсыз","Nur Lesen, keine Telemetrie, keine Cloud","Sola lettura, senza telemetria e senza cloud","Танҳо хондан, бе телеметрия ва бе абр","Faqat o‘qish, telemetriyasiz, bulutsiz","Lecture seule, sans télémétrie ni cloud"
-Feature10,709,Текст,,,,,,,,,,,
-Feature11,710,Текст,,,,,,,,,,,
-Feature12,711,Текст,,,,,,,,,,,
-Feature13,712,Текст,,,,,,,,,,,
-Feature14,713,Текст,,,,,,,,,,,
-Feature15,714,Текст,,,,,,,,,,,
-Feature16,715,Текст,,,,,,,,,,,
-Feature17,716,Текст,,,,,,,,,,,
-Feature18,717,Текст,,,,,,,,,,,
-Feature19,718,Текст,,,,,,,,,,,
-Feature20,719,Текст,,,,,,,,,,,
-MinimumHardwareReq1,800,Текст,,,,,,,,,,,
-MinimumHardwareReq2,801,Текст,,,,,,,,,,,
-MinimumHardwareReq3,802,Текст,,,,,,,,,,,
-MinimumHardwareReq4,803,Текст,,,,,,,,,,,
-MinimumHardwareReq5,804,Текст,,,,,,,,,,,
-MinimumHardwareReq6,805,Текст,,,,,,,,,,,
-MinimumHardwareReq7,806,Текст,,,,,,,,,,,
-MinimumHardwareReq8,807,Текст,,,,,,,,,,,
-MinimumHardwareReq9,808,Текст,,,,,,,,,,,
-MinimumHardwareReq10,809,Текст,,,,,,,,,,,
-MinimumHardwareReq11,810,Текст,,,,,,,,,,,
-RecommendedHardwareReq1,850,Текст,,,,,,,,,,,
-RecommendedHardwareReq2,851,Текст,,,,,,,,,,,
-RecommendedHardwareReq3,852,Текст,,,,,,,,,,,
-RecommendedHardwareReq4,853,Текст,,,,,,,,,,,
-RecommendedHardwareReq5,854,Текст,,,,,,,,,,,
-RecommendedHardwareReq6,855,Текст,,,,,,,,,,,
-RecommendedHardwareReq7,856,Текст,,,,,,,,,,,
-RecommendedHardwareReq8,857,Текст,,,,,,,,,,,
-RecommendedHardwareReq9,858,Текст,,,,,,,,,,,
-RecommendedHardwareReq10,859,Текст,,,,,,,,,,,
-RecommendedHardwareReq11,860,Текст,,,,,,,,,,,
-SearchTerm1,900,Текст,,project context,project context,контекст проекта,контекст проекта,ai контексті,projektkontext,contesto progetto,контексти лоиҳа,loyiha konteksti,contexte projet
-SearchTerm2,901,Текст,,project tree,project tree,дерево проекта,дерево проекта,жоба ағашы,projektbaum,albero progetto,дарахти лоиҳа,loyiha daraxti,arborescence projet
-SearchTerm3,902,Текст,,chatgpt code,chatgpt code,chatgpt код,chatgpt код,chatgpt коды,chatgpt code,codice chatgpt,коди chatgpt,chatgpt kodi,code chatgpt
-SearchTerm4,903,Текст,,structure export,structure export,экспорт структуры,экспорт структуры,құрылым экспорты,strukturexport,export struttura,содироти сохтор,tuzilma eksporti,export structure
-SearchTerm5,904,Текст,,ai codebase,ai codebase,кодовая база,кодовая база,ai codebase,ki codebasis,codebase ia,codebase ai,ai codebase,codebase ia
-SearchTerm6,905,Текст,,git viewer,git viewer,git просмотр,git просмотр,git қарау,git viewer,vista git,git намоиш,git korish,vue git
-SearchTerm7,906,Текст,,claude context,claude context,claude контекст,claude контекст,claude контексті,claude kontext,contesto claude,контексти claude,claude konteksti,contexte claude
-TrailerToPlayAtTopOfListing,999,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer1,1000,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer2,1001,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer3,1002,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer4,1003,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer5,1004,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer6,1005,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer7,1006,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer8,1007,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer9,1008,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer10,1009,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer11,1010,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer12,1011,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer13,1012,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer14,1013,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-Trailer15,1014,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerTitle1,1020,Текст,,,,,,,,,,,
-TrailerTitle2,1021,Текст,,,,,,,,,,,
-TrailerTitle3,1022,Текст,,,,,,,,,,,
-TrailerTitle4,1023,Текст,,,,,,,,,,,
-TrailerTitle5,1024,Текст,,,,,,,,,,,
-TrailerTitle6,1025,Текст,,,,,,,,,,,
-TrailerTitle7,1026,Текст,,,,,,,,,,,
-TrailerTitle8,1027,Текст,,,,,,,,,,,
-TrailerTitle9,1028,Текст,,,,,,,,,,,
-TrailerTitle10,1029,Текст,,,,,,,,,,,
-TrailerTitle11,1030,Текст,,,,,,,,,,,
-TrailerTitle12,1031,Текст,,,,,,,,,,,
-TrailerTitle13,1032,Текст,,,,,,,,,,,
-TrailerTitle14,1033,Текст,,,,,,,,,,,
-TrailerTitle15,1034,Текст,,,,,,,,,,,
-TrailerThumbnail1,1040,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail2,1041,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail3,1042,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail4,1043,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail5,1044,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail6,1045,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail7,1046,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail8,1047,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail9,1048,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail10,1049,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail11,1050,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail12,1051,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail13,1052,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail14,1053,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerThumbnail15,1054,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption1,1055,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption2,1056,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption3,1057,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption4,1058,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption5,1059,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption6,1060,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption7,1061,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption8,1062,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption9,1063,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption10,1064,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption11,1065,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption12,1066,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption13,1067,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption14,1068,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerClosedCaption15,1069,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription1,1070,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription2,1071,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription3,1072,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription4,1073,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription5,1074,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription6,1075,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription7,1076,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription8,1077,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription9,1078,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription10,1079,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription11,1080,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription12,1081,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription13,1082,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription14,1083,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-TrailerAudioDescription15,1084,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
-,,,,,,,,,,,,,
+Smart Ignore вобастагиҳо, кешҳо ва артефактҳои сохтро худкор хориҷ мекунад. Қоидаҳои .gitignore-и лоиҳа риоя мешаванд ё метавон танҳо файлҳои аз ҷониби Git пайгиришавандаро ворид кард. Ҷузвдонҳои решавӣ, навъҳои файл, истисноҳо ва файлҳои алоҳидаи дарахт мустақилона интихоб мешаванд.
+
+Барои ҳар тарзи кор интерфейси мувофиқ мавҷуд аст: GUI барои кори аён бо лоиҳа, TUI барои терминал ва клавиатура, CLI барои скриптҳо ва CI. Натиҷаро метавон нусхабардорӣ кард ё ба ASCII, Markdown, JSON ва XML содир намуд. Файлҳои интихобшударо инчунин ба ҷузвдони алоҳида нусха бардоштан ё ба бойгонии ZIP ҷамъ кардан мумкин аст.
+
+Ҷустуҷӯ ва филтрҳо кор бо пойгоҳҳои калони кодро осон мекунанд. Метрикаҳо шумораи файлҳо, сатрҳо, аломатҳо ва шумораи тахминии токенҳоро нишон медиҳанд. Профилҳои маҳаллӣ танзимоти лоиҳаҳоро нигоҳ медоранд. Абзорҳои дарунсохти Git клон кардани репозиторийҳо, иваз кардани шохаҳо ва нав кардани кешро дастгирӣ мекунанд.
+
+DevProjex ба таври маҳаллӣ ва дар реҷаи танҳо хондан кор мекунад: файлҳои манбаъ тағйир дода намешаванд, телеметрия ҷамъ намешавад ва аккаунт лозим нест. Барои Windows, Linux ва macOS дастрас аст. Коди манбаъ дар GitHub кушода аст.","DevProjex har qanday papka yoki Git repozitoriyasini sun’iy intellekt bilan ishlash uchun toza, tayyor loyiha kontekstiga aylantiradi — loyiha tuzilmasi, fayl mazmuni yoki ikkalasi birga. Nusxalash yoki eksport qilishdan oldin natijani jonli ko‘rib chiqishda tekshirish mumkin.
+
+Smart Ignore bog‘liqliklar, keshlar va build artefaktlarini avtomatik olib tashlaydi. Loyiha .gitignore qoidalariga amal qiladi yoki faqat Git kuzatayotgan fayllarni kiritish mumkin. Ildiz papkalar, fayl turlari, istisnolar va daraxtdagi alohida fayllar bir-biridan mustaqil tanlanadi.
+
+Har bir ish usuli uchun mos interfeys bor: GUI loyihani ko‘rgazmali boshqarish, TUI terminal va klaviatura, CLI esa skriptlar va CI uchun. Natijani nusxalash yoki ASCII, Markdown, JSON va XML formatlariga eksport qilish mumkin. Tanlangan fayllarni alohida papkaga ko‘chirish yoki ZIP arxiviga joylash ham mumkin.
+
+Qidiruv va filtrlar katta kod bazalari bilan ishlashni osonlashtiradi. Metrikalar fayllar soni, satrlar, belgilar va tokenlarning taxminiy sonini ko‘rsatadi. Lokal profillar loyiha sozlamalarini saqlaydi. Ichki Git vositalari repozitoriyalarni klonlash, branch almashtirish va keshni yangilashni qo‘llab-quvvatlaydi.
+
+DevProjex lokal va faqat o‘qish rejimida ishlaydi: manba fayllar o‘zgartirilmaydi, telemetriya yig‘ilmaydi va akkaunt talab qilinmaydi. Windows, Linux va macOS uchun mavjud. Manba kod GitHub’da ochiq.","DevProjex transforme n’importe quel dossier ou dépôt Git en contexte de projet propre et prêt pour l’IA — arborescence, contenu des fichiers ou les deux. Avant la copie ou l’export, le résultat peut être vérifié dans un aperçu en direct.
+
+Smart Ignore supprime automatiquement les dépendances, les caches et les artefacts de compilation. Les règles .gitignore du projet sont respectées, avec la possibilité de ne conserver que les fichiers suivis par Git. Dossiers racines, types de fichiers, exclusions et fichiers individuels se sélectionnent indépendamment.
+
+Chaque usage dispose de son interface : GUI pour une vue visuelle, TUI pour le terminal et le clavier, CLI pour les scripts et la CI. Le résultat peut être copié ou exporté en ASCII, Markdown, JSON ou XML. Les fichiers sélectionnés peuvent aussi être copiés dans un dossier séparé ou regroupés dans une archive ZIP.
+
+La recherche et les filtres facilitent le travail sur les grandes bases de code. Les métriques indiquent le nombre de fichiers, de lignes, de caractères et une estimation des tokens. Les profils locaux mémorisent les paramètres de chaque projet. Les outils Git intégrés permettent de cloner des dépôts, changer de branche et actualiser le cache.
+
+DevProjex fonctionne localement et en lecture seule : les fichiers source ne sont pas modifiés, aucune télémétrie n’est collectée et aucun compte n’est nécessaire. Disponible sur Windows, Linux et macOS. Le code source est ouvert sur GitHub.","DevProjex convierte cualquier carpeta o repositorio Git en un contexto de proyecto limpio y listo para la IA: estructura, contenido de los archivos o ambos. Antes de copiar o exportar, el resultado se puede comprobar en una vista previa en directo.
+
+Smart Ignore elimina automáticamente dependencias, cachés y artefactos de compilación. Respeta las reglas .gitignore del proyecto o permite incluir únicamente los archivos seguidos por Git. Las carpetas raíz, los tipos de archivo, las exclusiones y los archivos individuales se seleccionan de forma independiente.
+
+Cada forma de trabajo tiene su interfaz: GUI para una vista visual, TUI para el terminal y el teclado, y CLI para scripts y CI. El resultado se puede copiar o exportar como ASCII, Markdown, JSON o XML. Los archivos seleccionados también se pueden copiar a otra carpeta o guardar en un archivo ZIP.
+
+La búsqueda y los filtros facilitan el trabajo con bases de código grandes. Las métricas muestran el número de archivos, líneas, caracteres y una estimación de tokens. Los perfiles locales guardan la configuración de cada proyecto. Las herramientas Git integradas permiten clonar repositorios, cambiar de rama y actualizar la caché.
+
+DevProjex funciona localmente y en modo de solo lectura: no modifica los archivos originales, no recopila telemetría y no requiere una cuenta. Disponible para Windows, Linux y macOS. El código fuente está abierto en GitHub.","O DevProjex transforma qualquer pasta ou repositório Git em um contexto de projeto limpo e pronto para IA — estrutura, conteúdo dos arquivos ou ambos. Antes de copiar ou exportar, você pode conferir o resultado em uma visualização ao vivo.
+
+O Smart Ignore remove automaticamente dependências, caches e artefatos de build. Ele respeita as regras .gitignore do projeto ou permite incluir somente os arquivos rastreados pelo Git. Pastas raiz, tipos de arquivo, exclusões e arquivos individuais podem ser selecionados de forma independente.
+
+Cada forma de trabalho tem sua interface: GUI para uma visão visual, TUI para terminal e teclado, e CLI para scripts e CI. O resultado pode ser copiado ou exportado em ASCII, Markdown, JSON ou XML. Os arquivos selecionados também podem ser copiados para outra pasta ou reunidos em um arquivo ZIP.
+
+Busca e filtros facilitam o trabalho com codebases grandes. As métricas mostram quantidade de arquivos, linhas, caracteres e uma estimativa de tokens. Perfis locais salvam as configurações de cada projeto. As ferramentas Git integradas permitem clonar repositórios, trocar de branch e atualizar o cache.
+
+O DevProjex funciona localmente e em modo somente leitura: os arquivos de origem não são alterados, nenhuma telemetria é coletada e não é preciso criar uma conta. Disponível para Windows, Linux e macOS. O código-fonte é aberto no GitHub.","O DevProjex transforma qualquer pasta ou repositório Git num contexto de projeto limpo e pronto para IA — estrutura, conteúdo dos ficheiros ou ambos. Antes de copiar ou exportar, pode verificar o resultado numa pré-visualização em tempo real.
+
+O Smart Ignore remove automaticamente dependências, caches e artefactos de compilação. Respeita as regras .gitignore do projeto ou permite incluir apenas os ficheiros controlados pelo Git. Pastas raiz, tipos de ficheiro, exclusões e ficheiros individuais podem ser selecionados de forma independente.
+
+Cada forma de trabalho tem a sua interface: GUI para uma vista visual, TUI para o terminal e teclado, e CLI para scripts e CI. O resultado pode ser copiado ou exportado em ASCII, Markdown, JSON ou XML. Os ficheiros selecionados também podem ser copiados para outra pasta ou reunidos num arquivo ZIP.
+
+A pesquisa e os filtros facilitam o trabalho com bases de código grandes. As métricas mostram o número de ficheiros, linhas, caracteres e uma estimativa de tokens. Os perfis locais guardam as definições de cada projeto. As ferramentas Git integradas permitem clonar repositórios, mudar de branch e atualizar a cache.
+
+O DevProjex funciona localmente e em modo só de leitura: os ficheiros de origem não são alterados, não é recolhida telemetria e não é necessária uma conta. Disponível para Windows, Linux e macOS. O código-fonte está aberto no GitHub."
+ReleaseNotes,3,Текст,,"DevProjex 5.0 adds full CLI and TUI experiences alongside the GUI, Git-tracked file mode, system theme support, and update checks. Preview and parameter workflows were refined, with smoother tree and panel animations, faster startup, and better behavior on large projects. Ignore rules, export, help, and cross-platform reliability were strengthened.","DevProjex 5.0 adds full CLI and TUI experiences alongside the GUI, Git-tracked file mode, system theme support, and update checks. Preview and parameter workflows were refined, with smoother tree and panel animations, faster startup, and better behavior on large projects. Ignore rules, export, help, and cross-platform reliability were strengthened.","В DevProjex 5.0 появились полноценные CLI и TUI в дополнение к GUI, режим только отслеживаемых Git-файлов, системная тема и проверка обновлений. Переработаны превью и работа с параметрами, улучшены анимации дерева и панелей, запуск и поведение на больших проектах. Усилены логика исключений, экспорт, справка и кроссплатформенная стабильность.","В DevProjex 5.0 появились полноценные CLI и TUI в дополнение к GUI, режим только отслеживаемых Git-файлов, системная тема и проверка обновлений. Переработаны превью и работа с параметрами, улучшены анимации дерева и панелей, запуск и поведение на больших проектах. Усилены логика исключений, экспорт, справка и кроссплатформенная стабильность.","DevProjex 5.0 нұсқасында GUI-ге толық CLI және TUI интерфейстері, Git бақылайтын файлдар режимі, жүйелік тақырып және жаңартуларды тексеру қосылды. Алдын ала қарау мен параметрлер жетілдіріліп, ағаш пен панель анимациялары, іске қосылу жылдамдығы және үлкен жобалардағы жұмыс жақсарды. Ерекшеліктер логикасы, экспорт, анықтама және кроссплатформалық тұрақтылық күшейтілді.","DevProjex 5.0 ergänzt die GUI um vollständige CLI- und TUI-Oberflächen sowie den Git-Tracked-Modus, Systemdesign-Unterstützung und Update-Prüfungen. Vorschau und Parameterabläufe wurden überarbeitet; Baum- und Panelanimationen, Startzeit und das Verhalten bei großen Projekten wurden verbessert. Ausschlusslogik, Export, Hilfe und plattformübergreifende Stabilität wurden gestärkt.","DevProjex 5.0 affianca alla GUI interfacce CLI e TUI complete, la modalità file tracciati da Git, il tema di sistema e il controllo degli aggiornamenti. Anteprima e parametri sono stati perfezionati, con animazioni più fluide, avvio più rapido e migliore gestione dei progetti grandi. Rafforzate logica delle esclusioni, esportazione, guida e affidabilità multipiattaforma.","Дар DevProjex 5.0 ба GUI интерфейсҳои пурраи CLI ва TUI, реҷаи файлҳои пайгиришавандаи Git, мавзӯи система ва санҷиши навсозиҳо илова шуданд. Пешнамоиш ва танзимот такмил ёфта, аниматсияҳо, оғози барнома ва кор бо лоиҳаҳои калон беҳтар шуданд. Мантиқи истисноҳо, содирот, ёрӣ ва устувории кроссплатформавӣ низ мустаҳкам гардиданд.","DevProjex 5.0 versiyasida GUI bilan birga to‘liq CLI va TUI interfeyslari, Git kuzatadigan fayllar rejimi, tizim mavzusi va yangilanishlarni tekshirish qo‘shildi. Ko‘rib chiqish va parametrlar jarayoni yaxshilanib, animatsiyalar, ishga tushish tezligi va katta loyihalardagi ishlash takomillashtirildi. Istisnolar mantiqi, eksport, yordam va kross-platforma barqarorligi kuchaytirildi.","DevProjex 5.0 ajoute des interfaces CLI et TUI complètes aux côtés de la GUI, le mode fichiers suivis par Git, le thème système et la recherche de mises à jour. Les parcours d’aperçu et de paramètres ont été affinés, avec des animations plus fluides, un démarrage plus rapide et un meilleur comportement sur les grands projets. Les exclusions, l’export, l’aide et la fiabilité multiplateforme ont été renforcés.","DevProjex 5.0 incorpora experiencias CLI y TUI completas junto a la GUI, el modo de archivos seguidos por Git, el tema del sistema y la búsqueda de actualizaciones. Se han perfeccionado la vista previa y los parámetros, con animaciones más fluidas, un inicio más rápido y mejor comportamiento en proyectos grandes. También se han reforzado las exclusiones, la exportación, la ayuda y la fiabilidad multiplataforma.","O DevProjex 5.0 adiciona experiências completas de CLI e TUI ao lado da GUI, modo de arquivos rastreados pelo Git, tema do sistema e verificação de atualizações. A visualização e os parâmetros foram refinados, com animações mais suaves, inicialização mais rápida e melhor comportamento em projetos grandes. Exclusões, exportação, ajuda e confiabilidade multiplataforma também foram reforçadas.","O DevProjex 5.0 acrescenta experiências completas de CLI e TUI à GUI, modo de ficheiros controlados pelo Git, tema do sistema e pesquisa de atualizações. A pré-visualização e as definições foram aperfeiçoadas, com animações mais fluidas, arranque mais rápido e melhor comportamento em projetos grandes. As exclusões, exportação, ajuda e fiabilidade multiplataforma também foram reforçadas."
+Title,4,Текст,,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex
+ShortTitle,5,Текст,,,,,,,,,,,,,,
+SortTitle,6,Текст,,,,,,,,,,,,,,
+VoiceTitle,7,Текст,,,,,,,,,,,,,,
+ShortDescription,8,Текст,,"DevProjex turns your project into clean codebase context for ChatGPT, Claude, and other AI tools — from any folder or Git repository. Smart Ignore automatically strips out dependencies, caches, and build artifacts, with support for .gitignore and Git-tracked mode. GUI, TUI, and CLI in one app. Export to ASCII, Markdown, JSON, XML, or ZIP. Local, no signup, read-only.","DevProjex turns your project into clean codebase context for ChatGPT, Claude, and other AI tools — from any folder or Git repository. Smart Ignore automatically strips out dependencies, caches, and build artifacts, with support for .gitignore and Git-tracked mode. GUI, TUI, and CLI in one app. Export to ASCII, Markdown, JSON, XML, or ZIP. Local, no signup, read-only.","DevProjex превращает проект в чистый контекст для ChatGPT, Claude и других ИИ — из папки или Git-репозитория. Smart Ignore автоматически убирает зависимости, кэши и артефакты сборки, поддерживаются .gitignore и режим Git-tracked файлов. GUI, TUI и CLI в одном приложении. Экспорт в ASCII, Markdown, JSON, XML или ZIP. Локально, без регистрации, read-only.","DevProjex превращает проект в чистый контекст для ChatGPT, Claude и других ИИ — из папки или Git-репозитория. Smart Ignore автоматически убирает зависимости, кэши и артефакты сборки, поддерживаются .gitignore и режим Git-tracked файлов. GUI, TUI и CLI в одном приложении. Экспорт в ASCII, Markdown, JSON, XML или ZIP. Локально, без регистрации, read-only.","DevProjex кез келген бума не Git репозиторийінен ChatGPT, Claude және басқа ЖИ құралдарына арналған таза код контекстін жасайды. Smart Ignore тәуелділіктерді, кэштерді және құрастыру артефактілерін автоматты түрде алып тастайды; .gitignore және Git бақылайтын файлдар режимі қолданылады. GUI, TUI және CLI бір қолданбада. ASCII, Markdown, JSON, XML немесе ZIP экспорты. Жергілікті, тіркелусіз, тек оқу режимінде.","DevProjex verwandelt Projekte aus Ordnern oder Git-Repositories in sauberen Codebase-Kontext für ChatGPT, Claude und andere KI-Tools. Smart Ignore entfernt Abhängigkeiten, Caches und Build-Artefakte; .gitignore und Git-Tracked-Modus werden unterstützt. GUI, TUI und CLI in einer App. Export als ASCII, Markdown, JSON, XML oder ZIP. Lokal, ohne Anmeldung, schreibgeschützt.","DevProjex trasforma qualsiasi cartella o repository Git in un contesto pulito per ChatGPT, Claude e altri strumenti IA. Smart Ignore elimina automaticamente dipendenze, cache e artefatti di build, con supporto per .gitignore e modalità file tracciati da Git. GUI, TUI e CLI in un’unica app. Export in ASCII, Markdown, JSON, XML o ZIP. Locale, senza registrazione, in sola lettura.","DevProjex ҳар ҷузвдон ё репозитории Git-ро ба контексти тозаи код барои ChatGPT, Claude ва дигар абзорҳои зеҳни сунъӣ табдил медиҳад. Smart Ignore вобастагиҳо, кешҳо ва артефактҳои сохтро худкор хориҷ мекунад; .gitignore ва реҷаи файлҳои пайгиришавандаи Git дастгирӣ мешаванд. GUI, TUI ва CLI дар як барнома. Содирот ба ASCII, Markdown, JSON, XML ё ZIP. Маҳаллӣ, бе сабти ном, танҳо хондан.","DevProjex har qanday papka yoki Git repozitoriyasini ChatGPT, Claude va boshqa AI vositalari uchun toza kod kontekstiga aylantiradi. Smart Ignore bog‘liqliklar, keshlar va build artefaktlarini avtomatik olib tashlaydi; .gitignore va Git kuzatadigan fayllar rejimi qo‘llanadi. GUI, TUI va CLI bitta ilovada. ASCII, Markdown, JSON, XML yoki ZIP eksporti. Lokal, ro‘yxatdan o‘tmasdan, faqat o‘qish rejimida.","DevProjex transforme tout dossier ou dépôt Git en contexte de code propre pour ChatGPT, Claude et d’autres outils d’IA. Smart Ignore retire automatiquement dépendances, caches et artefacts de compilation, avec prise en charge de .gitignore et du mode fichiers suivis par Git. GUI, TUI et CLI dans une seule application. Export en ASCII, Markdown, JSON, XML ou ZIP. Local, sans inscription, en lecture seule.","DevProjex convierte cualquier carpeta o repositorio Git en contexto de código limpio para ChatGPT, Claude y otras herramientas de IA. Smart Ignore elimina dependencias, cachés y artefactos de compilación, con soporte para .gitignore y archivos seguidos por Git. GUI, TUI y CLI en una sola aplicación. Exportación a ASCII, Markdown, JSON, XML o ZIP. Local, sin registro y de solo lectura.","O DevProjex transforma qualquer pasta ou repositório Git em contexto de código limpo para ChatGPT, Claude e outras ferramentas de IA. O Smart Ignore remove dependências, caches e artefatos de build, com suporte a .gitignore e arquivos rastreados pelo Git. GUI, TUI e CLI em um só app. Exporte para ASCII, Markdown, JSON, XML ou ZIP. Local, sem cadastro e somente leitura.","O DevProjex transforma qualquer pasta ou repositório Git em contexto de código limpo para ChatGPT, Claude e outras ferramentas de IA. O Smart Ignore remove dependências, caches e artefactos de compilação, com suporte para .gitignore e ficheiros controlados pelo Git. GUI, TUI e CLI numa só aplicação. Exporte para ASCII, Markdown, JSON, XML ou ZIP. Local, sem registo e só de leitura."
+DevStudio,9,Текст,,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov
+CopyrightTrademarkInformation,12,Текст,,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov
+AdditionalLicenseTerms,13,Текст,,,,,,,,,,,,,,
+DesktopScreenshot1,100,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/1_Main/EN.png,ImportFolder/Screenshots/1_Main/EN.png,ImportFolder/Screenshots/1_Main/RU.png,ImportFolder/Screenshots/1_Main/RU.png,ImportFolder/Screenshots/1_Main/KK.png,ImportFolder/Screenshots/1_Main/DE.png,ImportFolder/Screenshots/1_Main/IT.png,ImportFolder/Screenshots/1_Main/TG.png,ImportFolder/Screenshots/1_Main/UZ.png,ImportFolder/Screenshots/1_Main/FR.png,ImportFolder/Screenshots/1_Main/ES.png,ImportFolder/Screenshots/1_Main/PT.png,ImportFolder/Screenshots/1_Main/PT-PT.png
+DesktopScreenshot2,101,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/2_Loaded_Project/EN.png,ImportFolder/Screenshots/2_Loaded_Project/EN.png,ImportFolder/Screenshots/2_Loaded_Project/RU.png,ImportFolder/Screenshots/2_Loaded_Project/RU.png,ImportFolder/Screenshots/2_Loaded_Project/KK.png,ImportFolder/Screenshots/2_Loaded_Project/DE.png,ImportFolder/Screenshots/2_Loaded_Project/IT.png,ImportFolder/Screenshots/2_Loaded_Project/TG.png,ImportFolder/Screenshots/2_Loaded_Project/UZ.png,ImportFolder/Screenshots/2_Loaded_Project/FR.png,ImportFolder/Screenshots/2_Loaded_Project/ES.png,ImportFolder/Screenshots/2_Loaded_Project/PT.png,ImportFolder/Screenshots/2_Loaded_Project/PT-PT.png
+DesktopScreenshot3,102,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/3_Tree_Preview/EN.png,ImportFolder/Screenshots/3_Tree_Preview/EN.png,ImportFolder/Screenshots/3_Tree_Preview/RU.png,ImportFolder/Screenshots/3_Tree_Preview/RU.png,ImportFolder/Screenshots/3_Tree_Preview/KK.png,ImportFolder/Screenshots/3_Tree_Preview/DE.png,ImportFolder/Screenshots/3_Tree_Preview/IT.png,ImportFolder/Screenshots/3_Tree_Preview/TG.png,ImportFolder/Screenshots/3_Tree_Preview/UZ.png,ImportFolder/Screenshots/3_Tree_Preview/FR.png,ImportFolder/Screenshots/3_Tree_Preview/ES.png,ImportFolder/Screenshots/3_Tree_Preview/PT.png,ImportFolder/Screenshots/3_Tree_Preview/PT-PT.png
+DesktopScreenshot4,103,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/4_Filter_Preview/EN.png,ImportFolder/Screenshots/4_Filter_Preview/EN.png,ImportFolder/Screenshots/4_Filter_Preview/RU.png,ImportFolder/Screenshots/4_Filter_Preview/RU.png,ImportFolder/Screenshots/4_Filter_Preview/KK.png,ImportFolder/Screenshots/4_Filter_Preview/DE.png,ImportFolder/Screenshots/4_Filter_Preview/IT.png,ImportFolder/Screenshots/4_Filter_Preview/TG.png,ImportFolder/Screenshots/4_Filter_Preview/UZ.png,ImportFolder/Screenshots/4_Filter_Preview/FR.png,ImportFolder/Screenshots/4_Filter_Preview/ES.png,ImportFolder/Screenshots/4_Filter_Preview/PT.png,ImportFolder/Screenshots/4_Filter_Preview/PT-PT.png
+DesktopScreenshot5,104,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/Screenshots/5_Tree_Preview_Settings/EN.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/EN.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/RU.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/RU.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/KK.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/DE.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/IT.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/TG.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/UZ.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/FR.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/ES.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/PT.png,ImportFolder/Screenshots/5_Tree_Preview_Settings/PT-PT.png
+DesktopScreenshot6,105,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot7,106,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot8,107,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot9,108,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot10,109,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot11,110,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot12,111,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot13,112,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot14,113,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot15,114,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot16,115,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot17,116,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot18,117,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot19,118,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot20,119,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot21,120,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot22,121,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot23,122,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot24,123,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot25,124,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot26,125,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot27,126,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot28,127,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot29,128,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshot30,129,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+DesktopScreenshotCaption1,150,Текст,,Open a local folder or Git repository,Open a local folder or Git repository,Открытие локальной папки или Git-репозитория,Открытие локальной папки или Git-репозитория,Жергілікті буманы немесе Git репозиторийін ашу,Lokalen Ordner oder Git-Repository öffnen,Apri una cartella locale o un repository Git,Кушодани ҷузвдони маҳаллӣ ё репозитории Git,Lokal papka yoki Git repozitoriyasini ochish,Ouvrir un dossier local ou un dépôt Git,Abre una carpeta local o un repositorio Git,Abra uma pasta local ou um repositório Git,Abra uma pasta local ou um repositório Git
+DesktopScreenshotCaption2,151,Текст,,Explore the project tree and choose exactly what to include,Explore the project tree and choose exactly what to include,Просмотр дерева проекта и точный выбор файлов,Просмотр дерева проекта и точный выбор файлов,"Жоба ағашын қарап, қажетті файлдарды дәл таңдау",Projektbaum erkunden und Dateien präzise auswählen,Esplora l’albero e scegli con precisione i file,Дидани дарахти лоиҳа ва интихоби дақиқи файлҳо,Loyiha daraxtini ko‘rish va fayllarni aniq tanlash,Explorer l’arborescence et choisir précisément les fichiers,Explora el árbol y elige con precisión los archivos,Explore a árvore e escolha exatamente o que incluir,Explore a árvore e escolha exatamente o que incluir
+DesktopScreenshotCaption3,152,Текст,,Preview project structure and file contents before export,Preview project structure and file contents before export,Предпросмотр структуры и содержимого перед экспортом,Предпросмотр структуры и содержимого перед экспортом,Экспорт алдында құрылым мен файл мазмұнын тексеру,Projektstruktur und Dateiinhalte vor dem Export prüfen,Controlla struttura e contenuto prima dell’esportazione,Санҷиши сохтор ва мундариҷа пеш аз содирот,Eksportdan oldin tuzilma va fayl mazmunini tekshirish,Vérifier la structure et le contenu avant l’export,Comprueba la estructura y el contenido antes de exportar,Confira a estrutura e os arquivos antes de exportar,Verifique a estrutura e os ficheiros antes de exportar
+DesktopScreenshotCaption4,153,Текст,,Filter large projects and inspect the resulting context,Filter large projects and inspect the resulting context,Фильтрация больших проектов и проверка контекста,Фильтрация больших проектов и проверка контекста,Үлкен жобаларды сүзу және дайын контексті қарау,Große Projekte filtern und den Kontext kontrollieren,Filtra i progetti grandi e verifica il contesto ottenuto,Филтр кардани лоиҳаҳои калон ва санҷиши контекст,Katta loyihalarni filtrlash va tayyor kontekstni ko‘rish,Filtrer les grands projets et contrôler le contexte obtenu,Filtra proyectos grandes y revisa el contexto resultante,Filtre projetos grandes e revise o contexto gerado,Filtre projetos grandes e reveja o contexto gerado
+DesktopScreenshotCaption5,154,Текст,,"Control exclusions, file types, top-level folders, and Git mode","Control exclusions, file types, top-level folders, and Git mode","Настройка исключений, расширений, корневых папок и Git-режима","Настройка исключений, расширений, корневых папок и Git-режима","Ерекшеліктерді, файл түрлерін, түбірлік бумаларды және Git режимін басқару","Ausschlüsse, Dateitypen, Stammordner und Git-Modus steuern","Gestisci esclusioni, tipi di file, cartelle radice e modalità Git","Идораи истисноҳо, навъҳои файл, ҷузвдонҳои решавӣ ва реҷаи Git","Istisnolar, fayl turlari, ildiz papkalar va Git rejimini boshqarish","Gérer exclusions, types de fichiers, dossiers racines et mode Git","Controla exclusiones, tipos de archivo, carpetas raíz y modo Git","Controle exclusões, tipos de arquivo, pastas raiz e modo Git","Controle exclusões, tipos de ficheiro, pastas raiz e modo Git"
+DesktopScreenshotCaption6,155,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption7,156,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption8,157,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption9,158,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption10,159,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption11,160,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption12,161,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption13,162,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption14,163,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption15,164,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption16,165,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption17,166,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption18,167,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption19,168,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption20,169,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption21,170,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption22,171,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption23,172,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption24,173,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption25,174,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption26,175,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption27,176,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption28,177,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption29,178,Текст,,,,,,,,,,,,,,
+DesktopScreenshotCaption30,179,Текст,,,,,,,,,,,,,,
+MobileScreenshot1,200,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot2,201,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot3,202,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot4,203,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot5,204,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot6,205,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot7,206,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot8,207,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot9,208,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot10,209,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot11,210,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot12,211,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot13,212,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot14,213,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot15,214,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot16,215,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot17,216,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot18,217,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot19,218,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot20,219,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot21,220,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot22,221,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot23,222,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot24,223,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot25,224,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot26,225,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot27,226,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot28,227,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot29,228,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshot30,229,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+MobileScreenshotCaption1,250,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption2,251,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption3,252,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption4,253,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption5,254,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption6,255,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption7,256,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption8,257,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption9,258,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption10,259,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption11,260,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption12,261,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption13,262,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption14,263,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption15,264,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption16,265,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption17,266,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption18,267,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption19,268,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption20,269,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption21,270,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption22,271,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption23,272,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption24,273,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption25,274,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption26,275,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption27,276,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption28,277,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption29,278,Текст,,,,,,,,,,,,,,
+MobileScreenshotCaption30,279,Текст,,,,,,,,,,,,,,
+XboxScreenshot1,300,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot2,301,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot3,302,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot4,303,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot5,304,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot6,305,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot7,306,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot8,307,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot9,308,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot10,309,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot11,310,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot12,311,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot13,312,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot14,313,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot15,314,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot16,315,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot17,316,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot18,317,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot19,318,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot20,319,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot21,320,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot22,321,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot23,322,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot24,323,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot25,324,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot26,325,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot27,326,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot28,327,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot29,328,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshot30,329,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxScreenshotCaption1,350,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption2,351,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption3,352,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption4,353,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption5,354,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption6,355,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption7,356,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption8,357,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption9,358,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption10,359,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption11,360,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption12,361,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption13,362,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption14,363,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption15,364,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption16,365,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption17,366,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption18,367,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption19,368,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption20,369,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption21,370,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption22,371,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption23,372,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption24,373,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption25,374,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption26,375,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption27,376,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption28,377,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption29,378,Текст,,,,,,,,,,,,,,
+XboxScreenshotCaption30,379,Текст,,,,,,,,,,,,,,
+HolographicScreenshot1,400,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot2,401,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot3,402,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot4,403,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot5,404,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot6,405,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot7,406,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot8,407,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot9,408,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot10,409,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot11,410,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot12,411,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot13,412,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot14,413,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot15,414,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot16,415,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot17,416,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot18,417,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot19,418,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot20,419,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot21,420,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot22,421,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot23,422,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot24,423,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot25,424,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot26,425,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot27,426,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot28,427,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot29,428,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshot30,429,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+HolographicScreenshotCaption1,450,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption2,451,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption3,452,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption4,453,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption5,454,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption6,455,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption7,456,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption8,457,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption9,458,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption10,459,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption11,460,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption12,461,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption13,462,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption14,463,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption15,464,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption16,465,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption17,466,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption18,467,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption19,468,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption20,469,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption21,470,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption22,471,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption23,472,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption24,473,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption25,474,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption26,475,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption27,476,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption28,477,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption29,478,Текст,,,,,,,,,,,,,,
+HolographicScreenshotCaption30,479,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshot11,510,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot12,511,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot13,512,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot14,513,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot15,514,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot16,515,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot17,516,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot18,517,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot19,518,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot20,519,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot21,520,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot22,521,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot23,522,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot24,523,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot25,524,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot26,525,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot27,526,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot28,527,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot29,528,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshot30,529,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption11,560,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption12,561,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption13,562,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption14,563,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption15,564,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption16,565,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption17,566,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption18,567,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption19,568,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption20,569,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption21,570,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption22,571,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption23,572,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption24,573,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption25,574,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption26,575,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption27,576,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption28,577,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption29,578,Текст,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption30,579,Текст,,,,,,,,,,,,,,
+StoreLogo720x1080,600,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+StoreLogo1080x1080,601,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+StoreLogo300x300,602,Относительный путь (или URL-адрес файла в Центре партнеров),,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png,ImportFolder/StoreAssets/StoreLogo300x300.png
+OverrideLogosForWin10,603,True/False,,False,False,False,False,False,False,False,False,False,False,False,False,False
+StoreLogoOverride150x150,604,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+StoreLogoOverride71x71,605,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+PromoImage1920x1080,606,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+PromoImage2400x1200,607,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxBrandedKeyArt584x800,608,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxTitledHero1920x1080,609,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+XboxFeaturedPromo1080x1080,610,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+OptionalPromo358x358,611,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+OptionalPromo1000x800,612,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+OptionalPromo414x180,613,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Feature1,700,Текст,,"Clean project context for ChatGPT, Claude, and other AI tools","Clean project context for ChatGPT, Claude, and other AI tools","Чистый контекст проекта для ChatGPT, Claude и других ИИ","Чистый контекст проекта для ChatGPT, Claude и других ИИ","ChatGPT, Claude және басқа ЖИ құралдарына арналған таза контекст","Sauberer Projektkontext für ChatGPT, Claude und andere KI-Tools","Contesto pulito per ChatGPT, Claude e altri strumenti IA","Контексти тоза барои ChatGPT, Claude ва дигар абзорҳои AI","ChatGPT, Claude va boshqa AI vositalari uchun toza kontekst","Contexte de projet propre pour ChatGPT, Claude et autres IA","Contexto limpio para ChatGPT, Claude y otras herramientas de IA","Contexto limpo para ChatGPT, Claude e outras ferramentas de IA","Contexto limpo para ChatGPT, Claude e outras ferramentas de IA"
+Feature2,701,Текст,,"GUI, TUI, and CLI in one application","GUI, TUI, and CLI in one application","GUI, TUI и CLI в одном приложении","GUI, TUI и CLI в одном приложении","GUI, TUI және CLI бір қолданбада","GUI, TUI und CLI in einer Anwendung","GUI, TUI e CLI in un’unica applicazione","GUI, TUI ва CLI дар як барнома","GUI, TUI va CLI bitta ilovada","GUI, TUI et CLI dans une seule application","GUI, TUI y CLI en una sola aplicación","GUI, TUI e CLI em um só aplicativo","GUI, TUI e CLI numa só aplicação"
+Feature3,702,Текст,,Live preview of the project tree and file contents,Live preview of the project tree and file contents,Живое превью дерева проекта и содержимого файлов,Живое превью дерева проекта и содержимого файлов,Жоба ағашы мен файл мазмұнының тікелей көрінісі,Live-Vorschau von Projektbaum und Dateiinhalten,Anteprima live dell’albero del progetto e dei file,Пешнамоиши зиндаи дарахт ва мундариҷаи файлҳо,Loyiha daraxti va fayl mazmunining jonli ko‘rinishi,Aperçu en direct de l’arborescence et des fichiers,Vista previa en directo del árbol y los archivos,Visualização ao vivo da árvore e do conteúdo dos arquivos,Pré-visualização da árvore e do conteúdo dos ficheiros
+Feature4,703,Текст,,"Smart Ignore, .gitignore, and Git-tracked mode","Smart Ignore, .gitignore, and Git-tracked mode","Smart Ignore, .gitignore и режим отслеживаемых Git-файлов","Smart Ignore, .gitignore и режим отслеживаемых Git-файлов","Smart Ignore, .gitignore және Git бақылайтын файлдар режимі","Smart Ignore, .gitignore und Git-Tracked-Modus","Smart Ignore, .gitignore e modalità file tracciati da Git","Smart Ignore, .gitignore ва реҷаи файлҳои пайгиришавандаи Git","Smart Ignore, .gitignore va Git kuzatadigan fayllar rejimi","Smart Ignore, .gitignore et mode fichiers suivis par Git","Smart Ignore, .gitignore y modo de archivos seguidos por Git","Smart Ignore, .gitignore e arquivos rastreados pelo Git","Smart Ignore, .gitignore e ficheiros controlados pelo Git"
+Feature5,704,Текст,,"Independent selection of folders, file types, and files","Independent selection of folders, file types, and files","Независимый выбор папок, расширений и отдельных файлов","Независимый выбор папок, расширений и отдельных файлов","Бумаларды, файл түрлерін және файлдарды тәуелсіз таңдау","Unabhängige Auswahl von Ordnern, Dateitypen und Dateien","Selezione indipendente di cartelle, tipi di file e file","Интихоби мустақили ҷузвдонҳо, навъҳо ва файлҳо","Papkalar, fayl turlari va fayllarni mustaqil tanlash","Sélection indépendante des dossiers, types et fichiers","Selección independiente de carpetas, tipos y archivos","Seleção independente de pastas, tipos e arquivos","Seleção independente de pastas, tipos e ficheiros"
+Feature6,705,Текст,,"Copy or export as ASCII, Markdown, JSON, and XML","Copy or export as ASCII, Markdown, JSON, and XML","Копирование и экспорт в ASCII, Markdown, JSON и XML","Копирование и экспорт в ASCII, Markdown, JSON и XML","ASCII, Markdown, JSON және XML түрінде көшіру және экспорт","Kopieren und Export als ASCII, Markdown, JSON und XML","Copia ed esportazione in ASCII, Markdown, JSON e XML","Нусхабардорӣ ва содирот ба ASCII, Markdown, JSON ва XML","ASCII, Markdown, JSON va XML formatida nusxalash va eksport","Copie et export en ASCII, Markdown, JSON et XML","Copia y exportación en ASCII, Markdown, JSON y XML","Cópia e exportação em ASCII, Markdown, JSON e XML","Cópia e exportação em ASCII, Markdown, JSON e XML"
+Feature7,706,Текст,,Export selected files to a folder or ZIP archive,Export selected files to a folder or ZIP archive,Экспорт выбранных файлов в папку или ZIP-архив,Экспорт выбранных файлов в папку или ZIP-архив,Таңдалған файлдарды бумаға немесе ZIP мұрағатына экспорттау,Ausgewählte Dateien als Ordner oder ZIP-Archiv exportieren,Esportazione dei file selezionati in cartella o archivio ZIP,Содироти файлҳои интихобшуда ба ҷузвдон ё ZIP,Tanlangan fayllarni papka yoki ZIP arxiviga eksport qilish,Export des fichiers sélectionnés vers un dossier ou une archive ZIP,Exportación de archivos seleccionados a carpeta o ZIP,Exportação dos arquivos selecionados para pasta ou ZIP,Exportação dos ficheiros selecionados para pasta ou ZIP
+Feature8,707,Текст,,"Search, filters, and line, character, and token metrics","Search, filters, and line, character, and token metrics","Поиск, фильтры и метрики строк, символов и токенов","Поиск, фильтры и метрики строк, символов и токенов","Іздеу, сүзгілер және жол, таңба, токен метрикалары","Suche, Filter sowie Zeilen-, Zeichen- und Tokenmetriken","Ricerca, filtri e metriche di righe, caratteri e token","Ҷустуҷӯ, филтрҳо ва метрикаҳои сатр, аломат ва токен","Qidiruv, filtrlar va satr, belgi, token metrikalari","Recherche, filtres et métriques de lignes, caractères et tokens","Búsqueda, filtros y métricas de líneas, caracteres y tokens","Busca, filtros e métricas de linhas, caracteres e tokens","Pesquisa, filtros e métricas de linhas, caracteres e tokens"
+Feature9,708,Текст,,Local profiles and built-in Git workflows,Local profiles and built-in Git workflows,Локальные профили и встроенные Git-инструменты,Локальные профили и встроенные Git-инструменты,Жергілікті профильдер және кірістірілген Git құралдары,Lokale Profile und integrierte Git-Abläufe,Profili locali e strumenti Git integrati,Профилҳои маҳаллӣ ва абзорҳои дарунсохти Git,Lokal profillar va ichki Git vositalari,Profils locaux et outils Git intégrés,Perfiles locales y herramientas Git integradas,Perfis locais e ferramentas Git integradas,Perfis locais e ferramentas Git integradas
+Feature10,709,Текст,,"Local, read-only, with no telemetry or account required","Local, read-only, with no telemetry or account required","Локальная работа, read-only, без телеметрии и аккаунта","Локальная работа, read-only, без телеметрии и аккаунта","Жергілікті, тек оқу режимінде, телеметриясыз және тіркелгісіз","Lokal, schreibgeschützt, ohne Telemetrie oder Konto","Locale, sola lettura, senza telemetria né account","Маҳаллӣ, танҳо хондан, бе телеметрия ва аккаунт","Lokal, faqat o‘qish, telemetriyasiz va akkauntsiz","Local, en lecture seule, sans télémétrie ni compte","Local, solo lectura, sin telemetría ni cuenta","Local, somente leitura, sem telemetria nem conta","Local, só de leitura, sem telemetria nem conta"
+Feature11,710,Текст,,,,,,,,,,,,,,
+Feature12,711,Текст,,,,,,,,,,,,,,
+Feature13,712,Текст,,,,,,,,,,,,,,
+Feature14,713,Текст,,,,,,,,,,,,,,
+Feature15,714,Текст,,,,,,,,,,,,,,
+Feature16,715,Текст,,,,,,,,,,,,,,
+Feature17,716,Текст,,,,,,,,,,,,,,
+Feature18,717,Текст,,,,,,,,,,,,,,
+Feature19,718,Текст,,,,,,,,,,,,,,
+Feature20,719,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq1,800,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq2,801,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq3,802,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq4,803,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq5,804,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq6,805,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq7,806,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq8,807,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq9,808,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq10,809,Текст,,,,,,,,,,,,,,
+MinimumHardwareReq11,810,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq1,850,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq2,851,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq3,852,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq4,853,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq5,854,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq6,855,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq7,856,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq8,857,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq9,858,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq10,859,Текст,,,,,,,,,,,,,,
+RecommendedHardwareReq11,860,Текст,,,,,,,,,,,,,,
+SearchTerm1,900,Текст,,project context,project context,контекст проекта,контекст проекта,жоба контексті,Projektkontext,contesto progetto,контексти лоиҳа,loyiha konteksti,contexte projet,contexto proyecto,contexto projeto,contexto projeto
+SearchTerm2,901,Текст,,AI codebase,AI codebase,код для ИИ,код для ИИ,ЖИ код базасы,KI Codebasis,codice per IA,код барои AI,AI kod bazasi,code pour IA,código para IA,código para IA,código para IA
+SearchTerm3,902,Текст,,ChatGPT code,ChatGPT code,ChatGPT код,ChatGPT код,ChatGPT коды,ChatGPT Code,codice ChatGPT,коди ChatGPT,ChatGPT kodi,code ChatGPT,código ChatGPT,código ChatGPT,código ChatGPT
+SearchTerm4,903,Текст,,Claude context,Claude context,Claude контекст,Claude контекст,Claude контексті,Claude Kontext,contesto Claude,контексти Claude,Claude konteksti,contexte Claude,contexto Claude,contexto Claude,contexto Claude
+SearchTerm5,904,Текст,,project tree,project tree,дерево проекта,дерево проекта,жоба ағашы,Projektbaum,albero progetto,дарахти лоиҳа,loyiha daraxti,arborescence projet,árbol proyecto,árvore projeto,árvore projeto
+SearchTerm6,905,Текст,,token counter,token counter,подсчёт токенов,подсчёт токенов,токен санау,Token zählen,conteggio token,ҳисоби токенҳо,token hisoblash,compteur tokens,contador tokens,contador tokens,contagem tokens
+SearchTerm7,906,Текст,,gitignore viewer,gitignore viewer,просмотр gitignore,просмотр gitignore,gitignore қарау,gitignore Viewer,visualizzatore gitignore,намоиши gitignore,gitignore ko‘rish,visionneuse gitignore,visor gitignore,visualizador gitignore,visualizador gitignore
+TrailerToPlayAtTopOfListing,999,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer1,1000,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer2,1001,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer3,1002,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer4,1003,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer5,1004,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer6,1005,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer7,1006,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer8,1007,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer9,1008,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer10,1009,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer11,1010,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer12,1011,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer13,1012,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer14,1013,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+Trailer15,1014,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerTitle1,1020,Текст,,,,,,,,,,,,,,
+TrailerTitle2,1021,Текст,,,,,,,,,,,,,,
+TrailerTitle3,1022,Текст,,,,,,,,,,,,,,
+TrailerTitle4,1023,Текст,,,,,,,,,,,,,,
+TrailerTitle5,1024,Текст,,,,,,,,,,,,,,
+TrailerTitle6,1025,Текст,,,,,,,,,,,,,,
+TrailerTitle7,1026,Текст,,,,,,,,,,,,,,
+TrailerTitle8,1027,Текст,,,,,,,,,,,,,,
+TrailerTitle9,1028,Текст,,,,,,,,,,,,,,
+TrailerTitle10,1029,Текст,,,,,,,,,,,,,,
+TrailerTitle11,1030,Текст,,,,,,,,,,,,,,
+TrailerTitle12,1031,Текст,,,,,,,,,,,,,,
+TrailerTitle13,1032,Текст,,,,,,,,,,,,,,
+TrailerTitle14,1033,Текст,,,,,,,,,,,,,,
+TrailerTitle15,1034,Текст,,,,,,,,,,,,,,
+TrailerThumbnail1,1040,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail2,1041,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail3,1042,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail4,1043,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail5,1044,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail6,1045,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail7,1046,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail8,1047,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail9,1048,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail10,1049,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail11,1050,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail12,1051,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail13,1052,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail14,1053,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerThumbnail15,1054,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption1,1055,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption2,1056,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption3,1057,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption4,1058,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption5,1059,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption6,1060,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption7,1061,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption8,1062,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption9,1063,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption10,1064,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption11,1065,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption12,1066,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption13,1067,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption14,1068,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerClosedCaption15,1069,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription1,1070,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription2,1071,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription3,1072,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription4,1073,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription5,1074,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription6,1075,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription7,1076,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription8,1077,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription9,1078,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription10,1079,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription11,1080,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription12,1081,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription13,1082,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription14,1083,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+TrailerAudioDescription15,1084,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,

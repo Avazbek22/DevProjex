@@ -34,7 +34,10 @@ internal static class StoreListingPaths
         "it-it",
         "tg-cyrl-tj",
         "uz-latn-uz",
-        "fr-fr"
+        "fr-fr",
+        "es-es",
+        "pt-br",
+        "pt-pt"
     ];
 
     internal static string FindRepositoryRoot()

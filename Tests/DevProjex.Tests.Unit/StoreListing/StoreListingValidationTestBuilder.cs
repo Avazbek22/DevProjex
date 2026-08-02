@@ -50,6 +50,8 @@ internal sealed class StoreListingValidationTestBuilder
         "claude context"
     ];
 
+    private readonly List<string> _additionalImportLocales = [];
+
     internal StoreListingValidationTestBuilder()
     {
         foreach (var locale in StoreListingPaths.LocaleColumns)
@@ -79,6 +81,23 @@ internal sealed class StoreListingValidationTestBuilder
         // The tests intentionally mutate raw field/locale cells instead of using a higher-level
         // domain API. That makes it much harder for a future refactor to hide a broken CSV shape.
         SetRowValue(field, locale, value);
+        return this;
+    }
+
+    internal StoreListingValidationTestBuilder WithAdditionalImportLocale(string locale)
+    {
+        if (Headers.Contains(locale, StringComparer.Ordinal) ||
+            _additionalImportLocales.Contains(locale, StringComparer.Ordinal))
+        {
+            throw new ArgumentException($"Locale already exists: {locale}", nameof(locale));
+        }
+
+        _additionalImportLocales.Add(locale);
+        foreach (var row in _rows.Values)
+        {
+            row[locale] = row.GetValueOrDefault("en-us", string.Empty);
+        }
+
         return this;
     }
 
@@ -253,8 +272,11 @@ internal sealed class StoreListingValidationTestBuilder
     private string BuildCsvText(bool useTemplateValues, bool withLfOnly)
     {
         var lineEnding = withLfOnly ? "\n" : "\r\n";
+        var headers = useTemplateValues
+            ? Headers
+            : [.. Headers, .. _additionalImportLocales];
         var builder = new StringBuilder();
-        builder.Append(string.Join(",", Headers));
+        builder.Append(string.Join(",", headers));
         builder.Append(lineEnding);
 
         foreach (var rowPair in _rows)
@@ -262,7 +284,7 @@ internal sealed class StoreListingValidationTestBuilder
             var row = rowPair.Value;
             row["Field"] = rowPair.Key;
 
-            var values = Headers.Select(header =>
+            var values = headers.Select(header =>
             {
                 var value = row.TryGetValue(header, out var cell) ? cell : string.Empty;
                 if (useTemplateValues && header == "default")
@@ -332,6 +354,9 @@ internal sealed class StoreListingValidationTestBuilder
             "tg-cyrl-tj" => "TG",
             "uz-latn-uz" => "UZ",
             "fr-fr" => "FR",
+            "es-es" => "ES",
+            "pt-br" => "PT",
+            "pt-pt" => "PT-PT",
             _ => locale.ToUpperInvariant()
         };
     }

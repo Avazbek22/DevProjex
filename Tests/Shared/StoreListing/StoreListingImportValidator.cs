@@ -120,15 +120,16 @@ internal static class StoreListingImportValidator
         StoreListingCsvDocument? templateDocument,
         StoreListingValidationReport report)
     {
-        // The latest export template is the safest source of truth.
-        // If Microsoft inserts, removes, or renames a column, we want a hard failure here
-        // instead of a mysterious Partner Center rejection later.
+        // Partner Center allows a new listing to be created by appending its locale code
+        // to an exported CSV. Preserve the entire template as an exact prefix so Microsoft
+        // schema changes still fail loudly without rejecting legitimate new languages.
         var expectedHeaders = templateDocument?.Headers
                               ?? ["Field", "ID", "Type (Тип)", "default", .. StoreListingPaths.LocaleColumns];
 
-        if (!importDocument.Headers.SequenceEqual(expectedHeaders, StringComparer.Ordinal))
+        if (importDocument.Headers.Count < expectedHeaders.Count ||
+            !importDocument.Headers.Take(expectedHeaders.Count).SequenceEqual(expectedHeaders, StringComparer.Ordinal))
         {
-            report.AddError("SLI006", "Import CSV header does not match the Partner Center export template.");
+            report.AddError("SLI006", "Import CSV does not preserve the Partner Center export header prefix.");
         }
     }
 
