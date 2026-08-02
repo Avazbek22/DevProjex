@@ -1,6 +1,6 @@
 <h1 align="center">DevProjex 📁🌳</h1>
 
-<h2 align="center">🏆 Officially Selected by the Avalonia UI Team for the <a href="https://avaloniaui.net/showcase">Avalonia App Showcase</a></h2>
+<h2 align="center">🏆 Officially Selected by the Avalonia UI Team for the <a href="https://avaloniaui.net/showcase">App Showcase</a></h2>
 
 <p align="center">
   <a href="https://github.com/Avazbek22/DevProjex/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Avazbek22/DevProjex/total"></a>
@@ -9,7 +9,7 @@
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-purple">
   <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green">
   <img alt="Repository size" src="https://img.shields.io/github/repo-size/Avazbek22/DevProjex">
- <a href="https://avaloniaui.net/showcase"><img alt="Avalonia App Showcase" src="https://img.shields.io/badge/Avalonia%20Team-Showcase%20Selection-7B61FF?logo=avaloniaui&logoColor=white"></a>
+ <a href="https://avaloniaui.net/showcase"><img alt="Avalonia App Showcase" src="https://img.shields.io/badge/Avalonia-Showcase%20Selection-7B61FF?logo=avaloniaui&logoColor=white"></a>
 </p>
 
 <p align="center">
