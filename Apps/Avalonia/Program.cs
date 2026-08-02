@@ -15,7 +15,8 @@ internal static class Program
         args = DesktopLaunchRequestStore.PromoteInternalInvocation(args);
         var hasPendingDesktopRequest =
             DesktopLaunchRequestStore.HasPendingRequest ||
-            DesktopDiagnosticRequestStore.HasPendingRequest;
+            DesktopDiagnosticRequestStore.HasPendingRequest ||
+            StoreScreenshotCaptureRequestStore.HasPendingRequest;
         var hasConsole =
             ShouldAttachConsoleForInvocation(hasPendingDesktopRequest) &&
             WindowsConsoleBridge.EnsureAttached();

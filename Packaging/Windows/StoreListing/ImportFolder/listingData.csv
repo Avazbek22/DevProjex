@@ -1,46 +1,76 @@
 Field,ID,Type (Тип),default,en-us,en,ru,ru-ru,kk-kz,de-de,it-it,tg-cyrl-tj,uz-latn-uz,fr-fr
 Description,2,Текст,,"Preparing project context for an AI chat takes more time than it should. DevProjex speeds that up: open a folder or repository, choose what to include, and get a project tree or file contents with a live preview before copying.
+
 Smart Ignore and .gitignore support filter out noise automatically — dependencies, system folders, build artifacts. The tree exports to ASCII or JSON. Works with any stack and any codebase size.
+
 For Git repositories: clone, switch branches, pull updates to local cache. For large projects: search and filtering, a progress bar with cancellation, and live metrics in the status bar — lines, characters, and estimated token count.
+
 Local profiles let you save different settings for different projects.
 Read-only by design: source files are never modified, no telemetry is collected, no account required. Source code is available on GitHub.","Preparing project context for an AI chat takes more time than it should. DevProjex speeds that up: open a folder or repository, choose what to include, and get a project tree or file contents with a live preview before copying.
+
 Smart Ignore and .gitignore support filter out noise automatically — dependencies, system folders, build artifacts. The tree exports to ASCII or JSON. Works with any stack and any codebase size.
+
 For Git repositories: clone, switch branches, pull updates to local cache. For large projects: search and filtering, a progress bar with cancellation, and live metrics in the status bar — lines, characters, and estimated token count.
+
 Local profiles let you save different settings for different projects.
 Read-only by design: source files are never modified, no telemetry is collected, no account required. Source code is available on GitHub.","Подготовить контекст проекта для ИИ-чата — задача, которая занимает больше времени, чем хотелось бы. DevProjex ускоряет её: открываете папку или репозиторий, выбираете что включить — и получаете готовое дерево или содержимое файлов с превью перед копированием.
+
 Smart Ignore и поддержка .gitignore убирают лишнее автоматически: системные папки, зависимости, мусор. Дерево экспортируется в ASCII или JSON. Работает с любым стеком и любым размером кодовой базы.
+
 Для Git-репозиториев: клонирование, переключение веток, обновление локального кэша. Для больших проектов — поиск и фильтрация, прогресс-бар с отменой, живые метрики в статус-баре: строки, символы, примерное число токенов.
+
 Локальные профили позволяют сохранять разные настройки для разных проектов.
-Приложение работает в режиме только чтения: файлы не изменяются, телеметрия не собирается, аккаунт не нужен. Исходный код открыт на GitHub.","Подготовить контекст проекта для ИИ-чата — задача, которая занимает больше времени, чем хотелось бы. DevProjex ускоряет её: открываете папку или репозиторий, выбираете что включить — и получаете готовое дерево или содержимое файлов с превью перед копированием.
+Приложение работает в режиме только чтения: файлы не изменяются, телеметрия не собирается, аккаунт не нужен.
+Исходный код открыт на GitHub.","Подготовить контекст проекта для ИИ-чата — задача, которая занимает больше времени, чем хотелось бы. DevProjex ускоряет её: открываете папку или репозиторий, выбираете что включить — и получаете готовое дерево или содержимое файлов с превью перед копированием.
+
 Smart Ignore и поддержка .gitignore убирают лишнее автоматически: системные папки, зависимости, мусор. Дерево экспортируется в ASCII или JSON. Работает с любым стеком и любым размером кодовой базы.
+
 Для Git-репозиториев: клонирование, переключение веток, обновление локального кэша. Для больших проектов — поиск и фильтрация, прогресс-бар с отменой, живые метрики в статус-баре: строки, символы, примерное число токенов.
+
 Локальные профили позволяют сохранять разные настройки для разных проектов.
 Приложение работает в режиме только чтения: файлы не изменяются, телеметрия не собирается, аккаунт не нужен. Исходный код открыт на GitHub.","AI чат үшін жоба контекстін дайындау қажет болғаннан көп уақыт алады. DevProjex мұны жылдамдатады: қалтаны немесе репозиторийді ашасыз, нені қосу керегін таңдайсыз және көшіру алдында live preview арқылы жоба ағашын не файл мазмұнын аласыз.
+
 Smart Ignore және .gitignore қолдауы артық нәрсені автоматты түрде сүзеді - тәуелділіктер, жүйелік қалталар, build артефактілері. Ағаш ASCII немесе JSON пішімінде экспортталады. Кез келген стекпен және кез келген көлемдегі codebase-пен жұмыс істейді.
+
 Git репозиторийлері үшін: клондау, branch ауыстыру, жаңартуларды жергілікті кэшке алу. Үлкен жобалар үшін: іздеу және сүзгілеу, болдырмауы бар progress bar және status bar-дағы тірі метрикалар - жолдар, таңбалар және токендердің шамамен саны.
+
 Жергілікті профильдер әртүрлі жобалар үшін әртүрлі параметрлерді сақтауға мүмкіндік береді.
 Қолданба тек оқу режимінде жұмыс істейді: бастапқы файлдар ешқашан өзгертілмейді, телеметрия жиналмайды, аккаунт қажет емес. Бастапқы код GitHub-та ашық.","Die Vorbereitung von Projektkontext für einen KI-Chat kostet mehr Zeit, als sie sollte. DevProjex beschleunigt das: Öffnen Sie einen Ordner oder ein Repository, wählen Sie aus, was einbezogen werden soll, und erhalten Sie einen Projektbaum oder Dateiinhalte mit Live-Vorschau vor dem Kopieren.
+
 Smart Ignore und die Unterstützung für .gitignore filtern unnötiges Rauschen automatisch heraus - Abhängigkeiten, Systemordner, Build-Artefakte. Der Baum lässt sich als ASCII oder JSON exportieren. Funktioniert mit jedem Stack und jeder Größe von Codebasen.
 Für Git-Repositories: klonen, Branches wechseln, Updates in den lokalen Cache laden. Für große Projekte: Suche und Filterung, eine Fortschrittsleiste mit Abbruch sowie Live-Metriken in der Statusleiste - Zeilen, Zeichen und geschätzte Tokenzahl.
+
 Lokale Profile ermöglichen es, unterschiedliche Einstellungen für unterschiedliche Projekte zu speichern.
 Standardmäßig schreibgeschützt: Quelldateien werden nie verändert, es wird keine Telemetrie erfasst und kein Konto benötigt. Der Quellcode ist auf GitHub verfügbar.","Preparare il contesto di un progetto per una chat IA richiede più tempo del dovuto. DevProjex accelera il processo: apri una cartella o un repository, scegli cosa includere e ottieni l'albero del progetto o il contenuto dei file con anteprima live prima della copia.
+
 Smart Ignore e il supporto a .gitignore filtrano automaticamente il rumore inutile - dipendenze, cartelle di sistema, artefatti di build. L'albero si esporta in ASCII o JSON. Funziona con qualsiasi stack e con codebase di qualsiasi dimensione.
+
 Per i repository Git: clonazione, cambio di branch, aggiornamento della cache locale. Per i progetti grandi: ricerca e filtraggio, barra di avanzamento con annullamento e metriche live nella barra di stato - righe, caratteri e numero stimato di token.
+
 I profili locali consentono di salvare impostazioni diverse per progetti diversi.
 Read-only by design: i file sorgente non vengono mai modificati, non viene raccolta telemetria e non serve alcun account. Il codice sorgente è disponibile su GitHub.","Омода кардани контексти лоиҳа барои AI-чат бештар аз он вақт мегирад, ки мехостед. DevProjex инро тез мекунад: ҷузвдон ё репозиториро мекушоед, интихоб мекунед, ки чӣ ворид шавад, ва пеш аз нусха бо пешнамоиши зинда дарахти лоиҳа ё мундариҷаи файлҳоро мегиред.
+
 Smart Ignore ва дастгирии .gitignore чизҳои зиёдатиро худкор хориҷ мекунанд - вобастагиҳо, ҷузвдонҳои система, артефактҳои build. Дарахт ба ASCII ё JSON содир мешавад. Бо ҳар гуна стек ва бо ҳар андозаи codebase кор мекунад.
+
 Барои репозиторийҳои Git: клон кардан, иваз кардани branch, гирифтани навсозиҳо ба кеши маҳаллӣ. Барои лоиҳаҳои калон: ҷустуҷӯ ва филтркунӣ, progress bar бо имкони бекоркунӣ ва метрикаҳои зинда дар status bar - сатрҳо, аломатҳо ва шумораи тахминии токенҳо.
+
 Профилҳои маҳаллӣ имкон медиҳанд, ки барои лоиҳаҳои гуногун танзимоти гуногун нигоҳ дошта шаванд.
 Барнома дар реҷаи танҳо хондан кор мекунад: файлҳои манбаъ ҳеҷ гоҳ тағйир дода намешаванд, телеметрия ҷамъ намешавад ва аккаунт лозим нест. Коди манбаъ дар GitHub дастрас аст.","AI chat uchun loyiha kontekstini tayyorlash ko‘pincha kerakligidan ko‘proq vaqt oladi. DevProjex buni tezlashtiradi: papka yoki repozitoriyani ochasiz, nimani kiritishni tanlaysiz va nusxalashdan oldin live preview bilan loyiha daraxti yoki fayl mazmunini olasiz.
+
 Smart Ignore va .gitignore qo‘llovi keraksiz narsalarni avtomatik olib tashlaydi - bog‘liqliklar, tizim papkalari, build artefaktlari. Daraxt ASCII yoki JSON ko‘rinishida eksport qilinadi. Istalgan stek va istalgan hajmdagi codebase bilan ishlaydi.
+
 Git repozitoriylari uchun: klonlash, branch almashtirish, yangilanishlarni lokal keshga olish. Katta loyihalar uchun: qidiruv va filtrlash, bekor qilish imkoniga ega progress bar va status barda jonli metrikalar - satrlar, belgilar va taxminiy tokenlar soni.
+
 Lokal profillar turli loyihalar uchun turli sozlamalarni saqlashga imkon beradi.
 Ilova read-only rejimida ishlaydi: manba fayllar o‘zgartirilmaydi, telemetriya yig‘ilmaydi, akkaunt kerak emas. Manba kod GitHub’da ochiq.","Préparer le contexte d’un projet pour un chat IA prend plus de temps que nécessaire. DevProjex accélère cela : ouvrez un dossier ou un dépôt, choisissez ce qu’il faut inclure et obtenez une arborescence du projet ou le contenu des fichiers avec un aperçu en direct avant la copie.
+
 Smart Ignore et la prise en charge de .gitignore filtrent automatiquement le bruit inutile - dépendances, dossiers système, artefacts de build. L’arborescence s’exporte en ASCII ou en JSON. Fonctionne avec n’importe quelle stack et pour toute taille de base de code.
+
 Pour les dépôts Git : clonage, changement de branche, récupération des mises à jour dans le cache local. Pour les grands projets : recherche et filtrage, barre de progression avec annulation, et métriques en direct dans la barre d’état - lignes, caractères et estimation du nombre de tokens.
+
 Les profils locaux permettent d’enregistrer des paramètres différents pour différents projets.
 Conçu en lecture seule : les fichiers source ne sont jamais modifiés, aucune télémétrie n’est collectée et aucun compte n’est requis. Le code source est disponible sur GitHub."
-ReleaseNotes,3,Текст,,"Reworked preview mode — the final result is visible immediately, without extra steps. Introduced a clearer context-building workflow. Improved UI smoothness and stability on large projects. Updated help content.","Reworked preview mode — the final result is visible immediately, without extra steps. Introduced a clearer context-building workflow. Improved UI smoothness and stability on large projects. Updated help content.","Переработан режим превью — финальный результат виден сразу, без лишних шагов. Добавлен более чёткий сценарий сборки контекста. Улучшена плавность интерфейса и стабильность на больших проектах. Обновлена справка.","Переработан режим превью — финальный результат виден сразу, без лишних шагов. Добавлен более чёткий сценарий сборки контекста. Улучшена плавность интерфейса и стабильность на больших проектах. Обновлена справка.",Алдын ала қарау режимі қайта жасалды - соңғы нәтиже артық қадамдарсыз бірден көрінеді. Контекст жинау сценарийі анығырақ болды. Интерфейс тегістігі мен үлкен жобалардағы тұрақтылық жақсарды. Анықтама жаңартылды.,"Der Vorschaumodus wurde überarbeitet - das Endergebnis ist sofort sichtbar, ohne zusätzliche Schritte. Der Workflow zum Erstellen von Kontext wurde klarer. Die UI läuft flüssiger und ist bei großen Projekten stabiler. Die Hilfe wurde aktualisiert.","La modalità anteprima è stata rielaborata: il risultato finale è visibile subito, senza passaggi extra. Il flusso di preparazione del contesto è ora più chiaro. Migliorate fluidità dell’interfaccia e stabilità sui progetti grandi. Guida aggiornata.","Режими пешнамоиш аз нав коркард шуд - натиҷаи ниҳоӣ фавран, бе қадамҳои зиёдатӣ намоён аст. Ҷараёни омода кардани контекст равшантар шуд. Ҳамвории интерфейс ва устуворӣ дар лоиҳаҳои калон беҳтар гардид. Ёрӣ нав шуд.",Preview rejimi qayta ishlangan - yakuniy natija ortiqcha qadamlarsiz darhol ko‘rinadi. Kontekst tayyorlash jarayoni aniqroq qilindi. Interfeys silliqligi va katta loyihalardagi barqarorlik yaxshilandi. Yordam yangilandi.,"Le mode aperçu a été repensé - le résultat final est visible immédiatement, sans étapes inutiles. Le workflow de préparation du contexte a été clarifié. L’interface est plus fluide et plus stable sur les grands projets. L’aide a été mise à jour."
+ReleaseNotes,3,Текст,,Improved UI smoothness and stability on large projects. Updated help content.,Improved UI smoothness and stability on large projects. Updated help content.,Улучшена плавность интерфейса и стабильность на больших проектах. Обновлена справка.,Улучшена плавность интерфейса и стабильность на больших проектах. Обновлена справка.,Интерфейс тегістігі мен үлкен жобалардағы тұрақтылық жақсарды. Анықтама жаңартылды.,Die UI läuft flüssiger und ist bei großen Projekten stabiler. Die Hilfe wurde aktualisiert.,Migliorate fluidità dell’interfaccia e stabilità sui progetti grandi. Guida aggiornata.,Ҳамвории интерфейс ва устуворӣ дар лоиҳаҳои калон беҳтар гардид. Ёрӣ нав шуд.,Kontekst tayyorlash jarayoni aniqroq qilindi. Interfeys silliqligi va katta loyihalardagi barqarorlik yaxshilandi. Yordam yangilandi.,L’interface est plus fluide et plus stable sur les grands projets. L’aide a été mise à jour.
 Title,4,Текст,,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex
 ShortTitle,5,Текст,,,,,,,,,,,
 SortTitle,6,Текст,,,,,,,,,,,
@@ -331,7 +361,7 @@ SurfaceHubScreenshotCaption29,578,Текст,,,,,,,,,,,
 SurfaceHubScreenshotCaption30,579,Текст,,,,,,,,,,,
 StoreLogo720x1080,600,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
 StoreLogo1080x1080,601,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
-StoreLogo300x300,602,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505700723672/listings/1152922700024380166/listingassets/3030968744615288149,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505700723672/listings/1152922700024380168/listingassets/3030968744615288149,,,,
+StoreLogo300x300,602,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701563228/listings/1152922700024380166/listingassets/3030968744615288149,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701563228/listings/1152922700024380168/listingassets/3030968744615288149,,,,
 OverrideLogosForWin10,603,True/False,,False,False,False,False,False,False,False,False,False,False
 StoreLogoOverride150x150,604,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
 StoreLogoOverride71x71,605,Относительный путь (или URL-адрес файла в Центре партнеров),,,,,,,,,,,
@@ -346,7 +376,7 @@ OptionalPromo414x180,613,Относительный путь (или URL-адр�
 Feature1,700,Текст,,Live preview before copying or exporting,Live preview before copying or exporting,Превью результата перед копированием или экспортом,Превью результата перед копированием или экспортом,Көшіру немесе экспорт алдында live preview,Live-Vorschau vor dem Kopieren oder Exportieren,Anteprima live prima della copia o dell’esportazione,Пешнамоиши зинда пеш аз нусха ё содирот,Nusxalash yoki eksportdan oldin live preview,Aperçu en direct avant copie ou export
 Feature2,701,Текст,,"Copy and export: Tree, Contents, or Tree + Contents","Copy and export: Tree, Contents, or Tree + Contents","Копирование и экспорт: Дерево, Содержимое или Дерево + Содержимое","Копирование и экспорт: Дерево, Содержимое или Дерево + Содержимое","Көшіру және экспорт: Ағаш, Мазмұн немесе Ағаш + мазмұн","Kopieren und Exportieren: Baum, Inhalt oder Baum + Inhalt","Copia ed export: Albero, Contenuto o Albero + Contenuto","Нусха ва содирот: Дарахт, Мундариҷа ё Дарахт + мундариҷа","Nusxalash va eksport: Daraxt, Kontent yoki Daraxt + kontent","Copie et export : arborescence, contenu ou arborescence + contenu"
 Feature3,702,Текст,,Tree formats: ASCII and JSON,Tree formats: ASCII and JSON,Форматы дерева: ASCII и JSON,Форматы дерева: ASCII и JSON,Ағаш форматтары: ASCII және JSON,Baumformate: ASCII und JSON,Formati dell’albero: ASCII e JSON,Форматҳои дарахт: ASCII ва JSON,Daraxt formatlari: ASCII va JSON,Formats d’arborescence : ASCII et JSON
-Feature4,703,Текст,,Smart Ignore and two Git-aware filtering modes,Smart Ignore and two Git-aware filtering modes,Smart Ignore и два режима Git-фильтрации,Smart Ignore и два режима Git-фильтрации,Smart Ignore және Git-сүзудің екі режимі,Smart Ignore und zwei Git-Filtermodi,Smart Ignore e due modalità di filtro Git,Smart Ignore ва ду реҷаи филтркунии Git,Smart Ignore va Git filtrlashning ikki rejimi,Smart Ignore et deux modes de filtrage Git
+Feature4,703,Текст,,Smart Ignore and .gitignore support,Smart Ignore and .gitignore support,Smart Ignore и поддержка .gitignore,Smart Ignore и поддержка .gitignore,Smart Ignore және .gitignore қолдауы,Smart Ignore und .gitignore-Unterstützung,Smart Ignore e supporto a .gitignore,Smart Ignore ва дастгирии .gitignore,Smart Ignore va .gitignore qo‘llovi,Smart Ignore et prise en charge de .gitignore
 Feature5,704,Текст,,"Git: clone, branches, updates","Git: clone, branches, updates","Git: клонирование, ветки, обновления","Git: клонирование, ветки, обновления","Git: клондау, branch-тар, жаңартулар","Git: Klonen, Branches, Updates","Git: clonazione, branch, aggiornamenti","Git: клон кардан, branch-ҳо, навсозиҳо","Git: klonlash, branchlar, yangilanishlar","Git : clonage, branches, mises à jour"
 Feature6,705,Текст,,Search and filtering for large codebases,Search and filtering for large codebases,Поиск и фильтрация для больших кодовых баз,Поиск и фильтрация для больших кодовых баз,Үлкен codebase үшін іздеу және сүзгілеу,Suche und Filterung für große Codebasen,Ricerca e filtraggio per codebase di grandi dimensioni,Ҷустуҷӯ ва филтркунӣ барои codebase-ҳои калон,Katta codebase uchun qidiruv va filtrlash,Recherche et filtrage pour les grandes bases de code
 Feature7,706,Текст,,"Metrics: lines, characters, ~tokens","Metrics: lines, characters, ~tokens","Метрики: строки, символы, ~токены","Метрики: строки, символы, ~токены","Метрикалар: жолдар, таңбалар, ~токендер","Metriken: Zeilen, Zeichen, ~Token","Metriche: righe, caratteri, ~token","Метрикаҳо: сатрҳо, аломатҳо, ~токенҳо","Metrikalar: satrlar, belgilar, ~tokenlar","Métriques : lignes, caractères, ~tokens"

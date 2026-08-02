@@ -503,6 +503,14 @@ public partial class MainWindow
             StartDeferredRecentProjectsLoad(cancellationToken);
             ScheduleOptionalFontCatalogLoad();
 
+            if (_startupOptions.StoreScreenshotCapture is { } storeCaptureRequest)
+            {
+                await RunStoreScreenshotCaptureAsync(
+                    storeCaptureRequest,
+                    cancellationToken);
+                return;
+            }
+
             if (_startupErrors.Count > 0)
             {
                 await ShowErrorAsync(string.Join(Environment.NewLine, _startupErrors));

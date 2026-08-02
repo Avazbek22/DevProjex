@@ -43,4 +43,23 @@ public static class AppLanguageUtility
 		AppLanguage.PtPt => "pt-pt",
 		_ => "en"
 	};
+
+	public static bool TryParseCode(string? code, out AppLanguage language)
+	{
+		language = AppLanguage.En;
+		if (string.IsNullOrWhiteSpace(code))
+			return false;
+
+		var normalized = code.Trim().Replace('_', '-').ToLowerInvariant();
+		foreach (var candidate in Enum.GetValues<AppLanguage>())
+		{
+			if (!string.Equals(ToCode(candidate), normalized, StringComparison.Ordinal))
+				continue;
+
+			language = candidate;
+			return true;
+		}
+
+		return false;
+	}
 }

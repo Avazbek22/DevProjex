@@ -1,4 +1,5 @@
 using DevProjex.Application.DesktopControl;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -21,6 +22,7 @@ public sealed record DesktopStartupOptions(
 	DesktopOpenRequest? OpenRequest = null,
 	SessionMetricsOptions? SessionMetrics = null,
 	DesktopDiagnosticScenario? DiagnosticScenario = null,
+	StoreScreenshotCaptureRequest? StoreScreenshotCapture = null,
 	bool ElevationAttempted = false)
 {
 	public static DesktopStartupOptions Default { get; } = new();

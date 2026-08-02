@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "captureWidth": 2048,
+  "captureHeight": 1280,
+  "windowWidth": 1740,
+  "windowHeight": 1080,
+  "captureSettleMilliseconds": 200,
+  "scenes": [
+    { "index": 1, "name": "Main", "directory": "1_Main" },
+    { "index": 2, "name": "Loaded_Project", "directory": "2_Loaded_Project" },
+    { "index": 3, "name": "Tree_Preview", "directory": "3_Tree_Preview" },
+    { "index": 4, "name": "Filter_Preview", "directory": "4_Filter_Preview" },
+    { "index": 5, "name": "Tree_Preview_Settings", "directory": "5_Tree_Preview_Settings" }
+  ]
+}
