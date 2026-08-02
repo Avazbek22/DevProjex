@@ -3,12 +3,30 @@ using Avalonia.Controls.Presenters;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Controls;
+using DevProjex.Avalonia.Coordinators;
 
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture workspace)
 {
+	[AvaloniaFact]
+	public async Task LoadedWindow_PreservesThreeIslandMinimumWidthAcrossPreviewLayout()
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+		try
+		{
+			AssertWindowMinimumWidth(window);
+			await UiTestDriver.OpenPreviewAsync(window);
+			AssertWindowMinimumWidth(window);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task CompactSettingsAllCheckBox_KeepsLabelAtNativeRasterScale()
 	{
@@ -204,6 +222,15 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
 
     private static bool HeaderEquals(MenuItem menuItem, string expected)
         => string.Equals(menuItem.Header?.ToString(), expected, StringComparison.Ordinal);
+
+	private static void AssertWindowMinimumWidth(MainWindow window)
+	{
+		var alignedMinimum = WorkspacePresentationController.AlignWindowConstraintToPhysicalPixels(
+			WorkspacePresentationController.MinimumWindowWidth,
+			window.RenderScaling);
+
+		Assert.Equal(alignedMinimum, window.MinWidth, precision: 6);
+	}
 
     private static void AssertVisibleText(MainWindow window, string expected)
     {

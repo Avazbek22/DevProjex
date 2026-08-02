@@ -2,6 +2,21 @@ namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowWindowConstraintTests
 {
+    [Fact]
+    public void MinimumWindowWidth_FitsTreePreviewAndSettingsIslands()
+    {
+        var requiredWidth =
+            WorkspacePresentationController.SplitTreePaneMinimumWidth +
+            WorkspacePresentationController.TreePreviewSplitterWidth +
+            WorkspacePresentationController.SplitPreviewPaneMinimumWidth +
+            WorkspacePresentationController.PreviewSettingsSplitterWidth +
+            WorkspacePresentationController.SettingsPanelMinimumWidth +
+            WorkspacePresentationController.WindowMinimumWidthSafetyPadding;
+
+        Assert.Equal(1063.0, requiredWidth);
+        Assert.Equal(WorkspacePresentationController.MinimumWindowWidth, requiredWidth);
+    }
+
     [Theory]
     [InlineData(882.0, 1.0)]
     [InlineData(882.0, 1.25)]

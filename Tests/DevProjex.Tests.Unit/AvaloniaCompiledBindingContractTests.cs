@@ -367,6 +367,20 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void MainWindow_DeclaresThreeIslandMinimumWidthBeforeRuntimeLayout()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+
+		Assert.Equal("1063", root.Attribute("MinWidth")?.Value);
+	}
+
+	[Fact]
 	public void MainWindow_StaticTextUsesStablePixelAlignedHintingContract()
 	{
 		var viewFile = Path.Combine(

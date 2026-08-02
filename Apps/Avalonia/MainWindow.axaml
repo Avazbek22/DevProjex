@@ -10,7 +10,7 @@
         Title="{Binding Title}"
         Icon="avares://DevProjex/AppIcon/app.ico"
         Width="1200" Height="800"
-        MinWidth="850" MinHeight="600"
+        MinWidth="1063" MinHeight="600"
         TransparencyLevelHint="None"
         TextOptions.TextHintingMode="Strong"
         TextOptions.BaselinePixelAlignment="Aligned"
