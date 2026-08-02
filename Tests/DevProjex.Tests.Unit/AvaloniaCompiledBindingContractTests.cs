@@ -367,6 +367,62 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void MainWindow_StaticTextUsesStablePixelAlignedHintingContract()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+
+		Assert.Equal("Strong", root.Attribute("TextOptions.TextHintingMode")?.Value);
+		Assert.Equal("Aligned", root.Attribute("TextOptions.BaselinePixelAlignment")?.Value);
+	}
+
+	[Fact]
+	public void ThemeStyles_CompactSectionAllKeepsTextAtNativeRasterScale()
+	{
+		var styleFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Styles",
+			"Theme.axaml");
+		var document = XDocument.Load(styleFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var styles = root.Descendants(avaloniaNamespace + "Style").ToArray();
+		var compactSectionAll = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Window.compact-mode CheckBox.section-all");
+		var compactBullet = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Window.compact-mode CheckBox.section-all /template/ Border#NormalRectangle");
+
+		Assert.DoesNotContain(
+			compactSectionAll.Descendants(avaloniaNamespace + "Setter"),
+			setter => setter.Attribute("Property")?.Value == "RenderTransform");
+		Assert.DoesNotContain(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Window.compact-mode CheckBox.section-all /template/ ContentPresenter");
+		Assert.Equal(
+			"18",
+			compactBullet.Elements(avaloniaNamespace + "Setter")
+				.Single(setter => setter.Attribute("Property")?.Value == "Width")
+				.Attribute("Value")?.Value);
+		Assert.Equal(
+			"18",
+			compactBullet.Elements(avaloniaNamespace + "Setter")
+				.Single(setter => setter.Attribute("Property")?.Value == "Height")
+				.Attribute("Value")?.Value);
+	}
+
+	[Fact]
 	public void MainWindow_DropZoneAnimationsUseSmoothIdleSafeContract()
 	{
 		var viewFile = Path.Combine(

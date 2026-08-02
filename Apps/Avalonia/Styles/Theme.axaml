@@ -164,7 +164,7 @@
   </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
-            <!-- Compact mode uses the Fluent CheckBox template with a scale transform. -->
+            <!-- Compact mode keeps the Fluent CheckBox template and sizes its vector parts directly. -->
             <Geometry x:Key="CheckBoxIndeterminateMarkGeometry">M3,6 L9,6</Geometry>
             <Geometry x:Key="PreviewCopyIconGeometry">M6.25,2.5 H12.25 A1.75,1.75 0 0 1 14,4.25 V10.25 A1.75,1.75 0 0 1 12.25,12 H10.5 V11 H12.25 A0.75,0.75 0 0 0 13,10.25 V4.25 A0.75,0.75 0 0 0 12.25,3.5 H6.25 A0.75,0.75 0 0 0 5.5,4.25 V6 H4.5 V4.25 A1.75,1.75 0 0 1 6.25,2.5 Z M4.25,6.5 H10.25 A1.75,1.75 0 0 1 12,8.25 V14.25 A1.75,1.75 0 0 1 10.25,16 H4.25 A1.75,1.75 0 0 1 2.5,14.25 V8.25 A1.75,1.75 0 0 1 4.25,6.5 Z M4.25,7.5 A0.75,0.75 0 0 0 3.5,8.25 V14.25 A0.75,0.75 0 0 0 4.25,15 H10.25 A0.75,0.75 0 0 0 11,14.25 V8.25 A0.75,0.75 0 0 0 10.25,7.5 Z</Geometry>
             <StreamGeometry x:Key="DevProjexTreeChevronGeometry">M 1,0 10,10 l -9,10 -1,-1 L 8,10 -0,1 Z</StreamGeometry>
@@ -836,28 +836,22 @@
         <Setter Property="FontSize" Value="{ReflectionBinding $parent[CheckBox].FontSize}" />
     </Style>
 
-    <!-- "All" checkboxes: same scale as list items, but text is compensated below. -->
+    <!-- Keep compact "All" labels at their native raster size. Scaling the entire CheckBox and
+         applying the inverse scale to its presenter produces the same geometry but forces glyphs
+         through two composition transforms, which is visibly softer at fractional DPI scales. -->
     <Style Selector="Window.compact-mode CheckBox.section-all">
         <Setter Property="Margin" Value="0,4,2,-9" />
-        <Setter Property="Padding" Value="0" />
-        <Setter Property="ClipToBounds" Value="False" />
-        <Setter Property="RenderTransformOrigin" Value="0,0.5" />
-        <Setter Property="RenderTransform">
-            <!-- Keep checkbox visuals consistent with list items. -->
-            <ScaleTransform ScaleX="0.88" ScaleY="0.88" />
-        </Setter>
+        <!-- Three DIPs reproduce the previous transformed label origin: (20 + 6) * 0.88 ≈ 23. -->
+        <Setter Property="Padding" Value="3,0,0,0" />
     </Style>
 
-    <!-- Compensate text size for "All" checkboxes so label stays readable. -->
-    <!-- If you change the checkbox scale, adjust this inverse scale accordingly. -->
-    <!-- Increase these scale values to make "All" label font larger in compact mode. -->
-    <Style Selector="Window.compact-mode CheckBox.section-all /template/ ContentPresenter">
-        <Setter Property="Margin" Value="6,0,0,0" />
-        <Setter Property="ClipToBounds" Value="False" />
-        <Setter Property="RenderTransformOrigin" Value="0,0.5" />
-        <Setter Property="RenderTransform">
-            <ScaleTransform ScaleX="1.136" ScaleY="1.136" />
-        </Setter>
+    <!-- The Fluent checkbox square is 20 DIPs. Size only that vector surface instead of scaling
+         the text-bearing control; the two-DIP top inset matches the former centered 0.88 scale. -->
+    <Style Selector="Window.compact-mode CheckBox.section-all /template/ Border#NormalRectangle">
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Margin" Value="0,2,0,0" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
     </Style>
 
     <Style Selector="ScrollViewer.checklist-scroll">

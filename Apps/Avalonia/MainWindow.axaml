@@ -12,6 +12,8 @@
         Width="1200" Height="800"
         MinWidth="850" MinHeight="600"
         TransparencyLevelHint="None"
+        TextOptions.TextHintingMode="Strong"
+        TextOptions.BaselinePixelAlignment="Aligned"
         Background="{DynamicResource AppBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TreeViewItem" x:DataType="vm:TreeNodeViewModel">

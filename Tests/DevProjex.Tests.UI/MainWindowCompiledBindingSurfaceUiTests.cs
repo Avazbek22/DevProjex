@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia.Controls.Presenters;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Controls;
@@ -8,6 +9,35 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture workspace)
 {
+	[AvaloniaFact]
+	public async Task CompactSettingsAllCheckBox_KeepsLabelAtNativeRasterScale()
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+		try
+		{
+			window.Classes.Add("compact-mode");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+			var checkBox = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
+			var contentPresenter = Assert.Single(
+				checkBox.GetVisualDescendants().OfType<ContentPresenter>(),
+				presenter => presenter.Name == "PART_ContentPresenter");
+			var box = Assert.Single(
+				checkBox.GetVisualDescendants().OfType<Border>(),
+				border => border.Name == "NormalRectangle");
+
+			Assert.Null(checkBox.RenderTransform);
+			Assert.Null(contentPresenter.RenderTransform);
+			Assert.Equal(18, box.Bounds.Width, precision: 3);
+			Assert.Equal(18, box.Bounds.Height, precision: 3);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task LoadedProject_BindsWindowMenuTreeStatusAndSettingsSurfaces()
     {
