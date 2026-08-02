@@ -8,8 +8,8 @@
   <a href="https://github.com/Avazbek22/DevProjex/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/github/license/Avazbek22/DevProjex"></a>
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-purple">
   <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green">
+  <img alt="WinGet" src="https://img.shields.io/badge/winget-available-blue">
   <img alt="Repository size" src="https://img.shields.io/github/repo-size/Avazbek22/DevProjex">
- <a href="https://avaloniaui.net/showcase"><img alt="Avalonia App Showcase" src="https://img.shields.io/badge/Avalonia-Showcase%20Selection-7B61FF?logo=avaloniaui&logoColor=white"></a>
 </p>
 
 <p align="center">
