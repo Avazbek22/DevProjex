@@ -43,6 +43,7 @@
 
   <ItemGroup>
     <AvaloniaXaml Update="Views\FilterBarView.axaml" />
+    <AvaloniaXaml Update="Views\UpdatePopoverView.axaml" />
   </ItemGroup>
 
   <Target
