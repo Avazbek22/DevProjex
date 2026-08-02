@@ -274,7 +274,11 @@ public sealed class AppInstancePackagingContractTests
             StringComparison.Ordinal);
         Assert.Contains("$publishedFiles.Count -ne 1", releaseScript, StringComparison.Ordinal);
         Assert.Contains(
-            "[System.IO.Path]::GetRelativePath($ridOutDir, $_.FullName)",
+            "Get-RelativePublishedPath -basePath $ridOutDir -publishedPath $_.FullName",
+            releaseScript,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Build-GitHubArtifactsInWorkspace -version $resolvedVersion -configuration \"Release\" -storePackageVersion $storePackageVersion",
             releaseScript,
             StringComparison.Ordinal);
         Assert.DoesNotContain("\"/p:PublishTrimmed=true\"", releaseScript, StringComparison.Ordinal);

@@ -70,6 +70,34 @@ function Invoke-ExternalCommand(
     }
 }
 
+function Get-RelativePublishedPath(
+    [string]$basePath,
+    [string]$publishedPath
+) {
+    # Windows PowerShell 5.1 runs on .NET Framework, where Path.GetRelativePath is unavailable.
+    # Published files are enumerated below basePath, so a validated prefix removal is sufficient
+    # and keeps the release script usable from both Windows PowerShell and PowerShell 7.
+    $separatorCharacters = [char[]]@(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $fullBasePath = [System.IO.Path]::GetFullPath($basePath).TrimEnd($separatorCharacters)
+    $fullPublishedPath = [System.IO.Path]::GetFullPath($publishedPath)
+    $basePrefix = $fullBasePath + [System.IO.Path]::DirectorySeparatorChar
+    $comparison = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        [System.StringComparison]::OrdinalIgnoreCase
+    }
+    else {
+        [System.StringComparison]::Ordinal
+    }
+
+    if (-not $fullPublishedPath.StartsWith($basePrefix, $comparison)) {
+        throw "Published path '$publishedPath' is outside '$basePath'."
+    }
+
+    return $fullPublishedPath.Substring($basePrefix.Length)
+}
+
 function Ensure-DotnetAvailable() {
     if ($null -eq (Get-Command dotnet -ErrorAction SilentlyContinue)) {
         throw "dotnet CLI is not available in PATH."
@@ -716,14 +744,17 @@ function Create-IsolatedWorkspace([string]$sourceRoot) {
     }
 }
 
-function Build-GitHubArtifactsInWorkspace([string]$version, [string]$configuration) {
+function Build-GitHubArtifactsInWorkspace(
+    [string]$version,
+    [string]$configuration,
+    [string]$storePackageVersion
+) {
     $projectPath = Join-Path $script:IsolatedRepoRoot "Apps\Avalonia\DevProjex.Avalonia.csproj"
     if (-not (Test-Path $projectPath)) {
         throw "Avalonia project not found in isolated workspace: $projectPath"
     }
 
-    $defaultReleaseVersionInfo = Get-DefaultReleaseVersionInfo -repoRoot $script:IsolatedRepoRoot
-    $versionProperties = Get-BuildVersionProperties -displayVersion $version -storePackageVersion ([string]$defaultReleaseVersionInfo.StorePackageVersion)
+    $versionProperties = Get-BuildVersionProperties -displayVersion $version -storePackageVersion $storePackageVersion
 
     $releaseDir = Join-Path $script:IsolatedRepoRoot "publish\github\v$version"
     $workDir = Join-Path $releaseDir "_work"
@@ -779,7 +810,7 @@ function Build-GitHubArtifactsInWorkspace([string]$version, [string]$configurati
         $publishedFiles = @(Get-ChildItem -LiteralPath $ridOutDir -File -Recurse)
         $relativePublishedFiles = @(
             $publishedFiles | ForEach-Object {
-                [System.IO.Path]::GetRelativePath($ridOutDir, $_.FullName)
+                Get-RelativePublishedPath -basePath $ridOutDir -publishedPath $_.FullName
             }
         )
         if ($publishedFiles.Count -ne 1 -or
@@ -794,7 +825,7 @@ function Build-GitHubArtifactsInWorkspace([string]$version, [string]$configurati
         Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
 
         if ($rid.StartsWith("win-", [System.StringComparison]::OrdinalIgnoreCase)) {
-            Assert-WindowsArtifactVersion -artifactPath $destinationPath -displayVersion $version -storePackageVersion ([string]$defaultReleaseVersionInfo.StorePackageVersion)
+            Assert-WindowsArtifactVersion -artifactPath $destinationPath -displayVersion $version -storePackageVersion $storePackageVersion
         }
     }
 
@@ -1482,7 +1513,7 @@ try {
     Configure-IsolatedNuGetCache
 
     Write-Step "Building GitHub artifacts in isolated workspace"
-    Build-GitHubArtifactsInWorkspace -version $resolvedVersion -configuration "Release"
+    Build-GitHubArtifactsInWorkspace -version $resolvedVersion -configuration "Release" -storePackageVersion $storePackageVersion
 
     Write-Step "Building Microsoft Store package in isolated workspace"
     Build-StoreArtifactsInWorkspace -displayVersion $resolvedVersion -configuration "ReleaseStore" -platform "x64" -bundlePlatforms "x64|arm64" -packageVersion $storePackageVersion

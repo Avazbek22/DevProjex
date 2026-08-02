@@ -2,10 +2,10 @@
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
     <DevProjexVersion Condition="'$(DevProjexVersion)'==''">5.0</DevProjexVersion>
-    <DevProjexAssemblyVersion Condition="'$(DevProjexAssemblyVersion)'==''">4.9.0.0</DevProjexAssemblyVersion>
+    <DevProjexAssemblyVersion Condition="'$(DevProjexAssemblyVersion)'==''">5.0.0.0</DevProjexAssemblyVersion>
     <DevProjexFileVersion Condition="'$(DevProjexFileVersion)'==''">$(DevProjexAssemblyVersion)</DevProjexFileVersion>
     <DevProjexInformationalVersion Condition="'$(DevProjexInformationalVersion)'==''">$(DevProjexVersion)</DevProjexInformationalVersion>
-    <DevProjexStorePackageVersion Condition="'$(DevProjexStorePackageVersion)'==''">4.9.0.0</DevProjexStorePackageVersion>
+    <DevProjexStorePackageVersion Condition="'$(DevProjexStorePackageVersion)'==''">5.0.0.0</DevProjexStorePackageVersion>
     <Version>$(DevProjexVersion)</Version>
     <AssemblyVersion>$(DevProjexAssemblyVersion)</AssemblyVersion>
     <FileVersion>$(DevProjexFileVersion)</FileVersion>
