@@ -99,8 +99,7 @@ If the `devprojex` command does not work, open in DevProjex:
 ## 5) Git
 Git menu is available only for projects cloned via DevProjex (Git Clone). The app does not touch your files — it works only with the cache.
 
-The cache is stored in the system temp folder. On Windows it is usually:
-`%TEMP%\DevProjex\RepoCache`
+The cache is stored in the user's system cache directory. Run `devprojex doctor` to see the resolved path.
 
 * Branch — shows the list of available branches with the active one marked; switching updates the tree to the selected branch. If the branch already exists locally, switching is offline (no update). If it does not exist locally, it is fetched and created.
 * Get updates — updates only the current branch: fetch and reset to origin/<branch>. For a Git Clone project, F5 performs the same action; the regular “File → Refresh” command is disabled.
@@ -498,10 +497,13 @@ In Transparency mode, the main-window background remains transparent. Menus, sub
 
 ## 16) Help
 
-### 16.1 Reset settings
+### 16.1 Updates
+“Help → Updates” compares the current version with the latest stable GitHub release. Automatic checks are off by default; when enabled, DevProjex checks at startup after at least seven days have passed since the previous successful check. The checkbox takes effect immediately. The latest successful result is retained between application runs and is not erased by a later network failure. Installation remains a user action.
+
+### 16.2 Reset settings
 Reset settings (Help → Reset settings) restores the default theme, effects, Compact mode, Tree expansion animation, and interface language. Project profiles, history, and files on disk are not changed.
 
-### 16.2 Reset data
+### 16.3 Reset data
 Reset data (Help → Reset data) removes saved local-project parameter profiles:
 * selected top-level folders;
 * selected file types;

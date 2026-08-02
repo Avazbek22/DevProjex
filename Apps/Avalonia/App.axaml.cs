@@ -18,9 +18,18 @@ public sealed class App : global::Avalonia.Application
                 .GetAwaiter()
                 .GetResult();
             var diagnosticRequest = DesktopDiagnosticRequestStore.TryConsume();
+            var storeCaptureRequest = StoreScreenshotCaptureRequestStore.TryConsume();
+            var captureLanguage = storeCaptureRequest is not null &&
+                                  AppLanguageUtility.TryParseCode(
+                                      storeCaptureRequest.LanguageCode,
+                                      out var parsedCaptureLanguage)
+                ? parsedCaptureLanguage
+                : (AppLanguage?)null;
             var startupOptions = new DesktopStartupOptions(
-                OpenRequest: diagnosticRequest is null
-                    ? desktopRequest
+                OpenRequest: storeCaptureRequest is not null
+                    ? new DesktopOpenRequest(Language: captureLanguage)
+                    : diagnosticRequest is null
+                        ? desktopRequest
                     : new DesktopOpenRequest(
                         ProjectPath: diagnosticRequest.ProjectPath,
                         Language: desktopRequest?.Language),
@@ -33,9 +42,14 @@ public sealed class App : global::Avalonia.Application
                 DiagnosticScenario: diagnosticRequest is null
                     ? null
                     : ParseDiagnosticScenario(diagnosticRequest.Scenario),
+                StoreScreenshotCapture: storeCaptureRequest,
                 ElevationAttempted: desktopRequest?.ElevationAttempted == true);
 
-            var services = AvaloniaCompositionRoot.CreateDefault(startupOptions);
+            var services = AvaloniaCompositionRoot.CreateDefault(
+                startupOptions,
+                storeCaptureRequest is null
+                    ? null
+                    : () => storeCaptureRequest.AppDataDirectory);
             desktop.MainWindow = new MainWindow(
                 startupOptions,
                 services);

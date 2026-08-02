@@ -62,19 +62,8 @@ public sealed class TerminalPreviewRevisionPtyTests
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Files 1",
-			cancellationToken: TestContext.Current.CancellationToken);
-		var final = await terminal.WaitForStableScreenAsync(
-			required: "<d n=",
-			forbidden: "DPX-TUI-PREVIEW-FAILED",
-			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("CONTEXT PREVIEW · Tree · XML", final, StringComparison.Ordinal);
-		Assert.Contains("<d n=", final, StringComparison.Ordinal);
-		Assert.Contains("[x]", final, StringComparison.Ordinal);
-		Assert.Contains("Files 1", final, StringComparison.Ordinal);
-		Assert.DoesNotContain("DPX-TUI-PREVIEW-FAILED", final, StringComparison.Ordinal);
-
+		// Switch view while the debounced selection reprojection is still pending. The final
+		// document must be generated from the resulting plan, not the pre-projection plan.
 		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
 		var selectedContent = await terminal.WaitForStableScreenAsync(
 			required: "LatestContentMarker",
@@ -84,8 +73,15 @@ public sealed class TerminalPreviewRevisionPtyTests
 			"CONTEXT PREVIEW · Tree + content · XML",
 			selectedContent,
 			StringComparison.Ordinal);
+		Assert.Contains("<d n=", selectedContent, StringComparison.Ordinal);
+		Assert.Contains("[x]", selectedContent, StringComparison.Ordinal);
+		Assert.Contains("Files 1", selectedContent, StringComparison.Ordinal);
 		Assert.DoesNotContain(
 			"LatestSelectionMarker",
+			selectedContent,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"DPX-TUI-PREVIEW-FAILED",
 			selectedContent,
 			StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);

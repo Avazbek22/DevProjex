@@ -1,3 +1,4 @@
+using Avalonia.Media;
 using DevProjex.Avalonia.Controls;
 
 namespace DevProjex.Tests.Unit.Avalonia;
@@ -19,6 +20,10 @@ public sealed class VirtualizedLineNumbersControlTests
         Assert.Equal(15, control.NumberFontSize, 3);
         Assert.Equal(0, control.ExtentHeight, 3);
         Assert.Equal(0, control.ViewportHeight, 3);
+        Assert.Equal(TextHintingMode.Strong, TextOptions.GetTextHintingMode(control));
+        Assert.Equal(
+            BaselinePixelAlignment.Aligned,
+            TextOptions.GetBaselinePixelAlignment(control));
     }
 
     [AvaloniaTheory]

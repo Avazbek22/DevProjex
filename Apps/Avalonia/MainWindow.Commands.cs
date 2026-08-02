@@ -1,6 +1,8 @@
 using DevProjex.Application;
+using DevProjex.Application.Updates;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
+using DevProjex.Avalonia.Views;
 using DevProjex.Infrastructure.TerminalCommands;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
@@ -27,6 +29,7 @@ public partial class MainWindow
 
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
     {
+        _viewModel.UpdatePopoverOpen = false;
         _appearanceSettings.ToggleThemePopover();
         e.Handled = true;
     }
@@ -86,6 +89,7 @@ public partial class MainWindow
     {
         _viewModel.HelpPopoverOpen = true;
         _viewModel.HelpDocsPopoverOpen = false;
+        _viewModel.UpdatePopoverOpen = false;
         _viewModel.ThemePopoverOpen = false;
         e.Handled = true;
     }
@@ -100,8 +104,74 @@ public partial class MainWindow
     {
         _viewModel.HelpDocsPopoverOpen = true;
         _viewModel.HelpPopoverOpen = false;
+        _viewModel.UpdatePopoverOpen = false;
         _viewModel.ThemePopoverOpen = false;
         e.Handled = true;
+    }
+
+    private async void OnUpdateCheckMenu(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        _viewModel.HelpPopoverOpen = false;
+        _viewModel.HelpDocsPopoverOpen = false;
+        _viewModel.ThemePopoverOpen = false;
+        try
+        {
+            await _applicationUpdates.OpenManualCheckAsync(
+                _windowLifetimeCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            // Window shutdown owns cancellation of menu-triggered work.
+        }
+    }
+
+    private async void OnUpdateCheck(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        try
+        {
+            await _applicationUpdates.CheckManuallyAsync(
+                _windowLifetimeCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            // Window shutdown owns cancellation of the active request.
+        }
+        catch
+        {
+            _viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
+                ApplicationUpdateAvailability.CheckFailed,
+                GetApplicationVersion()));
+        }
+    }
+
+    private void OnUpdateClose(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.UpdatePopoverOpen = false;
+        e.Handled = true;
+    }
+
+    private void OnUpdateOpenRepository(object? sender, RoutedEventArgs e)
+    {
+        OpenExternalLink(ProjectLinks.RepositoryUrl);
+        e.Handled = true;
+    }
+
+    private async void OnAutomaticUpdateCheckChanged(
+        object? sender,
+        AutomaticUpdateCheckChangedEventArgs e)
+    {
+        try
+        {
+            await _applicationUpdates.SetAutomaticCheckEnabledAsync(
+                e.Enabled,
+                _windowLifetimeCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            // Window shutdown owns cancellation of settings persistence.
+        }
     }
 
     private async void OnTerminalCommandSetup(object? sender, RoutedEventArgs e)
@@ -261,20 +331,13 @@ public partial class MainWindow
 
     private void OnAboutOpenLink(object? sender, RoutedEventArgs e)
     {
-        OpenRepositoryLink();
+        OpenExternalLink(ProjectLinks.RepositoryUrl);
         e.Handled = true;
     }
 
-    private async void OnAboutCopyLink(object? sender, RoutedEventArgs e)
+    private void OnAboutSupport(object? sender, RoutedEventArgs e)
     {
-        try
-        {
-            await SetClipboardTextAsync(ProjectLinks.RepositoryUrl);
-        }
-        catch (Exception ex)
-        {
-            await ShowErrorAsync(ex.Message);
-        }
+        OpenExternalLink(ProjectLinks.SupportUrl);
         e.Handled = true;
     }
 

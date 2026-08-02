@@ -12,7 +12,8 @@ public sealed class AvaloniaCompiledBindingContractTests
 		"HelpPopoverView.axaml",
 		"SearchBarView.axaml",
 		"SettingsPanelView.axaml",
-		"ThemePopoverView.axaml"
+		"ThemePopoverView.axaml",
+		"UpdatePopoverView.axaml"
 	];
 
 	[Fact]
@@ -79,6 +80,64 @@ public sealed class AvaloniaCompiledBindingContractTests
 		Assert.Equal(3, root.Descendants(avaloniaNamespace + "VirtualizingStackPanel").Count());
 		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsControl"));
 		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsRepeater"));
+	}
+
+	[Fact]
+	public void HelpMenu_PlacesUpdatesImmediatelyAfterAbout()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"TopMenuBarView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var helpMenu = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => string.Equals(
+				element.Attribute("Name")?.Value,
+				"HelpMenuItem",
+				StringComparison.Ordinal));
+		var children = helpMenu.Elements().ToList();
+		var aboutIndex = children.FindIndex(element => string.Equals(
+			element.Attribute("Name")?.Value,
+			"AboutMenuItem",
+			StringComparison.Ordinal));
+		var updatesIndex = children.FindIndex(element => string.Equals(
+			element.Attribute("Name")?.Value,
+			"UpdateMenuItem",
+			StringComparison.Ordinal));
+
+		Assert.True(aboutIndex >= 0);
+		Assert.Equal(aboutIndex + 1, updatesIndex);
+	}
+
+	[Fact]
+	public void HelpMenu_UpdateIndicatorUsesKnownAvailabilityAndAccentColor()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"TopMenuBarView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var updateMenuItem = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => element.Attribute("Name")?.Value == "UpdateMenuItem");
+		var indicator = updateMenuItem
+			.Descendants(avaloniaNamespace + "Ellipse")
+			.Single(element => element.Attribute("Name")?.Value == "UpdateAvailableIndicator");
+
+		Assert.Equal("8", indicator.Attribute("Width")?.Value);
+		Assert.Equal("8", indicator.Attribute("Height")?.Value);
+		Assert.Equal("{Binding IsKnownUpdateAvailable}", indicator.Attribute("IsVisible")?.Value);
+		Assert.Equal("{DynamicResource AppAccentBrush}", indicator.Attribute("Fill")?.Value);
+		Assert.Equal("False", indicator.Attribute("IsHitTestVisible")?.Value);
 	}
 
 	[Fact]
@@ -305,6 +364,76 @@ public sealed class AvaloniaCompiledBindingContractTests
 		var root = Assert.IsType<XElement>(document.Root);
 
 		Assert.Equal("None", root.Attribute("TransparencyLevelHint")?.Value);
+	}
+
+	[Fact]
+	public void MainWindow_DeclaresThreeIslandMinimumWidthBeforeRuntimeLayout()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+
+		Assert.Equal("1063", root.Attribute("MinWidth")?.Value);
+	}
+
+	[Fact]
+	public void MainWindow_StaticTextUsesStablePixelAlignedHintingContract()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"MainWindow.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+
+		Assert.Equal("Strong", root.Attribute("TextOptions.TextHintingMode")?.Value);
+		Assert.Equal("Aligned", root.Attribute("TextOptions.BaselinePixelAlignment")?.Value);
+	}
+
+	[Fact]
+	public void ThemeStyles_CompactSectionAllKeepsTextAtNativeRasterScale()
+	{
+		var styleFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Styles",
+			"Theme.axaml");
+		var document = XDocument.Load(styleFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var styles = root.Descendants(avaloniaNamespace + "Style").ToArray();
+		var compactSectionAll = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Window.compact-mode CheckBox.section-all");
+		var compactBullet = Assert.Single(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Window.compact-mode CheckBox.section-all /template/ Border#NormalRectangle");
+
+		Assert.DoesNotContain(
+			compactSectionAll.Descendants(avaloniaNamespace + "Setter"),
+			setter => setter.Attribute("Property")?.Value == "RenderTransform");
+		Assert.DoesNotContain(
+			styles,
+			element => element.Attribute("Selector")?.Value ==
+			           "Window.compact-mode CheckBox.section-all /template/ ContentPresenter");
+		Assert.Equal(
+			"18",
+			compactBullet.Elements(avaloniaNamespace + "Setter")
+				.Single(setter => setter.Attribute("Property")?.Value == "Width")
+				.Attribute("Value")?.Value);
+		Assert.Equal(
+			"18",
+			compactBullet.Elements(avaloniaNamespace + "Setter")
+				.Single(setter => setter.Attribute("Property")?.Value == "Height")
+				.Attribute("Value")?.Value);
 	}
 
 	[Fact]

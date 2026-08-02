@@ -2,7 +2,7 @@
 
 # 
 
-# Last updated: 2026-02-10
+# Last updated: 2026-08-02
 
 # 
 
@@ -38,7 +38,9 @@
 
 # 4\) Network and Git Features
 
-# DevProjex may access the network only when you use Git-related features (for example, cloning a repository, fetching updates, or listing branches). These operations are read-only and are used solely to download repository data into a local cache on your device.
+# DevProjex may access the network when you use Git-related features (for example, cloning a repository, fetching repository updates, or listing branches) or explicitly check for an application update. If you opt in to weekly update checks, the app may also request the latest stable DevProjex release metadata from GitHub at startup after at least seven days have elapsed since the previous check.
+
+# Application update checks send no project files or application settings. They read only the public latest-release version from the DevProjex GitHub repository; the app never downloads or installs an update automatically.
 
 # DevProjex does not send your local files to any server and does not upload changes to remote repositories (no commit/push/merge).
 
@@ -75,4 +77,3 @@
 # If you have questions about this Privacy Policy, contact:
 
 # Email: avazbekolimov722@gmail.com
-

@@ -503,6 +503,14 @@ public partial class MainWindow
             StartDeferredRecentProjectsLoad(cancellationToken);
             ScheduleOptionalFontCatalogLoad();
 
+            if (_startupOptions.StoreScreenshotCapture is { } storeCaptureRequest)
+            {
+                await RunStoreScreenshotCaptureAsync(
+                    storeCaptureRequest,
+                    cancellationToken);
+                return;
+            }
+
             if (_startupErrors.Count > 0)
             {
                 await ShowErrorAsync(string.Join(Environment.NewLine, _startupErrors));
@@ -549,6 +557,9 @@ public partial class MainWindow
             ObserveDetachedTask(
                 Task.Run(_repoCacheService.CleanupStaleCacheOnStartup, cancellationToken),
                 "CleanupStaleRepositoryCache");
+            ObserveDetachedTask(
+                _applicationUpdates.RunAutomaticCheckIfDueAsync(cancellationToken),
+                "AutomaticUpdateCheck");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

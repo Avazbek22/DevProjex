@@ -18,6 +18,10 @@ public sealed class VirtualizedPreviewTextControlTests
 
         Assert.True(control.Focusable);
         Assert.Null(control.Cursor);
+        Assert.Equal(TextHintingMode.Strong, TextOptions.GetTextHintingMode(control));
+        Assert.Equal(
+            BaselinePixelAlignment.Aligned,
+            TextOptions.GetBaselinePixelAlignment(control));
     }
 
     [AvaloniaFact]

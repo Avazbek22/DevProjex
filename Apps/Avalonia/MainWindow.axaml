@@ -10,8 +10,10 @@
         Title="{Binding Title}"
         Icon="avares://DevProjex/AppIcon/app.ico"
         Width="1200" Height="800"
-        MinWidth="850" MinHeight="600"
+        MinWidth="1063" MinHeight="600"
         TransparencyLevelHint="None"
+        TextOptions.TextHintingMode="Strong"
+        TextOptions.BaselinePixelAlignment="Aligned"
         Background="{DynamicResource AppBackgroundBrush}">
   <Window.Styles>
     <Style Selector="TreeViewItem" x:DataType="vm:TreeNodeViewModel">
@@ -213,6 +215,11 @@
                           ToggleFilterRequested="OnToggleFilter"
                           ThemeMenuClickRequested="OnThemeMenuClick"
                           HelpRequested="OnHelp"
+                          UpdateCheckMenuRequested="OnUpdateCheckMenu"
+                          UpdateCheckRequested="OnUpdateCheck"
+                          UpdateCloseRequested="OnUpdateClose"
+                          UpdateOpenRepositoryRequested="OnUpdateOpenRepository"
+                          AutomaticUpdateCheckChanged="OnAutomaticUpdateCheckChanged"
                           TerminalCommandSetupRequested="OnTerminalCommandSetup"
                           HelpCloseRequested="OnHelpClose"
                           LanguageRuRequested="OnLangRu"
@@ -228,8 +235,8 @@
                           LanguagePtPtRequested="OnLangPtPt"
                           AboutRequested="OnAbout"
                           AboutCloseRequested="OnAboutClose"
+                          AboutSupportRequested="OnAboutSupport"
                           AboutOpenLinkRequested="OnAboutOpenLink"
-                          AboutCopyLinkRequested="OnAboutCopyLink"
                           ResetSettingsRequested="OnResetSettings"
                           ResetDataRequested="OnResetData"
                           SetSystemThemeRequested="OnSetSystemThemeCheckbox"

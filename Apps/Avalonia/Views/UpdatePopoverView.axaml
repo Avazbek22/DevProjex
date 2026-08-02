@@ -1,0 +1,120 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:DevProjex.Avalonia.ViewModels"
+             x:Class="DevProjex.Avalonia.Views.UpdatePopoverView"
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
+  <UserControl.Styles>
+    <Style Selector="Border.update-version-card">
+      <Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="7" />
+      <Setter Property="Padding" Value="12" />
+    </Style>
+    <Style Selector="TextBlock.update-result-title">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.update-version-text">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+  </UserControl.Styles>
+
+  <Border Classes="theme-popover"
+          Padding="16"
+          Width="480"
+          MinWidth="400"
+          MaxWidth="{Binding AboutPopoverMaxWidth}"
+          MaxHeight="{Binding AboutPopoverMaxHeight}">
+    <Grid RowDefinitions="Auto,*,Auto">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Text="{Binding UpdateTitle}"
+                   FontSize="17"
+                   FontWeight="SemiBold"
+                   VerticalAlignment="Center" />
+        <Button Grid.Column="1"
+                Content="✕"
+                Classes="menu-icon-button"
+                Padding="4"
+                AutomationProperties.Name="{Binding UpdateTitle}"
+                Click="OnClose" />
+      </Grid>
+
+      <ScrollViewer Grid.Row="1"
+                    Margin="0,14,0,14"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto"
+                    IsScrollInertiaEnabled="True">
+        <StackPanel Spacing="12">
+          <TextBlock Text="{Binding UpdatePrompt}"
+                     IsVisible="{Binding IsUpdateCheckReady}"
+                     TextWrapping="Wrap"
+                     FontSize="14" />
+
+          <Border Classes="update-version-card">
+            <StackPanel Spacing="5">
+              <TextBlock Text="{Binding CurrentApplicationVersionText}"
+                         Classes="update-version-text"
+                         FontWeight="SemiBold" />
+              <TextBlock Text="{Binding LatestApplicationVersionText}"
+                         Classes="update-version-text"
+                         Foreground="{DynamicResource AppMutedTextBrush}"
+                         IsVisible="{Binding IsLatestApplicationVersionVisible}" />
+            </StackPanel>
+          </Border>
+
+          <StackPanel IsVisible="{Binding IsUpdateCheckInProgress}" Spacing="8">
+            <TextBlock Text="{Binding UpdateCheckingButton}"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       FontSize="13" />
+            <ProgressBar IsIndeterminate="True" Height="4" />
+          </StackPanel>
+
+          <TextBlock Text="{Binding UpdateAvailableTitle}"
+                     Classes="update-result-title"
+                     Foreground="{DynamicResource AppAccentBrush}"
+                     IsVisible="{Binding IsUpdateAvailable}" />
+          <TextBlock Text="{Binding UpdateUpToDateTitle}"
+                     Classes="update-result-title"
+                     IsVisible="{Binding IsApplicationUpToDate}" />
+          <TextBlock Text="{Binding UpdateCurrentVersionNewerTitle}"
+                     Classes="update-result-title"
+                     IsVisible="{Binding IsCurrentApplicationVersionNewer}" />
+
+          <StackPanel IsVisible="{Binding HasUpdateCheckFailed}" Spacing="4">
+            <TextBlock Text="{Binding UpdateFailedTitle}"
+                       Classes="update-result-title" />
+            <TextBlock Text="{Binding UpdateFailedMessage}"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       TextWrapping="Wrap"
+                       FontSize="13" />
+          </StackPanel>
+
+          <Separator Margin="0,2" />
+          <CheckBox Content="{Binding UpdateAutomaticWeekly}"
+                    IsChecked="{Binding AutomaticUpdateChecksEnabled, Mode=OneWay}"
+                    AutomationProperties.Name="{Binding UpdateAutomaticWeekly}"
+                    Click="OnAutomaticCheckChanged" />
+        </StackPanel>
+      </ScrollViewer>
+
+      <StackPanel Grid.Row="2"
+                  Orientation="Horizontal"
+                  Spacing="8"
+                  HorizontalAlignment="Right">
+        <Button Content="{Binding UpdateCheckActionText}"
+                Classes="primary-action"
+                IsVisible="{Binding IsUpdateCheckButtonVisible}"
+                IsEnabled="{Binding !IsUpdateCheckInProgress}"
+                Click="OnCheck" />
+        <Button Content="{Binding UpdateOpenRepository}"
+                Classes="primary-action"
+                IsVisible="{Binding IsUpdateAvailable}"
+                Click="OnOpenRepository" />
+      </StackPanel>
+    </Grid>
+  </Border>
+</UserControl>

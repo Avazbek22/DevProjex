@@ -99,8 +99,7 @@ Si la commande `devprojex` ne fonctionne pas, ouvrez dans DevProjex :
 ## 5) Git
 Le menu Git n’est disponible que pour les projets clonés via DevProjex (Git Clone). L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
 
-Le cache est stocké dans le dossier temporaire du système. Sous Windows, c’est généralement :
-`%TEMP%\DevProjex\RepoCache`
+Le cache est stocké dans le répertoire de cache de l’utilisateur. `devprojex doctor` affiche le chemin effectivement utilisé.
 
 * Branche — affiche la liste des branches disponibles avec indication de la branche active ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement se fait hors ligne (sans mise à jour). Si elle n’existe pas localement, elle est récupérée (fetch) et créée localement.
 * Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>. Pour un projet Git Clone, F5 effectue la même action ; la commande normale « Fichier → Actualiser » est désactivée.
@@ -446,10 +445,13 @@ En mode Transparence, l’arrière-plan de la fenêtre principale reste transpar
 
 ## 16) Aide
 
-### 16.1 Réinitialiser les paramètres
+### 16.1 Mises à jour
+« Aide → Mises à jour » compare la version actuelle à la dernière version stable publiée sur GitHub. La vérification automatique est désactivée par défaut ; lorsqu’elle est activée, DevProjex effectue la vérification au démarrage si au moins sept jours se sont écoulés depuis la dernière vérification réussie. La case à cocher est appliquée immédiatement. Le dernier résultat réussi est conservé entre les exécutions de l’application et n’est pas effacé par une erreur réseau ultérieure. L’installation reste une action de l’utilisateur.
+
+### 16.2 Réinitialiser les paramètres
 Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, de l’animation de déploiement de l’arborescence et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
 
-### 16.2 Réinitialiser les données
+### 16.3 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;

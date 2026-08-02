@@ -99,8 +99,7 @@ Si el comando `devprojex` no funciona, ábralo en DevProjex:
 ## 5) Git
 El menú Git está disponible solo para proyectos clonados a través de DevProjex (Git Clone). La aplicación no toca tus archivos, solo funciona con el caché.
 
-El caché se almacena en la carpeta temporal del sistema. En Windows suele ser:
-`%TEMP%\DevProjex\RepoCache`
+La caché se almacena en el directorio de caché del usuario. `devprojex doctor` muestra la ruta efectiva.
 
 * Sucursal: muestra la lista de sucursales disponibles con la activa marcada; El cambio actualiza el árbol a la rama seleccionada. Si la sucursal ya existe localmente, el cambio está fuera de línea (sin actualización). Si no existe localmente, se busca y se crea.
 * Obtener actualizaciones: actualiza solo la rama actual: buscar y restablecer al origen/<rama>. Para un proyecto Git Clone, F5 realiza la misma acción; el comando normal “Archivo → Actualizar” está deshabilitado.
@@ -500,10 +499,13 @@ En el modo Transparencia, el fondo de la ventana principal permanece transparent
 
 ## 16) Ayuda
 
-### 16.1 Restablecer configuración
+### 16.1 Actualizaciones
+«Ayuda → Actualizaciones» compara la versión actual con la última versión estable publicada en GitHub. Las comprobaciones automáticas están desactivadas de forma predeterminada; si se activan, DevProjex comprueba al iniciarse cuando han pasado al menos siete días desde la última comprobación correcta. La casilla se aplica inmediatamente. El último resultado correcto se conserva entre ejecuciones de la aplicación y no se borra por un error de red posterior. La instalación sigue siendo una acción del usuario.
+
+### 16.2 Restablecer configuración
 Restablecer configuración (Ayuda → Restablecer configuración) restaura el tema, los efectos, el modo compacto, la animación de expansión del árbol y el idioma de la interfaz predeterminados. Los perfiles, el historial y los archivos del proyecto en el disco no se modifican.
 
-### 16.2 Restablecer datos
+### 16.3 Restablecer datos
 Restablecer datos (Ayuda → Restablecer datos) elimina los perfiles de parámetros del proyecto local guardados:
 * carpetas de nivel superior seleccionadas;
 * tipos de archivos seleccionados;

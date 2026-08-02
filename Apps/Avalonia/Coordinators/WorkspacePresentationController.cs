@@ -36,13 +36,22 @@ internal sealed class WorkspacePresentationController : IDisposable
     internal const double SplitPreviewPaneMinimumWidth = 320.0;
     internal const double TreePreviewSplitterWidth = 4.0;
     internal const double PreviewSettingsSplitterWidth = 4.0;
+    internal const double WindowMinimumWidthSafetyPadding = 32.0;
+
+    // Keep this baseline independent of current pane visibility. Opening preview or settings
+    // must not force the native window to grow after it reached the supported minimum size.
+    internal const double MinimumWindowWidth =
+        SplitTreePaneMinimumWidth +
+        TreePreviewSplitterWidth +
+        SplitPreviewPaneMinimumWidth +
+        PreviewSettingsSplitterWidth +
+        SettingsPanelMinimumWidth +
+        WindowMinimumWidthSafetyPadding;
     internal static readonly TimeSpan PanelAnimationDuration =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(300));
     internal static readonly TimeSpan SettingsPanelAnimationDuration =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250));
 
-    private const double DefaultWindowMinimumWidth = 850.0;
-    private const double WindowMinimumWidthSafetyPadding = 32.0;
     private const double PreviewToolbarWideThreshold = 380.0;
     private const double PreviewToolbarCompactThreshold = 320.0;
     private const double ToastHostBottomMargin = 38.0;
@@ -595,7 +604,7 @@ internal sealed class WorkspacePresentationController : IDisposable
     private void UpdateWindowMinimumWidth()
     {
         var computedMinimumWidth = Math.Max(
-            DefaultWindowMinimumWidth,
+            MinimumWindowWidth,
             GetRequiredWindowWorkspaceWidth() + WindowMinimumWidthSafetyPadding);
         _window.MinWidth = AlignWindowConstraintToPhysicalPixels(
             computedMinimumWidth,
@@ -605,7 +614,7 @@ internal sealed class WorkspacePresentationController : IDisposable
     private double GetRequiredWindowWorkspaceWidth()
     {
         if (!_viewModel.IsProjectLoaded)
-            return DefaultWindowMinimumWidth;
+            return 0.0;
 
         var minimumWidth = GetMinimumLeadingWorkspaceWidth();
         if (ShouldReserveSettingsWidth())

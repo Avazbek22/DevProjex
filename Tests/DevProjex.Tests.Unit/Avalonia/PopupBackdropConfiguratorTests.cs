@@ -136,6 +136,44 @@ public sealed class PopupBackdropConfiguratorTests
     }
 
     [AvaloniaFact]
+    public void TryApplyToTopLevel_ReappliesChangedEffectOnExistingPopupWindow()
+    {
+        var popupLevel = new Window();
+        var host = new Window();
+
+        Assert.True(PopupBackdropConfigurator.TryApplyToTopLevel(
+            popupLevel,
+            host,
+            ThemeEffectMode.Solid,
+            PopupBackdropTransparencyFallback.None));
+        AssertTransparencyHints(
+            popupLevel,
+            WindowTransparencyLevel.Transparent,
+            WindowTransparencyLevel.None);
+
+        Assert.True(PopupBackdropConfigurator.TryApplyToTopLevel(
+            popupLevel,
+            host,
+            ThemeEffectMode.Acrylic,
+            PopupBackdropTransparencyFallback.None));
+        AssertTransparencyHints(
+            popupLevel,
+            WindowTransparencyLevel.AcrylicBlur,
+            WindowTransparencyLevel.Blur,
+            WindowTransparencyLevel.None);
+
+        Assert.True(PopupBackdropConfigurator.TryApplyToTopLevel(
+            popupLevel,
+            host,
+            ThemeEffectMode.Solid,
+            PopupBackdropTransparencyFallback.None));
+        AssertTransparencyHints(
+            popupLevel,
+            WindowTransparencyLevel.Transparent,
+            WindowTransparencyLevel.None);
+    }
+
+    [AvaloniaFact]
     public void TryApplyToTopLevel_WhenPopupIsHost_DoesNothing()
     {
         var host = new Window();

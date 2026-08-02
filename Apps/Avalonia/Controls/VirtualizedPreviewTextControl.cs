@@ -340,6 +340,11 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     public VirtualizedPreviewTextControl()
     {
+        // Keep the resting preview frame pixel-aligned without rounding logical scroll offsets.
+        // Selection and hit-testing share those offsets, while Avalonia performs the final
+        // device-pixel baseline snap for the active monitor's render scaling.
+        TextOptions.SetTextHintingMode(this, TextHintingMode.Strong);
+        TextOptions.SetBaselinePixelAlignment(this, BaselinePixelAlignment.Aligned);
         Focusable = true;
         RebuildTextLayoutMetadata();
     }

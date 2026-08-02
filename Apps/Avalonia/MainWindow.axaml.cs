@@ -1369,7 +1369,7 @@ public partial class MainWindow : Window
         string? currentProjectDisplayName)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
-            return MainWindowViewModel.BaseTitleWithAuthor;
+            return MainWindowViewModel.BaseTitle;
 
         if (isGitMode && !string.IsNullOrEmpty(currentRepositoryUrl))
         {
@@ -1658,11 +1658,11 @@ public partial class MainWindow : Window
             await clipboard.SetTextAsync(content);
     }
 
-    private static void OpenRepositoryLink()
+    private static void OpenExternalLink(string url)
     {
         Process.Start(new ProcessStartInfo
         {
-            FileName = ProjectLinks.RepositoryUrl,
+            FileName = url,
             UseShellExecute = true
         });
     }

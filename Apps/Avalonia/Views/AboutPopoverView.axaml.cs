@@ -3,8 +3,8 @@ namespace DevProjex.Avalonia.Views;
 public partial class AboutPopoverView : UserControl
 {
     public event EventHandler<RoutedEventArgs>? CloseRequested;
+    public event EventHandler<RoutedEventArgs>? SupportRequested;
     public event EventHandler<RoutedEventArgs>? OpenLinkRequested;
-    public event EventHandler<RoutedEventArgs>? CopyLinkRequested;
 
     public AboutPopoverView()
     {
@@ -17,6 +17,6 @@ public partial class AboutPopoverView : UserControl
     private void OnOpenLink(object? sender, RoutedEventArgs e)
         => OpenLinkRequested?.Invoke(sender, e);
 
-    private void OnCopyLink(object? sender, RoutedEventArgs e)
-        => CopyLinkRequested?.Invoke(sender, e);
+    private void OnSupport(object? sender, RoutedEventArgs e)
+        => SupportRequested?.Invoke(sender, e);
 }

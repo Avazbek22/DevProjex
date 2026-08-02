@@ -99,8 +99,7 @@ Se il comando `devprojex` non funziona, apri in DevProjex:
 ## 5) Git
 Il menu Git è disponibile solo per i progetti clonati tramite DevProjex (Git Clone). L'app non tocca i tuoi file — lavora solo con la cache.
 
-La cache si trova nella cartella temporanea di sistema. Su Windows di solito è:
-`%TEMP%\DevProjex\RepoCache`
+La cache viene archiviata nella directory della cache dell'utente. `devprojex doctor` mostra il percorso effettivamente utilizzato.
 
 * Branch — mostra l’elenco dei branch disponibili con indicazione di quello attivo; il cambio aggiorna l’albero al branch scelto. Se il branch esiste già in locale, il cambio è offline (senza aggiornamento). Se non esiste in locale, viene scaricato (fetch) e creato localmente.
 * Ottieni aggiornamenti — aggiorna solo il branch corrente: fetch e reset a origin/<branch>. Per un progetto Git Clone, F5 esegue la stessa azione; il normale comando «File → Aggiorna» è disattivato.
@@ -446,10 +445,13 @@ In modalità Trasparenza, lo sfondo della finestra principale rimane trasparente
 
 ## 16) Aiuto
 
-### 16.1 Ripristina impostazioni
+### 16.1 Aggiornamenti
+«Aiuto → Aggiornamenti» confronta la versione corrente con l’ultima versione stabile pubblicata su GitHub. I controlli automatici sono disattivati per impostazione predefinita; se attivati, DevProjex controlla all’avvio quando sono trascorsi almeno sette giorni dall’ultimo controllo riuscito. La casella di controllo viene applicata immediatamente. L’ultimo risultato riuscito viene conservato tra le esecuzioni dell’applicazione e non viene cancellato da un successivo errore di rete. L’installazione resta un’azione dell’utente.
+
+### 16.2 Ripristina impostazioni
 Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori predefiniti di tema, effetti, modalità compatta, animazione di espansione dell’albero e lingua dell’interfaccia. I profili dei progetti, la cronologia e i file sul disco non vengono modificati.
 
-### 16.2 Ripristina dati
+### 16.3 Ripristina dati
 Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
 * cartelle di primo livello selezionate;
 * tipi di file selezionati;

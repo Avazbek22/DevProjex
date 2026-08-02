@@ -89,6 +89,14 @@ public sealed class VirtualizedLineNumbersControl : Control
             NumberFontSizeProperty);
     }
 
+    public VirtualizedLineNumbersControl()
+    {
+        // Line numbers share the preview baseline and must use the same rasterization policy.
+        // Do not round VerticalOffset here: it would desynchronize numbers during smooth scroll.
+        TextOptions.SetTextHintingMode(this, TextHintingMode.Strong);
+        TextOptions.SetBaselinePixelAlignment(this, BaselinePixelAlignment.Aligned);
+    }
+
     public int LineCount
     {
         get => GetValue(LineCountProperty);

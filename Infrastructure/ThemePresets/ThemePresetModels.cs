@@ -33,6 +33,15 @@ public sealed class UserSettingsDb
 {
     public int SchemaVersion { get; set; }
     public AppViewSettings ViewSettings { get; set; } = new();
+    public UpdateCheckSettings UpdateCheckSettings { get; set; } = new();
+}
+
+public sealed record UpdateCheckSettings
+{
+    public bool IsAutomaticCheckEnabled { get; init; }
+    public DateTimeOffset? LastCheckUtc { get; init; }
+    public string LatestKnownVersion { get; init; } = string.Empty;
+    public string LastNotifiedVersion { get; init; } = string.Empty;
 }
 
 public sealed class ThemeSettingsDocument

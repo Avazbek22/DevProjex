@@ -25,6 +25,23 @@ public sealed class StoreListingImportValidatorSchemaTests
     }
 
     [Fact]
+    public void ValidateImportFolder_AllowsLocaleColumnsAppendedAfterTemplate()
+    {
+        var builder = new StoreListingValidationTestBuilder()
+            .WithAdditionalImportLocale("nl-nl");
+        var fixture = builder.Build();
+        using var tempDirectory = fixture.TempDirectory;
+
+        var report = StoreListingImportValidator.ValidateImportFolder(
+            fixture.ImportFolderPath,
+            fixture.ImportCsvPath,
+            fixture.TemplateCsvPath,
+            new StoreListingValidationOptions());
+
+        Assert.DoesNotContain(report.Errors, issue => issue.Code == "SLI006");
+    }
+
+    [Fact]
     public void ValidateImportFolder_Fails_WhenRowOrderDiffersFromTemplate()
     {
         var builder = new StoreListingValidationTestBuilder();

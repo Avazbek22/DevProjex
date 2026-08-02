@@ -99,8 +99,7 @@ Wenn der Befehl `devprojex` nicht funktioniert, öffnen Sie in DevProjex:
 ## 5) Git
 Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wurden (Git Clone). Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
 
-Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
-`%TEMP%\DevProjex\RepoCache`
+Der Cache wird im Cacheverzeichnis des Benutzers gespeichert. Den tatsächlich verwendeten Pfad zeigt `devprojex doctor` an.
 
 * Branch — zeigt die Liste verfügbarer Branches mit Markierung der aktiven Branch; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn sie lokal noch nicht existiert, wird sie per fetch geladen und lokal erstellt.
 * Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>. Bei einem Git-Clone-Projekt führt F5 dieselbe Aktion aus; der normale Befehl „Datei → Aktualisieren“ ist deaktiviert.
@@ -446,10 +445,13 @@ Im Transparenzmodus bleibt der Hintergrund des Hauptfensters transparent. Menüs
 
 ## 16) Hilfe
 
-### 16.1 Einstellungen zurücksetzen
+### 16.1 Updates
+„Hilfe → Updates“ vergleicht die aktuelle Version mit dem neuesten stabilen GitHub-Release. Automatische Prüfungen sind standardmäßig deaktiviert; wenn sie aktiviert sind, prüft DevProjex beim Start, sobald seit der letzten erfolgreichen Prüfung mindestens sieben Tage vergangen sind. Die Checkbox wird sofort angewendet. Das letzte erfolgreiche Ergebnis bleibt zwischen Anwendungsstarts erhalten und wird durch einen späteren Netzwerkfehler nicht gelöscht. Die Installation bleibt eine Benutzeraktion.
+
+### 16.2 Einstellungen zurücksetzen
 Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Animation beim Aufklappen des Baums und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
 
-### 16.2 Daten zurücksetzen
+### 16.3 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
 * ausgewählte Ordner der obersten Ebene;
 * ausgewählte Dateitypen;

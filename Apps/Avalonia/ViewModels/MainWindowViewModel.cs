@@ -29,11 +29,10 @@ public enum PreviewWorkspaceMode
     PreviewOnly
 }
 
-public sealed class MainWindowViewModel : ViewModelBase, IDisposable
+public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    public const string TitleVersion = "4.9";
+    public const string TitleVersion = "5.0";
     public const string BaseTitle = "DevProjex v" + TitleVersion;
-    public const string BaseTitleWithAuthor = "DevProjex by Olimoff v" + TitleVersion;
     public const double DefaultTreeFontSize = 15;
     public const double DefaultPreviewFontSize = 15;
 
@@ -130,7 +129,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _localization = localization;
         _helpContentProvider = helpContentProvider;
-        _title = BaseTitleWithAuthor;
+        _title = BaseTitle;
         _allExtensionsChecked = true;
         _allRootFoldersChecked = true;
         _allIgnoreChecked = true;
@@ -1407,8 +1406,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string HelpHelpCopyAll { get; private set; } = string.Empty;
     public string HelpAboutTitle { get; private set; } = string.Empty;
     public string HelpAboutBody { get; private set; } = string.Empty;
+    public string HelpAboutSupport { get; private set; } = string.Empty;
     public string HelpAboutOpenLink { get; private set; } = string.Empty;
-    public string HelpAboutCopyLink { get; private set; } = string.Empty;
     public string MenuTheme { get; private set; } = string.Empty;
     public string ThemeModeLabel { get; private set; } = string.Empty;
     public string ThemeSystemLabel { get; private set; } = string.Empty;
@@ -1568,9 +1567,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         HelpHelpBody = _helpContentProvider.GetHelpBody(_localization.CurrentLanguage);
         HelpHelpCopyAll = _localization["Help.Help.CopyAll"];
         HelpAboutTitle = _localization["Help.About.Title"];
-        HelpAboutBody = _localization["Help.About.Body"];
+        HelpAboutBody = _localization.Format("Help.About.Body", DateTime.Now.Year);
+        HelpAboutSupport = _localization["Help.About.Support"];
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
-        HelpAboutCopyLink = _localization["Help.About.CopyLink"];
+        UpdateApplicationUpdateLocalization();
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
         SettingsAll = _localization["Settings.All"];
         UpdateAllCheckboxLabels();
@@ -1713,8 +1713,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HelpHelpCopyAll));
         RaisePropertyChanged(nameof(HelpAboutTitle));
         RaisePropertyChanged(nameof(HelpAboutBody));
+        RaisePropertyChanged(nameof(HelpAboutSupport));
         RaisePropertyChanged(nameof(HelpAboutOpenLink));
-        RaisePropertyChanged(nameof(HelpAboutCopyLink));
         RaisePropertyChanged(nameof(SettingsIgnoreTitle));
         RaisePropertyChanged(nameof(SettingsAll));
         RaisePropertyChanged(nameof(SettingsExtensions));

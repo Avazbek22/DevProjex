@@ -1,9 +1,11 @@
+using Avalonia.Controls.Primitives.PopupPositioning;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Views;
 
 public partial class TopMenuBarView : UserControl
 {
+    private const double LargePopupViewportInset = 8;
     private bool _ownedControlHandlersAttached;
 
     public event EventHandler<RoutedEventArgs>? OpenFolderRequested;
@@ -42,12 +44,17 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? LanguagePtRequested;
     public event EventHandler<RoutedEventArgs>? LanguagePtPtRequested;
     public event EventHandler<RoutedEventArgs>? HelpRequested;
+    public event EventHandler<RoutedEventArgs>? UpdateCheckMenuRequested;
+    public event EventHandler<RoutedEventArgs>? UpdateCheckRequested;
+    public event EventHandler<RoutedEventArgs>? UpdateCloseRequested;
+    public event EventHandler<RoutedEventArgs>? UpdateOpenRepositoryRequested;
+    public event EventHandler<AutomaticUpdateCheckChangedEventArgs>? AutomaticUpdateCheckChanged;
     public event EventHandler<RoutedEventArgs>? TerminalCommandSetupRequested;
     public event EventHandler<RoutedEventArgs>? HelpCloseRequested;
     public event EventHandler<RoutedEventArgs>? AboutRequested;
     public event EventHandler<RoutedEventArgs>? AboutCloseRequested;
+    public event EventHandler<RoutedEventArgs>? AboutSupportRequested;
     public event EventHandler<RoutedEventArgs>? AboutOpenLinkRequested;
-    public event EventHandler<RoutedEventArgs>? AboutCopyLinkRequested;
     public event EventHandler<RoutedEventArgs>? ResetSettingsRequested;
     public event EventHandler<RoutedEventArgs>? ResetDataRequested;
     public event EventHandler<RoutedEventArgs>? SetSystemThemeRequested;
@@ -65,6 +72,9 @@ public partial class TopMenuBarView : UserControl
     public TopMenuBarView()
     {
         InitializeComponent();
+        HelpPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
+        HelpDocsPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
+        UpdatePopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
@@ -216,6 +226,9 @@ public partial class TopMenuBarView : UserControl
 
     private void OnHelp(object? sender, RoutedEventArgs e) => HelpRequested?.Invoke(sender, e);
 
+    private void OnCheckForUpdates(object? sender, RoutedEventArgs e)
+        => UpdateCheckMenuRequested?.Invoke(sender, e);
+
     private void OnTerminalCommandSetup(object? sender, RoutedEventArgs e)
         => TerminalCommandSetupRequested?.Invoke(sender, e);
 
@@ -256,8 +269,8 @@ public partial class TopMenuBarView : UserControl
         if (HelpPopover is not null)
         {
             HelpPopover.CloseRequested += OnHelpPopoverCloseRequested;
+            HelpPopover.SupportRequested += OnHelpPopoverSupportRequested;
             HelpPopover.OpenLinkRequested += OnHelpPopoverOpenLinkRequested;
-            HelpPopover.CopyLinkRequested += OnHelpPopoverCopyLinkRequested;
         }
 
         if (ThemePopup is not null)
@@ -269,8 +282,31 @@ public partial class TopMenuBarView : UserControl
         if (HelpDocsPopover is not null)
             HelpDocsPopover.CloseRequested += OnHelpDocsPopoverCloseRequested;
 
+        if (UpdatePopover is not null)
+        {
+            UpdatePopover.CloseRequested += OnUpdatePopoverCloseRequested;
+            UpdatePopover.CheckRequested += OnUpdatePopoverCheckRequested;
+            UpdatePopover.OpenRepositoryRequested += OnUpdatePopoverOpenRepositoryRequested;
+            UpdatePopover.AutomaticCheckChanged += OnAutomaticUpdateCheckChanged;
+        }
+
         if (HelpDocsPopup is not null)
             HelpDocsPopup.Opened += OnHelpDocsPopupOpened;
+
+        if (UpdatePopup is not null)
+            UpdatePopup.Opened += OnUpdatePopupOpened;
+
+        if (RootGrid is not null)
+            RootGrid.SizeChanged += OnLargePopupPlacementBoundsChanged;
+
+        if (HelpPopover is not null)
+            HelpPopover.SizeChanged += OnLargePopupPlacementBoundsChanged;
+
+        if (HelpDocsPopover is not null)
+            HelpDocsPopover.SizeChanged += OnLargePopupPlacementBoundsChanged;
+
+        if (UpdatePopover is not null)
+            UpdatePopover.SizeChanged += OnLargePopupPlacementBoundsChanged;
 
         _ownedControlHandlersAttached = true;
     }
@@ -293,8 +329,8 @@ public partial class TopMenuBarView : UserControl
         if (HelpPopover is not null)
         {
             HelpPopover.CloseRequested -= OnHelpPopoverCloseRequested;
+            HelpPopover.SupportRequested -= OnHelpPopoverSupportRequested;
             HelpPopover.OpenLinkRequested -= OnHelpPopoverOpenLinkRequested;
-            HelpPopover.CopyLinkRequested -= OnHelpPopoverCopyLinkRequested;
         }
 
         if (ThemePopup is not null)
@@ -306,8 +342,31 @@ public partial class TopMenuBarView : UserControl
         if (HelpDocsPopover is not null)
             HelpDocsPopover.CloseRequested -= OnHelpDocsPopoverCloseRequested;
 
+        if (UpdatePopover is not null)
+        {
+            UpdatePopover.CloseRequested -= OnUpdatePopoverCloseRequested;
+            UpdatePopover.CheckRequested -= OnUpdatePopoverCheckRequested;
+            UpdatePopover.OpenRepositoryRequested -= OnUpdatePopoverOpenRepositoryRequested;
+            UpdatePopover.AutomaticCheckChanged -= OnAutomaticUpdateCheckChanged;
+        }
+
         if (HelpDocsPopup is not null)
             HelpDocsPopup.Opened -= OnHelpDocsPopupOpened;
+
+        if (UpdatePopup is not null)
+            UpdatePopup.Opened -= OnUpdatePopupOpened;
+
+        if (RootGrid is not null)
+            RootGrid.SizeChanged -= OnLargePopupPlacementBoundsChanged;
+
+        if (HelpPopover is not null)
+            HelpPopover.SizeChanged -= OnLargePopupPlacementBoundsChanged;
+
+        if (HelpDocsPopover is not null)
+            HelpDocsPopover.SizeChanged -= OnLargePopupPlacementBoundsChanged;
+
+        if (UpdatePopover is not null)
+            UpdatePopover.SizeChanged -= OnLargePopupPlacementBoundsChanged;
 
         _ownedControlHandlersAttached = false;
     }
@@ -333,14 +392,28 @@ public partial class TopMenuBarView : UserControl
     private void OnHelpPopoverCloseRequested(object? sender, RoutedEventArgs e)
         => AboutCloseRequested?.Invoke(this, e);
 
+    private void OnHelpPopoverSupportRequested(object? sender, RoutedEventArgs e)
+        => AboutSupportRequested?.Invoke(this, e);
+
     private void OnHelpPopoverOpenLinkRequested(object? sender, RoutedEventArgs e)
         => AboutOpenLinkRequested?.Invoke(this, e);
 
-    private void OnHelpPopoverCopyLinkRequested(object? sender, RoutedEventArgs e)
-        => AboutCopyLinkRequested?.Invoke(this, e);
-
     private void OnHelpDocsPopoverCloseRequested(object? sender, RoutedEventArgs e)
         => HelpCloseRequested?.Invoke(this, e);
+
+    private void OnUpdatePopoverCloseRequested(object? sender, RoutedEventArgs e)
+        => UpdateCloseRequested?.Invoke(this, e);
+
+    private void OnUpdatePopoverCheckRequested(object? sender, RoutedEventArgs e)
+        => UpdateCheckRequested?.Invoke(this, e);
+
+    private void OnUpdatePopoverOpenRepositoryRequested(object? sender, RoutedEventArgs e)
+        => UpdateOpenRepositoryRequested?.Invoke(this, e);
+
+    private void OnAutomaticUpdateCheckChanged(
+        object? sender,
+        AutomaticUpdateCheckChangedEventArgs e)
+        => AutomaticUpdateCheckChanged?.Invoke(this, e);
 
     private void OnThemePopupOpened(object? sender, EventArgs e)
     {
@@ -350,14 +423,109 @@ public partial class TopMenuBarView : UserControl
 
     private void OnHelpPopupOpened(object? sender, EventArgs e)
     {
+        SynchronizeLargePopupOffset(HelpPopup);
         HelpPopover?.Focus();
         ApplyPopupBackdrop(HelpPopup);
     }
 
     private void OnHelpDocsPopupOpened(object? sender, EventArgs e)
     {
+        SynchronizeLargePopupOffset(HelpDocsPopup);
         HelpDocsPopover?.Focus();
         ApplyPopupBackdrop(HelpDocsPopup);
+    }
+
+    private void OnUpdatePopupOpened(object? sender, EventArgs e)
+    {
+        SynchronizeLargePopupOffset(UpdatePopup);
+        UpdatePopover?.Focus();
+        ApplyPopupBackdrop(UpdatePopup);
+    }
+
+    private void ConfigureLargePopupPlacement(CustomPopupPlacement placement)
+    {
+        // Preserve Avalonia's original Bottom placement (centered under Help) while
+        // constraining the popup to this window rather than the monitor work area.
+        placement.Anchor = PopupAnchor.Bottom;
+        placement.Gravity = PopupGravity.Bottom;
+        placement.Offset = new Point(
+            CalculateLargePopupHorizontalOffset(
+                placement.AnchorRectangle,
+                placement.PopupSize.Width,
+                GetLargePopupViewportBounds()),
+            placement.Offset.Y);
+    }
+
+    private void OnLargePopupPlacementBoundsChanged(object? sender, SizeChangedEventArgs e)
+    {
+        SynchronizeLargePopupOffset(HelpPopup);
+        SynchronizeLargePopupOffset(HelpDocsPopup);
+        SynchronizeLargePopupOffset(UpdatePopup);
+    }
+
+    private void SynchronizeLargePopupOffset(Popup? popup)
+    {
+        if (popup?.IsOpen != true ||
+            popup.Child is not { Bounds.Width: > 0 } child ||
+            HelpMenuItem is null ||
+            RootGrid is null ||
+            HelpMenuItem.TranslatePoint(default, RootGrid) is not { } targetOrigin)
+        {
+            return;
+        }
+
+        var anchorRectangle = new Rect(targetOrigin, HelpMenuItem.Bounds.Size);
+        var horizontalOffset = CalculateLargePopupHorizontalOffset(
+            anchorRectangle,
+            child.Bounds.Width,
+            new Rect(default, RootGrid.Bounds.Size));
+        if (Math.Abs(popup.HorizontalOffset - horizontalOffset) > 0.1)
+            popup.HorizontalOffset = horizontalOffset;
+    }
+
+    private Rect GetLargePopupViewportBounds()
+    {
+        if (RootGrid is null)
+            return default;
+
+        var topLevel = TopLevel.GetTopLevel(RootGrid);
+        var origin = topLevel is null
+            ? default
+            : RootGrid.TranslatePoint(default, topLevel) ?? default;
+        return new Rect(origin, RootGrid.Bounds.Size);
+    }
+
+    internal static double CalculateLargePopupHorizontalOffset(
+        Rect anchorRectangle,
+        double popupWidth,
+        Rect viewportBounds)
+    {
+        if (!double.IsFinite(popupWidth) ||
+            popupWidth <= 0 ||
+            !double.IsFinite(viewportBounds.Width) ||
+            viewportBounds.Width <= 0)
+        {
+            return 0;
+        }
+
+        var preferredLeft = anchorRectangle.X + (anchorRectangle.Width - popupWidth) / 2;
+        var minimumLeft = viewportBounds.Left + LargePopupViewportInset;
+        var maximumLeft = Math.Max(
+            minimumLeft,
+            viewportBounds.Right - LargePopupViewportInset - popupWidth);
+        var constrainedLeft = Math.Clamp(preferredLeft, minimumLeft, maximumLeft);
+        return constrainedLeft - preferredLeft;
+    }
+
+    internal void RefreshOpenPopupBackdrops()
+    {
+        // Native popups are separate top-level windows. Dynamic brushes update in place,
+        // but changing the selected material does not renegotiate their transparency hints.
+        // Keep already-open surfaces synchronized instead of requiring a close/reopen cycle.
+        ApplyPopupBackdropIfOpen(ThemePopup);
+        ApplyPopupBackdropIfOpen(HelpPopup);
+        ApplyPopupBackdropIfOpen(HelpDocsPopup);
+        ApplyPopupBackdropIfOpen(UpdatePopup);
     }
 
     private void OnToolTipLoaded(object? sender, RoutedEventArgs e)
@@ -378,6 +546,12 @@ public partial class TopMenuBarView : UserControl
             TopLevel.GetTopLevel(this),
             viewModel.ActiveThemeEffect,
             PopupBackdropTransparencyFallback.None);
+    }
+
+    private void ApplyPopupBackdropIfOpen(Popup? popup)
+    {
+        if (popup?.IsOpen == true)
+            ApplyPopupBackdrop(popup);
     }
 
     private void ApplyToolTipBackdrop(ToolTip toolTip)
