@@ -99,8 +99,7 @@ Se o comando `devprojex` não funcionar, abra no DevProjex:
 ## 5) Git
 O menu Git apenas está disponível para projetos clonados através do DevProjex (Git Clone). A aplicação não mexe nos seus ficheiros – funciona apenas com a cache.
 
-O cache é armazenado na pasta temporária do sistema. No Windows é normalmente:
-`%TEMP%\DevProjex\RepoCache`
+A cache é armazenada no diretório de cache do utilizador. `devprojex doctor` mostra o caminho efetivamente utilizado.
 
 * Agência — mostra a lista de agências disponíveis com o ativo assinalado; a troca atualiza a árvore para o ramo selecionado. Se a ramificação já existir localmente, a comutação será offline (sem atualização). Se não existir localmente, será obtido e criado.
 * Obter atualizações — atualiza apenas o branch atual: pesquisa e redefine para origin/<branch>. Para um projeto Git Clone, o F5 executa a mesma ação; o comando normal “Ficheiro → Atualizar” está desativado.

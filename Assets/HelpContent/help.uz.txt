@@ -99,8 +99,7 @@ Agar `devprojex` buyrug‘i ishlamasa, DevProjex ichida oching:
 ## 5) Git
 Git menyusi faqat DevProjex orqali klonlangan loyihalarda mavjud (Git Clone). Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
 
-Kesh tizimning vaqtinchalik papkasida saqlanadi. Windows’da odatda:
-`%TEMP%\DevProjex\RepoCache`
+Kesh foydalanuvchining tizim kesh katalogida saqlanadi. Haqiqiy yo‘lni `devprojex doctor` buyrug‘i ko‘rsatadi.
 
 * Tarmoq — mavjud tarmoqlar ro‘yxatini faol tarmoq belgisi bilan ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon lokal bo‘lsa, almashish tarmoqsiz (yangilanishsiz) bo‘ladi. Agar tarmoq lokalda bo‘lmasa, u fetch orqali yuklanib, lokal yaratiladi.
 * Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset. Git Clone loyihasida F5 xuddi shu amalni bajaradi; odatiy «Fayl → Yangilash» buyrug‘i o‘chirilgan bo‘ladi.

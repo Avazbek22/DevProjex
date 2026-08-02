@@ -99,8 +99,7 @@ Wenn der Befehl `devprojex` nicht funktioniert, öffnen Sie in DevProjex:
 ## 5) Git
 Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wurden (Git Clone). Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
 
-Der Cache liegt im System‑Temp‑Ordner. Unter Windows ist das in der Regel:
-`%TEMP%\DevProjex\RepoCache`
+Der Cache wird im Cacheverzeichnis des Benutzers gespeichert. Den tatsächlich verwendeten Pfad zeigt `devprojex doctor` an.
 
 * Branch — zeigt die Liste verfügbarer Branches mit Markierung der aktiven Branch; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn sie lokal noch nicht existiert, wird sie per fetch geladen und lokal erstellt.
 * Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>. Bei einem Git-Clone-Projekt führt F5 dieselbe Aktion aus; der normale Befehl „Datei → Aktualisieren“ ist deaktiviert.

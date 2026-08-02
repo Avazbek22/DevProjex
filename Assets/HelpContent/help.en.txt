@@ -99,8 +99,7 @@ If the `devprojex` command does not work, open in DevProjex:
 ## 5) Git
 Git menu is available only for projects cloned via DevProjex (Git Clone). The app does not touch your files — it works only with the cache.
 
-The cache is stored in the system temp folder. On Windows it is usually:
-`%TEMP%\DevProjex\RepoCache`
+The cache is stored in the user's system cache directory. Run `devprojex doctor` to see the resolved path.
 
 * Branch — shows the list of available branches with the active one marked; switching updates the tree to the selected branch. If the branch already exists locally, switching is offline (no update). If it does not exist locally, it is fetched and created.
 * Get updates — updates only the current branch: fetch and reset to origin/<branch>. For a Git Clone project, F5 performs the same action; the regular “File → Refresh” command is disabled.
