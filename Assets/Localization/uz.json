@@ -103,6 +103,7 @@
   "Update.Failed": "Yangilanishlarni tekshirib bo‘lmadi",
   "Update.FailedMessage": "Internet aloqasini tekshiring va qayta urinib ko‘ring.",
   "Update.Check": "Tekshirish",
+  "Update.CheckAgain": "Qayta tekshirish",
   "Update.Checking": "Yangilanishlar tekshirilmoqda…",
   "Update.Retry": "Qayta urinish",
   "Update.OpenRepository": "Repozitoriyni ochish",

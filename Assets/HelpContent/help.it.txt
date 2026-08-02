@@ -447,7 +447,7 @@ In modalità Trasparenza, lo sfondo della finestra principale rimane trasparente
 ## 16) Aiuto
 
 ### 16.1 Aggiornamenti
-«Aiuto → Aggiornamenti» confronta la versione corrente con l’ultima versione stabile pubblicata su GitHub. I controlli automatici sono disattivati per impostazione predefinita; se attivati, DevProjex controlla all’avvio quando sono trascorsi almeno sette giorni dal controllo precedente. La casella di controllo viene applicata immediatamente. L’installazione resta un’azione dell’utente.
+«Aiuto → Aggiornamenti» confronta la versione corrente con l’ultima versione stabile pubblicata su GitHub. I controlli automatici sono disattivati per impostazione predefinita; se attivati, DevProjex controlla all’avvio quando sono trascorsi almeno sette giorni dall’ultimo controllo riuscito. La casella di controllo viene applicata immediatamente. L’ultimo risultato riuscito viene conservato tra le esecuzioni dell’applicazione e non viene cancellato da un successivo errore di rete. L’installazione resta un’azione dell’utente.
 
 ### 16.2 Ripristina impostazioni
 Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori predefiniti di tema, effetti, modalità compatta, animazione di espansione dell’albero e lingua dell’interfaccia. I profili dei progetti, la cronologia e i file sul disco non vengono modificati.

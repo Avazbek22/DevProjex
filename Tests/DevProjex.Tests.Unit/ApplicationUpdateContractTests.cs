@@ -57,6 +57,7 @@ public sealed class ApplicationUpdateContractTests
         Assert.True(ApplicationUpdateSchedule.IsDue(true, null, now));
         Assert.False(ApplicationUpdateSchedule.IsDue(true, now.AddDays(-7).AddTicks(1), now));
         Assert.True(ApplicationUpdateSchedule.IsDue(true, now.AddDays(-7), now));
+        Assert.True(ApplicationUpdateSchedule.IsDue(true, now.AddMonths(-1), now));
         Assert.True(ApplicationUpdateSchedule.IsDue(true, now.AddMinutes(1), now));
     }
 }

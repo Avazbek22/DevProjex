@@ -447,7 +447,7 @@ Mica platformaning tizim materialidan foydalanadi va fon shaffofligi uchun alohi
 ## 16) Yordam
 
 ### 16.1 Yangilanishlar
-«Yordam → Yangilanishlar» joriy versiyani GitHub’dagi eng so‘nggi barqaror reliz bilan taqqoslaydi. Avtomatik tekshiruv standart holatda o‘chirilgan; u yoqilsa, DevProjex avvalgi tekshiruvdan kamida yetti kun o‘tganda ishga tushish vaqtida tekshiradi. Belgilash katagi darhol qo‘llanadi. O‘rnatishni foydalanuvchi o‘zi bajaradi.
+«Yordam → Yangilanishlar» joriy versiyani GitHub’dagi eng so‘nggi barqaror reliz bilan taqqoslaydi. Avtomatik tekshiruv standart holatda o‘chirilgan; u yoqilsa, DevProjex oxirgi muvaffaqiyatli tekshiruvdan kamida yetti kun o‘tganda ishga tushish vaqtida tekshiradi. Belgilash katagi darhol qo‘llanadi. Oxirgi muvaffaqiyatli natija dastur qayta ishga tushirilganda saqlanadi va keyingi tarmoq xatosi tufayli o‘chirilmaydi. O‘rnatishni foydalanuvchi o‘zi bajaradi.
 
 ### 16.2 Sozlamalarni tiklash
 Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) mavzu, effektlar, ixcham rejim, daraxtni ochish animatsiyasi va interfeys tilini standart qiymatlarga qaytaradi. Loyiha profillari, tarix va diskdagi fayllar o‘zgartirilmaydi.

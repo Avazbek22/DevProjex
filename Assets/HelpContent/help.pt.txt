@@ -501,7 +501,7 @@ No modo Transparência, o fundo da janela principal permanece transparente. Menu
 ## 16) Ajuda
 
 ### 16.1 Atualizações
-“Ajuda → Atualizações” compara a versão atual com a versão estável mais recente publicada no GitHub. As verificações automáticas ficam desativadas por padrão; quando ativadas, o DevProjex verifica na inicialização após pelo menos sete dias desde a verificação anterior. A caixa de seleção é aplicada imediatamente. A instalação continua sendo uma ação do usuário.
+“Ajuda → Atualizações” compara a versão atual com a versão estável mais recente publicada no GitHub. As verificações automáticas ficam desativadas por padrão; quando ativadas, o DevProjex verifica na inicialização após pelo menos sete dias desde a última verificação bem-sucedida. A caixa de seleção é aplicada imediatamente. O último resultado bem-sucedido é mantido entre as execuções do aplicativo e não é apagado por uma falha de rede posterior. A instalação continua sendo uma ação do usuário.
 
 ### 16.2 Redefinir configurações
 Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema padrão, efeitos, modo compacto, animação de expansão da árvore e idioma da interface. Perfis de projeto, histórico e arquivos em disco não são alterados.

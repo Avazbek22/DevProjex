@@ -192,11 +192,20 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         UpdateCheckSettings? settings)
     {
         settings ??= new UpdateCheckSettings();
-        var lastNotifiedVersion = settings.LastNotifiedVersion?.Trim() ?? string.Empty;
-        if (lastNotifiedVersion.Length > 64)
-            lastNotifiedVersion = string.Empty;
+        var latestKnownVersion = NormalizeStoredVersion(settings.LatestKnownVersion);
+        var lastNotifiedVersion = NormalizeStoredVersion(settings.LastNotifiedVersion);
 
-        return settings with { LastNotifiedVersion = lastNotifiedVersion };
+        return settings with
+        {
+            LatestKnownVersion = latestKnownVersion,
+            LastNotifiedVersion = lastNotifiedVersion
+        };
+    }
+
+    private static string NormalizeStoredVersion(string? version)
+    {
+        var normalized = version?.Trim() ?? string.Empty;
+        return normalized.Length <= 64 ? normalized : string.Empty;
     }
 
     private JsonStoreFileSet GetFileSet()

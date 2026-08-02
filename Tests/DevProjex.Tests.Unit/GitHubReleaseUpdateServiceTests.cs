@@ -87,6 +87,22 @@ public sealed class GitHubReleaseUpdateServiceTests
         Assert.Null(handler.Request);
     }
 
+    [Fact]
+    public async Task CheckAsync_NetworkFailure_ReturnsTypedFailureWithoutLeakingException()
+    {
+        using var handler = new StubHttpMessageHandler(
+            _ => throw new HttpRequestException("Synthetic network failure."));
+        using var service = new GitHubReleaseUpdateService(handler);
+
+        var result = await service.CheckAsync(
+            "5.0",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ApplicationUpdateAvailability.CheckFailed, result.Availability);
+        Assert.Equal("5.0", result.CurrentVersion);
+        Assert.Null(result.LatestVersion);
+    }
+
     private static HttpResponseMessage JsonResponse(string json)
         => new(HttpStatusCode.OK)
         {

@@ -67,7 +67,7 @@ public sealed partial class MainWindowViewModel
     public bool IsCurrentApplicationVersionNewer =>
         UpdateCheckState == UpdateCheckPresentationState.CurrentVersionNewer;
     public bool HasUpdateCheckFailed => UpdateCheckState == UpdateCheckPresentationState.Failed;
-    public bool IsUpdateCheckButtonVisible => !IsUpdateAvailable;
+    public bool IsUpdateCheckButtonVisible => true;
     public bool IsLatestApplicationVersionVisible =>
         IsUpdateAvailable || IsApplicationUpToDate || IsCurrentApplicationVersionNewer;
 
@@ -85,7 +85,8 @@ public sealed partial class MainWindowViewModel
     {
         UpdateCheckPresentationState.Checking => UpdateCheckingButton,
         UpdateCheckPresentationState.Failed => UpdateRetryButton,
-        _ => UpdateCheckButton
+        UpdateCheckPresentationState.Ready => UpdateCheckButton,
+        _ => UpdateCheckAgainButton
     };
 
     public string MenuHelpCheckUpdates { get; private set; } = string.Empty;
@@ -98,6 +99,7 @@ public sealed partial class MainWindowViewModel
     public string UpdateFailedTitle { get; private set; } = string.Empty;
     public string UpdateFailedMessage { get; private set; } = string.Empty;
     public string UpdateCheckButton { get; private set; } = string.Empty;
+    public string UpdateCheckAgainButton { get; private set; } = string.Empty;
     public string UpdateCheckingButton { get; private set; } = string.Empty;
     public string UpdateRetryButton { get; private set; } = string.Empty;
     public string UpdateOpenRepository { get; private set; } = string.Empty;
@@ -148,6 +150,7 @@ public sealed partial class MainWindowViewModel
         UpdateFailedTitle = _localization["Update.Failed"];
         UpdateFailedMessage = _localization["Update.FailedMessage"];
         UpdateCheckButton = _localization["Update.Check"];
+        UpdateCheckAgainButton = _localization["Update.CheckAgain"];
         UpdateCheckingButton = _localization["Update.Checking"];
         UpdateRetryButton = _localization["Update.Retry"];
         UpdateOpenRepository = _localization["Update.OpenRepository"];
@@ -162,6 +165,7 @@ public sealed partial class MainWindowViewModel
         RaisePropertyChanged(nameof(UpdateFailedTitle));
         RaisePropertyChanged(nameof(UpdateFailedMessage));
         RaisePropertyChanged(nameof(UpdateCheckButton));
+        RaisePropertyChanged(nameof(UpdateCheckAgainButton));
         RaisePropertyChanged(nameof(UpdateCheckingButton));
         RaisePropertyChanged(nameof(UpdateRetryButton));
         RaisePropertyChanged(nameof(UpdateOpenRepository));

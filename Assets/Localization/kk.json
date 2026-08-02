@@ -103,6 +103,7 @@
   "Update.Failed": "Жаңартуларды тексеру мүмкін болмады",
   "Update.FailedMessage": "Интернет байланысын тексеріп, әрекетті қайталаңыз.",
   "Update.Check": "Тексеру",
+  "Update.CheckAgain": "Қайта тексеру",
   "Update.Checking": "Жаңартулар тексерілуде…",
   "Update.Retry": "Қайталау",
   "Update.OpenRepository": "Репозиторийді ашу",

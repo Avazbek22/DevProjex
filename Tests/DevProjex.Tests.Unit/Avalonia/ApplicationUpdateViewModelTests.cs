@@ -27,7 +27,8 @@ public sealed class ApplicationUpdateViewModelTests
         Assert.True(viewModel.IsUpdateAvailable);
         Assert.True(viewModel.IsLatestApplicationVersionVisible);
         Assert.Equal("Latest version: v4.10.0", viewModel.LatestApplicationVersionText);
-        Assert.False(viewModel.IsUpdateCheckButtonVisible);
+        Assert.True(viewModel.IsUpdateCheckButtonVisible);
+        Assert.Equal("Check again", viewModel.UpdateCheckActionText);
     }
 
     [Theory]
@@ -60,6 +61,7 @@ public sealed class ApplicationUpdateViewModelTests
                     ["Update.CurrentVersion"] = "Current version: {0}",
                     ["Update.LatestVersion"] = "Latest version: {0}",
                     ["Update.Check"] = "Check",
+                    ["Update.CheckAgain"] = "Check again",
                     ["Update.Checking"] = "Checking…",
                     ["Update.Retry"] = "Try again"
                 }

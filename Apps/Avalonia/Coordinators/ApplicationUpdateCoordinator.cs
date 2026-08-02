@@ -35,7 +35,6 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
     {
         // Opening the popover is a UI action and must not wait behind disk locking.
         // The persisted opt-in state is loaded asynchronously after the surface is visible.
-        _viewModel.PrepareManualUpdateCheck();
         _viewModel.UpdatePopoverOpen = true;
         await _operationGate.WaitAsync(cancellationToken);
         try
@@ -43,6 +42,12 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
             var settings = await EnsureSettingsLoadedAsync(cancellationToken);
             _viewModel.AutomaticUpdateChecksEnabled =
                 settings.UpdateCheckSettings.IsAutomaticCheckEnabled;
+            if (_viewModel.UpdateCheckState is
+                UpdateCheckPresentationState.Ready or
+                UpdateCheckPresentationState.Failed)
+            {
+                RestoreLastSuccessfulResult(settings.UpdateCheckSettings);
+            }
         }
         finally
         {
@@ -176,10 +181,14 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
         bool markAvailableVersionAsNotified,
         CancellationToken cancellationToken)
     {
-        // A failed request is not a completed weekly check. Retaining the old timestamp
-        // lets the next application start retry instead of suppressing checks for a week.
-        if (result.Availability == ApplicationUpdateAvailability.CheckFailed)
+        // A failed request must not erase the last successful snapshot. Keeping that
+        // snapshot separate from notification history makes the result durable across
+        // process restarts without presenting a failed attempt as fresh release data.
+        if (result.Availability == ApplicationUpdateAvailability.CheckFailed ||
+            !ApplicationReleaseVersion.TryParse(result.LatestVersion, out var latestVersion))
+        {
             return;
+        }
 
         var lastNotifiedVersion = markAvailableVersionAsNotified &&
                                   result.Availability == ApplicationUpdateAvailability.UpdateAvailable
@@ -188,6 +197,7 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
         settings.UpdateCheckSettings = settings.UpdateCheckSettings with
         {
             LastCheckUtc = _utcNow(),
+            LatestKnownVersion = latestVersion.ToString(),
             LastNotifiedVersion = lastNotifiedVersion
         };
         await PersistSettingsAsync(settings, cancellationToken);
@@ -208,6 +218,28 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
         => ApplicationReleaseVersion.TryParse(lastNotifiedVersion, out var notified) &&
            ApplicationReleaseVersion.TryParse(latestVersion, out var latest) &&
            notified.Equals(latest);
+
+    private bool RestoreLastSuccessfulResult(UpdateCheckSettings settings)
+    {
+        if (settings.LastCheckUtc is null ||
+            !ApplicationReleaseVersion.TryParse(_currentVersion, out var current) ||
+            !ApplicationReleaseVersion.TryParse(settings.LatestKnownVersion, out var latest))
+        {
+            return false;
+        }
+
+        var availability = current.CompareTo(latest) switch
+        {
+            < 0 => ApplicationUpdateAvailability.UpdateAvailable,
+            > 0 => ApplicationUpdateAvailability.CurrentVersionNewer,
+            _ => ApplicationUpdateAvailability.UpToDate
+        };
+        _viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
+            availability,
+            current.ToString(),
+            latest.ToString()));
+        return true;
+    }
 
     private static string NormalizeCurrentVersion(string currentVersion)
         => ApplicationReleaseVersion.TryParse(currentVersion, out var parsed)

@@ -103,6 +103,7 @@
   "Update.Failed": "Не удалось проверить обновления",
   "Update.FailedMessage": "Проверьте подключение к интернету и повторите попытку.",
   "Update.Check": "Проверить",
+  "Update.CheckAgain": "Проверить снова",
   "Update.Checking": "Проверяем обновления…",
   "Update.Retry": "Повторить",
   "Update.OpenRepository": "Открыть репозиторий",

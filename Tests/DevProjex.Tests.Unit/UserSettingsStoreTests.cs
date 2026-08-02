@@ -19,6 +19,7 @@ public sealed class UserSettingsStoreTests
         Assert.Null(database.ViewSettings.PreferredLanguage);
         Assert.False(database.UpdateCheckSettings.IsAutomaticCheckEnabled);
         Assert.Null(database.UpdateCheckSettings.LastCheckUtc);
+        Assert.Empty(database.UpdateCheckSettings.LatestKnownVersion);
         Assert.Empty(database.UpdateCheckSettings.LastNotifiedVersion);
     }
 
@@ -199,6 +200,7 @@ public sealed class UserSettingsStoreTests
         {
             IsAutomaticCheckEnabled = true,
             LastCheckUtc = checkedAt,
+            LatestKnownVersion = " v4.10.0 ",
             LastNotifiedVersion = " v4.10.0 "
         };
 
@@ -209,6 +211,7 @@ public sealed class UserSettingsStoreTests
         Assert.Equal(AppLanguage.Ru, reloaded.ViewSettings.PreferredLanguage);
         Assert.True(reloaded.UpdateCheckSettings.IsAutomaticCheckEnabled);
         Assert.Equal(checkedAt, reloaded.UpdateCheckSettings.LastCheckUtc);
+        Assert.Equal("v4.10.0", reloaded.UpdateCheckSettings.LatestKnownVersion);
         Assert.Equal("v4.10.0", reloaded.UpdateCheckSettings.LastNotifiedVersion);
     }
 
@@ -240,6 +243,13 @@ public sealed class UserSettingsStoreTests
             {
                 IsCompactMode = true,
                 PreferredLanguage = AppLanguage.It
+            },
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LastCheckUtc = new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero),
+                LatestKnownVersion = "5.0",
+                LastNotifiedVersion = "5.0"
             }
         };
         Assert.True(store.TrySave(database));
@@ -249,6 +259,9 @@ public sealed class UserSettingsStoreTests
 
         Assert.True(recovered.ViewSettings.IsCompactMode);
         Assert.Equal(AppLanguage.It, recovered.ViewSettings.PreferredLanguage);
+        Assert.True(recovered.UpdateCheckSettings.IsAutomaticCheckEnabled);
+        Assert.Equal("5.0", recovered.UpdateCheckSettings.LatestKnownVersion);
+        Assert.Equal("5.0", recovered.UpdateCheckSettings.LastNotifiedVersion);
         Assert.Equal(File.ReadAllText(store.GetPath()), File.ReadAllText(store.GetPath() + ".bak"));
     }
 

@@ -103,6 +103,7 @@
     "Update.Failed":  "Não foi possível verificar atualizações",
     "Update.FailedMessage":  "Verifique sua conexão com a Internet e tente novamente.",
     "Update.Check":  "Verificar",
+    "Update.CheckAgain":  "Verificar novamente",
     "Update.Checking":  "Verificando atualizações…",
     "Update.Retry":  "Tentar novamente",
     "Update.OpenRepository":  "Abrir repositório",

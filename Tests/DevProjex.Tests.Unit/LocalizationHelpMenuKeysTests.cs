@@ -19,6 +19,7 @@ public sealed class LocalizationHelpMenuKeysTests
 		"Update.Failed",
 		"Update.FailedMessage",
 		"Update.Check",
+		"Update.CheckAgain",
 		"Update.Checking",
 		"Update.Retry",
 		"Update.OpenRepository",

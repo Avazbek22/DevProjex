@@ -103,6 +103,7 @@
   "Update.Failed": "Навсозиҳоро санҷидан муяссар нашуд",
   "Update.FailedMessage": "Пайвасти интернетро санҷед ва дубора кӯшиш кунед.",
   "Update.Check": "Санҷидан",
+  "Update.CheckAgain": "Боз санҷидан",
   "Update.Checking": "Навсозиҳо санҷида мешаванд…",
   "Update.Retry": "Дубора кӯшиш кардан",
   "Update.OpenRepository": "Кушодани репозиторий",
