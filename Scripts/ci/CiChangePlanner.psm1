@@ -92,6 +92,19 @@ function Test-PathEquals {
 	return $Path.Equals($Expected, [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Test-StaticDocumentationAsset {
+	param([Parameter(Mandatory)][string] $Path)
+
+	if (-not (Test-PathStartsWith $Path '.github/assets/')) {
+		return $false
+	}
+
+	# Keep this allowlist deliberately narrow. Renderable repository artwork cannot affect
+	# the product, while scripts or unfamiliar formats in the same directory must fail safe.
+	$extension = [IO.Path]::GetExtension($Path)
+	return $extension -in @('.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp')
+}
+
 function Add-PathToCiPlan {
 	param(
 		[Parameter(Mandatory)]
@@ -122,6 +135,7 @@ function Add-PathToCiPlan {
 	}
 
 	if ((Test-PathEquals $normalized 'README.md') -or
+		(Test-StaticDocumentationAsset $normalized) -or
 		(Test-PathStartsWith $normalized 'Docs/') -or
 		((Test-PathStartsWith $normalized 'Packaging/') -and $normalized.EndsWith('.md', [StringComparison]::OrdinalIgnoreCase))) {
 		Enable-CiTargets -Plan $Plan -Targets @('Documentation') -Reason "Documentation contract: $normalized"

@@ -29,6 +29,31 @@ Assert-Plan -Name 'README only' -Path 'README.md' `
 	-Enabled Documentation `
 	-Disabled $allHeavyTargets
 
+$staticDocumentationAssets = @(
+	'.github/assets/support.svg',
+	'.github/assets/screenshots/overview.PNG',
+	'.github/assets/social-preview.jpg',
+	'.github/assets/demo.jpeg',
+	'.github/assets/demo.gif',
+	'.github/assets/demo.webp'
+)
+foreach ($assetPath in $staticDocumentationAssets) {
+	Assert-Plan -Name "Static documentation asset: $assetPath" -Path $assetPath `
+		-Enabled Documentation `
+		-Disabled $allHeavyTargets
+}
+
+Assert-Plan -Name 'README and static asset stay documentation-only' `
+	-Path @('README.md', '.github/assets/boosty-support.svg') `
+	-Enabled Documentation `
+	-Disabled $allHeavyTargets
+
+Assert-Plan -Name 'Executable under documentation assets fails safe' -Path '.github/assets/generate-banner.ps1' `
+	-Enabled $allHeavyTargets
+
+Assert-Plan -Name 'Unknown documentation asset format fails safe' -Path '.github/assets/banner.bin' `
+	-Enabled $allHeavyTargets
+
 Assert-Plan -Name 'Root text note only' -Path 'release-note.txt' `
 	-Disabled ($allHeavyTargets + 'Documentation')
 
