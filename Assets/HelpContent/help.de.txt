@@ -446,10 +446,13 @@ Im Transparenzmodus bleibt der Hintergrund des Hauptfensters transparent. Menüs
 
 ## 16) Hilfe
 
-### 16.1 Einstellungen zurücksetzen
+### 16.1 Updates
+„Hilfe → Updates“ vergleicht die aktuelle Version mit dem neuesten stabilen GitHub-Release. Automatische Prüfungen sind standardmäßig deaktiviert; wenn sie aktiviert sind, prüft DevProjex beim Start, sobald seit der letzten Prüfung mindestens sieben Tage vergangen sind. Die Checkbox wird sofort angewendet. Die Installation bleibt eine Benutzeraktion.
+
+### 16.2 Einstellungen zurücksetzen
 Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Animation beim Aufklappen des Baums und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
 
-### 16.2 Daten zurücksetzen
+### 16.3 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
 * ausgewählte Ordner der obersten Ebene;
 * ausgewählte Dateitypen;

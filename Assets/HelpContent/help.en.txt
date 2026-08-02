@@ -498,10 +498,13 @@ In Transparency mode, the main-window background remains transparent. Menus, sub
 
 ## 16) Help
 
-### 16.1 Reset settings
+### 16.1 Updates
+“Help → Updates” compares the current version with the latest stable GitHub release. Automatic checks are off by default; when enabled, DevProjex checks at startup after at least seven days have passed since the previous check. The checkbox takes effect immediately. Installation remains a user action.
+
+### 16.2 Reset settings
 Reset settings (Help → Reset settings) restores the default theme, effects, Compact mode, Tree expansion animation, and interface language. Project profiles, history, and files on disk are not changed.
 
-### 16.2 Reset data
+### 16.3 Reset data
 Reset data (Help → Reset data) removes saved local-project parameter profiles:
 * selected top-level folders;
 * selected file types;

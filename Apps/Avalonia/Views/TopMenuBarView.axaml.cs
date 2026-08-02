@@ -44,6 +44,11 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? LanguagePtRequested;
     public event EventHandler<RoutedEventArgs>? LanguagePtPtRequested;
     public event EventHandler<RoutedEventArgs>? HelpRequested;
+    public event EventHandler<RoutedEventArgs>? UpdateCheckMenuRequested;
+    public event EventHandler<RoutedEventArgs>? UpdateCheckRequested;
+    public event EventHandler<RoutedEventArgs>? UpdateCloseRequested;
+    public event EventHandler<RoutedEventArgs>? UpdateOpenRepositoryRequested;
+    public event EventHandler<AutomaticUpdateCheckChangedEventArgs>? AutomaticUpdateCheckChanged;
     public event EventHandler<RoutedEventArgs>? TerminalCommandSetupRequested;
     public event EventHandler<RoutedEventArgs>? HelpCloseRequested;
     public event EventHandler<RoutedEventArgs>? AboutRequested;
@@ -69,6 +74,7 @@ public partial class TopMenuBarView : UserControl
         InitializeComponent();
         HelpPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
         HelpDocsPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
+        UpdatePopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
@@ -220,6 +226,9 @@ public partial class TopMenuBarView : UserControl
 
     private void OnHelp(object? sender, RoutedEventArgs e) => HelpRequested?.Invoke(sender, e);
 
+    private void OnCheckForUpdates(object? sender, RoutedEventArgs e)
+        => UpdateCheckMenuRequested?.Invoke(sender, e);
+
     private void OnTerminalCommandSetup(object? sender, RoutedEventArgs e)
         => TerminalCommandSetupRequested?.Invoke(sender, e);
 
@@ -273,8 +282,19 @@ public partial class TopMenuBarView : UserControl
         if (HelpDocsPopover is not null)
             HelpDocsPopover.CloseRequested += OnHelpDocsPopoverCloseRequested;
 
+        if (UpdatePopover is not null)
+        {
+            UpdatePopover.CloseRequested += OnUpdatePopoverCloseRequested;
+            UpdatePopover.CheckRequested += OnUpdatePopoverCheckRequested;
+            UpdatePopover.OpenRepositoryRequested += OnUpdatePopoverOpenRepositoryRequested;
+            UpdatePopover.AutomaticCheckChanged += OnAutomaticUpdateCheckChanged;
+        }
+
         if (HelpDocsPopup is not null)
             HelpDocsPopup.Opened += OnHelpDocsPopupOpened;
+
+        if (UpdatePopup is not null)
+            UpdatePopup.Opened += OnUpdatePopupOpened;
 
         if (RootGrid is not null)
             RootGrid.SizeChanged += OnLargePopupPlacementBoundsChanged;
@@ -284,6 +304,9 @@ public partial class TopMenuBarView : UserControl
 
         if (HelpDocsPopover is not null)
             HelpDocsPopover.SizeChanged += OnLargePopupPlacementBoundsChanged;
+
+        if (UpdatePopover is not null)
+            UpdatePopover.SizeChanged += OnLargePopupPlacementBoundsChanged;
 
         _ownedControlHandlersAttached = true;
     }
@@ -319,8 +342,19 @@ public partial class TopMenuBarView : UserControl
         if (HelpDocsPopover is not null)
             HelpDocsPopover.CloseRequested -= OnHelpDocsPopoverCloseRequested;
 
+        if (UpdatePopover is not null)
+        {
+            UpdatePopover.CloseRequested -= OnUpdatePopoverCloseRequested;
+            UpdatePopover.CheckRequested -= OnUpdatePopoverCheckRequested;
+            UpdatePopover.OpenRepositoryRequested -= OnUpdatePopoverOpenRepositoryRequested;
+            UpdatePopover.AutomaticCheckChanged -= OnAutomaticUpdateCheckChanged;
+        }
+
         if (HelpDocsPopup is not null)
             HelpDocsPopup.Opened -= OnHelpDocsPopupOpened;
+
+        if (UpdatePopup is not null)
+            UpdatePopup.Opened -= OnUpdatePopupOpened;
 
         if (RootGrid is not null)
             RootGrid.SizeChanged -= OnLargePopupPlacementBoundsChanged;
@@ -330,6 +364,9 @@ public partial class TopMenuBarView : UserControl
 
         if (HelpDocsPopover is not null)
             HelpDocsPopover.SizeChanged -= OnLargePopupPlacementBoundsChanged;
+
+        if (UpdatePopover is not null)
+            UpdatePopover.SizeChanged -= OnLargePopupPlacementBoundsChanged;
 
         _ownedControlHandlersAttached = false;
     }
@@ -364,6 +401,20 @@ public partial class TopMenuBarView : UserControl
     private void OnHelpDocsPopoverCloseRequested(object? sender, RoutedEventArgs e)
         => HelpCloseRequested?.Invoke(this, e);
 
+    private void OnUpdatePopoverCloseRequested(object? sender, RoutedEventArgs e)
+        => UpdateCloseRequested?.Invoke(this, e);
+
+    private void OnUpdatePopoverCheckRequested(object? sender, RoutedEventArgs e)
+        => UpdateCheckRequested?.Invoke(this, e);
+
+    private void OnUpdatePopoverOpenRepositoryRequested(object? sender, RoutedEventArgs e)
+        => UpdateOpenRepositoryRequested?.Invoke(this, e);
+
+    private void OnAutomaticUpdateCheckChanged(
+        object? sender,
+        AutomaticUpdateCheckChangedEventArgs e)
+        => AutomaticUpdateCheckChanged?.Invoke(this, e);
+
     private void OnThemePopupOpened(object? sender, EventArgs e)
     {
         ThemePopover?.Focus();
@@ -384,6 +435,13 @@ public partial class TopMenuBarView : UserControl
         ApplyPopupBackdrop(HelpDocsPopup);
     }
 
+    private void OnUpdatePopupOpened(object? sender, EventArgs e)
+    {
+        SynchronizeLargePopupOffset(UpdatePopup);
+        UpdatePopover?.Focus();
+        ApplyPopupBackdrop(UpdatePopup);
+    }
+
     private void ConfigureLargePopupPlacement(CustomPopupPlacement placement)
     {
         // Preserve Avalonia's original Bottom placement (centered under Help) while
@@ -402,6 +460,7 @@ public partial class TopMenuBarView : UserControl
     {
         SynchronizeLargePopupOffset(HelpPopup);
         SynchronizeLargePopupOffset(HelpDocsPopup);
+        SynchronizeLargePopupOffset(UpdatePopup);
     }
 
     private void SynchronizeLargePopupOffset(Popup? popup)
@@ -466,6 +525,7 @@ public partial class TopMenuBarView : UserControl
         ApplyPopupBackdropIfOpen(ThemePopup);
         ApplyPopupBackdropIfOpen(HelpPopup);
         ApplyPopupBackdropIfOpen(HelpDocsPopup);
+        ApplyPopupBackdropIfOpen(UpdatePopup);
     }
 
     private void OnToolTipLoaded(object? sender, RoutedEventArgs e)

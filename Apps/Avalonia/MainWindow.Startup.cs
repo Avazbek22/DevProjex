@@ -549,6 +549,9 @@ public partial class MainWindow
             ObserveDetachedTask(
                 Task.Run(_repoCacheService.CleanupStaleCacheOnStartup, cancellationToken),
                 "CleanupStaleRepositoryCache");
+            ObserveDetachedTask(
+                _applicationUpdates.RunAutomaticCheckIfDueAsync(cancellationToken),
+                "AutomaticUpdateCheck");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

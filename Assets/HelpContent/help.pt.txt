@@ -500,10 +500,13 @@ No modo Transparência, o fundo da janela principal permanece transparente. Menu
 
 ## 16) Ajuda
 
-### 16.1 Redefinir configurações
+### 16.1 Atualizações
+“Ajuda → Atualizações” compara a versão atual com a versão estável mais recente publicada no GitHub. As verificações automáticas ficam desativadas por padrão; quando ativadas, o DevProjex verifica na inicialização após pelo menos sete dias desde a verificação anterior. A caixa de seleção é aplicada imediatamente. A instalação continua sendo uma ação do usuário.
+
+### 16.2 Redefinir configurações
 Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema padrão, efeitos, modo compacto, animação de expansão da árvore e idioma da interface. Perfis de projeto, histórico e arquivos em disco não são alterados.
 
-### 16.2 Redefinir dados
+### 16.3 Redefinir dados
 Redefinir dados (Ajuda → Redefinir dados) remove perfis de parâmetros de projeto local salvos:
 * pastas de nível superior selecionadas;
 * tipos de arquivo selecionados;

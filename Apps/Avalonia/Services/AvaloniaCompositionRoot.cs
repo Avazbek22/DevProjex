@@ -9,6 +9,7 @@ using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.Reports;
 using DevProjex.Infrastructure.TerminalCommands;
+using DevProjex.Infrastructure.Updates;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -99,6 +100,7 @@ public static class AvaloniaCompositionRoot
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
         var zipDownloadService = new ZipDownloadService();
+        var applicationUpdateService = new GitHubReleaseUpdateService();
         ITaskbarProgressService taskbarProgressService = OperatingSystem.IsWindows()
             ? new WindowsTaskbarProgressService()
             : new NoopTaskbarProgressService();
@@ -134,6 +136,7 @@ public static class AvaloniaCompositionRoot
             ZipDownloadService: zipDownloadService,
             FileContentAnalyzer: fileContentAnalyzer,
             ProjectAnalysisService: projectAnalysisService,
+            ApplicationUpdateService: applicationUpdateService,
             TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService,
             SessionMetricsRecorder: sessionMetricsRecorder);

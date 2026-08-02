@@ -150,6 +150,7 @@ public partial class MainWindow
             _workspacePresentation.Dispose();
             _selectionCoordinator.Dispose();
             _themeBrushCoordinator.Dispose();
+            _applicationUpdates.Dispose();
             _statusOperations.Dispose();
 
             // Dispose ViewModel to clean up collection event handlers

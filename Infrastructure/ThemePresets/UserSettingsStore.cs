@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.ThemePresets;
 
 public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 {
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 8;
     private const string FolderName = "DevProjex";
     private const string FileName = "user-settings.json";
 
@@ -120,12 +120,44 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         }
     }
 
+    public bool TryPersistUpdateCheckSettings(UserSettingsDb database)
+    {
+        lock (_sync)
+        {
+            try
+            {
+                var fileSet = GetFileSet();
+                if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+                    return false;
+
+                using var _ = heldLock;
+                if (HasFutureSchema(fileSet))
+                    return false;
+                var latest = LoadInternal(fileSet);
+                latest.UpdateCheckSettings = NormalizeUpdateCheckSettings(
+                    database.UpdateCheckSettings);
+                if (!TrySaveInternal(fileSet, Normalize(latest)))
+                    return false;
+
+                database.SchemaVersion = latest.SchemaVersion;
+                database.UpdateCheckSettings = latest.UpdateCheckSettings;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
     public string GetPath() => GetFileSet().PrimaryPath;
 
     private UserSettingsDb Normalize(UserSettingsDb database)
     {
         database.SchemaVersion = CurrentSchemaVersion;
         database.ViewSettings = NormalizeViewSettings(database.ViewSettings);
+        database.UpdateCheckSettings = NormalizeUpdateCheckSettings(
+            database.UpdateCheckSettings);
         return database;
     }
 
@@ -154,6 +186,17 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         return Enum.IsDefined(settings.PreferredLanguage ?? AppLanguage.En)
             ? settings
             : settings with { PreferredLanguage = null };
+    }
+
+    private static UpdateCheckSettings NormalizeUpdateCheckSettings(
+        UpdateCheckSettings? settings)
+    {
+        settings ??= new UpdateCheckSettings();
+        var lastNotifiedVersion = settings.LastNotifiedVersion?.Trim() ?? string.Empty;
+        if (lastNotifiedVersion.Length > 64)
+            lastNotifiedVersion = string.Empty;
+
+        return settings with { LastNotifiedVersion = lastNotifiedVersion };
     }
 
     private JsonStoreFileSet GetFileSet()
@@ -216,7 +259,8 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
     private static UserSettingsDb CreateDefaultDb() => new()
     {
         SchemaVersion = CurrentSchemaVersion,
-        ViewSettings = DefaultViewSettings
+        ViewSettings = DefaultViewSettings,
+        UpdateCheckSettings = new UpdateCheckSettings()
     };
 
     private static bool HasFutureSchema(JsonStoreFileSet fileSet) =>

@@ -12,7 +12,8 @@ public sealed class AvaloniaCompiledBindingContractTests
 		"HelpPopoverView.axaml",
 		"SearchBarView.axaml",
 		"SettingsPanelView.axaml",
-		"ThemePopoverView.axaml"
+		"ThemePopoverView.axaml",
+		"UpdatePopoverView.axaml"
 	];
 
 	[Fact]
@@ -79,6 +80,38 @@ public sealed class AvaloniaCompiledBindingContractTests
 		Assert.Equal(3, root.Descendants(avaloniaNamespace + "VirtualizingStackPanel").Count());
 		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsControl"));
 		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsRepeater"));
+	}
+
+	[Fact]
+	public void HelpMenu_PlacesUpdatesImmediatelyAfterAbout()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"TopMenuBarView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var helpMenu = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => string.Equals(
+				element.Attribute("Name")?.Value,
+				"HelpMenuItem",
+				StringComparison.Ordinal));
+		var children = helpMenu.Elements().ToList();
+		var aboutIndex = children.FindIndex(element => string.Equals(
+			element.Attribute("Name")?.Value,
+			"AboutMenuItem",
+			StringComparison.Ordinal));
+		var updatesIndex = children.FindIndex(element => string.Equals(
+			element.Attribute("Name")?.Value,
+			"UpdateMenuItem",
+			StringComparison.Ordinal));
+
+		Assert.True(aboutIndex >= 0);
+		Assert.Equal(aboutIndex + 1, updatesIndex);
 	}
 
 	[Fact]

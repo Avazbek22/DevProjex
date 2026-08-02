@@ -446,10 +446,13 @@ En mode Transparence, l’arrière-plan de la fenêtre principale reste transpar
 
 ## 16) Aide
 
-### 16.1 Réinitialiser les paramètres
+### 16.1 Mises à jour
+« Aide → Mises à jour » compare la version actuelle à la dernière version stable publiée sur GitHub. La vérification automatique est désactivée par défaut ; lorsqu’elle est activée, DevProjex effectue la vérification au démarrage si au moins sept jours se sont écoulés depuis la précédente. La case à cocher est appliquée immédiatement. L’installation reste une action de l’utilisateur.
+
+### 16.2 Réinitialiser les paramètres
 Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, de l’animation de déploiement de l’arborescence et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
 
-### 16.2 Réinitialiser les données
+### 16.3 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
 * dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;

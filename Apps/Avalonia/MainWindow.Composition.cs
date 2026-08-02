@@ -59,6 +59,7 @@ public partial class MainWindow
     private readonly MemoryCleanupCoordinator _memoryCleanup;
     private readonly TreeViewportController _treeViewport;
     private readonly AppearanceSettingsController _appearanceSettings;
+    private readonly ApplicationUpdateCoordinator _applicationUpdates;
     private readonly ThemeBrushCoordinator _themeBrushCoordinator;
     private readonly bool _isMicaSupported = ThemeEffectPlatformSupport.IsMicaSupportedOnCurrentPlatform();
     private readonly SelectionSyncCoordinator _selectionCoordinator;
@@ -227,6 +228,11 @@ public partial class MainWindow
         _recentFolderAvailabilityService = services.RecentFolderAvailabilityService;
 
         _viewModel = new MainWindowViewModel(_localization, services.HelpContentProvider);
+        _applicationUpdates = new ApplicationUpdateCoordinator(
+            _viewModel,
+            services.ApplicationUpdateService,
+            _userSettingsStore,
+            GetApplicationVersion());
         InitializeDefaultFont();
         _statusOperations = new StatusOperationCoordinator(
             _viewModel,
@@ -571,6 +577,13 @@ public partial class MainWindow
                 _topMenuBar?.RefreshOpenPopupBackdrops();
             else if (args.PropertyName == nameof(MainWindowViewModel.ThemePopoverOpen))
                 _appearanceSettings.HandleThemePopoverStateChange();
+            else if (args.PropertyName == nameof(MainWindowViewModel.UpdatePopoverOpen) &&
+                     _viewModel.UpdatePopoverOpen)
+            {
+                _viewModel.HelpPopoverOpen = false;
+                _viewModel.HelpDocsPopoverOpen = false;
+                _viewModel.ThemePopoverOpen = false;
+            }
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
                 UpdateDropZoneAnimationState();
             else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)

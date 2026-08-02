@@ -500,10 +500,13 @@ No modo Transparência, o fundo da janela principal permanece transparente. Os m
 
 ## 16) Ajuda
 
-### 16.1 Repor configurações
+### 16.1 Atualizações
+«Ajuda → Atualizações» compara a versão atual com a versão estável mais recente publicada no GitHub. As verificações automáticas estão desativadas por predefinição; quando ativadas, o DevProjex verifica no arranque após terem passado pelo menos sete dias desde a verificação anterior. A caixa de seleção é aplicada imediatamente. A instalação continua a ser uma ação do utilizador.
+
+### 16.2 Repor configurações
 Repor definições (Ajuda → Repor definições) restaura o tema predefinido, os efeitos, o modo compacto, a animação de expansão da árvore e o idioma da interface. Os perfis de projeto, histórico e ficheiros em disco não são alterados.
 
-### 16.2 Repor dados
+### 16.3 Repor dados
 Repor dados (Ajuda → Repor dados) remove os perfis de parâmetros de projeto local guardados:
 * pastas de nível superior selecionadas;
 * tipos de ficheiro selecionados;

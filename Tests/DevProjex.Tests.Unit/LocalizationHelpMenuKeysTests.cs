@@ -6,9 +6,24 @@ public sealed class LocalizationHelpMenuKeysTests
 	[
 		"Menu.Help",
 		"Menu.Help.Help",
+		"Menu.Help.CheckUpdates",
 		"Menu.Help.About",
 		"Menu.Help.ResetSettings",
-		"Menu.Help.ResetData"
+		"Menu.Help.ResetData",
+		"Update.Title",
+		"Update.Prompt",
+		"Update.AutomaticWeekly",
+		"Update.Available",
+		"Update.UpToDate",
+		"Update.CurrentVersionNewer",
+		"Update.Failed",
+		"Update.FailedMessage",
+		"Update.Check",
+		"Update.Checking",
+		"Update.Retry",
+		"Update.OpenRepository",
+		"Update.CurrentVersion",
+		"Update.LatestVersion"
 	];
 
 	[Fact]

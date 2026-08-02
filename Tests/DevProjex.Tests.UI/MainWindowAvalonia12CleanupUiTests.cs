@@ -44,6 +44,7 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             var themePopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "ThemePopup");
             var helpPopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "HelpPopup");
             var helpDocsPopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "HelpDocsPopup");
+            var updatePopup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "UpdatePopup");
             var themeMenuItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "ThemeMenuItem");
             var helpMenuItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "HelpMenuItem");
             var expectedAdjustment =
@@ -80,6 +81,16 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             Assert.NotNull(helpDocsPopup.CustomPopupPlacementCallback);
             Assert.Equal(4, helpDocsPopup.VerticalOffset);
             Assert.Same(helpMenuItem, helpDocsPopup.PlacementTarget);
+
+            Assert.True(updatePopup.IsLightDismissEnabled);
+            Assert.False(updatePopup.OverlayDismissEventPassThrough);
+            Assert.False(updatePopup.ShouldUseOverlayLayer);
+            Assert.False(updatePopup.WindowManagerAddShadowHint);
+            Assert.Equal(expectedAdjustment, updatePopup.PlacementConstraintAdjustment);
+            Assert.Equal(PlacementMode.Custom, updatePopup.Placement);
+            Assert.NotNull(updatePopup.CustomPopupPlacementCallback);
+            Assert.Equal(4, updatePopup.VerticalOffset);
+            Assert.Same(helpMenuItem, updatePopup.PlacementTarget);
         }
         finally
         {
@@ -99,6 +110,7 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
             AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<ThemePopoverView>(window, "ThemePopover"));
             AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<AboutPopoverView>(window, "HelpPopover"));
             AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<HelpPopoverView>(window, "HelpDocsPopover"));
+            AssertPopoverCard(UiTestDriver.GetRequiredTopMenuControl<UpdatePopoverView>(window, "UpdatePopover"));
         }
         finally
         {

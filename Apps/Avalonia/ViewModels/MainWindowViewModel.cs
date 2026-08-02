@@ -29,7 +29,7 @@ public enum PreviewWorkspaceMode
     PreviewOnly
 }
 
-public sealed class MainWindowViewModel : ViewModelBase, IDisposable
+public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
     public const string TitleVersion = "4.9";
     public const string BaseTitle = "DevProjex v" + TitleVersion;
@@ -1570,6 +1570,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         HelpAboutBody = _localization.Format("Help.About.Body", DateTime.Now.Year);
         HelpAboutSupport = _localization["Help.About.Support"];
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
+        UpdateApplicationUpdateLocalization();
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
         SettingsAll = _localization["Settings.All"];
         UpdateAllCheckboxLabels();
