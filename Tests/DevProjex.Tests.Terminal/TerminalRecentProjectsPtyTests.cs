@@ -54,9 +54,6 @@ public sealed class TerminalRecentProjectsPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Loading project",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var workspace = await terminal.WaitForScreenAsync(

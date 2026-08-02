@@ -31,12 +31,9 @@ public sealed class TerminalPtyRecoveryTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("E", TestContext.Current.CancellationToken);
 		var prompt = await terminal.WaitForScreenAsync(
-			"Destination:",
-			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains(
 			Path.GetFileName(destination),
-			prompt,
-			StringComparison.Ordinal);
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Destination:", prompt, StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Destination state: Ready",
