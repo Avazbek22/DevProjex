@@ -16,7 +16,7 @@
   <strong>The fastest way to turn a real codebase into clean, AI-ready context.</strong>
 </p>
 
-DevProjex is a cross-platform desktop app for turning real folders and codebases into **clean, controlled context for AI chats, reviews, and documentation**.
+DevProjex is a cross-platform app for turning folders and codebases into **clean, controlled context for AI chats, reviews, and documentation** — with GUI, TUI, and CLI workflows.
 
 Select only what matters, preview the result, copy or export it as **tree, content, or both** in ASCII, MD, JSON, or XML, or create a separate project copy as a folder or ZIP archive.
 
@@ -40,11 +40,7 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 
 ---
 
-<p align="center">
-  <a href="https://boosty.to/avazbek22">
-    <img src=".github/assets/boosty-support.svg" width="800" alt="Support DevProjex on Boosty">
-  </a>
-</p>
+
 
 ## Quick Start ⚡
 
@@ -86,7 +82,7 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **Animated toasts** for user feedback
 * **Localization** (11 languages)
 * **Responsive async scanning** (UI stays smooth on big folders)
-* **Terminal automation mode**: generate AI-ready context, JSON reports, CI-friendly diagnostics, tree/content exports, and physical project copies from the same desktop executable
+* **Unified terminal workflows**: use the keyboard-first TUI for interactive project inspection, or the deterministic CLI for AI-ready context, JSON reports, CI-friendly diagnostics, tree/content exports, and project copies — all from the same application executable
 
 ---
 
@@ -224,39 +220,14 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for commands and examples, and [D
 
 ---
 
-## What DevProjex does (short & honest)
+## Safety boundaries 🛡️
 
-### ✅ Does
+DevProjex keeps user-owned source projects read-only and makes its operational boundaries explicit:
 
-* Builds a visual tree of any folder or project
-* Lets you select files/folders via checkboxes
-* Supports drag & drop opening (folder or file path)
-* Copies:
-
-  * tree (selection-aware, falls back to full)
-  * content (selection-aware, falls back to all files)
-  * tree + content (selection-aware, falls back to full)
-* Exports:
-
-  * tree (`.txt`, `.md`, `.json`, `.xml` depending on the selected tree format)
-  * content (`.txt`)
-  * tree + content (`.txt`, with selected tree format)
-* Exports project copies:
-
-  * to a separate folder
-  * to a ZIP archive
-  * with the effective directory structure, binary files, and included empty folders preserved
-* Shows preview output before copy/export
-* Shows live output metrics and operation progress in status bar
-* Restores previously applied parameters for each local project folder
-* Supports smart ignore rules (VCS, IDEs, build outputs)
-* Works well on large, layered projects
-
-### ❌ Does not
-
-* Edit, rename, move, or delete files
-* Run code or modify your repositories (no commits/merges)
-* Include binary file contents in text/context exports
+* Does not edit, rename, move, or delete files in the opened source project
+* Does not execute project code or perform commits, merges, pushes, or branch changes in a user-owned repository
+* Does not include binary file contents in text or AI-context documents
+* Writes generated files and project copies only to explicit destinations outside the source project
 
 ---
 
@@ -264,7 +235,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for commands and examples, and [D
 
 * **.NET 10**
 * **Avalonia UI** (cross-platform)
-* Cleanly separated architecture (Core / Services / UI)
+* Clean Architecture layers (Kernel / Application / Infrastructure / Terminal / Avalonia)
 * JSON-based resources (localization, icon mappings, presets)
 * 10000+ automated tests (unit + integration + UI)
 
@@ -284,12 +255,18 @@ Good contribution areas:
 
 See `CONTRIBUTING.md` for details.
 
+<p align="center">
+  <a href="https://boosty.to/avazbek22">
+    <img src=".github/assets/boosty-support.svg" width="800" alt="Support DevProjex on Boosty">
+  </a>
+</p>
+
 ---
 
 ## License (GPL-3.0) 📄
 
 DevProjex is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
-* Copyright (c) 2025-2026 Avazbek Olimov.
+* Copyright (c) 2025–present Avazbek Olimov.
 
 See `LICENSE` for details.
 
@@ -297,4 +274,7 @@ See `LICENSE` for details.
 
 ## Keywords 🔎
 
-project tree viewer, folder structure viewer, directory tree generator, project structure visualizer, repository tree viewer, source code tree generator, repository visualization tool, codebase explorer, codebase visualization, directory structure export, AI prompt preparation, LLM context builder, codebase context extraction, AI developer tools, repository inspection tool, developer productivity tools, Avalonia UI desktop app, .NET 10 application, cross-platform developer tool
+* **AI and LLM context:** AI-ready codebase context, ChatGPT project context, Claude code context, LLM context builder, AI prompt preparation, context engineering, repository context generator, source code context export
+* **Project analysis and export:** project tree generator, folder structure viewer, directory tree visualizer, codebase explorer, repository analyzer, live code preview, estimated token counting, ASCII export, Markdown export, JSON export, XML export
+* **Git-aware filtering:** Smart Ignore, `.gitignore`-aware filtering, Git-tracked files, monorepo context filtering, project file selection, source code filtering
+* **Interfaces and platforms:** cross-platform developer tool, visual GUI, keyboard-first TUI, terminal UI, command-line interface, CLI automation, CI workflows, Avalonia UI, .NET 10, local read-only application, no telemetry
