@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  checks: read
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
@@ -19,8 +20,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan-release:
+    name: Plan Release Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_release: ${{ steps.plan.outputs.run_release }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate CI planner contracts
+        shell: pwsh
+        run: ./Scripts/ci/Test-CiChangePlanner.ps1
+
+      - name: Select release validation plan
+        id: plan
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIOUS_GATE_NAME: Release Gate
+        run: >
+          ./Scripts/ci/Select-CiPlan.ps1
+          -GitHubEventPath $env:GITHUB_EVENT_PATH
+          -GitHubEventName $env:GITHUB_EVENT_NAME
+          -PreviousGateName $env:PREVIOUS_GATE_NAME
+          -GitHubOutputPath $env:GITHUB_OUTPUT
+
   validate-release-config:
     name: Validate Release Config
+    needs: plan-release
+    if: ${{ needs.plan-release.outputs.run_release == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -1470,3 +1502,34 @@ jobs:
             --no-restore `
             --filter $filter `
             --logger "console;verbosity=minimal"
+
+  release-gate:
+    name: Release Gate
+    needs:
+      - plan-release
+      - validate-release-config
+      - prepare-publish-matrix
+      - publish-smoke
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify selected release jobs
+        shell: pwsh
+        env:
+          PLAN_RESULT: ${{ needs.plan-release.result }}
+          CONFIG_RESULT: ${{ needs.validate-release-config.result }}
+          MATRIX_RESULT: ${{ needs.prepare-publish-matrix.result }}
+          PUBLISH_RESULT: ${{ needs.publish-smoke.result }}
+        run: |
+          $results = @{
+            plan = $env:PLAN_RESULT
+            config = $env:CONFIG_RESULT
+            matrix = $env:MATRIX_RESULT
+            publish = $env:PUBLISH_RESULT
+          }
+          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
+          if ($failed.Count -gt 0) {
+            throw "Selected release jobs failed: $($failed.ForEach({ \"$($_.Key)=$($_.Value)\" }) -join ', ')"
+          }
