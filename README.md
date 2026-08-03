@@ -28,6 +28,12 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 
 ---
 
+## App Demo 🖼️
+
+<img src="Docs/Media/readme-demo/devprojex-demo-04-readme.gif" alt="DevProjex desktop app demo" width="100%" />
+
+---
+
 ## Download 🚀
 
 **Download from Microsoft Store:**
@@ -40,19 +46,13 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 
 ---
 
-
-
 ## Quick Start ⚡
 
 1. Open or drop a project folder.
 2. Select the folders, files, filters, ignore rules, and output mode you need.
 3. Preview the result, then copy, export, or run the same workflow from the terminal.
 
----
 
-## App Demo 🖼️
-
-<img src="Docs/Media/readme-demo/devprojex-demo-04-readme.gif" alt="DevProjex desktop app demo" width="100%" />
 
 ---
 
@@ -84,84 +84,52 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 * **Responsive async scanning** (UI stays smooth on big folders)
 * **Unified terminal workflows**: use the keyboard-first TUI for interactive project inspection, or the deterministic CLI for AI-ready context, JSON reports, CI-friendly diagnostics, tree/content exports, and project copies — all from the same application executable
 
----
+## DevProjex vs the alternatives ⚖️
+
+| Feature | DevProjex | Repomix | gitingest | code2prompt | GPTree GUI | files-to-prompt |
+|---|---|---|---|---|---|---|
+| Desktop GUI | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| TUI | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| CLI | ✅ | ✅ | ✅ | ✅ | ❌¹ | ✅ |
+| Interactive checkbox/tree file selection | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| Live preview before export | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| .gitignore support | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Tracked-files-only Git mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Scope-aware, evidence-based artifact filtering (monorepo-safe) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Dedicated ASCII-tree-only export mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Multiple structured formats (Markdown/JSON/XML) | ✅ | ✅ | ❌ | ✅ | ❌ | MD/XML only |
+| Token / char / line counting | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Remote repository via URL | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Per-project saved configuration/profiles | ✅ | ✅ | ❌ | not confirmed² | ✅ | ❌ |
+| Runs fully local by default | ✅ | ✅ CLI³ | ✅ CLI/self-host³ | ✅ | ✅ | ✅ |
+
+¹ GPTree GUI itself has no CLI/TUI; a separate `gptree` CLI package exists with its own interactive selection mode.
+² code2prompt supports templating and CLI flags; a dedicated per-project config file wasn't confirmed in public docs at time of writing.
+³ Hosted web versions (repomix.com, gitingest.com) process code on their servers; CLI usage is local.
+
+*Every row above is a feature DevProjex supports. Reflects public documentation as of August 2026 — check each project's repo for the latest.*
 
 ## How Smart Ignore Works 🧠
 
-**Smart Ignore is DevProjex’s deterministic, local, scope-aware filtering algorithm.** It is not an AI model and it does not treat an opened folder as one global blacklist. Instead, DevProjex combines project ownership and filesystem evidence in its own **Scope + Evidence** pipeline.
+Smart Ignore is a local, deterministic filtering engine — not an AI model, and not a single global blacklist. It understands where each project starts and ends, and applies the right rules only where they belong.
 
-### 1. Detect the project scope
+**Scope-aware.** DevProjex detects project boundaries from markers like `.csproj`, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, and similar files. Stack-specific rules (`node_modules`, `bin`/`obj`, virtual envs, build caches) apply only inside the project that owns them — so a `.NET` service won't hide `bin` in an unrelated sibling folder, and a frontend app won't apply `node_modules` rules somewhere else in the workspace.
 
-DevProjex recognizes project boundaries from markers such as `.csproj`, `package.json`, `pyproject.toml`, `pom.xml`, `go.mod`, `Cargo.toml`, `composer.json`, and `Gemfile`.
+**Evidence, not guesswork.** Ambiguous folder names like `build`, `dist`, or `vendor` can mean generated output or real source code. Smart Ignore checks for actual signatures — compiler output, package metadata, known artifact layouts — before excluding anything. If there's no evidence, the folder stays visible.
 
-Stack-specific rules are applied only inside the scope that owns those markers:
+**Monorepo-safe.** Every nested project (frontend, backend, tools, docs) is filtered independently, based on its own markers — no cross-contamination between unrelated parts of a workspace.
 
-* .NET: `bin`, `obj`
-* JavaScript/frontend: `node_modules`, framework caches, build and coverage output
-* Python: virtual environments, bytecode and tool caches
-* JVM: Gradle/Maven caches and build output
-* Go, Rust, PHP, and Ruby: their corresponding dependency and generated-output folders
-
-### 2. Require evidence for ambiguous folders
-
-A directory name alone is not always enough. Names such as `build`, `dist`, `vendor`, `packages`, `cache`, `pkg`, or `Library` can contain either generated output or real source code.
-
-Smart Ignore first performs a cheap candidate-name check, then looks for strong local signatures such as package metadata, compiler output, cache tags, generated manifests, or known artifact layouts. If the evidence is missing, the folder stays visible. This conservative two-stage check reduces false positives without turning every project load into an expensive deep content scan.
-
-The signature layer also recognizes common generated layouts from CMake, Dart/Flutter, Swift, Unity, Unreal Engine, Terraform, Serverless, Zig, and package-manager caches.
-
-### 3. Keep mixed monorepos isolated
-
-Each nested project keeps its own rules. A .NET service does not make `bin` disappear from an unrelated sibling, and a frontend app does not apply `node_modules` rules to an ordinary folder elsewhere in the workspace.
-
-```text
-repo/
-├── apps/web/package.json       -> frontend artifacts are filtered in this scope
-├── services/api/api.csproj     -> .NET artifacts are filtered in this scope
-├── tools/data/pyproject.toml   -> Python artifacts are filtered in this scope
-└── docs/build/                 -> remains visible without artifact evidence
-```
-
-Deep projects are not limited to the repository root. When an artifact candidate is encountered during tree traversal, DevProjex validates it against the applicable ancestor project markers. This keeps deeply nested and mixed-language workspaces predictable.
-
-### 4. Choose the Git view you need
-
-`.gitignore` answers “which paths should Git ignore?” It does not mean “show only files owned by the repository.” DevProjex supports both workflows as two mutually exclusive modes:
-
-| Mode | Result |
+**Two Git-aware modes, your choice:**
+| Mode | What it shows |
 |---|---|
-| **Use `.gitignore`** | Keeps tracked files and untracked files that are not excluded by reachable `.gitignore` rules. Each path uses the index of its owning repository/worktree scope; a scope without a readable index safely falls back to pattern-only evaluation. |
-| **Tracked Git files only** | Uses the installed Git CLI to start from existing working-tree files recorded in each readable Git index. Modified tracked files and staged additions remain included; untracked files are excluded. |
+| `.gitignore` mode | Tracked files + untracked files not excluded by `.gitignore` (per-repository, with nested rules and negations) |
+| Tracked-files-only | Only files currently recorded in the Git index — nothing untracked |
 
-In `.gitignore` mode, every reachable `.gitignore` is evaluated in its own directory scope, including the ancestor rule chain when a repository subfolder is opened, nested rules, and negations. Pattern case matching follows the effective repository `core.ignoreCase` value; macOS Unicode comparison also follows Git's `core.precomposeUnicode` behavior. This keeps the tree, extension list, preview, and exports on the same path semantics as Git.
+**You stay in control.** Smart Ignore, Git mode, and basic filters (hidden files, dot-files, empty folders) all combine and can be toggled independently. Ignored means excluded from the current view, copy, or export — never deleted from your project.
 
-Only regular working-tree `.gitignore` files are rule sources. DevProjex does not apply `.git/info/exclude`, global Git excludes, or a `.gitignore` symbolic link; this matches Git's own control-file behavior and prevents a link target outside the project from changing the result. If a regular `.gitignore` cannot be read, its directory scope is excluded fail-closed and the scan reports partial access instead of silently including files without applying all ignore rules.
-
-If no `.gitignore` exists, the selected mode remains active with an empty pattern set: only the exact Git administration entry `.git` is protected, while names such as `.github` remain normal project content.
-
-DevProjex resolves every reachable nested repository and worktree independently, at any reachable nesting level. A child repository never inherits tracked state from its parent or sibling. Tracked-files mode is fail-closed and never silently falls back to `.gitignore`: direct commands, including `devprojex open`, return a policy failure before output or Desktop handoff if the Git CLI cannot load any applicable index; an already-open Desktop workspace keeps the explicit selection visible so it can be turned off; TUI startup does not open an unavailable tracked workspace, while an unsuccessful interactive TUI mode change keeps the last usable Git mode. A readable empty index is valid; unreadable nested indexes are excluded with a warning when another applicable index was loaded.
-
-This is a view of the current working tree, not a historical snapshot of `HEAD` or a promise that the files match a remote Git host. The current bytes of modified tracked files are used.
-
-### 5. Compose filters predictably
-
-The selected Git mode runs first. Smart Ignore processes the remaining items, followed by the explicit dot-file, hidden-item, empty-item, and extensionless-file rules. Root-folder, file-type, and checkbox selections can narrow the same effective tree further.
-
-The built-in `standard` profile selects `gitignore` mode and all eight exclusion groups: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files`, and `extensionless-files`. Explicit CLI options replace the corresponding profile field for that invocation.
-
-Inside a Git repository, the two Git modes remain visible as a stable toggle pair. Smart Ignore and the evidence-based basic options appear only when they can affect the current tree. Smart Ignore may therefore stay hidden while the selected Git mode already excludes all matching artifacts, then appear after that mode is changed.
-
-### Control stays with you
-
-* Switch between hierarchical `.gitignore` evaluation and the tracked-files-only Git view.
-* Combine the selected Git mode with Smart Ignore and the basic ignore switches.
-* Put project-specific patterns in `.gitignore`; the curated Smart Ignore rules are intentionally not an arbitrary user-editable pattern list.
-* Control dot-prefixed and hidden items through their separate switches instead of having Smart Ignore hide them implicitly.
-* Narrow the result by top-level folders and file types.
-* Narrow the final export through tree checkboxes and verify it in preview.
-* Applied choices are remembered in local project profiles.
-
-Ignored means excluded from the current tree, copy, and export result — never deleted from the source project. The implementation is open source: see the [stack rules](Infrastructure/SmartIgnore) and the [evidence-based signature matcher](Kernel/Models/SmartArtifactIgnoreMatcher.cs).
+📖 Full technical details — signature matching, worktree handling, edge cases — are documented in [`Docs/SmartIgnore.md`](Docs/SmartIgnore.md).
 
 ---
 
@@ -269,12 +237,3 @@ DevProjex is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 * Copyright (c) 2025–present Avazbek Olimov.
 
 See `LICENSE` for details.
-
----
-
-## Keywords 🔎
-
-* **AI and LLM context:** AI-ready codebase context, ChatGPT project context, Claude code context, LLM context builder, AI prompt preparation, context engineering, repository context generator, source code context export
-* **Project analysis and export:** project tree generator, folder structure viewer, directory tree visualizer, codebase explorer, repository analyzer, live code preview, estimated token counting, ASCII export, Markdown export, JSON export, XML export
-* **Git-aware filtering:** Smart Ignore, `.gitignore`-aware filtering, Git-tracked files, monorepo context filtering, project file selection, source code filtering
-* **Interfaces and platforms:** cross-platform developer tool, visual GUI, keyboard-first TUI, terminal UI, command-line interface, CLI automation, CI workflows, Avalonia UI, .NET 10, local read-only application, no telemetry
