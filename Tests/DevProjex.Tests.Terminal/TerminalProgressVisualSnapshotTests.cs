@@ -53,7 +53,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			checkpointRoot,
 			"25",
 			TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "25%");
+		await WaitForStableMeasuredScreenAsync(terminal, "25%");
 		Verify(
 			"workspace-progress-25-en-120x30",
 			terminal,
@@ -65,7 +65,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			checkpointRoot,
 			"50",
 			TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "50%");
+		await WaitForStableMeasuredScreenAsync(terminal, "50%");
 		Verify(
 			"workspace-progress-50-en-120x30",
 			terminal,
@@ -92,7 +92,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			checkpointRoot,
 			"90",
 			TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "90%");
+		await WaitForStableMeasuredScreenAsync(terminal, "90%");
 		Verify(
 			"workspace-progress-90-en-120x30",
 			terminal,
@@ -250,10 +250,11 @@ public sealed class TerminalProgressVisualSnapshotTests
 			GetCheckpointRoot(dataRoot),
 			"50",
 			TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Building ZIP");
-		await terminal.WaitForScreenAsync(
-			"50%",
-			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableMeasuredScreenAsync(terminal, "50%");
+		Assert.Contains(
+			"Building ZIP",
+			terminal.CaptureScreen(),
+			StringComparison.Ordinal);
 		Verify(
 			"workspace-progress-50-zip-en-120x30",
 			terminal,
@@ -316,7 +317,9 @@ public sealed class TerminalProgressVisualSnapshotTests
 			GetCheckpointRoot(dataRoot),
 			"50",
 			TestContext.Current.CancellationToken);
-		var active = await WaitForStableScreenAsync(terminal, phase);
+		await WaitForStableMeasuredScreenAsync(terminal, "50%");
+		var active = terminal.CaptureScreen();
+		Assert.Contains(phase, active, StringComparison.Ordinal);
 		if (monochrome)
 			Assert.Matches(@"\[[#\-]+\] 50%", active);
 		Verify(

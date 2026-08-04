@@ -440,5 +440,6 @@ jobs:
           }
           $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
           if ($failed.Count -gt 0) {
-            throw "Selected CI jobs failed: $($failed.ForEach({ \"$($_.Key)=$($_.Value)\" }) -join ', ')"
+            $details = $failed.ForEach({ "$($_.Key)=$($_.Value)" }) -join ', '
+            throw "Selected CI jobs failed: $details"
           }
