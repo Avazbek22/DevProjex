@@ -31,7 +31,7 @@ Choose what you need in an interactive file tree, check the result in a live pre
 ## Download 🚀
 
 **Download from Microsoft Store:**
-👉 [Download from Microsoft Store](https://apps.microsoft.com/detail/9ndq3nq5m354)
+👉 [MS-Store DevProjex](https://apps.microsoft.com/detail/9ndq3nq5m354)
 
 **Latest GitHub release:**
 👉 [https://github.com/Avazbek22/DevProjex/releases/latest](https://github.com/Avazbek22/DevProjex/releases/latest)
@@ -42,36 +42,38 @@ Choose what you need in an interactive file tree, check the result in a live pre
 
 ## Why DevProjex? 💡
 
-Copying files into a chat window one by one doesn't scale past a few files. CLI tools can pack a whole project fast, but you can't see what you're sending before it's sent.
+Copying files into a chat window one by one **doesn't scale**. CLI tools pack a whole project fast, but you **can't see what you're sending** before it's sent.
 
-DevProjex works differently: visual, precise, and fully offline. You see and choose exactly what leaves your project, check it in a live preview, and export a real project copy when you need one — not just a block of text.
+DevProjex works differently — visual, precise, and fully offline:
+
+* **You see what leaves your project** — file tree, live preview, token estimate
+* **You control what leaves it** — Smart Ignore, Git modes, name filters, saved profiles
+* **You get more than text** — a real project copy as a folder or ZIP
 
 ### Use it for
 
-* Clean input for AI assistants (ChatGPT, Claude, DeepSeek, Qwen, etc.)
-* Policy-restricted environments where AI agents, remote indexing, or IDE plugins are not allowed
-* Sharing project structure in code reviews or chats
-* Pulling only the relevant modules out of a large codebase
-* Explaining a project's architecture to a teammate or student
-* Looking through large folders without messy CLI output
+* **AI assistants** — clean input for ChatGPT, Claude, DeepSeek, Qwen
+* **Restricted environments** where AI agents, remote indexing, or IDE plugins aren't allowed
+* **Code reviews** — share structure and only the files that matter
+* **Large codebases** — pull out one module instead of the whole repo
+* **Teaching** — explain a project's architecture to a teammate or student
 
 ### Get started
 
-1. Open or drop a project folder.
-2. Choose the folders, files, filters, ignore rules, and output mode you need.
-3. Check the result in preview, then copy, export, or run the same workflow from the terminal.
+1. **Open or drop** a project folder.
+2. **Choose** folders, files, filters, ignore rules, and output mode.
+3. **Preview**, then copy, export, or run the same workflow from the terminal.
 
-DevProjex works with any language, repository, or project structure.
+Works with any language, repository, or project structure.
 
 ---
 
 ## Feature overview ✨
 
 **Choose and control**
-* Export a clean copy of your project to a folder or ZIP archive
+* **Smart Ignore** — strips build junk (`node_modules`, `bin`, caches) in seconds, without touching your source. [How it works ↓](#how-smart-ignore-works-)
 * File tree with checkboxes, search, and name filters
 * Two Git-aware modes: follow `.gitignore`, or show only tracked files
-* Smart Ignore — understands each project's structure, safe for monorepos
 
 **Preview and export**
 * Live preview (tree / content / both) before you copy or export
@@ -85,7 +87,7 @@ DevProjex works with any language, repository, or project structure.
 * Live counters for lines, characters, and estimated tokens
 * Progress bar with safe cancellation
 
-**Details that matter**
+**Interface**
 * Light, dark, and system themes, with transparency and blur where supported
 * Localization in 11 languages
 * Stays smooth even on very large folders
@@ -103,6 +105,7 @@ DevProjex works with any language, repository, or project structure.
 | Dedicated ASCII-tree-only export | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Run with no install (npx / uvx / browser) | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
 
 ---
 
@@ -152,6 +155,7 @@ DevProjex keeps your source projects read-only, with clear limits on what it doe
 
 ---
 
+
 ## How Smart Ignore Works 🧠
 
 Smart Ignore is a local, deterministic filter — not an AI model, and not one big blacklist for the whole folder. It knows where each project starts and ends, and applies the right rules only inside that project.
@@ -162,7 +166,7 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
 
 **It keeps monorepos separate.** Each nested project — frontend, backend, tools, docs — is filtered on its own, based on its own markers. Nothing crosses over between unrelated parts of your workspace.
 
-**Two Git modes, your choice:**
+**Git modes — a separate setting, not part of Smart Ignore:**
 
 | Mode | What it shows |
 |---|---|
@@ -177,11 +181,7 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
 
 ## Documentation 📚
 
-* [Smart Ignore — full technical details](Docs/SmartIgnore.md)
-* [Command Line reference](Docs/CommandLine.md)
-* [Terminal Workspace guide](Docs/TerminalWorkspace.md)
-* [Contributing Guide](CONTRIBUTING.md)
-* [Code of Conduct](CODE_OF_CONDUCT.md)
+[Smart Ignore](Docs/SmartIgnore.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ---
 
@@ -200,21 +200,20 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
 * JSON-based resources (localization, icon mappings, presets)
 * 10,000+ automated tests (unit + integration + UI)
 
+**Build from source**
+
+```bash
+git clone https://github.com/Avazbek22/DevProjex.git
+cd DevProjex
+dotnet build -c Release
+dotnet test
+```
+
 ---
 
 ## Contributing 🤝
 
-Issues and pull requests are welcome.
-
-Good places to start:
-
-* UX improvements
-* Performance tuning
-* Tests
-* Localization
-* Documentation & screenshots
-
-Not sure where to start? Check issues labeled [`good first issue`](https://github.com/Avazbek22/DevProjex/labels/good%20first%20issue).
+Issues and pull requests are welcome. Good places to start: **UX**, **performance tuning**, **tests**, **localization**, **documentation & screenshots**. Not sure where? Check issues labeled [`good first issue`](https://github.com/Avazbek22/DevProjex/labels/good%20first%20issue).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
@@ -232,8 +231,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License (GPL-3.0) 📄
 
-DevProjex is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. This keeps the project — and any tool built on top of it — open source.
-
-* Copyright (c) 2025–present Avazbek Olimov.
-
-See [LICENSE](LICENSE) for details.
+DevProjex is licensed under the **GNU General Public License v3.0** — this keeps the project, and any tool built on top of it, open source. Copyright (c) 2025–present Avazbek Olimov. See [LICENSE](LICENSE) for details.
