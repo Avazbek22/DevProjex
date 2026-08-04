@@ -6,25 +6,19 @@
   <a href="https://github.com/Avazbek22/DevProjex/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Avazbek22/DevProjex/total"></a>
   <a href="https://github.com/Avazbek22/DevProjex/actions"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml"></a>
   <a href="https://github.com/Avazbek22/DevProjex/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/github/license/Avazbek22/DevProjex"></a>
-  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-purple">
+  <img alt="Last commit" src="https://img.shields.io/github/last-commit/Avazbek22/DevProjex">
   <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green">
-  <img alt="WinGet" src="https://img.shields.io/badge/winget-available-blue">
-  <img alt="Repository size" src="https://img.shields.io/github/repo-size/Avazbek22/DevProjex">
 </p>
 
 <p align="center">
   <strong>The fastest way to turn a real codebase into clean, AI-ready context.</strong>
 </p>
 
-DevProjex is a cross-platform app for turning folders and codebases into **clean, controlled context for AI chats, reviews, and documentation** — with GUI, TUI, and CLI workflows.
+DevProjex turns any folder or codebase into clean, ready-to-use context for AI chats, code reviews, and documentation. Use it as a **GUI**, a **TUI**, or a **CLI** — whatever fits your workflow.
 
-Select only what matters, preview the result, copy or export it as **tree, content, or both** in ASCII, MD, JSON, or XML, or create a separate project copy as a folder or ZIP archive.
+Choose what you need in an interactive file tree, check the result in a live preview, then export it as **ASCII, Markdown, JSON, or XML**. Need more than text? Export a real copy of your project — a clean **folder or ZIP file** — with the same filters applied.
 
-It’s built for real projects where terminal output is noisy, IDE integrations are limited, and you still need fast, controlled context for an AI chat or a human reviewer.
-
-DevProjex is not an autonomous coding agent. It gives you a manual, fully controlled way to prepare project context when agents, IDE plugins, or remote indexing cannot be used.
-
-> 🔒 Source-project read-only & without telemetry by design — opening, analyzing, or exporting from a project never modifies that source tree. Explicit file, folder, ZIP, and portable-profile destinations are accepted only outside it; application-owned settings, local profiles, clones, caches, and runtime state are stored outside the source tree.
+> 🔒 **Read-only and telemetry-free by design.** DevProjex never modifies your source files, and nothing ever leaves your machine.
 
 ---
 
@@ -46,120 +40,85 @@ DevProjex is not an autonomous coding agent. It gives you a manual, fully contro
 
 ---
 
-## Quick Start ⚡
+## Why DevProjex? 💡
+
+Copying files into a chat window one by one doesn't scale past a few files. CLI tools can pack a whole project fast, but you can't see what you're sending before it's sent.
+
+DevProjex works differently: visual, precise, and fully offline. You see and choose exactly what leaves your project, check it in a live preview, and export a real project copy when you need one — not just a block of text.
+
+### Use it for
+
+* Clean input for AI assistants (ChatGPT, Claude, DeepSeek, Qwen, etc.)
+* Policy-restricted environments where AI agents, remote indexing, or IDE plugins are not allowed
+* Sharing project structure in code reviews or chats
+* Pulling only the relevant modules out of a large codebase
+* Explaining a project's architecture to a teammate or student
+* Looking through large folders without messy CLI output
+
+### Get started
 
 1. Open or drop a project folder.
-2. Select the folders, files, filters, ignore rules, and output mode you need.
-3. Preview the result, then copy, export, or run the same workflow from the terminal.
-
-
-
----
-
-## Feature overview ✨
-
-* **Clean, controlled project context** for AI chats, reviews, and documentation
-* **TreeView with checkbox selection**
-* **Multiple copy/export modes** (tree / content / combined)
-* **Preview mode** (tree / content / combined) before copy/export
-* **ASCII, MD, JSON, and XML tree formats** for AI prompts, documentation, and parsers
-* **Per-project local parameter profiles** (saved per local project path)
-* **Export to file** from menu (tree / content / tree + content)
-* **Export project copies** to a separate folder or ZIP archive, preserving the effective tree, binary files, and included empty folders
-* **Search & name filtering** for large projects
-* **Two Git-aware filtering modes**: hierarchical `.gitignore` evaluation or an index-backed tracked-files-only view across nested repositories and worktrees
-* **Scope-aware Smart Ignore** for mixed workspaces and monorepos
-* **Extensionless files handling** via dedicated ignore option
-* **Git integration** (clone by URL, switch branches, get updates in cached copies)
-* **Status bar with live metrics** (tree/content lines, chars, ~tokens)
-* **Progress bar + operation cancellation** with safe fallback behavior
-* **Modern appearance system**
-
-  * System / Light / Dark
-  * Transparency / blur / Mica where supported
-  * Presets stored locally
-  * Island-based layout and smooth UI animations
-* **Animated toasts** for user feedback
-* **Localization** (11 languages)
-* **Responsive async scanning** (UI stays smooth on big folders)
-* **Unified terminal workflows**: use the keyboard-first TUI for interactive project inspection, or the deterministic CLI for AI-ready context, JSON reports, CI-friendly diagnostics, tree/content exports, and project copies — all from the same application executable
-
-## DevProjex vs the alternatives ⚖️
-
-| Feature | DevProjex | Repomix | gitingest | code2prompt | GPTree GUI | files-to-prompt |
-|---|---|---|---|---|---|---|
-| Desktop GUI | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| TUI | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| CLI | ✅ | ✅ | ✅ | ✅ | ❌¹ | ✅ |
-| Interactive checkbox/tree file selection | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
-| Live preview before export | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
-| .gitignore support | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Tracked-files-only Git mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Scope-aware, evidence-based artifact filtering (monorepo-safe) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Dedicated ASCII-tree-only export mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Multiple structured formats (Markdown/JSON/XML) | ✅ | ✅ | ❌ | ✅ | ❌ | MD/XML only |
-| Token / char / line counting | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Remote repository via URL | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Per-project saved configuration/profiles | ✅ | ✅ | ❌ | not confirmed² | ✅ | ❌ |
-| Runs fully local by default | ✅ | ✅ CLI³ | ✅ CLI/self-host³ | ✅ | ✅ | ✅ |
-
-¹ GPTree GUI itself has no CLI/TUI; a separate `gptree` CLI package exists with its own interactive selection mode.
-² code2prompt supports templating and CLI flags; a dedicated per-project config file wasn't confirmed in public docs at time of writing.
-³ Hosted web versions (repomix.com, gitingest.com) process code on their servers; CLI usage is local.
-
-*Every row above is a feature DevProjex supports. Reflects public documentation as of August 2026 — check each project's repo for the latest.*
-
-## How Smart Ignore Works 🧠
-
-Smart Ignore is a local, deterministic filtering engine — not an AI model, and not a single global blacklist. It understands where each project starts and ends, and applies the right rules only where they belong.
-
-**Scope-aware.** DevProjex detects project boundaries from markers like `.csproj`, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, and similar files. Stack-specific rules (`node_modules`, `bin`/`obj`, virtual envs, build caches) apply only inside the project that owns them — so a `.NET` service won't hide `bin` in an unrelated sibling folder, and a frontend app won't apply `node_modules` rules somewhere else in the workspace.
-
-**Evidence, not guesswork.** Ambiguous folder names like `build`, `dist`, or `vendor` can mean generated output or real source code. Smart Ignore checks for actual signatures — compiler output, package metadata, known artifact layouts — before excluding anything. If there's no evidence, the folder stays visible.
-
-**Monorepo-safe.** Every nested project (frontend, backend, tools, docs) is filtered independently, based on its own markers — no cross-contamination between unrelated parts of a workspace.
-
-**Two Git-aware modes, your choice:**
-| Mode | What it shows |
-|---|---|
-| `.gitignore` mode | Tracked files + untracked files not excluded by `.gitignore` (per-repository, with nested rules and negations) |
-| Tracked-files-only | Only files currently recorded in the Git index — nothing untracked |
-
-**You stay in control.** Smart Ignore, Git mode, and basic filters (hidden files, dot-files, empty folders) all combine and can be toggled independently. Ignored means excluded from the current view, copy, or export — never deleted from your project.
-
-📖 Full technical details — signature matching, worktree handling, edge cases — are documented in [`Docs/SmartIgnore.md`](Docs/SmartIgnore.md).
-
----
-
-## Typical use cases 🎯
-
-* Prepare **clean input for AI assistants** (ChatGPT, Claude, DeepSeek, Qwen, etc.)
-* Work in **policy-restricted environments** where AI agents, remote indexing, or IDE plugins are not allowed
-* Share project structure in code reviews or chats
-* Extract only relevant modules from large codebases
-* Teach or explain project architecture
-* Inspect large folders without noisy CLI scripts
-
+2. Choose the folders, files, filters, ignore rules, and output mode you need.
+3. Check the result in preview, then copy, export, or run the same workflow from the terminal.
 
 DevProjex works with any language, repository, or project structure.
 
 ---
 
+## Feature overview ✨
+
+**Choose and control**
+* Export a clean copy of your project to a folder or ZIP archive
+* File tree with checkboxes, search, and name filters
+* Two Git-aware modes: follow `.gitignore`, or show only tracked files
+* Smart Ignore — understands each project's structure, safe for monorepos
+
+**Preview and export**
+* Live preview (tree / content / both) before you copy or export
+* Export as ASCII, Markdown, JSON, or XML
+* Save to file or clipboard — tree only, content only, or both
+
+**Workflow**
+* GUI, TUI, and CLI — the same engine, three ways to work
+* Git tools built in: clone by URL, switch branches, update cached copies
+* Local profiles remember your settings per project
+* Live counters for lines, characters, and estimated tokens
+* Progress bar with safe cancellation
+
+**Details that matter**
+* Light, dark, and system themes, with transparency and blur where supported
+* Localization in 11 languages
+* Stays smooth even on very large folders
+
+---
+
+## DevProjex vs the alternatives ⚖️
+
+| Feature | DevProjex | Repomix | gitingest | code2prompt | GPTree | files-to-prompt |
+|---|---|---|---|---|---|---|
+| GUI + TUI + CLI — all in one app | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Live preview before export | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| Tracked-files-only Git mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Scope-aware, evidence-based Smart Ignore (monorepo-safe) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Dedicated ASCII-tree-only export | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+---
+
 ## Project Copy Export 📦
 
-Use **File → Export Project → To Folder…** or **To ZIP Archive…** to create a separate copy of the current effective tree.
+Use **File → Export Project → To Folder…** or **To ZIP Archive…** to create a separate copy of your current selection.
 
-Project copies respect the selected root folders, file types, ignore rules, and checked items. If nothing is checked, the entire current tree is exported. Directory structure, binary files, and included empty folders are preserved.
+Project copies respect your chosen root folders, file types, ignore rules, and checked items. If nothing is checked, the whole current tree is exported. Directory structure, binary files, and included empty folders are preserved.
 
-The source project is not modified, and the result cannot be written inside it. The same workflow is available through `devprojex export project`.
+The source project is never modified, and the result can't be written inside it. The same workflow is available through `devprojex export project`.
 
 ---
 
 ## Command Line ⚙️
 
-DevProjex is not only a desktop context builder. The same app can run from the terminal for repeatable, script-friendly project analysis and AI-context export.
+DevProjex isn't only a desktop context builder. The same app runs from the terminal too, for repeatable, script-friendly project analysis and AI-context export.
 
 ```bash
 devprojex
@@ -171,41 +130,75 @@ devprojex export project . --as zip -o ../devprojex-submission.zip
 devprojex analyze . --git-mode tracked --exclude smart-ignore
 ```
 
-Use it to:
+### What the CLI adds
 
-* work interactively in the Terminal Workspace without starting Avalonia;
-* reopen local folders or cached Git repositories from one shared Recent Workspaces history;
-* inspect Tree, Content, or Tree + Content in ASCII, JSON, XML, or Markdown through Tree, Preview, and Parameters;
-* discover every important workflow through the searchable Action Palette;
-* open or control the desktop app through semantic local IPC;
-* generate clean AI-ready context without opening the UI;
-* export selected context to stdout or deterministic files;
-* create exact folder or ZIP project copies;
-* produce stable machine-readable JSON analysis;
-* share the same Git filtering, Exclusions, profiles, and project engine as Desktop.
+* Scriptable exports for CI pipelines — JSON reports, stdout output, deterministic files
+* A keyboard-first Terminal Workspace for interactive work, no desktop app needed
+* A searchable Action Palette to find any workflow fast
+* The same Git filtering, exclusions, and profiles as the desktop app
 
-See [Docs/CommandLine.md](Docs/CommandLine.md) for commands and examples, and [Docs/TerminalWorkspace.md](Docs/TerminalWorkspace.md) for the interactive terminal interface.
+See [Docs/CommandLine.md](Docs/CommandLine.md) for the full command reference, and [Docs/TerminalWorkspace.md](Docs/TerminalWorkspace.md) for the interactive terminal interface.
 
 ---
 
 ## Safety boundaries 🛡️
 
-DevProjex keeps user-owned source projects read-only and makes its operational boundaries explicit:
+DevProjex keeps your source projects read-only, with clear limits on what it does:
 
 * Does not edit, rename, move, or delete files in the opened source project
-* Does not execute project code or perform commits, merges, pushes, or branch changes in a user-owned repository
-* Does not include binary file contents in text or AI-context documents
-* Writes generated files and project copies only to explicit destinations outside the source project
+* Does not run project code, and does not commit, merge, push, or switch branches in a user-owned repository
+* Does not include binary file contents in text or AI-context output
+* Writes generated files and project copies only to destinations you choose, outside the source project
+
+---
+
+## How Smart Ignore Works 🧠
+
+Smart Ignore is a local, deterministic filter — not an AI model, and not one big blacklist for the whole folder. It knows where each project starts and ends, and applies the right rules only inside that project.
+
+**It knows project boundaries.** DevProjex finds project markers like `.csproj`, `package.json`, `pyproject.toml`, `go.mod`, or `Cargo.toml`. Rules for that stack (`node_modules`, `bin`/`obj`, virtual environments, build caches) apply only inside the project that owns them. A .NET service won't hide `bin` in an unrelated folder next to it, and a frontend app won't hide `node_modules` somewhere it doesn't belong.
+
+**It checks before it hides anything.** Folder names like `build`, `dist`, or `vendor` can mean generated files — or real source code. Smart Ignore looks for real signs first: package files, compiler output, known build layouts. If there's no clear sign, the folder stays visible.
+
+**It keeps monorepos separate.** Each nested project — frontend, backend, tools, docs — is filtered on its own, based on its own markers. Nothing crosses over between unrelated parts of your workspace.
+
+**Two Git modes, your choice:**
+
+| Mode | What it shows |
+|---|---|
+| `.gitignore` mode | Tracked files, plus untracked files not excluded by `.gitignore` (with nested rules and negations) |
+| Tracked-files-only | Only files currently recorded in the Git index |
+
+**You stay in control.** Smart Ignore, the Git mode, and basic filters (hidden files, dot-files, empty folders) all work together and can be turned on or off one by one. "Ignored" means excluded from the current view, copy, or export — it never deletes anything from your project.
+
+📖 Full technical details — signature matching, worktree handling, edge cases — are in [`Docs/SmartIgnore.md`](Docs/SmartIgnore.md).
+
+---
+
+## Documentation 📚
+
+* [Smart Ignore — full technical details](Docs/SmartIgnore.md)
+* [Command Line reference](Docs/CommandLine.md)
+* [Terminal Workspace guide](Docs/TerminalWorkspace.md)
+* [Contributing Guide](CONTRIBUTING.md)
+* [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ---
 
 ## Tech stack 🧩
 
+<p>
+  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-purple">
+  <img alt="WinGet" src="https://img.shields.io/badge/winget-available-blue">
+  <img alt="Repository size" src="https://img.shields.io/github/repo-size/Avazbek22/DevProjex">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-10000%2B-brightgreen">
+</p>
+
 * **.NET 10**
 * **Avalonia UI** (cross-platform)
 * Clean Architecture layers (Kernel / Application / Infrastructure / Terminal / Avalonia)
 * JSON-based resources (localization, icon mappings, presets)
-* 10000+ automated tests (unit + integration + UI)
+* 10,000+ automated tests (unit + integration + UI)
 
 ---
 
@@ -213,7 +206,7 @@ DevProjex keeps user-owned source projects read-only and makes its operational b
 
 Issues and pull requests are welcome.
 
-Good contribution areas:
+Good places to start:
 
 * UX improvements
 * Performance tuning
@@ -221,7 +214,13 @@ Good contribution areas:
 * Localization
 * Documentation & screenshots
 
-See `CONTRIBUTING.md` for details.
+Not sure where to start? Check issues labeled [`good first issue`](https://github.com/Avazbek22/DevProjex/labels/good%20first%20issue).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+---
+
+## Support 💛
 
 <p align="center">
   <a href="https://boosty.to/avazbek22">
@@ -233,7 +232,8 @@ See `CONTRIBUTING.md` for details.
 
 ## License (GPL-3.0) 📄
 
-DevProjex is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+DevProjex is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. This keeps the project — and any tool built on top of it — open source.
+
 * Copyright (c) 2025–present Avazbek Olimov.
 
-See `LICENSE` for details.
+See [LICENSE](LICENSE) for details.
