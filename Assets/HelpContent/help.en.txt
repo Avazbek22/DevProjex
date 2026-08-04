@@ -335,7 +335,7 @@ Depending on the project contents, the following options may be shown:
 * Dot-prefixed files
 * Files without extension
 
-Inside a Git repository, "Use .gitignore" and "Tracked Git files only" remain visible as a stable toggle pair. Other options are shown when their rules can change the current tree. The list may therefore change after switching another rule, a top-level folder, or a file type.
+Inside a Git repository, "Use .gitignore" and "Tracked Git files only" remain visible as a stable checkbox pair. Enabling one clears the other. Clicking the active checkbox again clears it, leaving both Git filters off without changing Smart Ignore or the basic exclusions. Other options are shown when their rules can change the current tree. The list may therefore change after switching another rule, a top-level folder, or a file type.
 
 A new option is enabled by default when it first appears. A known option keeps the user's choice even if it temporarily disappears from the list.
 
@@ -385,12 +385,12 @@ Every reachable nested repository and worktree is resolved independently at any 
 
 In an already-open Desktop workspace, the explicit tracked selection remains visible and fail-closed: output and export are blocked when readiness fails, while partial readiness continues with a localized warning.
 
-"Use .gitignore" and "Tracked Git files only" are mutually exclusive. Enabling one disables the other. For local projects that support profiles, the selected mode is saved with the root-folder, file-type, and other ignore settings.
+"Use .gitignore" and "Tracked Git files only" are mutually exclusive when enabled. The active checkbox may also be cleared to disable Git filtering. For local projects that support profiles, this state is saved with the root-folder, file-type, and other ignore settings.
 
 ### 12.5 Relationship between Git filtering and Smart Ignore
-The selected Git mode and Smart Ignore are independent switches. The Git mode applies first at every reachable Git scope. Smart Ignore then processes the remaining items, and the basic rules run last.
+The Git checkboxes and Smart Ignore are independent controls. The selected Git mode applies first at every reachable Git scope. Smart Ignore then processes the remaining items, and the basic rules run last.
 
-Smart Ignore can stay hidden while the selected Git mode already covers all of its candidates, then appear after the Git mode is changed. The two Git modes remain visible as a stable pair inside a Git repository.
+Smart Ignore can stay hidden while the selected Git mode already covers all of its candidates, then appear after the Git mode is changed or cleared. Both Git checkboxes remain available inside a Git repository.
 
 A Git negation rule starting with `!` cancels only a Git result. It does not disable Smart Ignore or a basic rule.
 

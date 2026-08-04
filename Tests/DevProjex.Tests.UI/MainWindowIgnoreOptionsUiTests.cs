@@ -268,13 +268,23 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
-    public async Task RepositoryGitModes_RemainVisibleToggleExclusivelyAndApplyTrackedProjection()
+    public async Task RepositoryGitModes_AllowTrackedGitIgnoreSmartOnlyAndNoFiltering()
     {
         EnsureGitAvailable();
         using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
         await File.WriteAllTextAsync(
             Path.Combine(project.RootPath, "LocalOnly.cs"),
             "class LocalOnly {}\n",
+            TestContext.Current.CancellationToken);
+        Directory.CreateDirectory(Path.Combine(project.RootPath, "logs"));
+        await File.WriteAllTextAsync(
+            Path.Combine(project.RootPath, "logs", "ignored.log"),
+            "ignored by gitignore\n",
+            TestContext.Current.CancellationToken);
+        Directory.CreateDirectory(Path.Combine(project.RootPath, "bin", "Debug"));
+        await File.WriteAllTextAsync(
+            Path.Combine(project.RootPath, "bin", "Debug", "app.dll"),
+            "generated artifact\n",
             TestContext.Current.CancellationToken);
         RunGit(project.RootPath, "init", "--quiet");
         RunGit(
@@ -304,6 +314,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.TrackedGitFilesOnly,
                 Assert.Single(initialIgnoreOptions, option => option.IsControllerGroupEnd).Id);
             await WaitForProjectTreePathStateAsync(window, exists: true, "LocalOnly.cs");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "logs", "ignored.log");
 
             await SetIgnoreOptionCheckedAsync(
                 window,
@@ -334,7 +345,46 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.UseGitIgnore,
                 isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.TrackedGitFilesOnly,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                visible: true,
+                isChecked: true);
+            var smartOnlyIgnoreOptions = UiTestDriver.GetViewModel(window).IgnoreOptions;
+            Assert.Equal(
+                [
+                    IgnoreOptionId.SmartIgnore,
+                    IgnoreOptionId.UseGitIgnore,
+                    IgnoreOptionId.TrackedGitFilesOnly
+                ],
+                smartOnlyIgnoreOptions.Take(3).Select(static option => option.Id));
             Assert.False(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.TrackedGitFilesOnly,
+                visible: true,
+                isChecked: false);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "logs", "ignored.log");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "bin", "Debug", "app.dll");
+
+            await SetIgnoreOptionCheckedAsync(
+                window,
+                IgnoreOptionId.SmartIgnore,
+                isChecked: false);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "bin", "Debug", "app.dll");
+
             await UiTestDriver.ClickAsync(
                 window,
                 UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));

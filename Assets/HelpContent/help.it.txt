@@ -319,7 +319,7 @@ Un elemento viene mostrato solo se la cartella di primo livello e il tipo di fil
 ### 12.1 Regole disponibili
 In base al contenuto del progetto possono comparire Smart Ignore, «Usa .gitignore», «Solo file tracciati da Git», cartelle e file vuoti, nascosti o con punto iniziale e file senza estensione.
 
-In un repository Git, «Usa .gitignore» e «Solo file tracciati da Git» restano visibili come una coppia stabile. Le altre opzioni appaiono quando possono modificare l’albero corrente. L’elenco può quindi cambiare dopo la modifica di un’altra regola, di una cartella di primo livello o di un tipo di file. Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
+In un repository Git, «Usa .gitignore» e «Solo file tracciati da Git» restano visibili come due caselle. Attivarne una disattiva l’altra; fare di nuovo clic sulla casella attiva disattiva completamente il filtro Git senza modificare Smart Ignore o le regole di base. Le altre opzioni appaiono quando possono modificare l’albero corrente. L’elenco può quindi cambiare dopo la modifica di un’altra regola, di una cartella di primo livello o di un tipo di file. Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
 
 ### 12.2 Smart Ignore
 Smart Ignore nasconde dipendenze, risultati di build, cache e altri artefatti di servizio. DevProjex identifica il tipo di progetto dalla struttura e da file marker come `.csproj`, `package.json`, `pyproject.toml` o `Cargo.toml`. Le regole dello stack rilevato restano nell’area del progetto e non si estendono ai progetti vicini di un altro stack.
@@ -348,12 +348,12 @@ Ogni repository annidato e ogni worktree raggiungibile vengono elaborati in modo
 
 In uno spazio di lavoro Desktop già aperto, la selezione esplicita resta visibile e fallisce in modo sicuro: output ed esportazione vengono bloccati se la verifica non riesce, mentre una disponibilità parziale consente di continuare con un avviso localizzato.
 
-«Usa .gitignore» e «Solo file tracciati da Git» si escludono a vicenda: l’attivazione di uno disattiva l’altro. Nei progetti locali che supportano i profili, la modalità scelta viene salvata insieme alle cartelle di primo livello, ai tipi di file e alle altre regole di esclusione.
+«Usa .gitignore» e «Solo file tracciati da Git» si escludono quando vengono attivati. La casella attiva può essere deselezionata per disattivare il filtro Git. Nei progetti locali che supportano i profili, questo stato viene salvato insieme alle cartelle di primo livello, ai tipi di file e alle altre regole di esclusione.
 
 ### 12.5 Relazione tra il filtro Git e Smart Ignore
-La modalità Git selezionata e Smart Ignore sono interruttori indipendenti. La modalità Git viene applicata per prima in ogni area Git raggiungibile, poi Smart Ignore elabora gli elementi rimasti e infine agiscono le regole di base.
+La modalità Git selezionata e Smart Ignore sono controllati in modo indipendente. La modalità Git viene applicata per prima in ogni area Git raggiungibile, poi Smart Ignore elabora gli elementi rimasti e infine agiscono le regole di base.
 
-Smart Ignore può restare nascosto finché la modalità Git selezionata copre già tutti i suoi candidati e comparire dopo un cambio di modalità. In un repository Git, le due modalità Git restano visibili come una coppia stabile.
+Smart Ignore può restare nascosto finché la modalità Git selezionata copre già tutti i suoi candidati e comparire dopo un cambio o la disattivazione della modalità. Entrambe le caselle Git restano disponibili nel repository.
 
 Una negazione Git con `!` annulla solo il risultato Git. Non disattiva Smart Ignore né una regola di base.
 

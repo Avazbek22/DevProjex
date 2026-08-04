@@ -319,7 +319,7 @@ Element faqat uning yuqori darajadagi papkasi va fayl turi tanlangan, shuningdek
 ### 12.1 Mavjud qoidalar
 Loyiha mazmuniga qarab Smart Ignore, «.gitignore dan foydalanish», «Faqat Git kuzatadigan fayllar», bo‘sh, yashirin yoki nuqta bilan boshlanuvchi papka va fayllar hamda kengaytmasiz fayllar ko‘rsatilishi mumkin.
 
-Git repozitoriyasida «.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» barqaror almashtirgichlar juftligi sifatida ko‘rinib turadi. Boshqa bandlar joriy daraxtni o‘zgartira olganda paydo bo‘ladi. Shu sababli boshqa qoida, yuqori darajadagi papka yoki fayl turi almashtirilganda ro‘yxat o‘zgarishi mumkin. Yangi band birinchi paydo bo‘lganda odatda yoqiladi; avvaldan ma’lum band vaqtincha yo‘qolsa ham foydalanuvchi tanlovini saqlaydi.
+Git repozitoriyasida «.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» ikkita belgilash katagi sifatida ko‘rinib turadi. Birini yoqish ikkinchisini o‘chiradi; faol katakni qayta bosish Git filtrlashni to‘liq o‘chiradi va Smart Ignore yoki asosiy qoidalarni o‘zgartirmaydi. Boshqa bandlar joriy daraxtni o‘zgartira olganda paydo bo‘ladi. Shu sababli boshqa qoida, yuqori darajadagi papka yoki fayl turi almashtirilganda ro‘yxat o‘zgarishi mumkin. Yangi band birinchi paydo bo‘lganda odatda yoqiladi; avvaldan ma’lum band vaqtincha yo‘qolsa ham foydalanuvchi tanlovini saqlaydi.
 
 ### 12.2 Smart Ignore
 Smart Ignore bog‘liqliklar, build natijalari, keshlar va boshqa xizmat artefaktlarini yashiradi. DevProjex loyiha turini tuzilma va `.csproj`, `package.json`, `pyproject.toml`, `Cargo.toml` kabi marker fayllar orqali aniqlaydi. Tegishli stek qoidalari faqat topilgan loyiha hududida ishlaydi va qo‘shni boshqa stek loyihasiga yoyilmaydi.
@@ -348,12 +348,12 @@ Har bir yetib boriladigan ichki repozitoriya va worktree istalgan erishiladigan 
 
 Allaqachon ochiq Desktop ish maydonida aniq tanlov ko‘rinib turadi va fail-closed ishlaydi: tayyorlik xatosida chiqarish va eksport bloklanadi, qisman tayyorlikda esa amal mahalliylashtirilgan ogohlantirish bilan davom etadi.
 
-«.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» o‘zaro istisno qilinadi: birini yoqish ikkinchisini o‘chiradi. Profillarni qo‘llaydigan mahalliy loyihalarda tanlangan rejim yuqori darajadagi papkalar, fayl turlari va boshqa istisno sozlamalari bilan birga saqlanadi.
+«.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» yoqilganda bir-birini o‘chiradi. Git filtrlashni to‘liq o‘chirish uchun faol katak belgisini olib tashlash mumkin. Profillarni qo‘llaydigan mahalliy loyihalarda bu holat yuqori darajadagi papkalar, fayl turlari va boshqa istisno sozlamalari bilan birga saqlanadi.
 
 ### 12.5 Git filtrlashi va Smart Ignore aloqasi
-Tanlangan Git rejimi va Smart Ignore mustaqil almashtirgichlardir. Avval har bir erishiladigan Git hududida Git rejimi, keyin qolgan elementlarga Smart Ignore, oxirida esa asosiy qoidalar qo‘llanadi.
+Tanlangan Git rejimi va Smart Ignore mustaqil boshqariladi. Avval har bir erishiladigan Git hududida Git rejimi, keyin qolgan elementlarga Smart Ignore, oxirida esa asosiy qoidalar qo‘llanadi.
 
-Tanlangan Git rejimi barcha Smart Ignore nomzodlarini qamrab turganda Smart Ignore yashirin bo‘lishi va Git rejimi o‘zgartirilgach paydo bo‘lishi mumkin. Git repozitoriyasida ikkala Git rejimi ham barqaror juftlik sifatida ko‘rinib turadi.
+Tanlangan Git rejimi barcha Smart Ignore nomzodlarini qamrab turganda Smart Ignore yashirin bo‘lishi va Git rejimi o‘zgartirilgach yoki o‘chirilgach paydo bo‘lishi mumkin. Git repozitoriyasida ikkala Git katagi ham mavjud bo‘lib qoladi.
 
 `!` Git inkori faqat Git natijasini bekor qiladi; u Smart Ignore yoki asosiy qoidani o‘chirmaydi.
 

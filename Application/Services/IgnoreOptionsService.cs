@@ -5,6 +5,10 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{
 		var options = new List<IgnoreOptionDescriptor>();
+		// Smart Ignore is the primary exclusion controller in the Desktop list. Keep it
+		// above both optional Git modes whenever project evidence makes it available.
+		AppendExclusionOptions(options, availability, smartIgnoreOnly: true);
+
 		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering)
 		{
 			if (descriptor.LegacyOptionId is not { } optionId)
@@ -26,8 +30,20 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 			}
 		}
 
+		AppendExclusionOptions(options, availability, smartIgnoreOnly: false);
+		return options;
+	}
+
+	private void AppendExclusionOptions(
+		List<IgnoreOptionDescriptor> options,
+		IgnoreOptionsAvailability availability,
+		bool smartIgnoreOnly)
+	{
 		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
 		{
+			if ((descriptor.Id == ProjectExclusion.SmartIgnore) != smartIgnoreOnly)
+				continue;
+
 			var (included, count) = descriptor.Id switch
 			{
 				ProjectExclusion.SmartIgnore => (availability.IncludeSmartIgnore, 0),
@@ -57,8 +73,6 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 					availability.ShowAdvancedCounts),
 				true));
 		}
-
-		return options;
 	}
 
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions()

@@ -41,8 +41,8 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 			IncludeGitIgnore: true,
 			IncludeSmartIgnore: true));
 
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
-		Assert.Equal(IgnoreOptionId.SmartIgnore, options[1].Id);
+		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
 		Assert.Equal(IgnoreOptionId.HiddenFolders, options[2].Id);
 		Assert.Equal(IgnoreOptionId.HiddenFiles, options[3].Id);
 		Assert.Equal(IgnoreOptionId.DotFolders, options[4].Id);
@@ -61,17 +61,17 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 
 		Assert.Equal(
 			[
+				IgnoreOptionId.SmartIgnore,
 				IgnoreOptionId.UseGitIgnore,
 				IgnoreOptionId.TrackedGitFilesOnly,
-				IgnoreOptionId.SmartIgnore,
 				IgnoreOptionId.HiddenFolders,
 				IgnoreOptionId.HiddenFiles,
 				IgnoreOptionId.DotFolders,
 				IgnoreOptionId.DotFiles
 			],
 			options.Select(static option => option.Id));
-		Assert.True(options[0].DefaultChecked);
-		Assert.False(options[1].DefaultChecked);
+		Assert.True(options[1].DefaultChecked);
+		Assert.False(options[2].DefaultChecked);
 	}
 
 	[Fact]

@@ -319,7 +319,7 @@ Un élément n’est affiché que si son dossier de premier niveau et son type d
 ### 12.1 Règles disponibles
 Selon le contenu du projet, Smart Ignore, « Utiliser .gitignore », « Uniquement les fichiers suivis par Git », les dossiers et fichiers vides, cachés ou commençant par un point, ainsi que les fichiers sans extension peuvent être proposés.
 
-Dans un dépôt Git, « Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » restent visibles sous la forme d’une paire stable. Les autres options apparaissent lorsqu’elles peuvent modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle, d’un dossier de premier niveau ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
+Dans un dépôt Git, « Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » restent visibles sous la forme de deux cases. Activer l’une désactive l’autre ; cliquer de nouveau sur la case active désactive entièrement le filtrage Git sans modifier Smart Ignore ni les règles de base. Les autres options apparaissent lorsqu’elles peuvent modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle, d’un dossier de premier niveau ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
 
 ### 12.2 Smart Ignore
 Smart Ignore masque les dépendances, résultats de build, caches et autres artefacts de service. DevProjex identifie le type du projet à partir de sa structure et de fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml`. Les règles de la technologie reconnue restent dans la zone du projet et ne s’étendent pas aux projets voisins d’une autre technologie.
@@ -348,12 +348,12 @@ Chaque dépôt imbriqué et chaque worktree accessible sont traités indépendam
 
 Dans un espace de travail Desktop déjà ouvert, la sélection explicite reste visible et échoue de façon sûre : la sortie et l’exportation sont bloquées si la disponibilité échoue, tandis qu’une disponibilité partielle permet de continuer avec un avertissement localisé.
 
-« Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » s’excluent mutuellement : activer l’un désactive l’autre. Pour les projets locaux prenant en charge les profils, le mode choisi est enregistré avec les dossiers de premier niveau, les types de fichiers et les autres règles d’exclusion.
+« Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » s’excluent lors de l’activation. La case active peut aussi être décochée pour désactiver le filtrage Git. Pour les projets locaux prenant en charge les profils, cet état est enregistré avec les dossiers de premier niveau, les types de fichiers et les autres règles d’exclusion.
 
 ### 12.5 Relation entre le filtrage Git et Smart Ignore
-Le mode Git sélectionné et Smart Ignore sont des interrupteurs indépendants. Le mode Git est appliqué en premier dans chaque zone Git accessible, puis Smart Ignore traite les éléments restants et les règles de base s’appliquent en dernier.
+Le mode Git sélectionné et Smart Ignore sont contrôlés indépendamment. Le mode Git est appliqué en premier dans chaque zone Git accessible, puis Smart Ignore traite les éléments restants et les règles de base s’appliquent en dernier.
 
-Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déjà tous ses candidats, puis apparaître après un changement de mode. Dans un dépôt Git, les deux modes Git restent visibles sous la forme d’une paire stable.
+Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déjà tous ses candidats, puis apparaître après un changement ou une désactivation du mode. Les deux cases Git restent disponibles dans le dépôt.
 
 Une négation Git avec `!` annule uniquement le résultat Git. Elle ne désactive ni Smart Ignore ni une règle de base.
 

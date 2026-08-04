@@ -305,6 +305,67 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void GitFilteringCheckboxes_AllowActiveModeToBeClearedAndKeepSmartIgnoreIndependent()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => null,
+			availabilityProvider: (_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				IncludeTrackedGitFilesOnly: true));
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+		coordinator.ApplyProjectProfileSelections(
+			projectPath,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions:
+				[
+					IgnoreOptionId.UseGitIgnore,
+					IgnoreOptionId.SmartIgnore
+				]));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], projectPath);
+
+		var useGitIgnore = viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.UseGitIgnore);
+		var trackedOnly = viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly);
+		var smartIgnore = viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.SmartIgnore);
+		Assert.True(useGitIgnore.IsChecked);
+		Assert.False(trackedOnly.IsChecked);
+		Assert.True(smartIgnore.IsChecked);
+
+		trackedOnly.IsChecked = true;
+		Assert.False(useGitIgnore.IsChecked);
+		Assert.True(trackedOnly.IsChecked);
+
+		// An active Git checkbox may be cleared. None is a valid Git-filtering mode;
+		// it must not be normalized back to the other checkbox or affect Smart Ignore.
+		trackedOnly.IsChecked = false;
+		Assert.False(useGitIgnore.IsChecked);
+		Assert.False(trackedOnly.IsChecked);
+		Assert.True(smartIgnore.IsChecked);
+		Assert.Equal(
+			[IgnoreOptionId.SmartIgnore],
+			coordinator.GetSelectedIgnoreOptionIds());
+		var persistedStates = Assert.IsAssignableFrom<IReadOnlyDictionary<IgnoreOptionId, bool>>(
+			coordinator.SnapshotIgnoreOptionStatesForPersistence());
+		Assert.False(persistedStates[IgnoreOptionId.UseGitIgnore]);
+		Assert.False(persistedStates[IgnoreOptionId.TrackedGitFilesOnly]);
+		Assert.True(persistedStates[IgnoreOptionId.SmartIgnore]);
+
+		coordinator.HandleIgnoreAllChanged(isChecked: false, currentPath: null);
+
+		Assert.False(useGitIgnore.IsChecked);
+		Assert.False(trackedOnly.IsChecked);
+		Assert.Empty(coordinator.GetSelectedIgnoreOptionIds());
+	}
+
+	[Fact]
 	public void RootFolderReset_UnsubscribesRemovedItemsAndDoesNotDuplicateRetainedSubscriptions()
 	{
 		var viewModel = CreateViewModel();

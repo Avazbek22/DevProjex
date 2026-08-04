@@ -91,6 +91,12 @@ Smart Ignore and Git filtering solve different problems. Smart Ignore recognizes
 
 Only one Git mode can be active at a time. Ordinary exclusions, including Smart Ignore, remain independent and can be combined with any Git mode.
 
+Desktop keeps the two Git modes as checkboxes because they are settings alongside
+the other exclusions. Enabling one Git checkbox clears the other; clearing the
+active checkbox leaves both off, which is the valid no-Git-filtering state. These
+actions never change Smart Ignore or an ordinary exclusion. The section-wide
+**All** checkbox still controls the whole section and never enables both Git modes.
+
 ### `.gitignore` mode
 
 The `.gitignore` implementation supports nested rule scopes, negations, and ancestor rules from the owning repository or worktree root to the selected folder. An ignored directory is still traversed when a later negation may expose a descendant.

@@ -1310,10 +1310,10 @@ public sealed partial class SelectionSyncCoordinator(
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = null;
 
-        if (changedOption is { IsChecked: true } &&
+        if (changedOption is not null &&
             GitFilteringModeResolver.IsGitFilteringOption(changedOption.Id))
         {
-            SelectExclusiveGitFilteringOption(changedOption.Id);
+            ApplyGitFilteringCheckboxTransition(changedOption);
         }
 
         SyncIgnoreAllCheckbox();
@@ -2833,14 +2833,17 @@ public sealed partial class SelectionSyncCoordinator(
             trackedOnly.IsChecked = false;
     }
 
-    private void SelectExclusiveGitFilteringOption(IgnoreOptionId selectedOptionId)
+    private void ApplyGitFilteringCheckboxTransition(IgnoreOptionViewModel changedOption)
     {
+        // The two Git checkboxes represent one optional mode, not a mandatory radio
+        // selection. Enabling either mode clears its peer; clearing the active mode must
+        // leave both unchecked so users can run Smart Ignore alone or disable all filters.
         _suppressIgnoreItemCheck = true;
         try
         {
             foreach (var option in viewModel.IgnoreOptions)
             {
-                if (option.Id != selectedOptionId &&
+                if (option.Id != changedOption.Id &&
                     GitFilteringModeResolver.IsGitFilteringOption(option.Id))
                 {
                     option.IsChecked = false;

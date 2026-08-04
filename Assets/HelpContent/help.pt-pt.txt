@@ -335,7 +335,7 @@ Dependendo do conteúdo do projeto, poderão ser apresentadas as seguintes opç�
 * Ficheiros com prefixo de ponto
 * Ficheiros sem extensão
 
-Dentro de um repositório Git, "Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" permanecem visíveis como um par estável de opções. As restantes opções são mostradas quando as suas regras podem alterar a árvore atual. A lista pode, portanto, mudar após a alteração de outra regra, uma pasta de nível superior ou um tipo de ficheiro.
+Dentro de um repositório Git, "Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" permanecem visíveis como duas caixas. Ativar uma desmarca a outra; clicar novamente na caixa ativa desativa por completo a filtragem Git sem alterar o Smart Ignore nem as regras básicas. As restantes opções são mostradas quando as suas regras podem alterar a árvore atual. A lista pode, portanto, mudar após a alteração de outra regra, uma pasta de nível superior ou um tipo de ficheiro.
 
 Uma nova opção é ativada por defeito quando aparece pela primeira vez. Uma opção conhecida mantém a escolha do utilizador mesmo que desapareça temporariamente da lista.
 
@@ -387,12 +387,12 @@ Cada repositório aninhado e cada worktree acessível são processados de forma 
 
 Num espaço de trabalho Desktop já aberto, a seleção explícita permanece visível e falha em segurança: a saída e a exportação são bloqueadas quando a prontidão falha, enquanto a prontidão parcial permite continuar com um aviso localizado.
 
-"Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" são mutuamente exclusivos: ativar um desativa o outro. Nos projetos locais que suportam perfis, o modo escolhido é guardado com as pastas de nível superior, os tipos de ficheiro e as restantes regras de exclusão.
+"Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" excluem-se ao serem ativados. A caixa ativa também pode ser desmarcada para desativar a filtragem Git. Nos projetos locais que suportam perfis, este estado é guardado com as pastas de nível superior, os tipos de ficheiro e as restantes regras de exclusão.
 
 ### 12.5 Relação entre a filtragem Git e o Smart Ignore
 O modo Git selecionado e o Smart Ignore são controlos independentes. O modo Git é aplicado primeiro em cada âmbito Git acessível; depois, o Smart Ignore processa os elementos restantes; por fim, atuam as regras básicas.
 
-O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já abranger todos os seus candidatos e aparecer depois de esse modo ser alterado. Dentro de um repositório Git, os dois modos Git permanecem visíveis como um par estável.
+O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já abranger todos os seus candidatos e aparecer depois de esse modo ser alterado ou desativado. As duas caixas Git permanecem disponíveis no repositório.
 
 Uma regra de negação Git iniciada por `!` cancela apenas o resultado Git. Não desativa o Smart Ignore nem uma regra básica.
 

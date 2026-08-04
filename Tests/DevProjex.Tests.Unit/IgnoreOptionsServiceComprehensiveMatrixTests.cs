@@ -176,8 +176,8 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 		bool includeExtensionless)
 	{
 		var ordered = new List<IgnoreOptionId>(9);
-		if (includeGit) ordered.Add(IgnoreOptionId.UseGitIgnore);
 		if (includeSmart) ordered.Add(IgnoreOptionId.SmartIgnore);
+		if (includeGit) ordered.Add(IgnoreOptionId.UseGitIgnore);
 		if (includeEmptyFolders) ordered.Add(IgnoreOptionId.EmptyFolders);
 		if (includeEmptyFiles) ordered.Add(IgnoreOptionId.EmptyFiles);
 		if (includeHiddenFolders) ordered.Add(IgnoreOptionId.HiddenFolders);
