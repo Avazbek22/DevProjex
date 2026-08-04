@@ -31,7 +31,7 @@ Choose what you need in an interactive file tree, check the result in a live pre
 ## Download 🚀
 
 **Download from Microsoft Store:**
-👉 [MS-Store DevProjex](https://apps.microsoft.com/detail/9ndq3nq5m354)
+👉 [DevProjex](https://apps.microsoft.com/detail/9ndq3nq5m354)
 
 **Latest GitHub release:**
 👉 [https://github.com/Avazbek22/DevProjex/releases/latest](https://github.com/Avazbek22/DevProjex/releases/latest)
@@ -79,6 +79,7 @@ Works with any language, repository, or project structure.
 * Live preview (tree / content / both) before you copy or export
 * Export as ASCII, Markdown, JSON, or XML
 * Save to file or clipboard — tree only, content only, or both
+* Export a clean copy of your project to a folder or ZIP archive
 
 **Workflow**
 * GUI, TUI, and CLI — the same engine, three ways to work

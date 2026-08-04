@@ -176,8 +176,8 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
 		Assert.Equal(6, options.Count);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
-		Assert.Equal(IgnoreOptionId.SmartIgnore, options[1].Id);
+		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
 	}
 
 	[Fact]

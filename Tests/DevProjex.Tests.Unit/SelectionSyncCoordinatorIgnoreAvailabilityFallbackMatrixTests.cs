@@ -200,10 +200,10 @@ public sealed class SelectionSyncCoordinatorIgnoreAvailabilityFallbackMatrixTest
 	private static IgnoreOptionId[] BuildBaseIds(bool includeGitIgnore, bool includeSmartIgnore)
 	{
 		var ids = new List<IgnoreOptionId>(2);
-		if (includeGitIgnore)
-			ids.Add(IgnoreOptionId.UseGitIgnore);
 		if (includeSmartIgnore)
 			ids.Add(IgnoreOptionId.SmartIgnore);
+		if (includeGitIgnore)
+			ids.Add(IgnoreOptionId.UseGitIgnore);
 
 		return ids.ToArray();
 	}

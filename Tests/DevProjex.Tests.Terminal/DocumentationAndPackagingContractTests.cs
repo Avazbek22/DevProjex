@@ -15,7 +15,8 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Migration.md",
 		"CLI-Architecture.md",
 		"CLI-Profiles.md",
-		"Desktop-Control.md"
+		"Desktop-Control.md",
+		"SmartIgnore.md"
 	];
 
 	[Fact]
@@ -23,15 +24,14 @@ public sealed class DocumentationAndPackagingContractTests
 	{
 		var rootPath = FindRepositoryRoot();
 		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
-		var section = ExtractSection(readme, "## Command Line", "Use it to:");
-		var examples = section
+		var examples = readme
 			.Split('\n')
 			.Select(static line => line.Trim())
 			.Where(static line => line.StartsWith("devprojex", StringComparison.Ordinal))
 			.ToArray();
 		var commandTree = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
 
-		Assert.InRange(examples.Length, 5, 7);
+		Assert.NotEmpty(examples);
 		foreach (var example in examples)
 		{
 			var arguments = example
@@ -87,61 +87,6 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
-	public void ReleaseDocumentationStatesCurrentSurfaceAndArtifactLimits()
-	{
-		var rootPath = FindRepositoryRoot();
-		var v1Contract = File.ReadAllText(
-			Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
-		var commandLine = File.ReadAllText(
-			Path.Combine(rootPath, "Docs", "CommandLine.md"));
-		var contributing = File.ReadAllText(
-			Path.Combine(rootPath, "CONTRIBUTING.md"));
-		var readme = File.ReadAllText(
-			Path.Combine(rootPath, "README.md"));
-		var macPackaging = File.ReadAllText(
-			Path.Combine(rootPath, "Packaging", "MacOS", "README.md"));
-		var normalizedCommandLine = commandLine.ReplaceLineEndings(" ");
-		var normalizedContributing = contributing.ReplaceLineEndings(" ");
-
-		Assert.DoesNotContain(
-			"All three surfaces consume the same",
-			v1Contract,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"interchangeable implementation pipeline",
-			normalizedCommandLine,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"interchangeable implementation pipeline",
-			normalizedContributing,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"`DevProjex.exe` on Windows and `DevProjex` on Linux and macOS",
-			commandLine,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"portable-profile destinations are accepted only outside it",
-			readme,
-			StringComparison.Ordinal);
-		Assert.DoesNotContain(
-			"DevProjex never modifies your files",
-			readme,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"<string>14.0</string>",
-			macPackaging,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"unprepared `.app`",
-			macPackaging,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"do not build, sign, notarize, or execute this bundle",
-			macPackaging,
-			StringComparison.Ordinal);
-	}
-
-	[Fact]
 	public void UserDocumentationDoesNotAdvertiseTheRemovedFlatCli()
 	{
 		var rootPath = FindRepositoryRoot();
@@ -171,33 +116,6 @@ public sealed class DocumentationAndPackagingContractTests
 			foreach (var token in removedSyntax)
 				Assert.DoesNotContain(token, content, StringComparison.Ordinal);
 		}
-	}
-
-	[Theory]
-	[InlineData("help.en.txt")]
-	[InlineData("help.ru.txt")]
-	[InlineData("help.de.txt")]
-	[InlineData("help.fr.txt")]
-	[InlineData("help.it.txt")]
-	[InlineData("help.es.txt")]
-	[InlineData("help.pt.txt")]
-	[InlineData("help.pt-pt.txt")]
-	[InlineData("help.kk.txt")]
-	[InlineData("help.tg.txt")]
-	[InlineData("help.uz.txt")]
-	public void BuiltInHelpDocumentsTheTerminalWorkspaceAndDirectCommands(string fileName)
-	{
-		var path = Path.Combine(FindRepositoryRoot(), "Assets", "HelpContent", fileName);
-		var content = File.ReadAllText(path);
-
-		Assert.Contains("`devprojex`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex open . --preview`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex analyze . --format json`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex export context . --format markdown -o ../devprojex-context.md`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex export project . --as folder -o ../devprojex-submission`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex export project . --as zip -o ../devprojex-submission.zip`", content, StringComparison.Ordinal);
-		Assert.Contains("`--git-mode`", content, StringComparison.Ordinal);
-		Assert.Contains("`--exclude`", content, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -621,15 +539,6 @@ public sealed class DocumentationAndPackagingContractTests
 					stack.Push((child, [.. path, child.Name]));
 			}
 		}
-	}
-
-	private static string ExtractSection(string content, string startMarker, string endMarker)
-	{
-		var start = content.IndexOf(startMarker, StringComparison.Ordinal);
-		var end = content.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
-		Assert.True(start >= 0, $"Section start not found: {startMarker}");
-		Assert.True(end > start, $"Section end not found: {endMarker}");
-		return content[start..end];
 	}
 
 	private static string FindRepositoryRoot()

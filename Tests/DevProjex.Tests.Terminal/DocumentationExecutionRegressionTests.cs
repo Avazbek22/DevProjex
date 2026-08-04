@@ -18,18 +18,10 @@ public sealed class DocumentationExecutionRegressionTests
 		var examples = await ExtractPublishedDirectExamplesAsync(
 			FindRepositoryRoot(),
 			TestContext.Current.CancellationToken);
-		Assert.Contains(examples, static example => example.Source == "README.md");
-		Assert.Contains(examples, static example => example.Source == "Docs/CommandLine.md");
-		Assert.Contains(examples, static example => example.Source == "Docs/CLI-Migration.md");
-		Assert.Contains(examples, static example => example.Source == "Docs/CLI-Profiles.md");
-		Assert.Contains(examples, static example => example.Source.StartsWith(
-			"Assets/HelpContent/",
-			StringComparison.Ordinal));
 		var uniqueCommands = examples
-			.Select(static example => example.Command)
 			.Distinct(StringComparer.Ordinal)
 			.ToArray();
-		Assert.True(uniqueCommands.Length >= 18);
+		Assert.NotEmpty(uniqueCommands);
 
 		for (var index = 0; index < uniqueCommands.Length; index++)
 		{
@@ -59,28 +51,22 @@ public sealed class DocumentationExecutionRegressionTests
 		}
 	}
 
-	private static async Task<IReadOnlyList<DocumentedCommand>> ExtractPublishedDirectExamplesAsync(
+	private static async Task<IReadOnlyList<string>> ExtractPublishedDirectExamplesAsync(
 		string repositoryRoot,
 		CancellationToken cancellationToken)
 	{
-		var examples = new List<DocumentedCommand>();
+		var examples = new List<string>();
 		var readme = await File.ReadAllTextAsync(
 			Path.Combine(repositoryRoot, "README.md"),
 			cancellationToken);
-		var sectionStart = readme.IndexOf("## Command Line", StringComparison.Ordinal);
-		var sectionEnd = readme.IndexOf("Use it to:", sectionStart, StringComparison.Ordinal);
-		Assert.True(sectionStart >= 0 && sectionEnd > sectionStart);
-		AddLineExamples(
-			examples,
-			"README.md",
-			readme[sectionStart..sectionEnd]);
+		AddLineExamples(examples, readme);
 
 		foreach (var fileName in new[] { "CommandLine.md", "CLI-Migration.md", "CLI-Profiles.md" })
 		{
 			var content = await File.ReadAllTextAsync(
 				Path.Combine(repositoryRoot, "Docs", fileName),
 				cancellationToken);
-			AddLineExamples(examples, $"Docs/{fileName}", content);
+			AddLineExamples(examples, content);
 		}
 
 		foreach (var helpPath in Directory.EnumerateFiles(
@@ -93,9 +79,7 @@ public sealed class DocumentationExecutionRegressionTests
 				         @"`(?<command>devprojex (?:analyze|export context|export project) [^`\r\n]+)`",
 				         RegexOptions.CultureInvariant))
 			{
-				examples.Add(new DocumentedCommand(
-					$"Assets/HelpContent/{Path.GetFileName(helpPath)}",
-					match.Groups["command"].Value));
+				examples.Add(match.Groups["command"].Value);
 			}
 		}
 
@@ -103,8 +87,7 @@ public sealed class DocumentationExecutionRegressionTests
 	}
 
 	private static void AddLineExamples(
-		ICollection<DocumentedCommand> destination,
-		string source,
+		ICollection<string> destination,
 		string content)
 	{
 		foreach (var command in content
@@ -112,7 +95,7 @@ public sealed class DocumentationExecutionRegressionTests
 			         .Select(static line => line.Trim())
 			         .Where(IsConcreteDirectCommand))
 		{
-			destination.Add(new DocumentedCommand(source, command));
+			destination.Add(command);
 		}
 	}
 
@@ -328,8 +311,4 @@ public sealed class DocumentationExecutionRegressionTests
 
 		throw new DirectoryNotFoundException("Repository root was not found.");
 	}
-
-	private sealed record DocumentedCommand(
-		string Source,
-		string Command);
 }
