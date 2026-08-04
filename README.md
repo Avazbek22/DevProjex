@@ -18,7 +18,7 @@ DevProjex turns any folder or codebase into clean, ready-to-use context for AI c
 
 Choose what you need in an interactive file tree, check the result in a live preview, then export it as **ASCII, Markdown, JSON, or XML**. Need more than text? Export a real copy of your project — a clean **folder or ZIP file** — with the same filters applied.
 
-> 🔒 **Read-only and telemetry-free by design.** DevProjex never modifies your source files, and nothing ever leaves your machine.
+> 🔒 **Read-only and telemetry-free by design.** DevProjex does not upload your project contents or collect telemetry.
 
 ---
 
@@ -44,7 +44,7 @@ Choose what you need in an interactive file tree, check the result in a live pre
 
 Copying files into a chat window one by one **doesn't scale**. CLI tools pack a whole project fast, but you **can't see what you're sending** before it's sent.
 
-DevProjex works differently — visual, precise, and fully offline:
+DevProjex works differently — visual, precise, and local-first:
 
 * **You see what leaves your project** — file tree, live preview, token estimate
 * **You control what leaves it** — Smart Ignore, Git modes, name filters, saved profiles
@@ -71,7 +71,7 @@ Works with any language, repository, or project structure.
 ## Feature overview ✨
 
 **Choose and control**
-* **Smart Ignore** — strips build junk (`node_modules`, `bin`, caches) in seconds, without touching your source. [How it works ↓](#how-smart-ignore-works-)
+* **Smart Ignore** — filters stack-specific build output, dependency folders, and caches without touching your source. [How it works ↓](#how-smart-ignore-works-)
 * File tree with checkboxes, search, and name filters
 * Two Git-aware modes: follow `.gitignore`, or show only tracked files
 
@@ -149,7 +149,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full command reference, a
 DevProjex keeps your source projects read-only, with clear limits on what it does:
 
 * Does not edit, rename, move, or delete files in the opened source project
-* Does not run project code, and does not commit, merge, push, or switch branches in a user-owned repository
+* Does not commit, merge, push, or switch branches in the source repository opened from the user's filesystem. Branch operations are limited to application-owned cached clones.
 * Does not include binary file contents in text or AI-context output
 * Writes generated files and project copies only to destinations you choose, outside the source project
 
