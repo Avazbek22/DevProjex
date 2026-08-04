@@ -1,7 +1,7 @@
 ## 1) Nima va nima uchun
 DevProjex loyiha kontekstini tez tayyorlaydi: papka/fayl tuzilmasini ko‘rsatadi, elementlarni belgilash va daraxtni va/yoki fayl mazmunini buferga nusxalash imkonini beradi. Code review, qo‘llab‑quvvatlash, o‘qitish va loyiha tuzilmasini AI‑yordamchiga berish uchun qulay.
 
-Muhim: ilova faqat o‘qish rejimida ishlaydi va fayllarni o‘zgartirmaydi.
+Muhim: DevProjex ochilgan loyihadagi fayllarni o‘zgartirmaydi.
 
 ## 2) Loyiha daraxti
 * Fayl/papka ikonkalari.
@@ -90,7 +90,7 @@ Xususiyatlar:
 * bo‘sh joyli yo‘llar qo‘shtirnoqqa olinishi kerak;
 * `--git-mode` Git filtrlashsiz, `.gitignore` yoki faqat Git kuzatuvidagi fayllarni tanlaydi;
 * `--exclude` oddiy istisnolarni Git filtrlashdan alohida boshqaradi;
-* to‘g‘ridan-to‘g‘ri buyruqlar deterministik va Desktop interfeysini ochmaydi;
+* tahlil va eksport buyruqlari deterministik bo‘lib, grafik interfeysni ochmaydi;
 * buyruq loyiha fayllarini o‘zgartirmaydi — DevProjex read-only rejimida ishlaydi.
 
 Agar `devprojex` buyrug‘i ishlamasa, DevProjex ichida oching:

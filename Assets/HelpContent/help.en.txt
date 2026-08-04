@@ -1,7 +1,7 @@
 ﻿## 1) What it is and why
 DevProjex quickly prepares project context: shows the folder/file structure, lets you select items with checkboxes, and copy the tree and/or file contents to the clipboard. Useful for code review, support, learning, and sharing project structure with an AI assistant.
 
-Important: the app is read-only and never modifies files.
+Important: DevProjex does not modify files in the project you open.
 
 ## 2) Project tree
 * File/folder type icons.
@@ -90,7 +90,7 @@ Notes:
 * paths with spaces must be wrapped in quotes;
 * `--git-mode` selects no Git filtering, `.gitignore`, or tracked Git files;
 * `--exclude` controls ordinary exclusions separately from Git filtering;
-* direct commands are deterministic and do not open the desktop interface;
+* analysis and export commands are deterministic and do not open the desktop interface;
 * the command does not modify project files — DevProjex works in read-only mode.
 
 If the `devprojex` command does not work, open in DevProjex:

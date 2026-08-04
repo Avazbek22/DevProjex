@@ -1,7 +1,7 @@
 ## 1) Cos’è e a cosa serve
 DevProjex prepara rapidamente il contesto del progetto: mostra la struttura di cartelle/file, permette di selezionare gli elementi e copiare l’albero e/o il contenuto dei file negli appunti. Utile per code review, supporto, formazione e condivisione della struttura con un assistente AI.
 
-Importante: l’app è solo in lettura e non modifica i file.
+Importante: DevProjex non modifica i file del progetto aperto.
 
 ## 2) Albero del progetto
 * Icone per tipo file/cartella.
@@ -90,7 +90,7 @@ Note:
 * i percorsi con spazi devono essere racchiusi tra virgolette;
 * `--git-mode` seleziona nessun filtro Git, `.gitignore` o solo i file tracciati da Git;
 * `--exclude` gestisce le esclusioni ordinarie separatamente dal filtro Git;
-* i comandi diretti sono deterministici e non aprono l’interfaccia Desktop;
+* i comandi di analisi ed esportazione sono deterministici e non aprono l’interfaccia grafica;
 * il comando non modifica i file del progetto — DevProjex lavora in sola lettura.
 
 Se il comando `devprojex` non funziona, apri in DevProjex:

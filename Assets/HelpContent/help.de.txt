@@ -1,7 +1,7 @@
 ## 1) Was ist das und wozu
 DevProjex bereitet den Projektkontext schnell auf: zeigt die Ordner/Dateistruktur, erlaubt das Markieren von Elementen und das Kopieren des Baums und/oder von Dateiinhalten in die Zwischenablage. Nützlich für Code‑Reviews, Support, Schulung und das Teilen der Struktur mit einem KI‑Assistenten.
 
-Wichtig: Die App arbeitet nur lesend und ändert keine Dateien.
+Wichtig: DevProjex ändert keine Dateien im geöffneten Projekt.
 
 ## 2) Projektbaum
 * Symbole für Datei/Ordner‑Typen.
@@ -90,7 +90,7 @@ Hinweise:
 * Pfade mit Leerzeichen müssen in Anführungszeichen stehen;
 * `--git-mode` wählt keine Git-Filterung, `.gitignore` oder nur von Git verfolgte Dateien;
 * `--exclude` steuert gewöhnliche Ausschlüsse getrennt von der Git-Filterung;
-* direkte Befehle sind deterministisch und öffnen die Desktop-Oberfläche nicht;
+* Analyse- und Exportbefehle sind deterministisch und öffnen die Desktop-Oberfläche nicht;
 * der Befehl ändert keine Projektdateien — DevProjex arbeitet im Lesemodus.
 
 Wenn der Befehl `devprojex` nicht funktioniert, öffnen Sie in DevProjex:

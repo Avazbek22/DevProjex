@@ -1,7 +1,7 @@
 ## 1) Qué es y por qué
 DevProjex prepara rápidamente el contexto del proyecto: muestra la estructura de carpetas/archivos, le permite seleccionar elementos con casillas de verificación y copiar el contenido del árbol y/o del archivo al portapapeles. Útil para revisión de código, soporte, aprendizaje y compartir la estructura del proyecto con un asistente de IA.
 
-Importante: la aplicación es de solo lectura y nunca modifica archivos.
+Importante: DevProjex no modifica los archivos del proyecto abierto.
 
 ## 2) árbol de proyectos
 * Iconos de tipo de archivo/carpeta.
@@ -90,7 +90,7 @@ Notas:
 * las rutas con espacios deben estar entre comillas;
 * `--git-mode` selecciona sin filtrado Git, `.gitignore` o solo archivos seguidos por Git;
 * `--exclude` controla las exclusiones normales por separado del filtrado Git;
-* los comandos directos son deterministas y no abren la interfaz Desktop;
+* los comandos de análisis y exportación son deterministas y no abren la interfaz gráfica;
 * el comando no modifica los archivos del proyecto: DevProjex funciona en modo de solo lectura.
 
 Si el comando `devprojex` no funciona, ábralo en DevProjex:

@@ -1,7 +1,7 @@
 ## 1) Qu’est‑ce que c’est et pourquoi
 DevProjex prépare rapidement le contexte d’un projet : affiche la structure dossiers/fichiers, permet de sélectionner des éléments et de copier l’arborescence et/ou le contenu des fichiers dans le presse‑papiers. Utile pour code review, support, formation et partage de structure avec un assistant IA.
 
-Important : l’application est en lecture seule et ne modifie jamais les fichiers.
+Important : DevProjex ne modifie pas les fichiers du projet ouvert.
 
 ## 2) Arborescence du projet
 * Icônes de type fichier/dossier.
@@ -90,7 +90,7 @@ Particularités :
 * les chemins contenant des espaces doivent être placés entre guillemets ;
 * `--git-mode` choisit aucune filtration Git, `.gitignore` ou uniquement les fichiers suivis par Git ;
 * `--exclude` gère les exclusions ordinaires séparément de la filtration Git ;
-* les commandes directes sont déterministes et n’ouvrent pas l’interface Desktop ;
+* les commandes d’analyse et d’exportation sont déterministes et n’ouvrent pas l’interface graphique ;
 * la commande ne modifie pas les fichiers du projet — DevProjex fonctionne en lecture seule.
 
 Si la commande `devprojex` ne fonctionne pas, ouvrez dans DevProjex :

@@ -219,19 +219,17 @@ boundary.
 `--no-mouse`, `--color never`, and `--plain` provide conservative fallbacks.
 `NO_COLOR`, `TERM=dumb`, redirected streams, and CI are also respected.
 
-Native macOS TUI beta validation covers published startup, keyboard navigation,
+Native macOS TUI validation covers published startup, keyboard navigation,
 resize, normal exit, and observable parent-shell usability. Extended `Ctrl+Z`
-and job-control scenarios are not part of this beta's certified contract.
+and job-control scenarios are not part of the certified contract.
 
-Release validation currently has one upstream blocker: Terminal.Gui 2.4.17
-unconditionally writes its mouse-enable sequence while constructing the ANSI
-output driver, before the application mouse policy is available. DevProjex
-immediately disables tracking before processing input, ignores mouse input for
-`--no-mouse`, and restores terminal state, but the stricter invariant “no
-mouse-enable sequence is ever emitted” is not certified. This is tracked by an
-explicitly skipped PTY gate tied to the
-[pinned upstream implementation](https://github.com/tui-cs/Terminal.Gui/blob/d0a0ed9b150d3fc8aacf4ab07b7f7d91264fe6d6/Terminal.Gui/Drivers/AnsiDriver/AnsiOutput.cs#L128-L150);
-the skip must be removed before release-candidate approval.
+Terminal.Gui 2.4.17 may briefly emit a mouse-enable sequence while initializing
+its ANSI driver, before DevProjex applies `--no-mouse`. In `--no-mouse` sessions,
+DevProjex disables tracking before normal input, ignores mouse events, and
+restores the terminal on exit. Release validation checks observable behavior and
+shell usability; it does not promise that Terminal.Gui emits no initialization
+sequence at all. The upstream behavior is documented in the
+[pinned implementation](https://github.com/tui-cs/Terminal.Gui/blob/d0a0ed9b150d3fc8aacf4ab07b7f7d91264fe6d6/Terminal.Gui/Drivers/AnsiDriver/AnsiOutput.cs#L128-L150).
 
 ## Export
 
