@@ -265,6 +265,7 @@ public sealed class PreviewDocumentBuilder(
             }
 
             trimTrailingEstimatedLine = false;
+			using var contentLease = redactionScope?.TrackFullContentBuffer();
 			var transformed = redactionScope?.Redact(file, content.Content, cancellationToken);
 			var text = transformed?.Text ?? content.Content;
 			if (transformed is { Spans.Count: > 0 })

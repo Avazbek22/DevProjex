@@ -226,6 +226,41 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		};
 	}
 
+	/// <summary>
+	/// Applies content-only exclusions without touching discovery, ignore rules, or the tree.
+	/// Hide Secrets is deliberately the only exclusion allowed through this path.
+	/// </summary>
+	public ProjectContextPlan ApplyContentTransformationSelection(
+		ProjectContextPlan baseline,
+		IReadOnlyCollection<ProjectExclusion> exclusions)
+	{
+		ArgumentNullException.ThrowIfNull(baseline);
+		ArgumentNullException.ThrowIfNull(exclusions);
+		var currentPathExclusions = (baseline.Selection.Exclusions ?? [])
+			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
+			.ToHashSet();
+		var requestedPathExclusions = exclusions
+			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
+			.ToHashSet();
+		if (!currentPathExclusions.SetEquals(requestedPathExclusions))
+		{
+			throw new ArgumentException(
+				"Content-only selection updates cannot change path exclusions.",
+				nameof(exclusions));
+		}
+
+		var selection = baseline.Selection with { Exclusions = exclusions.ToArray() };
+		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodes(
+			baseline.EffectiveTree,
+			baseline.SelectedFullPaths);
+		return baseline with
+		{
+			Selection = selection,
+			Fingerprint = BuildFingerprint(baseline.SourceRoot, selection, includedNodes),
+			Redaction = null
+		};
+	}
+
 	private static IReadOnlyDictionary<string, long> BuildEffectiveFileSizes(
 		TreeNodeDescriptor root,
 		ProjectTreeInventorySnapshot? inventory,

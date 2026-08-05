@@ -1,3 +1,5 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class IgnoreOptionsServiceAdditionalTests
@@ -8,6 +10,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.HideSecrets.Scanning"] = "Hide secrets — scanning…",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "Ignore hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Ignore hidden files",
@@ -96,5 +99,39 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
 		Assert.Equal("Use GitIgnore", options[1].Label);
 		Assert.True(options[1].DefaultChecked);
+	}
+
+	[Theory]
+	[InlineData(SecretScanState.Disabled)]
+	[InlineData(SecretScanState.Pending)]
+	[InlineData(SecretScanState.Failed)]
+	public void FormatHideSecretsLabel_WithoutCompletedResult_DoesNotInventZero(SecretScanState state)
+	{
+		var service = new IgnoreOptionsService(
+			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		Assert.Equal("Hide secrets", service.FormatHideSecretsLabel(state, redactionCount: null));
+	}
+
+	[Fact]
+	public void FormatHideSecretsLabel_WhileScanning_UsesProgressLabelWithoutCount()
+	{
+		var service = new IgnoreOptionsService(
+			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		Assert.Equal(
+			"Hide secrets — scanning…",
+			service.FormatHideSecretsLabel(SecretScanState.Scanning, redactionCount: null));
+	}
+
+	[Theory]
+	[InlineData(0, "Hide secrets (0)")]
+	[InlineData(4, "Hide secrets (4)")]
+	public void FormatHideSecretsLabel_AfterCompletion_ShowsMeasuredCount(int count, string expected)
+	{
+		var service = new IgnoreOptionsService(
+			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		Assert.Equal(expected, service.FormatHideSecretsLabel(SecretScanState.Completed, count));
 	}
 }

@@ -874,6 +874,15 @@ internal static class UiTestDriver
         return GetSelectionCoordinator(window).GetSelectedIgnoreOptionIds();
     }
 
+	public static long GetSelectionRevision(MainWindow window) =>
+		GetSelectionCoordinator(window).CurrentSelectionRevision;
+
+	public static object GetCurrentTreeIdentity(MainWindow window) =>
+		GetRequiredPrivateFieldValue(window, "_currentTree");
+
+	public static object GetCurrentTreeInventoryIdentity(MainWindow window) =>
+		GetRequiredPrivateFieldValue(window, "_currentTreeInventory");
+
     public static ContextDiagnostic? GetAppliedGitReadinessDiagnostic(
         MainWindow window,
         string projectPath) =>
@@ -1482,6 +1491,15 @@ internal static class UiTestDriver
         var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<T>(field?.GetValue(window));
     }
+
+	private static object GetRequiredPrivateFieldValue(MainWindow window, string fieldName)
+	{
+		var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		var value = field!.GetValue(window);
+		Assert.NotNull(value);
+		return value!;
+	}
 
     private static void SetRequiredPrivateField(MainWindow window, string fieldName, object? value)
     {

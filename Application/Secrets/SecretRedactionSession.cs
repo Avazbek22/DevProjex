@@ -1,19 +1,24 @@
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
 namespace DevProjex.Application.Secrets;
 
 /// <summary>
-/// Owns user decisions for one application process. Overrides deliberately do not persist:
-/// durable secret fingerprints would create sensitive, stale profile state after source changes.
+/// Owns session-only keep-as-is decisions and a bounded cache of compact findings. Source and
+/// redacted file contents are operation-local and are never retained by this object.
 /// </summary>
-public sealed class SecretRedactionSession
+public sealed class SecretRedactionSession : IDisposable
 {
 	private readonly ISecretDetector _detector;
 	private readonly Func<SecretRedactionLegendText> _legendTextProvider;
+	private readonly SecretScanCache _scanCache;
 	private readonly object _sync = new();
 	private readonly HashSet<string> _keptOccurrenceIds = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, SecretRedactionSnapshot> _snapshots = new(StringComparer.Ordinal);
 	private long _overrideRevision;
+	private int _activeFullContentBuffers;
+	private int _peakFullContentBuffers;
+	private bool _disposed;
 
 	public SecretRedactionSession(
 		ISecretDetector detector,
@@ -25,10 +30,19 @@ public sealed class SecretRedactionSession
 	public SecretRedactionSession(
 		ISecretDetector detector,
 		Func<SecretRedactionLegendText> legendTextProvider)
+		: this(detector, legendTextProvider, new SecretScanCache())
+	{
+	}
+
+	internal SecretRedactionSession(
+		ISecretDetector detector,
+		Func<SecretRedactionLegendText> legendTextProvider,
+		SecretScanCache scanCache)
 	{
 		_detector = detector ?? throw new ArgumentNullException(nameof(detector));
 		_legendTextProvider = legendTextProvider ??
 		                      throw new ArgumentNullException(nameof(legendTextProvider));
+		_scanCache = scanCache ?? throw new ArgumentNullException(nameof(scanCache));
 	}
 
 	public SecretRedactionLegendText LegendText =>
@@ -42,8 +56,11 @@ public sealed class SecretRedactionSession
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths)
 	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
+		_scanCache.SynchronizeSelection(projectRoot, orderedFilePaths);
+
 		HashSet<string> keptOccurrences;
 		long overrideRevision;
 		lock (_sync)
@@ -54,7 +71,6 @@ public sealed class SecretRedactionSession
 
 		return new SecretRedactionScope(
 			this,
-			_detector,
 			projectRoot,
 			orderedFilePaths,
 			LegendText,
@@ -64,6 +80,7 @@ public sealed class SecretRedactionSession
 
 	public bool ToggleKeepAsIs(string occurrenceId)
 	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(occurrenceId);
 		bool kept;
 		lock (_sync)
@@ -86,21 +103,165 @@ public sealed class SecretRedactionSession
 			return _snapshots.TryGetValue(key, out var snapshot) ? snapshot.RedactedCount : null;
 	}
 
+	public SecretScanCacheDiagnostics GetCacheDiagnostics()
+	{
+		var cache = _scanCache.Capture();
+		return new SecretScanCacheDiagnostics(
+			cache.EntryCount,
+			cache.RetainedBytes,
+			_scanCache.MaximumEntries,
+			_scanCache.MaximumRetainedBytes,
+			cache.Hits,
+			cache.Misses,
+			cache.DetectionRuns,
+			Volatile.Read(ref _activeFullContentBuffers),
+			Volatile.Read(ref _peakFullContentBuffers));
+	}
+
 	public void InvalidateSnapshots()
 	{
 		lock (_sync)
 			_snapshots.Clear();
 	}
 
+	/// <summary>
+	/// Releases all content-derived state when Hide Secrets is switched off. Keep-as-is decisions
+	/// remain session-only preferences and can be applied again if the user re-enables the option.
+	/// </summary>
+	public void Disable()
+	{
+		_scanCache.Clear();
+		InvalidateSnapshots();
+	}
+
+	/// <summary>
+	/// Releases all project-specific state when the active workspace changes or the window closes.
+	/// </summary>
+	public void Reset()
+	{
+		_scanCache.Clear();
+		lock (_sync)
+		{
+			_snapshots.Clear();
+			_keptOccurrenceIds.Clear();
+			_overrideRevision++;
+		}
+	}
+
+	public void Dispose()
+	{
+		if (_disposed)
+			return;
+		_disposed = true;
+		Reset();
+	}
+
+	internal bool TryGetCachedFindings(
+		string filePath,
+		SecretFileMetadata metadata,
+		out SecretScanCacheEntry entry) =>
+		_scanCache.TryGetByMetadata(filePath, metadata, _detector.RulesIdentity, out entry);
+
+	internal SecretScanCacheEntry GetOrDetectFindings(
+		string projectRoot,
+		string filePath,
+		string content,
+		SecretFileMetadata metadata,
+		CancellationToken cancellationToken) =>
+		GetOrDetectFindings(
+			projectRoot,
+			filePath,
+			content.AsSpan(),
+			metadata,
+			cancellationToken);
+
+	internal SecretScanCacheEntry GetOrDetectFindings(
+		string projectRoot,
+		string filePath,
+		ReadOnlySpan<char> content,
+		SecretFileMetadata metadata,
+		CancellationToken cancellationToken)
+	{
+		var contentFingerprint = HashText(content);
+		if (_scanCache.TryGetByContent(
+			    filePath,
+			    metadata,
+			    contentFingerprint,
+			    _detector.RulesIdentity,
+			    out var cached))
+		{
+			return cached;
+		}
+
+		var relativePath = NormalizeRelativePath(projectRoot, filePath);
+		var detected = SecretRedactionScope.ResolveNonOverlappingMatches(
+			_detector.Detect(relativePath, content, cancellationToken));
+		var findings = new SecretFindingMetadata[detected.Count];
+		for (var index = 0; index < detected.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var finding = detected[index];
+			if (finding.Start < 0 || finding.Length <= 0 || finding.Start > content.Length - finding.Length)
+				throw new SecretDetectionException($"Secret detector returned an invalid span for '{relativePath}'.");
+			findings[index] = new SecretFindingMetadata(
+				finding.RuleId,
+				finding.Start,
+				finding.Length,
+				HashValue(content.Slice(finding.Start, finding.Length)),
+				finding.RuleOrder);
+		}
+
+		var normalizedPath = Path.GetFullPath(filePath);
+		var entry = new SecretScanCacheEntry(
+			normalizedPath,
+			metadata,
+			contentFingerprint,
+			_detector.RulesIdentity,
+			IsBinary: false,
+			findings,
+			EstimateRetainedBytes(
+				normalizedPath,
+				contentFingerprint,
+				_detector.RulesIdentity,
+				findings));
+		_scanCache.Store(entry, detectionExecuted: true);
+		return entry;
+	}
+
+	internal SecretScanCacheEntry StoreBinary(string filePath, SecretFileMetadata metadata)
+	{
+		var normalizedPath = Path.GetFullPath(filePath);
+		var entry = new SecretScanCacheEntry(
+			normalizedPath,
+			metadata,
+			ContentFingerprint: string.Empty,
+			_detector.RulesIdentity,
+			IsBinary: true,
+			Findings: [],
+			ApproximateRetainedBytes: 96 + normalizedPath.Length * sizeof(char));
+		_scanCache.Store(entry, detectionExecuted: false);
+		return entry;
+	}
+
+	internal IDisposable TrackFullContentBuffer()
+	{
+		var active = Interlocked.Increment(ref _activeFullContentBuffers);
+		while (true)
+		{
+			var peak = Volatile.Read(ref _peakFullContentBuffers);
+			if (active <= peak || Interlocked.CompareExchange(ref _peakFullContentBuffers, active, peak) == peak)
+				break;
+		}
+		return new FullContentBufferLease(this);
+	}
+
 	internal void Publish(SecretRedactionSnapshot snapshot, long overrideRevision)
 	{
 		lock (_sync)
 		{
-			// An output already in flight may finish after a keep-as-is decision changed.
-			// Its artifact remains internally coherent, but its count must not replace the
-			// snapshot for the newer decision state shown by the interactive surfaces.
 			if (overrideRevision != _overrideRevision)
 				return;
+			_snapshots.Clear();
 			_snapshots[snapshot.SelectionKey] = snapshot;
 		}
 		SnapshotPublished?.Invoke(this, new SecretRedactionSnapshotPublishedEventArgs(snapshot));
@@ -110,9 +271,6 @@ public sealed class SecretRedactionSession
 	{
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		AppendHashValue(hash, Path.GetFullPath(projectRoot));
-		// Callers may hold the same effective selection in tree order, inventory order, or
-		// canonical export order. Snapshot identity describes the selected set, so normalize
-		// its ordering here instead of coupling count publication to a particular surface.
 		var relativePaths = orderedFilePaths
 			.Select(path => NormalizeRelativePath(projectRoot, path))
 			.OrderBy(static path => path, StringComparer.Ordinal);
@@ -127,14 +285,47 @@ public sealed class SecretRedactionSession
 		return relative == "." ? Path.GetFileName(filePath) : relative;
 	}
 
-	internal static string HashValue(string value) =>
-		Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+	internal static string HashValue(ReadOnlySpan<char> value) => HashText(value);
+
+	private static string HashText(string value) => HashText(value.AsSpan());
+
+	private static string HashText(ReadOnlySpan<char> value)
+	{
+		Span<byte> hash = stackalloc byte[32];
+		SHA256.HashData(MemoryMarshal.AsBytes(value), hash);
+		return Convert.ToHexString(hash);
+	}
+
+	private static long EstimateRetainedBytes(
+		string normalizedPath,
+		string contentFingerprint,
+		string rulesIdentity,
+		IReadOnlyList<SecretFindingMetadata> findings)
+	{
+		long bytes = 160 +
+		             (normalizedPath.Length + contentFingerprint.Length + rulesIdentity.Length) * sizeof(char);
+		foreach (var finding in findings)
+			bytes += 64 + (finding.RuleId.Length + finding.ValueFingerprint.Length) * sizeof(char);
+		return bytes;
+	}
 
 	private static void AppendHashValue(IncrementalHash hash, string value)
 	{
 		var bytes = Encoding.UTF8.GetBytes(value);
 		hash.AppendData(BitConverter.GetBytes(bytes.Length));
 		hash.AppendData(bytes);
+	}
+
+	private sealed class FullContentBufferLease(SecretRedactionSession owner) : IDisposable
+	{
+		private SecretRedactionSession? _owner = owner;
+
+		public void Dispose()
+		{
+			var current = Interlocked.Exchange(ref _owner, null);
+			if (current is not null)
+				Interlocked.Decrement(ref current._activeFullContentBuffers);
+		}
 	}
 }
 
@@ -146,7 +337,6 @@ public sealed class SecretRedactionSnapshotPublishedEventArgs(SecretRedactionSna
 public sealed class SecretRedactionScope
 {
 	private readonly SecretRedactionSession _session;
-	private readonly ISecretDetector _detector;
 	private readonly string _projectRoot;
 	private readonly IReadOnlySet<string> _keptOccurrenceIds;
 	private readonly long _overrideRevision;
@@ -159,7 +349,6 @@ public sealed class SecretRedactionScope
 
 	internal SecretRedactionScope(
 		SecretRedactionSession session,
-		ISecretDetector detector,
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths,
 		SecretRedactionLegendText legendText,
@@ -167,7 +356,6 @@ public sealed class SecretRedactionScope
 		long overrideRevision)
 	{
 		_session = session;
-		_detector = detector;
 		_projectRoot = Path.GetFullPath(projectRoot);
 		_keptOccurrenceIds = keptOccurrenceIds;
 		_overrideRevision = overrideRevision;
@@ -181,53 +369,127 @@ public sealed class SecretRedactionScope
 	public string? PlaceholderExample => _placeholderExample;
 	public SecretRedactionLegendText LegendText { get; }
 
+	public bool TryAnalyzeCached(string filePath)
+	{
+		EnsureActive();
+		var metadata = SecretFileMetadata.Capture(filePath);
+		if (!_session.TryGetCachedFindings(filePath, metadata, out var entry))
+			return false;
+		ProcessFindings(filePath, entry.Findings);
+		return true;
+	}
+
+	internal void Analyze(
+		string filePath,
+		string content,
+		SecretFileMetadata metadata,
+		CancellationToken cancellationToken = default) =>
+		Analyze(filePath, content.AsSpan(), metadata, cancellationToken);
+
+	internal void Analyze(
+		string filePath,
+		ReadOnlySpan<char> content,
+		SecretFileMetadata metadata,
+		CancellationToken cancellationToken = default)
+	{
+		EnsureActive();
+		var entry = _session.GetOrDetectFindings(
+			_projectRoot,
+			filePath,
+			content,
+			metadata,
+			cancellationToken);
+		ProcessFindings(filePath, entry.Findings);
+	}
+
+	internal void AnalyzeBinary(string filePath, SecretFileMetadata metadata)
+	{
+		EnsureActive();
+		_session.StoreBinary(filePath, metadata);
+	}
+
 	public SecretTextRedactionResult Redact(
 		string filePath,
 		string content,
 		CancellationToken cancellationToken = default)
 	{
-		if (_completed)
-			throw new InvalidOperationException("The redaction output scope is already complete.");
+		var plan = CreatePlan(filePath, content, cancellationToken);
+		return plan.BuildResult(content);
+	}
 
-		var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
-		var matches = ResolveNonOverlappingMatches(
-			_detector.Detect(relativePath, content, cancellationToken));
-		if (matches.Count == 0)
-			return new SecretTextRedactionResult(content, [], 0, 0);
-
-		var builder = new StringBuilder(content.Length);
-		var spans = new List<SecretPreviewSpan>(matches.Count);
-		var sourceOffset = 0;
-		var redactedInFile = 0;
-		foreach (var match in matches)
+	internal SecretFileRedactionPlan CreatePlan(
+		string filePath,
+		string content,
+		CancellationToken cancellationToken = default)
+	{
+		EnsureActive();
+		var metadata = SecretFileMetadata.Capture(filePath);
+		if (metadata.Length > SecretRedactionOutputPreparer.MaximumScannableFileBytes)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			builder.Append(content, sourceOffset, match.Start - sourceOffset);
+			throw new SecretScanLimitExceededException(
+				filePath,
+				metadata.Length,
+				SecretRedactionOutputPreparer.MaximumScannableFileBytes);
+		}
+		var entry = _session.GetOrDetectFindings(
+			_projectRoot,
+			filePath,
+			content,
+			metadata,
+			cancellationToken);
+		return ProcessFindings(filePath, entry.Findings);
+	}
 
-			var secretHash = SecretRedactionSession.HashValue(match.Value);
-			var identity = $"{match.RuleId}:{secretHash}";
-			if (!_identityIndexes.TryGetValue(identity, out var index))
+	internal IDisposable TrackFullContentBuffer() => _session.TrackFullContentBuffer();
+
+	public SecretRedactionSnapshot Complete()
+	{
+		EnsureActive();
+		_completed = true;
+		var snapshot = new SecretRedactionSnapshot(SelectionKey, _detectedCount, _redactedCount);
+		_session.Publish(snapshot, _overrideRevision);
+		return snapshot;
+	}
+
+	private SecretFileRedactionPlan ProcessFindings(
+		string filePath,
+		IReadOnlyList<SecretFindingMetadata> findings)
+	{
+		var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
+		var replacements = new SecretReplacement[findings.Count];
+		var spans = new SecretPreviewSpan[findings.Count];
+		var outputDelta = 0;
+		var redactedInFile = 0;
+		for (var index = 0; index < findings.Count; index++)
+		{
+			var finding = findings[index];
+			var identity = $"{finding.RuleId}:{finding.ValueFingerprint}";
+			if (!_identityIndexes.TryGetValue(identity, out var identityIndex))
 			{
-				index = _ruleIdentityCounts.GetValueOrDefault(match.RuleId) + 1;
-				_ruleIdentityCounts[match.RuleId] = index;
-				_identityIndexes.Add(identity, index);
+				identityIndex = _ruleIdentityCounts.GetValueOrDefault(finding.RuleId) + 1;
+				_ruleIdentityCounts[finding.RuleId] = identityIndex;
+				_identityIndexes.Add(identity, identityIndex);
 			}
 
 			var occurrenceId = SecretRedactionSession.HashValue(
-				$"{_projectRoot}\n{relativePath}\n{match.RuleId}\n{secretHash}\n{match.Start}\n{match.Length}");
+				$"{_projectRoot}\n{relativePath}\n{finding.RuleId}\n{finding.ValueFingerprint}\n{finding.Start}\n{finding.Length}".AsSpan());
 			var kept = _keptOccurrenceIds.Contains(occurrenceId);
 			var replacement = kept
-				? match.Value
-				: SecretRedactionLegend.CreatePlaceholder(match.RuleId, index);
-			var outputStart = builder.Length;
-			builder.Append(replacement);
-			spans.Add(new SecretPreviewSpan(
+				? null
+				: SecretRedactionLegend.CreatePlaceholder(finding.RuleId, identityIndex);
+			var outputStart = checked(finding.Start + outputDelta);
+			var outputLength = replacement?.Length ?? finding.Length;
+			replacements[index] = new SecretReplacement(
+				finding.Start,
+				finding.Length,
+				replacement);
+			spans[index] = new SecretPreviewSpan(
 				occurrenceId,
-				match.RuleId,
+				finding.RuleId,
 				outputStart,
-				replacement.Length,
-				kept ? SecretPreviewSpanState.KeptAsIs : SecretPreviewSpanState.Redacted));
-
+				outputLength,
+				kept ? SecretPreviewSpanState.KeptAsIs : SecretPreviewSpanState.Redacted);
+			outputDelta = checked(outputDelta + outputLength - finding.Length);
 			_detectedCount++;
 			if (!kept)
 			{
@@ -235,35 +497,23 @@ public sealed class SecretRedactionScope
 				redactedInFile++;
 				_placeholderExample ??= replacement;
 			}
-			sourceOffset = match.Start + match.Length;
 		}
-		builder.Append(content, sourceOffset, content.Length - sourceOffset);
 
-		return new SecretTextRedactionResult(
-			builder.ToString(),
-			spans,
-			matches.Count,
-			redactedInFile);
+		return new SecretFileRedactionPlan(replacements, spans, findings.Count, redactedInFile);
 	}
 
-	public SecretRedactionSnapshot Complete()
+	private void EnsureActive()
 	{
 		if (_completed)
 			throw new InvalidOperationException("The redaction output scope is already complete.");
-		_completed = true;
-		var snapshot = new SecretRedactionSnapshot(SelectionKey, _detectedCount, _redactedCount);
-		_session.Publish(snapshot, _overrideRevision);
-		return snapshot;
 	}
 
-	private static IReadOnlyList<DetectedSecret> ResolveNonOverlappingMatches(
+	internal static IReadOnlyList<DetectedSecret> ResolveNonOverlappingMatches(
 		IReadOnlyList<DetectedSecret> matches)
 	{
 		if (matches.Count <= 1)
 			return matches;
 
-		// Specific rules win over the generic fallback for the same value. Afterwards,
-		// source position and upstream rule order make overlap resolution deterministic.
 		var candidates = matches
 			.OrderBy(static match => IsGenericRule(match.RuleId))
 			.ThenBy(static match => match.RuleOrder)
@@ -305,5 +555,85 @@ public sealed class SecretRedactionScope
 
 		public int Compare(AcceptedInterval left, AcceptedInterval right) =>
 			left.Start.CompareTo(right.Start);
+	}
+}
+
+internal sealed record SecretReplacement(int SourceStart, int SourceLength, string? Replacement)
+{
+	public int SourceEnd => checked(SourceStart + SourceLength);
+}
+
+internal sealed class SecretFileRedactionPlan(
+	IReadOnlyList<SecretReplacement> replacements,
+	IReadOnlyList<SecretPreviewSpan> spans,
+	int detectedCount,
+	int redactedCount)
+{
+	public IReadOnlyList<SecretReplacement> Replacements { get; } = replacements;
+	public IReadOnlyList<SecretPreviewSpan> Spans { get; } = spans;
+	public int DetectedCount { get; } = detectedCount;
+	public int RedactedCount { get; } = redactedCount;
+
+	public SecretTextRedactionResult BuildResult(string content)
+	{
+		if (Replacements.Count == 0)
+			return new SecretTextRedactionResult(content, Spans, 0, 0);
+
+		var estimatedLength = content.Length;
+		foreach (var replacement in Replacements)
+			estimatedLength = checked(estimatedLength + (replacement.Replacement?.Length ?? replacement.SourceLength) - replacement.SourceLength);
+		var builder = new StringBuilder(estimatedLength);
+		AppendTo(builder, content, content.Length);
+		return new SecretTextRedactionResult(builder.ToString(), Spans, DetectedCount, RedactedCount);
+	}
+
+	public void AppendTo(StringBuilder destination, string content, int sourceLength)
+	{
+		ArgumentOutOfRangeException.ThrowIfGreaterThan(sourceLength, content.Length);
+		var sourceOffset = 0;
+		foreach (var replacement in Replacements)
+		{
+			if (replacement.SourceStart >= sourceLength)
+				break;
+			if (replacement.SourceEnd > sourceLength)
+				throw new InvalidOperationException("A redaction span crosses the requested output boundary.");
+			destination.Append(content, sourceOffset, replacement.SourceStart - sourceOffset);
+			if (replacement.Replacement is null)
+				destination.Append(content, replacement.SourceStart, replacement.SourceLength);
+			else
+				destination.Append(replacement.Replacement);
+			sourceOffset = replacement.SourceEnd;
+		}
+		destination.Append(content, sourceOffset, sourceLength - sourceOffset);
+	}
+
+	public async ValueTask WriteToAsync(
+		TextWriter destination,
+		string content,
+		CancellationToken cancellationToken)
+	{
+		var sourceOffset = 0;
+		foreach (var replacement in Replacements)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			await destination.WriteAsync(
+					content.AsMemory(sourceOffset, replacement.SourceStart - sourceOffset),
+					cancellationToken)
+				.ConfigureAwait(false);
+			if (replacement.Replacement is null)
+			{
+				await destination.WriteAsync(
+						content.AsMemory(replacement.SourceStart, replacement.SourceLength),
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
+			else
+			{
+				await destination.WriteAsync(replacement.Replacement.AsMemory(), cancellationToken)
+					.ConfigureAwait(false);
+			}
+			sourceOffset = replacement.SourceEnd;
+		}
+		await destination.WriteAsync(content.AsMemory(sourceOffset), cancellationToken).ConfigureAwait(false);
 	}
 }

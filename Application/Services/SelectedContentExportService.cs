@@ -161,7 +161,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 					maxFileSizeForFullRead ?? SecretRedactionOutputPreparer.MaximumScannableFileBytes);
 			}
 
-			var transformedContent = redactionScope?.Redact(
+			using var contentLease = redactionScope?.TrackFullContentBuffer();
+			var redactionPlan = redactionScope?.CreatePlan(
 				file,
 				content.Content,
 				cancellationToken);
@@ -189,9 +190,21 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			}
 			else
 			{
-				// Trim trailing newlines for clipboard-friendly output
-				var text = (transformedContent?.Text ?? content.Content).TrimEnd('\r', '\n');
-				sb.AppendLine(text);
+				// Trim trailing newlines for clipboard-friendly output without allocating a
+				// second whole-file string when redaction is enabled.
+				var sourceLength = content.Content.Length;
+				while (sourceLength > 0 && content.Content[sourceLength - 1] is '\r' or '\n')
+					sourceLength--;
+				if (redactionPlan is null)
+				{
+					sb.Append(content.Content.AsSpan(0, sourceLength));
+					sb.AppendLine();
+				}
+				else
+				{
+					redactionPlan.AppendTo(sb, content.Content, sourceLength);
+					sb.AppendLine();
+				}
 			}
 
 			if (maxOutputCharacters is { } characterLimit && sb.Length >= characterLimit)

@@ -167,6 +167,7 @@
   "Settings.Ignore.TrackedGitFilesOnly": "Nur von Git verfolgte Dateien",
   "Settings.Ignore.SmartIgnore": "Smart Ignore",
   "Settings.Ignore.HideSecrets": "Geheimnisse verbergen",
+  "Settings.Ignore.HideSecrets.Scanning": "Geheimnisse verbergen — Scan läuft…",
   "SecretRedaction.Legend.Summary": "Von DevProjex vor dem Export unkenntlich gemachte Werte: {0}.",
   "SecretRedaction.Legend.Placeholder": "Platzhalter wie {0} kennzeichnen entfernte Geheimnisse.",
   "SecretRedaction.Legend.Notice": "Behandeln Sie Platzhaltertext nicht als echten Wert.",

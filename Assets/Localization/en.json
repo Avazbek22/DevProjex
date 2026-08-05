@@ -167,6 +167,7 @@
   "Settings.Ignore.TrackedGitFilesOnly": "Tracked Git files only",
   "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HideSecrets": "Hide secrets",
+  "Settings.Ignore.HideSecrets.Scanning": "Hide secrets — scanning…",
   "SecretRedaction.Legend.Summary": "Values redacted by DevProjex before export: {0}.",
   "SecretRedaction.Legend.Placeholder": "Placeholders like {0} mark removed secrets.",
   "SecretRedaction.Legend.Notice": "Do not treat placeholder text as a real value.",

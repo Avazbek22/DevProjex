@@ -222,8 +222,13 @@ public sealed class SecretRedactionSessionTests
 	public void OutputScope_ReusesIdentityIndexAcrossFilesAndIsDeterministic()
 	{
 		var detector = new StubDetector("telegram-bot-api-token", StubDetector.Secret);
-		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "devprojex-secret-tests"));
-		var paths = new[] { Path.Combine(root, "a.cs"), Path.Combine(root, "b.cs") };
+		using var workspace = new TemporaryDirectory();
+		var root = workspace.Path;
+		var paths = new[]
+		{
+			workspace.CreateFile("a.cs", $"token={StubDetector.Secret}"),
+			workspace.CreateFile("b.cs", $"token={StubDetector.Secret}")
+		};
 		var firstSession = new SecretRedactionSession(detector);
 		var secondSession = new SecretRedactionSession(detector);
 
@@ -240,8 +245,13 @@ public sealed class SecretRedactionSessionTests
 	{
 		const string secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 		var detector = new StubDetector("github-pat", secret);
-		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "devprojex-secret-tests"));
-		var paths = new[] { Path.Combine(root, "a.cs"), Path.Combine(root, "b.cs") };
+		using var workspace = new TemporaryDirectory();
+		var root = workspace.Path;
+		var paths = new[]
+		{
+			workspace.CreateFile("a.cs", $"a={secret}"),
+			workspace.CreateFile("b.cs", $"b={secret}")
+		};
 		var session = new SecretRedactionSession(detector);
 		var firstScope = session.BeginOutput(root, paths);
 		var first = firstScope.Redact(paths[0], $"a={secret}", TestContext.Current.CancellationToken);
@@ -265,8 +275,9 @@ public sealed class SecretRedactionSessionTests
 	public void KeepAsIsOverride_IsDeliberatelyScopedToOneApplicationSession()
 	{
 		var detector = new StubDetector("telegram-bot-api-token", StubDetector.Secret);
-		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "devprojex-secret-tests"));
-		var path = Path.Combine(root, "config.cs");
+		using var workspace = new TemporaryDirectory();
+		var root = workspace.Path;
+		var path = workspace.CreateFile("config.cs", StubDetector.Secret);
 		var firstSession = new SecretRedactionSession(detector);
 		var firstScope = firstSession.BeginOutput(root, [path]);
 		var firstResult = firstScope.Redact(path, StubDetector.Secret, TestContext.Current.CancellationToken);
@@ -311,11 +322,12 @@ public sealed class SecretRedactionSessionTests
 	public void KeepAsIsOverride_DoesNotCrossProjectRoots()
 	{
 		var detector = new StubDetector("telegram-bot-api-token", StubDetector.Secret);
-		var baseRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "devprojex-secret-tests"));
+		using var workspace = new TemporaryDirectory();
+		var baseRoot = workspace.Path;
 		var firstRoot = Path.Combine(baseRoot, "first");
 		var secondRoot = Path.Combine(baseRoot, "second");
-		var firstPath = Path.Combine(firstRoot, "config.cs");
-		var secondPath = Path.Combine(secondRoot, "config.cs");
+		var firstPath = workspace.CreateFile("first/config.cs", StubDetector.Secret);
+		var secondPath = workspace.CreateFile("second/config.cs", StubDetector.Secret);
 		var session = new SecretRedactionSession(detector);
 		var firstScope = session.BeginOutput(firstRoot, [firstPath]);
 		var firstResult = firstScope.Redact(
@@ -340,8 +352,9 @@ public sealed class SecretRedactionSessionTests
 	public void OutputScope_FreezesOverridesAndDoesNotPublishAStaleCount()
 	{
 		var detector = new StubDetector("telegram-bot-api-token", StubDetector.Secret);
-		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "devprojex-secret-tests"));
-		var path = Path.Combine(root, "config.cs");
+		using var workspace = new TemporaryDirectory();
+		var root = workspace.Path;
+		var path = workspace.CreateFile("config.cs", StubDetector.Secret);
 		var session = new SecretRedactionSession(detector);
 		var initialScope = session.BeginOutput(root, [path]);
 		var initial = initialScope.Redact(path, StubDetector.Secret, TestContext.Current.CancellationToken);
@@ -366,18 +379,22 @@ public sealed class SecretRedactionSessionTests
 	public void KeepAsIsOverride_FailsClosedWhenTheFindingMovesWithinTheFile()
 	{
 		var detector = new StubDetector("telegram-bot-api-token", StubDetector.Secret);
-		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "devprojex-secret-tests"));
-		var path = Path.Combine(root, "config.cs");
+		using var workspace = new TemporaryDirectory();
+		var root = workspace.Path;
+		var path = workspace.CreateFile("config.cs", $"token={StubDetector.Secret}");
 		var session = new SecretRedactionSession(detector);
 		var initialScope = session.BeginOutput(root, [path]);
 		var initial = initialScope.Redact(path, $"token={StubDetector.Secret}", TestContext.Current.CancellationToken);
 		initialScope.Complete();
 		Assert.True(session.ToggleKeepAsIs(Assert.Single(initial.Spans).OccurrenceId));
 
+		var editedContent = $"inserted=true\ntoken={StubDetector.Secret}";
+		File.WriteAllText(path, editedContent);
+		File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(2));
 		var editedScope = session.BeginOutput(root, [path]);
 		var edited = editedScope.Redact(
 			path,
-			$"inserted=true\ntoken={StubDetector.Secret}",
+			editedContent,
 			TestContext.Current.CancellationToken);
 		editedScope.Complete();
 
@@ -391,8 +408,9 @@ public sealed class SecretRedactionSessionTests
 		const int findingCount = 20_000;
 		const string secret = "value-123456";
 		var content = string.Join('|', Enumerable.Repeat(secret, findingCount));
-		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "devprojex-secret-tests"));
-		var path = Path.Combine(root, "dense.env");
+		using var workspace = new TemporaryDirectory();
+		var root = workspace.Path;
+		var path = workspace.CreateFile("dense.env", content);
 		var session = new SecretRedactionSession(new DenseDetector(secret));
 		var scope = session.BeginOutput(root, [path]);
 

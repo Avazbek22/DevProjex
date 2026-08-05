@@ -253,7 +253,8 @@ public partial class MainWindow : Window
 
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
-			_secretRedactionCount);
+			_secretRedactionCount,
+			_secretRedactionScanState);
     }
 
     private async Task ShowErrorAsync(string message)
@@ -385,25 +386,53 @@ public partial class MainWindow : Window
 		// overrides are separate content state, so invalidate only when that state changes;
 		// invalidating every preview refresh would rescan all selected text unnecessarily.
 		InvalidatePreviewCache();
+		var enabled = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.HideSecrets);
+		if (!enabled)
+		{
+			CancelAndDispose(ref _secretRedactionCountCts);
+			_secretRedactionSession.Disable();
+			_secretRedactionCount = null;
+			_secretRedactionScanState = SecretScanState.Disabled;
+			_selectionCoordinator.RelabelIgnoreOptions(
+				AdvancedIgnoreCountsAlwaysEnabled,
+				secretRedactionsCount: null,
+				_secretRedactionScanState);
+			if (_viewModel.IsAnyPreviewVisible)
+				_previewPipeline.ScheduleRefresh(immediate: true);
+			return;
+		}
 		// A canceled option refresh may restore the exact selection that was already scanned.
 		// Reuse that snapshot synchronously so rollback also restores the measured label.
 		_secretRedactionCount = GetCachedSecretRedactionCountForCurrentSelection();
+		_secretRedactionScanState = _secretRedactionCount is null
+			? SecretScanState.Pending
+			: SecretScanState.Completed;
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
-			_secretRedactionCount);
-		_previewPipeline.ScheduleRefresh(immediate: true);
+			_secretRedactionCount,
+			_secretRedactionScanState);
+		if (_viewModel.IsAnyPreviewVisible)
+			_previewPipeline.ScheduleRefresh(immediate: true);
 		ScheduleSecretRedactionCountRefresh();
 	}
 
 	private void InvalidateSecretRedactionCount()
 	{
+		_secretRedactionSession.InvalidateSnapshots();
+		var enabled = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.HideSecrets);
+		_secretRedactionScanState = enabled
+			? SecretScanState.Pending
+			: SecretScanState.Disabled;
 		if (_secretRedactionCount is not null)
-		{
 			_secretRedactionCount = null;
-			_selectionCoordinator.RelabelIgnoreOptions(
-				AdvancedIgnoreCountsAlwaysEnabled,
-				secretRedactionsCount: null);
-		}
+		_selectionCoordinator.RelabelIgnoreOptions(
+			AdvancedIgnoreCountsAlwaysEnabled,
+			secretRedactionsCount: null,
+			_secretRedactionScanState);
 
 		ScheduleSecretRedactionCountRefresh();
 	}
@@ -1066,7 +1095,8 @@ public partial class MainWindow : Window
     {
         _memoryCleanup.CancelPreview();
 		_secretRedactionCount = null;
-		_secretRedactionSession.InvalidateSnapshots();
+		_secretRedactionScanState = SecretScanState.Disabled;
+		_secretRedactionSession.Reset();
 
         // Background metrics become stale as soon as the visible tree is about to change.
         // Cancel them before tearing down the current project state to avoid wasted I/O.

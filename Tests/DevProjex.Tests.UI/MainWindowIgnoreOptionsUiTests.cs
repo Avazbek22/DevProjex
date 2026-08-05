@@ -1,3 +1,4 @@
+using DevProjex.Application.Diagnostics;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Kernel.Abstractions;
@@ -82,19 +83,87 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
 	[AvaloniaFact]
-	public async Task HideSecrets_WithPreviewClosedPublishesMeasuredSelectionCount()
+	public async Task HideSecrets_WithNoFindings_UpdatesOnlyContentState()
 	{
-		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
-		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
+		await AssertHideSecretsIsolatedFromPathSelectionAsync(project, expectedCount: 0);
+	}
 
+	[AvaloniaFact]
+	public async Task HideSecrets_WithFindings_UpdatesOnlyContentState()
+	{
+		using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
+		Directory.CreateDirectory(Path.Combine(project.RootPath, "secrets"));
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "secrets", "credentials.env"),
+			"AWS_ACCESS_KEY_ID=AKIA" + "Z7M3Q5X2P6N4R7T5\n");
+
+		await AssertHideSecretsIsolatedFromPathSelectionAsync(project, expectedCount: 1);
+	}
+
+	private static async Task AssertHideSecretsIsolatedFromPathSelectionAsync(
+		UiTestProject project,
+		int expectedCount)
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
 		try
 		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.SmartIgnore,
+				visible: true,
+				isChecked: true);
 			Assert.False(UiTestDriver.GetViewModel(window).IsAnyPreviewVisible);
+
+			var tree = UiTestDriver.GetCurrentTreeIdentity(window);
+			var inventory = UiTestDriver.GetCurrentTreeInventoryIdentity(window);
+			var previewDocument = UiTestDriver.GetViewModel(window).PreviewDocument;
+			var selectionRevision = UiTestDriver.GetSelectionRevision(window);
+			using var measurement = IgnorePipelineDiagnostics.BeginMeasurement();
+
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
 			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 				window,
 				IgnoreOptionId.HideSecrets,
-				"Hide secrets (1)");
+				$"Hide secrets ({expectedCount})");
+
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.SmartIgnore,
+				visible: true,
+				isChecked: true);
+			Assert.Same(tree, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Same(inventory, UiTestDriver.GetCurrentTreeInventoryIdentity(window));
+			Assert.Same(previewDocument, UiTestDriver.GetViewModel(window).PreviewDocument);
+			Assert.Equal(selectionRevision, UiTestDriver.GetSelectionRevision(window));
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				visible: true,
+				isChecked: false);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Hide secrets");
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.SmartIgnore,
+				visible: true,
+				isChecked: true);
+
+			Assert.Same(tree, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Same(inventory, UiTestDriver.GetCurrentTreeInventoryIdentity(window));
+			Assert.Same(previewDocument, UiTestDriver.GetViewModel(window).PreviewDocument);
+			Assert.Equal(selectionRevision, UiTestDriver.GetSelectionRevision(window));
+			var diagnostics = measurement.Capture();
+			Assert.Equal(0, diagnostics.WorkspaceScans);
+			Assert.Equal(0, diagnostics.DirectoryEnumerations);
+			Assert.Equal(0, diagnostics.FileEnumerations);
+			Assert.Equal(0, diagnostics.IgnoreRulesBuilds);
+			Assert.Equal(0, diagnostics.FullSelectionRefreshes);
+			Assert.Equal(0, diagnostics.LiveSelectionRefreshes);
 		}
 		finally
 		{
@@ -1986,6 +2055,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 "ignore option labels to be localized before the rollback baseline is exercised");
 
             await SetIgnoreAllCheckedAsync(window, isChecked: true);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Скрывать секреты (0)");
 
             var stableRoots = viewModel.RootFolders
                 .Select(static option => (option.Name, option.IsChecked))
@@ -2035,12 +2108,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
             Assert.Equal(
                 stableExtensions,
                 viewModel.Extensions.Select(static option => (option.Name, option.IsChecked)).ToArray());
-            Assert.Equal(
-                stableIgnoreOptions,
-                viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label, option.IsChecked)).ToArray());
+			Assert.Equal(
+				stableIgnoreOptions.Select(static option => (option.Id, option.IsChecked)).ToArray(),
+				viewModel.IgnoreOptions.Select(static option => (option.Id, option.IsChecked)).ToArray());
             Assert.Equal(stableTreeNodes.Length, viewModel.TreeNodes.Count);
             for (var index = 0; index < stableTreeNodes.Length; index++)
                 Assert.Same(stableTreeNodes[index], viewModel.TreeNodes[index]);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Скрывать секреты (0)");
+			Assert.Equal(
+				stableIgnoreOptions,
+				viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label, option.IsChecked)).ToArray());
 
             // The scanner intentionally ignores cancellation. Releasing it verifies that the
             // invalidated late result cannot overwrite the synchronously restored presentation.

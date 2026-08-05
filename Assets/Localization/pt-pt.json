@@ -167,6 +167,7 @@
     "Settings.Ignore.TrackedGitFilesOnly":  "Apenas ficheiros controlados pelo Git",
     "Settings.Ignore.SmartIgnore":  "Smart Ignore",
     "Settings.Ignore.HideSecrets":  "Ocultar segredos",
+    "Settings.Ignore.HideSecrets.Scanning": "Ocultar segredos — a analisar…",
     "SecretRedaction.Legend.Summary":  "Valores ocultados pelo DevProjex antes da exportação: {0}.",
     "SecretRedaction.Legend.Placeholder":  "Marcadores como {0} assinalam segredos removidos.",
     "SecretRedaction.Legend.Notice":  "Não trate o texto do marcador como um valor real.",

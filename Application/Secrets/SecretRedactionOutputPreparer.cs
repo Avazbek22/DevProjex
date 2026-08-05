@@ -1,3 +1,7 @@
+using System.Buffers;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+
 namespace DevProjex.Application.Secrets;
 
 /// <summary>
@@ -26,13 +30,17 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var sourcePath = orderedFilePaths[index];
+				var metadataBeforeRead = SecretFileMetadata.Capture(sourcePath);
 				var result = await contentAnalyzer
 					.ReadClassifiedAsync(sourcePath, MaximumScannableFileBytes, cancellationToken)
 					.ConfigureAwait(false);
+				var metadataAfterRead = SecretFileMetadata.Capture(sourcePath);
+				EnsureStableRead(sourcePath, metadataBeforeRead, metadataAfterRead, result.Content);
 
 				switch (result.Classification)
 				{
 					case FileContentClassification.Binary:
+						scope.AnalyzeBinary(sourcePath, metadataAfterRead);
 						preparedFiles[sourcePath] = PreparedSecretFile.Binary(sourcePath);
 						continue;
 					case FileContentClassification.TooLarge:
@@ -50,12 +58,14 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				var content = result.Content ??
 				              throw new SecretDetectionException(
 					              $"Hide Secrets received no text for '{sourcePath}'.");
-				var transformed = scope.Redact(sourcePath, content.Content, cancellationToken);
+				using var contentLease = context.Session.TrackFullContentBuffer();
+				var plan = scope.CreatePlan(sourcePath, content.Content, cancellationToken);
 				var encoding = result.Encoding ?? TextFileEncoding.Utf8;
 				var preparedPath = Path.Combine(workingDirectory, $"{index:D8}.redacted.txt");
 				await WritePreparedTextAsync(
 						preparedPath,
-						transformed.Text,
+						content.Content,
+						plan,
 						ResolveEncoding(encoding),
 						cancellationToken)
 					.ConfigureAwait(false);
@@ -64,7 +74,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					preparedPath,
 					FileContentClassification.Text,
 					encoding,
-					transformed.Spans
+					plan.Spans
 						.Where(static span => span.State == SecretPreviewSpanState.Redacted)
 						.Select(static span => new PreparedSecretSpan(span.Start, span.Length))
 						.ToArray());
@@ -96,28 +106,102 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		foreach (var sourcePath in orderedFilePaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var result = await contentAnalyzer
-				.ReadClassifiedAsync(sourcePath, MaximumScannableFileBytes, cancellationToken)
+			if (scope.TryAnalyzeCached(sourcePath))
+				continue;
+
+			var metadataBeforeRead = SecretFileMetadata.Capture(sourcePath);
+			if (metadataBeforeRead.Length > MaximumScannableFileBytes)
+			{
+				throw new SecretScanLimitExceededException(
+					sourcePath,
+					metadataBeforeRead.Length,
+					MaximumScannableFileBytes);
+			}
+
+			await using var snapshot = await contentAnalyzer
+				.OpenCompleteSnapshotAsync(sourcePath, cancellationToken)
 				.ConfigureAwait(false);
-			switch (result.Classification)
+			var metadataAfterRead = SecretFileMetadata.Capture(sourcePath);
+			EnsureStableSnapshot(
+				sourcePath,
+				metadataBeforeRead,
+				metadataAfterRead,
+				snapshot.Result);
+			switch (snapshot.Result.Classification)
 			{
 				case FileContentClassification.Binary:
+					scope.AnalyzeBinary(sourcePath, metadataAfterRead);
 					continue;
 				case FileContentClassification.TooLarge:
 					throw new SecretScanLimitExceededException(
 						sourcePath,
-						result.Content?.SizeBytes ?? new FileInfo(sourcePath).Length,
+						snapshot.Result.Metrics?.SizeBytes ?? metadataAfterRead.Length,
 						MaximumScannableFileBytes);
-				case FileContentClassification.Text when result.Content is not null:
-					_ = scope.Redact(sourcePath, result.Content.Content, cancellationToken);
+				case FileContentClassification.Text when snapshot.Result.Metrics is { } metrics:
+					await AnalyzeSnapshotAsync(
+							scope,
+							sourcePath,
+							metadataAfterRead,
+							metrics,
+							snapshot,
+							cancellationToken)
+						.ConfigureAwait(false);
 					continue;
 				default:
 					throw new SecretDetectionException(
-						$"Hide Secrets could not inspect '{sourcePath}' ({result.Classification}).");
+						$"Hide Secrets could not inspect '{sourcePath}' ({snapshot.Result.Classification}).");
 			}
 		}
 
 		return scope.Complete();
+	}
+
+	private static async Task AnalyzeSnapshotAsync(
+		SecretRedactionScope scope,
+		string sourcePath,
+		SecretFileMetadata metadata,
+		TextFileMetrics metrics,
+		IFileContentSnapshot snapshot,
+		CancellationToken cancellationToken)
+	{
+		var buffer = ArrayPool<char>.Shared.Rent(Math.Max(1, metrics.CharCount));
+		var written = 0;
+		try
+		{
+			await snapshot.CopyTextToAsync(
+					metrics.CharCount,
+					(chunk, token) =>
+					{
+						token.ThrowIfCancellationRequested();
+						if (chunk.Length > buffer.Length - written)
+							throw new SecretDetectionException(
+								$"Hide Secrets received inconsistent content length for '{sourcePath}'.");
+						chunk.CopyTo(buffer.AsMemory(written));
+						written += chunk.Length;
+						return ValueTask.CompletedTask;
+					},
+					cancellationToken)
+				.ConfigureAwait(false);
+			if (written != metrics.CharCount)
+			{
+				throw new SecretDetectionException(
+					$"Hide Secrets received inconsistent content length for '{sourcePath}'.");
+			}
+
+			using var contentLease = scope.TrackFullContentBuffer();
+			scope.Analyze(
+				sourcePath,
+				buffer.AsSpan(0, written),
+				metadata,
+				cancellationToken);
+		}
+		finally
+		{
+			// Pooled memory may be handed to unrelated application work. Erase the complete
+			// rented segment so raw credentials never survive this operation in the shared pool.
+			CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(buffer.AsSpan()));
+			ArrayPool<char>.Shared.Return(buffer);
+		}
 	}
 
 	private static Encoding ResolveEncoding(TextFileEncoding encoding) => encoding switch
@@ -139,6 +223,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	private static async Task WritePreparedTextAsync(
 		string path,
 		string content,
+		SecretFileRedactionPlan plan,
 		Encoding encoding,
 		CancellationToken cancellationToken)
 	{
@@ -154,7 +239,27 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 
 		await using var stream = new FileStream(path, options);
 		await using var writer = new StreamWriter(stream, encoding);
-		await writer.WriteAsync(content.AsMemory(), cancellationToken).ConfigureAwait(false);
+		await plan.WriteToAsync(writer, content, cancellationToken).ConfigureAwait(false);
+	}
+
+	private static void EnsureStableRead(
+		string path,
+		SecretFileMetadata before,
+		SecretFileMetadata after,
+		TextFileContent? content)
+	{
+		if (before != after || (content is not null && content.SizeBytes != after.Length))
+			throw new SecretDetectionException($"Hide Secrets could not inspect a changing file: '{path}'.");
+	}
+
+	private static void EnsureStableSnapshot(
+		string path,
+		SecretFileMetadata before,
+		SecretFileMetadata after,
+		FileContentMetricsResult result)
+	{
+		if (before != after || (result.Metrics is { } metrics && metrics.SizeBytes != after.Length))
+			throw new SecretDetectionException($"Hide Secrets could not inspect a changing file: '{path}'.");
 	}
 
 	internal static void DeleteWorkingDirectory(string path)

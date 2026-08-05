@@ -1,5 +1,6 @@
 using DevProjex.Application.Models;
 using DevProjex.Application.Context;
+using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Collections;
 using DevProjex.Avalonia.Services;
 
@@ -577,7 +578,10 @@ public sealed partial class SelectionSyncCoordinator(
         ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
     }
 
-    public void RelabelIgnoreOptions(bool showAdvancedCounts, int? secretRedactionsCount = null)
+    public void RelabelIgnoreOptions(
+	    bool showAdvancedCounts,
+	    int? secretRedactionsCount = null,
+	    SecretScanState secretScanState = SecretScanState.Disabled)
     {
         if (viewModel.IgnoreOptions.Count == 0)
             return;
@@ -613,6 +617,13 @@ public sealed partial class SelectionSyncCoordinator(
 
         foreach (var option in viewModel.IgnoreOptions)
         {
+			if (option.Id == IgnoreOptionId.HideSecrets)
+			{
+				option.Label = ignoreOptionsService.FormatHideSecretsLabel(
+					hideSecretsIsChecked ? secretScanState : SecretScanState.Disabled,
+					secretRedactionsCount);
+				continue;
+			}
             if (descriptorsById.TryGetValue(option.Id, out var descriptor))
                 option.Label = descriptor.Label;
         }
@@ -636,7 +647,7 @@ public sealed partial class SelectionSyncCoordinator(
     public void ApplyProjectProfileSelections(string projectPath, ProjectSelectionProfile profile)
     {
         _session.ApplyProfile(projectPath, profile);
-        _session.AdvanceRevision();
+		_session.AdvanceRevision();
     }
 
     public void ResetProjectProfileSelections(string projectPath)
@@ -1342,7 +1353,8 @@ public sealed partial class SelectionSyncCoordinator(
         SyncIgnoreAllCheckbox();
 
         UpdateIgnoreSelectionCache();
-        _session.AdvanceRevision();
+		if (changedOption?.Id != IgnoreOptionId.HideSecrets)
+			_session.AdvanceRevision();
         RequestPendingApplyEvaluation();
 
         var currentPath = currentPathProvider();

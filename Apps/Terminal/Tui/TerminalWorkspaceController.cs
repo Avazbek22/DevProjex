@@ -103,14 +103,37 @@ public sealed class TerminalWorkspaceController(
 		state.ReplacePlan(plan);
 	}
 
-	public Task SetExclusionsAsync(
+	public async Task SetExclusionsAsync(
 		TerminalWorkspaceState state,
 		IReadOnlyCollection<ProjectExclusion> exclusions,
-		CancellationToken cancellationToken) =>
-		RebuildAsync(
-			state,
-			state.BuildSelection() with { Exclusions = exclusions },
-			cancellationToken);
+		CancellationToken cancellationToken)
+	{
+		var currentPathExclusions = (state.Plan.Selection.Exclusions ?? [])
+			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
+			.ToHashSet();
+		var requestedPathExclusions = exclusions
+			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
+			.ToHashSet();
+		if (currentPathExclusions.SetEquals(requestedPathExclusions))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var plan = services.ContextPlanner.ApplyContentTransformationSelection(
+				state.Plan,
+				exclusions);
+			state.ReplaceContentTransformationPlan(plan);
+			if (!exclusions.Contains(ProjectExclusion.HideSecrets))
+				services.SecretRedactionSession.Disable();
+			return;
+		}
+
+		await RebuildAsync(
+				state,
+				state.BuildSelection() with { Exclusions = exclusions },
+				cancellationToken)
+			.ConfigureAwait(false);
+		if (!exclusions.Contains(ProjectExclusion.HideSecrets))
+			services.SecretRedactionSession.Disable();
+	}
 
 	public Task SetRootsAsync(
 		TerminalWorkspaceState state,

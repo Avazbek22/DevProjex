@@ -37,14 +37,20 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	}
 
 	public int RuleCount => _configuration.Value.Rules.Count;
+	public string RulesIdentity => $"gitleaks:{RulesVersion}:{ConfigurationSha256}";
 
 	public IReadOnlyList<DetectedSecret> Detect(
 		string repositoryRelativePath,
 		string content,
+		CancellationToken cancellationToken = default) =>
+		Detect(repositoryRelativePath, content.AsSpan(), cancellationToken);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
-		ArgumentNullException.ThrowIfNull(content);
 		cancellationToken.ThrowIfCancellationRequested();
 		if (content.Length == 0)
 			return [];
@@ -67,7 +73,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private IReadOnlyList<DetectedSecret> DetectCore(
 		string repositoryRelativePath,
-		string content,
+		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken)
 	{
 
@@ -91,13 +97,19 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 			try
 			{
-				for (var match = rule.Regex.Match(content); match.Success; match = match.NextMatch())
+				foreach (var valueMatch in rule.Regex.EnumerateMatches(content))
 				{
 					cancellationToken.ThrowIfCancellationRequested();
-					if (!TryExtractSecret(rule, match, out var secretGroup))
+					// ValueMatch deliberately omits capture groups. Re-running the expression over
+					// the already bounded full-match slice keeps the full file allocation-free while
+					// preserving the reviewed Gitleaks secretGroup semantics.
+					var matchText = content.Slice(valueMatch.Index, valueMatch.Length).ToString();
+					var captureMatch = rule.Regex.Match(matchText);
+					if (!captureMatch.Success ||
+					    !TryExtractSecret(rule, captureMatch, out var secretGroup))
 						continue;
 
-					var line = GetContainingLine(content, match.Index, match.Length);
+					var line = GetContainingLine(content, valueMatch.Index, valueMatch.Length);
 					if (line.Contains(GitleaksAllowSignature, StringComparison.Ordinal))
 						continue;
 					var secret = secretGroup.Value;
@@ -107,7 +119,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 					var context = new AllowlistContext(
 						normalizedPath,
 						secret,
-						match.Value,
+						matchText,
 						line);
 					if (configuration.GlobalAllowlists.Any(allowlist => allowlist.Allows(context)) ||
 					    rule.Allowlists.Any(allowlist => allowlist.Allows(context)))
@@ -117,7 +129,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 					findings.Add(new DetectedSecret(
 						rule.Id,
-						secretGroup.Index,
+						checked(valueMatch.Index + secretGroup.Index),
 						secretGroup.Length,
 						secret,
 						rule.Order));
@@ -162,15 +174,15 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return secretGroup.Length > 0;
 	}
 
-	private static string GetContainingLine(string content, int matchStart, int matchLength)
+	private static string GetContainingLine(ReadOnlySpan<char> content, int matchStart, int matchLength)
 	{
-		var lineStart = content.LastIndexOf('\n', Math.Max(0, matchStart - 1));
-		lineStart = lineStart < 0 ? 0 : lineStart + 1;
+		var lineStart = content[..Math.Max(0, matchStart)].LastIndexOf('\n') + 1;
 		var matchEnd = Math.Min(content.Length, matchStart + matchLength);
-		var lineEnd = content.IndexOf('\n', matchEnd);
-		if (lineEnd < 0)
-			lineEnd = content.Length;
-		return content[lineStart..lineEnd].TrimEnd('\r');
+		var relativeLineEnd = content[matchEnd..].IndexOf('\n');
+		var lineEnd = relativeLineEnd < 0 ? content.Length : matchEnd + relativeLineEnd;
+		if (lineEnd > lineStart && content[lineEnd - 1] == '\r')
+			lineEnd--;
+		return content[lineStart..lineEnd].ToString();
 	}
 
 	internal static double CalculateShannonEntropy(string value)
@@ -442,7 +454,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		}
 
 		public bool[] FindCandidates(
-			string content,
+			ReadOnlySpan<char> content,
 			int ruleCount,
 			CancellationToken cancellationToken)
 		{

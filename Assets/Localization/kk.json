@@ -167,6 +167,7 @@
   "Settings.Ignore.TrackedGitFilesOnly": "Тек Git бақылайтын файлдар",
   "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HideSecrets": "Құпияларды жасыру",
+  "Settings.Ignore.HideSecrets.Scanning": "Құпияларды жасыру — сканерлеу…",
   "SecretRedaction.Legend.Summary": "DevProjex экспорт алдында жасырған мәндер саны: {0}.",
   "SecretRedaction.Legend.Placeholder": "{0} сияқты белгілер жойылған құпияларды көрсетеді.",
   "SecretRedaction.Legend.Notice": "Белгі мәтінін нақты мән деп қабылдамаңыз.",

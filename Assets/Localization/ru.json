@@ -167,6 +167,7 @@
   "Settings.Ignore.TrackedGitFilesOnly": "Только отслеживаемые Git-файлы",
   "Settings.Ignore.SmartIgnore": "Умный игнор",
   "Settings.Ignore.HideSecrets": "Скрывать секреты",
+  "Settings.Ignore.HideSecrets.Scanning": "Скрывать секреты — сканирование…",
   "SecretRedaction.Legend.Summary": "Значений, скрытых DevProjex перед экспортом: {0}.",
   "SecretRedaction.Legend.Placeholder": "Метки вида {0} обозначают удалённые секреты.",
   "SecretRedaction.Legend.Notice": "Не воспринимайте текст метки как настоящее значение.",

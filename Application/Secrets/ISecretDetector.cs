@@ -6,10 +6,26 @@ namespace DevProjex.Application.Secrets;
 /// </summary>
 public interface ISecretDetector
 {
+	/// <summary>
+	/// Identifies the exact rule set used to produce findings. Cache entries must never cross
+	/// this boundary because equal file bytes can produce different findings after a rule update.
+	/// </summary>
+	string RulesIdentity => GetType().FullName ?? nameof(ISecretDetector);
+
 	IReadOnlyList<DetectedSecret> Detect(
 		string repositoryRelativePath,
 		string content,
 		CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Detects directly over an operation-owned buffer. Production detectors should override
+	/// this overload so count-only scans do not manufacture a full-file string per source file.
+	/// </summary>
+	IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default) =>
+		Detect(repositoryRelativePath, content.ToString(), cancellationToken);
 }
 
 /// <summary>

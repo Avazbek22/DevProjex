@@ -1,7 +1,20 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Application.Services;
 
 public sealed class IgnoreOptionsService(LocalizationService localization)
 {
+	public string FormatHideSecretsLabel(SecretScanState state, int? redactionCount)
+	{
+		var label = localization["Settings.Ignore.HideSecrets"];
+		return state switch
+		{
+			SecretScanState.Scanning => localization["Settings.Ignore.HideSecrets.Scanning"],
+			SecretScanState.Completed when redactionCount is { } count => $"{label} ({count})",
+			_ => label
+		};
+	}
+
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{
 		var options = new List<IgnoreOptionDescriptor>();

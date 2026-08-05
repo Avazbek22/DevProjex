@@ -25,9 +25,11 @@ public partial class MainWindow
 				return;
 
 			_secretRedactionCount = count;
+			_secretRedactionScanState = SecretScanState.Completed;
 			_selectionCoordinator.RelabelIgnoreOptions(
 				AdvancedIgnoreCountsAlwaysEnabled,
-				count);
+				count,
+				_secretRedactionScanState);
 		});
 	}
 
@@ -75,6 +77,12 @@ public partial class MainWindow
 			return;
 		}
 
+		_secretRedactionScanState = SecretScanState.Scanning;
+		_selectionCoordinator.RelabelIgnoreOptions(
+			AdvancedIgnoreCountsAlwaysEnabled,
+			secretRedactionsCount: null,
+			_secretRedactionScanState);
+
 		var selectedPaths = GetCheckedPaths();
 		var files = selectedPaths.Count > 0
 			? BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths)
@@ -115,7 +123,15 @@ public partial class MainWindow
 			}
 
 			var message = ResolveUserFacingOutputErrorMessage(exception);
-			await Dispatcher.UIThread.InvokeAsync(() => ShowErrorAsync(message));
+			await Dispatcher.UIThread.InvokeAsync(() =>
+			{
+				_secretRedactionScanState = SecretScanState.Failed;
+				_selectionCoordinator.RelabelIgnoreOptions(
+					AdvancedIgnoreCountsAlwaysEnabled,
+					secretRedactionsCount: null,
+					_secretRedactionScanState);
+				return ShowErrorAsync(message);
+			});
 		}
 		finally
 		{
@@ -311,6 +327,7 @@ public partial class MainWindow
 	private CancellationTokenSource? _secretRedactionCountCts;
 	private long _secretRedactionCountRefreshVersion;
 	private int? _secretRedactionCount;
+	private SecretScanState _secretRedactionScanState = SecretScanState.Disabled;
 
     public MainWindow(
         DesktopStartupOptions startupOptions,

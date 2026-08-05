@@ -126,6 +126,7 @@ public partial class MainWindow
             DetachRecentMenuHandlers();
             DetachTreeFontMenuHandlers();
 			_secretRedactionSession.SnapshotPublished -= OnSecretRedactionSnapshotPublished;
+			_secretRedactionSession.Reset();
 
             // Unsubscribe from tunneled/bubbled events
             RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
