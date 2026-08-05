@@ -6,9 +6,13 @@
 │    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
 │    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
 │                                 │ Filter actions:                                                                         │                                  │
-│                                 │ Preview format                                                                          │                                  │
+│                                 │ Preview format                                                                          │s                                 │
+│                                 │                                                                                         │ text files only. Binary          │
+│                                 │ Preview format: ASCII  [F]                                                              │nspected, and no matches is       │
+│                                 │                                                                                         │arantee.                          │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
 │                                 │                                                                                         │e                                 │
-│                                 │ Preview format: ASCII  [F]                                                              │s                                 │
 │                                 │                                                                                         │rs                                │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │ers                               │
@@ -16,10 +20,6 @@
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │ut extension                      │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │                                  │
 │                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │                                  │

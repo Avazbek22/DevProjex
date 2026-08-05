@@ -82,6 +82,7 @@ selection. `open` additionally accepts `auto`:
 --select <RELATIVE_PATH>     repeatable
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>             repeatable
+--hide-secrets [<true|false>]
 ```
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
@@ -109,7 +110,6 @@ Exclusion tokens:
 
 ```text
 smart-ignore
-hide-secrets
 hidden-folders
 hidden-files
 dot-folders
@@ -125,11 +125,11 @@ exclusion set. `--exclude none` selects an empty set and cannot be combined with
 another exclusion. If an option is absent, its value comes from the selected
 profile.
 
-`hide-secrets` is an opt-in content transformation, not a path filter. It replaces
-matched values in selected text files, keeps the files and surrounding code, and
-adds a redaction legend to every output that contains a replacement. It is not in
-the `standard` profile. Binary files are not scanned. A zero match count means only
-that the rules matched nothing; it is not a safety result. See
+`--hide-secrets` is a separate, additive content transformation. It does not
+replace Exclusions or change the effective tree. It replaces detected values in
+selected text files, keeps their surrounding context, and adds a redaction legend
+to output containing replacements. It is off in the `standard` profile. Binary
+files are not inspected, and no findings is not a security guarantee. See
 [HideSecrets.md](HideSecrets.md).
 
 Modern local profiles retain checked and unchecked states across roots, extensions,
@@ -271,7 +271,7 @@ documents; Markdown contains headings, a fenced tree, and fenced text-file
 content. Binary bytes are never embedded in context output. Machine documents
 mark binary entries with metadata.
 
-With `--exclude hide-secrets`, text, Markdown, JSON, and XML carry a format-native
+With `--hide-secrets`, text, Markdown, JSON, and XML carry a format-native
 redaction legend whenever at least one value is replaced. Detection failure or a
 selected text file above the supported scan limit fails closed and produces no
 complete output artifact.
@@ -293,7 +293,7 @@ devprojex export context .
 devprojex export context . --view tree --format json -o -
 devprojex export context . --view content --format xml -o ../devprojex-context.xml
 devprojex export context . --format markdown -o ../devprojex-context.md --force
-devprojex export context . --exclude hide-secrets --format markdown -o ../devprojex-redacted.md
+devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
 ```
 
 ## Export Project
@@ -320,7 +320,7 @@ structure, and included empty directories. Staging is cleaned after cancellation
 or failure. Canonical destination checks reject destinations equal to or inside
 the source, including paths reached through symlinks or junctions.
 
-With `--exclude hide-secrets`, detected values in text files are replaced and a
+With `--hide-secrets`, detected values in text files are replaced and a
 `DEVPROJEX_REDACTIONS.txt` legend is added at the copy root. Binary files remain
 unchanged. The result is intentionally not byte-for-byte faithful and may not
 build or run. `--dry-run` states this before any destination or staging path is

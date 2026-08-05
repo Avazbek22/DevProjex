@@ -436,16 +436,16 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         Assert.Equal(
             viewModel.Extensions.Count > 0 && viewModel.Extensions.All(static option => option.IsChecked),
             viewModel.AllExtensionsChecked);
-        Assert.Equal(
-            viewModel.IgnoreOptions.Count > 0 && viewModel.IgnoreOptions.All(static option => option.IsChecked),
-            viewModel.AllIgnoreChecked);
+		Assert.Equal(
+			AreAllPathIgnoreOptionsChecked(viewModel.IgnoreOptions),
+			viewModel.AllIgnoreChecked);
 
         Assert.All(
             viewModel.RootFolders,
             option => Assert.True(
                 Directory.Exists(Path.Combine(rootPath, option.Name)),
                 $"{step}: root option '{option.Name}' is not a direct existing directory."));
-        Assert.Equal(
+		Assert.Equal(
             viewModel.RootFolders.Count,
             viewModel.RootFolders.Select(static option => option.Name).Distinct(PathComparer.Default).Count());
         Assert.Equal(
@@ -485,7 +485,25 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
             $"do not match final tree roots [{string.Join(", ", treeRoots.Order(PathComparer.Default))}].");
 
         await Task.CompletedTask;
-    }
+	}
+
+	private static bool AreAllPathIgnoreOptionsChecked(IEnumerable<IgnoreOptionViewModel> options)
+	{
+		var pathOptions = options
+			.Where(static option => option.Id != IgnoreOptionId.HideSecrets)
+			.ToArray();
+		if (pathOptions.Length == 0)
+			return false;
+
+		var ordinaryOptionsChecked = pathOptions
+			.Where(static option => !GitFilteringModeResolver.IsGitFilteringOption(option.Id))
+			.All(static option => option.IsChecked);
+		var gitOptions = pathOptions
+			.Where(static option => GitFilteringModeResolver.IsGitFilteringOption(option.Id))
+			.ToArray();
+		return ordinaryOptionsChecked &&
+		       (gitOptions.Length == 0 || gitOptions.Any(static option => option.IsChecked));
+	}
 
     private static void AssertOptionsEqual(
         IEnumerable<SelectionOption> expected,

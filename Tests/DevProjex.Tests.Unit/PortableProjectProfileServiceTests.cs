@@ -1,4 +1,5 @@
 using DevProjex.Application.Context;
+using System.Text.Json;
 
 namespace DevProjex.Tests.Unit;
 
@@ -76,5 +77,90 @@ public sealed class PortableProjectProfileServiceTests
 		{
 			Directory.Delete(alias);
 		}
+	}
+
+	[Fact]
+	public async Task SaveAsyncWritesHideSecretsSeparatelyFromPathExclusions()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var destination = Path.Combine(workspace.Path, "portable.json");
+		var service = new PortableProjectProfileService();
+
+		await service.SaveAsync(
+			sourceRoot,
+			destination,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [ProjectExclusion.SmartIgnore, ProjectExclusion.HideSecrets],
+				HideSecrets: true),
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken));
+		var selection = document.RootElement.GetProperty("selection");
+		Assert.True(selection.GetProperty("hideSecrets").GetBoolean());
+		Assert.Equal(
+			["smart-ignore"],
+			selection.GetProperty("exclusions")
+				.EnumerateArray()
+				.Select(static value => value.GetString()));
+	}
+
+	[Fact]
+	public async Task LoadAsyncMigratesLegacyHideSecretsExclusion()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = Path.Combine(workspace.Path, "legacy.json");
+		await File.WriteAllTextAsync(
+			path,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": ["smart-ignore", "hide-secrets"]
+			  }
+			}
+			""",
+			TestContext.Current.CancellationToken);
+
+		var selection = await new PortableProjectProfileService().LoadAsync(
+			path,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(selection.HideSecrets);
+		Assert.Equal([ProjectExclusion.SmartIgnore], selection.Exclusions);
+	}
+
+	[Fact]
+	public async Task LoadAsyncExplicitHideSecretsValueOverridesLegacyToken()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = Path.Combine(workspace.Path, "explicit.json");
+		await File.WriteAllTextAsync(
+			path,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": ["hide-secrets"],
+			    "hideSecrets": false
+			  }
+			}
+			""",
+			TestContext.Current.CancellationToken);
+
+		var selection = await new PortableProjectProfileService().LoadAsync(
+			path,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(selection.HideSecrets);
+		Assert.Empty(selection.Exclusions!);
 	}
 }

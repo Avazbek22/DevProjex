@@ -12,6 +12,9 @@ public interface ISecretDetector
 	/// </summary>
 	string RulesIdentity => GetType().FullName ?? nameof(ISecretDetector);
 
+	ISecretDetectionScope CreateScope(string projectRoot) =>
+		new UnscopedSecretDetectionScope(this);
+
 	IReadOnlyList<DetectedSecret> Detect(
 		string repositoryRelativePath,
 		string content,
@@ -26,6 +29,30 @@ public interface ISecretDetector
 		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken = default) =>
 		Detect(repositoryRelativePath, content.ToString(), cancellationToken);
+}
+
+public interface ISecretDetectionScope
+{
+	string GetRulesIdentity(string fullPath, string repositoryRelativePath);
+
+	IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default);
+}
+
+internal sealed class UnscopedSecretDetectionScope(ISecretDetector detector) : ISecretDetectionScope
+{
+	public string GetRulesIdentity(string fullPath, string repositoryRelativePath) =>
+		detector.RulesIdentity;
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default) =>
+		detector.Detect(repositoryRelativePath, content, cancellationToken);
 }
 
 /// <summary>

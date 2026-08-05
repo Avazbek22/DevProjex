@@ -68,6 +68,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _allExtensionsChecked;
     private bool _allRootFoldersChecked;
     private bool _allIgnoreChecked;
+	private IgnoreOptionViewModel? _hideSecretsOption;
     private bool _isDarkTheme = true;
     private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
@@ -136,7 +137,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         UpdateLocalization();
 
         // Create named handlers for proper cleanup
-        _ignoreOptionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
+		_ignoreOptionsChangedHandler = (_, _) =>
+		{
+			SynchronizeIgnoreOptionSections();
+			UpdateAllCheckboxLabels();
+		};
         _extensionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
         _rootFoldersChangedHandler = (_, _) => UpdateAllCheckboxLabels();
         _recentFoldersChangedHandler = (_, _) =>
@@ -174,6 +179,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<SelectionOptionViewModel> RootFolders { get; } = new ResettableObservableCollection<SelectionOptionViewModel>();
     public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = new ResettableObservableCollection<SelectionOptionViewModel>();
     public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new ResettableObservableCollection<IgnoreOptionViewModel>();
+	public ObservableCollection<IgnoreOptionViewModel> PathIgnoreOptions { get; } =
+		new ResettableObservableCollection<IgnoreOptionViewModel>();
+	public IgnoreOptionViewModel? HideSecretsOption
+	{
+		get => _hideSecretsOption;
+		private set
+		{
+			if (ReferenceEquals(_hideSecretsOption, value)) return;
+			_hideSecretsOption = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(HasHideSecretsOption));
+		}
+	}
+	public bool HasHideSecretsOption => HideSecretsOption is not null;
     public ObservableCollection<FontFamily> FontFamilies { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentFolders { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentRepositories { get; } = [];
@@ -1422,6 +1441,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemeBorderVisibility { get; private set; } = string.Empty;
     public string ThemeMenuTransparency { get; private set; } = string.Empty;
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
+	public string SettingsSecretsTitle { get; private set; } = string.Empty;
+	public string SettingsSecretsNotice { get; private set; } = string.Empty;
     public string SettingsAll { get; private set; } = string.Empty;
     public string SettingsAllIgnore { get; private set; } = string.Empty;
     public string SettingsAllExtensions { get; private set; } = string.Empty;
@@ -1572,6 +1593,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
         UpdateApplicationUpdateLocalization();
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
+		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
+		SettingsSecretsNotice = _localization["Settings.Secrets.Notice"];
         SettingsAll = _localization["Settings.All"];
         UpdateAllCheckboxLabels();
         SettingsExtensions = _localization["Settings.Extensions"];
@@ -1716,6 +1739,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HelpAboutSupport));
         RaisePropertyChanged(nameof(HelpAboutOpenLink));
         RaisePropertyChanged(nameof(SettingsIgnoreTitle));
+		RaisePropertyChanged(nameof(SettingsSecretsTitle));
+		RaisePropertyChanged(nameof(SettingsSecretsNotice));
         RaisePropertyChanged(nameof(SettingsAll));
         RaisePropertyChanged(nameof(SettingsExtensions));
         RaisePropertyChanged(nameof(SettingsRootFolders));
@@ -1829,7 +1854,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrEmpty(baseText))
             baseText = _localization["Settings.All"];
 
-        SettingsAllIgnore = IgnoreOptions.Count > 0 ? $"{baseText} ({IgnoreOptions.Count})" : baseText;
+		SettingsAllIgnore = PathIgnoreOptions.Count > 0 ? $"{baseText} ({PathIgnoreOptions.Count})" : baseText;
         SettingsAllExtensions = Extensions.Count > 0 ? $"{baseText} ({Extensions.Count})" : baseText;
         SettingsAllRootFolders = RootFolders.Count > 0 ? $"{baseText} ({RootFolders.Count})" : baseText;
 
@@ -1838,6 +1863,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(SettingsAllRootFolders));
         RaisePropertyChanged(nameof(HasRootFolderOptions));
     }
+
+	private void SynchronizeIgnoreOptionSections()
+	{
+		((ResettableObservableCollection<IgnoreOptionViewModel>)PathIgnoreOptions).ReplaceAll(
+			IgnoreOptions.Where(static option => option.Id != IgnoreOptionId.HideSecrets));
+		HideSecretsOption = IgnoreOptions.FirstOrDefault(
+			static option => option.Id == IgnoreOptionId.HideSecrets);
+	}
 
     /// <summary>
     /// Cleans up event subscriptions and resources to prevent memory leaks.
@@ -1862,6 +1895,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Clear collections to release references
         TreeNodes.Clear();
         IgnoreOptions.Clear();
+		PathIgnoreOptions.Clear();
+		HideSecretsOption = null;
         Extensions.Clear();
         RootFolders.Clear();
         FontFamilies.Clear();

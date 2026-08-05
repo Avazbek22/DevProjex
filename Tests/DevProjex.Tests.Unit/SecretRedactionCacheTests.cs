@@ -86,6 +86,22 @@ public sealed class SecretRedactionCacheTests
 		Assert.Null(session.GetRedactionCount(workspace.Path, [path]));
 	}
 
+	[Fact]
+	public void BinaryCache_UsesTheScopedRulesIdentityAndReusesUnchangedMetadata()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("assets/blob.bin", "\0binary");
+		using var session = new SecretRedactionSession(new ScopedIdentityDetector());
+		var firstScope = session.BeginOutput(workspace.Path, [path]);
+
+		firstScope.AnalyzeBinary(path, SecretFileMetadata.Capture(path));
+		_ = firstScope.Complete();
+
+		var secondScope = session.BeginOutput(workspace.Path, [path]);
+		Assert.True(secondScope.TryAnalyzeCached(path));
+		Assert.Equal(0, secondScope.Complete().RedactedCount);
+	}
+
 	private static int Scan(
 		SecretRedactionSession session,
 		string projectRoot,
@@ -136,6 +152,29 @@ public sealed class SecretRedactionCacheTests
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			throw new InvalidOperationException("The cancellation contract was not honored.");
+		}
+	}
+
+	private sealed class ScopedIdentityDetector : ISecretDetector
+	{
+		public string RulesIdentity => "base-rules";
+
+		public ISecretDetectionScope CreateScope(string projectRoot) => new ScopedIdentityDetectionScope();
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+
+		private sealed class ScopedIdentityDetectionScope : ISecretDetectionScope
+		{
+			public string GetRulesIdentity(string fullPath, string repositoryRelativePath) => "scoped-rules";
+
+			public IReadOnlyList<DetectedSecret> Detect(
+				string fullPath,
+				string repositoryRelativePath,
+				ReadOnlySpan<char> content,
+				CancellationToken cancellationToken = default) => [];
 		}
 	}
 }

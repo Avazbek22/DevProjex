@@ -335,7 +335,7 @@ Erkannte Stellen werden in der Vorschau hervorgehoben. Ein Klick behält nur die
 
 Ausgaben mit Ersetzungen enthalten einen Hinweis. Auch eine Ordner- oder ZIP-Kopie ändert passenden Text und lässt sich möglicherweise nicht mehr erstellen oder ausführen. Binärdateien werden unverändert kopiert und nicht geprüft. Eine ausgewählte Textdatei über 16 MiB oder ein Erkennungsfehler beendet den Vorgang, statt ungeprüften Text zu exportieren.
 
-Der Zähler meldet nur Regelübereinstimmungen. Null bedeutet nicht, dass das Projekt sicher ist. In der CLI gilt `--exclude hide-secrets`; Einzelheiten stehen in `Docs/HideSecrets.md`.
+Der Zähler meldet nur Regelübereinstimmungen. Null bedeutet nicht, dass das Projekt sicher ist. In der CLI gilt `--hide-secrets`; Einzelheiten stehen in `Docs/HideSecrets.md`.
 
 ### 12.4 .gitignore verwenden
 Wenn aktiviert, berücksichtigt DevProjex jede erreichbare `.gitignore`, nicht nur die Datei im Wurzelordner. Jede Datei gilt für ihren eigenen Ordner und alle erreichbaren Unterordner, jedoch nicht für übergeordnete oder benachbarte Ordner.

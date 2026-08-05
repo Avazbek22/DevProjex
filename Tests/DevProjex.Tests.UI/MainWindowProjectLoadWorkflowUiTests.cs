@@ -741,17 +741,18 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
 
-            await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
+			await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() =>
 				{
 					var hideSecrets = UiTestDriver.GetViewModel(window).IgnoreOptions.First(
 						static option => option.Id == IgnoreOptionId.HideSecrets);
-					return Regex.IsMatch(hideSecrets.Label, @"\(\d+\)$");
+					return hideSecrets.IsChecked && IsCompletedHideSecretsLabel(hideSecrets.Label);
 				},
-				"enabled Hide Secrets to publish its measured count");
+				"enabled Hide Secrets to publish an honest completed state");
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
         }
         finally
@@ -1285,20 +1286,20 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
             if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
                 continue;
 
-            if (option.Id == IgnoreOptionId.HideSecrets)
-            {
-                var secretCount = Regex.Match(option.Label, @"\((\d+)\)$");
-                if (option.IsChecked)
-                {
-                    Assert.True(
-                        secretCount.Success && int.TryParse(secretCount.Groups[1].Value, out _),
-                        $"Enabled Hide Secrets must render its measured redaction count. Actual label: '{option.Label}'.");
-                }
-                else
-                {
-                    Assert.False(
-                        secretCount.Success,
-                        $"Disabled Hide Secrets must not imply that a content scan ran. Actual label: '{option.Label}'.");
+			if (option.Id == IgnoreOptionId.HideSecrets)
+			{
+				if (option.IsChecked)
+				{
+					Assert.True(
+						IsCompletedHideSecretsLabel(option.Label),
+						$"Enabled Hide Secrets must render an honest completed state. Actual label: '{option.Label}'.");
+					Assert.DoesNotMatch(@"\(0\)$", option.Label);
+				}
+				else
+				{
+					Assert.False(
+						Regex.IsMatch(option.Label, @"\(\d+\)$"),
+						$"Disabled Hide Secrets must not imply that a content scan ran. Actual label: '{option.Label}'.");
                 }
 
                 continue;
@@ -1308,8 +1309,15 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
             Assert.True(match.Success, $"Advanced ignore option '{option.Id}' must render a positive count in its label. Actual label: '{option.Label}'.");
             Assert.True(int.TryParse(match.Groups[1].Value, out var count) && count > 0,
                 $"Advanced ignore option '{option.Id}' must never stay visible with a zero/invalid count. Actual label: '{option.Label}'.");
-        }
-    }
+		}
+	}
+
+	private static bool IsCompletedHideSecretsLabel(string label)
+	{
+		var positiveCount = Regex.Match(label, @"\(([1-9]\d*)\)$");
+		return positiveCount.Success ||
+		       label.EndsWith(" — no detected values", StringComparison.Ordinal);
+	}
 
     private sealed class BlockingFileContentAnalyzer(IFileContentAnalyzer innerAnalyzer) : IFileContentAnalyzer
     {

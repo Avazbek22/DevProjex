@@ -10,7 +10,9 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 		return state switch
 		{
 			SecretScanState.Scanning => localization["Settings.Ignore.HideSecrets.Scanning"],
-			SecretScanState.Completed when redactionCount is { } count => $"{label} ({count})",
+			SecretScanState.Completed when redactionCount > 0 => $"{label} ({redactionCount})",
+			SecretScanState.Completed when redactionCount == 0 =>
+				localization["Settings.Ignore.HideSecrets.NoMatches"],
 			_ => label
 		};
 	}
@@ -22,6 +24,7 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 		// Unlike path filters, Hide Secrets is always offered because availability cannot
 		// be known without reading the selected content.
 		AppendPrimaryExclusionOptions(options, availability);
+		AppendContentTransformationOptions(options, availability);
 
 		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering)
 		{
@@ -54,25 +57,17 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	{
 		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
 		{
-			if (descriptor.Id is not (ProjectExclusion.SmartIgnore or ProjectExclusion.HideSecrets))
+			if (descriptor.Id != ProjectExclusion.SmartIgnore)
 				continue;
 
-			var included = descriptor.Id == ProjectExclusion.HideSecrets ||
-			               availability.IncludeSmartIgnore;
+			var included = availability.IncludeSmartIgnore;
 			if (!included)
 				continue;
 
-			var label = localization[descriptor.LabelKey];
-			if (descriptor.Id == ProjectExclusion.HideSecrets &&
-			    availability.SecretRedactionsCount is { } redactionCount)
-			{
-				label = $"{label} ({redactionCount})";
-			}
-
 			options.Add(new IgnoreOptionDescriptor(
 				descriptor.LegacyOptionId,
-				label,
-				descriptor.Id == ProjectExclusion.SmartIgnore));
+				localization[descriptor.LabelKey],
+				true));
 		}
 	}
 
@@ -82,7 +77,7 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	{
 		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
 		{
-			if (descriptor.Id is ProjectExclusion.SmartIgnore or ProjectExclusion.HideSecrets)
+			if (descriptor.Id == ProjectExclusion.SmartIgnore)
 				continue;
 
 			var (included, count) = descriptor.Id switch
@@ -112,6 +107,19 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 					count,
 					availability.ShowAdvancedCounts),
 				true));
+		}
+	}
+
+	private void AppendContentTransformationOptions(
+		List<IgnoreOptionDescriptor> options,
+		IgnoreOptionsAvailability availability)
+	{
+		foreach (var descriptor in ProjectPresentationCatalog.ContentTransformations)
+		{
+			var label = availability.SecretRedactionsCount is { } redactionCount
+				? FormatHideSecretsLabel(SecretScanState.Completed, redactionCount)
+				: localization[descriptor.LabelKey];
+			options.Add(new IgnoreOptionDescriptor(descriptor.LegacyOptionId, label, false));
 		}
 	}
 

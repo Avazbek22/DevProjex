@@ -57,7 +57,18 @@ public sealed class SelectionProfileMatrixUnitTests
 			Assert.Equal(shouldBeChecked, option.IsChecked);
 		}
 
-		var allCheckedExpected = availableIds.Length > 0 && expectedChecked.Count == availableIds.Length;
+		var availablePathOptions = availableIds
+			.Where(static option => option != IgnoreOptionId.HideSecrets)
+			.ToArray();
+		var ordinaryPathOptions = availablePathOptions
+			.Where(static option => !GitFilteringModeResolver.IsGitFilteringOption(option))
+			.ToArray();
+		var gitPathOptions = availablePathOptions
+			.Where(GitFilteringModeResolver.IsGitFilteringOption)
+			.ToArray();
+		var allCheckedExpected = availablePathOptions.Length > 0 &&
+		                         ordinaryPathOptions.All(expectedChecked.Contains) &&
+		                         (gitPathOptions.Length == 0 || gitPathOptions.Any(expectedChecked.Contains));
 		Assert.Equal(allCheckedExpected, viewModel.AllIgnoreChecked);
 	}
 

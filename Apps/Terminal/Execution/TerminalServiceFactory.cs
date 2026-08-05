@@ -40,7 +40,7 @@ public sealed class TerminalServiceFactory(
 		var treeExport = new TreeExportService();
 		var contentAnalyzer = new FileContentAnalyzer();
 		var secretRedactionSession = new SecretRedactionSession(
-			new GitleaksSecretDetector(),
+			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore),
 			new SecretRedactionLegendText(
 				localization["SecretRedaction.Legend.Summary"],
 				localization["SecretRedaction.Legend.Placeholder"],

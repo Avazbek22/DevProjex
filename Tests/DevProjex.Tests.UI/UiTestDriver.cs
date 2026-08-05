@@ -301,10 +301,13 @@ internal static class UiTestDriver
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
-        await ScrollSettingsItemIntoViewAsync(
-            window,
-            "IgnoreOptionsList",
-            GetViewModel(window).IgnoreOptions.FirstOrDefault(option => option.Id == optionId));
+        if (optionId != IgnoreOptionId.HideSecrets)
+        {
+            await ScrollSettingsItemIntoViewAsync(
+                window,
+                "IgnoreOptionsList",
+                GetViewModel(window).IgnoreOptions.FirstOrDefault(option => option.Id == optionId));
+        }
         await ClickResolvedControlAsync(
             window,
             () => FindIgnoreOptionCheckBox(window, optionId),

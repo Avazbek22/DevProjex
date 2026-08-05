@@ -41,6 +41,13 @@ public sealed class MachineSchemaContractTests
 			TestContext.Current.CancellationToken);
 
 		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var selectionPayload = document.RootElement.GetProperty("selection");
+		Assert.False(selectionPayload.GetProperty("hideSecrets").GetBoolean());
+		Assert.DoesNotContain(
+			"hide-secrets",
+			selectionPayload.GetProperty("exclusions")
+				.EnumerateArray()
+				.Select(static value => value.GetString()));
 		var diagnostic = Assert.Single(
 			document.RootElement.GetProperty("diagnostics").EnumerateArray());
 		Assert.Equal("DPX-TEST-PATH", diagnostic.GetProperty("code").GetString());

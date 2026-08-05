@@ -345,12 +345,12 @@ public sealed partial class SelectionSyncCoordinator(
     public void HandleIgnoreAllChanged(bool isChecked, string? currentPath)
     {
         if (_suppressIgnoreAllCheck) return;
-		var hideSecretsWasChecked = viewModel.IgnoreOptions.Any(static option =>
-			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
 
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = isChecked;
-        _session.IgnoreOptions.ApplyAllPreferenceToKnownStates(isChecked);
+		_session.IgnoreOptions.ApplyAllPreferenceToKnownStates(
+			isChecked,
+			IgnoreOptionId.HideSecrets);
 
         _suppressIgnoreAllCheck = true;
         viewModel.AllIgnoreChecked = isChecked;
@@ -360,10 +360,6 @@ public sealed partial class SelectionSyncCoordinator(
         UpdateIgnoreSelectionCache();
         _session.AdvanceRevision();
         RequestPendingApplyEvaluation();
-		var hideSecretsIsChecked = viewModel.IgnoreOptions.Any(static option =>
-			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
-		if (hideSecretsWasChecked != hideSecretsIsChecked)
-			contentTransformationChanged?.Invoke();
         if (!string.IsNullOrEmpty(currentPath))
         {
             QueueFullRefresh(currentPath, changedIgnoreOptionId: null);
@@ -1279,6 +1275,8 @@ public sealed partial class SelectionSyncCoordinator(
             var allOrdinaryOptionsChecked = true;
             foreach (var option in viewModel.IgnoreOptions)
             {
+				if (option.Id == IgnoreOptionId.HideSecrets)
+					continue;
                 hasItems = true;
                 if (GitFilteringModeResolver.IsGitFilteringOption(option.Id))
                 {
@@ -2837,7 +2835,8 @@ public sealed partial class SelectionSyncCoordinator(
         if (_session.IgnoreOptions.TryGetCachedState(option.Id, out var cachedState))
             return cachedState;
 
-        if (_session.IgnoreOptions.AllPreference.HasValue)
+		if (option.Id != IgnoreOptionId.HideSecrets &&
+		    _session.IgnoreOptions.AllPreference.HasValue)
             return _session.IgnoreOptions.AllPreference.Value;
 
         if (_session.IgnoreOptionStateCacheIsComplete)
@@ -2936,6 +2935,8 @@ public sealed partial class SelectionSyncCoordinator(
         {
             foreach (var option in viewModel.IgnoreOptions)
             {
+				if (option.Id == IgnoreOptionId.HideSecrets)
+					continue;
                 option.IsChecked = option.Id switch
                 {
                     IgnoreOptionId.UseGitIgnore =>

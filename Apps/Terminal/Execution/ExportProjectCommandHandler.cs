@@ -48,7 +48,7 @@ public sealed class ExportProjectCommandHandler(
 		var requestedOutput = Path.GetFullPath(request.OutputPath);
 		if (request.DryRun)
 		{
-			var redactSecrets = plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true;
+			var redactSecrets = plan.Selection.HideSecrets == true;
 			if (redactSecrets)
 			{
 				await services.SecretRedactionOutputPreparer
@@ -82,7 +82,7 @@ public sealed class ExportProjectCommandHandler(
 			ConflictPolicy: request.Force
 				? ProjectCopyConflictPolicy.ReplaceAtomically
 				: ProjectCopyConflictPolicy.Fail,
-			RedactSecrets: plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true);
+			RedactSecrets: plan.Selection.HideSecrets == true);
 		var result = await new ProgressRenderer(environment, request.Output, services.Localization)
 			.RunProjectExportAsync(progress =>
 				services.ProjectCopyExportService.ExportAsync(

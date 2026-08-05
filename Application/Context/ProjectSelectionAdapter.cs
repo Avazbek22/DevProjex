@@ -21,6 +21,8 @@ public static class ProjectSelectionAdapter
 
 		foreach (var exclusion in selection.Exclusions)
 			options.Add(ToIgnoreOption(exclusion));
+		if (selection.HideSecrets is true)
+			options.Add(IgnoreOptionId.HideSecrets);
 
 		return options.OrderBy(static option => (int)option).ToArray();
 	}
@@ -33,6 +35,8 @@ public static class ProjectSelectionAdapter
 		var exclusions = new HashSet<ProjectExclusion>();
 		foreach (var option in options)
 		{
+			if (option == IgnoreOptionId.HideSecrets)
+				continue;
 			if (TryToExclusion(option, out var exclusion))
 				exclusions.Add(exclusion);
 		}
@@ -53,6 +57,7 @@ public static class ProjectSelectionAdapter
 			SelectedPaths: profile.SelectedPaths?.ToArray() ?? [],
 			GitMode: GitFilteringModeResolver.Resolve(profile.SelectedIgnoreOptions),
 			Exclusions: ToExclusions(profile.SelectedIgnoreOptions),
+			HideSecrets: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets),
 			ProfileSource: source);
 	}
 

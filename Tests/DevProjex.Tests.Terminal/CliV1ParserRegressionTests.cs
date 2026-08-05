@@ -51,7 +51,7 @@ public sealed class CliV1ParserRegressionTests
 
 		Assert.Equal(
 			Enum.GetValues<ProjectExclusion>().Order(),
-			ProjectPresentationCatalog.Exclusions
+			ProjectPresentationCatalog.LegacyExclusionChoices
 				.Select(static descriptor => descriptor.Id)
 				.Order());
 		Assert.Equal(

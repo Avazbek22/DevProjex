@@ -1302,7 +1302,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.True(dotFolders.IsChecked);
 		Assert.True(dotFiles.IsChecked);
 		Assert.False(viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
-		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
 	}
 
 	[Fact]
@@ -1476,6 +1476,38 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			viewModel.Extensions.Select(static option => option.Name));
 	}
 
+	[AvaloniaFact]
+	public async Task ApplyHideSecretsOverride_ChangesOnlyContentTransformationState()
+	{
+		const string path = @"C:\Project";
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		var contentTransformationChanges = 0;
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			scanner,
+			() => path,
+			contentTransformationChanged: () => contentTransformationChanges++);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
+		HookAllOptionListeners(coordinator, viewModel);
+		var revisionBefore = coordinator.CurrentSelectionRevision;
+		var scansBefore = scanner.TotalScanCount;
+
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+		Assert.Equal(1, contentTransformationChanges);
+		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
+		Assert.Equal(scansBefore, scanner.TotalScanCount);
+		Assert.False(coordinator.ApplyHideSecretsOverride(true));
+		Assert.Equal(1, contentTransformationChanges);
+	}
+
 	[Fact]
 	public void ReversibleRefresh_CoupledGitModeSnapshotIsNotRestoredForSingleCheckboxClear()
 	{
@@ -1645,7 +1677,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[AvaloniaFact]
-	public async Task CancelPendingRefreshes_RestoredHideSecretsNotifiesContentPipeline()
+	public async Task CancelPendingPathRefresh_PreservesHideSecretsWithoutContentNotification()
 	{
 		const string path = @"C:\Project";
 		using var scanStarted = new ManualResetEventSlim();
@@ -1676,16 +1708,18 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			Assert.True(await Task.Run(
 				() => scanStarted.Wait(TimeSpan.FromSeconds(2)),
 				TestContext.Current.CancellationToken));
-			Assert.Equal(1, contentTransformationChanges);
+			Assert.True(viewModel.IgnoreOptions.Single(
+				static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+			Assert.Equal(0, contentTransformationChanges);
 
 			Assert.True(coordinator.CancelPendingRefreshes());
 			Assert.True(viewModel.IgnoreOptions.Single(
 				static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
-			Assert.Equal(2, contentTransformationChanges);
+			Assert.Equal(0, contentTransformationChanges);
 
 			releaseScan.Set();
 			await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
-			Assert.Equal(2, contentTransformationChanges);
+			Assert.Equal(0, contentTransformationChanges);
 		}
 		finally
 		{

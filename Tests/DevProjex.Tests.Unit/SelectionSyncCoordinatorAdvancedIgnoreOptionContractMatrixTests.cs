@@ -46,7 +46,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		Assert.Equal($"{optionCase.BaseLabel} ({effectiveCount})", option!.Label);
 		Assert.True(option.IsChecked);
 		Assert.False(GetHideSecretsOption(viewModel).IsChecked);
-		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
 	}
 
 	public static IEnumerable<object[]> ReappearingUncheckedCases()
@@ -140,7 +140,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		Assert.True(Assert.Single(
 			viewModel.IgnoreOptions,
 			item => item.Id == IgnoreOptionId.UseGitIgnore).IsChecked);
-		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
 	}
 
 	[Theory]
@@ -167,7 +167,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			IgnoreOptionCounts.Empty,
 			hasIgnoreCounts: true);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
-		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
 
 		ApplyScanState(
 			coordinator,

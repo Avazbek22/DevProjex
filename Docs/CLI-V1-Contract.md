@@ -143,13 +143,13 @@ remains a usage error instead of silently selecting a later command.
 --select <RELATIVE_PATH>             repeatable
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>                     repeatable
+--hide-secrets [<true|false>]
 ```
 
 Exclusion tokens are:
 
 ```text
 smart-ignore
-hide-secrets
 hidden-folders
 hidden-files
 dot-folders
@@ -170,10 +170,10 @@ extension, and selected-path collections are unresolved defaults, so the current
 project inventory supplies their available values. An explicit CLI field replaces
 only that profile field for the current invocation.
 
-`hide-secrets` is a ninth, opt-in exclusion token and is not selected by the
-`standard` profile. Unlike the eight path/metadata exclusions, it transforms the
-content of selected text files after selection. It does not remove the file.
-Binary files are not scanned and remain byte-identical in physical copies.
+`--hide-secrets` is a separate, additive option and is off in the `standard`
+profile. It transforms selected text content after path selection and does not
+replace the Exclusions collection, remove a file, or change the effective tree.
+Binary files are not inspected and remain byte-identical in physical copies.
 
 When enabled, the same per-occurrence decisions apply to Preview, clipboard,
 context documents, folder copies, and ZIP copies. Placeholders use the stable form
@@ -186,6 +186,12 @@ Detection failure, regex timeout, or a selected text file above the 16 MiB scan
 limit fails closed. Direct commands report `DPX-SECRET-DETECTION-FAILED` or
 `DPX-SECRET-SCAN-LIMIT-EXCEEDED` and exit `1`; no complete artifact is published.
 No result describes zero matches as safe or clean.
+
+For v5 compatibility, `--exclude hide-secrets` remains parseable but is omitted
+from current help and completion choices. Resolution migrates it to the separate
+`selection.hideSecrets` Boolean and removes it from canonical
+`selection.exclusions`. An explicit `--hide-secrets true|false` takes precedence
+over the legacy token.
 
 `gitignore` mode reads regular `.gitignore` files reachable in the selected working
 tree. When the selected path is below its owning repository/worktree root, the
@@ -369,7 +375,7 @@ never adds a project-name child or a numeric suffix. `--force` is invalid for
 folder output. ZIP output requires a `.zip` path; `--force` permits atomic ZIP
 replacement.
 
-When `hide-secrets` is selected, text findings are replaced and a root
+When `--hide-secrets` is selected, text findings are replaced and a root
 `DEVPROJEX_REDACTIONS.txt` legend is added using a deterministic non-colliding
 suffix when necessary. Such a copy is intentionally not byte-for-byte faithful
 and may not build or run. Binary files remain unchanged. The normal confirmation
@@ -516,7 +522,8 @@ that prevents an accepted option from becoming a no-op.
 | analyze/context/project/open | `--extension` | profile extensions | replaces the profile extension set with each repeated normalized extension | repeatable; conflicts with `open --last` | requested payload/path stays on stdout | parser, resolver, handler, process |
 | analyze/context/project/open | `--select` | profile selected paths | replaces the profile explicit path set with each repeated source-relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
 | analyze/context/project/open | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; `tracked` requires Git CLI and at least one readable applicable index | on unavailable index, `analyze` preserves its requested report; context/project/open create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, handler, process |
-| analyze/context/project/open | `--exclude` | profile exclusions | replaces the profile exclusion set with repeated typed values; `hide-secrets` enables the opt-in content transformation | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2`; secret inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
+| analyze/context/project/open | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
+| analyze/context/project/open | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | `analyze` | `--format` | `text` | selects the canonical text serializer or analysis JSON | none | document on stdout or in the selected file; invalid value exits `2` | parser, serializer, handler, process |
 | `analyze` | `-o`, `--output` | `-` | selects stdout or an exact new report file | existing/unsafe file is rejected; no force or dry-run | document or real absolute path on stdout; conflict exits `4` | handler, destination, process |
 | `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |
@@ -671,10 +678,10 @@ stdout may be non-seekable. File output streams into an adjacent temporary file
 and then moves or replaces it atomically. The CLI handler never materializes a
 complete project context as one byte buffer or one managed string.
 
-Without `hide-secrets`, exact document generation validates and decodes each
+Without `--hide-secrets`, exact document generation validates and decodes each
 included text file in bounded chunks; it does not retain either the complete
 document or a complete currently processed file as a managed string. With
-`hide-secrets`, each selected text file is classified and inspected once, bounded
+`--hide-secrets`, each selected text file is classified and inspected once, bounded
 to 16 MiB, then written to a per-operation snapshot consumed by the serializer.
 The complete document is never retained in either mode. Binary bytes are never
 embedded in text, Markdown, JSON, or XML context documents.

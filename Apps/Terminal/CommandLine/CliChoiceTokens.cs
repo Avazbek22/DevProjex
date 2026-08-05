@@ -82,7 +82,7 @@ internal sealed class CliChoiceSet<T>(params CliChoiceSet<T>.Choice[] choices)
 		static choice => choice.Token);
 
 	public IReadOnlyList<string> Tokens { get; } =
-		choices.Select(static choice => choice.Token).ToArray();
+		choices.Where(static choice => choice.IsVisible).Select(static choice => choice.Token).ToArray();
 
 	public bool TryParse(string token, out T value) =>
 		_values.TryGetValue(token, out value);
@@ -92,7 +92,7 @@ internal sealed class CliChoiceSet<T>(params CliChoiceSet<T>.Choice[] choices)
 			? token
 			: throw new ArgumentOutOfRangeException(nameof(value), value, null);
 
-	public readonly record struct Choice(string Token, T Value);
+	public readonly record struct Choice(string Token, T Value, bool IsVisible = true);
 }
 
 internal static class CliChoiceSets
@@ -170,7 +170,11 @@ internal static class CliChoiceSets
 				.Select(static descriptor =>
 					new CliChoiceSet<CliExclusionValue>.Choice(
 						descriptor.Token,
-						new CliExclusionValue(descriptor.Id)))
+						new CliExclusionValue(descriptor.Id))),
+			new(
+				ProjectPresentationCatalog.Get(ProjectExclusion.HideSecrets).Token,
+				new CliExclusionValue(ProjectExclusion.HideSecrets),
+				IsVisible: false)
 		]);
 
 	public static CliChoiceSet<CliCompletionShell> CompletionShell { get; } = new(

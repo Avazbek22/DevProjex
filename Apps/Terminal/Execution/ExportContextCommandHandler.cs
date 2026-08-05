@@ -39,7 +39,7 @@ public sealed class ExportContextCommandHandler(
 		if (request.DryRun)
 		{
 			if (request.View is ProjectContextView.Content or ProjectContextView.TreeContent &&
-			    plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true)
+			    plan.Selection.HideSecrets == true)
 			{
 				await services.SecretRedactionOutputPreparer
 					.AnalyzeAsync(

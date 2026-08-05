@@ -28,32 +28,31 @@ public sealed class HideSecretsPathIsolationIntegrationTests
 		var includedFiles = state.Plan.IncludedFiles;
 		var includedFolders = state.Plan.IncludedFolders;
 		var previewDocument = state.PreviewDocument;
+		var pathExclusions = state.Plan.Selection.Exclusions;
 		using var measurement = IgnorePipelineDiagnostics.BeginMeasurement();
-		var enabled = (state.Plan.Selection.Exclusions ?? [])
-			.Append(ProjectExclusion.HideSecrets)
-			.Distinct()
-			.ToArray();
 
-		await controller.SetExclusionsAsync(
+		controller.SetHideSecrets(
 			state,
-			enabled,
+			enabled: true,
 			TestContext.Current.CancellationToken);
 
 		Assert.Contains(ProjectExclusion.SmartIgnore, state.Plan.Selection.Exclusions ?? []);
-		Assert.Contains(ProjectExclusion.HideSecrets, state.Plan.Selection.Exclusions ?? []);
+		Assert.True(state.Plan.Selection.HideSecrets);
+		Assert.Same(pathExclusions, state.Plan.Selection.Exclusions);
 		Assert.Same(effectiveTree, state.Plan.EffectiveTree);
 		Assert.Same(projectedTree, state.Plan.ProjectedTree);
 		Assert.Same(includedFiles, state.Plan.IncludedFiles);
 		Assert.Same(includedFolders, state.Plan.IncludedFolders);
 		Assert.Same(previewDocument, state.PreviewDocument);
 
-		await controller.SetExclusionsAsync(
+		controller.SetHideSecrets(
 			state,
-			enabled.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets).ToArray(),
+			enabled: false,
 			TestContext.Current.CancellationToken);
 
 		Assert.Contains(ProjectExclusion.SmartIgnore, state.Plan.Selection.Exclusions ?? []);
-		Assert.DoesNotContain(ProjectExclusion.HideSecrets, state.Plan.Selection.Exclusions ?? []);
+		Assert.False(state.Plan.Selection.HideSecrets);
+		Assert.Same(pathExclusions, state.Plan.Selection.Exclusions);
 		Assert.Same(effectiveTree, state.Plan.EffectiveTree);
 		Assert.Same(projectedTree, state.Plan.ProjectedTree);
 		Assert.Same(includedFiles, state.Plan.IncludedFiles);

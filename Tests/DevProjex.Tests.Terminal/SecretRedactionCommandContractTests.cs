@@ -7,6 +7,38 @@ public sealed class SecretRedactionCommandContractTests
 	private const string GithubToken = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 
 	[Fact]
+	public async Task ExportContext_AdditiveOptionWorksWithNoPathExclusions()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile(
+			"project/appsettings.json",
+			"{ \"ConnectionStrings\": { \"Main\": \"Host=db;Username=admin;Password=postgres;Database=app\" } }");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content",
+				"--format", "text",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--hide-secrets",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain("Password=postgres", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains(
+			"Password=DEVPROJEX_REDACTED[connection-password#1]",
+			environment.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task AnalyzeJson_ReportsMatchesWithoutClaimingSafety()
 	{
 		using var workspace = CreateWorkspace();
@@ -19,7 +51,7 @@ public sealed class SecretRedactionCommandContractTests
 				"analyze", workspace.ProjectRoot,
 				"--format=JSON",
 				"--git-mode", "none",
-				"--exclude=HIDE-SECRETS",
+				"--hide-secrets",
 				"-o", "-"
 			]);
 
@@ -47,7 +79,7 @@ public sealed class SecretRedactionCommandContractTests
 				"analyze", workspace.ProjectRoot,
 				"--format", "json",
 				"--git-mode", "none",
-				"--exclude", "hide-secrets",
+				"--hide-secrets",
 				"-o", "-"
 			]);
 
@@ -81,7 +113,7 @@ public sealed class SecretRedactionCommandContractTests
 				"--view", "tree-content",
 				"--format", format,
 				"--git-mode", "none",
-				"--exclude", "hide-secrets",
+				"--hide-secrets",
 				"--plain",
 				"-o", "-"
 			]);
@@ -121,7 +153,7 @@ public sealed class SecretRedactionCommandContractTests
 				"export", "project", workspace.ProjectRoot,
 				"--as", kind,
 				"--git-mode", "none",
-				"--exclude", "hide-secrets",
+				"--hide-secrets",
 				"-o", destination
 			]);
 
@@ -160,7 +192,7 @@ public sealed class SecretRedactionCommandContractTests
 				"export", "project", workspace.ProjectRoot,
 				"--as", "folder",
 				"--git-mode", "none",
-				"--exclude", "hide-secrets",
+				"--hide-secrets",
 				"--dry-run",
 				"--language", "en",
 				"-o", destination
@@ -192,7 +224,7 @@ public sealed class SecretRedactionCommandContractTests
 				"--view", "content",
 				"--format", "text",
 				"--git-mode", "none",
-				"--exclude", "hide-secrets",
+				"--hide-secrets",
 				"--plain",
 				"-o", destination
 			]);
@@ -224,7 +256,7 @@ public sealed class SecretRedactionCommandContractTests
 				"--view", "content",
 				"--format", "text",
 				"--git-mode", "none",
-				"--exclude", "hide-secrets",
+				"--hide-secrets",
 				"--dry-run",
 				"-o", destination
 			}
@@ -233,7 +265,7 @@ public sealed class SecretRedactionCommandContractTests
 				"export", "project", workspace.ProjectRoot,
 				"--as", "folder",
 				"--git-mode", "none",
-				"--exclude", "hide-secrets",
+				"--hide-secrets",
 				"--dry-run",
 				"-o", destination
 			};
@@ -248,6 +280,57 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
+	public async Task ExportContext_LegacyExcludeTokenRemainsAccepted()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content",
+				"--format", "text",
+				"--git-mode", "none",
+				"--exclude", "hide-secrets",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task ExportContext_ExplicitFalseOverridesLegacyHideSecretsToken()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content",
+				"--format", "text",
+				"--git-mode", "none",
+				"--exclude", "hide-secrets",
+				"--hide-secrets", "false",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("DEVPROJEX_REDACTED", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task ExportContextHelpAndCompletionExposeCanonicalToken()
 	{
 		using var workspace = CreateWorkspace();
@@ -257,7 +340,11 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await RunAsync(workspace, help, ["export", "context", "--language", "en", "--help"]));
-		Assert.Contains("hide-secrets", help.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--hide-secrets", help.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"none|smart-ignore|hide-secrets",
+			help.StandardOutput,
+			StringComparison.Ordinal);
 		const string completionLine = "devprojex export context . --exclude ";
 		Assert.Equal(
 			CommandLineExitCodes.Success,
@@ -269,7 +356,7 @@ public sealed class SecretRedactionCommandContractTests
 					"--position", completionLine.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
 					completionLine
 				]));
-		Assert.Contains(
+		Assert.DoesNotContain(
 			"hide-secrets",
 			completion.StandardOutput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
 	}
@@ -305,9 +392,10 @@ public sealed class SecretRedactionCommandContractTests
 		string outputRoot,
 		string appDataRoot) : IDisposable
 	{
+		public TemporaryDirectory Temporary { get; } = temporary;
 		public string ProjectRoot { get; } = projectRoot;
 		public string OutputRoot { get; } = outputRoot;
 		public string AppDataRoot { get; } = appDataRoot;
-		public void Dispose() => temporary.Dispose();
+		public void Dispose() => Temporary.Dispose();
 	}
 }

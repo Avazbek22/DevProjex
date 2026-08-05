@@ -335,7 +335,7 @@ Le corrispondenze sono evidenziate nell’anteprima. Fare clic su una di esse pe
 
 Gli output con sostituzioni includono una spiegazione. Anche una copia in cartella o ZIP modifica il testo corrispondente e potrebbe non compilarsi o avviarsi. I file binari non vengono analizzati e sono copiati senza modifiche. Un file di testo selezionato oltre 16 MiB o un errore di rilevamento interrompe l’operazione anziché esportare testo non controllato.
 
-Il contatore segnala soltanto le corrispondenze con le regole. Zero non significa che il progetto sia sicuro. La CLI usa `--exclude hide-secrets`; i dettagli sono in `Docs/HideSecrets.md`.
+Il contatore segnala soltanto le corrispondenze con le regole. Zero non significa che il progetto sia sicuro. La CLI usa `--hide-secrets`; i dettagli sono in `Docs/HideSecrets.md`.
 
 ### 12.4 Usa .gitignore
 Quando è attiva, l’opzione applica ogni `.gitignore` raggiungibile, non solo quello nella radice. Ogni file agisce sulla cartella che lo contiene e su tutte le sottocartelle accessibili, ma non sulle cartelle superiori o adiacenti.

@@ -108,30 +108,24 @@ public sealed class TerminalWorkspaceController(
 		IReadOnlyCollection<ProjectExclusion> exclusions,
 		CancellationToken cancellationToken)
 	{
-		var currentPathExclusions = (state.Plan.Selection.Exclusions ?? [])
-			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
-			.ToHashSet();
-		var requestedPathExclusions = exclusions
-			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
-			.ToHashSet();
-		if (currentPathExclusions.SetEquals(requestedPathExclusions))
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var plan = services.ContextPlanner.ApplyContentTransformationSelection(
-				state.Plan,
-				exclusions);
-			state.ReplaceContentTransformationPlan(plan);
-			if (!exclusions.Contains(ProjectExclusion.HideSecrets))
-				services.SecretRedactionSession.Disable();
-			return;
-		}
-
 		await RebuildAsync(
 				state,
 				state.BuildSelection() with { Exclusions = exclusions },
 				cancellationToken)
 			.ConfigureAwait(false);
-		if (!exclusions.Contains(ProjectExclusion.HideSecrets))
+	}
+
+	public void SetHideSecrets(
+		TerminalWorkspaceState state,
+		bool enabled,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		var plan = services.ContextPlanner.ApplyContentTransformationSelection(
+			state.Plan,
+			enabled);
+		state.ReplaceContentTransformationPlan(plan);
+		if (!enabled)
 			services.SecretRedactionSession.Disable();
 	}
 
@@ -279,7 +273,7 @@ public sealed class TerminalWorkspaceController(
 	}
 
 	private SecretRedactionContext? CreateRedactionContext(ProjectContextPlan plan) =>
-		plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true
+		plan.Selection.HideSecrets == true
 			? new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession)
 			: null;
 
@@ -402,7 +396,7 @@ public sealed class TerminalWorkspaceController(
 					Format: format,
 					DestinationMode: ProjectCopyDestinationMode.Exact,
 					ConflictPolicy: ProjectCopyConflictPolicy.Fail,
-					RedactSecrets: plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true),
+					RedactSecrets: plan.Selection.HideSecrets == true),
 				progress,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
@@ -665,6 +659,8 @@ public sealed class TerminalWorkspaceController(
 				arguments.Add(ProjectSelectionTokens.ToToken(exclusion));
 			}
 		}
+		if (plan.Selection.HideSecrets == true)
+			arguments.Add("--hide-secrets");
 
 		if (!SetEquals(plan.AvailableRoots, plan.SelectedRoots, PathComparer.Default))
 		{

@@ -335,7 +335,7 @@ Les correspondances sont mises en évidence dans l’aperçu. Cliquez sur l’un
 
 Toute sortie contenant des remplacements comporte une explication. Une copie en dossier ou ZIP modifie également le texte correspondant et peut ne plus se compiler ou s’exécuter. Les fichiers binaires ne sont pas analysés et restent inchangés. Un fichier texte sélectionné de plus de 16 Mio ou une erreur de détection arrête l’opération au lieu d’exporter du texte non vérifié.
 
-Le compteur indique seulement les correspondances aux règles. Zéro ne signifie pas que le projet est sûr. La CLI utilise `--exclude hide-secrets` ; les détails figurent dans `Docs/HideSecrets.md`.
+Le compteur indique seulement les correspondances aux règles. Zéro ne signifie pas que le projet est sûr. La CLI utilise `--hide-secrets` ; les détails figurent dans `Docs/HideSecrets.md`.
 
 ### 12.4 Utiliser .gitignore
 Lorsqu’elle est activée, l’option applique chaque `.gitignore` accessible, et pas seulement celui de la racine. Chaque fichier s’applique à son propre dossier et à tous ses sous-dossiers accessibles, jamais aux dossiers parents ou voisins.

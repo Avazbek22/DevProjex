@@ -157,22 +157,32 @@ public sealed class SecretRedactionSession : IDisposable
 	}
 
 	internal bool TryGetCachedFindings(
+		string projectRoot,
 		string filePath,
 		SecretFileMetadata metadata,
+		ISecretDetectionScope detectorScope,
 		out SecretScanCacheEntry entry) =>
-		_scanCache.TryGetByMetadata(filePath, metadata, _detector.RulesIdentity, out entry);
+		_scanCache.TryGetByMetadata(
+			filePath,
+			metadata,
+			detectorScope.GetRulesIdentity(
+				filePath,
+				NormalizeRelativePath(projectRoot, filePath)),
+			out entry);
 
 	internal SecretScanCacheEntry GetOrDetectFindings(
 		string projectRoot,
 		string filePath,
 		string content,
 		SecretFileMetadata metadata,
+		ISecretDetectionScope detectorScope,
 		CancellationToken cancellationToken) =>
 		GetOrDetectFindings(
 			projectRoot,
 			filePath,
 			content.AsSpan(),
 			metadata,
+			detectorScope,
 			cancellationToken);
 
 	internal SecretScanCacheEntry GetOrDetectFindings(
@@ -180,22 +190,24 @@ public sealed class SecretRedactionSession : IDisposable
 		string filePath,
 		ReadOnlySpan<char> content,
 		SecretFileMetadata metadata,
+		ISecretDetectionScope detectorScope,
 		CancellationToken cancellationToken)
 	{
+		var relativePath = NormalizeRelativePath(projectRoot, filePath);
+		var rulesIdentity = detectorScope.GetRulesIdentity(filePath, relativePath);
 		var contentFingerprint = HashText(content);
 		if (_scanCache.TryGetByContent(
 			    filePath,
 			    metadata,
 			    contentFingerprint,
-			    _detector.RulesIdentity,
+			    rulesIdentity,
 			    out var cached))
 		{
 			return cached;
 		}
 
-		var relativePath = NormalizeRelativePath(projectRoot, filePath);
 		var detected = SecretRedactionScope.ResolveNonOverlappingMatches(
-			_detector.Detect(relativePath, content, cancellationToken));
+			detectorScope.Detect(filePath, relativePath, content, cancellationToken));
 		var findings = new SecretFindingMetadata[detected.Count];
 		for (var index = 0; index < detected.Count; index++)
 		{
@@ -216,29 +228,36 @@ public sealed class SecretRedactionSession : IDisposable
 			normalizedPath,
 			metadata,
 			contentFingerprint,
-			_detector.RulesIdentity,
+			rulesIdentity,
 			IsBinary: false,
 			findings,
 			EstimateRetainedBytes(
 				normalizedPath,
 				contentFingerprint,
-				_detector.RulesIdentity,
+				rulesIdentity,
 				findings));
 		_scanCache.Store(entry, detectionExecuted: true);
 		return entry;
 	}
 
-	internal SecretScanCacheEntry StoreBinary(string filePath, SecretFileMetadata metadata)
+	internal SecretScanCacheEntry StoreBinary(
+		string projectRoot,
+		string filePath,
+		SecretFileMetadata metadata,
+		ISecretDetectionScope detectorScope)
 	{
 		var normalizedPath = Path.GetFullPath(filePath);
+		var relativePath = NormalizeRelativePath(projectRoot, filePath);
+		var rulesIdentity = detectorScope.GetRulesIdentity(filePath, relativePath);
 		var entry = new SecretScanCacheEntry(
 			normalizedPath,
 			metadata,
 			ContentFingerprint: string.Empty,
-			_detector.RulesIdentity,
+			rulesIdentity,
 			IsBinary: true,
 			Findings: [],
-			ApproximateRetainedBytes: 96 + normalizedPath.Length * sizeof(char));
+			ApproximateRetainedBytes: 96 +
+			                          (normalizedPath.Length + rulesIdentity.Length) * sizeof(char));
 		_scanCache.Store(entry, detectionExecuted: false);
 		return entry;
 	}
@@ -254,6 +273,9 @@ public sealed class SecretRedactionSession : IDisposable
 		}
 		return new FullContentBufferLease(this);
 	}
+
+	internal ISecretDetectionScope CreateDetectorScope(string projectRoot) =>
+		_detector.CreateScope(projectRoot);
 
 	internal void Publish(SecretRedactionSnapshot snapshot, long overrideRevision)
 	{
@@ -340,6 +362,7 @@ public sealed class SecretRedactionScope
 	private readonly string _projectRoot;
 	private readonly IReadOnlySet<string> _keptOccurrenceIds;
 	private readonly long _overrideRevision;
+	private readonly ISecretDetectionScope _detectorScope;
 	private readonly Dictionary<string, int> _identityIndexes = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, int> _ruleIdentityCounts = new(StringComparer.Ordinal);
 	private int _detectedCount;
@@ -359,6 +382,7 @@ public sealed class SecretRedactionScope
 		_projectRoot = Path.GetFullPath(projectRoot);
 		_keptOccurrenceIds = keptOccurrenceIds;
 		_overrideRevision = overrideRevision;
+		_detectorScope = session.CreateDetectorScope(_projectRoot);
 		LegendText = legendText;
 		SelectionKey = SecretRedactionSession.BuildSelectionKey(_projectRoot, orderedFilePaths);
 	}
@@ -372,11 +396,24 @@ public sealed class SecretRedactionScope
 	public bool TryAnalyzeCached(string filePath)
 	{
 		EnsureActive();
-		var metadata = SecretFileMetadata.Capture(filePath);
-		if (!_session.TryGetCachedFindings(filePath, metadata, out var entry))
+		if (!TryGetCachedEntry(filePath, SecretFileMetadata.Capture(filePath), out var entry))
 			return false;
 		ProcessFindings(filePath, entry.Findings);
 		return true;
+	}
+
+	internal bool TryGetCachedEntry(
+		string filePath,
+		SecretFileMetadata metadata,
+		out SecretScanCacheEntry entry)
+	{
+		EnsureActive();
+		return _session.TryGetCachedFindings(
+			_projectRoot,
+			filePath,
+			metadata,
+			_detectorScope,
+			out entry);
 	}
 
 	internal void Analyze(
@@ -392,20 +429,46 @@ public sealed class SecretRedactionScope
 		SecretFileMetadata metadata,
 		CancellationToken cancellationToken = default)
 	{
-		EnsureActive();
-		var entry = _session.GetOrDetectFindings(
-			_projectRoot,
+		var entry = Detect(
 			filePath,
 			content,
 			metadata,
 			cancellationToken);
-		ProcessFindings(filePath, entry.Findings);
+		ProcessEntry(filePath, entry);
+	}
+
+	internal SecretScanCacheEntry Detect(
+		string filePath,
+		ReadOnlySpan<char> content,
+		SecretFileMetadata metadata,
+		CancellationToken cancellationToken = default)
+	{
+		EnsureActive();
+		return _session.GetOrDetectFindings(
+			_projectRoot,
+			filePath,
+			content,
+			metadata,
+			_detectorScope,
+			cancellationToken);
 	}
 
 	internal void AnalyzeBinary(string filePath, SecretFileMetadata metadata)
 	{
 		EnsureActive();
-		_session.StoreBinary(filePath, metadata);
+		_session.StoreBinary(_projectRoot, filePath, metadata, _detectorScope);
+	}
+
+	internal SecretScanCacheEntry StoreBinary(string filePath, SecretFileMetadata metadata)
+	{
+		EnsureActive();
+		return _session.StoreBinary(_projectRoot, filePath, metadata, _detectorScope);
+	}
+
+	internal void ProcessEntry(string filePath, SecretScanCacheEntry entry)
+	{
+		EnsureActive();
+		ProcessFindings(filePath, entry.Findings);
 	}
 
 	public SecretTextRedactionResult Redact(
@@ -436,6 +499,7 @@ public sealed class SecretRedactionScope
 			filePath,
 			content,
 			metadata,
+			_detectorScope,
 			cancellationToken);
 		return ProcessFindings(filePath, entry.Findings);
 	}

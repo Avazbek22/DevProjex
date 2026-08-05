@@ -5,10 +5,14 @@
 │  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
 │    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
 │    [x] readme.md                        │││   │   └── Handler.cs                                        ││  ( ) Tracked Git files only                       │
-│                                         │││   └── App.cs                                                ││  EXCLUSIONS                                       │
-│                                         ││├── global.json                                               ││  [ ] All                                          │
-│                                         ││└── readme.md                                                 ││  [x] Smart ignore                                 │
-│                                         ││                                                              ││  [ ] Hide secrets                                 │
+│                                         │││   └── App.cs                                                ││  SMART SECRETS:                                   │
+│                                         ││├── global.json                                               ││  [ ] Hide secrets                                 │
+│                                         ││└── readme.md                                                 ││  Checks selected text files only. Binary          │
+│                                         ││                                                              ││  files are not inspected, and no matches is       │
+│                                         ││                                                              ││  not a safety guarantee.                          │
+│                                         ││                                                              ││  EXCLUSIONS                                       │
+│                                         ││                                                              ││  [x] All                                          │
+│                                         ││                                                              ││  [x] Smart ignore                                 │
 │                                         ││                                                              ││  [x] Empty folders                                │
 │                                         ││                                                              ││  [x] Empty files                                  │
 │                                         ││                                                              ││  [x] Hidden folders                               │
@@ -24,10 +28,6 @@
 │                                         ││                                                              ││  ROOT FOLDERS                                     │
 │                                         ││                                                              ││  [x] All                                          │
 │                                         ││                                                              ││  [x] src                                          │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │

@@ -364,7 +364,7 @@ Las coincidencias se resaltan en la vista previa. Haga clic en una para conserva
 
 Las salidas con sustituciones incluyen una explicación. Una copia en carpeta o ZIP también modifica el texto coincidente y podría dejar de compilarse o ejecutarse. Los archivos binarios no se analizan y se copian sin cambios. Un archivo de texto seleccionado de más de 16 MiB o un fallo de detección detiene la operación en lugar de exportar texto sin revisar.
 
-El contador solo informa de coincidencias con las reglas. Cero no significa que el proyecto sea seguro. En la CLI se usa `--exclude hide-secrets`; los detalles están en `Docs/HideSecrets.md`.
+El contador solo informa de coincidencias con las reglas. Cero no significa que el proyecto sea seguro. En la CLI se usa `--hide-secrets`; los detalles están en `Docs/HideSecrets.md`.
 
 ### 12.4 Usar .gitignore
 Cuando está habilitado, DevProjex aplica todos los `.gitignore` accesibles, no solo el archivo en la raíz de la carpeta abierta.

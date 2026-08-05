@@ -60,12 +60,6 @@ public static class ProjectPresentationCatalog
 			"Settings.Ignore.SmartIgnore",
 			0),
 		new(
-			ProjectExclusion.HideSecrets,
-			IgnoreOptionId.HideSecrets,
-			"hide-secrets",
-			"Settings.Ignore.HideSecrets",
-			1),
-		new(
 			ProjectExclusion.EmptyFolders,
 			IgnoreOptionId.EmptyFolders,
 			"empty-folders",
@@ -109,6 +103,27 @@ public static class ProjectPresentationCatalog
 			8)
 	];
 
+	/// <summary>
+	/// Content transformations operate on selected bytes after path filtering. Keeping them out
+	/// of <see cref="Exclusions"/> prevents UI and cache consumers from treating them as tree rules.
+	/// </summary>
+	public static IReadOnlyList<ProjectExclusionDescriptor> ContentTransformations { get; } =
+	[
+		new(
+			ProjectExclusion.HideSecrets,
+			IgnoreOptionId.HideSecrets,
+			"hide-secrets",
+			"Settings.Ignore.HideSecrets",
+			0)
+	];
+
+	/// <summary>
+	/// Preserves parsing of v5 --exclude tokens while new command surfaces expose transformations
+	/// through dedicated additive options.
+	/// </summary>
+	public static IReadOnlyList<ProjectExclusionDescriptor> LegacyExclusionChoices { get; } =
+		[.. Exclusions, .. ContentTransformations];
+
 	public static IReadOnlyList<ProjectContextViewDescriptor> PreviewModes { get; } =
 	[
 		new(ProjectContextView.Tree, "tree", "Preview.Mode.Tree", 0),
@@ -125,7 +140,7 @@ public static class ProjectPresentationCatalog
 	];
 
 	public static ProjectExclusionDescriptor Get(ProjectExclusion exclusion) =>
-		Exclusions.FirstOrDefault(descriptor => descriptor.Id == exclusion) ??
+		LegacyExclusionChoices.FirstOrDefault(descriptor => descriptor.Id == exclusion) ??
 		throw new ArgumentOutOfRangeException(nameof(exclusion), exclusion, null);
 
 	public static GitFilteringDescriptor Get(GitFilteringMode mode) =>

@@ -27,7 +27,7 @@ public static class ProjectSelectionTokens
 
 	public static bool TryParseExclusion(string? value, out ProjectExclusion exclusion)
 	{
-		var descriptor = ProjectPresentationCatalog.Exclusions.FirstOrDefault(
+		var descriptor = ProjectPresentationCatalog.LegacyExclusionChoices.FirstOrDefault(
 			item => string.Equals(item.Token, value, StringComparison.OrdinalIgnoreCase));
 		exclusion = descriptor?.Id ?? (ProjectExclusion)(-1);
 		return descriptor is not null;

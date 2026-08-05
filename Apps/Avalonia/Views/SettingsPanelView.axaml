@@ -93,7 +93,7 @@
           Background="Transparent"
           BorderThickness="0"
           IsEnabled="{Binding AreFilterSettingsEnabled}">
-    <Grid RowDefinitions="Auto,*,*,*">
+    <Grid RowDefinitions="Auto,*,Auto,*,*">
       <!-- Apply stays at the top because filter options remain intentionally staged. -->
       <Button Name="ApplySettingsButton"
               Grid.Row="0"
@@ -118,7 +118,7 @@
         <Border Grid.Row="1" Classes="checklist-border">
           <ListBox Name="IgnoreOptionsList"
                    Classes="settings-list"
-                   ItemsSource="{Binding IgnoreOptions}"
+                   ItemsSource="{Binding PathIgnoreOptions}"
                    SelectionMode="Multiple"
                    ScrollViewer.IsScrollInertiaEnabled="True"
                    ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -147,8 +147,38 @@
         </Border>
       </Grid>
 
+	  <!-- Smart Secrets transforms selected content; it is intentionally separate from path filters. -->
+	  <Grid Grid.Row="2"
+			RowDefinitions="Auto,Auto"
+			Margin="0,10,0,0"
+			IsVisible="{Binding HasHideSecretsOption}"
+			IsEnabled="{Binding AreFilterSettingsEnabled}">
+		<TextBlock Grid.Row="0"
+				   Classes="section-title"
+				   Text="{Binding SettingsSecretsTitle}"
+				   Margin="0,0,0,6"
+				   FontSize="15" />
+		<Border Grid.Row="1" Classes="checklist-border" Padding="5,3">
+		  <StackPanel Spacing="2">
+			<ContentControl Content="{Binding HideSecretsOption}">
+			  <ContentControl.ContentTemplate>
+				<DataTemplate x:DataType="vm:IgnoreOptionViewModel">
+				  <CheckBox Classes="list-item settings-list-entry"
+							Content="{Binding Label}"
+							IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+				</DataTemplate>
+			  </ContentControl.ContentTemplate>
+			</ContentControl>
+			<TextBlock Text="{Binding SettingsSecretsNotice}"
+					   Foreground="{DynamicResource AppMutedTextBrush}"
+					   FontSize="11"
+					   TextWrapping="Wrap" />
+		  </StackPanel>
+		</Border>
+	  </Grid>
+
       <!-- Extensions section - equal star height -->
-      <Grid Grid.Row="2" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="ExtensionsHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="ExtensionsHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsExtensions}" Margin="0" FontSize="15"/>
           <CheckBox Name="ExtensionsAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllExtensions}"
@@ -179,7 +209,7 @@
       </Grid>
 
       <!-- RootFolders section - equal star height -->
-      <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="4" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="RootFoldersHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="RootFoldersHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsRootFolders}" Margin="0" FontSize="15"/>
           <CheckBox Name="RootFoldersAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"

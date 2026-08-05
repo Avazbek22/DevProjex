@@ -364,7 +364,7 @@ As ocorrências são destacadas na visualização. Clique em uma delas para mant
 
 Saídas com substituições incluem uma explicação. Uma cópia em pasta ou ZIP também altera o texto correspondente e pode deixar de compilar ou executar. Arquivos binários não são verificados e são copiados sem alterações. Um arquivo de texto selecionado com mais de 16 MiB ou uma falha de detecção interrompe a operação em vez de exportar texto não verificado.
 
-O contador informa apenas correspondências com as regras. Zero não significa que o projeto é seguro. Na CLI, use `--exclude hide-secrets`; os detalhes estão em `Docs/HideSecrets.md`.
+O contador informa apenas correspondências com as regras. Zero não significa que o projeto é seguro. Na CLI, use `--hide-secrets`; os detalhes estão em `Docs/HideSecrets.md`.
 
 ### 12.4 Usar .gitignore
 Quando ativado, o DevProjex aplica todos os `.gitignore` acessíveis, não apenas o arquivo na raiz da pasta aberta.

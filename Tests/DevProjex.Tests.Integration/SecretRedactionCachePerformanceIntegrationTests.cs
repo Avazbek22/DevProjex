@@ -51,7 +51,10 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 		Assert.Equal(FileCount, firstDiagnostics.EntryCount);
 		Assert.InRange(firstDiagnostics.RetainedBytes, 1, firstDiagnostics.MaximumRetainedBytes);
 		Assert.Equal(0, firstDiagnostics.ActiveFullContentBuffers);
-		Assert.InRange(firstDiagnostics.PeakFullContentBuffers, 1, 1);
+		Assert.InRange(
+			firstDiagnostics.PeakFullContentBuffers,
+			1,
+			Math.Min(8, Math.Max(1, Environment.ProcessorCount)));
 		var sourceCharacterCount = FileCount * (long)CharactersPerFile;
 		Assert.True(
 			firstAllocated < sourceCharacterCount,
@@ -120,14 +123,16 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 
 	private sealed class CountingDetector : ISecretDetector
 	{
-		public int CallCount { get; private set; }
+		private int _callCount;
+
+		public int CallCount => Volatile.Read(ref _callCount);
 
 		public IReadOnlyList<DetectedSecret> Detect(
 			string repositoryRelativePath,
 			string content,
 			CancellationToken cancellationToken = default)
 		{
-			CallCount++;
+			Interlocked.Increment(ref _callCount);
 			cancellationToken.ThrowIfCancellationRequested();
 			var start = content.IndexOf(Secret, StringComparison.Ordinal);
 			return start < 0
@@ -140,7 +145,7 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 			ReadOnlySpan<char> content,
 			CancellationToken cancellationToken = default)
 		{
-			CallCount++;
+			Interlocked.Increment(ref _callCount);
 			cancellationToken.ThrowIfCancellationRequested();
 			var start = content.IndexOf(Secret, StringComparison.Ordinal);
 			return start < 0
@@ -151,8 +156,11 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 
 	private sealed class CountingFileContentAnalyzer(IFileContentAnalyzer inner) : IFileContentAnalyzer
 	{
-		public int FullContentReadCount { get; private set; }
-		public long FullContentBytesRead { get; private set; }
+		private int _fullContentReadCount;
+		private long _fullContentBytesRead;
+
+		public int FullContentReadCount => Volatile.Read(ref _fullContentReadCount);
+		public long FullContentBytesRead => Interlocked.Read(ref _fullContentBytesRead);
 
 		public FileContentClassification? ClassifyWithoutReading(string path) =>
 			inner.ClassifyWithoutReading(path);
@@ -165,8 +173,8 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 			var result = await inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
 			if (result.Content is { IsEstimated: false } content)
 			{
-				FullContentReadCount++;
-				FullContentBytesRead += content.SizeBytes;
+				Interlocked.Increment(ref _fullContentReadCount);
+				Interlocked.Add(ref _fullContentBytesRead, content.SizeBytes);
 			}
 			return result;
 		}
@@ -192,10 +200,24 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 			if (snapshot.Result.Classification == FileContentClassification.Text &&
 			    snapshot.Result.Metrics is { } metrics)
 			{
-				FullContentReadCount++;
-				FullContentBytesRead += metrics.SizeBytes;
+				Interlocked.Increment(ref _fullContentReadCount);
+				Interlocked.Add(ref _fullContentBytesRead, metrics.SizeBytes);
 			}
 			return snapshot;
+		}
+
+		public async ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default)
+		{
+			var buffer = await inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+			if (buffer.Classification == FileContentClassification.Text)
+			{
+				Interlocked.Increment(ref _fullContentReadCount);
+				Interlocked.Add(ref _fullContentBytesRead, buffer.SizeBytes);
+			}
+			return buffer;
 		}
 
 		public ValueTask<TextFileContent?> TryReadAsTextAsync(

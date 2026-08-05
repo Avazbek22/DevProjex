@@ -2200,7 +2200,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (kind is null)
 			return;
 		var selectedKind = kind.Value;
-		if (_state.Plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true &&
+		if (_state.Plan.Selection.HideSecrets == true &&
 		    !Confirm(
 			    L("Dialog.ProjectCopy.Redaction.Title"),
 			    L("Dialog.ProjectCopy.Redaction.Message")))
@@ -3366,9 +3366,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var values = SelectValues(
 			L("Terminal.Tui.Exclusions"),
 			available.Select(static item => item.Label).ToArray(),
-			current.Select(exclusion => labelsById[exclusion]).ToArray());
-		return values?.Select(value => idsByLabel[value])
-			.ToArray();
+			current.Where(labelsById.ContainsKey).Select(exclusion => labelsById[exclusion]).ToArray());
+		return values?.Select(value => idsByLabel[value]).ToArray();
 	}
 
 	private IReadOnlyCollection<string>? SelectValues(

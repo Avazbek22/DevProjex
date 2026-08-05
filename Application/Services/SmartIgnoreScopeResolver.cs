@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 
 namespace DevProjex.Application.Services;
@@ -9,6 +10,8 @@ public sealed class SmartIgnoreScopeResolver : ISmartIgnoreScopeResolver
 	private readonly SmartIgnoreRuleDescriptor[] _descriptors;
 	private readonly FrozenDictionary<string, SmartIgnoreRuleDescriptor[]> _directoryRules;
 	private readonly FrozenDictionary<string, SmartIgnoreRuleDescriptor[]> _fileRules;
+	private readonly ConcurrentDictionary<string, Lazy<ProjectRootFacts>> _currentFileScopeFacts =
+		new(PathComparer.Default);
 
 	public SmartIgnoreScopeResolver(
 		string rootPath,
@@ -50,6 +53,51 @@ public sealed class SmartIgnoreScopeResolver : ISmartIgnoreScopeResolver
 			name,
 			isDirectory: false,
 			_fileRules);
+
+	public SmartProjectScopeResolution ResolveFileOwningScope(
+		string fullFilePath,
+		IReadOnlySet<string>? additionalMarkerFiles = null,
+		IReadOnlySet<string>? additionalMarkerExtensions = null)
+	{
+		string normalizedPath;
+		try
+		{
+			normalizedPath = PathUtility.Normalize(fullFilePath);
+		}
+		catch
+		{
+			var missing = ProjectRootFacts.Missing(fullFilePath);
+			return new SmartProjectScopeResolution(fullFilePath, missing, false);
+		}
+
+		var currentDirectory = Path.GetDirectoryName(normalizedPath);
+		while (!string.IsNullOrWhiteSpace(currentDirectory) && IsWithinRoot(currentDirectory))
+		{
+			// Secret scope changes affect what bytes may leave the application. Resolve the
+			// small set of candidate configuration directories against current topology rather
+			// than accepting the short-lived discovery cache used by path presentation.
+			var facts = GetCurrentFileScopeFacts(currentDirectory);
+			var hasMarker = HasKnownProjectMarker(facts) ||
+			                additionalMarkerFiles is { Count: > 0 } && facts.HasAnyMarkerFile(additionalMarkerFiles) ||
+			                additionalMarkerExtensions is { Count: > 0 } && facts.HasAnyFileExtension(additionalMarkerExtensions);
+			if (hasMarker)
+				return new SmartProjectScopeResolution(currentDirectory, facts, true);
+			if (PathComparer.Default.Equals(currentDirectory, _rootPath))
+				return new SmartProjectScopeResolution(currentDirectory, facts, false);
+			currentDirectory = Path.GetDirectoryName(currentDirectory);
+		}
+
+		var rootFacts = GetCurrentFileScopeFacts(_rootPath);
+		return new SmartProjectScopeResolution(_rootPath, rootFacts, false);
+	}
+
+	private ProjectRootFacts GetCurrentFileScopeFacts(string path) =>
+		_currentFileScopeFacts.GetOrAdd(
+			path,
+			static (candidate, provider) => new Lazy<ProjectRootFacts>(
+				() => provider.Get(candidate, forceRefresh: true),
+				LazyThreadSafetyMode.ExecutionAndPublication),
+			_rootFactsProvider).Value;
 
 	private SmartIgnoreScopeDecision Evaluate(
 		string fullPath,

@@ -1140,7 +1140,8 @@ public sealed class DevProjexCommandTree
 		result.GetResult(selection.Extensions) is { Implicit: false } ||
 		result.GetResult(selection.SelectedPaths) is { Implicit: false } ||
 		result.GetResult(selection.GitMode) is { Implicit: false } ||
-		result.GetResult(selection.Exclusions) is { Implicit: false };
+		result.GetResult(selection.Exclusions) is { Implicit: false } ||
+		result.GetResult(selection.HideSecrets) is { Implicit: false };
 
 	private int? ValidateDesktopOpenGitReadiness(
 		TerminalServices services,

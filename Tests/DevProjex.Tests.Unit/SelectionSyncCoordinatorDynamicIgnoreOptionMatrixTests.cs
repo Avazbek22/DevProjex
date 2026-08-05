@@ -76,7 +76,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreOptionMatrixTests
 
 		Assert.True(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
-		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
 	}
 
 	[Theory]

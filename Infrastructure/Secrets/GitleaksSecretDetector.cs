@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using DevProjex.Application.Secrets;
@@ -21,6 +22,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	internal static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(250);
 	private const string ResourceSuffix = ".Secrets.Rules.gitleaks-v8.30.1.toml";
 	private const string GitleaksAllowSignature = "gitleaks:allow";
+	private const string GenericApiKeyRuleId = "generic-api-key";
+	private static readonly string[] GenericApiKeySignals =
+	[
+		"key", "api", "token", "secret", "client", "passwd", "password", "auth", "access"
+	];
 	private readonly Lazy<CompiledConfiguration> _configuration;
 
 	public GitleaksSecretDetector()
@@ -38,6 +44,50 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	public int RuleCount => _configuration.Value.Rules.Count;
 	public string RulesIdentity => $"gitleaks:{RulesVersion}:{ConfigurationSha256}";
+
+	internal GitleaksCandidateStatistics InspectCandidates(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
+		var configuration = _configuration.Value;
+		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+		Span<ulong> candidates = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
+		configuration.KeywordPrefilter.FindCandidates(content, candidates, cancellationToken);
+		var candidateCount = 0;
+		foreach (var ruleOrder in EnumerateCandidateRuleOrders(candidates, configuration.Rules.Count))
+		{
+			var rule = configuration.Rules[ruleOrder];
+			if (rule.ContentRegex is not null &&
+			    rule.AppliesToPath(normalizedPath))
+			{
+				candidateCount++;
+			}
+		}
+
+		return new GitleaksCandidateStatistics(candidateCount);
+	}
+
+	internal IReadOnlyList<string> InspectCandidateRuleIds(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
+		var configuration = _configuration.Value;
+		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+		Span<ulong> candidates = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
+		configuration.KeywordPrefilter.FindCandidates(content, candidates, cancellationToken);
+		var ids = new List<string>();
+		foreach (var ruleOrder in EnumerateCandidateRuleOrders(candidates, configuration.Rules.Count))
+		{
+			var rule = configuration.Rules[ruleOrder];
+			if (rule.ContentRegex is not null && rule.AppliesToPath(normalizedPath))
+				ids.Add(rule.Id);
+		}
+		return ids;
+	}
 
 	public IReadOnlyList<DetectedSecret> Detect(
 		string repositoryRelativePath,
@@ -81,30 +131,33 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
 		if (configuration.GlobalAllowlists.Any(allowlist => allowlist.AllowsWholeFileByPath(normalizedPath)))
 			return [];
-		var candidateRules = configuration.KeywordPrefilter.FindCandidates(
-			content,
-			configuration.Rules.Count,
-			cancellationToken);
+		Span<ulong> candidateRules = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
+		configuration.KeywordPrefilter.FindCandidates(content, candidateRules, cancellationToken);
 
 		var findings = new List<DetectedSecret>();
-		foreach (var rule in configuration.Rules)
+		foreach (var ruleOrder in EnumerateCandidateRuleOrders(candidateRules, configuration.Rules.Count))
 		{
+			var rule = configuration.Rules[ruleOrder];
 			cancellationToken.ThrowIfCancellationRequested();
-			if (rule.Regex is null ||
-			    !rule.AppliesToPath(normalizedPath) ||
-			    !candidateRules[rule.Order])
+			if (rule.ContentRegex is null ||
+			    !rule.AppliesToPath(normalizedPath))
 				continue;
-
+			if (rule.Id.Equals(GenericApiKeyRuleId, StringComparison.Ordinal) &&
+			    !HasGenericApiKeyEvidence(content))
+			{
+				continue;
+			}
 			try
 			{
-				foreach (var valueMatch in rule.Regex.EnumerateMatches(content))
+				var contentRegex = rule.ContentRegex.Value;
+				foreach (var valueMatch in contentRegex.EnumerateMatches(content))
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 					// ValueMatch deliberately omits capture groups. Re-running the expression over
 					// the already bounded full-match slice keeps the full file allocation-free while
 					// preserving the reviewed Gitleaks secretGroup semantics.
 					var matchText = content.Slice(valueMatch.Index, valueMatch.Length).ToString();
-					var captureMatch = rule.Regex.Match(matchText);
+					var captureMatch = contentRegex.Match(matchText);
 					if (!captureMatch.Success ||
 					    !TryExtractSecret(rule, captureMatch, out var secretGroup))
 						continue;
@@ -145,6 +198,84 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		return findings;
 	}
+
+	private static bool HasGenericApiKeyEvidence(ReadOnlySpan<char> content)
+	{
+		for (var delimiter = 0; delimiter < content.Length; delimiter++)
+		{
+			if (content[delimiter] is not ('=' or ':' or '>'))
+				continue;
+
+			var lineStart = content[..delimiter].LastIndexOf('\n') + 1;
+			var keyWindowStart = Math.Max(lineStart, delimiter - 48);
+			var keyWindow = content[keyWindowStart..delimiter];
+			var hasSignal = false;
+			foreach (var signal in GenericApiKeySignals)
+			{
+				if (!keyWindow.Contains(signal, StringComparison.OrdinalIgnoreCase))
+					continue;
+				hasSignal = true;
+				break;
+			}
+			if (!hasSignal)
+			{
+				continue;
+			}
+
+			var valueStart = delimiter + 1;
+			var skipped = 0;
+			while (valueStart < content.Length && skipped < 8 &&
+			       (char.IsWhiteSpace(content[valueStart]) ||
+			        content[valueStart] is '=' or '>' or ':' or '<' or '|' or '\'' or '"' or '`'))
+			{
+				valueStart++;
+				skipped++;
+			}
+
+			var valueEnd = valueStart;
+			while (valueEnd < content.Length &&
+			       valueEnd - valueStart < 150 &&
+			       IsGenericApiKeyCharacter(content[valueEnd]))
+			{
+				valueEnd++;
+			}
+			var candidate = content[valueStart..valueEnd];
+			if (candidate.Length >= 10 && CalculateShannonEntropy(candidate) > 3.5d)
+				return true;
+		}
+		return false;
+	}
+
+	private static bool IsGenericApiKeyCharacter(char character) =>
+		char.IsLetterOrDigit(character) || character is '_' or '.' or '=' or '-';
+
+	private static double CalculateShannonEntropy(ReadOnlySpan<char> value)
+	{
+		Span<int> frequencies = stackalloc int[128];
+		foreach (var character in value)
+		{
+			if (character >= frequencies.Length)
+				return CalculateShannonEntropy(value.ToString());
+			frequencies[character]++;
+		}
+
+		var entropy = 0d;
+		foreach (var frequency in frequencies)
+		{
+			if (frequency == 0)
+				continue;
+			var probability = (double)frequency / value.Length;
+			entropy -= probability * Math.Log2(probability);
+		}
+		return entropy;
+	}
+
+	private static int GetCandidateWordCount(int ruleCount) => (ruleCount + 63) / 64;
+
+	private static CandidateRuleOrderEnumerable EnumerateCandidateRuleOrders(
+		ReadOnlySpan<ulong> candidates,
+		int ruleCount) =>
+		new(candidates, ruleCount);
 
 	private static bool TryExtractSecret(
 		CompiledRule rule,
@@ -260,11 +391,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		if (rules.Select(static rule => rule.Id).Distinct(StringComparer.Ordinal).Count() != rules.Count)
 			throw new SecretDetectionException("The Gitleaks configuration contains duplicate rule identifiers.");
 		var pathOnlyRules = rules
-			.Where(static rule => rule.Regex is null)
+			.Where(static rule => rule.ContentRegex is null)
 			.Select(static rule => rule.Id)
 			.ToArray();
 		if (pathOnlyRules is not [PathOnlyRuleId] ||
-		    rules.Count(static rule => rule.Regex is not null) != ExpectedContentRuleCount)
+		    rules.Count(static rule => rule.ContentRegex is not null) != ExpectedContentRuleCount)
 		{
 			throw new SecretDetectionException(
 				"The reviewed Gitleaks content-rule boundary changed and requires an explicit port decision.");
@@ -280,10 +411,10 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	{
 		var id = GetRequiredString(table, "id");
 		var regex = GetOptionalString(table, "regex") is { Length: > 0 } pattern
-			? CompileRegex(pattern, $"rule '{id}'")
+			? CreateDeferredRegex(pattern, $"rule '{id}'")
 			: null;
 		var pathRegex = GetOptionalString(table, "path") is { Length: > 0 } path
-			? CompileRegex(path, $"path for rule '{id}'")
+			? CreateDeferredRegex(path, $"path for rule '{id}'")
 			: null;
 		var allowlists = table.TryGetValue("allowlists", out var allowlistValue) &&
 		                 allowlistValue is TomlTableArray allowlistTables
@@ -302,8 +433,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static CompiledAllowlist CompileAllowlist(TomlTable table) =>
 		new(
-			GetStringArray(table, "paths").Select(pattern => CompileRegex(pattern, "allowlist path")).ToArray(),
-			GetStringArray(table, "regexes").Select(pattern => CompileRegex(pattern, "allowlist expression")).ToArray(),
+			GetStringArray(table, "paths").Select(pattern => CreateDeferredRegex(pattern, "allowlist path")).ToArray(),
+			GetStringArray(table, "regexes").Select(pattern => CreateDeferredRegex(pattern, "allowlist expression")).ToArray(),
 			GetStringArray(table, "stopwords"),
 			GetOptionalString(table, "regexTarget") switch
 			{
@@ -330,6 +461,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			throw new SecretDetectionException($"Invalid {context} expression.", exception);
 		}
 	}
+
+	private static Lazy<Regex> CreateDeferredRegex(string pattern, string context) =>
+		new(
+			() => CompileRegex(pattern, context),
+			LazyThreadSafetyMode.ExecutionAndPublication);
 
 	private static string GetRequiredString(TomlTable table, string key) =>
 		GetOptionalString(table, key) is { Length: > 0 } value
@@ -376,15 +512,15 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private sealed record CompiledRule(
 		string Id,
-		Regex? Regex,
-		Regex? PathRegex,
+		Lazy<Regex>? ContentRegex,
+		Lazy<Regex>? PathRegex,
 		double Entropy,
 		int SecretGroup,
 		IReadOnlyList<string> Keywords,
 		IReadOnlyList<CompiledAllowlist> Allowlists,
 		int Order)
 	{
-		public bool AppliesToPath(string path) => PathRegex?.IsMatch(path) ?? true;
+		public bool AppliesToPath(string path) => PathRegex?.Value.IsMatch(path) ?? true;
 	}
 
 	/// <summary>
@@ -453,14 +589,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			return new KeywordPrefilter(nodes, rulesWithoutKeywords);
 		}
 
-		public bool[] FindCandidates(
+		public void FindCandidates(
 			ReadOnlySpan<char> content,
-			int ruleCount,
+			Span<ulong> candidates,
 			CancellationToken cancellationToken)
 		{
-			var candidates = new bool[ruleCount];
+			candidates.Clear();
 			foreach (var ruleOrder in _rulesWithoutKeywords)
-				candidates[ruleOrder] = true;
+				MarkCandidate(candidates, ruleOrder);
 
 			var state = 0;
 			for (var index = 0; index < content.Length; index++)
@@ -473,11 +609,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				if (_nodes[state].Transitions.TryGetValue(character, out var next))
 					state = next;
 				foreach (var ruleOrder in _nodes[state].RuleOrders)
-					candidates[ruleOrder] = true;
+					MarkCandidate(candidates, ruleOrder);
 			}
-
-			return candidates;
 		}
+
+		private static void MarkCandidate(Span<ulong> candidates, int ruleOrder) =>
+			candidates[ruleOrder >> 6] |= 1UL << (ruleOrder & 63);
 
 		private sealed class Node
 		{
@@ -487,14 +624,60 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		}
 	}
 
+	private readonly ref struct CandidateRuleOrderEnumerable
+	{
+		private readonly ReadOnlySpan<ulong> _candidates;
+		private readonly int _ruleCount;
+
+		public CandidateRuleOrderEnumerable(ReadOnlySpan<ulong> candidates, int ruleCount)
+		{
+			_candidates = candidates;
+			_ruleCount = ruleCount;
+		}
+
+		public Enumerator GetEnumerator() => new(_candidates, _ruleCount);
+
+		public ref struct Enumerator
+		{
+			private readonly ReadOnlySpan<ulong> _candidates;
+			private readonly int _ruleCount;
+			private int _wordIndex = -1;
+			private ulong _remaining;
+
+			public Enumerator(ReadOnlySpan<ulong> candidates, int ruleCount)
+			{
+				_candidates = candidates;
+				_ruleCount = ruleCount;
+			}
+
+			public int Current { get; private set; }
+
+			public bool MoveNext()
+			{
+				while (_remaining == 0)
+				{
+					_wordIndex++;
+					if (_wordIndex >= _candidates.Length)
+						return false;
+					_remaining = _candidates[_wordIndex];
+				}
+
+				var bit = BitOperations.TrailingZeroCount(_remaining);
+				_remaining &= _remaining - 1;
+				Current = (_wordIndex << 6) + bit;
+				return Current < _ruleCount;
+			}
+		}
+	}
+
 	private sealed record CompiledAllowlist(
-		IReadOnlyList<Regex> Paths,
-		IReadOnlyList<Regex> Regexes,
+		IReadOnlyList<Lazy<Regex>> Paths,
+		IReadOnlyList<Lazy<Regex>> Regexes,
 		IReadOnlyList<string> Stopwords,
 		AllowlistRegexTarget RegexTarget,
 		bool RequireAll)
 	{
-		public bool AllowsPath(string path) => Paths.Any(regex => regex.IsMatch(path));
+		public bool AllowsPath(string path) => Paths.Any(regex => regex.Value.IsMatch(path));
 
 		public bool AllowsWholeFileByPath(string path) =>
 			IsPathSufficientForAllowlist(
@@ -511,7 +694,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				AllowlistRegexTarget.Line => context.Line,
 				_ => context.Secret
 			};
-			var regexMatches = Regexes.Any(regex => regex.IsMatch(target));
+			var regexMatches = Regexes.Any(regex => regex.Value.IsMatch(target));
 			var stopwordMatches = Stopwords.Any(stopword =>
 				context.Secret.Contains(stopword, StringComparison.OrdinalIgnoreCase));
 			if (!RequireAll)
@@ -541,3 +724,5 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		Line
 	}
 }
+
+internal readonly record struct GitleaksCandidateStatistics(int CandidateRuleCount);

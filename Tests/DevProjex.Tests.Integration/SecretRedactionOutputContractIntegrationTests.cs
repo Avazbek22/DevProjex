@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using DevProjex.Application.Context;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Secrets;
+using DevProjex.Infrastructure.SmartIgnore;
 
 namespace DevProjex.Tests.Integration;
 
@@ -11,6 +12,10 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	private const string GithubToken = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 	private const string GithubTokenSecond = "ghp_" + "Z8y6X4w2V0u9T7s5R3q1P8n6M4k2J0h9G7f5";
 	private const string AwsAccessKey = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+	private const string UriPassword = "u7!p";
+	private const string ConnectionPassword = "p0st!";
+	private const string ConfigurationPassword = "Admin123!";
+	private const string EnvironmentSecret = "this is my signing key";
 	private const string PrivateKeyBodyFragment =
 		"MIIEvQIBADANBgkq" +
 		"hkiG9w0BAQEFAASC" +
@@ -28,7 +33,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		using var workspace = CreateWorkspace();
 		var sourceBefore = CaptureSourceBytes(workspace.SourceRoot);
 		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		var session = new SecretRedactionSession(CreateDetector());
 		var context = new SecretRedactionContext(workspace.SourceRoot, session);
 		var plan = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: true);
 		var treeExporter = new TreeExportService();
@@ -62,10 +67,10 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			session,
 			ProjectCopyExportFormat.Zip);
 
-		Assert.Equal(4, preview.Redactions.Count);
-		Assert.Equal(4, preview.RedactionSummary?.RedactedCount);
-		Assert.Equal(4, folder.RedactedValueCount);
-		Assert.Equal(4, zip.RedactedValueCount);
+		Assert.Equal(8, preview.Redactions.Count);
+		Assert.Equal(8, preview.RedactionSummary?.RedactedCount);
+		Assert.Equal(8, folder.RedactedValueCount);
+		Assert.Equal(8, zip.RedactedValueCount);
 		Assert.All(
 			new[] { previewPayload, selectedContent }.Concat(contextDocuments.Values),
 			AssertNoTextSecret);
@@ -84,7 +89,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	{
 		using var workspace = CreateWorkspace(repeatedGithubOnly: true);
 		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		var session = new SecretRedactionSession(CreateDetector());
 		var context = new SecretRedactionContext(workspace.SourceRoot, session);
 		var plan = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: true);
 		var previewBuilder = new PreviewDocumentBuilder(analyzer);
@@ -201,11 +206,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var first = await BuildContextDocumentsAsync(
 			plan,
 			analyzer,
-			new SecretRedactionSession(new GitleaksSecretDetector()));
+			new SecretRedactionSession(CreateDetector()));
 		var second = await BuildContextDocumentsAsync(
 			plan,
 			analyzer,
-			new SecretRedactionSession(new GitleaksSecretDetector()));
+			new SecretRedactionSession(CreateDetector()));
 
 		Assert.Equal(first.Keys, second.Keys);
 		foreach (var format in first.Keys)
@@ -242,7 +247,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, binaryPath, ownsTemporary: false);
 		var sourceBefore = CaptureSourceBytes(sourceRoot);
 		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
 
 		var folder = await ExportProjectAsync(
@@ -286,7 +291,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		File.WriteAllBytes(binaryPath, [0, 1, 0]);
 		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, binaryPath, ownsTemporary: false);
 		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
 
 		var folder = await ExportProjectAsync(
@@ -329,7 +334,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		File.WriteAllBytes(binaryPath, [0, 1, 0]);
 		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, binaryPath, ownsTemporary: false);
 		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
 		var contextService = new ProjectContextDocumentService(
 			new TreeExportService(),
@@ -366,7 +371,34 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
-	public void LocalProfile_RoundTripsHideSecretsAndResolvesTheSameExclusion()
+	public async Task OversizedSelectedBinary_PassesTheTextScanLimitUnchanged()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("oversized-binary-project");
+		var binaryPath = Path.Combine(sourceRoot, "payload.asset");
+		await using (var stream = new FileStream(
+			binaryPath,
+			FileMode.CreateNew,
+			FileAccess.Write,
+			FileShare.None))
+		{
+			stream.WriteByte(0);
+			stream.SetLength(SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1);
+		}
+
+		using var session = new SecretRedactionSession(CreateDetector());
+		var result = await new SecretRedactionOutputPreparer(new FileContentAnalyzer()).AnalyzeAsync(
+			new SecretRedactionContext(sourceRoot, session),
+			[binaryPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, result.DetectedCount);
+		Assert.Equal(0, result.RedactedCount);
+		Assert.Equal(SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1, new FileInfo(binaryPath).Length);
+	}
+
+	[Fact]
+	public void LocalProfile_RoundTripsHideSecretsAsContentTransformation()
 	{
 		using var temporary = new TemporaryDirectory();
 		var projectRoot = temporary.CreateDirectory("profile-project");
@@ -388,7 +420,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var selection = ProjectSelectionAdapter.FromLegacyProfile(
 			loaded,
 			ProjectProfileReference.Local);
-		Assert.Contains(ProjectExclusion.HideSecrets, selection.Exclusions!);
+		Assert.True(selection.HideSecrets);
+		Assert.DoesNotContain(ProjectExclusion.HideSecrets, selection.Exclusions!);
 	}
 
 	[Fact]
@@ -396,7 +429,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	{
 		using var workspace = CreateWorkspace();
 		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: true);
 		var prepared = await new SecretRedactionOutputPreparer(analyzer).PrepareAsync(
 			new SecretRedactionContext(workspace.SourceRoot, session),
@@ -446,7 +479,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		temporary.CreateFile("bounded-project/a-visible.cs", $"token={GithubToken}\n");
 		temporary.CreateFile("bounded-project/z-omitted.cs", $"token={GithubTokenSecond}\n");
 		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
 		var service = new ProjectContextDocumentService(
 			new TreeExportService(),
@@ -478,7 +511,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		temporary.CreateFile("bounded-project/a.cs", $"value={GithubToken}");
 		temporary.CreateFile("bounded-project/z-after.cs", "must-not-enter-bounded-prefix");
 		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(new GitleaksSecretDetector());
+		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
 		var service = new ProjectContextDocumentService(
 			new TreeExportService(),
@@ -516,15 +549,13 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			ProjectLoadWorkflowRuntime.CreateIgnoreRulesService(),
 			new TreeExportService(),
 			new FileContentAnalyzer());
-		var exclusions = hideSecrets
-			? new[] { ProjectExclusion.HideSecrets }
-			: [];
 		return await new ProjectContextPlanner(analysisService).BuildAsync(
 			new ProjectContextRequest(
 				projectRoot,
 				new ProjectSelectionSpec(
 					GitMode: GitFilteringMode.None,
-					Exclusions: exclusions)),
+					Exclusions: [],
+					HideSecrets: hideSecrets)),
 			TestContext.Current.CancellationToken);
 	}
 
@@ -591,12 +622,12 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	private static void AssertNativeLegends(
 		IReadOnlyDictionary<ProjectContextDocumentFormat, string> documents)
 	{
-		Assert.StartsWith("Values redacted by DevProjex before export: 4", documents[ProjectContextDocumentFormat.Text], StringComparison.Ordinal);
+		Assert.StartsWith("Values redacted by DevProjex before export: 8", documents[ProjectContextDocumentFormat.Text], StringComparison.Ordinal);
 		Assert.StartsWith("<!--", documents[ProjectContextDocumentFormat.Markdown], StringComparison.Ordinal);
 		using var json = JsonDocument.Parse(documents[ProjectContextDocumentFormat.Json]);
-		Assert.Equal(4, json.RootElement.GetProperty("redaction").GetProperty("count").GetInt32());
+		Assert.Equal(8, json.RootElement.GetProperty("redaction").GetProperty("count").GetInt32());
 		var xml = XDocument.Parse(documents[ProjectContextDocumentFormat.Xml]);
-		Assert.Equal("4", xml.Root?.Element("redaction")?.Element("count")?.Value);
+		Assert.Equal("8", xml.Root?.Element("redaction")?.Element("count")?.Value);
 	}
 
 	private static void AssertFolderCopy(Workspace workspace, ProjectCopyExportResult result)
@@ -612,6 +643,12 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			appContent,
 			StringComparison.Ordinal);
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "settings.json")));
+		var connection = File.ReadAllText(Path.Combine(result.DestinationPath, "config", "appsettings.json"));
+		AssertNoTextSecret(connection);
+		Assert.Contains("Host=db;Username=admin;Password=DEVPROJEX_REDACTED[connection-password#1];Database=app", connection, StringComparison.Ordinal);
+		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "service.txt")));
+		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "web.config")));
+		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, ".env")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "secrets", "private.pem")));
 		Assert.Contains(
 			"DEVPROJEX_REDACTED[private-key#1]",
@@ -639,6 +676,12 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			appContent,
 			StringComparison.Ordinal);
 		AssertNoTextSecret(ReadZipText(archive, "config/settings.json"));
+		var connection = ReadZipText(archive, "config/appsettings.json");
+		AssertNoTextSecret(connection);
+		Assert.Contains("Host=db;Username=admin;Password=DEVPROJEX_REDACTED[connection-password#1];Database=app", connection, StringComparison.Ordinal);
+		AssertNoTextSecret(ReadZipText(archive, "config/service.txt"));
+		AssertNoTextSecret(ReadZipText(archive, "config/web.config"));
+		AssertNoTextSecret(ReadZipText(archive, ".env"));
 		var privateKey = ReadZipText(archive, "secrets/private.pem");
 		AssertNoTextSecret(privateKey);
 		Assert.Contains("DEVPROJEX_REDACTED[private-key#1]", privateKey, StringComparison.Ordinal);
@@ -687,6 +730,10 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.DoesNotContain(GithubToken, text, StringComparison.Ordinal);
 		Assert.DoesNotContain(GithubTokenSecond, text, StringComparison.Ordinal);
 		Assert.DoesNotContain(AwsAccessKey, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(UriPassword, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(ConnectionPassword, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(ConfigurationPassword, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(EnvironmentSecret, text, StringComparison.Ordinal);
 		// Checking the body separately prevents a header-only PEM replacement from passing.
 		Assert.DoesNotContain(PrivateKeyBodyFragment, text, StringComparison.Ordinal);
 	}
@@ -698,6 +745,10 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Contains("DEVPROJEX_REDACTED[github-pat#2]", text, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[aws-access-token#1]", text, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[private-key#1]", text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[credential-uri-password#1]", text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[connection-password#1]", text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[config-secret#1]", text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[environment-secret#1]", text, StringComparison.Ordinal);
 	}
 
 	private static int CountOccurrences(string value, string search)
@@ -740,6 +791,16 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			temporary.CreateFile("project/config/settings.json", $"{{\"awsAccessKey\":\"{AwsAccessKey}\"}}\n");
 			temporary.CreateFile("project/docs/example.md", $"token: {GithubTokenSecond}\n");
 			temporary.CreateFile("project/secrets/private.pem", PrivateKeyPem + "\n");
+			temporary.CreateFile(
+				"project/config/appsettings.json",
+				$"{{\"ConnectionStrings\":{{\"Main\":\"Host=db;Username=admin;Password={ConnectionPassword};Database=app\"}}}}\n");
+			temporary.CreateFile(
+				"project/config/service.txt",
+				$"postgres://admin:{UriPassword}@db.local/app\n");
+			temporary.CreateFile(
+				"project/config/web.config",
+				$"<appSettings><add key=\"Password\" value=\"{ConfigurationPassword}\" /></appSettings>\n");
+			temporary.CreateFile("project/.env", $"JWT_SECRET=\"{EnvironmentSecret}\"\n");
 		}
 
 		var binaryPath = Path.Combine(sourceRoot, "assets", "blob.bin");
@@ -751,6 +812,22 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			temporary.CreateDirectory("exports"),
 			binaryPath);
 	}
+
+	private static SmartSecretsDetector CreateDetector() =>
+		new(
+			new GitleaksSecretDetector(),
+			new SmartIgnoreService(
+			[
+				new CommonSmartIgnoreRule(),
+				new FrontendArtifactsIgnoreRule(),
+				new DotNetArtifactsIgnoreRule(),
+				new PythonArtifactsIgnoreRule(),
+				new JvmArtifactsIgnoreRule(),
+				new RustArtifactsIgnoreRule(),
+				new GoArtifactsIgnoreRule(),
+				new PhpArtifactsIgnoreRule(),
+				new RubyArtifactsIgnoreRule()
+			]));
 
 	private sealed class CountingDetector : ISecretDetector
 	{

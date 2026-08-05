@@ -47,7 +47,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreNegativeMatrixTests
 
 		Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == dynamicOptionId);
 		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
-		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
 
 		ApplyIgnoreCounts(coordinator, BuildCounts(dynamicOptionId, dynamicVisible: true));
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
@@ -128,7 +128,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreNegativeMatrixTests
 		Assert.True(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 		Assert.Contains(dynamicOptionId, coordinator.GetSelectedIgnoreOptionIds());
 		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
-		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
 	}
 
 	public static IEnumerable<object[]> DynamicOptionIds()

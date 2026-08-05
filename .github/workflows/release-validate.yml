@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "master" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "v5.1" ]
   workflow_dispatch:
 
 permissions:
@@ -500,6 +500,53 @@ jobs:
 
           if ($exportStdout -notmatch "App\.cs") {
             throw "Published export smoke did not print the expected tree for ${{ matrix.rid }}. StdOut=$exportStdout"
+          }
+
+          $smartSecretsProject = Join-Path `
+            $env:RUNNER_TEMP `
+            "devprojex-smart-secrets-${{ matrix.rid }}"
+          Remove-Item -LiteralPath $smartSecretsProject -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $smartSecretsProject | Out-Null
+          $smartSecretsSourcePath = Join-Path $smartSecretsProject "appsettings.json"
+          $originalPassword = "Admin123!"
+          $smartSecretsSource = @"
+{
+  "ConnectionStrings": {
+    "Primary": "Host=db;Username=admin;Password=$originalPassword;Database=app"
+  }
+}
+"@
+          $smartSecretsSource | Set-Content `
+            -LiteralPath $smartSecretsSourcePath `
+            -Encoding utf8NoBOM `
+            -NoNewline
+          $smartSecretsSourceBytes = [System.IO.File]::ReadAllBytes($smartSecretsSourcePath)
+
+          $smartSecretsContext = Invoke-NativeCommand `
+            -Name "Smart Secrets context contract" `
+            -Arguments @(
+              "export", "context", $smartSecretsProject,
+              "--view", "content",
+              "--format", "text",
+              "--git-mode", "none",
+              "--exclude", "none",
+              "--hide-secrets",
+              "--plain",
+              "--language", "en",
+              "-o", "-")
+          if ($smartSecretsContext.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($smartSecretsContext.StdErr) -or
+              $smartSecretsContext.StdOut.Contains($originalPassword, [StringComparison]::Ordinal) -or
+              -not $smartSecretsContext.StdOut.Contains(
+                "Password=DEVPROJEX_REDACTED[connection-password#1]",
+                [StringComparison]::Ordinal)) {
+            throw "Published Smart Secrets context contract failed. ExitCode=$($smartSecretsContext.ExitCode) StdOut=$($smartSecretsContext.StdOut) StdErr=$($smartSecretsContext.StdErr)"
+          }
+
+          $smartSecretsSourceBytesAfter = [System.IO.File]::ReadAllBytes($smartSecretsSourcePath)
+          if ([Convert]::ToBase64String($smartSecretsSourceBytes) -ne
+              [Convert]::ToBase64String($smartSecretsSourceBytesAfter)) {
+            throw "Published Smart Secrets context export modified the source file."
           }
 
           $emptyGitIgnoreDestination = Join-Path $env:RUNNER_TEMP "devprojex-empty-gitignore-${{ matrix.rid }}"

@@ -2,6 +2,7 @@ using DevProjex.Application.Diagnostics;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Kernel.Abstractions;
+using Avalonia.VisualTree;
 
 namespace DevProjex.Tests.UI;
 
@@ -125,7 +126,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 				window,
 				IgnoreOptionId.HideSecrets,
-				$"Hide secrets ({expectedCount})");
+				expectedCount == 0
+					? "Hide secrets — no detected values"
+					: $"Hide secrets ({expectedCount})");
 
 			await UiTestDriver.WaitForIgnoreOptionStateAsync(
 				window,
@@ -239,7 +242,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.HideSecrets,
                 visible: true,
                 isChecked: false);
-            Assert.False(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
+			Assert.True(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
         }
         finally
         {
@@ -2058,7 +2061,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 				window,
 				IgnoreOptionId.HideSecrets,
-				"Скрывать секреты (0)");
+				"Скрывать секреты");
+			Assert.False(viewModel.HideSecretsOption?.IsChecked);
 
             var stableRoots = viewModel.RootFolders
                 .Select(static option => (option.Name, option.IsChecked))
@@ -2094,8 +2098,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                           StringComparison.Ordinal),
                 "the blocked ignore-all refresh to expose its cancellation action");
 
-            Assert.False(viewModel.AllIgnoreChecked);
-            Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
+			Assert.False(viewModel.AllIgnoreChecked);
+			Assert.All(
+				viewModel.PathIgnoreOptions,
+				static option => Assert.False(option.IsChecked));
+			Assert.False(viewModel.HideSecretsOption?.IsChecked);
 
             await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
 
@@ -2117,7 +2124,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 				window,
 				IgnoreOptionId.HideSecrets,
-				"Скрывать секреты (0)");
+				"Скрывать секреты");
 			Assert.Equal(
 				stableIgnoreOptions,
 				viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label, option.IsChecked)).ToArray());
@@ -2522,6 +2529,32 @@ public sealed class MainWindowIgnoreOptionsUiTests
             optionId,
             visible: true,
             isChecked: isChecked);
+    }
+
+    [AvaloniaFact]
+    public async Task HideSecrets_IsRenderedInItsOwnSectionAndIsIndependentFromIgnoreAll()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var hideSecrets = Assert.IsType<IgnoreOptionViewModel>(viewModel.HideSecretsOption);
+            Assert.DoesNotContain(viewModel.PathIgnoreOptions, static option => option.Id == IgnoreOptionId.HideSecrets);
+            var checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets);
+            var ignoreList = UiTestDriver.GetRequiredControl<ListBox>(window, "IgnoreOptionsList");
+            Assert.DoesNotContain(checkBox.GetVisualAncestors(), ancestor => ReferenceEquals(ancestor, ignoreList));
+
+            var ignoreAll = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
+            await UiTestDriver.RaiseButtonClickAsync(ignoreAll);
+            Assert.False(hideSecrets.IsChecked);
+            await UiTestDriver.RaiseButtonClickAsync(ignoreAll);
+            Assert.False(hideSecrets.IsChecked);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
     }
 
     private static async Task SetIgnoreAllCheckedAsync(MainWindow window, bool isChecked)

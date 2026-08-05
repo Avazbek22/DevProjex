@@ -85,6 +85,21 @@ public interface IFileContentAnalyzer
 	}
 
 	/// <summary>
+	/// Reads a bounded text file into an operation-owned buffer in one pass. Callers that need
+	/// random access to the complete text, such as span-based scanners, should use this contract
+	/// instead of measuring a snapshot and streaming the same file a second time.
+	/// </summary>
+	async ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+		string path,
+		long maximumBytes,
+		CancellationToken cancellationToken = default)
+	{
+		var result = await ReadClassifiedAsync(path, maximumBytes, cancellationToken)
+			.ConfigureAwait(false);
+		return new MaterializedCompleteTextFileBuffer(result);
+	}
+
+	/// <summary>
 	/// Tries to read file as text content with full content loaded.
 	/// Returns null if file is binary or cannot be read.
 	/// Use this for export operations where content is needed.
@@ -106,6 +121,38 @@ public interface IFileContentAnalyzer
 		string path,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default);
+}
+
+public interface ICompleteTextFileBuffer : IAsyncDisposable
+{
+	FileContentClassification Classification { get; }
+
+	long SizeBytes { get; }
+
+	ReadOnlyMemory<char> Content { get; }
+}
+
+internal sealed class MaterializedCompleteTextFileBuffer : ICompleteTextFileBuffer
+{
+	private readonly string? _content;
+
+	public MaterializedCompleteTextFileBuffer(FileContentReadResult result)
+	{
+		ArgumentNullException.ThrowIfNull(result);
+		Classification = result.Classification;
+		SizeBytes = result.Content?.SizeBytes ?? 0;
+		_content = result.Classification == FileContentClassification.Text
+			? result.Content?.Content
+			: null;
+	}
+
+	public FileContentClassification Classification { get; }
+
+	public long SizeBytes { get; }
+
+	public ReadOnlyMemory<char> Content => _content?.AsMemory() ?? ReadOnlyMemory<char>.Empty;
+
+	public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
 public interface IFileContentSnapshot : IAsyncDisposable

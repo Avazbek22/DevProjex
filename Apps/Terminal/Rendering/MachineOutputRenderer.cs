@@ -47,6 +47,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			{
 				gitMode = ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value),
 				exclusions = plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken).ToArray(),
+				hideSecrets = plan.Selection.HideSecrets == true,
 				roots = plan.SelectedRoots,
 				extensions = plan.SelectedExtensions,
 				selectedPaths = plan.Selection.SelectedPaths ?? []

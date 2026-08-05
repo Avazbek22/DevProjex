@@ -11,6 +11,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.HideSecrets.Scanning"] = "Hide secrets — scanning…",
+				["Settings.Ignore.HideSecrets.NoMatches"] = "Hide secrets — no detected values",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "Ignore hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Ignore hidden files",
@@ -125,7 +126,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 	}
 
 	[Theory]
-	[InlineData(0, "Hide secrets (0)")]
+	[InlineData(0, "Hide secrets — no detected values")]
 	[InlineData(4, "Hide secrets (4)")]
 	public void FormatHideSecretsLabel_AfterCompletion_ShowsMeasuredCount(int count, string expected)
 	{

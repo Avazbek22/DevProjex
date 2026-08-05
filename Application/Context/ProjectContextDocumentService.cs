@@ -183,7 +183,7 @@ public sealed class ProjectContextDocumentService(
 	private bool ShouldRedact(ProjectContextPlan plan, ProjectContextView view) =>
 		secretRedactionSession is not null &&
 		IncludesContent(view) &&
-		plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true;
+		plan.Selection.HideSecrets == true;
 
 	private async Task<string> BuildRedactedAsync(
 		ProjectContextPlan plan,

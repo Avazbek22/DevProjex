@@ -5,10 +5,14 @@
 │  > [x] src                           ││├── src                                                   ││  ( ) No Git filtering                          │
 │    [x] README.md                     │││   └── RepositoryMarker.cs                               ││  (*) Use .gitignore                            │
 │                                      ││└── README.md                                             ││  ( ) Tracked Git files only                    │
-│                                      ││                                                          ││  EXCLUSIONS                                    │
-│                                      ││                                                          ││  [ ] All                                       │
-│                                      ││                                                          ││  [x] Smart ignore                              │
+│                                      ││                                                          ││  SMART SECRETS:                                │
 │                                      ││                                                          ││  [ ] Hide secrets                              │
+│                                      ││                                                          ││  Checks selected text files only. Binary       │
+│                                      ││                                                          ││  files are not inspected, and no matches is    │
+│                                      ││                                                          ││  not a safety guarantee.                       │
+│                                      ││                                                          ││  EXCLUSIONS                                    │
+│                                      ││                                                          ││  [x] All                                       │
+│                                      ││                                                          ││  [x] Smart ignore                              │
 │                                      ││                                                          ││  [x] Empty folders                             │
 │                                      ││                                                          ││  [x] Empty files                               │
 │                                      ││                                                          ││  [x] Hidden folders                            │
@@ -23,10 +27,6 @@
 │                                      ││                                                          ││  ROOT FOLDERS                                  │
 │                                      ││                                                          ││  [x] All                                       │
 │                                      ││                                                          ││  [x] src                                       │
-│                                      ││                                                          ││                                                │
-│                                      ││                                                          ││                                                │
-│                                      ││                                                          ││                                                │
-│                                      ││                                                          ││                                                │
 │                                      ││                                                          ││                                                │
 │                                      ││ Files 2  |  Lines 1-5/5                                  ││                                                │
 └──────────────────────────────────────┘└──────────────────────────────────────────────────────────┘└────────────────────────────────────────────────┘

@@ -1,7 +1,3 @@
-using System.Buffers;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-
 namespace DevProjex.Application.Secrets;
 
 /// <summary>
@@ -12,6 +8,8 @@ namespace DevProjex.Application.Secrets;
 public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAnalyzer)
 {
 	public const long MaximumScannableFileBytes = 16 * 1024 * 1024;
+	private const long MaximumParallelScanFileBytes = 1024 * 1024;
+	private const int MaximumParallelScans = 8;
 
 	public async Task<PreparedSecretRedactionOutput> PrepareAsync(
 		SecretRedactionContext context,
@@ -103,106 +101,114 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 		var scope = context.BeginOutput(orderedFilePaths);
-		foreach (var sourcePath in orderedFilePaths)
+		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
+		var parallelWork = new List<SecretScanWorkItem>();
+		var serialWork = new List<SecretScanWorkItem>();
+		for (var index = 0; index < orderedFilePaths.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (scope.TryAnalyzeCached(sourcePath))
+			var sourcePath = orderedFilePaths[index];
+			var metadata = SecretFileMetadata.Capture(sourcePath);
+			if (scope.TryGetCachedEntry(sourcePath, metadata, out var cached))
+			{
+				entries[index] = cached;
 				continue;
-
-			var metadataBeforeRead = SecretFileMetadata.Capture(sourcePath);
-			if (metadataBeforeRead.Length > MaximumScannableFileBytes)
-			{
-				throw new SecretScanLimitExceededException(
-					sourcePath,
-					metadataBeforeRead.Length,
-					MaximumScannableFileBytes);
 			}
 
-			await using var snapshot = await contentAnalyzer
-				.OpenCompleteSnapshotAsync(sourcePath, cancellationToken)
-				.ConfigureAwait(false);
-			var metadataAfterRead = SecretFileMetadata.Capture(sourcePath);
-			EnsureStableSnapshot(
-				sourcePath,
-				metadataBeforeRead,
-				metadataAfterRead,
-				snapshot.Result);
-			switch (snapshot.Result.Classification)
-			{
-				case FileContentClassification.Binary:
-					scope.AnalyzeBinary(sourcePath, metadataAfterRead);
-					continue;
-				case FileContentClassification.TooLarge:
-					throw new SecretScanLimitExceededException(
-						sourcePath,
-						snapshot.Result.Metrics?.SizeBytes ?? metadataAfterRead.Length,
-						MaximumScannableFileBytes);
-				case FileContentClassification.Text when snapshot.Result.Metrics is { } metrics:
-					await AnalyzeSnapshotAsync(
-							scope,
-							sourcePath,
-							metadataAfterRead,
-							metrics,
-							snapshot,
-							cancellationToken)
+			var workItem = new SecretScanWorkItem(index, sourcePath, metadata);
+			if (metadata.Length <= MaximumParallelScanFileBytes)
+				parallelWork.Add(workItem);
+			else
+				serialWork.Add(workItem);
+		}
+
+		if (parallelWork.Count > 0)
+		{
+			await Parallel.ForEachAsync(
+				parallelWork,
+				new ParallelOptions
+				{
+					CancellationToken = cancellationToken,
+					MaxDegreeOfParallelism = Math.Min(
+						MaximumParallelScans,
+						Math.Max(1, Environment.ProcessorCount))
+				},
+				async (workItem, token) =>
+				{
+					entries[workItem.Index] = await AnalyzeFileAsync(scope, workItem, token)
 						.ConfigureAwait(false);
-					continue;
-				default:
-					throw new SecretDetectionException(
-						$"Hide Secrets could not inspect '{sourcePath}' ({snapshot.Result.Classification}).");
-			}
+				}).ConfigureAwait(false);
+		}
+
+		// Large files run alone after the small-file batch. This keeps peak raw content
+		// bounded by either eight 1 MiB files or one file at the documented scan limit.
+		foreach (var workItem in serialWork)
+		{
+			entries[workItem.Index] = await AnalyzeFileAsync(scope, workItem, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		for (var index = 0; index < entries.Length; index++)
+		{
+			var entry = entries[index] ??
+			            throw new SecretDetectionException(
+				            $"Hide Secrets produced no scan result for '{orderedFilePaths[index]}'.");
+			scope.ProcessEntry(orderedFilePaths[index], entry);
 		}
 
 		return scope.Complete();
 	}
 
-	private static async Task AnalyzeSnapshotAsync(
+	private async Task<SecretScanCacheEntry> AnalyzeFileAsync(
 		SecretRedactionScope scope,
-		string sourcePath,
-		SecretFileMetadata metadata,
-		TextFileMetrics metrics,
-		IFileContentSnapshot snapshot,
+		SecretScanWorkItem workItem,
 		CancellationToken cancellationToken)
 	{
-		var buffer = ArrayPool<char>.Shared.Rent(Math.Max(1, metrics.CharCount));
-		var written = 0;
-		try
-		{
-			await snapshot.CopyTextToAsync(
-					metrics.CharCount,
-					(chunk, token) =>
-					{
-						token.ThrowIfCancellationRequested();
-						if (chunk.Length > buffer.Length - written)
-							throw new SecretDetectionException(
-								$"Hide Secrets received inconsistent content length for '{sourcePath}'.");
-						chunk.CopyTo(buffer.AsMemory(written));
-						written += chunk.Length;
-						return ValueTask.CompletedTask;
-					},
-					cancellationToken)
-				.ConfigureAwait(false);
-			if (written != metrics.CharCount)
-			{
-				throw new SecretDetectionException(
-					$"Hide Secrets received inconsistent content length for '{sourcePath}'.");
-			}
+		var sourcePath = workItem.SourcePath;
+		var metadataBeforeRead = workItem.Metadata;
 
-			using var contentLease = scope.TrackFullContentBuffer();
-			scope.Analyze(
+		await using var contentBuffer = await contentAnalyzer
+			.OpenCompleteTextBufferAsync(
 				sourcePath,
-				buffer.AsSpan(0, written),
-				metadata,
-				cancellationToken);
-		}
-		finally
+				MaximumScannableFileBytes,
+				cancellationToken)
+			.ConfigureAwait(false);
+		var metadataAfterRead = SecretFileMetadata.Capture(sourcePath);
+		if (metadataBeforeRead != metadataAfterRead ||
+		    contentBuffer.SizeBytes > 0 && contentBuffer.SizeBytes != metadataAfterRead.Length)
 		{
-			// Pooled memory may be handed to unrelated application work. Erase the complete
-			// rented segment so raw credentials never survive this operation in the shared pool.
-			CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(buffer.AsSpan()));
-			ArrayPool<char>.Shared.Return(buffer);
+			throw new SecretDetectionException(
+				$"Hide Secrets could not inspect a changing file: '{sourcePath}'.");
+		}
+
+		switch (contentBuffer.Classification)
+		{
+			case FileContentClassification.Binary:
+				return scope.StoreBinary(sourcePath, metadataAfterRead);
+			case FileContentClassification.TooLarge:
+				throw new SecretScanLimitExceededException(
+					sourcePath,
+					contentBuffer.SizeBytes > 0 ? contentBuffer.SizeBytes : metadataAfterRead.Length,
+					MaximumScannableFileBytes);
+			case FileContentClassification.Text:
+				using (scope.TrackFullContentBuffer())
+				{
+					return scope.Detect(
+						sourcePath,
+						contentBuffer.Content.Span,
+						metadataAfterRead,
+						cancellationToken);
+				}
+			default:
+				throw new SecretDetectionException(
+					$"Hide Secrets could not inspect '{sourcePath}' ({contentBuffer.Classification}).");
 		}
 	}
+
+	private readonly record struct SecretScanWorkItem(
+		int Index,
+		string SourcePath,
+		SecretFileMetadata Metadata);
 
 	private static Encoding ResolveEncoding(TextFileEncoding encoding) => encoding switch
 	{

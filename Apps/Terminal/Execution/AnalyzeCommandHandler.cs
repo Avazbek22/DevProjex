@@ -20,7 +20,7 @@ public sealed class AnalyzeCommandHandler(
 					request.Selection,
 					cancellationToken: cancellationToken))
 			.ConfigureAwait(false);
-		if (plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true)
+		if (plan.Selection.HideSecrets == true)
 		{
 			var redaction = await services.SecretRedactionOutputPreparer
 				.AnalyzeAsync(

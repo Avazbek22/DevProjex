@@ -144,7 +144,7 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 				Assert.True(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 				Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFiles).IsChecked);
 				Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
-				Assert.False(viewModel.AllIgnoreChecked);
+				Assert.True(viewModel.AllIgnoreChecked);
 				AssertIgnoreSetEqual(selectedIds, [dynamicOptionId, IgnoreOptionId.HiddenFiles]);
 				break;
 
@@ -168,7 +168,7 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 				Assert.True(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 				Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked);
 				Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
-				Assert.False(viewModel.AllIgnoreChecked);
+				Assert.True(viewModel.AllIgnoreChecked);
 				AssertIgnoreSetEqual(selectedIds, [dynamicOptionId, IgnoreOptionId.HiddenFolders]);
 				break;
 

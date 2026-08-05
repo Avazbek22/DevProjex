@@ -23,6 +23,7 @@ public sealed class StartupInteractionControllerSelectionTests
 		Assert.Equal(ProjectSelectionApplicationMode.ResetToDefaults, intent.Extensions);
 		Assert.Equal(ProjectSelectionApplicationMode.ApplyResolvedValue, intent.GitMode);
 		Assert.Equal(ProjectSelectionApplicationMode.ApplyResolvedValue, intent.Exclusions);
+		Assert.Equal(ProjectSelectionApplicationMode.ApplyResolvedValue, intent.HideSecrets);
 	}
 
 	[Fact]
@@ -62,6 +63,7 @@ public sealed class StartupInteractionControllerSelectionTests
 		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.Extensions);
 		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.GitMode);
 		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.Exclusions);
+		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.HideSecrets);
 	}
 
 	[Fact]
@@ -92,6 +94,40 @@ public sealed class StartupInteractionControllerSelectionTests
 		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.Extensions);
 		Assert.Equal(ProjectSelectionApplicationMode.ApplyResolvedValue, intent.GitMode);
 		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.Exclusions);
+		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.HideSecrets);
+	}
+
+	[Fact]
+	public async Task ResolveAsync_LocalHideSecretsOverride_AppliesOnlyContentTransformationAcrossDesktopBoundary()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectPath = Path.Combine(temp.Path, "project");
+		Directory.CreateDirectory(projectPath);
+		var store = new ProjectProfileStore(() => temp.Path);
+		store.SaveProfile(
+			projectPath,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: ["src"],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.UseGitIgnore, IgnoreOptionId.SmartIgnore]));
+		var resolver = new ProjectSelectionResolver(
+			store,
+			static (_, _) => throw new InvalidOperationException("Portable profile loading was unexpected."));
+
+		var resolved = await resolver.ResolveAsync(
+			projectPath,
+			ProjectProfileReference.Local,
+			new ProjectSelectionSpec(HideSecrets: true),
+			TestContext.Current.CancellationToken);
+
+		var intent = Assert.IsType<ProjectSelectionApplicationIntent>(resolved.ApplicationIntent);
+		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.Roots);
+		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.Extensions);
+		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.GitMode);
+		Assert.Equal(ProjectSelectionApplicationMode.Preserve, intent.Exclusions);
+		Assert.Equal(ProjectSelectionApplicationMode.ApplyResolvedValue, intent.HideSecrets);
+		Assert.True(resolved.HideSecrets);
+		Assert.Contains(ProjectExclusion.SmartIgnore, resolved.Exclusions!);
 	}
 
 	[Fact]
@@ -132,5 +168,23 @@ public sealed class StartupInteractionControllerSelectionTests
 			inherited);
 
 		Assert.True(resolved.SetEquals([IgnoreOptionId.UseGitIgnore]));
+	}
+
+	[Fact]
+	public void ResolveIgnoreSelectionOverride_PathExclusionsOnly_PreservesHideSecrets()
+	{
+		var inherited = new HashSet<IgnoreOptionId>
+		{
+			IgnoreOptionId.UseGitIgnore,
+			IgnoreOptionId.DotFolders,
+			IgnoreOptionId.HideSecrets
+		};
+
+		var resolved = StartupInteractionController.ResolveIgnoreSelectionOverride(
+			new ProjectSelectionSpec(Exclusions: []),
+			inherited);
+
+		Assert.True(resolved.SetEquals(
+			[IgnoreOptionId.UseGitIgnore, IgnoreOptionId.HideSecrets]));
 	}
 }

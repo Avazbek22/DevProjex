@@ -133,7 +133,7 @@ devprojex
 devprojex open . --preview
 devprojex analyze . --format json
 devprojex export context . --format markdown -o ../devprojex-context.md
-devprojex export context . --exclude hide-secrets --format markdown -o ../devprojex-redacted.md
+devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
 devprojex export project . --as folder -o ../devprojex-submission
 devprojex export project . --as zip -o ../devprojex-submission.zip
 devprojex analyze . --git-mode tracked --exclude smart-ignore

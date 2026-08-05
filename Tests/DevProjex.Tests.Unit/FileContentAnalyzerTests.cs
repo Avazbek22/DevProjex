@@ -657,5 +657,75 @@ public sealed class FileContentAnalyzerTests
 		});
 	}
 
+	[Fact]
+	public async Task OpenCompleteTextBufferAsync_SupportedEncodings_ReturnExactOperationOwnedText()
+	{
+		using var temp = new TemporaryDirectory();
+		const string content = "secret=Привет-世界\r\nnext=value";
+		var encodings = new Encoding[]
+		{
+			new UTF8Encoding(false, true),
+			new UTF8Encoding(true, true),
+			new UnicodeEncoding(false, true, true),
+			new UnicodeEncoding(true, true, true),
+			new UTF32Encoding(false, true, true),
+			new UTF32Encoding(true, true, true)
+		};
+
+		for (var index = 0; index < encodings.Length; index++)
+		{
+			var path = Path.Combine(temp.Path, $"encoded-{index}.txt");
+			await File.WriteAllTextAsync(path, content, encodings[index], TestContext.Current.CancellationToken);
+			await using var buffer = await _analyzer.OpenCompleteTextBufferAsync(
+				path,
+				1024 * 1024,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(FileContentClassification.Text, buffer.Classification);
+			Assert.Equal(new FileInfo(path).Length, buffer.SizeBytes);
+			Assert.Equal(content, buffer.Content.ToString());
+		}
+	}
+
+	[Fact]
+	public async Task OpenCompleteTextBufferAsync_BinaryAndLimitRemainExplicit()
+	{
+		using var temp = new TemporaryDirectory();
+		var binary = temp.CreateBinaryFile("opaque.unknown", [0x41, 0x42, 0x00, 0x43]);
+		var oversized = temp.CreateFile("oversized.txt", new string('x', 1024));
+
+		await using var binaryBuffer = await _analyzer.OpenCompleteTextBufferAsync(
+			binary,
+			2,
+			TestContext.Current.CancellationToken);
+		await using var oversizedBuffer = await _analyzer.OpenCompleteTextBufferAsync(
+			oversized,
+			128,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Binary, binaryBuffer.Classification);
+		Assert.Equal(4, binaryBuffer.SizeBytes);
+		Assert.True(binaryBuffer.Content.IsEmpty);
+		Assert.Equal(FileContentClassification.TooLarge, oversizedBuffer.Classification);
+		Assert.Equal(1024, oversizedBuffer.SizeBytes);
+		Assert.True(oversizedBuffer.Content.IsEmpty);
+	}
+
+	[Fact]
+	public async Task OpenCompleteTextBufferAsync_DisposeInvalidatesPooledContent()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("content.txt", "sensitive operation text");
+		var buffer = await _analyzer.OpenCompleteTextBufferAsync(
+			path,
+			1024,
+			TestContext.Current.CancellationToken);
+		Assert.Equal("sensitive operation text", buffer.Content.ToString());
+
+		await buffer.DisposeAsync();
+
+		Assert.Throws<ObjectDisposedException>(() => _ = buffer.Content);
+	}
+
 	#endregion
 }
