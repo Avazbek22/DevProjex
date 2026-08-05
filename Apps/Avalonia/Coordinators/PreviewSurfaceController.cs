@@ -49,6 +49,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         ExportOutputMetrics.Empty;
     private bool _hasSelectionMetricsSnapshot;
     private bool _scrollSyncActive;
+	private Vector? _pendingRedactionViewportOffset;
     private bool _disposed;
 
     public PreviewSurfaceController(
@@ -109,6 +110,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		if (context is null)
 			return;
 
+		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
 		context.Session.ToggleKeepAsIs(e.OccurrenceId);
 		_requestRedactionRefresh();
 	}
@@ -629,6 +631,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     public void ClearDocument()
     {
+		_pendingRedactionViewportOffset = null;
         ClearSelectionMetrics();
         var previousDocument = _viewModel.PreviewDocument;
         _viewModel.PreviewDocument = null;
@@ -733,19 +736,22 @@ internal sealed class PreviewSurfaceController : IDisposable
         IPreviewTextDocument document,
         int lineCount)
     {
+		var preservedOffset = _pendingRedactionViewportOffset;
+		_pendingRedactionViewportOffset = null;
         ClearSelectionMetrics();
         var previousDocument = _viewModel.PreviewDocument;
         _viewModel.PreviewDocument = document;
         _viewModel.PreviewText = string.Empty;
         _viewModel.PreviewLineCount = Math.Max(1, lineCount);
 
-        _controls.TextScrollViewer.Offset = default;
-        _controls.LineNumbersControl.VerticalOffset = 0;
+		if (preservedOffset is null)
+			_controls.TextScrollViewer.Offset = default;
+		_controls.LineNumbersControl.VerticalOffset = preservedOffset?.Y ?? 0;
         _controls.LineNumbersControl.ExtentHeight =
             Math.Max(0, _controls.TextScrollViewer.Extent.Height);
         _controls.LineNumbersControl.ViewportHeight =
             Math.Max(0, _controls.TextScrollViewer.Viewport.Height);
-        _controls.TextControl.VerticalOffset = 0;
+		_controls.TextControl.VerticalOffset = preservedOffset?.Y ?? 0;
         _controls.TextControl.ViewportHeight =
             Math.Max(0, _controls.TextScrollViewer.Viewport.Height);
         _controls.TextControl.ViewportWidth =
@@ -756,9 +762,40 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         UpdateStickyPath();
         Dispatcher.UIThread.Post(
-            UpdateStickyPath,
+			() =>
+			{
+				if (preservedOffset is { } offset)
+					RestoreViewportAfterRedaction(offset);
+				else
+					UpdateStickyPath();
+			},
             DispatcherPriority.Render);
     }
+
+	private void RestoreViewportAfterRedaction(Vector requestedOffset)
+	{
+		var scrollViewer = _controls.TextScrollViewer;
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+		var restoredOffset = new Vector(
+			Math.Clamp(requestedOffset.X, 0, maximumX),
+			Math.Clamp(requestedOffset.Y, 0, maximumY));
+
+		try
+		{
+			_scrollSyncActive = true;
+			scrollViewer.Offset = restoredOffset;
+			_controls.LineNumbersControl.VerticalOffset = restoredOffset.Y;
+			_controls.TextControl.HorizontalOffset = restoredOffset.X;
+			_controls.TextControl.VerticalOffset = restoredOffset.Y;
+		}
+		finally
+		{
+			_scrollSyncActive = false;
+		}
+
+		UpdateStickyPath();
+	}
 
     private IReadOnlyList<string> ResolvePreviewFiles(
         IReadOnlySet<string> selectedPaths,

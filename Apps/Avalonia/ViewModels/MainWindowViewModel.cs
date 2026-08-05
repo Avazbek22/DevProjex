@@ -1445,20 +1445,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemeMenuTransparency { get; private set; } = string.Empty;
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsTitle { get; private set; } = string.Empty;
-	public string SettingsSecretsNotice { get; private set; } = string.Empty;
-	private string _settingsSecretsStatus = string.Empty;
-	public string SettingsSecretsStatus
-	{
-		get => _settingsSecretsStatus;
-		set
-		{
-			if (_settingsSecretsStatus == value) return;
-			_settingsSecretsStatus = value;
-			RaisePropertyChanged();
-			RaisePropertyChanged(nameof(HasSettingsSecretsStatus));
-		}
-	}
-	public bool HasSettingsSecretsStatus => !string.IsNullOrWhiteSpace(SettingsSecretsStatus);
 	public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
     public string SettingsAll { get; private set; } = string.Empty;
@@ -1611,8 +1597,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
         UpdateApplicationUpdateLocalization();
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
-		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
-		SettingsSecretsNotice = _localization["Settings.Secrets.Notice"];
+		SettingsSecretsTitle = _localization["Settings.ContentProcessing.Title"];
 		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
 		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
         SettingsAll = _localization["Settings.All"];
@@ -1760,7 +1745,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HelpAboutOpenLink));
         RaisePropertyChanged(nameof(SettingsIgnoreTitle));
 		RaisePropertyChanged(nameof(SettingsSecretsTitle));
-		RaisePropertyChanged(nameof(SettingsSecretsNotice));
 		RaisePropertyChanged(nameof(PreviewSecretRedactedTooltip));
 		RaisePropertyChanged(nameof(PreviewSecretKeptTooltip));
         RaisePropertyChanged(nameof(SettingsAll));

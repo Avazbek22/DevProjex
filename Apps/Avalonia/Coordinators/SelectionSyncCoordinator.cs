@@ -608,6 +608,7 @@ public sealed partial class SelectionSyncCoordinator(
             EmptyFilesCount: counts.EmptyFiles,
 			IncludeTrackedGitFilesOnly: visibleIds.Contains(IgnoreOptionId.TrackedGitFilesOnly),
 			SecretRedactionsCount: hideSecretsIsChecked ? secretRedactionsCount : null,
+			SecretMatchesCount: hideSecretsIsChecked ? secretMatchesCount : null,
             ShowAdvancedCounts: showAdvancedCounts);
         var localizedDescriptors = ignoreOptionsService.GetOptions(availability);
         var descriptorsById = localizedDescriptors.ToDictionary(static descriptor => descriptor.Id);
@@ -618,20 +619,14 @@ public sealed partial class SelectionSyncCoordinator(
 			{
 				option.Label = ignoreOptionsService.FormatHideSecretsLabel(
 					hideSecretsIsChecked ? secretScanState : SecretScanState.Disabled,
+					secretMatchesCount,
 					secretRedactionsCount);
 				continue;
 			}
             if (descriptorsById.TryGetValue(option.Id, out var descriptor))
                 option.Label = descriptor.Label;
         }
-		viewModel.SettingsSecretsStatus = hideSecretsIsChecked
-			? ignoreOptionsService.FormatHideSecretsStatus(
-				secretScanState,
-				secretMatchesCount,
-				secretRedactionsCount)
-			: string.Empty;
-
-        _ignoreOptions = localizedDescriptors;
+		_ignoreOptions = localizedDescriptors;
         SynchronizeStableIgnoreOptionLabels();
     }
 

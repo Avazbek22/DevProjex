@@ -751,9 +751,10 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 					var viewModel = UiTestDriver.GetViewModel(window);
 					var hideSecrets = viewModel.IgnoreOptions.First(
 						static option => option.Id == IgnoreOptionId.HideSecrets);
-					return hideSecrets.IsChecked && IsCompletedHideSecretsStatus(viewModel.SettingsSecretsStatus);
+					return hideSecrets.IsChecked &&
+					       Regex.IsMatch(hideSecrets.Label, @"\(\d+/\d+\)$", RegexOptions.CultureInvariant);
 				},
-				"enabled Hide Secrets to publish an honest completed state");
+				"enabled Hide Secrets to publish measured matched/hidden counts");
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
         }
         finally
@@ -1295,12 +1296,6 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
             Assert.True(int.TryParse(match.Groups[1].Value, out var count) && count > 0,
                 $"Advanced ignore option '{option.Id}' must never stay visible with a zero/invalid count. Actual label: '{option.Label}'.");
 		}
-	}
-
-	private static bool IsCompletedHideSecretsStatus(string status)
-	{
-		return status.StartsWith("Matches: ", StringComparison.Ordinal) ||
-		       string.Equals(status, "The rules matched nothing.", StringComparison.Ordinal);
 	}
 
     private sealed class BlockingFileContentAnalyzer(IFileContentAnalyzer innerAnalyzer) : IFileContentAnalyzer

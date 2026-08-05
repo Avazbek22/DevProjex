@@ -4,29 +4,18 @@ namespace DevProjex.Application.Services;
 
 public sealed class IgnoreOptionsService(LocalizationService localization)
 {
-	public string FormatHideSecretsLabel(SecretScanState state, int? redactionCount)
-	{
-		var label = localization["Settings.Ignore.HideSecrets"];
-		return state == SecretScanState.Completed && redactionCount > 0
-			? $"{label} ({redactionCount})"
-			: label;
-	}
-
-	public string FormatHideSecretsStatus(
+	public string FormatHideSecretsLabel(
 		SecretScanState state,
 		int? matchedCount,
-		int? redactionCount) => state switch
+		int? redactionCount)
 	{
-		SecretScanState.Scanning => localization["Settings.Secrets.Status.Scanning"],
-		SecretScanState.Failed => localization["Settings.Secrets.Status.Failed"],
-		SecretScanState.Completed when matchedCount == 0 =>
-			localization["Settings.Secrets.Status.NoMatches"],
-		SecretScanState.Completed when matchedCount > 0 && redactionCount == 0 =>
-			localization.Format("Settings.Secrets.Status.AllKept", matchedCount),
-		SecretScanState.Completed when matchedCount > 0 && redactionCount is not null =>
-			localization.Format("Settings.Secrets.Status.Applied", matchedCount, redactionCount),
-		_ => string.Empty
-	};
+		var label = localization["Settings.Ignore.HideSecrets"];
+		return state == SecretScanState.Completed &&
+		       matchedCount is not null &&
+		       redactionCount is not null
+			? $"{label} ({matchedCount}/{redactionCount})"
+			: label;
+	}
 
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{
@@ -127,8 +116,9 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	{
 		foreach (var descriptor in ProjectPresentationCatalog.ContentTransformations)
 		{
-			var label = availability.SecretRedactionsCount is { } redactionCount
-				? FormatHideSecretsLabel(SecretScanState.Completed, redactionCount)
+			var label = availability.SecretMatchesCount is { } matchedCount &&
+			            availability.SecretRedactionsCount is { } redactionCount
+				? FormatHideSecretsLabel(SecretScanState.Completed, matchedCount, redactionCount)
 				: localization[descriptor.LabelKey];
 			options.Add(new IgnoreOptionDescriptor(descriptor.LegacyOptionId, label, false));
 		}

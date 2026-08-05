@@ -149,7 +149,7 @@
 
 	  <!-- Content-processing options transform selected bytes without changing the tree. -->
 	  <Grid Grid.Row="1"
-			RowDefinitions="Auto,Auto"
+			RowDefinitions="Auto,*"
 			Margin="0,2,0,0"
 			IsVisible="{Binding HasContentProcessingOptions}"
 			IsEnabled="{Binding AreFilterSettingsEnabled}">
@@ -159,9 +159,8 @@
 				   Text="{Binding SettingsSecretsTitle}"
 				   Margin="0,0,0,6"
 				   FontSize="15" />
-		<Border Grid.Row="1" Classes="checklist-border">
-		  <StackPanel Spacing="2">
-			<ListBox Name="ContentProcessingOptionsList"
+		<Border Name="ContentProcessingOptionsBorder" Grid.Row="1" Classes="checklist-border">
+		  <ListBox Name="ContentProcessingOptionsList"
 					 Classes="settings-list"
 					 ItemsSource="{Binding ContentProcessingOptions}"
 					 SelectionMode="Multiple"
@@ -179,19 +178,7 @@
 							IsChecked="{Binding IsChecked, Mode=TwoWay}" />
 				</DataTemplate>
 			  </ListBox.ItemTemplate>
-			</ListBox>
-			<TextBlock Text="{Binding SettingsSecretsStatus}"
-					   IsVisible="{Binding HasSettingsSecretsStatus}"
-					   Foreground="{DynamicResource AppAccentBrush}"
-					   FontSize="11"
-					   Margin="5,0"
-					   TextWrapping="Wrap" />
-			<TextBlock Text="{Binding SettingsSecretsNotice}"
-					   Foreground="{DynamicResource AppMutedTextBrush}"
-					   FontSize="11"
-					   Margin="5,0,5,3"
-					   TextWrapping="Wrap" />
-		  </StackPanel>
+		  </ListBox>
 		</Border>
 	  </Grid>
 

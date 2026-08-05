@@ -1514,11 +1514,12 @@ public partial class MainWindow : Window
         IReadOnlyCollection<string> selectedRootFolders)
     {
         var availability = _ignoreRulesService.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
-        return availability with
-        {
+		return availability with
+		{
 			ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled,
-			SecretRedactionsCount = _secretRedactionCount
-        };
+			SecretRedactionsCount = _secretRedactionCount,
+			SecretMatchesCount = _secretRedactionMatchedCount
+		};
     }
 
     private IgnoreRules BuildIgnoreRules(string rootPath)

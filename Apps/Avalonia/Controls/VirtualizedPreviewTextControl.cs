@@ -143,6 +143,8 @@ public sealed class VirtualizedPreviewTextControl : Control
     private MenuItem? _copyMenuItem;
     private MenuItem? _selectAllMenuItem;
     private MenuItem? _clearSelectionMenuItem;
+	private ToolTip? _redactionToolTip;
+	private TextBlock? _redactionToolTipText;
     private static Cursor? _previewTextCursor;
     private static Cursor? _previewMenuCursor;
 	private static Cursor? _previewActionCursor;
@@ -853,9 +855,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 			return;
 		}
 
-		if (e.Key == Key.F8 && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
+		if (e.Key is Key.Up or Key.Down && e.KeyModifiers == KeyModifiers.Alt)
 		{
-			MoveToRedaction(forward: e.KeyModifiers != KeyModifiers.Shift);
+			MoveToRedaction(forward: e.Key == Key.Down);
 			e.Handled = true;
 		}
     }
@@ -932,18 +934,54 @@ public sealed class VirtualizedPreviewTextControl : Control
 			StringComparison.Ordinal);
 		_hoveredRedactionOccurrenceId = occurrenceId;
 		Cursor = redaction is null ? PreviewTextCursor : PreviewActionCursor;
-		ToolTip.SetTip(
-			this,
-			redaction is null
-				? null
-				: string.Format(
-					CultureInfo.CurrentCulture,
-					redaction.State == SecretPreviewSpanState.Redacted
-						? RedactedSecretToolTipFormat
-						: KeptSecretToolTipFormat,
-					redaction.RuleId));
+		if (redaction is null)
+		{
+			ToolTip.SetTip(this, null);
+		}
+		else
+		{
+			var toolTip = EnsureRedactionToolTip();
+			_redactionToolTipText!.Text = string.Format(
+				CultureInfo.CurrentCulture,
+				redaction.State == SecretPreviewSpanState.Redacted
+					? RedactedSecretToolTipFormat
+					: KeptSecretToolTipFormat,
+				redaction.RuleId);
+			ToolTip.SetTip(this, toolTip);
+		}
 		if (changed)
 			InvalidateVisual();
+	}
+
+	private ToolTip EnsureRedactionToolTip()
+	{
+		if (_redactionToolTip is not null)
+			return _redactionToolTip;
+
+		_redactionToolTipText = new TextBlock
+		{
+			TextWrapping = TextWrapping.Wrap
+		};
+		_redactionToolTip = new ToolTip
+		{
+			Content = _redactionToolTipText,
+			MaxWidth = 420
+		};
+		_redactionToolTip.Classes.Add("preview-blurred-tooltip");
+		_redactionToolTip.Loaded += OnRedactionToolTipLoaded;
+		return _redactionToolTip;
+	}
+
+	private void OnRedactionToolTipLoaded(object? sender, RoutedEventArgs e)
+	{
+		if (sender is not ToolTip toolTip || DataContext is not MainWindowViewModel viewModel)
+			return;
+
+		PopupBackdropConfigurator.TryApply(
+			toolTip,
+			TopLevel.GetTopLevel(this),
+			viewModel.ActiveThemeEffect,
+			PopupBackdropTransparencyFallback.Transparent);
 	}
 
 	private void MoveToRedaction(bool forward)
@@ -1013,6 +1051,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         _ownerScrollViewer = null;
 		_activeRedactionOccurrenceId = null;
 		UpdateHoveredRedaction(null);
+		ToolTip.SetTip(this, null);
         CloseContextMenu();
         ResetVisibleWindowCache();
     }

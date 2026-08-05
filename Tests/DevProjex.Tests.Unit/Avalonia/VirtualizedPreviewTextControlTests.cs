@@ -137,9 +137,11 @@ public sealed class VirtualizedPreviewTextControlTests
 			var textCursor = Assert.IsType<Cursor>(control.Cursor);
 			window.MouseMove(point, RawInputModifiers.None);
 			Assert.NotSame(textCursor, control.Cursor);
+			var toolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(control));
+			Assert.Contains("preview-blurred-tooltip", toolTip.Classes);
 			Assert.Contains(
 				"github-pat",
-				Assert.IsType<string>(ToolTip.GetTip(control)),
+				Assert.IsType<TextBlock>(toolTip.Content).Text,
 				StringComparison.Ordinal);
 
             window.MouseDown(point, MouseButton.Left, RawInputModifiers.LeftMouseButton);
@@ -205,17 +207,17 @@ public sealed class VirtualizedPreviewTextControlTests
 			control.Focus();
 			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
 
-			window.KeyPress(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
 			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
-			window.KeyRelease(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
 
-			window.KeyPress(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
 			Assert.Equal(secondOccurrence, GetActiveRedactionOccurrenceId(control));
-			window.KeyRelease(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
 
-			window.KeyPress(Key.F8, RawInputModifiers.Shift, PhysicalKey.F8, null);
+			window.KeyPress(Key.Up, RawInputModifiers.Alt, PhysicalKey.None, null);
 			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
-			window.KeyRelease(Key.F8, RawInputModifiers.Shift, PhysicalKey.F8, null);
+			window.KeyRelease(Key.Up, RawInputModifiers.Alt, PhysicalKey.None, null);
 
 			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
 			Assert.Equal(firstOccurrence, requestedOccurrence);
