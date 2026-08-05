@@ -7,7 +7,7 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class SmartSecretsDetectorTests
 {
-	private static readonly SmartSecretsDetector Detector = CreateDetector();
+	internal static readonly SmartSecretsDetector Detector = CreateDetector();
 
 	[Theory]
 	[InlineData("postgres://admin:pass@db.local/app")]
@@ -267,13 +267,14 @@ public sealed class SmartSecretsDetectorTests
 	[Fact(Timeout = 5_000)]
 	public void Detect_PathologicalStructuredInput_CompletesWithinBound()
 	{
-		var content = "DB_PASSWORD=" + new string('a', 2 * 1024 * 1024);
+		var value = new string('a', 2 * 1024 * 1024 - 1) + "b";
+		var content = "DB_PASSWORD=" + value;
 
 		var finding = Assert.Single(
 			Detector.Detect(".env", content, TestContext.Current.CancellationToken),
 			static finding => finding.RuleId == "environment-secret");
 
-		Assert.Equal(content.Length - "DB_PASSWORD=".Length, finding.Length);
+		Assert.Equal(value.Length, finding.Length);
 	}
 
 	private static string Replace(string content, DetectedSecret finding) =>
@@ -282,7 +283,7 @@ public sealed class SmartSecretsDetectorTests
 			$"DEVPROJEX_REDACTED[{finding.RuleId}#1]",
 			content.AsSpan(finding.Start + finding.Length));
 
-	private static SmartSecretsDetector CreateDetector()
+	internal static SmartSecretsDetector CreateDetector()
 	{
 		var smartIgnore = new SmartIgnoreService(
 		[

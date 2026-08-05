@@ -92,6 +92,38 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void Detect_UserSecretsIdFastAllowlist_PreservesARealGenericFindingInTheSameFile()
+	{
+		const string genericValue = "A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h";
+		const string content =
+			"<UserSecretsId>ce4e9e0f-5100-41c3-89f8-35d17f41e32b</UserSecretsId>\n" +
+			"apiKey = \"" + genericValue + "\"";
+
+		var finding = Assert.Single(
+			Detector.Detect("src/project.csproj", content, TestContext.Current.CancellationToken),
+			static match => match.RuleId == "generic-api-key");
+
+		Assert.Equal(genericValue, finding.Value);
+	}
+
+	[Theory]
+	[InlineData("credential")]
+	[InlineData("creds")]
+	public void Detect_GenericFastGatePreservesEveryPinnedKeyVocabulary(string key)
+	{
+		const string genericValue = "A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h";
+
+		var finding = Assert.Single(
+			Detector.Detect(
+				"src/config.txt",
+				$"{key} = \"{genericValue}\"",
+				TestContext.Current.CancellationToken),
+			static match => match.RuleId == "generic-api-key");
+
+		Assert.Equal(genericValue, finding.Value);
+	}
+
+	[Fact]
 	public void Detect_GitleaksAllowMarker_SuppressesFindingOnThatLine()
 	{
 		const string content = "const token = \"ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\"; // gitleaks:allow";

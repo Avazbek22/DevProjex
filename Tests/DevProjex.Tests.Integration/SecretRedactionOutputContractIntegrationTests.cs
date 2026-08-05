@@ -16,6 +16,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	private const string ConnectionPassword = "p0st!";
 	private const string ConfigurationPassword = "Admin123!";
 	private const string EnvironmentSecret = "this is my signing key";
+	private const string ContainerSecret = "container-pass-42";
+	private const string AuthorizationCredential = "sanitized.header.token";
 	private const string PrivateKeyBodyFragment =
 		"MIIEvQIBADANBgkq" +
 		"hkiG9w0BAQEFAASC" +
@@ -67,10 +69,10 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			session,
 			ProjectCopyExportFormat.Zip);
 
-		Assert.Equal(8, preview.Redactions.Count);
-		Assert.Equal(8, preview.RedactionSummary?.RedactedCount);
-		Assert.Equal(8, folder.RedactedValueCount);
-		Assert.Equal(8, zip.RedactedValueCount);
+		Assert.Equal(10, preview.Redactions.Count);
+		Assert.Equal(10, preview.RedactionSummary?.RedactedCount);
+		Assert.Equal(10, folder.RedactedValueCount);
+		Assert.Equal(10, zip.RedactedValueCount);
 		Assert.All(
 			new[] { previewPayload, selectedContent }.Concat(contextDocuments.Values),
 			AssertNoTextSecret);
@@ -195,6 +197,35 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			Assert.Contains(GithubToken, ReadZipText(archive, "src/app.cs"), StringComparison.Ordinal);
 		Assert.Null(zip.RedactionLegendPath);
 		Assert.Equal(0, detector.CallCount);
+	}
+
+	[Fact(Timeout = 10_000)]
+	public async Task CountPipeline_CompletesSharedDetectorWarmUpBeforeReadingSourceContent()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("warmup-project");
+		var path = temporary.CreateFile("warmup-project/config.txt", "ordinary content");
+		var detector = new BlockingWarmUpDetector();
+		var analyzer = new WarmUpGuardAnalyzer(new FileContentAnalyzer(), detector);
+		using var session = new SecretRedactionSession(detector);
+		var preparer = new SecretRedactionOutputPreparer(analyzer);
+		var context = new SecretRedactionContext(sourceRoot, session);
+
+		var operation = preparer.AnalyzeAsync(context, [path], TestContext.Current.CancellationToken);
+		try
+		{
+			await detector.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(0, analyzer.ReadCount);
+			Assert.Same(session.BeginWarmUp(), session.BeginWarmUp());
+		}
+		finally
+		{
+			detector.Release();
+		}
+
+		await operation;
+		Assert.Equal(1, detector.WarmUpCount);
+		Assert.Equal(1, analyzer.ReadCount);
 	}
 
 	[Fact]
@@ -622,12 +653,12 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	private static void AssertNativeLegends(
 		IReadOnlyDictionary<ProjectContextDocumentFormat, string> documents)
 	{
-		Assert.StartsWith("Values redacted by DevProjex before export: 8", documents[ProjectContextDocumentFormat.Text], StringComparison.Ordinal);
+		Assert.StartsWith("Values redacted by DevProjex before export: 10", documents[ProjectContextDocumentFormat.Text], StringComparison.Ordinal);
 		Assert.StartsWith("<!--", documents[ProjectContextDocumentFormat.Markdown], StringComparison.Ordinal);
 		using var json = JsonDocument.Parse(documents[ProjectContextDocumentFormat.Json]);
-		Assert.Equal(8, json.RootElement.GetProperty("redaction").GetProperty("count").GetInt32());
+		Assert.Equal(10, json.RootElement.GetProperty("redaction").GetProperty("count").GetInt32());
 		var xml = XDocument.Parse(documents[ProjectContextDocumentFormat.Xml]);
-		Assert.Equal("8", xml.Root?.Element("redaction")?.Element("count")?.Value);
+		Assert.Equal("10", xml.Root?.Element("redaction")?.Element("count")?.Value);
 	}
 
 	private static void AssertFolderCopy(Workspace workspace, ProjectCopyExportResult result)
@@ -649,6 +680,12 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "service.txt")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "web.config")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, ".env")));
+		var dockerfile = File.ReadAllText(Path.Combine(result.DestinationPath, "container", "service.dockerfile"));
+		AssertNoTextSecret(dockerfile);
+		Assert.Contains("ENV DB_PASSWORD=DEVPROJEX_REDACTED[container-secret#1]", dockerfile, StringComparison.Ordinal);
+		var request = File.ReadAllText(Path.Combine(result.DestinationPath, "requests", "health.http"));
+		AssertNoTextSecret(request);
+		Assert.Contains("Authorization: Bearer DEVPROJEX_REDACTED[authorization-bearer#1]", request, StringComparison.Ordinal);
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "secrets", "private.pem")));
 		Assert.Contains(
 			"DEVPROJEX_REDACTED[private-key#1]",
@@ -682,6 +719,12 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(ReadZipText(archive, "config/service.txt"));
 		AssertNoTextSecret(ReadZipText(archive, "config/web.config"));
 		AssertNoTextSecret(ReadZipText(archive, ".env"));
+		var dockerfile = ReadZipText(archive, "container/service.dockerfile");
+		AssertNoTextSecret(dockerfile);
+		Assert.Contains("ENV DB_PASSWORD=DEVPROJEX_REDACTED[container-secret#1]", dockerfile, StringComparison.Ordinal);
+		var request = ReadZipText(archive, "requests/health.http");
+		AssertNoTextSecret(request);
+		Assert.Contains("Authorization: Bearer DEVPROJEX_REDACTED[authorization-bearer#1]", request, StringComparison.Ordinal);
 		var privateKey = ReadZipText(archive, "secrets/private.pem");
 		AssertNoTextSecret(privateKey);
 		Assert.Contains("DEVPROJEX_REDACTED[private-key#1]", privateKey, StringComparison.Ordinal);
@@ -734,6 +777,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.DoesNotContain(ConnectionPassword, text, StringComparison.Ordinal);
 		Assert.DoesNotContain(ConfigurationPassword, text, StringComparison.Ordinal);
 		Assert.DoesNotContain(EnvironmentSecret, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(ContainerSecret, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(AuthorizationCredential, text, StringComparison.Ordinal);
 		// Checking the body separately prevents a header-only PEM replacement from passing.
 		Assert.DoesNotContain(PrivateKeyBodyFragment, text, StringComparison.Ordinal);
 	}
@@ -749,6 +794,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Contains("DEVPROJEX_REDACTED[connection-password#1]", text, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[config-secret#1]", text, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[environment-secret#1]", text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[container-secret#1]", text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[authorization-bearer#1]", text, StringComparison.Ordinal);
 	}
 
 	private static int CountOccurrences(string value, string search)
@@ -801,6 +848,12 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				"project/config/web.config",
 				$"<appSettings><add key=\"Password\" value=\"{ConfigurationPassword}\" /></appSettings>\n");
 			temporary.CreateFile("project/.env", $"JWT_SECRET=\"{EnvironmentSecret}\"\n");
+			temporary.CreateFile(
+				"project/container/service.dockerfile",
+				$"FROM scratch\nENV DB_PASSWORD={ContainerSecret}\n");
+			temporary.CreateFile(
+				"project/requests/health.http",
+				$"GET https://localhost/health\nAuthorization: Bearer {AuthorizationCredential}\n");
 		}
 
 		var binaryPath = Path.Combine(sourceRoot, "assets", "blob.bin");
@@ -840,6 +893,76 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		{
 			CallCount++;
 			throw new InvalidOperationException("The detector must not run while Hide Secrets is disabled.");
+		}
+	}
+
+	private sealed class BlockingWarmUpDetector : ISecretDetector
+	{
+		private readonly ManualResetEventSlim _release = new(false);
+		private int _warmUpCount;
+		private int _warmUpCompleted;
+
+		public TaskCompletionSource Started { get; } = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		public int WarmUpCount => Volatile.Read(ref _warmUpCount);
+		public bool IsWarmUpCompleted => Volatile.Read(ref _warmUpCompleted) != 0;
+
+		public void WarmUp(CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _warmUpCount);
+			Started.TrySetResult();
+			_release.Wait(cancellationToken);
+			Volatile.Write(ref _warmUpCompleted, 1);
+		}
+
+		public void Release() => _release.Set();
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+	}
+
+	private sealed class WarmUpGuardAnalyzer(
+		IFileContentAnalyzer inner,
+		BlockingWarmUpDetector detector) : IFileContentAnalyzer
+	{
+		private int _readCount;
+
+		public int ReadCount => Volatile.Read(ref _readCount);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			inner.ClassifyWithoutReading(path);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default)
+		{
+			Assert.True(detector.IsWarmUpCompleted, "Source content was read before detector warm-up completed.");
+			Interlocked.Increment(ref _readCount);
+			return inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
 		}
 	}
 

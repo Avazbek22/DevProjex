@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using DevProjex.Application.Context;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Services;
@@ -47,16 +49,12 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		using var session = new SecretRedactionSession(CreateSmartSecretsDetector());
 		var preparer = new SecretRedactionOutputPreparer(analyzer);
 		var context = new SecretRedactionContext(workspace.Path, session);
-		// Rule parsing and the first regex compilation are fixed engine startup costs. Warm
-		// them before measuring the per-selection pipeline so this gate detects file-scaling
-		// regressions rather than runtime initialization changes.
-		_ = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
-		session.Disable();
+		await session.BeginWarmUp();
 		analyzer.ResetCounters();
 		var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
-		var stopwatch = Stopwatch.StartNew();
+		var firstStopwatch = Stopwatch.StartNew();
 		var first = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
-		stopwatch.Stop();
+		firstStopwatch.Stop();
 		var allocated = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
 		var diagnostics = session.GetCacheDiagnostics();
 
@@ -73,6 +71,13 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 			allocated < sourceBytes * 2,
 			$"Count-only scan allocated {allocated:N0} bytes for {sourceBytes:N0} source bytes.");
 
+		session.Disable();
+		analyzer.ResetCounters();
+		var steadyStopwatch = Stopwatch.StartNew();
+		_ = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
+		steadyStopwatch.Stop();
+		Assert.Equal(fileCount, analyzer.ReadCount);
+
 		_ = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
 		Assert.Equal(fileCount, analyzer.ReadCount);
 
@@ -88,7 +93,8 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		Assert.Equal(0, diagnostics.RetainedBytes);
 		TestContext.Current.TestOutputHelper?.WriteLine(
 			$"Smart Secrets many-small-files baseline: files={fileCount:N0}, bytes={sourceBytes:N0}, " +
-			$"elapsed={stopwatch.Elapsed.TotalMilliseconds:F2} ms, allocated={allocated:N0} B.");
+			$"first={firstStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
+			$"steady={steadyStopwatch.Elapsed.TotalMilliseconds:F2} ms, allocated={allocated:N0} B.");
 	}
 
 	[Fact]
@@ -108,22 +114,58 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 			initializationStopwatch.Stop();
 			var initializationAllocated = GC.GetTotalAllocatedBytes(precise: true) -
 			                              initializationAllocatedBefore;
-			var smartDetector = CreateSmartSecretsDetector();
 			var orderedPaths = files.Select(static file => file.FullPath).ToArray();
-			using var coldSession = new SecretRedactionSession(smartDetector);
-			var coldPreparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
-			var coldContext = new SecretRedactionContext(root, coldSession);
-			var coldAllocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
-			var coldStopwatch = Stopwatch.StartNew();
-			_ = await coldPreparer.AnalyzeAsync(
-				coldContext,
+			var totalCharacters = files.Sum(static file => (long)file.Content.Length);
+			var manifestIdentity = ComputeManifestIdentity(files);
+			var smartDetector = CreateSmartSecretsDetector();
+			using var session = new SecretRedactionSession(smartDetector);
+			var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+			var context = new SecretRedactionContext(root, session);
+
+			ForceCollection();
+			var retainedBeforeWarmUp = GC.GetTotalMemory(forceFullCollection: false);
+			var warmUpAllocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+			var warmUpStopwatch = Stopwatch.StartNew();
+			await session.BeginWarmUp();
+			warmUpStopwatch.Stop();
+			var warmUpAllocated = GC.GetTotalAllocatedBytes(precise: true) - warmUpAllocatedBefore;
+			ForceCollection();
+			var retainedAfterWarmUp = GC.GetTotalMemory(forceFullCollection: false);
+
+			var firstAllocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+			var firstStopwatch = Stopwatch.StartNew();
+			var firstResult = await preparer.AnalyzeAsync(
+				context,
 				orderedPaths,
 				TestContext.Current.CancellationToken);
-			coldStopwatch.Stop();
-			var coldAllocated = GC.GetTotalAllocatedBytes(precise: true) - coldAllocatedBefore;
-			coldSession.Disable();
+			firstStopwatch.Stop();
+			var firstAllocated = GC.GetTotalAllocatedBytes(precise: true) - firstAllocatedBefore;
+
+			session.Disable();
+			var steadyAllocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+			var steadyStopwatch = Stopwatch.StartNew();
+			var steadyResult = await preparer.AnalyzeAsync(
+				context,
+				orderedPaths,
+				TestContext.Current.CancellationToken);
+			steadyStopwatch.Stop();
+			var steadyAllocated = GC.GetTotalAllocatedBytes(precise: true) - steadyAllocatedBefore;
+
+			var cachedStopwatch = Stopwatch.StartNew();
+			var cachedResult = await preparer.AnalyzeAsync(
+				context,
+				orderedPaths,
+				TestContext.Current.CancellationToken);
+			cachedStopwatch.Stop();
+			Assert.Equal(firstResult.RedactedCount, steadyResult.RedactedCount);
+			Assert.Equal(firstResult.RedactedCount, cachedResult.RedactedCount);
+
 			var smartScope = smartDetector.CreateScope(root);
-			var totalCharacters = files.Sum(static file => (long)file.Content.Length);
+			var actualRuleIds = files
+				.SelectMany(file => smartScope
+					.Detect(file.FullPath, file.RelativePath, file.Content.AsSpan(), TestContext.Current.CancellationToken)
+					.Select(static finding => finding.RuleId))
+				.ToHashSet(StringComparer.Ordinal);
 			var candidateRuleIds = files
 				.SelectMany(file => detector.InspectCandidateRuleIds(
 					file.RelativePath,
@@ -131,6 +173,13 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 					TestContext.Current.CancellationToken))
 				.ToArray();
 			var uniqueCandidateRules = candidateRuleIds.ToHashSet(StringComparer.Ordinal);
+			var runnableRules = files
+				.SelectMany(file => detector.InspectRunnableRuleIds(
+						file.RelativePath,
+						file.Content.AsSpan(),
+						TestContext.Current.CancellationToken)
+					.Select(ruleId => new { file.RelativePath, RuleId = ruleId }))
+				.ToArray();
 			var busiestRules = candidateRuleIds
 				.GroupBy(static id => id, StringComparer.Ordinal)
 				.OrderByDescending(static group => group.Count())
@@ -143,39 +192,50 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				detector.Detect(file.RelativePath, file.Content.AsSpan(), token).Count);
 			var smartMeasurement = Measure(files, (file, token) =>
 				smartScope.Detect(file.FullPath, file.RelativePath, file.Content.AsSpan(), token).Count);
-			using var session = new SecretRedactionSession(smartDetector);
-			var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
-			var context = new SecretRedactionContext(root, session);
-			var pipelineStopwatch = Stopwatch.StartNew();
-			var pipelineResult = await preparer.AnalyzeAsync(
-				context,
-				orderedPaths,
-				TestContext.Current.CancellationToken);
-			pipelineStopwatch.Stop();
-			var warmStopwatch = Stopwatch.StartNew();
-			_ = await preparer.AnalyzeAsync(
-				context,
-				orderedPaths,
-				TestContext.Current.CancellationToken);
-			warmStopwatch.Stop();
-
 			TestContext.Current.TestOutputHelper?.WriteLine(
-				$"{Path.GetFileName(root)}: files={files.Count:N0}, chars={totalCharacters:N0}, " +
+				$"{Path.GetFileName(root)}: manifest={manifestIdentity}, files={files.Count:N0}, " +
+				$"chars={totalCharacters:N0}, " +
 				$"candidates/file={(double)candidateMeasurement.ResultCount / Math.Max(1, files.Count):F1}, " +
 				$"uniqueCandidates={uniqueCandidateRules.Count:N0}, " +
+				$"candidateIds={string.Join(',', uniqueCandidateRules.Order(StringComparer.Ordinal))}, " +
 				$"topCandidates={string.Join(',', busiestRules)}, " +
+				$"runnable={string.Join(',', runnableRules.GroupBy(static item => item.RuleId, StringComparer.Ordinal).Select(static group => $"{group.Key}:{group.Count()}"))}, " +
+				$"runnableFiles={string.Join(',', runnableRules.Select(static item => $"{item.RelativePath}:{item.RuleId}"))}, " +
+				$"actualRules={string.Join(',', actualRuleIds.Order(StringComparer.Ordinal))}, " +
 				$"engineInit={initializationStopwatch.Elapsed.TotalMilliseconds:F2} ms/" +
 				$"{initializationAllocated:N0} B, " +
-				$"cold={coldStopwatch.Elapsed.TotalMilliseconds:F2} ms/{coldAllocated:N0} B, " +
+				$"warmup={warmUpStopwatch.Elapsed.TotalMilliseconds:F2} ms/{warmUpAllocated:N0} B, " +
+				$"retainedWarmup={retainedAfterWarmUp - retainedBeforeWarmUp:N0} B, " +
+				$"first={firstStopwatch.Elapsed.TotalMilliseconds:F2} ms/{firstAllocated:N0} B, " +
+				$"steady={steadyStopwatch.Elapsed.TotalMilliseconds:F2} ms/{steadyAllocated:N0} B, " +
+				$"cached={cachedStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"candidate={candidateMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"detect={detectionMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"smart={smartMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"throughput={ToMegabytes(totalCharacters) / smartMeasurement.Elapsed.TotalSeconds:F1} MB/s, " +
 				$"allocated={smartMeasurement.AllocatedBytes:N0} B, " +
-				$"pipeline={pipelineStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
-				$"warm={warmStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
-				$"redactions={pipelineResult.RedactedCount}.");
+				$"redactions={firstResult.RedactedCount}.");
 		}
+	}
+
+	private static string ComputeManifestIdentity(IReadOnlyList<LoadedTextFile> files)
+	{
+		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		foreach (var file in files.OrderBy(static file => file.RelativePath, StringComparer.Ordinal))
+		{
+			hash.AppendData(Encoding.UTF8.GetBytes(file.RelativePath));
+			hash.AppendData([0]);
+			hash.AppendData(Encoding.UTF8.GetBytes(file.Content));
+			hash.AppendData([0]);
+		}
+		return Convert.ToHexString(hash.GetHashAndReset())[..12];
+	}
+
+	private static void ForceCollection()
+	{
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
 	}
 
 	private static Measurement Measure(

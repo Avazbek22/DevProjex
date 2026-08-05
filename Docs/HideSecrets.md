@@ -81,6 +81,13 @@ shape are stronger evidence:
 - credential URIs for PostgreSQL, MySQL, MongoDB, Redis, AMQP, and HTTP(S);
 - ADO.NET and JDBC-style connection strings;
 - `.env*` and `.npmrc` assignments;
+- `ENV` and `ARG KEY=value` assignments in Dockerfile and Containerfile
+  variants; the legacy `ENV KEY value` form is also supported. A space-delimited
+  `ARG KEY value` is not treated as an assignment because Docker's ARG grammar
+  defines only `ARG KEY` and `ARG KEY=value`;
+- `Authorization` and `Proxy-Authorization` credentials in `.http` and
+  `.rest` request files, with the authentication scheme left visible;
+- password fields in `.pgpass`, `pgpass.conf`, `.netrc`, and `_netrc`;
 - `appsettings*.json`, `*.config`, `application*.yml`,
   `application*.yaml`, `*.tfvars`, `docker-compose*.yml`, and
   `docker-compose*.yaml` values;
@@ -97,8 +104,16 @@ shaped credentials in source remain covered by Gitleaks rules.
 
 References and placeholders such as `${DB_PASSWORD}`, `$(DbPassword)`,
 `%DB_PASSWORD%`, `{{ secret }}`, `<password>`, and empty values are not redacted.
-These checks match whole values or interpolation syntax, never a substring inside
-an otherwise credential-shaped value.
+Common template values such as `changeme`, `your-password-here`, `replace_me`,
+`placeholder`, `null`, `none`, and repeated non-numeric characters are also
+ignored. These checks match whole values or interpolation syntax, never a
+substring inside an otherwise credential-shaped value. Weak literal values such
+as `password`, `admin`, `0000`, and `123456` still match in recognized
+configuration shapes.
+
+The provider tier intentionally preserves Gitleaks' upstream substring-based
+stopwords, including their false-negative trade-off. The scope-aware tier does
+not copy that behaviour: its placeholder allowlist is whole-value only.
 
 Smart Ignore and Smart Secrets share an engine shape but have opposite failure
 biases. Smart Ignore leaves a directory visible when artifact evidence is missing,

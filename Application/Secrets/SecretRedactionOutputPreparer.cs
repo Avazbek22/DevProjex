@@ -18,6 +18,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
+		await context.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 
 		var workingDirectory = CreateWorkingDirectory();
 		var preparedFiles = new Dictionary<string, PreparedSecretFile>(PathComparer.Default);
@@ -100,6 +101,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
+		await context.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		var scope = context.BeginOutput(orderedFilePaths);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
 		var parallelWork = new List<SecretScanWorkItem>();

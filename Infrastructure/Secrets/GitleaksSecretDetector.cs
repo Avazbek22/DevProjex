@@ -23,9 +23,17 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private const string ResourceSuffix = ".Secrets.Rules.gitleaks-v8.30.1.toml";
 	private const string GitleaksAllowSignature = "gitleaks:allow";
 	private const string GenericApiKeyRuleId = "generic-api-key";
+	private const string TwitterBearerPrefix = "AAAAAAAAAAAAAAAAAAAAAA";
+	private const string RegexWarmUpProbe =
+		"apiKey = \"A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h\"; /src/config.json";
+	private static readonly string[] CommonWarmUpRuleIds =
+	[
+		GenericApiKeyRuleId
+	];
 	private static readonly string[] GenericApiKeySignals =
 	[
-		"key", "api", "token", "secret", "client", "passwd", "password", "auth", "access"
+		"key", "api", "token", "secret", "client", "passwd", "password", "auth", "access",
+		"credential", "creds"
 	];
 	private readonly Lazy<CompiledConfiguration> _configuration;
 
@@ -44,6 +52,41 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	public int RuleCount => _configuration.Value.Rules.Count;
 	public string RulesIdentity => $"gitleaks:{RulesVersion}:{ConfigurationSha256}";
+
+	public void WarmUp(CancellationToken cancellationToken = default)
+	{
+		try
+		{
+			var configuration = _configuration.Value;
+			foreach (var allowlist in configuration.GlobalAllowlists)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				allowlist.WarmUp();
+			}
+			// Warming all provider-specific expressions allocates hundreds of megabytes and
+			// delays the first result. The generic rule has intentionally broad, ubiquitous
+			// keywords and dominates ordinary source trees; distinctive provider rules stay
+			// lazy until their own value shape is actually present.
+			foreach (var ruleId in CommonWarmUpRuleIds)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var rule = configuration.Rules.Single(candidate =>
+					candidate.Id.Equals(ruleId, StringComparison.Ordinal));
+				_ = rule.ContentRegex?.Value.IsMatch(RegexWarmUpProbe);
+				_ = rule.PathRegex?.Value.IsMatch(RegexWarmUpProbe);
+				foreach (var allowlist in rule.Allowlists)
+					allowlist.WarmUp();
+			}
+		}
+		catch (SecretDetectionException)
+		{
+			throw;
+		}
+		catch (RegexMatchTimeoutException exception)
+		{
+			throw new SecretDetectionException("Secret detector warm-up timed out.", exception);
+		}
+	}
 
 	internal GitleaksCandidateStatistics InspectCandidates(
 		string repositoryRelativePath,
@@ -85,6 +128,33 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			var rule = configuration.Rules[ruleOrder];
 			if (rule.ContentRegex is not null && rule.AppliesToPath(normalizedPath))
 				ids.Add(rule.Id);
+		}
+		return ids;
+	}
+
+	internal IReadOnlyList<string> InspectRunnableRuleIds(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
+		var configuration = _configuration.Value;
+		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+		Span<ulong> candidates = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
+		configuration.KeywordPrefilter.FindCandidates(content, candidates, cancellationToken);
+		var ids = new List<string>();
+		foreach (var ruleOrder in EnumerateCandidateRuleOrders(candidates, configuration.Rules.Count))
+		{
+			var rule = configuration.Rules[ruleOrder];
+			if (rule.ContentRegex is null ||
+			    rule.Id.Equals(GenericApiKeyRuleId, StringComparison.Ordinal) &&
+			    !HasGenericApiKeyEvidence(content) ||
+			    !HasRuleSpecificEvidence(rule.Id, content) ||
+			    !rule.AppliesToPath(normalizedPath))
+			{
+				continue;
+			}
+			ids.Add(rule.Id);
 		}
 		return ids;
 	}
@@ -139,14 +209,19 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		{
 			var rule = configuration.Rules[ruleOrder];
 			cancellationToken.ThrowIfCancellationRequested();
-			if (rule.ContentRegex is null ||
-			    !rule.AppliesToPath(normalizedPath))
+			if (rule.ContentRegex is null)
 				continue;
 			if (rule.Id.Equals(GenericApiKeyRuleId, StringComparison.Ordinal) &&
 			    !HasGenericApiKeyEvidence(content))
 			{
 				continue;
 			}
+			if (!HasRuleSpecificEvidence(rule.Id, content))
+				continue;
+			// Value-shape gates are path-independent necessary conditions. Running them first
+			// avoids constructing a provider rule's lazy path DFA for ordinary keyword noise.
+			if (!rule.AppliesToPath(normalizedPath))
+				continue;
 			try
 			{
 				var contentRegex = rule.ContentRegex.Value;
@@ -201,50 +276,468 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static bool HasGenericApiKeyEvidence(ReadOnlySpan<char> content)
 	{
-		for (var delimiter = 0; delimiter < content.Length; delimiter++)
+		for (var delimiterStart = 0; delimiterStart < content.Length; delimiterStart++)
 		{
-			if (content[delimiter] is not ('=' or ':' or '>'))
+			var delimiterLength = GetGenericDelimiterLength(content, delimiterStart);
+			if (delimiterLength == 0)
 				continue;
 
-			var lineStart = content[..delimiter].LastIndexOf('\n') + 1;
-			var keyWindowStart = Math.Max(lineStart, delimiter - 48);
-			var keyWindow = content[keyWindowStart..delimiter];
-			var hasSignal = false;
-			foreach (var signal in GenericApiKeySignals)
-			{
-				if (!keyWindow.Contains(signal, StringComparison.OrdinalIgnoreCase))
-					continue;
-				hasSignal = true;
-				break;
-			}
-			if (!hasSignal)
-			{
+			if (!TryFindGenericApiKeyCandidate(
+					content,
+					delimiterStart + delimiterLength,
+					out var candidate) ||
+			    CalculateShannonEntropy(candidate) <= 3.5d)
 				continue;
-			}
 
-			var valueStart = delimiter + 1;
-			var skipped = 0;
-			while (valueStart < content.Length && skipped < 8 &&
-			       (char.IsWhiteSpace(content[valueStart]) ||
-			        content[valueStart] is '=' or '>' or ':' or '<' or '|' or '\'' or '"' or '`'))
-			{
-				valueStart++;
-				skipped++;
-			}
-
-			var valueEnd = valueStart;
-			while (valueEnd < content.Length &&
-			       valueEnd - valueStart < 150 &&
-			       IsGenericApiKeyCharacter(content[valueEnd]))
-			{
-				valueEnd++;
-			}
-			var candidate = content[valueStart..valueEnd];
-			if (candidate.Length >= 10 && CalculateShannonEntropy(candidate) > 3.5d)
+			// Values reject the overwhelming majority of source-code delimiters. Only a
+			// plausible literal pays for the bounded key-vocabulary probe.
+			var lineStart = content[..delimiterStart].LastIndexOf('\n') + 1;
+			var keyWindowStart = Math.Max(lineStart, delimiterStart - 40);
+			var keyWindow = content[keyWindowStart..delimiterStart];
+			if (!HasCompatibleGenericKey(keyWindow))
+				continue;
+			// UserSecretsId is project metadata, and the pinned Gitleaks generic rule already
+			// allowlists it. Recognising it before lazy regex construction preserves that
+			// upstream decision without paying for the large generic allowlist on every csproj.
+			if (!keyWindow.Contains("UserSecretsId", StringComparison.OrdinalIgnoreCase))
 				return true;
 		}
 		return false;
 	}
+
+	private static bool TryFindGenericApiKeyCandidate(
+		ReadOnlySpan<char> content,
+		int valueStart,
+		out ReadOnlySpan<char> candidate)
+	{
+		// Gitleaks permits up to five separators before the captured value. Try each
+		// legal boundary instead of consuming them greedily: '=' is both a separator
+		// and a legal first character of the provider-neutral value grammar.
+		for (var skipped = 0; skipped <= 5 && valueStart < content.Length; skipped++, valueStart++)
+		{
+			if (TryReadGenericApiKeyCandidate(content, valueStart, out candidate))
+				return true;
+			if (skipped == 5 ||
+			    !char.IsWhiteSpace(content[valueStart]) &&
+			    content[valueStart] is not ('=' or '\'' or '"' or '`'))
+			{
+				break;
+			}
+		}
+
+		candidate = default;
+		return false;
+	}
+
+	private static int GetGenericDelimiterLength(ReadOnlySpan<char> content, int start)
+	{
+		return content[start] switch
+		{
+			'=' => start + 1 < content.Length && content[start + 1] == '>' ? 2 : 1,
+			'>' => 1,
+			'|' when start + 1 < content.Length && content[start + 1] == '|' => 2,
+			'?' when start + 1 < content.Length && content[start + 1] == '=' => 2,
+			',' => 1,
+			':' => GetColonDelimiterLength(content, start),
+			_ => 0
+		};
+	}
+
+	private static int GetColonDelimiterLength(ReadOnlySpan<char> content, int start)
+	{
+		var length = 1;
+		while (length < 3 && start + length < content.Length && content[start + length] == ':')
+			length++;
+		if (start + length < content.Length && content[start + length] == '=')
+			length++;
+		return length;
+	}
+
+	private static bool HasCompatibleGenericKey(ReadOnlySpan<char> keyWindow)
+	{
+		var suffixEnd = keyWindow.Length;
+		var punctuationCount = 0;
+		while (suffixEnd > 0 && punctuationCount < 3 &&
+		       (char.IsWhiteSpace(keyWindow[suffixEnd - 1]) || keyWindow[suffixEnd - 1] is '\'' or '"'))
+		{
+			suffixEnd--;
+			punctuationCount++;
+		}
+		var key = keyWindow[..suffixEnd];
+		foreach (var signal in GenericApiKeySignals)
+		{
+			var searchEnd = key.Length;
+			while (searchEnd >= signal.Length)
+			{
+				var signalStart = key[..searchEnd].LastIndexOf(signal, StringComparison.OrdinalIgnoreCase);
+				if (signalStart < 0)
+					break;
+				var suffix = key[(signalStart + signal.Length)..];
+				if (suffix.Length <= 20 && IsGenericKeySuffix(suffix))
+					return true;
+				searchEnd = signalStart;
+			}
+		}
+		return false;
+	}
+
+	private static bool IsGenericKeySuffix(ReadOnlySpan<char> suffix)
+	{
+		foreach (var character in suffix)
+		{
+			if (!char.IsWhiteSpace(character) &&
+			    !char.IsLetterOrDigit(character) &&
+			    character is not ('_' or '.' or '-'))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static bool TryReadGenericApiKeyCandidate(
+		ReadOnlySpan<char> content,
+		int valueStart,
+		out ReadOnlySpan<char> candidate)
+	{
+		var wordEnd = valueStart;
+		while (wordEnd < content.Length && wordEnd - valueStart <= 150 &&
+		       IsGenericApiKeyCharacter(content[wordEnd]))
+		{
+			wordEnd++;
+		}
+		if (wordEnd - valueStart is >= 10 and <= 150 && IsGenericValueTerminator(content, wordEnd))
+		{
+			candidate = content[valueStart..wordEnd];
+			return true;
+		}
+
+		var base64End = valueStart;
+		while (base64End < content.Length && IsGenericBase64Character(content[base64End]))
+			base64End++;
+		var paddingStart = base64End;
+		while (base64End < content.Length && base64End - paddingStart < 3 && content[base64End] == '=')
+			base64End++;
+		if (paddingStart - valueStart >= 12 && IsGenericValueTerminator(content, base64End))
+		{
+			candidate = content[valueStart..base64End];
+			return true;
+		}
+
+		candidate = default;
+		return false;
+	}
+
+	private static bool IsGenericValueTerminator(ReadOnlySpan<char> content, int index) =>
+		index == content.Length ||
+		content[index] is '`' or '\'' or '"' or ';' ||
+		char.IsWhiteSpace(content[index]) ||
+		content[index] == '\\' && index + 1 < content.Length && content[index + 1] is 'n' or 'r';
+
+	private static bool IsGenericBase64Character(char character) =>
+		char.IsAsciiLetterOrDigit(character) || character is '+' or '/';
+
+	private static bool HasRuleSpecificEvidence(string ruleId, ReadOnlySpan<char> content) =>
+		ruleId switch
+		{
+			"1password-secret-key" => HasOnePasswordSecretKeyEvidence(content),
+			"1password-service-account-token" =>
+				HasPrefixedRun(content, "ops_", 250, int.MaxValue, IsBase64Character),
+			"cohere-api-token" => HasRun(content, 40, char.IsAsciiLetterOrDigit),
+			"lob-pub-api-key" =>
+				content.Contains("test_pub_", StringComparison.OrdinalIgnoreCase) ||
+				content.Contains("live_pub_", StringComparison.OrdinalIgnoreCase),
+			"sendgrid-api-token" =>
+				HasPrefixedRun(content, "SG.", 66, 66, IsProviderTokenCharacter),
+			"sentry-access-token" => HasRun(content, 64, char.IsAsciiHexDigit),
+			"square-access-token" =>
+				HasPrefixedRun(content, "EAAA", 22, 60, IsWordOrHyphen) ||
+				HasPrefixedRun(content, "sq0atp-", 22, 60, IsWordOrHyphen),
+			"telegram-bot-api-token" => HasTelegramTokenEvidence(content),
+			"twitter-access-secret" => HasRun(content, 45, char.IsAsciiLetterOrDigit),
+			"twitter-access-token" => HasTwitterAccessTokenEvidence(content),
+			"twitter-api-key" => HasRun(content, 25, char.IsAsciiLetterOrDigit),
+			"twitter-api-secret" => HasRun(content, 50, char.IsAsciiLetterOrDigit),
+			"twitter-bearer-token" =>
+				HasPrefixedRun(content, TwitterBearerPrefix, 80, 100, IsTwitterBearerCharacter),
+			"vault-service-token" =>
+				HasPrefixedRun(content, "hvs.", 90, 120, IsVaultTokenCharacter, IsGitleaksValueTerminator) ||
+				HasPrefixedRun(content, "s.", 24, 24, char.IsAsciiLetterOrDigit, IsGitleaksValueTerminator),
+			"twilio-api-key" => HasPrefixedRun(content, "SK", 32, 32, char.IsAsciiHexDigit),
+			"jwt" => HasJwtEvidence(content),
+			"yandex-access-token" => content.Contains("t1.", StringComparison.Ordinal),
+			"yandex-api-key" =>
+				HasPrefixedRun(
+					content,
+					"AQVN",
+					35,
+					38,
+					IsWordOrHyphen,
+					comparison: StringComparison.OrdinalIgnoreCase),
+			"yandex-aws-access-token" =>
+				HasPrefixedRun(
+					content,
+					"YC",
+					38,
+					38,
+					IsWordOrHyphen,
+					comparison: StringComparison.OrdinalIgnoreCase),
+			"linear-client-secret" =>
+				content.Contains("linear", StringComparison.OrdinalIgnoreCase) && HasHexRun(content, 32),
+			"curl-auth-header" =>
+				content.Contains("curl", StringComparison.Ordinal) &&
+				(content.Contains("-H", StringComparison.Ordinal) ||
+				 content.Contains("--header", StringComparison.Ordinal)),
+			"curl-auth-user" =>
+				content.Contains("curl", StringComparison.Ordinal) &&
+				(content.Contains("-u", StringComparison.Ordinal) ||
+				 content.Contains("--user", StringComparison.Ordinal)),
+			"discord-api-token" => HasRun(content, 64, char.IsAsciiHexDigit),
+			"discord-client-id" => HasRun(content, 18, char.IsAsciiDigit),
+			"discord-client-secret" => HasRun(content, 32, IsWordHyphenOrEquals),
+			"facebook-page-access-token" =>
+				HasPrefixedRun(content, "EAAM", 100, int.MaxValue, char.IsAsciiLetterOrDigit) ||
+				HasPrefixedRun(content, "EAAC", 100, int.MaxValue, char.IsAsciiLetterOrDigit),
+			"octopus-deploy-api-key" =>
+				HasPrefixedRun(content, "API-", 26, 26, char.IsAsciiLetterOrDigit),
+			_ => true
+		};
+
+	private static bool HasPrefixedRun(
+		ReadOnlySpan<char> content,
+		string prefix,
+		int minimumLength,
+		int maximumLength,
+		Func<char, bool> isAllowed,
+		Func<char, bool>? isTerminator = null,
+		StringComparison comparison = StringComparison.Ordinal)
+	{
+		var searchStart = 0;
+		while (searchStart <= content.Length - prefix.Length - minimumLength)
+		{
+			var relativeStart = content[searchStart..].IndexOf(prefix, comparison);
+			if (relativeStart < 0)
+				return false;
+			var runStart = searchStart + relativeStart + prefix.Length;
+			var runLength = 0;
+			while (runStart + runLength < content.Length &&
+			       runLength <= maximumLength &&
+			       isAllowed(content[runStart + runLength]))
+			{
+				runLength++;
+			}
+			if (runLength >= minimumLength && runLength <= maximumLength &&
+			    (runStart + runLength == content.Length ||
+			     isTerminator is null || isTerminator(content[runStart + runLength])))
+				return true;
+			searchStart = runStart;
+		}
+		return false;
+	}
+
+	private static bool HasOnePasswordSecretKeyEvidence(ReadOnlySpan<char> content)
+	{
+		var searchStart = 0;
+		while (searchStart <= content.Length - 39)
+		{
+			var relativeStart = content[searchStart..].IndexOf("A3-", StringComparison.Ordinal);
+			if (relativeStart < 0)
+				return false;
+			var start = searchStart + relativeStart;
+			if ((start == 0 || !IsWordCharacter(content[start - 1])) &&
+			    (MatchesOnePasswordSecretKey(content, start, middleWithSeparator: false, out var end) ||
+			     MatchesOnePasswordSecretKey(content, start, middleWithSeparator: true, out end)) &&
+			    (end == content.Length || !IsWordCharacter(content[end])))
+			{
+				return true;
+			}
+			searchStart = start + 3;
+		}
+		return false;
+	}
+
+	private static bool MatchesOnePasswordSecretKey(
+		ReadOnlySpan<char> content,
+		int start,
+		bool middleWithSeparator,
+		out int end)
+	{
+		var cursor = start + 3;
+		if (!ConsumeUpperAlphaNumeric(content, ref cursor, 6) || !Consume(content, ref cursor, '-'))
+		{
+			end = cursor;
+			return false;
+		}
+		if (middleWithSeparator)
+		{
+			if (!ConsumeUpperAlphaNumeric(content, ref cursor, 6) ||
+			    !Consume(content, ref cursor, '-') ||
+			    !ConsumeUpperAlphaNumeric(content, ref cursor, 5))
+			{
+				end = cursor;
+				return false;
+			}
+		}
+		else if (!ConsumeUpperAlphaNumeric(content, ref cursor, 11))
+		{
+			end = cursor;
+			return false;
+		}
+		for (var segment = 0; segment < 3; segment++)
+		{
+			if (!Consume(content, ref cursor, '-') || !ConsumeUpperAlphaNumeric(content, ref cursor, 5))
+			{
+				end = cursor;
+				return false;
+			}
+		}
+		end = cursor;
+		return true;
+	}
+
+	private static bool ConsumeUpperAlphaNumeric(ReadOnlySpan<char> content, ref int cursor, int length)
+	{
+		if (cursor > content.Length - length)
+			return false;
+		for (var index = 0; index < length; index++)
+		{
+			var character = content[cursor + index];
+			if (!char.IsAsciiDigit(character) && character is not (>= 'A' and <= 'Z'))
+				return false;
+		}
+		cursor += length;
+		return true;
+	}
+
+	private static bool Consume(ReadOnlySpan<char> content, ref int cursor, char expected)
+	{
+		if (cursor >= content.Length || content[cursor] != expected)
+			return false;
+		cursor++;
+		return true;
+	}
+
+	private static bool HasRun(
+		ReadOnlySpan<char> content,
+		int requiredLength,
+		Func<char, bool> isAllowed)
+	{
+		var runLength = 0;
+		foreach (var character in content)
+		{
+			runLength = isAllowed(character) ? runLength + 1 : 0;
+			if (runLength >= requiredLength)
+				return true;
+		}
+		return false;
+	}
+
+	private static bool HasTelegramTokenEvidence(ReadOnlySpan<char> content)
+	{
+		for (var colon = 5; colon < content.Length - 35; colon++)
+		{
+			if (content[colon] != ':' || content[colon + 1] != 'A')
+				continue;
+			var digitStart = colon;
+			while (digitStart > 0 && char.IsAsciiDigit(content[digitStart - 1]))
+				digitStart--;
+			if (colon - digitStart is < 5 or > 16)
+				continue;
+			var suffixLength = 0;
+			while (colon + 2 + suffixLength < content.Length &&
+			       suffixLength < 34 &&
+			       IsWordOrHyphen(content[colon + 2 + suffixLength]))
+			{
+				suffixLength++;
+			}
+			if (suffixLength == 34)
+				return true;
+		}
+		return false;
+	}
+
+	private static bool HasTwitterAccessTokenEvidence(ReadOnlySpan<char> content)
+	{
+		for (var hyphen = 15; hyphen < content.Length - 20; hyphen++)
+		{
+			if (content[hyphen] != '-')
+				continue;
+			var digitStart = hyphen;
+			while (digitStart > 0 && char.IsAsciiDigit(content[digitStart - 1]))
+				digitStart--;
+			if (hyphen - digitStart is < 15 or > 25)
+				continue;
+			var suffixLength = 0;
+			while (hyphen + 1 + suffixLength < content.Length &&
+			       suffixLength < 40 &&
+			       char.IsAsciiLetterOrDigit(content[hyphen + 1 + suffixLength]))
+			{
+				suffixLength++;
+			}
+			if (suffixLength >= 20)
+				return true;
+		}
+		return false;
+	}
+
+	private static bool HasJwtEvidence(ReadOnlySpan<char> content)
+	{
+		var searchStart = 0;
+		while (searchStart <= content.Length - 3)
+		{
+			var relativeSeparator = content[searchStart..].IndexOf(".ey", StringComparison.Ordinal);
+			if (relativeSeparator < 0)
+				return false;
+			var separator = searchStart + relativeSeparator;
+			var firstStart = separator;
+			while (firstStart > 0 && char.IsAsciiLetterOrDigit(content[firstStart - 1]))
+				firstStart--;
+			if (separator - firstStart >= 19 &&
+			    content[firstStart] == 'e' &&
+			    firstStart + 1 < separator && content[firstStart + 1] == 'y')
+			{
+				return true;
+			}
+			searchStart = separator + 3;
+		}
+		return false;
+	}
+
+	private static bool HasHexRun(ReadOnlySpan<char> content, int requiredLength)
+	{
+		var runLength = 0;
+		foreach (var character in content)
+		{
+			runLength = char.IsAsciiHexDigit(character) ? runLength + 1 : 0;
+			if (runLength >= requiredLength)
+				return true;
+		}
+		return false;
+	}
+
+	private static bool IsVaultTokenCharacter(char character) =>
+		char.IsAsciiLetterOrDigit(character) || character is '_' or '-';
+
+	private static bool IsGitleaksValueTerminator(char character) =>
+		character is '`' or '\'' or '"' or ';' or '\\' || char.IsWhiteSpace(character);
+
+	private static bool IsWordCharacter(char character) =>
+		char.IsLetterOrDigit(character) || character == '_';
+
+	private static bool IsBase64Character(char character) =>
+		char.IsAsciiLetterOrDigit(character) || character is '+' or '/' or '=';
+
+	private static bool IsProviderTokenCharacter(char character) =>
+		char.IsAsciiLetterOrDigit(character) || character is '=' or '_' or '-' or '.';
+
+	private static bool IsWordOrHyphen(char character) =>
+		char.IsAsciiLetterOrDigit(character) || character is '_' or '-';
+
+	private static bool IsWordHyphenOrEquals(char character) =>
+		IsWordOrHyphen(character) || character == '=';
+
+	private static bool IsTwitterBearerCharacter(char character) =>
+		char.IsAsciiLetterOrDigit(character) || character == '%';
 
 	private static bool IsGenericApiKeyCharacter(char character) =>
 		char.IsLetterOrDigit(character) || character is '_' or '.' or '=' or '-';
@@ -431,10 +924,19 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			order);
 	}
 
+	// Provider detectors stay non-backtracking. Allowlists inspect only a path or an already
+	// bounded finding context under the same hard timeout; using the interpreted engine here
+	// avoids retaining tens of megabytes of lazy symbolic DFA state for exclusion predicates.
 	private static CompiledAllowlist CompileAllowlist(TomlTable table) =>
 		new(
-			GetStringArray(table, "paths").Select(pattern => CreateDeferredRegex(pattern, "allowlist path")).ToArray(),
-			GetStringArray(table, "regexes").Select(pattern => CreateDeferredRegex(pattern, "allowlist expression")).ToArray(),
+			GetStringArray(table, "paths").Select(pattern => CreateDeferredRegex(
+				pattern,
+				"allowlist path",
+				useNonBacktracking: false)).ToArray(),
+			GetStringArray(table, "regexes").Select(pattern => CreateDeferredRegex(
+				pattern,
+				"allowlist expression",
+				useNonBacktracking: false)).ToArray(),
 			GetStringArray(table, "stopwords"),
 			GetOptionalString(table, "regexTarget") switch
 			{
@@ -444,16 +946,19 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			},
 			string.Equals(GetOptionalString(table, "condition"), "AND", StringComparison.OrdinalIgnoreCase));
 
-	private static Regex CompileRegex(string pattern, string context)
+	private static Regex CompileRegex(string pattern, string context, bool useNonBacktracking)
 	{
 		var translated = pattern
 			.Replace("[[:alnum:]]", "[A-Za-z0-9]", StringComparison.Ordinal)
 			.Replace("(?P<", "(?<", StringComparison.Ordinal);
 		try
 		{
+			var options = RegexOptions.CultureInvariant;
+			if (useNonBacktracking)
+				options |= RegexOptions.NonBacktracking;
 			return new Regex(
 				translated,
-				RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
+				options,
 				RegexTimeout);
 		}
 		catch (ArgumentException exception)
@@ -462,9 +967,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		}
 	}
 
-	private static Lazy<Regex> CreateDeferredRegex(string pattern, string context) =>
+	private static Lazy<Regex> CreateDeferredRegex(
+		string pattern,
+		string context,
+		bool useNonBacktracking = true) =>
 		new(
-			() => CompileRegex(pattern, context),
+			() => CompileRegex(pattern, context, useNonBacktracking),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 
 	private static string GetRequiredString(TomlTable table, string key) =>
@@ -677,6 +1185,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		AllowlistRegexTarget RegexTarget,
 		bool RequireAll)
 	{
+		public void WarmUp()
+		{
+			foreach (var path in Paths)
+				_ = path.Value.IsMatch(RegexWarmUpProbe);
+			foreach (var regex in Regexes)
+				_ = regex.Value.IsMatch(RegexWarmUpProbe);
+		}
+
 		public bool AllowsPath(string path) => Paths.Any(regex => regex.Value.IsMatch(path));
 
 		public bool AllowsWholeFileByPath(string path) =>
@@ -687,27 +1203,43 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		public bool Allows(AllowlistContext context)
 		{
-			var pathMatches = AllowsPath(context.Path);
 			var target = RegexTarget switch
 			{
 				AllowlistRegexTarget.Match => context.Match,
 				AllowlistRegexTarget.Line => context.Line,
 				_ => context.Secret
 			};
-			var regexMatches = Regexes.Any(regex => regex.Value.IsMatch(target));
-			var stopwordMatches = Stopwords.Any(stopword =>
-				context.Secret.Contains(stopword, StringComparison.OrdinalIgnoreCase));
 			if (!RequireAll)
-				return pathMatches || regexMatches || stopwordMatches;
+			{
+				return Paths.Count > 0 && AllowsPath(context.Path) ||
+				       Stopwords.Count > 0 && Stopwords.Any(stopword =>
+					       context.Secret.Contains(stopword, StringComparison.OrdinalIgnoreCase)) ||
+				       Regexes.Count > 0 && Regexes.Any(regex => regex.Value.IsMatch(target));
+			}
 
-			var checks = new List<bool>(3);
+			var hasCriterion = false;
 			if (Paths.Count > 0)
-				checks.Add(pathMatches);
-			if (Regexes.Count > 0)
-				checks.Add(regexMatches);
+			{
+				hasCriterion = true;
+				if (!AllowsPath(context.Path))
+					return false;
+			}
 			if (Stopwords.Count > 0)
-				checks.Add(stopwordMatches);
-			return checks.Count > 0 && checks.All(static value => value);
+			{
+				hasCriterion = true;
+				if (!Stopwords.Any(stopword =>
+					    context.Secret.Contains(stopword, StringComparison.OrdinalIgnoreCase)))
+				{
+					return false;
+				}
+			}
+			if (Regexes.Count > 0)
+			{
+				hasCriterion = true;
+				if (!Regexes.Any(regex => regex.Value.IsMatch(target)))
+					return false;
+			}
+			return hasCriterion;
 		}
 	}
 

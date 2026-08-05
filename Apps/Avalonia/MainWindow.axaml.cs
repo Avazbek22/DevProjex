@@ -403,6 +403,9 @@ public partial class MainWindow : Window
 				_previewPipeline.ScheduleRefresh(immediate: true);
 			return;
 		}
+		// Start detector-only initialization before Preview and count pipelines read any
+		// selected content. This is engine warm-up; it never accesses the project tree.
+		_ = _secretRedactionSession.BeginWarmUp();
 		// A canceled option refresh may restore the exact selection that was already scanned.
 		// Reuse that snapshot synchronously so rollback also restores the measured label.
 		_secretRedactionCount = GetCachedSecretRedactionCountForCurrentSelection();

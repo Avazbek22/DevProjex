@@ -15,6 +15,7 @@ public sealed class SecretRedactionSession : IDisposable
 	private readonly object _sync = new();
 	private readonly HashSet<string> _keptOccurrenceIds = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, SecretRedactionSnapshot> _snapshots = new(StringComparer.Ordinal);
+	private Task? _detectorWarmUpTask;
 	private long _overrideRevision;
 	private int _activeFullContentBuffers;
 	private int _peakFullContentBuffers;
@@ -51,6 +52,30 @@ public sealed class SecretRedactionSession : IDisposable
 
 	public event EventHandler? OverridesChanged;
 	public event EventHandler<SecretRedactionSnapshotPublishedEventArgs>? SnapshotPublished;
+
+	/// <summary>
+	/// Starts rule-engine initialization once for the process session. It retains compiled rules,
+	/// never project content, and can safely overlap selection and preview preparation.
+	/// </summary>
+	public Task BeginWarmUp()
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		lock (_sync)
+		{
+			if (_detectorWarmUpTask is not null)
+				return _detectorWarmUpTask;
+			_detectorWarmUpTask = Task.Run(() => _detector.WarmUp(CancellationToken.None));
+			_ = _detectorWarmUpTask.ContinueWith(
+				static task => _ = task.Exception,
+				CancellationToken.None,
+				TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+				TaskScheduler.Default);
+			return _detectorWarmUpTask;
+		}
+	}
+
+	internal Task EnsureWarmUpAsync(CancellationToken cancellationToken) =>
+		BeginWarmUp().WaitAsync(cancellationToken);
 
 	public SecretRedactionScope BeginOutput(
 		string projectRoot,
@@ -593,13 +618,15 @@ public sealed class SecretRedactionScope
 			var predecessorView = accepted.GetViewBetween(
 				minimum,
 				new AcceptedInterval(candidate.Start, candidate.Start, null));
-			if (predecessorView.Count > 0 && predecessorView.Max.End > candidate.Start)
+			var predecessor = predecessorView.Max;
+			if (predecessor is not null && predecessor.End > candidate.Start)
 				continue;
 
 			var successorView = accepted.GetViewBetween(
 				new AcceptedInterval(candidate.Start, candidate.Start, null),
 				maximum);
-			if (successorView.Count > 0 && successorView.Min.Start < candidateEnd)
+			var successor = successorView.Min;
+			if (successor is not null && successor.Start < candidateEnd)
 				continue;
 
 			accepted.Add(new AcceptedInterval(candidate.Start, candidateEnd, candidate));
@@ -611,14 +638,22 @@ public sealed class SecretRedactionScope
 	private static bool IsGenericRule(string ruleId) =>
 		ruleId.Equals("generic-api-key", StringComparison.Ordinal);
 
-	private readonly record struct AcceptedInterval(int Start, int End, DetectedSecret? Match);
+	private sealed record AcceptedInterval(int Start, int End, DetectedSecret? Match);
 
 	private sealed class AcceptedIntervalStartComparer : IComparer<AcceptedInterval>
 	{
 		public static AcceptedIntervalStartComparer Instance { get; } = new();
 
-		public int Compare(AcceptedInterval left, AcceptedInterval right) =>
-			left.Start.CompareTo(right.Start);
+		public int Compare(AcceptedInterval? left, AcceptedInterval? right)
+		{
+			if (ReferenceEquals(left, right))
+				return 0;
+			if (left is null)
+				return -1;
+			if (right is null)
+				return 1;
+			return left.Start.CompareTo(right.Start);
+		}
 	}
 }
 

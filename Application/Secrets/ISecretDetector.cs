@@ -12,6 +12,14 @@ public interface ISecretDetector
 	/// </summary>
 	string RulesIdentity => GetType().FullName ?? nameof(ISecretDetector);
 
+	/// <summary>
+	/// Performs detector-only initialization before source buffers enter the pipeline. The
+	/// default is intentionally free so lightweight and test detectors pay no startup cost.
+	/// </summary>
+	void WarmUp(CancellationToken cancellationToken = default)
+	{
+	}
+
 	ISecretDetectionScope CreateScope(string projectRoot) =>
 		new UnscopedSecretDetectionScope(this);
 
