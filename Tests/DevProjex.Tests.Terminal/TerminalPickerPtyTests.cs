@@ -46,7 +46,7 @@ public sealed class TerminalPickerPtyTests
 		picker = await terminal.WaitForScreenAsync(
 			"Открыть",
 			cancellationToken: TestContext.Current.CancellationToken);
-		picker = await terminal.WaitForScreenAsync(
+		picker = await terminal.WaitForStableScreenAsync(
 			"Отмена",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Назад", picker, StringComparison.Ordinal);
