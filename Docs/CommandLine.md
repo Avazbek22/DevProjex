@@ -109,6 +109,7 @@ Exclusion tokens:
 
 ```text
 smart-ignore
+hide-secrets
 hidden-folders
 hidden-files
 dot-folders
@@ -123,6 +124,13 @@ If at least one `--exclude` is present, the supplied values are the exact ordina
 exclusion set. `--exclude none` selects an empty set and cannot be combined with
 another exclusion. If an option is absent, its value comes from the selected
 profile.
+
+`hide-secrets` is an opt-in content transformation, not a path filter. It replaces
+matched values in selected text files, keeps the files and surrounding code, and
+adds a redaction legend to every output that contains a replacement. It is not in
+the `standard` profile. Binary files are not scanned. A zero match count means only
+that the rules matched nothing; it is not a safety result. See
+[HideSecrets.md](HideSecrets.md).
 
 Modern local profiles retain checked and unchecked states across roots, extensions,
 and Exclusions. Newly discovered rows use current defaults in Desktop, CLI, and TUI;
@@ -263,6 +271,11 @@ documents; Markdown contains headings, a fenced tree, and fenced text-file
 content. Binary bytes are never embedded in context output. Machine documents
 mark binary entries with metadata.
 
+With `--exclude hide-secrets`, text, Markdown, JSON, and XML carry a format-native
+redaction legend whenever at least one value is replaced. Detection failure or a
+selected text file above the supported scan limit fails closed and produces no
+complete output artifact.
+
 When output is stdout, stdout contains only the context document. When output is a
 file, stdout contains one absolute result path. Existing files are conflicts
 unless `--force` is used; replacement is atomic. The destination parent directory
@@ -280,6 +293,7 @@ devprojex export context .
 devprojex export context . --view tree --format json -o -
 devprojex export context . --view content --format xml -o ../devprojex-context.xml
 devprojex export context . --format markdown -o ../devprojex-context.md --force
+devprojex export context . --exclude hide-secrets --format markdown -o ../devprojex-redacted.md
 ```
 
 ## Export Project
@@ -305,6 +319,12 @@ Folder and ZIP exports preserve selected binary bytes, timestamps, directory
 structure, and included empty directories. Staging is cleaned after cancellation
 or failure. Canonical destination checks reject destinations equal to or inside
 the source, including paths reached through symlinks or junctions.
+
+With `--exclude hide-secrets`, detected values in text files are replaced and a
+`DEVPROJEX_REDACTIONS.txt` legend is added at the copy root. Binary files remain
+unchanged. The result is intentionally not byte-for-byte faithful and may not
+build or run. `--dry-run` states this before any destination or staging path is
+created.
 
 On success stdout contains exactly one absolute result path. Measured progress and
 warnings use stderr.
@@ -420,6 +440,7 @@ legacy shapes do not receive a speculative replacement. See
 - [CLI-V1-Contract.md](CLI-V1-Contract.md): normative public contract
 - [CLI-Architecture.md](CLI-Architecture.md): layers and one-EXE routing
 - [CLI-Output-Contract.md](CLI-Output-Contract.md): streams and schemas
+- [HideSecrets.md](HideSecrets.md): redaction, overrides, limits, and rule provenance
 - [CLI-Profiles.md](CLI-Profiles.md): portable profiles and precedence
 - [Desktop-Control.md](Desktop-Control.md): local IPC
 - [TerminalWorkspace.md](TerminalWorkspace.md): interactive TUI

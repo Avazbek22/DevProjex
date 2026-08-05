@@ -38,6 +38,10 @@ maps by retaining their selected values as checked entries; all other rows use c
 defaults consistently across surfaces. Explicit CLI fields are exact for that invocation
 and never mutate the stored maps.
 
+The `hide-secrets` checkbox is stored like the other Exclusions and remains off in
+the built-in `standard` profile. Individual keep-as-is decisions are session-only:
+profiles never store secret fingerprints, values, or occurrence locations.
+
 ## Schema v1
 
 ```json
@@ -66,7 +70,8 @@ Semantics:
 - selected file and directory paths are relative to the source root;
 - a directory includes its effective subtree;
 - Git mode is exactly one of `none`, `gitignore`, or `tracked`;
-- Exclusions contain only ordinary exclusion tokens.
+- Exclusions contain only known tokens, including the opt-in `hide-secrets`
+  content transformation.
 
 Nonblank root values are exact top-level filesystem names. They are compared with the
 effective host path semantics and are not whitespace-trimmed.

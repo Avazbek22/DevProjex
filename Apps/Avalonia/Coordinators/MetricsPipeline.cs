@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 

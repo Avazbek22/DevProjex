@@ -6,8 +6,9 @@
 │    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
 │    [x] readme.md                        │││   │   └── Handler.cs                                        ││  ( ) Tracked Git files only                       │
 │                                         │││   └── App.cs                                                ││  EXCLUSIONS                                       │
-│                                         ││├── global.json                                               ││  [x] All                                          │
+│                                         ││├── global.json                                               ││  [ ] All                                          │
 │                                         ││└── readme.md                                                 ││  [x] Smart ignore                                 │
+│                                         ││                                                              ││  [ ] Hide secrets                                 │
 │                                         ││                                                              ││  [x] Empty folders                                │
 │                                         ││                                                              ││  [x] Empty files                                  │
 │                                         ││                                                              ││  [x] Hidden folders                               │
@@ -23,7 +24,6 @@
 │                                         ││                                                              ││  ROOT FOLDERS                                     │
 │                                         ││                                                              ││  [x] All                                          │
 │                                         ││                                                              ││  [x] src                                          │
-│                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │

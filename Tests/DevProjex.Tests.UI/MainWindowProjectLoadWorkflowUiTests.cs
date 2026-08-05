@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Abstractions;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.UI;
 
@@ -611,6 +610,16 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         try
         {
             var ignoreAllCheckBox = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
+            if (!UiTestDriver.GetViewModel(window).AllIgnoreChecked)
+            {
+                await UiTestDriver.ClickAsync(window, ignoreAllCheckBox);
+                await UiTestDriver.WaitForConditionAsync(
+                    window,
+                    () => UiTestDriver.GetViewModel(window).AllIgnoreChecked,
+                    "all ignore rules to become selected before testing the all-off transition");
+                await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            }
+
             await UiTestDriver.ClickAsync(window, ignoreAllCheckBox);
 
             await UiTestDriver.WaitForConditionAsync(
@@ -734,6 +743,15 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 
             await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var hideSecrets = UiTestDriver.GetViewModel(window).IgnoreOptions.First(
+						static option => option.Id == IgnoreOptionId.HideSecrets);
+					return Regex.IsMatch(hideSecrets.Label, @"\(\d+\)$");
+				},
+				"enabled Hide Secrets to publish its measured count");
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
         }
         finally
@@ -1266,6 +1284,25 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         {
             if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
                 continue;
+
+            if (option.Id == IgnoreOptionId.HideSecrets)
+            {
+                var secretCount = Regex.Match(option.Label, @"\((\d+)\)$");
+                if (option.IsChecked)
+                {
+                    Assert.True(
+                        secretCount.Success && int.TryParse(secretCount.Groups[1].Value, out _),
+                        $"Enabled Hide Secrets must render its measured redaction count. Actual label: '{option.Label}'.");
+                }
+                else
+                {
+                    Assert.False(
+                        secretCount.Success,
+                        $"Disabled Hide Secrets must not imply that a content scan ran. Actual label: '{option.Label}'.");
+                }
+
+                continue;
+            }
 
             var match = Regex.Match(option.Label, @"\((\d+)\)$");
             Assert.True(match.Success, $"Advanced ignore option '{option.Id}' must render a positive count in its label. Actual label: '{option.Label}'.");

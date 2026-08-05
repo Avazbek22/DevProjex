@@ -1,6 +1,4 @@
-using DevProjex.Kernel;
 using DevProjex.Kernel.Abstractions;
-using DevProjex.Kernel.Models;
 
 namespace DevProjex.Tests.Shared.ProjectLoadWorkflow;
 

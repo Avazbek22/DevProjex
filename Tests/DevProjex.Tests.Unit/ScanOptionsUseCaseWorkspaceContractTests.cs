@@ -1,5 +1,3 @@
-using DevProjex.Application.Selection;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class ScanOptionsUseCaseWorkspaceContractTests

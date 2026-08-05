@@ -8,7 +8,9 @@ public sealed class FileBackedPreviewTextDocument(
     long fileLength,
     int maxLineLength,
     long characterCount,
-    IReadOnlyList<PreviewDocumentSection>? sections = null)
+    IReadOnlyList<PreviewDocumentSection>? sections = null,
+	IReadOnlyList<PreviewRedactionSpan>? redactions = null,
+	PreviewRedactionSummary? redactionSummary = null)
     : IPreviewTextDocument
 {
     private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
@@ -31,6 +33,11 @@ public sealed class FileBackedPreviewTextDocument(
 
     public IReadOnlyList<PreviewDocumentSection> Sections { get; } =
         sections is { Count: > 0 } ? sections.ToArray() : Array.Empty<PreviewDocumentSection>();
+
+	public IReadOnlyList<PreviewRedactionSpan> Redactions { get; } =
+		redactions is { Count: > 0 } ? redactions.ToArray() : Array.Empty<PreviewRedactionSpan>();
+
+	public PreviewRedactionSummary? RedactionSummary { get; } = redactionSummary;
 
     public string GetFullText()
     {

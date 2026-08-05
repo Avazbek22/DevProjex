@@ -8,6 +8,7 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
@@ -142,8 +143,10 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 		var availability = BuildSingleOptionAvailability(optionId, count, showAdvanced);
 		var options = service.GetOptions(availability);
 
-		Assert.Single(options);
-		Assert.Equal(optionId, options[0].Id);
+		Assert.Equal(2, options.Count);
+		Assert.Equal(IgnoreOptionId.HideSecrets, options[0].Id);
+		Assert.False(options[0].DefaultChecked);
+		var option = Assert.Single(options, candidate => candidate.Id == optionId);
 
 		var baseLabel = optionId switch
 		{
@@ -161,7 +164,7 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 			? $"{baseLabel} ({count})"
 			: baseLabel;
 
-		Assert.Equal(expected, options[0].Label);
+		Assert.Equal(expected, option.Label);
 	}
 
 	private static IgnoreOptionId[] BuildExpectedIds(
@@ -175,8 +178,9 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 		bool includeDotFiles,
 		bool includeExtensionless)
 	{
-		var ordered = new List<IgnoreOptionId>(9);
+		var ordered = new List<IgnoreOptionId>(10);
 		if (includeSmart) ordered.Add(IgnoreOptionId.SmartIgnore);
+		ordered.Add(IgnoreOptionId.HideSecrets);
 		if (includeGit) ordered.Add(IgnoreOptionId.UseGitIgnore);
 		if (includeEmptyFolders) ordered.Add(IgnoreOptionId.EmptyFolders);
 		if (includeEmptyFiles) ordered.Add(IgnoreOptionId.EmptyFiles);

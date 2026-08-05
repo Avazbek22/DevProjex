@@ -1,5 +1,4 @@
 using DevProjex.Application.Updates;
-using DevProjex.Avalonia.ViewModels;
 using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Avalonia.Coordinators;

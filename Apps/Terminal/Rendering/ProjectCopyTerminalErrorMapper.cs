@@ -55,6 +55,18 @@ internal static class ProjectCopyTerminalErrorMapper
 				localization["Terminal.Error.IoFailure"],
 				ExitCode: CommandLineExitCodes.RuntimeError,
 				Exception: exception),
+			ProjectCopyExportError.SecretDetectionFailed => new TerminalError(
+				"DPX-SECRET-DETECTION-FAILED",
+				localization["Error.ProjectCopy.SecretDetectionFailed"],
+				ExitCode: CommandLineExitCodes.RuntimeError,
+				Exception: exception,
+				ContextPath: exception.PathContext),
+			ProjectCopyExportError.SecretScanLimitExceeded => new TerminalError(
+				"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
+				localization["Error.ProjectCopy.SecretScanLimitExceeded"],
+				ExitCode: CommandLineExitCodes.RuntimeError,
+				Exception: exception,
+				ContextPath: exception.PathContext),
 			ProjectCopyExportError.UnexpectedFailure => new TerminalError(
 				"DPX-EXPORT-FAILED",
 				localization["Terminal.Error.ExportFailed"],

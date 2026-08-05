@@ -49,6 +49,7 @@ public partial class MainWindow
         CancelAndDispose(ref _gitCloneCts);
         CancelAndDispose(ref _gitOperationCts);
         CancelAndDispose(ref _projectCopyExportCts);
+		CancelAndDispose(ref _secretRedactionCountCts);
     }
 
     private static void CancelAndDispose(ref CancellationTokenSource? source)
@@ -124,6 +125,7 @@ public partial class MainWindow
                 _previewBar.SizeChanged -= OnPreviewBarSizeChanged;
             DetachRecentMenuHandlers();
             DetachTreeFontMenuHandlers();
+			_secretRedactionSession.SnapshotPublished -= OnSecretRedactionSnapshotPublished;
 
             // Unsubscribe from tunneled/bubbled events
             RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);

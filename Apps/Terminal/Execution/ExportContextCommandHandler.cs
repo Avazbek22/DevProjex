@@ -1,5 +1,6 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -37,6 +38,16 @@ public sealed class ExportContextCommandHandler(
 
 		if (request.DryRun)
 		{
+			if (request.View is ProjectContextView.Content or ProjectContextView.TreeContent &&
+			    plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true)
+			{
+				await services.SecretRedactionOutputPreparer
+					.AnalyzeAsync(
+						new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession),
+						plan.IncludedFiles,
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,

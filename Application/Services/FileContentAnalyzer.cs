@@ -348,7 +348,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 						CharCount: 0,
 						IsEmpty: true,
 						IsWhitespaceOnly: false,
-						IsEstimated: false));
+						IsEstimated: false),
+					TextFileEncoding.Utf8);
 			}
 
 			var encoding = DetectBomEncoding(stream, cancellationToken);
@@ -369,7 +370,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 						IsWhitespaceOnly: false,
 						IsEstimated: true,
 						TrailingNewlineChars: 0,
-						TrailingNewlineLineBreaks: 0));
+						TrailingNewlineLineBreaks: 0),
+					ResolveTextEncoding(encoding));
 			}
 
 			return new FileContentReadResult(
@@ -378,7 +380,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 					stream,
 					sizeBytes,
 					encoding ?? StrictUtf8,
-					cancellationToken));
+					cancellationToken),
+				ResolveTextEncoding(encoding));
 		}
 		catch (OperationCanceledException)
 		{
@@ -412,6 +415,23 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		{
 			return new FileContentReadResult(FileContentClassification.Unreadable);
 		}
+	}
+
+	private static TextFileEncoding ResolveTextEncoding(Encoding? bomEncoding)
+	{
+		if (bomEncoding is null)
+			return TextFileEncoding.Utf8;
+		if (ReferenceEquals(bomEncoding, StrictUtf8))
+			return TextFileEncoding.Utf8Bom;
+		if (ReferenceEquals(bomEncoding, StrictUtf16Le))
+			return TextFileEncoding.Utf16LittleEndian;
+		if (ReferenceEquals(bomEncoding, StrictUtf16Be))
+			return TextFileEncoding.Utf16BigEndian;
+		if (ReferenceEquals(bomEncoding, StrictUtf32Le))
+			return TextFileEncoding.Utf32LittleEndian;
+		if (ReferenceEquals(bomEncoding, StrictUtf32Be))
+			return TextFileEncoding.Utf32BigEndian;
+		throw new ArgumentOutOfRangeException(nameof(bomEncoding));
 	}
 
 	/// <summary>

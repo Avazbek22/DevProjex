@@ -7,6 +7,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "Ignore hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Ignore hidden files",
@@ -23,7 +24,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 
 		var options = service.GetOptions();
 
-		Assert.Equal(4, options.Count);
+		Assert.Equal(5, options.Count);
 	}
 
 	[Theory]
@@ -32,6 +33,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 	[InlineData(IgnoreOptionId.HiddenFiles)]
 	[InlineData(IgnoreOptionId.DotFolders)]
 	[InlineData(IgnoreOptionId.DotFiles)]
+	[InlineData(IgnoreOptionId.HideSecrets)]
 	public void GetOptions_ContainsExpectedIds(IgnoreOptionId id)
 	{
 		var service = new IgnoreOptionsService(new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
@@ -47,6 +49,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 	[InlineData(IgnoreOptionId.HiddenFiles, "Ignore hidden files")]
 	[InlineData(IgnoreOptionId.DotFolders, "Ignore dot folders")]
 	[InlineData(IgnoreOptionId.DotFiles, "Ignore dot files")]
+	[InlineData(IgnoreOptionId.HideSecrets, "Hide secrets")]
 	public void GetOptions_ReturnsLocalizedLabels(IgnoreOptionId id, string expectedLabel)
 	{
 		var service = new IgnoreOptionsService(new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
@@ -57,14 +60,17 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 	}
 
 	[Fact]
-	// Verifies all ignore options default to checked.
-	public void GetOptions_DefaultChecked_IsTrue()
+	// Hide Secrets is intentionally opt-in; path-only exclusions keep their existing defaults.
+	public void GetOptions_UsesSafeDefaults()
 	{
 		var service = new IgnoreOptionsService(new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
 
 		var options = service.GetOptions();
 
-		Assert.All(options, option => Assert.True(option.DefaultChecked));
+		Assert.False(options.Single(option => option.Id == IgnoreOptionId.HideSecrets).DefaultChecked);
+		Assert.All(
+			options.Where(option => option.Id != IgnoreOptionId.HideSecrets),
+			option => Assert.True(option.DefaultChecked));
 	}
 
 	[Fact]
@@ -85,9 +91,10 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 
 		var options = service.GetOptions(includeGitIgnore: true);
 
-		Assert.Equal(5, options.Count);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
-		Assert.Equal("Use GitIgnore", options[0].Label);
-		Assert.True(options[0].DefaultChecked);
+		Assert.Equal(6, options.Count);
+		Assert.Equal(IgnoreOptionId.HideSecrets, options[0].Id);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
+		Assert.Equal("Use GitIgnore", options[1].Label);
+		Assert.True(options[1].DefaultChecked);
 	}
 }

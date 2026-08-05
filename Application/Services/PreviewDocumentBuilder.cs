@@ -1,4 +1,5 @@
 using System.Buffers;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Application.Services;
 
@@ -45,16 +46,12 @@ public sealed class PreviewDocumentBuilder(
     {
         ArgumentNullException.ThrowIfNull(writeAsync);
 
-        var storagePath = CreateStoragePath();
-        try
-        {
-            await using (var stream = new FileStream(
-                             storagePath,
-                             FileMode.CreateNew,
-                             FileAccess.ReadWrite,
-                             FileShare.None,
-                             bufferSize: 8192,
-                             options: FileOptions.Asynchronous | FileOptions.SequentialScan))
+		var storagePath = CreateStoragePath();
+		try
+		{
+			await using (var stream = OpenStorageFile(
+			                 storagePath,
+			                 FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
                 await writeAsync(stream, cancellationToken).ConfigureAwait(false);
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -73,14 +70,20 @@ public sealed class PreviewDocumentBuilder(
         IEnumerable<string> filePaths,
         CancellationToken cancellationToken,
         Func<string, string>? displayPathMapper,
-        bool includeOmissionMarkers = false)
+        bool includeOmissionMarkers = false,
+		SecretRedactionContext? redactionContext = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
         if (orderedFiles.Count == 0)
+        {
+			redactionContext?.BeginOutput(orderedFiles).Complete();
             return null;
+		}
 
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
         var sections = new List<PreviewDocumentSection>(orderedFiles.Count);
+		var redactions = new List<PreviewRedactionSpan>();
+		var redactionScope = redactionContext?.BeginOutput(orderedFiles);
         var anyWritten = await AppendContentEntriesAsync(
             builder,
             orderedFiles,
@@ -88,9 +91,15 @@ public sealed class PreviewDocumentBuilder(
             displayPathMapper,
             prependSectionSeparator: false,
             includeOmissionMarkers,
+			redactionScope,
+			redactions,
             cancellationToken).ConfigureAwait(false);
 
-        return anyWritten ? builder.BuildDocument(sections) : null;
+		var redactionSnapshot = redactionScope?.Complete();
+		if (!anyWritten)
+			return null;
+
+		return BuildPreviewDocument(builder, sections, redactions, redactionScope, redactionSnapshot);
     }
 
     public async Task<IPreviewTextDocument> BuildTreeAndContentDocumentAsync(
@@ -98,16 +107,22 @@ public sealed class PreviewDocumentBuilder(
         IEnumerable<string> filePaths,
         CancellationToken cancellationToken,
         Func<string, string>? displayPathMapper,
-        bool includeOmissionMarkers = false)
+        bool includeOmissionMarkers = false,
+		SecretRedactionContext? redactionContext = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
         var normalizedTreeText = treeText.TrimEnd('\r', '\n');
 
         if (orderedFiles.Count == 0)
+        {
+			redactionContext?.BeginOutput(orderedFiles).Complete();
             return CreateInMemory(normalizedTreeText);
+		}
 
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
         var sections = new List<PreviewDocumentSection>(orderedFiles.Count);
+		var redactions = new List<PreviewRedactionSpan>();
+		var redactionScope = redactionContext?.BeginOutput(orderedFiles);
         var wroteTree = AppendMultilineText(builder, normalizedTreeText.AsSpan());
         var wroteContent = await AppendContentEntriesAsync(
             builder,
@@ -116,12 +131,15 @@ public sealed class PreviewDocumentBuilder(
             displayPathMapper,
             prependSectionSeparator: wroteTree,
             includeOmissionMarkers,
+			redactionScope,
+			redactions,
             cancellationToken).ConfigureAwait(false);
+		var redactionSnapshot = redactionScope?.Complete();
 
         if (!wroteTree && !wroteContent)
             return CreateInMemory(string.Empty);
 
-        return builder.BuildDocument(sections);
+        return BuildPreviewDocument(builder, sections, redactions, redactionScope, redactionSnapshot);
     }
 
     private async Task<bool> AppendContentEntriesAsync(
@@ -131,6 +149,8 @@ public sealed class PreviewDocumentBuilder(
         Func<string, string>? displayPathMapper,
         bool prependSectionSeparator,
         bool includeOmissionMarkers,
+		SecretRedactionScope? redactionScope,
+		ICollection<PreviewRedactionSpan> redactions,
         CancellationToken cancellationToken)
     {
         var anyWritten = false;
@@ -140,10 +160,22 @@ public sealed class PreviewDocumentBuilder(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            var maximumFileBytes = redactionScope is null
+                ? MaximumInteractiveFileBytes
+                : SecretRedactionOutputPreparer.MaximumScannableFileBytes;
             var readResult = await contentAnalyzer
-                .ReadClassifiedAsync(file, MaximumInteractiveFileBytes, cancellationToken)
+                .ReadClassifiedAsync(file, maximumFileBytes, cancellationToken)
                 .ConfigureAwait(false);
             var content = readResult.Content;
+			if (redactionScope is not null &&
+			    readResult.Classification is not (
+				    FileContentClassification.Text or
+				    FileContentClassification.TooLarge or
+				    FileContentClassification.Binary))
+			{
+				throw new SecretDetectionException(
+					$"Hide Secrets could not inspect '{file}' ({readResult.Classification}).");
+			}
             if ((!readResult.IsText || content is null) && !includeOmissionMarkers)
                 continue;
 
@@ -207,6 +239,12 @@ public sealed class PreviewDocumentBuilder(
 
             if (content.IsEstimated)
             {
+				if (redactionScope is not null)
+					throw new SecretScanLimitExceededException(
+						file,
+						content.SizeBytes,
+						maximumFileBytes);
+
                 if (includeOmissionMarkers)
                 {
                     builder.AppendLine(GetOmissionMarker(FileContentClassification.TooLarge));
@@ -227,7 +265,16 @@ public sealed class PreviewDocumentBuilder(
             }
 
             trimTrailingEstimatedLine = false;
-            AppendTrimmedContent(builder, content.Content.AsSpan());
+			var transformed = redactionScope?.Redact(file, content.Content, cancellationToken);
+			var text = transformed?.Text ?? content.Content;
+			if (transformed is { Spans.Count: > 0 })
+			{
+				AppendPreviewRedactionSpans(
+					redactions,
+					transformed,
+					builder.LineCount + 1);
+			}
+			AppendTrimmedContent(builder, text.AsSpan());
             sections.Add(new PreviewDocumentSection(
                 displayPath,
                 sectionStartLine,
@@ -241,6 +288,108 @@ public sealed class PreviewDocumentBuilder(
 
         return anyWritten;
     }
+
+	private static IPreviewTextDocument BuildPreviewDocument(
+		PreviewTextStorageBuilder body,
+		IReadOnlyList<PreviewDocumentSection> sections,
+		IReadOnlyList<PreviewRedactionSpan> redactions,
+		SecretRedactionScope? scope,
+		SecretRedactionSnapshot? snapshot)
+	{
+		if (scope is null || snapshot is null || snapshot.RedactedCount == 0)
+			return body.BuildDocument(sections, redactions);
+
+		var legendLines = SecretRedactionLegend.BuildPlainLegend(
+			snapshot.RedactedCount,
+			scope.PlaceholderExample!,
+			scope.LegendText);
+		using var final = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
+		foreach (var line in legendLines)
+			final.AppendLine(line);
+		final.AppendLine(ClipboardBlankLine);
+		var lineOffset = final.LineCount;
+		final.AppendFrom(body);
+
+		var shiftedSections = sections
+			.Select(section => section with
+			{
+				StartLine = section.StartLine + lineOffset,
+				EndLine = section.EndLine + lineOffset,
+				HeaderLine = section.HeaderLine + lineOffset,
+				ContentStartLine = section.ContentStartLine + lineOffset
+			})
+			.ToArray();
+		var shiftedRedactions = redactions
+			.Select(span => span with { LineNumber = span.LineNumber + lineOffset })
+			.ToArray();
+		return final.BuildDocument(
+			shiftedSections,
+			shiftedRedactions,
+			new PreviewRedactionSummary(snapshot.RedactedCount, legendLines.Count));
+	}
+
+	private static void AppendPreviewRedactionSpans(
+		ICollection<PreviewRedactionSpan> destination,
+		SecretTextRedactionResult result,
+		int firstContentLine)
+	{
+		var sourcePosition = 0;
+		var line = firstContentLine;
+		var column = 0;
+		foreach (var span in result.Spans.OrderBy(static span => span.Start))
+		{
+			AdvancePosition(result.Text.AsSpan(sourcePosition, span.Start - sourcePosition), ref line, ref column);
+			var spanText = result.Text.AsSpan(span.Start, span.Length);
+			var segmentStart = 0;
+			for (var index = 0; index <= spanText.Length; index++)
+			{
+				if (index < spanText.Length && spanText[index] != '\n')
+					continue;
+
+				var segmentLength = index - segmentStart;
+				if (segmentLength > 0 && spanText[index - 1] == '\r')
+					segmentLength--;
+				if (segmentLength > 0)
+				{
+					destination.Add(new PreviewRedactionSpan(
+						span.OccurrenceId,
+						span.RuleId,
+						line,
+						column,
+						segmentLength,
+						span.State));
+				}
+
+				if (index < spanText.Length)
+				{
+					line++;
+					column = 0;
+					segmentStart = index + 1;
+				}
+				else
+				{
+					column += segmentLength;
+				}
+			}
+			sourcePosition = span.Start + span.Length;
+		}
+	}
+
+	private static void AdvancePosition(ReadOnlySpan<char> text, ref int line, ref int column)
+	{
+		foreach (var character in text)
+		{
+			if (character == '\n')
+			{
+				line++;
+				column = 0;
+			}
+			else if (character != '\r')
+			{
+				column++;
+			}
+		}
+	}
 
     private string GetOmissionMarker(FileContentClassification classification)
     {
@@ -440,12 +589,30 @@ public sealed class PreviewDocumentBuilder(
         }
     }
 
-    private static string CreateStoragePath()
-    {
-        var previewDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "Preview");
-        Directory.CreateDirectory(previewDirectory);
-        return Path.Combine(previewDirectory, $"{Guid.NewGuid():N}.preview.txt");
-    }
+	private static string CreateStoragePath()
+	{
+		var previewDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "Preview");
+		Directory.CreateDirectory(previewDirectory);
+		return Path.Combine(previewDirectory, $"{Guid.NewGuid():N}.preview.txt");
+	}
+
+	private static FileStream OpenStorageFile(string storagePath, FileOptions options)
+	{
+		var streamOptions = new FileStreamOptions
+		{
+			Access = FileAccess.ReadWrite,
+			Mode = FileMode.CreateNew,
+			Share = FileShare.None,
+			BufferSize = 8192,
+			Options = options
+		};
+		if (!OperatingSystem.IsWindows())
+			streamOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
+		// Preview backing files can contain an explicitly kept credential. Keep them private
+		// even though their randomized names live under the shared system temp directory.
+		return new FileStream(storagePath, streamOptions);
+	}
 
     private static void DisposeStorageFile(string storagePath)
     {
@@ -474,18 +641,12 @@ public sealed class PreviewDocumentBuilder(
         private int _maxLineLength;
         private long _characterCount;
 
-        public PreviewTextStorageBuilder(int inMemoryThresholdChars)
-        {
-            _inMemoryThresholdChars = inMemoryThresholdChars;
-            _storagePath = CreateStoragePath();
-            _stream = new FileStream(
-                _storagePath,
-                FileMode.Create,
-                FileAccess.ReadWrite,
-                FileShare.None,
-                bufferSize: 8192,
-                options: FileOptions.SequentialScan);
-        }
+		public PreviewTextStorageBuilder(int inMemoryThresholdChars)
+		{
+			_inMemoryThresholdChars = inMemoryThresholdChars;
+			_storagePath = CreateStoragePath();
+			_stream = OpenStorageFile(_storagePath, FileOptions.SequentialScan);
+		}
 
         public void AppendLine(string line) => AppendLine(line.AsSpan());
 
@@ -546,7 +707,29 @@ public sealed class PreviewDocumentBuilder(
             _characterCount = Math.Max(0, _characterCount - 1);
         }
 
-        public IPreviewTextDocument BuildDocument(IReadOnlyList<PreviewDocumentSection>? sections = null)
+        public void AppendFrom(PreviewTextStorageBuilder source)
+		{
+			ThrowIfDisposed();
+			ArgumentNullException.ThrowIfNull(source);
+			source.ThrowIfDisposed();
+			if (ReferenceEquals(this, source))
+				throw new ArgumentException("A preview builder cannot append itself.", nameof(source));
+
+			source._stream.Flush();
+			var destinationStart = _stream.Position;
+			source._stream.Position = 0;
+			source._stream.CopyTo(_stream);
+			foreach (var offset in source._lineOffsets)
+				_lineOffsets.Add(destinationStart + offset);
+			_lineLengths.AddRange(source._lineLengths);
+			_maxLineLength = Math.Max(_maxLineLength, source._maxLineLength);
+			_characterCount += source._characterCount;
+		}
+
+        public IPreviewTextDocument BuildDocument(
+			IReadOnlyList<PreviewDocumentSection>? sections = null,
+			IReadOnlyList<PreviewRedactionSpan>? redactions = null,
+			PreviewRedactionSummary? redactionSummary = null)
         {
             ThrowIfDisposed();
 
@@ -570,7 +753,7 @@ public sealed class PreviewDocumentBuilder(
 
                 DisposeStorageFile();
                 _disposed = true;
-                return new InMemoryPreviewTextDocument(text, sections);
+                return new InMemoryPreviewTextDocument(text, sections, redactions, redactionSummary);
             }
 
             _disposed = true;
@@ -580,7 +763,9 @@ public sealed class PreviewDocumentBuilder(
                 fileLength,
                 _maxLineLength,
                 _characterCount,
-                sections);
+                sections,
+				redactions,
+				redactionSummary);
         }
 
         public void Dispose()

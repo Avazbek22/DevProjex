@@ -1,9 +1,9 @@
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Input.Raw;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using DevProjex.Application.Preview;
+using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Controls;
 
 namespace DevProjex.Tests.Unit.Avalonia;
@@ -76,6 +76,66 @@ public sealed class VirtualizedPreviewTextControlTests
                 trailingAreaPoint,
                 MouseButton.Left,
                 RawInputModifiers.None);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void ClickingRedactedSpan_RequestsOnlyThatOccurrenceOverride()
+    {
+        const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
+        const string occurrenceId = "github-occurrence";
+        const string prefix = "token = \"";
+        var text = prefix + placeholder + "\";";
+        using var document = new InMemoryPreviewTextDocument(
+            text,
+            redactions:
+            [
+                new PreviewRedactionSpan(
+                    occurrenceId,
+                    "github-pat",
+                    1,
+                    prefix.Length,
+                    placeholder.Length,
+                    SecretPreviewSpanState.Redacted)
+            ]);
+        var control = new VirtualizedPreviewTextControl
+        {
+            Document = document,
+            Width = 720,
+            Height = 120,
+            TextFontSize = 16,
+            TextBrush = Brushes.White
+        };
+        var window = new Window
+        {
+            Width = 760,
+            Height = 180,
+            WindowDecorations = WindowDecorations.None,
+            Content = control
+        };
+        string? requestedOccurrence = null;
+        control.RedactionToggleRequested += (_, eventArgs) =>
+            requestedOccurrence = eventArgs.OccurrenceId;
+
+        try
+        {
+            window.Show();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+            var typeface = ResolveTestTypeface(control);
+            var x = origin.X + control.LeftPadding +
+                    MeasureRenderedPrefixWidth(control, text, prefix.Length + 2, typeface);
+            var y = origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2);
+            var point = new Point(x, y);
+
+            window.MouseDown(point, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(point, MouseButton.Left, RawInputModifiers.None);
+
+            Assert.Equal(occurrenceId, requestedOccurrence);
         }
         finally
         {

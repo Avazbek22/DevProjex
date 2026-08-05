@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace DevProjex.Tests.Terminal;
 
 [Collection(EnvironmentVariableCollection.Name)]

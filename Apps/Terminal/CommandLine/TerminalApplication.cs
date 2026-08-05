@@ -1,6 +1,5 @@
 using System.CommandLine;
 using System.CommandLine.Help;
-using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Tui;

@@ -1,6 +1,5 @@
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia;
 
@@ -107,6 +106,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
         _viewModel.TreeNodes.Clear();
 
         _currentTree = result.Tree;
+		InvalidateSecretRedactionCount();
         if (interactiveFilter)
             _lastInteractiveFilterUsedInMemory = usedInMemoryFilter;
         UpdateCurrentTreeInventory(input, result, interactiveFilter, usedInMemoryFilter);

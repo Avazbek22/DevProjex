@@ -1,9 +1,13 @@
 using System.Buffers;
 using System.IO.Compression;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Application.Services;
 
-public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBuilder)
+public sealed class ProjectCopyExportService(
+	ProjectCopyExportPlanBuilder planBuilder,
+	IFileContentAnalyzer? contentAnalyzer = null,
+	SecretRedactionSession? secretRedactionSession = null)
 {
 	private const int CopyBufferSize = 128 * 1024;
 	private const int CleanupAttemptCount = 6;
@@ -21,6 +25,9 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 			ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
 
 			ValidateSources(plan, cancellationToken);
+			await using var prepared = request.RedactSecrets
+				? await PrepareRedactedOutputAsync(plan, cancellationToken).ConfigureAwait(false)
+				: null;
 			return request.Format switch
 			{
 				ProjectCopyExportFormat.Folder => await ExportFolderAsync(
@@ -28,6 +35,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 					request.DestinationPath,
 					request.DestinationMode,
 					request.ConflictPolicy,
+					prepared,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				ProjectCopyExportFormat.Zip => await ExportZipAsync(
@@ -35,6 +43,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 					request.DestinationPath,
 					request.DestinationMode,
 					request.ConflictPolicy,
+					prepared,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				_ => throw new ProjectCopyExportException(
@@ -46,12 +55,44 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		{
 			throw exception switch
 			{
+				SecretScanLimitExceededException scanLimit => new ProjectCopyExportException(
+					ProjectCopyExportError.SecretScanLimitExceeded,
+					"Hide Secrets could not inspect a selected text file because it exceeds the supported scan limit.",
+					scanLimit,
+					scanLimit.Path),
+				SecretDetectionException detection => new ProjectCopyExportException(
+					ProjectCopyExportError.SecretDetectionFailed,
+					"Hide Secrets could not inspect every selected text file. No project copy was created.",
+					detection),
 				FileNotFoundException or DirectoryNotFoundException => ExportFailure(ProjectCopyExportError.SourceUnavailable, exception),
 				UnauthorizedAccessException => ExportFailure(ProjectCopyExportError.AccessDenied, exception),
 				IOException => ExportFailure(ProjectCopyExportError.IoFailure, exception),
 				_ => ExportFailure(ProjectCopyExportError.UnexpectedFailure, exception)
 			};
 		}
+	}
+
+	private async Task<PreparedSecretRedactionOutput> PrepareRedactedOutputAsync(
+		ProjectCopyExportPlan plan,
+		CancellationToken cancellationToken)
+	{
+		if (contentAnalyzer is null || secretRedactionSession is null)
+		{
+			throw new ProjectCopyExportException(
+				ProjectCopyExportError.InvalidRequest,
+				"Hide Secrets is unavailable because the redaction services were not configured.");
+		}
+
+		var files = plan.Entries
+			.Where(static entry => !entry.IsDirectory)
+			.Select(static entry => entry.SourcePath)
+			.ToArray();
+		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
+		return await preparer.PrepareAsync(
+				new SecretRedactionContext(plan.ProjectRootPath, secretRedactionSession),
+				files,
+				cancellationToken)
+			.ConfigureAwait(false);
 	}
 
 	public static void EnsureDestinationOutsideProject(string projectRootPath, string destinationPath)
@@ -81,6 +122,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		string destinationPath,
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
+		PreparedSecretRedactionOutput? prepared,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -116,6 +158,8 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		var processedEntries = 0;
 		var processedFiles = 0;
 		long bytesWritten = 0;
+		var legendName = ResolveLegendName(plan, prepared);
+		var totalEntries = plan.Entries.Count + (legendName is null ? 0 : 1);
 		Exception? operationException = null;
 
 		try
@@ -128,7 +172,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				var destination = ResolveDestinationPath(stagingPath, directory.RelativePath);
 				Directory.CreateDirectory(destination);
 				processedEntries++;
-				ReportProgress(progress, processedEntries, plan.Entries.Count, bytesWritten);
+				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 			}
 
 			foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
@@ -136,16 +180,27 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				cancellationToken.ThrowIfCancellationRequested();
 				var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
 				Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-				var copiedBytes = await CopyFileAsync(file.SourcePath, destination, buffer, cancellationToken)
+				var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
+				var copiedBytes = await CopyFileAsync(contentPath, destination, buffer, cancellationToken)
 					.ConfigureAwait(false);
 				bytesWritten += copiedBytes;
 				processedEntries++;
 				processedFiles++;
 				TryCopyLastWriteTime(file.SourcePath, destination);
-				ReportProgress(progress, processedEntries, plan.Entries.Count, bytesWritten);
+				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 			}
 
-			if (plan.Entries.Count == 0)
+			if (legendName is not null)
+			{
+				var legendPath = ResolveDestinationPath(stagingPath, legendName);
+				var legendBytes = await WriteLegendFileAsync(legendPath, prepared!, cancellationToken)
+					.ConfigureAwait(false);
+				bytesWritten += legendBytes;
+				processedEntries++;
+				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+			}
+
+			if (totalEntries == 0)
 				ReportProgress(progress, 0, 0, 0);
 
 			cancellationToken.ThrowIfCancellationRequested();
@@ -167,7 +222,13 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 				? requestedPath
 				: Path.Combine(requestedDestinationParent, Path.GetFileName(finalPath));
 			var reportedPath = ResolveReportedDestinationPath(requestedFinalPath, finalPath);
-			return new ProjectCopyExportResult(reportedPath, processedFiles, plan.DirectoryCount, bytesWritten);
+			return new ProjectCopyExportResult(
+				reportedPath,
+				processedFiles,
+				plan.DirectoryCount,
+				bytesWritten,
+				prepared?.Snapshot.RedactedCount ?? 0,
+				legendName);
 		}
 		catch (Exception exception)
 		{
@@ -195,6 +256,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		string destinationArchivePath,
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
+		PreparedSecretRedactionOutput? prepared,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -234,6 +296,8 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		var processedEntries = 0;
 		var processedFiles = 0;
 		long bytesWritten = 0;
+		var legendName = ResolveLegendName(plan, prepared);
+		var totalEntries = plan.Entries.Count + (legendName is null ? 0 : 1);
 		Exception? operationException = null;
 
 		try
@@ -248,7 +312,7 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 					var entry = archive.CreateEntry(entryName, CompressionLevel.NoCompression);
 					TrySetZipLastWriteTime(entry, directory.SourcePath);
 					processedEntries++;
-					ReportProgress(progress, processedEntries, plan.Entries.Count, bytesWritten);
+					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 				}
 
 				foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
@@ -257,16 +321,29 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 					var entryName = BuildZipEntryName(plan.ProjectName, file.RelativePath, isDirectory: false);
 					var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
 					TrySetZipLastWriteTime(entry, file.SourcePath);
-					await using var source = OpenSourceFile(file.SourcePath);
+					var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
+					await using var source = OpenSourceFile(contentPath);
 					await using var destination = entry.Open();
 					var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
 					bytesWritten += copiedBytes;
 					processedEntries++;
 					processedFiles++;
-					ReportProgress(progress, processedEntries, plan.Entries.Count, bytesWritten);
+					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 				}
 
-				if (plan.Entries.Count == 0)
+				if (legendName is not null)
+				{
+					var entryName = BuildZipEntryName(plan.ProjectName, legendName, isDirectory: false);
+					var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+					await using var destination = entry.Open();
+					var legendBytes = Encoding.UTF8.GetBytes(BuildLegend(prepared!));
+					await destination.WriteAsync(legendBytes, cancellationToken).ConfigureAwait(false);
+					bytesWritten += legendBytes.Length;
+					processedEntries++;
+					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+				}
+
+				if (totalEntries == 0)
 					ReportProgress(progress, 0, 0, 0);
 			}
 
@@ -289,7 +366,13 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 					exception);
 			}
 			var reportedPath = ResolveReportedDestinationPath(requestedDestinationPath, destinationPath);
-			return new ProjectCopyExportResult(reportedPath, processedFiles, plan.DirectoryCount, bytesWritten);
+			return new ProjectCopyExportResult(
+				reportedPath,
+				processedFiles,
+				plan.DirectoryCount,
+				bytesWritten,
+				prepared?.Snapshot.RedactedCount ?? 0,
+				legendName);
 		}
 		catch (Exception exception)
 		{
@@ -944,6 +1027,50 @@ public sealed class ProjectCopyExportService(ProjectCopyExportPlanBuilder planBu
 		await using var source = OpenSourceFile(sourcePath);
 		await using var destination = OpenDestinationFile(destinationPath);
 		return await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
+	}
+
+	private static string? ResolveLegendName(
+		ProjectCopyExportPlan plan,
+		PreparedSecretRedactionOutput? prepared)
+	{
+		if (prepared is null || prepared.Snapshot.RedactedCount == 0)
+			return null;
+
+		var occupiedRootNames = plan.Entries
+			.Where(static entry =>
+				!string.IsNullOrEmpty(entry.RelativePath) &&
+				string.IsNullOrEmpty(Path.GetDirectoryName(entry.RelativePath)))
+			.Select(static entry => Path.GetFileName(entry.RelativePath))
+			.ToHashSet(PathComparer.Default);
+		if (!occupiedRootNames.Contains(SecretRedactionLegend.CopyFileName))
+			return SecretRedactionLegend.CopyFileName;
+
+		for (var suffix = 1; ; suffix++)
+		{
+			var candidate = $"DEVPROJEX_REDACTIONS-{suffix}.txt";
+			if (!occupiedRootNames.Contains(candidate))
+				return candidate;
+		}
+	}
+
+	private static string BuildLegend(PreparedSecretRedactionOutput prepared) =>
+		SecretRedactionLegend.CreatePlainText(
+			prepared.Snapshot.RedactedCount,
+			prepared.PlaceholderExample!,
+			prepared.LegendText) + Environment.NewLine;
+
+	private static async Task<long> WriteLegendFileAsync(
+		string path,
+		PreparedSecretRedactionOutput prepared,
+		CancellationToken cancellationToken)
+	{
+		await File.WriteAllTextAsync(
+				path,
+				BuildLegend(prepared),
+				new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+				cancellationToken)
+			.ConfigureAwait(false);
+		return new FileInfo(path).Length;
 	}
 
 	private static async Task<long> CopyStreamAsync(

@@ -124,6 +124,7 @@ The workspace supports:
 - root and extension selection;
 - one Git filtering choice: none, `.gitignore`, or tracked files;
 - ordinary Exclusions independent from Git filtering;
+- opt-in Hide Secrets redaction with a count after the current selection is scanned;
 - tree, content, and tree-plus-content preview;
 - ASCII, JSON, XML, and Markdown formats;
 - file, folder, character, token, and byte metrics;
@@ -182,6 +183,10 @@ moving focus also makes the corresponding Tree, Preview, or Parameters pane visi
 focus and preview position survive Help, settings overlays, refreshes, exports,
 cancellation, and terminal resize.
 
+When Hide Secrets has findings, `[` and `]` move between highlighted occurrences;
+`Enter` or `Space` toggles keep-as-is for the active occurrence. That decision is
+used by every output in the current session and is not saved in the project profile.
+
 ## Preview
 
 The regular Preview follows the Desktop model: Tree, Content, or Tree + Content
@@ -236,6 +241,11 @@ sequence at all. The upstream behavior is documented in the
 The export dialog reports output kind, view/format, destination, selected counts,
 estimated metrics, Git mode, Exclusions, conflicts, and warnings. After a
 successful interactive operation it shows an equivalent direct command.
+
+When Hide Secrets is enabled, project-copy confirmation states that matching text
+will change, binary files will remain unchanged, and the folder or ZIP may not
+build or run. Outputs containing replacements include the same redaction legend
+and decisions shown in Preview.
 
 Context, project-copy, ZIP, and portable-profile destinations use the same
 canonical outside-source and existing-parent policy as direct commands. The

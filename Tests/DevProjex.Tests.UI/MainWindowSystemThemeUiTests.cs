@@ -1,5 +1,4 @@
 using DevProjex.Infrastructure.ThemePresets;
-using DevProjex.Avalonia.Views;
 using AvaloniaThemeVariant = Avalonia.Styling.ThemeVariant;
 
 namespace DevProjex.Tests.UI;

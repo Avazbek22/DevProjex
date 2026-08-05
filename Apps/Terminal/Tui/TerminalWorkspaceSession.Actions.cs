@@ -1,7 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
-using DevProjex.Terminal.CommandLine;
-using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -118,7 +116,7 @@ internal sealed partial class TerminalWorkspaceSession
 			new TerminalParameterRow(
 				$"exclusion:{descriptor.Token}",
 				TerminalParameterRowKind.Exclusion,
-				L(descriptor.LabelKey),
+				FormatExclusionLabel(descriptor, plan, exclusions),
 				exclusions.Contains(descriptor.Id),
 				Exclusion: descriptor.Id)));
 		rows.Add(new TerminalParameterRow(
@@ -174,6 +172,24 @@ internal sealed partial class TerminalWorkspaceSession
 				TerminalParameterRowKind.Information,
 				$"{L("Terminal.Tui.Recent.Unavailable")}: {root}")));
 		return rows;
+	}
+
+	private string FormatExclusionLabel(
+		ProjectExclusionDescriptor descriptor,
+		ProjectContextPlan plan,
+		IReadOnlySet<ProjectExclusion> exclusions)
+	{
+		var label = L(descriptor.LabelKey);
+		if (descriptor.Id != ProjectExclusion.HideSecrets ||
+		    !exclusions.Contains(ProjectExclusion.HideSecrets))
+		{
+			return label;
+		}
+
+		var redactionCount = _services.SecretRedactionSession.GetRedactionCount(
+			plan.SourceRoot,
+			plan.IncludedFiles);
+		return redactionCount is { } count ? $"{label} ({count:N0})" : label;
 	}
 
 	private void TrackSelectedControl()

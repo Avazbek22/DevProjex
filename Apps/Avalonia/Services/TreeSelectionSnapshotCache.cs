@@ -1,5 +1,3 @@
-using DevProjex.Kernel;
-
 namespace DevProjex.Avalonia.Services;
 
 internal sealed class TreeSelectionSnapshotCache

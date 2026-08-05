@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 
 namespace DevProjex.Terminal.CommandLine;
 

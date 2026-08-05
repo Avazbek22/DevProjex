@@ -30,7 +30,9 @@ public enum ProjectCopyExportError
 	IoFailure = 7,
 	UnsafeDestinationPath = 8,
 	UnexpectedFailure = 9,
-	DestinationConflict = 10
+	DestinationConflict = 10,
+	SecretDetectionFailed = 11,
+	SecretScanLimitExceeded = 12
 }
 
 public sealed record ProjectCopyExportRequest(
@@ -41,13 +43,16 @@ public sealed record ProjectCopyExportRequest(
 	string DestinationPath,
 	ProjectCopyExportFormat Format,
 	ProjectCopyDestinationMode DestinationMode = ProjectCopyDestinationMode.AutomaticName,
-	ProjectCopyConflictPolicy ConflictPolicy = ProjectCopyConflictPolicy.Fail);
+	ProjectCopyConflictPolicy ConflictPolicy = ProjectCopyConflictPolicy.Fail,
+	bool RedactSecrets = false);
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,
 	int CopiedFileCount,
 	int CreatedDirectoryCount,
-	long BytesWritten);
+	long BytesWritten,
+	int RedactedValueCount = 0,
+	string? RedactionLegendPath = null);
 
 public sealed record ProjectCopyExportProgress(
 	int ProcessedEntryCount,

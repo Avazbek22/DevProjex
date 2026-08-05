@@ -1,6 +1,4 @@
 using System.Runtime.CompilerServices;
-using DevProjex.Application.Selection;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Services;
 

@@ -5,9 +5,10 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{
 		var options = new List<IgnoreOptionDescriptor>();
-		// Smart Ignore is the primary exclusion controller in the Desktop list. Keep it
-		// above both optional Git modes whenever project evidence makes it available.
-		AppendExclusionOptions(options, availability, smartIgnoreOnly: true);
+		// Content-level protection belongs with the primary controllers, before Git modes.
+		// Unlike path filters, Hide Secrets is always offered because availability cannot
+		// be known without reading the selected content.
+		AppendPrimaryExclusionOptions(options, availability);
 
 		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering)
 		{
@@ -30,23 +31,49 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 			}
 		}
 
-		AppendExclusionOptions(options, availability, smartIgnoreOnly: false);
+		AppendPathExclusionOptions(options, availability);
 		return options;
 	}
 
-	private void AppendExclusionOptions(
+	private void AppendPrimaryExclusionOptions(
 		List<IgnoreOptionDescriptor> options,
-		IgnoreOptionsAvailability availability,
-		bool smartIgnoreOnly)
+		IgnoreOptionsAvailability availability)
 	{
 		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
 		{
-			if ((descriptor.Id == ProjectExclusion.SmartIgnore) != smartIgnoreOnly)
+			if (descriptor.Id is not (ProjectExclusion.SmartIgnore or ProjectExclusion.HideSecrets))
+				continue;
+
+			var included = descriptor.Id == ProjectExclusion.HideSecrets ||
+			               availability.IncludeSmartIgnore;
+			if (!included)
+				continue;
+
+			var label = localization[descriptor.LabelKey];
+			if (descriptor.Id == ProjectExclusion.HideSecrets &&
+			    availability.SecretRedactionsCount is { } redactionCount)
+			{
+				label = $"{label} ({redactionCount})";
+			}
+
+			options.Add(new IgnoreOptionDescriptor(
+				descriptor.LegacyOptionId,
+				label,
+				descriptor.Id == ProjectExclusion.SmartIgnore));
+		}
+	}
+
+	private void AppendPathExclusionOptions(
+		List<IgnoreOptionDescriptor> options,
+		IgnoreOptionsAvailability availability)
+	{
+		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
+		{
+			if (descriptor.Id is ProjectExclusion.SmartIgnore or ProjectExclusion.HideSecrets)
 				continue;
 
 			var (included, count) = descriptor.Id switch
 			{
-				ProjectExclusion.SmartIgnore => (availability.IncludeSmartIgnore, 0),
 				ProjectExclusion.HiddenFolders =>
 					(availability.IncludeHiddenFolders, availability.HiddenFoldersCount),
 				ProjectExclusion.HiddenFiles =>

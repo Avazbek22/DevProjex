@@ -95,7 +95,7 @@ public sealed class SelectionSyncCoordinatorIgnoreAvailabilityFallbackMatrixTest
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
 		var ids = viewModel.IgnoreOptions.Select(option => option.Id).ToArray();
-		var expectedIds = BuildBaseIds(includeGitIgnore, includeSmartIgnore)
+		var expectedIds = BuildVisibleBaseIds(includeGitIgnore, includeSmartIgnore)
 			.Append(IgnoreOptionId.ExtensionlessFiles)
 			.ToArray();
 
@@ -184,7 +184,7 @@ public sealed class SelectionSyncCoordinatorIgnoreAvailabilityFallbackMatrixTest
 		bool includeSmartIgnore)
 	{
 		var ids = options.Select(option => option.Id).ToArray();
-		Assert.Equal(BuildBaseIds(includeGitIgnore, includeSmartIgnore), ids);
+		Assert.Equal(BuildVisibleBaseIds(includeGitIgnore, includeSmartIgnore), ids);
 	}
 
 	private static void AssertBaseOnlySelection(
@@ -193,11 +193,23 @@ public sealed class SelectionSyncCoordinatorIgnoreAvailabilityFallbackMatrixTest
 		bool includeSmartIgnore)
 	{
 		Assert.Equal(
-			BuildBaseIds(includeGitIgnore, includeSmartIgnore).OrderBy(static id => id),
+			BuildDefaultSelectedBaseIds(includeGitIgnore, includeSmartIgnore).OrderBy(static id => id),
 			selected.OrderBy(static id => id));
 	}
 
-	private static IgnoreOptionId[] BuildBaseIds(bool includeGitIgnore, bool includeSmartIgnore)
+	private static IgnoreOptionId[] BuildVisibleBaseIds(bool includeGitIgnore, bool includeSmartIgnore)
+	{
+		var ids = new List<IgnoreOptionId>(3);
+		if (includeSmartIgnore)
+			ids.Add(IgnoreOptionId.SmartIgnore);
+		ids.Add(IgnoreOptionId.HideSecrets);
+		if (includeGitIgnore)
+			ids.Add(IgnoreOptionId.UseGitIgnore);
+
+		return ids.ToArray();
+	}
+
+	private static IgnoreOptionId[] BuildDefaultSelectedBaseIds(bool includeGitIgnore, bool includeSmartIgnore)
 	{
 		var ids = new List<IgnoreOptionId>(2);
 		if (includeSmartIgnore)
@@ -270,6 +282,7 @@ public sealed class SelectionSyncCoordinatorIgnoreAvailabilityFallbackMatrixTest
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",

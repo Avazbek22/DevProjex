@@ -1,7 +1,5 @@
-using System.ComponentModel;
-using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -32,6 +30,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly LocalizationService _localization;
     private readonly IToastService _toastService;
     private readonly PreviewDocumentBuilder _previewDocumentBuilder;
+	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
     private readonly SelectedContentExportService _contentExport;
     private readonly ProjectTextOutputPipeline _textOutputPipeline;
     private readonly TreeExportService _treeExport;
@@ -40,6 +39,8 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly Func<bool> _ensureClipboardOutputReady;
     private readonly Func<string, Task> _setClipboardTextAsync;
     private readonly Func<string, Task> _showErrorAsync;
+	private readonly Func<SecretRedactionContext?> _redactionContextProvider;
+	private readonly Action _requestRedactionRefresh;
 
     private CancellationTokenSource? _selectionMetricsCts;
     private DispatcherTimer? _selectionMetricsDebounceTimer;
@@ -57,6 +58,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         LocalizationService localization,
         IToastService toastService,
         PreviewDocumentBuilder previewDocumentBuilder,
+		SecretRedactionOutputPreparer secretRedactionPreparer,
         SelectedContentExportService contentExport,
         ProjectTextOutputPipeline textOutputPipeline,
         TreeExportService treeExport,
@@ -64,7 +66,9 @@ internal sealed class PreviewSurfaceController : IDisposable
         PreviewWorkspacePipeline previewPipeline,
         Func<bool> ensureClipboardOutputReady,
         Func<string, Task> setClipboardTextAsync,
-        Func<string, Task> showErrorAsync)
+        Func<string, Task> showErrorAsync,
+		Func<SecretRedactionContext?> redactionContextProvider,
+		Action requestRedactionRefresh)
     {
         _window = window;
         _viewModel = viewModel;
@@ -72,6 +76,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         _localization = localization;
         _toastService = toastService;
         _previewDocumentBuilder = previewDocumentBuilder;
+		_secretRedactionPreparer = secretRedactionPreparer;
         _contentExport = contentExport;
         _textOutputPipeline = textOutputPipeline;
         _treeExport = treeExport;
@@ -80,6 +85,8 @@ internal sealed class PreviewSurfaceController : IDisposable
         _ensureClipboardOutputReady = ensureClipboardOutputReady;
         _setClipboardTextAsync = setClipboardTextAsync;
         _showErrorAsync = showErrorAsync;
+		_redactionContextProvider = redactionContextProvider;
+		_requestRedactionRefresh = requestRedactionRefresh;
 
         controls.TextControl.VerticalOffset =
             Math.Max(0, controls.TextScrollViewer.Offset.Y);
@@ -91,7 +98,20 @@ internal sealed class PreviewSurfaceController : IDisposable
         controls.TextControl.CopiedToClipboard += OnCopiedToClipboard;
         controls.TextControl.PreviewSelectionChanged +=
             OnSelectionChanged;
+		controls.TextControl.RedactionToggleRequested += OnRedactionToggleRequested;
     }
+
+	private void OnRedactionToggleRequested(
+		object? sender,
+		PreviewRedactionToggleRequestedEventArgs e)
+	{
+		var context = _redactionContextProvider();
+		if (context is null)
+			return;
+
+		context.Session.ToggleKeepAsIs(e.OccurrenceId);
+		_requestRedactionRefresh();
+	}
 
     public bool HasSelectionMetricsSnapshot =>
         _hasSelectionMetricsSnapshot;
@@ -325,6 +345,11 @@ internal sealed class PreviewSurfaceController : IDisposable
             string noCheckedFilesText,
             CancellationToken cancellationToken)
     {
+		// A partial warmup cannot assign the same deterministic secret indexes as the full
+		// selection. Skip it instead of briefly presenting an unredacted or inconsistent preview.
+		if (_redactionContextProvider() is not null)
+			return null;
+
         if (!PreviewWarmupPolicy.ShouldBuildPreviewWarmup(
                 mode,
                 hasSelection,
@@ -451,6 +476,20 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         if (selectedMode == PreviewContentMode.Tree)
         {
+			var redactionContext = _redactionContextProvider();
+			if (redactionContext is not null && currentTreeRoot is not null)
+			{
+				var selectedFiles = ResolvePreviewFiles(
+					selectedPaths,
+					hasSelection,
+					currentTreeRoot,
+					currentTreeOrderedFilePaths);
+				_secretRedactionPreparer
+					.AnalyzeAsync(redactionContext, selectedFiles, cancellationToken)
+					.GetAwaiter()
+					.GetResult();
+			}
+
             var treePreviewText =
                 !string.IsNullOrWhiteSpace(currentPath) &&
                 currentTreeRoot is not null
@@ -495,7 +534,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                 _previewDocumentBuilder.BuildContentDocumentAsync(
                         files,
                         cancellationToken,
-                        pathPresentation?.MapFilePath)
+						pathPresentation?.MapFilePath,
+						redactionContext: _redactionContextProvider())
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -558,7 +598,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     cancellationToken,
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
-                            currentPath))
+							currentPath),
+					redactionContext: _redactionContextProvider())
                 .GetAwaiter()
                 .GetResult();
         return new PreviewBuildResult(document);
@@ -668,6 +709,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         _disposed = true;
         _controls.TextControl.CopyingToClipboard -=
             OnCopyingToClipboard;
+		_controls.TextControl.RedactionToggleRequested -= OnRedactionToggleRequested;
         _controls.TextControl.CopiedToClipboard -=
             OnCopiedToClipboard;
         _controls.TextControl.PreviewSelectionChanged -=

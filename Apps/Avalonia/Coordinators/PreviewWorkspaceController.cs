@@ -1,7 +1,6 @@
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
 using Avalonia.Media.Imaging;
-using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Coordinators;

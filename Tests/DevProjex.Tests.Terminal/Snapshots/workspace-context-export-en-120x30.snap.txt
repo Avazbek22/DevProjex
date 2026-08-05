@@ -12,7 +12,7 @@
 │                  │ Characters: 247                                                             █ │                   │
 │                  │ Estimated tokens: 62                                                        █ │                   │
 │                  │ Destination:                                                                █ │                   │
-│                  │ <OUTPUT_ROOT>\context-out█ │                   │
+│                  │ <OUTPUT_ROOT>/context-out█ │                   │
 │                  │ put.md                                                                      █ │                   │
 │                  │ Destination state: Ready                                                    █ │                   │
 │                  │ Git filtering: Use .gitignore                                               █ │                   │

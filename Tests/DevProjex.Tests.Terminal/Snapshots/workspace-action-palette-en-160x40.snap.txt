@@ -8,14 +8,14 @@
 │                                 │ Filter actions:                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │e                                 │
-│                                 │ Analyze  [A]                                                                            │rs                                │
-│                                 │ Search  [/]                                                                             │                                  │
-│                                 │ Preview mode: Tree  [1/2/3]                                                             │ers                               │
-│                                 │ Preview format: ASCII  [F]                                                              │s                                 │
-│                                 │ Git filtering: Use .gitignore  [M]                                                      │                                  │
+│                                 │ Analyze  [A]                                                                            │s                                 │
+│                                 │ Search  [/]                                                                             │rs                                │
+│                                 │ Preview mode: Tree  [1/2/3]                                                             │                                  │
+│                                 │ Preview format: ASCII  [F]                                                              │ers                               │
+│                                 │ Git filtering: Use .gitignore  [M]                                                      │s                                 │
 │                                 │ Exclusions: 8  [X]                                                                      │                                  │
-│                                 │ Root folders: All (1)  [R]                                                              │ut extension                      │
-│                                 │ File types: All (3)  [T]                                                                │                                  │
+│                                 │ Root folders: All (1)  [R]                                                              │                                  │
+│                                 │ File types: All (3)  [T]                                                                │ut extension                      │
 │                                 │ Export context  [E]                                                                     │                                  │
 │                                 │ To Folder…  [Z]                                                                         │                                  │
 │                                 │ To ZIP Archive…  [Z]                                                                    │                                  │

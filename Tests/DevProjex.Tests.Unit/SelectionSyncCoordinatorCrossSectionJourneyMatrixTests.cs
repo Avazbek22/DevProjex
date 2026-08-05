@@ -1,6 +1,5 @@
 using DevProjex.Application.Models;
 using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 
 namespace DevProjex.Tests.Unit;
@@ -79,6 +78,12 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		await InitializeCoordinatorAsync(coordinator, viewModel, workspace.RootPath);
 
 		var oracle = SettingsIslandOracle.Create(workspace.RootPath);
+		await ExecuteActionAndRefreshAsync(
+			viewModel,
+			coordinator,
+			oracle,
+			workspace.RootPath,
+			SettingsAction.SetAllIgnore(true));
 		var ignoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).ToArray();
 		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), ignoreOptionIds.Order());
 
@@ -172,6 +177,12 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			coordinator,
 			oracle,
 			workspace.RootPath,
+			SettingsAction.SetAllIgnore(true));
+		await ExecuteActionAndRefreshAsync(
+			viewModel,
+			coordinator,
+			oracle,
+			workspace.RootPath,
 			SettingsAction.SetAllIgnore(false));
 		var expectedUnavailableOptionIds = new[]
 		{
@@ -228,6 +239,12 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		await InitializeCoordinatorAsync(coordinator, viewModel, workspace.RootPath);
 		var oracle = SettingsIslandOracle.Create(workspace.RootPath);
 
+		await ExecuteActionAndRefreshAsync(
+			viewModel,
+			coordinator,
+			oracle,
+			workspace.RootPath,
+			SettingsAction.SetAllIgnore(true));
 		await ExecuteActionAndRefreshAsync(
 			viewModel,
 			coordinator,
@@ -764,6 +781,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			],
 			"master-checkbox-wave-with-explicit-preferences" =>
 			[
+				SettingsAction.SetAllIgnore(true),
 				SettingsAction.SetAllIgnore(false),
 				SettingsAction.SetAllRoots(false),
 				SettingsAction.ToggleRoot("alpha"),
@@ -876,7 +894,9 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				break;
 			case SettingsActionKind.SetAllIgnore:
 				Assert.NotEqual(action.IsChecked!.Value, viewModel.AllIgnoreChecked);
-				coordinator.HandleIgnoreAllChanged(action.IsChecked.Value, rootPath);
+				coordinator.HandleIgnoreAllChanged(
+					action.IsChecked.Value,
+					rootPath);
 				break;
 			case SettingsActionKind.Checkpoint:
 				throw new InvalidOperationException("Checkpoints are handled by the journey runner.");
@@ -891,6 +911,16 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		SelectionRefreshSnapshot expected,
 		string stepName)
 	{
+		var selectedIgnoreIds = coordinator.GetSelectedIgnoreOptionIds()
+			.OrderBy(static optionId => optionId)
+			.ToArray();
+		var expectedSelectedIgnoreIds = expected.IgnoreOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Id)
+			.OrderBy(static optionId => optionId)
+			.ToArray();
+		AssertSequenceEqual(expectedSelectedIgnoreIds, selectedIgnoreIds, $"{stepName}: runtime ignore selection");
+
 		var expectedRoots = expected.RootOptions?
 			.Select(static option => (option.Name, option.IsChecked))
 			.ToArray() ?? [];
@@ -927,16 +957,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		Assert.Equal(expectedExtensions.Length,
 			expectedExtensions.Select(static option => option.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
 		Assert.Equal(expectedIgnore.Length, expectedIgnore.Select(static option => option.Id).Distinct().Count());
-
-		var selectedIgnoreIds = coordinator.GetSelectedIgnoreOptionIds()
-			.OrderBy(static optionId => optionId)
-			.ToArray();
-		var expectedSelectedIgnoreIds = expectedIgnore
-			.Where(static option => option.IsChecked)
-			.Select(static option => option.Id)
-			.OrderBy(static optionId => optionId)
-			.ToArray();
-		AssertSequenceEqual(expectedSelectedIgnoreIds, selectedIgnoreIds, $"{stepName}: runtime ignore selection");
 
 		AssertVisibleAdvancedIgnoreOptionsCarryExactCounts(expected);
 	}
@@ -1166,7 +1186,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 	{
 		foreach (var option in snapshot.IgnoreOptions)
 		{
-			if (option.Id is IgnoreOptionId.SmartIgnore or IgnoreOptionId.UseGitIgnore)
+			if (option.Id is IgnoreOptionId.SmartIgnore or IgnoreOptionId.HideSecrets or IgnoreOptionId.UseGitIgnore)
 				continue;
 
 			var expectedCount = GetIgnoreOptionCount(snapshot.IgnoreOptionCounts, option.Id);
@@ -1308,6 +1328,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		private bool _allExtensionsChecked;
 		private bool? _ignoreAllPreference;
 		private RefreshRoute _nextRefreshRoute;
+		private bool _hasPendingRefresh;
 		private bool _skipNextRecompute;
 
 		private SettingsIslandOracle(
@@ -1374,9 +1395,12 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 					break;
 				case SettingsActionKind.ToggleIgnore:
 					ToggleVisibleIgnore(action.IgnoreOptionId!.Value);
-					PromoteRefreshRoute(IsLiveIgnoreOption(action.IgnoreOptionId.Value)
-						? RefreshRoute.Live
-						: RefreshRoute.Full);
+					if (action.IgnoreOptionId.Value != IgnoreOptionId.HideSecrets)
+					{
+						PromoteRefreshRoute(IsLiveIgnoreOption(action.IgnoreOptionId.Value)
+							? RefreshRoute.Live
+							: RefreshRoute.Full);
+					}
 					break;
 				case SettingsActionKind.SetAllRoots:
 					SetAllVisibleRoots(action.IsChecked!.Value);
@@ -1399,11 +1423,14 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 		public SelectionRefreshSnapshot Recompute()
 		{
-			if (_skipNextRecompute)
+			if (_skipNextRecompute && !_hasPendingRefresh)
 			{
 				_skipNextRecompute = false;
 				return CurrentSnapshot;
 			}
+			_skipNextRecompute = false;
+			if (!_hasPendingRefresh)
+				return CurrentSnapshot;
 
 			var context = CreateContext(captureTreeInventory: _nextRefreshRoute == RefreshRoute.Full);
 			var computedSnapshot = _nextRefreshRoute == RefreshRoute.Full
@@ -1428,6 +1455,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			SynchronizeMasterStates(snapshot);
 			CurrentSnapshot = snapshot;
 			_nextRefreshRoute = RefreshRoute.Live;
+			_hasPendingRefresh = false;
 			return snapshot;
 		}
 
@@ -1472,6 +1500,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 		private void PromoteRefreshRoute(RefreshRoute requestedRoute)
 		{
+			_hasPendingRefresh = true;
 			if (requestedRoute == RefreshRoute.Full)
 				_nextRefreshRoute = RefreshRoute.Full;
 		}
@@ -1563,6 +1592,25 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			Assert.Contains(CurrentSnapshot.IgnoreOptions, option => option.Id == optionId);
 			_ignoreStates[optionId] = !_ignoreStates[optionId];
 			_ignoreAllPreference = null;
+
+			if (optionId != IgnoreOptionId.HideSecrets)
+				return;
+
+			// Hide Secrets transforms selected content but never changes filesystem visibility.
+			// Mirror the production content-only route without manufacturing a tree refresh.
+			CurrentSnapshot = CurrentSnapshot with
+			{
+				IgnoreOptions = CurrentSnapshot.IgnoreOptions
+					.Select(option => option.Id == optionId
+						? option with { IsChecked = _ignoreStates[optionId] }
+						: option)
+					.ToArray(),
+				IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>(_ignoreStates),
+				SelectedIgnoreOptions = _ignoreStates
+					.Where(static pair => pair.Value)
+					.Select(static pair => pair.Key)
+					.ToHashSet()
+			};
 		}
 
 		private void SetAllVisibleRoots(bool isChecked)

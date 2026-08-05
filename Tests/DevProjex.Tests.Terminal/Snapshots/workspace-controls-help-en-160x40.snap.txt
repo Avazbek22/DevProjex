@@ -8,14 +8,14 @@
 │                                 ┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐                                  │
 │                                 │ PARAMETERS                                                                            ▲ │                                  │
 │                                 │ Up/Down or j/k selects a row; Enter changes the selected radio button, checkbox, or   █ │e                                 │
-│                                 │ All control. This panel contains only Git filtering, Exclusions, File Types, Root     █ │rs                                │
-│                                 │ Folders, and an unobtrusive saved-settings indicator when applicable. Use Ctrl+P for  █ │                                  │
-│                                 │ actions, E for context export, and Z for folder/ZIP export. Tab/F6 returns to Tree;   █ │ers                               │
-│                                 │ Shift+Tab/Shift+F6 moves to Preview.                                                  █ │s                                 │
-│                                 │                                                                                       █ │                                  │
+│                                 │ All control. This panel contains only Git filtering, Exclusions, File Types, Root     █ │s                                 │
+│                                 │ Folders, and an unobtrusive saved-settings indicator when applicable. Use Ctrl+P for  █ │rs                                │
+│                                 │ actions, E for context export, and Z for folder/ZIP export. Tab/F6 returns to Tree;   █ │                                  │
+│                                 │ Shift+Tab/Shift+F6 moves to Preview.                                                  █ │ers                               │
+│                                 │                                                                                       █ │s                                 │
 │                                 │ WORKSPACE                                                                             █ │                                  │
-│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      █ │ut extension                      │
-│                                 │ changes Git filtering, Exclusions, File Types, and Root Folders.                      █ │                                  │
+│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      █ │                                  │
+│                                 │ changes Git filtering, Exclusions, File Types, and Root Folders.                      █ │ut extension                      │
 │                                 │                                                                                       ░ │                                  │
 │                                 │ ACTION PALETTE                                                                        ░ │                                  │
 │                                 │ Ctrl+P lists every important action and shortcut. Type to filter, use Up/Down, then   ░ │                                  │

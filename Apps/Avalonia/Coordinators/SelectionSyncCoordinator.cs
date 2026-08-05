@@ -2,7 +2,6 @@ using DevProjex.Application.Models;
 using DevProjex.Application.Context;
 using DevProjex.Avalonia.Collections;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -15,7 +14,9 @@ public sealed partial class SelectionSyncCoordinator(
     Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability> getIgnoreOptionsAvailability,
     Func<string, bool> tryElevateAndRestart,
     Func<string?> currentPathProvider,
-    StatusOperationCoordinator? statusOperations = null)
+    StatusOperationCoordinator? statusOperations = null,
+    Action? contentTransformationChanged = null,
+    Action? selectionContentChanged = null)
     : IDisposable
 {
     // Store collection references for proper cleanup
@@ -343,6 +344,8 @@ public sealed partial class SelectionSyncCoordinator(
     public void HandleIgnoreAllChanged(bool isChecked, string? currentPath)
     {
         if (_suppressIgnoreAllCheck) return;
+		var hideSecretsWasChecked = viewModel.IgnoreOptions.Any(static option =>
+			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
 
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = isChecked;
@@ -356,6 +359,10 @@ public sealed partial class SelectionSyncCoordinator(
         UpdateIgnoreSelectionCache();
         _session.AdvanceRevision();
         RequestPendingApplyEvaluation();
+		var hideSecretsIsChecked = viewModel.IgnoreOptions.Any(static option =>
+			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
+		if (hideSecretsWasChecked != hideSecretsIsChecked)
+			contentTransformationChanged?.Invoke();
         if (!string.IsNullOrEmpty(currentPath))
         {
             QueueFullRefresh(currentPath, changedIgnoreOptionId: null);
@@ -570,14 +577,16 @@ public sealed partial class SelectionSyncCoordinator(
         ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
     }
 
-    public void RelabelIgnoreOptions(bool showAdvancedCounts)
+    public void RelabelIgnoreOptions(bool showAdvancedCounts, int? secretRedactionsCount = null)
     {
         if (viewModel.IgnoreOptions.Count == 0)
             return;
 
-        var visibleIds = viewModel.IgnoreOptions
-            .Select(static option => option.Id)
-            .ToHashSet();
+		var visibleIds = viewModel.IgnoreOptions
+			.Select(static option => option.Id)
+			.ToHashSet();
+		var hideSecretsIsChecked = viewModel.IgnoreOptions.Any(static option =>
+			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
         var counts = _ignoreOptionCounts;
         var availability = new IgnoreOptionsAvailability(
             IncludeGitIgnore: visibleIds.Contains(IgnoreOptionId.UseGitIgnore),
@@ -596,7 +605,8 @@ public sealed partial class SelectionSyncCoordinator(
             ExtensionlessFilesCount: counts.ExtensionlessFiles,
             IncludeEmptyFiles: visibleIds.Contains(IgnoreOptionId.EmptyFiles),
             EmptyFilesCount: counts.EmptyFiles,
-            IncludeTrackedGitFilesOnly: visibleIds.Contains(IgnoreOptionId.TrackedGitFilesOnly),
+			IncludeTrackedGitFilesOnly: visibleIds.Contains(IgnoreOptionId.TrackedGitFilesOnly),
+			SecretRedactionsCount: hideSecretsIsChecked ? secretRedactionsCount : null,
             ShowAdvancedCounts: showAdvancedCounts);
         var localizedDescriptors = ignoreOptionsService.GetOptions(availability);
         var descriptorsById = localizedDescriptors.ToDictionary(static descriptor => descriptor.Id);
@@ -968,6 +978,8 @@ public sealed partial class SelectionSyncCoordinator(
     public bool CancelPendingRefreshes()
     {
         var shouldRestoreStableSelection = HasDirtySelectionRefresh();
+		var hideSecretsWasChecked = viewModel.IgnoreOptions.Any(static option =>
+			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
         lock (_backgroundRefreshSync)
         {
             _liveOptionsRefreshCts?.Cancel();
@@ -980,7 +992,16 @@ public sealed partial class SelectionSyncCoordinator(
         if (!shouldRestoreStableSelection || snapshot is null)
             return false;
 
-        RestoreStableSelectionSnapshot(snapshot);
+		RestoreStableSelectionSnapshot(snapshot);
+		var hideSecretsIsChecked = viewModel.IgnoreOptions.Any(static option =>
+			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
+		if (hideSecretsWasChecked != hideSecretsIsChecked)
+		{
+			// Rollback is a real content-state transition. Notify the output pipeline just as
+			// an ordinary checkbox change would, otherwise Preview and the measured count lag
+			// behind the selection visibly restored to the user.
+			contentTransformationChanged?.Invoke();
+		}
         return true;
     }
 
@@ -1285,6 +1306,7 @@ public sealed partial class SelectionSyncCoordinator(
             UpdateRootSelectionCache();
             _session.AdvanceRevision();
             RequestPendingApplyEvaluation();
+			selectionContentChanged?.Invoke();
 
             QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.RootSelection);
         }
@@ -1298,6 +1320,7 @@ public sealed partial class SelectionSyncCoordinator(
             UpdateExtensionsSelectionCache();
             _session.AdvanceRevision();
             RequestPendingApplyEvaluation();
+			selectionContentChanged?.Invoke();
             QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.ExtensionSelection);
         }
     }
@@ -1323,6 +1346,14 @@ public sealed partial class SelectionSyncCoordinator(
         RequestPendingApplyEvaluation();
 
         var currentPath = currentPathProvider();
+		if (changedOption?.Id == IgnoreOptionId.HideSecrets)
+		{
+			// Hide Secrets changes produced content, never filesystem visibility. Rebuild the
+			// preview from the current selection without paying for an unrelated tree scan.
+			contentTransformationChanged?.Invoke();
+			return;
+		}
+		selectionContentChanged?.Invoke();
         if (!string.IsNullOrEmpty(currentPath))
         {
             QueueRefreshForIgnoreOptionChange(currentPath, changedOption?.Id);
@@ -1984,9 +2015,21 @@ public sealed partial class SelectionSyncCoordinator(
 
         foreach (var option in viewModel.IgnoreOptions)
         {
+            var stableState = stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(option.Id);
+            if (!reversibleSnapshot.IgnoreOptionStateCache.TryGetValue(
+                    option.Id,
+                    out var reversibleState) ||
+                (option.Id != changedId && reversibleState != stableState))
+            {
+                // Restoring a cached snapshot is valid only when that snapshot differs in
+                // the initiating row alone. Git modes are a coupled checkbox pair, so a
+                // transition can change both rows and must converge through a real refresh.
+                return false;
+            }
+
             var expectedState = option.Id == changedId
                 ? reversedState
-                : stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(option.Id);
+                : stableState;
             if (!stableSnapshot.IgnoreOptionStateCache.ContainsKey(option.Id) ||
                 option.IsChecked != expectedState)
             {
@@ -1996,9 +2039,18 @@ public sealed partial class SelectionSyncCoordinator(
 
         foreach (var (optionId, isChecked) in _session.IgnoreOptions.OptionStateCache)
         {
+            var stableState = stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(optionId);
+            if (!reversibleSnapshot.IgnoreOptionStateCache.TryGetValue(
+                    optionId,
+                    out var reversibleState) ||
+                (optionId != changedId && reversibleState != stableState))
+            {
+                return false;
+            }
+
             var expectedState = optionId == changedId
                 ? reversedState
-                : stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(optionId);
+                : stableState;
             if (!stableSnapshot.IgnoreOptionStateCache.ContainsKey(optionId) ||
                 isChecked != expectedState)
             {

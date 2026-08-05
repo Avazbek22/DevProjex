@@ -7,9 +7,10 @@ using DevProjex.Infrastructure.AppInstances;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
-using DevProjex.Infrastructure.Reports;
 using DevProjex.Infrastructure.TerminalCommands;
 using DevProjex.Infrastructure.Updates;
+using DevProjex.Infrastructure.Secrets;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -64,9 +65,19 @@ public static class AvaloniaCompositionRoot
         var filterSelectionService = new FilterOptionSelectionService();
         var treeExportService = new TreeExportService();
         var fileContentAnalyzer = new FileContentAnalyzer();
+		var secretRedactionSession = new SecretRedactionSession(
+			new GitleaksSecretDetector(),
+			() => new SecretRedactionLegendText(
+				localization["SecretRedaction.Legend.Summary"],
+				localization["SecretRedaction.Legend.Placeholder"],
+				localization["SecretRedaction.Legend.Notice"],
+				localization["SecretRedaction.NoFindingsNotice"]));
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
-        var projectCopyExportService = new ProjectCopyExportService(new ProjectCopyExportPlanBuilder());
+        var projectCopyExportService = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			fileContentAnalyzer,
+			secretRedactionSession);
         var projectAnalysisService = new ProjectAnalysisService(
             scanOptionsUseCase,
             buildTreeUseCase,
@@ -139,6 +150,7 @@ public static class AvaloniaCompositionRoot
             ApplicationUpdateService: applicationUpdateService,
             TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService,
-            SessionMetricsRecorder: sessionMetricsRecorder);
+            SessionMetricsRecorder: sessionMetricsRecorder,
+			SecretRedactionSession: secretRedactionSession);
     }
 }

@@ -6,8 +6,9 @@
 │    [x] README.md                     │││   └── RepositoryMarker.cs                               ││  (*) Use .gitignore                            │
 │                                      ││└── README.md                                             ││  ( ) Tracked Git files only                    │
 │                                      ││                                                          ││  EXCLUSIONS                                    │
-│                                      ││                                                          ││  [x] All                                       │
+│                                      ││                                                          ││  [ ] All                                       │
 │                                      ││                                                          ││  [x] Smart ignore                              │
+│                                      ││                                                          ││  [ ] Hide secrets                              │
 │                                      ││                                                          ││  [x] Empty folders                             │
 │                                      ││                                                          ││  [x] Empty files                               │
 │                                      ││                                                          ││  [x] Hidden folders                            │
@@ -22,7 +23,6 @@
 │                                      ││                                                          ││  ROOT FOLDERS                                  │
 │                                      ││                                                          ││  [x] All                                       │
 │                                      ││                                                          ││  [x] src                                       │
-│                                      ││                                                          ││                                                │
 │                                      ││                                                          ││                                                │
 │                                      ││                                                          ││                                                │
 │                                      ││                                                          ││                                                │

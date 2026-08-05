@@ -1,5 +1,6 @@
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -217,6 +218,13 @@ public sealed class TerminalWorkspaceController(
 		var files = view is ProjectContextView.Content or ProjectContextView.TreeContent
 			? plan.IncludedFiles
 			: [];
+		var redactionContext = CreateRedactionContext(plan);
+		if (view == ProjectContextView.Tree && redactionContext is not null)
+		{
+			await services.SecretRedactionOutputPreparer
+				.AnalyzeAsync(redactionContext, plan.IncludedFiles, cancellationToken)
+				.ConfigureAwait(false);
+		}
 		string MapDisplayPath(string path) =>
 			Path.GetRelativePath(plan.SourceRoot, path).Replace('\\', '/');
 
@@ -230,7 +238,8 @@ public sealed class TerminalWorkspaceController(
 						files,
 						cancellationToken,
 						MapDisplayPath,
-						includeOmissionMarkers: true)
+						includeOmissionMarkers: true,
+						redactionContext: redactionContext)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
 			ProjectContextView.TreeContent => await services.PreviewDocumentBuilder
@@ -239,11 +248,17 @@ public sealed class TerminalWorkspaceController(
 					files,
 					cancellationToken,
 					MapDisplayPath,
-					includeOmissionMarkers: true)
+					includeOmissionMarkers: true,
+					redactionContext: redactionContext)
 				.ConfigureAwait(false),
 			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};
 	}
+
+	private SecretRedactionContext? CreateRedactionContext(ProjectContextPlan plan) =>
+		plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true
+			? new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession)
+			: null;
 
 	private static TreeTextFormat MapTreeFormat(ProjectContextDocumentFormat format) =>
 		format switch
@@ -363,7 +378,8 @@ public sealed class TerminalWorkspaceController(
 					DestinationPath: requestedDestination,
 					Format: format,
 					DestinationMode: ProjectCopyDestinationMode.Exact,
-					ConflictPolicy: ProjectCopyConflictPolicy.Fail),
+					ConflictPolicy: ProjectCopyConflictPolicy.Fail,
+					RedactSecrets: plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true),
 				progress,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);

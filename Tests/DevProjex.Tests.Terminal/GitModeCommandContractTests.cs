@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using DevProjex.Application.Context;
 
 namespace DevProjex.Tests.Terminal;
 

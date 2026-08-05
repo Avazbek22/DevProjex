@@ -1,7 +1,6 @@
 using DevProjex.Avalonia.Services;
 using DevProjex.Application.Context;
 using DevProjex.Application.DesktopControl;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 

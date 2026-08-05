@@ -1,5 +1,6 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -70,6 +71,23 @@ internal static class CommandExecution
 		{
 			var error = ProjectCopyTerminalErrorMapper.Map(exception, text);
 			return WriteError(environment, outputOptions, text, error);
+		}
+		catch (SecretScanLimitExceededException exception)
+		{
+			return WriteError(environment, outputOptions, text, new TerminalError(
+				"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
+				text["Error.ProjectCopy.SecretScanLimitExceeded"],
+				ExitCode: CommandLineExitCodes.RuntimeError,
+				Exception: exception,
+				ContextPath: exception.Path));
+		}
+		catch (SecretDetectionException exception)
+		{
+			return WriteError(environment, outputOptions, text, new TerminalError(
+				"DPX-SECRET-DETECTION-FAILED",
+				text["Error.ProjectCopy.SecretDetectionFailed"],
+				ExitCode: CommandLineExitCodes.RuntimeError,
+				Exception: exception));
 		}
 		catch (OutputDestinationConflictException exception)
 		{

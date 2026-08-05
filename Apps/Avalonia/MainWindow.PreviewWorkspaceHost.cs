@@ -100,6 +100,9 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
             lineCount);
     }
 
+    string IPreviewWorkspacePipelineHost.ResolvePreviewErrorMessage(Exception exception) =>
+        ResolveUserFacingOutputErrorMessage(exception);
+
     void IPreviewWorkspacePipelineHost.ClearPreviewDocument() =>
         ClearPreviewDocument();
 

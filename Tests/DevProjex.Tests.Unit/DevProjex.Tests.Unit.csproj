@@ -23,4 +23,9 @@
     <Compile Include="..\Shared\StoreListing\**\*.cs" LinkBase="StoreListing" />
     <Compile Include="..\Shared\ProjectLoadWorkflow\**\*.cs" LinkBase="ProjectLoadWorkflow" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\Fixtures\Secrets\gitleaks-v8.30.1-corpus.jsonl"
+                      Link="Fixtures\Secrets\gitleaks-v8.30.1-corpus.jsonl" />
+  </ItemGroup>
 </Project>

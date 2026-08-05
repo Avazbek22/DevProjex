@@ -83,6 +83,8 @@ public sealed record ProjectSourceIdentity(
 	string? CommitHash = null,
 	bool IsCachedRepository = false);
 
+public sealed record SecretRedactionSummary(int MatchedCount, int RedactedCount);
+
 public sealed record ProjectContextPlan(
 	string SourceRoot,
 	ProjectSelectionSpec Selection,
@@ -101,7 +103,8 @@ public sealed record ProjectContextPlan(
 	string Fingerprint,
 	long IncludedBytes = 0,
 	IReadOnlyDictionary<string, long>? EffectiveFileSizes = null,
-	ProjectSourceIdentity? SourceIdentity = null)
+	ProjectSourceIdentity? SourceIdentity = null,
+	SecretRedactionSummary? Redaction = null)
 {
 	public bool HasErrors => Diagnostics.Any(static diagnostic =>
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);

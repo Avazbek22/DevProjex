@@ -28,6 +28,8 @@ internal interface IPreviewWorkspacePipelineHost
 
     void ApplyPreviewText(string text, int lineCount);
 
+    string ResolvePreviewErrorMessage(Exception exception) => exception.Message;
+
     void ClearPreviewDocument();
 
     Task<PreviewWarmupSnapshot?> TryBuildPreviewWarmupSnapshotAsync(

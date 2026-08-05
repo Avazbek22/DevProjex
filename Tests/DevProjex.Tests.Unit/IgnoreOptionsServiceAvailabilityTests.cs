@@ -7,6 +7,7 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.SmartIgnore"] = "Smart Ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
@@ -18,10 +19,10 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 		};
 
 	[Theory]
-	[InlineData(false, false, 4)]
-	[InlineData(true, false, 5)]
-	[InlineData(false, true, 5)]
-	[InlineData(true, true, 6)]
+	[InlineData(false, false, 5)]
+	[InlineData(true, false, 6)]
+	[InlineData(false, true, 6)]
+	[InlineData(true, true, 7)]
 	public void GetOptions_RespectsAvailabilityFlags(bool includeGitIgnore, bool includeSmartIgnore, int expectedCount)
 	{
 		var service = CreateService();
@@ -42,11 +43,12 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 			IncludeSmartIgnore: true));
 
 		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFolders, options[2].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFiles, options[3].Id);
-		Assert.Equal(IgnoreOptionId.DotFolders, options[4].Id);
-		Assert.Equal(IgnoreOptionId.DotFiles, options[5].Id);
+		Assert.Equal(IgnoreOptionId.HideSecrets, options[1].Id);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[2].Id);
+		Assert.Equal(IgnoreOptionId.HiddenFolders, options[3].Id);
+		Assert.Equal(IgnoreOptionId.HiddenFiles, options[4].Id);
+		Assert.Equal(IgnoreOptionId.DotFolders, options[5].Id);
+		Assert.Equal(IgnoreOptionId.DotFiles, options[6].Id);
 	}
 
 	[Fact]
@@ -62,6 +64,7 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 		Assert.Equal(
 			[
 				IgnoreOptionId.SmartIgnore,
+				IgnoreOptionId.HideSecrets,
 				IgnoreOptionId.UseGitIgnore,
 				IgnoreOptionId.TrackedGitFilesOnly,
 				IgnoreOptionId.HiddenFolders,
@@ -70,8 +73,9 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 				IgnoreOptionId.DotFiles
 			],
 			options.Select(static option => option.Id));
-		Assert.True(options[1].DefaultChecked);
-		Assert.False(options[2].DefaultChecked);
+		Assert.False(options[1].DefaultChecked);
+		Assert.True(options[2].DefaultChecked);
+		Assert.False(options[3].DefaultChecked);
 	}
 
 	[Fact]

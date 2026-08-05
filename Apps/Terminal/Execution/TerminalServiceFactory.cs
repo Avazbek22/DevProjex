@@ -1,5 +1,7 @@
 using DevProjex.Terminal.Tui;
 using DevProjex.Infrastructure.Persistence;
+using DevProjex.Infrastructure.Secrets;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -37,6 +39,13 @@ public sealed class TerminalServiceFactory(
 		var selectionService = new FilterOptionSelectionService();
 		var treeExport = new TreeExportService();
 		var contentAnalyzer = new FileContentAnalyzer();
+		var secretRedactionSession = new SecretRedactionSession(
+			new GitleaksSecretDetector(),
+			new SecretRedactionLegendText(
+				localization["SecretRedaction.Legend.Summary"],
+				localization["SecretRedaction.Legend.Placeholder"],
+				localization["SecretRedaction.Legend.Notice"],
+				localization["SecretRedaction.NoFindingsNotice"]));
 		var analysis = new ProjectAnalysisService(
 			scanOptions,
 			buildTree,
@@ -51,8 +60,12 @@ public sealed class TerminalServiceFactory(
 		var contextDocumentService = new ProjectContextDocumentService(
 			treeExport,
 			contentAnalyzer,
-			ResolveContentClassification);
-		var projectCopyExportService = new ProjectCopyExportService(new ProjectCopyExportPlanBuilder());
+			ResolveContentClassification,
+			secretRedactionSession);
+		var projectCopyExportService = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			contentAnalyzer,
+			secretRedactionSession);
 		var localProfiles = new ProjectProfileStore(resolvedAppDataPathProvider);
 		var portableProfiles = new PortableProjectProfileService();
 		var selectionResolver = new ProjectSelectionResolver(
@@ -93,6 +106,8 @@ public sealed class TerminalServiceFactory(
 			RecentWorkspacesService: new RecentWorkspacesService(),
 			RecentProjectsStore: recentProjects,
 			GitRepositoryService: gitRepository,
-			RepoCacheService: repoCache);
+			RepoCacheService: repoCache,
+			SecretRedactionSession: secretRedactionSession,
+			SecretRedactionOutputPreparer: new SecretRedactionOutputPreparer(contentAnalyzer));
 	}
 }

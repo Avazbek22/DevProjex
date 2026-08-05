@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
+using DevProjex.Application.Secrets;
 using DevProjex.Terminal.CommandLine;
 
 namespace DevProjex.Terminal.Rendering;
@@ -70,6 +72,20 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			fingerprint = plan.Fingerprint
 		};
 		var json = JsonSerializer.Serialize(document, JsonOptions);
+		if (plan.Redaction is { } redaction)
+		{
+			var root = JsonNode.Parse(json)?.AsObject() ??
+			           throw new JsonException("The analysis document could not be materialized.");
+			root["redaction"] = new JsonObject
+			{
+				["matchedCount"] = redaction.MatchedCount,
+				["redactedCount"] = redaction.RedactedCount,
+				["notice"] = redaction.MatchedCount == 0
+					? SecretRedactionLegendText.English.NoFindingsNotice
+					: SecretRedactionLegendText.English.Notice
+			};
+			json = root.ToJsonString(JsonOptions);
+		}
 		await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
 	}
 

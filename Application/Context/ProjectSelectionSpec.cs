@@ -9,7 +9,8 @@ public enum ProjectExclusion
 	DotFiles,
 	EmptyFolders,
 	EmptyFiles,
-	ExtensionlessFiles
+	ExtensionlessFiles,
+	HideSecrets
 }
 
 public enum ProjectProfileSourceKind

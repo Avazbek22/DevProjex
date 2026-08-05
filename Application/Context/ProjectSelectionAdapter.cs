@@ -80,6 +80,7 @@ public static class ProjectSelectionAdapter
 			ProjectExclusion.EmptyFolders => IgnoreOptionId.EmptyFolders,
 			ProjectExclusion.EmptyFiles => IgnoreOptionId.EmptyFiles,
 			ProjectExclusion.ExtensionlessFiles => IgnoreOptionId.ExtensionlessFiles,
+			ProjectExclusion.HideSecrets => IgnoreOptionId.HideSecrets,
 			_ => throw new ArgumentOutOfRangeException(nameof(exclusion), exclusion, null)
 		};
 
@@ -110,6 +111,9 @@ public static class ProjectSelectionAdapter
 				return true;
 			case IgnoreOptionId.ExtensionlessFiles:
 				exclusion = ProjectExclusion.ExtensionlessFiles;
+				return true;
+			case IgnoreOptionId.HideSecrets:
+				exclusion = ProjectExclusion.HideSecrets;
 				return true;
 			default:
 				exclusion = default;

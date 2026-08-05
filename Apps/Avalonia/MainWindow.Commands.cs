@@ -3,7 +3,6 @@ using DevProjex.Application.Updates;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
-using DevProjex.Infrastructure.TerminalCommands;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
 namespace DevProjex.Avalonia;

@@ -8,14 +8,14 @@
 │                                 │ Filter actions:                                                                         │                                  │
 │                                 │ Preview format                                                                          │                                  │
 │                                 │                                                                                         │e                                 │
-│                                 │ Preview format: ASCII  [F]                                                              │rs                                │
+│                                 │ Preview format: ASCII  [F]                                                              │s                                 │
+│                                 │                                                                                         │rs                                │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │ers                               │
 │                                 │                                                                                         │s                                 │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │ut extension                      │
-│                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │

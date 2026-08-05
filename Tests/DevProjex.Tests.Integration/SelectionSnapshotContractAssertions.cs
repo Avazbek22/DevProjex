@@ -1,5 +1,4 @@
 using DevProjex.Application.Models;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
 

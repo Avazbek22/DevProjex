@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Services;

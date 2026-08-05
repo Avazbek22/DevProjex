@@ -1,6 +1,5 @@
 using DevProjex.Application.Models;
 using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Unit;
 
@@ -423,8 +422,12 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
             $"{step}: extension options");
         Assert.True(
             coldSnapshot.IgnoreOptions.SequenceEqual(
-                viewModel.IgnoreOptions.Select(static option =>
-                    new ResolvedIgnoreOptionState(option.Id, option.Label, DefaultChecked: true, option.IsChecked))),
+				 viewModel.IgnoreOptions.Select(static option =>
+					 new ResolvedIgnoreOptionState(
+						 option.Id,
+						 option.Label,
+						 DefaultChecked: option.Id != IgnoreOptionId.HideSecrets,
+						 option.IsChecked))),
             $"{step}: ignore options differ from a cold refresh.");
 
         Assert.Equal(

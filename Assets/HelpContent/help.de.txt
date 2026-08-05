@@ -328,7 +328,16 @@ Bei mehrdeutigen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `L
 
 Die Erkennung neuer Projektbereiche ist begrenzt, damit große Benutzerordner nicht vollständig wiederholt analysiert werden. Normale Strukturen werden flach, erkannte Monorepos tiefer durchsucht. Nach der Erkennung gilt Smart Ignore ohne Tiefenbegrenzung für den gesamten Unterbaum des Bereichs.
 
-### 12.3 .gitignore verwenden
+### 12.3 Geheimnisse verbergen
+„Geheimnisse verbergen“ ist standardmäßig deaktiviert. Die Option prüft nur ausgewählte Textinhalte und ersetzt jeden erkannten Wert an seiner Stelle; Datei und umgebender Code bleiben erhalten. Solange sie ausgeschaltet ist, erfolgt keine Prüfung und es erscheint kein Zähler. Nach der Prüfung zeigt die Bezeichnung, wie viele Werte weiterhin unkenntlich gemacht sind.
+
+Erkannte Stellen werden in der Vorschau hervorgehoben. Ein Klick behält nur dieses Vorkommen unverändert. Im Terminal Workspace wechseln `[` und `]` zwischen den Vorkommen; `Enter` oder `Space` schalten das aktive um. Die Entscheidung gilt während der aktuellen Sitzung für Vorschau, Zwischenablage, Kontextexport, Ordner und ZIP und wird nicht im Projektprofil gespeichert.
+
+Ausgaben mit Ersetzungen enthalten einen Hinweis. Auch eine Ordner- oder ZIP-Kopie ändert passenden Text und lässt sich möglicherweise nicht mehr erstellen oder ausführen. Binärdateien werden unverändert kopiert und nicht geprüft. Eine ausgewählte Textdatei über 16 MiB oder ein Erkennungsfehler beendet den Vorgang, statt ungeprüften Text zu exportieren.
+
+Der Zähler meldet nur Regelübereinstimmungen. Null bedeutet nicht, dass das Projekt sicher ist. In der CLI gilt `--exclude hide-secrets`; Einzelheiten stehen in `Docs/HideSecrets.md`.
+
+### 12.4 .gitignore verwenden
 Wenn aktiviert, berücksichtigt DevProjex jede erreichbare `.gitignore`, nicht nur die Datei im Wurzelordner. Jede Datei gilt für ihren eigenen Ordner und alle erreichbaren Unterordner, jedoch nicht für übergeordnete oder benachbarte Ordner.
 
 Für einen Pfad werden die Regeln von der übergeordneten zur tieferen `.gitignore` ausgewertet; innerhalb einer Datei von oben nach unten. Die letzte passende Regel bestimmt das Git-Ergebnis.
@@ -341,7 +350,7 @@ Ein symbolischer Link namens `.gitignore` wird entsprechend dem Verhalten von Gi
 
 Das integrierte Profil `standard` wählt `gitignore` und alle acht Ausschlussgruppen: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` und `extensionless-files`.
 
-### 12.4 Nur von Git verfolgte Dateien
+### 12.5 Nur von Git verfolgte Dateien
 „Nur von Git verfolgte Dateien“ baut die Git-Stufe des Baums aus vorhandenen Arbeitsbaumdateien auf, die in jedem lesbaren Git-Index eingetragen sind. Geänderte verfolgte Dateien und neu zum Index hinzugefügte Dateien bleiben enthalten; nicht verfolgte Dateien werden ausgeschlossen. Dies ist der aktuelle Arbeitsbaum, kein historischer Snapshot von `HEAD` oder einem entfernten Repository.
 
 Jedes erreichbare verschachtelte Repository und jeder erreichbare Worktree wird auf jeder erreichbaren Verschachtelungsebene unabhängig verarbeitet. Ein untergeordnetes Repository übernimmt keine verfolgten Pfade vom übergeordneten oder einem benachbarten Repository. Dieser Modus benötigt die Git CLI; ein lesbarer leerer Index ist gültig. Wird der Terminal-Arbeitsbereich (TUI) in diesem Modus gestartet und kann kein passender Index geladen werden, wird der Arbeitsbereich nicht geöffnet. Wird der Modus interaktiv in einem bereits geöffneten TUI-Arbeitsbereich gewählt und kann kein passender Index geladen werden, wird die Änderung abgelehnt und der letzte verwendbare Git-Modus bleibt aktiv. Direkte Befehle enden in diesem Fall mit einem Richtlinien- oder Prüfungsfehler. DevProjex wechselt niemals stillschweigend zu `.gitignore`. Ist ein anderer passender Index lesbar, werden nicht verfügbare verschachtelte Bereiche mit einer Warnung ausgeschlossen.
@@ -350,26 +359,26 @@ In einem bereits geöffneten Desktop-Arbeitsbereich bleibt die explizite Auswahl
 
 „.gitignore verwenden“ und „Nur von Git verfolgte Dateien“ schließen sich beim Aktivieren gegenseitig aus. Der aktive Schalter kann deaktiviert werden, um die Git-Filterung vollständig auszuschalten. Bei lokalen Projekten mit Profilunterstützung wird dieser Zustand zusammen mit den Ordnern der obersten Ebene, Dateitypen und übrigen Ausschlusseinstellungen gespeichert.
 
-### 12.5 Zusammenspiel von Git-Filterung und Smart Ignore
+### 12.6 Zusammenspiel von Git-Filterung und Smart Ignore
 Der gewählte Git-Modus und Smart Ignore werden unabhängig voneinander gesteuert. Der Git-Modus wird zuerst in jedem erreichbaren Git-Bereich angewendet, danach verarbeitet Smart Ignore die verbleibenden Elemente und zuletzt folgen die Grundregeln.
 
 Smart Ignore kann ausgeblendet bleiben, solange der gewählte Git-Modus bereits alle seine Kandidaten abdeckt, und nach einem Wechsel oder Deaktivieren des Git-Modus erscheinen. Beide Git-Schalter bleiben im Repository verfügbar.
 
 Eine Git-Negation mit `!` hebt nur das Git-Ergebnis auf. Smart Ignore und Grundregeln bleiben wirksam.
 
-### 12.6 Grundregeln
+### 12.7 Grundregeln
 Regeln für führende Punkte prüfen den Namen; Regeln für versteckte Elemente prüfen das Hidden-Systemattribut. Beides kann je nach Plattform dasselbe oder verschiedene Elemente betreffen.
 
 „Leere Dateien“ blendet Dateien mit 0 Byte aus. „Dateien ohne Erweiterung“ betrifft beispielsweise `Dockerfile`, `Makefile` und `README`.
 
 „Leere Ordner“ blendet logisch leere Ordner aus. Ein Ordner ist logisch leer, wenn nach Anwendung der ausgewählten Dateitypen und aller anderen Regeln keine sichtbaren Dateien oder Unterordner verbleiben. Deshalb kann sich sein Zähler ändern, wenn eine andere Regel umgeschaltet wird.
 
-### 12.7 Zähler
+### 12.8 Zähler
 Ein Zähler zeigt den direkten Beitrag einer Regel unter den aktuellen Einstellungen, nicht die physische Anzahl ähnlicher Elemente auf dem Datenträger. Ein Element wird nicht gleichzeitig mehreren überlappenden Zählern zugeordnet.
 
 Die feste Zuordnung lautet: für Ordner `.gitignore`, Smart Ignore, führender Punkt, Hidden-Attribut; für Dateien `.gitignore`, Smart Ignore, führender Punkt, keine Erweiterung, leere Datei, Hidden-Attribut. Diese Reihenfolge betrifft nur die Zähler. Für die Sichtbarkeit genügt jeder aktivierte Mechanismus, der das Element ausschließt.
 
-### 12.8 Änderungen anwenden
+### 12.9 Änderungen anwenden
 Das Umschalten von Kontrollkästchen aktualisiert zuerst die verfügbaren Einstellungen und Zähler. Der endgültige Baum wird nach „Einstellungen anwenden“ neu aufgebaut. Wird die Vorbereitung abgebrochen, kehrt DevProjex zum letzten vollständig abgeschlossenen Zustand zurück; teilweise berechnete Regeln werden nicht angewendet.
 
 ## 13) Wie Baum und Kennzahlen berechnet werden

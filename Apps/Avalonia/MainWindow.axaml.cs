@@ -1,9 +1,7 @@
 using System.Runtime.CompilerServices;
 using Avalonia.Platform.Storage;
-using DevProjex.Application;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
 using DevProjex.Infrastructure.TerminalCommands;
 using AppViewSettings = DevProjex.Infrastructure.ThemePresets.AppViewSettings;
 
@@ -253,7 +251,9 @@ public partial class MainWindow : Window
         UpdateTitle();
         UpdateToastHostLayout();
 
-        _selectionCoordinator.RelabelIgnoreOptions(AdvancedIgnoreCountsAlwaysEnabled);
+		_selectionCoordinator.RelabelIgnoreOptions(
+			AdvancedIgnoreCountsAlwaysEnabled,
+			_secretRedactionCount);
     }
 
     private async Task ShowErrorAsync(string message)
@@ -378,6 +378,35 @@ public partial class MainWindow : Window
     {
         _previewPipeline.ScheduleRefresh(immediate);
     }
+
+	private void ScheduleContentTransformationRefresh()
+	{
+		// The regular cache key already tracks selection and presentation changes. Redaction
+		// overrides are separate content state, so invalidate only when that state changes;
+		// invalidating every preview refresh would rescan all selected text unnecessarily.
+		InvalidatePreviewCache();
+		// A canceled option refresh may restore the exact selection that was already scanned.
+		// Reuse that snapshot synchronously so rollback also restores the measured label.
+		_secretRedactionCount = GetCachedSecretRedactionCountForCurrentSelection();
+		_selectionCoordinator.RelabelIgnoreOptions(
+			AdvancedIgnoreCountsAlwaysEnabled,
+			_secretRedactionCount);
+		_previewPipeline.ScheduleRefresh(immediate: true);
+		ScheduleSecretRedactionCountRefresh();
+	}
+
+	private void InvalidateSecretRedactionCount()
+	{
+		if (_secretRedactionCount is not null)
+		{
+			_secretRedactionCount = null;
+			_selectionCoordinator.RelabelIgnoreOptions(
+				AdvancedIgnoreCountsAlwaysEnabled,
+				secretRedactionsCount: null);
+		}
+
+		ScheduleSecretRedactionCountRefresh();
+	}
 
     private void CancelPreviewRefresh()
     {
@@ -1036,6 +1065,8 @@ public partial class MainWindow : Window
     private void ClearPreviousProjectState(bool forceCompactingGc = false)
     {
         _memoryCleanup.CancelPreview();
+		_secretRedactionCount = null;
+		_secretRedactionSession.InvalidateSnapshots();
 
         // Background metrics become stale as soon as the visible tree is about to change.
         // Cancel them before tearing down the current project state to avoid wasted I/O.
@@ -1443,7 +1474,8 @@ public partial class MainWindow : Window
         var availability = _ignoreRulesService.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
         return availability with
         {
-            ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled
+			ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled,
+			SecretRedactionsCount = _secretRedactionCount
         };
     }
 

@@ -45,6 +45,10 @@ project inventory, effective selection, metrics, diagnostics, and the
 deterministic context fingerprint available to the current engine. v1 does not
 publish a timings field.
 
+When Hide Secrets is enabled, analysis adds a top-level `redaction` object with
+`matchedCount`, `redactedCount`, and a non-safety `notice`. Zero means the pinned
+rules matched nothing; it never means that the project is safe.
+
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
 
@@ -88,6 +92,16 @@ Property order is deterministic where contract tests require it. Paths use `/`
 inside machine documents. A binary entry has `isBinary: true` and null content;
 binary bytes are never inserted into AI context output.
 
+When at least one value is replaced, JSON adds this top-level object:
+
+```json
+"redaction": {
+  "count": 1,
+  "placeholderExample": "DEVPROJEX_REDACTED[github-pat#1]",
+  "notice": "Do not treat placeholder text as a real value."
+}
+```
+
 For a cached Git clone, `project.source` is an additive object containing the
 source type, safe repository URL, and optional branch/commit metadata. Human
 identity never uses the generated cache-directory suffix. Local projects retain
@@ -100,6 +114,9 @@ XML uses the root element `devprojexContext` with `schemaVersion="1"` and
 `metrics`, `tree`, `files`, `diagnostics`, and `fingerprint` elements. XML is a
 complete well-formed UTF-8 document with escaped values.
 
+When replacements exist, XML includes a top-level `redaction` element with
+`count`, `placeholderExample`, and `notice` children.
+
 ## Markdown and Text
 
 Markdown contains one project heading, an optional fenced tree block, and file
@@ -108,6 +125,10 @@ the document structure.
 
 Text preserves the existing readable tree and file-section semantics. With
 `--plain`, tree connectors use strict ASCII.
+
+When replacements exist, text starts with a plain three-line legend and Markdown
+starts with the equivalent HTML comment. The legend is part of the requested
+payload, not an operational message on stderr.
 
 Context generation streams UTF-8 to stdout or an adjacent temporary file. File
 output is flushed and moved atomically; cancellation or write failure removes
@@ -129,6 +150,10 @@ preflight is ready; it is not a result path.
 The readiness line is the requested dry-run result and remains visible at
 `quiet` and `minimal`; incidental status and progress remain suppressed.
 
+A project-copy dry run with Hide Secrets enabled also states that detected text
+will be changed, binary files will remain unchanged, and the result may not build
+or run. This warning does not create or scan an output artifact.
+
 ## Errors
 
 Human errors follow:
@@ -145,6 +170,12 @@ The `DPX-*` code is stable and language-independent. Normal verbosity never
 prints raw `Exception.Message`, an inner exception, or a platform-localized I/O
 message. Diagnostic verbosity may report an exception type, safe path context,
 stack trace, and request identifier, but never file content or secrets.
+
+Secret inspection is fail-closed. `DPX-SECRET-SCAN-LIMIT-EXCEEDED` identifies a
+selected text file above the supported 16 MiB limit;
+`DPX-SECRET-DETECTION-FAILED` identifies rule loading, matching, timeout, or
+classified-read failure. Both are runtime failures (exit `1`) and never fall back to an
+unredacted artifact.
 
 ## Exit Codes
 

@@ -1,7 +1,6 @@
 using DevProjex.Terminal.CommandLine;
 using Spectre.Console;
 using System.Globalization;
-using System.Text;
 
 namespace DevProjex.Terminal.Rendering;
 

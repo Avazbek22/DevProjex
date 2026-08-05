@@ -1,7 +1,6 @@
 using Avalonia.Platform.Storage;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia;
 
@@ -20,6 +19,9 @@ public partial class MainWindow
 
         try
         {
+			if (!await ConfirmRedactedProjectCopyAsync())
+				return;
+
             var folderName = $"{GetProjectCopyName()}-copy";
             var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
@@ -54,6 +56,9 @@ public partial class MainWindow
 
         try
         {
+			if (!await ConfirmRedactedProjectCopyAsync())
+				return;
+
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
                 Title = _localization["Picker.ProjectCopy.Zip"],
@@ -104,7 +109,8 @@ public partial class MainWindow
             _currentTree.Root,
             selectedPaths,
             destinationPath,
-            format);
+			format,
+			RedactSecrets: CreateSecretRedactionContext() is not null);
         var cancellation = new CancellationTokenSource();
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _projectCopyExportCts = cancellation;
@@ -115,9 +121,11 @@ public partial class MainWindow
 
         try
         {
-            operationId = _statusOperations.Begin(
-                _localization["Status.Operation.ExportingProjectCopy"],
-                indeterminate: false,
+			operationId = _statusOperations.Begin(
+				_localization["Status.Operation.ExportingProjectCopy"],
+				// Secret inspection has no honest item total. The first measured copy
+				// progress event switches this operation to determinate automatically.
+				indeterminate: request.RedactSecrets,
                 operationType: StatusOperationType.ProjectCopyExport,
                 cancelAction: cancellation.Cancel);
             var progress = new Progress<ProjectCopyExportProgress>(value =>
@@ -166,6 +174,20 @@ public partial class MainWindow
             completion.TrySetResult(true);
         }
     }
+
+	private async Task<bool> ConfirmRedactedProjectCopyAsync()
+	{
+		if (CreateSecretRedactionContext() is null)
+			return true;
+
+		return await MessageDialog.ShowConfirmationAsync(
+			this,
+			_localization["Dialog.ProjectCopy.Redaction.Title"],
+			_localization["Dialog.ProjectCopy.Redaction.Message"],
+			_localization["Dialog.ProjectCopy.Redaction.Continue"],
+			_localization["Dialog.Cancel"],
+			height: 230);
+	}
 
     private string GetProjectCopyName()
     {

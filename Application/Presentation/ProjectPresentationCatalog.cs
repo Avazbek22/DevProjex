@@ -60,47 +60,53 @@ public static class ProjectPresentationCatalog
 			"Settings.Ignore.SmartIgnore",
 			0),
 		new(
+			ProjectExclusion.HideSecrets,
+			IgnoreOptionId.HideSecrets,
+			"hide-secrets",
+			"Settings.Ignore.HideSecrets",
+			1),
+		new(
 			ProjectExclusion.EmptyFolders,
 			IgnoreOptionId.EmptyFolders,
 			"empty-folders",
 			"Settings.Ignore.EmptyFolders",
-			1),
+			2),
 		new(
 			ProjectExclusion.EmptyFiles,
 			IgnoreOptionId.EmptyFiles,
 			"empty-files",
 			"Settings.Ignore.EmptyFiles",
-			2),
+			3),
 		new(
 			ProjectExclusion.HiddenFolders,
 			IgnoreOptionId.HiddenFolders,
 			"hidden-folders",
 			"Settings.Ignore.HiddenFolders",
-			3),
+			4),
 		new(
 			ProjectExclusion.HiddenFiles,
 			IgnoreOptionId.HiddenFiles,
 			"hidden-files",
 			"Settings.Ignore.HiddenFiles",
-			4),
+			5),
 		new(
 			ProjectExclusion.DotFolders,
 			IgnoreOptionId.DotFolders,
 			"dot-folders",
 			"Settings.Ignore.DotFolders",
-			5),
+			6),
 		new(
 			ProjectExclusion.DotFiles,
 			IgnoreOptionId.DotFiles,
 			"dot-files",
 			"Settings.Ignore.DotFiles",
-			6),
+			7),
 		new(
 			ProjectExclusion.ExtensionlessFiles,
 			IgnoreOptionId.ExtensionlessFiles,
 			"extensionless-files",
 			"Settings.Ignore.ExtensionlessFiles",
-			7)
+			8)
 	];
 
 	public static IReadOnlyList<ProjectContextViewDescriptor> PreviewModes { get; } =

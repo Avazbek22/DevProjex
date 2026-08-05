@@ -328,7 +328,16 @@ Per nomi ambigui come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` 
 
 La ricerca di nuove aree di progetto è limitata per evitare l’analisi ripetuta di ogni directory in una grande cartella utente. Le strutture normali usano una ricerca poco profonda, mentre i monorepo riconosciuti vengono esaminati più in profondità. Dopo il rilevamento, Smart Ignore si applica all’intero sottoalbero senza limite di profondità.
 
-### 12.3 Usa .gitignore
+### 12.3 Nascondi segreti
+«Nascondi segreti» è disattivato per impostazione predefinita. Analizza solo il testo selezionato e sostituisce ogni valore rilevato sul posto, conservando il file e il codice circostante. Quando è disattivato non viene eseguita alcuna scansione e non appare alcun contatore. Dopo la scansione della selezione corrente, l’etichetta mostra quanti valori restano nascosti.
+
+Le corrispondenze sono evidenziate nell’anteprima. Fare clic su una di esse per conservare invariata solo quell’occorrenza. In Terminal Workspace, `[` e `]` scorrono le occorrenze e `Enter` o `Space` attivano o disattivano quella corrente. La decisione vale per la sessione in anteprima, appunti, esportazione del contesto, cartella e ZIP; non viene salvata nel profilo del progetto.
+
+Gli output con sostituzioni includono una spiegazione. Anche una copia in cartella o ZIP modifica il testo corrispondente e potrebbe non compilarsi o avviarsi. I file binari non vengono analizzati e sono copiati senza modifiche. Un file di testo selezionato oltre 16 MiB o un errore di rilevamento interrompe l’operazione anziché esportare testo non controllato.
+
+Il contatore segnala soltanto le corrispondenze con le regole. Zero non significa che il progetto sia sicuro. La CLI usa `--exclude hide-secrets`; i dettagli sono in `Docs/HideSecrets.md`.
+
+### 12.4 Usa .gitignore
 Quando è attiva, l’opzione applica ogni `.gitignore` raggiungibile, non solo quello nella radice. Ogni file agisce sulla cartella che lo contiene e su tutte le sottocartelle accessibili, ma non sulle cartelle superiori o adiacenti.
 
 Per un percorso, le regole vengono valutate dal `.gitignore` padre verso quelli più profondi; nello stesso file, dall’alto verso il basso. L’ultima regola corrispondente determina il risultato Git.
@@ -341,7 +350,7 @@ Un collegamento simbolico denominato `.gitignore` non viene seguito, in conformi
 
 Il profilo integrato `standard` seleziona `gitignore` e tutti gli otto gruppi di esclusione: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` e `extensionless-files`.
 
-### 12.4 Solo file tracciati da Git
+### 12.5 Solo file tracciati da Git
 «Solo file tracciati da Git» costruisce la fase Git dell’albero dai file esistenti nell’albero di lavoro registrati in ogni indice Git leggibile. I file tracciati modificati e i nuovi file aggiunti all’indice restano inclusi; i file non tracciati vengono esclusi. Questo è l’albero di lavoro corrente, non un’istantanea storica di `HEAD` o di un repository remoto.
 
 Ogni repository annidato e ogni worktree raggiungibile vengono elaborati in modo indipendente a qualsiasi livello di annidamento raggiungibile. Un repository figlio non eredita i percorsi tracciati dal repository padre o da uno adiacente. Questa modalità richiede la CLI di Git; un indice vuoto ma leggibile è valido. Se lo spazio di lavoro del terminale (TUI) viene avviato in questa modalità e non è possibile caricare alcun indice applicabile, lo spazio di lavoro non viene aperto. Se la modalità viene selezionata interattivamente in uno spazio di lavoro TUI già aperto e non è possibile caricare alcun indice applicabile, la modifica viene rifiutata e resta attiva l’ultima modalità Git utilizzabile. Nella stessa situazione, i comandi diretti terminano con un errore di criterio o di verifica. DevProjex non passa mai silenziosamente a `.gitignore`. Quando è leggibile un altro indice applicabile, gli ambiti annidati non disponibili vengono esclusi con un avviso.
@@ -350,26 +359,26 @@ In uno spazio di lavoro Desktop già aperto, la selezione esplicita resta visibi
 
 «Usa .gitignore» e «Solo file tracciati da Git» si escludono quando vengono attivati. La casella attiva può essere deselezionata per disattivare il filtro Git. Nei progetti locali che supportano i profili, questo stato viene salvato insieme alle cartelle di primo livello, ai tipi di file e alle altre regole di esclusione.
 
-### 12.5 Relazione tra il filtro Git e Smart Ignore
+### 12.6 Relazione tra il filtro Git e Smart Ignore
 La modalità Git selezionata e Smart Ignore sono controllati in modo indipendente. La modalità Git viene applicata per prima in ogni area Git raggiungibile, poi Smart Ignore elabora gli elementi rimasti e infine agiscono le regole di base.
 
 Smart Ignore può restare nascosto finché la modalità Git selezionata copre già tutti i suoi candidati e comparire dopo un cambio o la disattivazione della modalità. Entrambe le caselle Git restano disponibili nel repository.
 
 Una negazione Git con `!` annulla solo il risultato Git. Non disattiva Smart Ignore né una regola di base.
 
-### 12.6 Regole di base
+### 12.7 Regole di base
 Le regole per il punto iniziale controllano il nome; quelle per gli elementi nascosti controllano l’attributo di sistema Hidden. A seconda della piattaforma possono riguardare lo stesso elemento oppure elementi diversi.
 
 «File vuoti» nasconde i file di 0 byte. «File senza estensione» nasconde, ad esempio, `Dockerfile`, `Makefile` e `README`.
 
 «Cartelle vuote» nasconde le cartelle logicamente vuote. Una cartella è logicamente vuota quando, dopo i tipi di file selezionati e tutte le altre regole, non rimangono file o sottocartelle visibili. Il relativo contatore può quindi cambiare quando viene modificata un’altra regola.
 
-### 12.7 Contatori
+### 12.8 Contatori
 Un contatore mostra il contributo diretto della regola con le impostazioni correnti, non il numero fisico di elementi simili sul disco. Lo stesso elemento non viene attribuito contemporaneamente a più contatori sovrapposti.
 
 L’ordine stabile di attribuzione è: per le cartelle, `.gitignore`, Smart Ignore, punto iniziale, attributo Hidden; per i file, `.gitignore`, Smart Ignore, punto iniziale, nessuna estensione, file vuoto, attributo Hidden. Questo ordine riguarda solo i contatori. Per la visibilità è sufficiente che un qualsiasi meccanismo attivo escluda l’elemento.
 
-### 12.8 Applicazione delle modifiche
+### 12.9 Applicazione delle modifiche
 Le caselle aggiornano prima le opzioni disponibili e i contatori. L’albero finale viene ricostruito dopo «Applica impostazioni». Se la preparazione viene annullata, DevProjex torna all’ultimo stato completato; le regole calcolate solo in parte non vengono applicate.
 
 ## 13) Come vengono calcolati albero e metriche

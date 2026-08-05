@@ -1,5 +1,6 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -47,10 +48,25 @@ public sealed class ExportProjectCommandHandler(
 		var requestedOutput = Path.GetFullPath(request.OutputPath);
 		if (request.DryRun)
 		{
+			var redactSecrets = plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true;
+			if (redactSecrets)
+			{
+				await services.SecretRedactionOutputPreparer
+					.AnalyzeAsync(
+						new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession),
+						plan.IncludedFiles,
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,
 				requestedOutput);
+			if (redactSecrets)
+			{
+				environment.Error.WriteLine(
+					services.Localization["Terminal.DryRun.ProjectCopy.RedactionWarning"]);
+			}
 			return CommandLineExitCodes.Success;
 		}
 
@@ -65,7 +81,8 @@ public sealed class ExportProjectCommandHandler(
 			DestinationMode: ProjectCopyDestinationMode.Exact,
 			ConflictPolicy: request.Force
 				? ProjectCopyConflictPolicy.ReplaceAtomically
-				: ProjectCopyConflictPolicy.Fail);
+				: ProjectCopyConflictPolicy.Fail,
+			RedactSecrets: plan.Selection.Exclusions?.Contains(ProjectExclusion.HideSecrets) == true);
 		var result = await new ProgressRenderer(environment, request.Output, services.Localization)
 			.RunProjectExportAsync(progress =>
 				services.ProjectCopyExportService.ExportAsync(

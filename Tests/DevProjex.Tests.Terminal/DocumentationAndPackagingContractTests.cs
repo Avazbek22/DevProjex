@@ -16,8 +16,27 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Architecture.md",
 		"CLI-Profiles.md",
 		"Desktop-Control.md",
-		"SmartIgnore.md"
+		"SmartIgnore.md",
+		"HideSecrets.md"
 	];
+
+	[Fact]
+	public void SecretRuleAttributionShipsWithTheEmbeddedConfiguration()
+	{
+		var rootPath = FindRepositoryRoot();
+		var infrastructureProject = XDocument.Load(
+			Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var embeddedResources = infrastructureProject
+			.Descendants("EmbeddedResource")
+			.Select(element => element.Attribute("Include")?.Value)
+			.ToArray();
+
+		Assert.Contains("Secrets\\Rules\\gitleaks-v8.30.1.toml", embeddedResources);
+		Assert.Contains("..\\THIRD-PARTY-NOTICES.md", embeddedResources);
+		var notices = File.ReadAllText(Path.Combine(rootPath, "THIRD-PARTY-NOTICES.md"));
+		Assert.Contains("Copyright (c) 2019 Zachary Rice", notices, StringComparison.Ordinal);
+		Assert.Contains("Copyright (c) 2019-2026, Alexandre Mutel", notices, StringComparison.Ordinal);
+	}
 
 	[Fact]
 	public void ReadmeCommandExamplesParseAgainstTheProductionCommandTree()

@@ -204,9 +204,20 @@ public enum FileContentClassification
 	UnsupportedEncoding
 }
 
+public enum TextFileEncoding
+{
+	Utf8 = 0,
+	Utf8Bom = 1,
+	Utf16LittleEndian = 2,
+	Utf16BigEndian = 3,
+	Utf32LittleEndian = 4,
+	Utf32BigEndian = 5
+}
+
 public sealed record FileContentReadResult(
 	FileContentClassification Classification,
-	TextFileContent? Content = null)
+	TextFileContent? Content = null,
+	TextFileEncoding? Encoding = null)
 {
 	public bool IsText =>
 		Classification is FileContentClassification.Text or FileContentClassification.TooLarge;

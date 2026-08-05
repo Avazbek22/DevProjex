@@ -143,7 +143,8 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 			case ProfileMutationMode.SelectedDynamicOnly:
 				Assert.True(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 				Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFiles).IsChecked);
-				Assert.True(viewModel.AllIgnoreChecked);
+				Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
+				Assert.False(viewModel.AllIgnoreChecked);
 				AssertIgnoreSetEqual(selectedIds, [dynamicOptionId, IgnoreOptionId.HiddenFiles]);
 				break;
 
@@ -166,7 +167,8 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 			case ProfileMutationMode.CorruptedAfterSave:
 				Assert.True(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 				Assert.True(GetIgnoreOption(viewModel, IgnoreOptionId.HiddenFolders).IsChecked);
-				Assert.True(viewModel.AllIgnoreChecked);
+				Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
+				Assert.False(viewModel.AllIgnoreChecked);
 				AssertIgnoreSetEqual(selectedIds, [dynamicOptionId, IgnoreOptionId.HiddenFolders]);
 				break;
 
@@ -336,6 +338,7 @@ public sealed class ProjectProfileDynamicIgnoreMutationMatrixIntegrationTests
 			new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",

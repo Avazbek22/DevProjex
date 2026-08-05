@@ -1,8 +1,6 @@
 using System.Text.Encodings.Web;
-using System.Text.Json.Serialization;
 using DevProjex.Application.Context;
 using DevProjex.Application.Services;
-using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.ProjectProfiles;
 

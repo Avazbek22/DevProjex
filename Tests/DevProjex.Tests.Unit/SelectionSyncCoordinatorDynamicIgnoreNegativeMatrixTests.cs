@@ -46,7 +46,8 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreNegativeMatrixTests
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
 
 		Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == dynamicOptionId);
-		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
+		Assert.False(viewModel.AllIgnoreChecked);
 
 		ApplyIgnoreCounts(coordinator, BuildCounts(dynamicOptionId, dynamicVisible: true));
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
@@ -126,7 +127,8 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreNegativeMatrixTests
 
 		Assert.True(GetIgnoreOption(viewModel, dynamicOptionId).IsChecked);
 		Assert.Contains(dynamicOptionId, coordinator.GetSelectedIgnoreOptionIds());
-		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
+		Assert.False(viewModel.AllIgnoreChecked);
 	}
 
 	public static IEnumerable<object[]> DynamicOptionIds()
@@ -219,6 +221,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreNegativeMatrixTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",

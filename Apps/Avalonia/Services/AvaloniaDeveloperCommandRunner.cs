@@ -1,4 +1,3 @@
-using System.Reflection;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
 

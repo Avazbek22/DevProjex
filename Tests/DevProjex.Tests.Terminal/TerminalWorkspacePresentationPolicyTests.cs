@@ -1,5 +1,5 @@
-using DevProjex.Terminal.CommandLine;
-using DevProjex.Terminal.Tui;
+using DevProjex.Application.Preview;
+using DevProjex.Application.Secrets;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -73,5 +73,42 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 
 		Assert.False(view.ViewportSettings.HasFlag(
 			ViewportSettingsFlags.HasScrollBars));
+	}
+
+	[Fact]
+	public void PreviewRedactionNavigation_TogglesOnlyTheActiveOccurrence()
+	{
+		const string firstOccurrence = "occurrence-a";
+		const string secondOccurrence = "occurrence-b";
+		using var document = new InMemoryPreviewTextDocument(
+			"DEVPROJEX_REDACTED[github-pat#1]\nDEVPROJEX_REDACTED[aws-access-token#1]",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					firstOccurrence,
+					"github-pat",
+					1,
+					0,
+					35,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					secondOccurrence,
+					"aws-access-token",
+					2,
+					0,
+					41,
+					SecretPreviewSpanState.Redacted)
+			]);
+		using var view = new TerminalVirtualizedPreviewView();
+		var toggled = new List<string>();
+		view.RedactionToggleRequested += (_, eventArgs) => toggled.Add(eventArgs.OccurrenceId);
+		view.SetDocument(document, preserveViewport: false);
+
+		Assert.True(view.MoveActiveRedaction(reverse: false));
+		Assert.True(view.TryToggleActiveRedaction());
+		Assert.True(view.MoveActiveRedaction(reverse: false));
+		Assert.True(view.TryToggleActiveRedaction());
+
+		Assert.Equal([firstOccurrence, secondOccurrence], toggled);
 	}
 }

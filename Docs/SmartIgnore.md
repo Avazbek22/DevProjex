@@ -89,7 +89,7 @@ Smart Ignore and Git filtering solve different problems. Smart Ignore recognizes
 | `gitignore` | Applies reachable hierarchical `.gitignore` rules. |
 | `tracked` | Includes only paths returned by applicable Git indexes. |
 
-Only one Git mode can be active at a time. Ordinary exclusions, including Smart Ignore, remain independent and can be combined with any Git mode.
+Only one Git mode can be active at a time. Ordinary exclusions, including Smart Ignore, remain independent and can be combined with any Git mode. Hide Secrets is also selected in Exclusions, but it is a later content transformation rather than a path filter; see [Hide Secrets](HideSecrets.md).
 
 Desktop keeps the two Git modes as checkboxes because they are settings alongside
 the other exclusions. Enabling one Git checkbox clears the other; clearing the
