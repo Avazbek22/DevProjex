@@ -83,9 +83,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			return new PreparedSecretRedactionOutput(
 				workingDirectory,
 				preparedFiles,
-				snapshot,
-				scope.PlaceholderExample,
-				scope.LegendText);
+				snapshot);
 		}
 		catch
 		{
@@ -328,20 +326,14 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 	internal PreparedSecretRedactionOutput(
 		string workingDirectory,
 		IReadOnlyDictionary<string, PreparedSecretFile> files,
-		SecretRedactionSnapshot snapshot,
-		string? placeholderExample,
-		SecretRedactionLegendText legendText)
+		SecretRedactionSnapshot snapshot)
 	{
 		_workingDirectory = workingDirectory;
 		_files = files;
 		Snapshot = snapshot;
-		PlaceholderExample = placeholderExample;
-		LegendText = legendText;
 	}
 
 	public SecretRedactionSnapshot Snapshot { get; }
-	public string? PlaceholderExample { get; }
-	public SecretRedactionLegendText LegendText { get; }
 
 	public PreparedSecretFile GetFile(string sourcePath)
 	{

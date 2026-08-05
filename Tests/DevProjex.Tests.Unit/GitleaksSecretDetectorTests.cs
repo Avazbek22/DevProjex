@@ -337,28 +337,6 @@ public sealed class SecretRedactionSessionTests
 	}
 
 	[Fact]
-	public void LegendProvider_IsResolvedPerOutputScopeForRuntimeLanguageChanges()
-	{
-		var currentLegend = SecretRedactionLegendText.English;
-		var session = new SecretRedactionSession(
-			new StubDetector("telegram-bot-api-token", StubDetector.Secret),
-			() => currentLegend);
-		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "devprojex-secret-tests"));
-		var path = Path.Combine(root, "config.cs");
-		var first = session.BeginOutput(root, [path]);
-
-		currentLegend = new SecretRedactionLegendText(
-			"Localized count: {0}.",
-			"Localized placeholder: {0}.",
-			"Localized notice.",
-			"Localized no-findings notice.");
-		var second = session.BeginOutput(root, [path]);
-
-		Assert.Same(SecretRedactionLegendText.English, first.LegendText);
-		Assert.Same(currentLegend, second.LegendText);
-	}
-
-	[Fact]
 	public void KeepAsIsOverride_DoesNotCrossProjectRoots()
 	{
 		var detector = new StubDetector("telegram-bot-api-token", StubDetector.Secret);

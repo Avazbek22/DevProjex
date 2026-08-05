@@ -10,8 +10,11 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
-				["Settings.Ignore.HideSecrets.Scanning"] = "Hide secrets — scanning…",
-				["Settings.Ignore.HideSecrets.NoMatches"] = "Hide secrets — no detected values",
+				["Settings.Secrets.Status.Scanning"] = "Scanning selected text files…",
+				["Settings.Secrets.Status.Failed"] = "The scan could not be completed.",
+				["Settings.Secrets.Status.NoMatches"] = "The rules matched nothing.",
+				["Settings.Secrets.Status.Applied"] = "Matches: {0}. Hidden: {1}.",
+				["Settings.Secrets.Status.AllKept"] = "Matches: {0}. All values are kept as-is.",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "Ignore hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Ignore hidden files",
@@ -115,18 +118,18 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 	}
 
 	[Fact]
-	public void FormatHideSecretsLabel_WhileScanning_UsesProgressLabelWithoutCount()
+	public void FormatHideSecretsLabel_WhileScanning_StaysShortAndDoesNotInventCount()
 	{
 		var service = new IgnoreOptionsService(
 			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
 
-		Assert.Equal(
-			"Hide secrets — scanning…",
-			service.FormatHideSecretsLabel(SecretScanState.Scanning, redactionCount: null));
+		Assert.Equal("Hide secrets", service.FormatHideSecretsLabel(
+			SecretScanState.Scanning,
+			redactionCount: null));
 	}
 
 	[Theory]
-	[InlineData(0, "Hide secrets — no detected values")]
+	[InlineData(0, "Hide secrets")]
 	[InlineData(4, "Hide secrets (4)")]
 	public void FormatHideSecretsLabel_AfterCompletion_ShowsMeasuredCount(int count, string expected)
 	{
@@ -134,5 +137,28 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
 
 		Assert.Equal(expected, service.FormatHideSecretsLabel(SecretScanState.Completed, count));
+	}
+
+	[Theory]
+	[InlineData(SecretScanState.Disabled, null, null, "")]
+	[InlineData(SecretScanState.Pending, null, null, "")]
+	[InlineData(SecretScanState.Scanning, null, null, "Scanning selected text files…")]
+	[InlineData(SecretScanState.Failed, null, null, "The scan could not be completed.")]
+	[InlineData(SecretScanState.Completed, 0, 0, "The rules matched nothing.")]
+	[InlineData(SecretScanState.Completed, 2, 2, "Matches: 2. Hidden: 2.")]
+	[InlineData(SecretScanState.Completed, 2, 1, "Matches: 2. Hidden: 1.")]
+	[InlineData(SecretScanState.Completed, 2, 0, "Matches: 2. All values are kept as-is.")]
+	public void FormatHideSecretsStatus_DistinguishesNoMatchesFromUserDecisions(
+		SecretScanState state,
+		int? matchedCount,
+		int? redactionCount,
+		string expected)
+	{
+		var service = new IgnoreOptionsService(
+			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		Assert.Equal(
+			expected,
+			service.FormatHideSecretsStatus(state, matchedCount, redactionCount));
 	}
 }

@@ -178,8 +178,7 @@ Binary files are not inspected and remain byte-identical in physical copies.
 When enabled, the same per-occurrence decisions apply to Preview, clipboard,
 context documents, folder copies, and ZIP copies. Placeholders use the stable form
 `DEVPROJEX_REDACTED[rule-id#index]`; identical values under one rule reuse an index
-within a produced output. Outputs containing replacements include a format-native
-legend. Preview keep-as-is overrides apply to every later output in the current
+within a produced output. Preview keep-as-is overrides apply to every later output in the current
 application session and deliberately do not persist in profiles.
 
 Detection failure, regex timeout, or a selected text file above the 16 MiB scan
@@ -375,9 +374,7 @@ never adds a project-name child or a numeric suffix. `--force` is invalid for
 folder output. ZIP output requires a `.zip` path; `--force` permits atomic ZIP
 replacement.
 
-When `--hide-secrets` is selected, text findings are replaced and a root
-`DEVPROJEX_REDACTIONS.txt` legend is added using a deterministic non-colliding
-suffix when necessary. Such a copy is intentionally not byte-for-byte faithful
+When `--hide-secrets` is selected, text findings are replaced. Such a copy is intentionally not byte-for-byte faithful
 and may not build or run. Binary files remain unchanged. The normal confirmation
 and dry-run plan state this before writing.
 

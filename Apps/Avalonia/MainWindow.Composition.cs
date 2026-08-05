@@ -20,20 +20,22 @@ public partial class MainWindow
 	{
 		Dispatcher.UIThread.Post(() =>
 		{
-			var count = GetCachedSecretRedactionCountForCurrentSelection();
-			if (count is null || count.Value != eventArgs.Snapshot.RedactedCount)
+			var snapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
+			if (snapshot is null || snapshot.SelectionKey != eventArgs.Snapshot.SelectionKey)
 				return;
 
-			_secretRedactionCount = count;
+			_secretRedactionMatchedCount = snapshot.DetectedCount;
+			_secretRedactionCount = snapshot.RedactedCount;
 			_secretRedactionScanState = SecretScanState.Completed;
 			_selectionCoordinator.RelabelIgnoreOptions(
 				AdvancedIgnoreCountsAlwaysEnabled,
-				count,
-				_secretRedactionScanState);
+				snapshot.RedactedCount,
+				_secretRedactionScanState,
+				snapshot.DetectedCount);
 		});
 	}
 
-	private int? GetCachedSecretRedactionCountForCurrentSelection()
+	private SecretRedactionSnapshot? GetCachedSecretRedactionSnapshotForCurrentSelection()
 	{
 		if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
 		    _currentTree is null ||
@@ -48,7 +50,7 @@ public partial class MainWindow
 			? BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths)
 			: _currentTree.OrderedFilePaths ??
 			  PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(_currentTree.Root);
-		return _secretRedactionSession.GetRedactionCount(_currentPath, files);
+		return _secretRedactionSession.GetSnapshot(_currentPath, files);
 	}
 
 	private SecretRedactionContext? CreateSecretRedactionContext()
@@ -81,7 +83,8 @@ public partial class MainWindow
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
 			secretRedactionsCount: null,
-			_secretRedactionScanState);
+			_secretRedactionScanState,
+			secretMatchesCount: null);
 
 		var selectedPaths = GetCheckedPaths();
 		var files = selectedPaths.Count > 0
@@ -129,7 +132,8 @@ public partial class MainWindow
 				_selectionCoordinator.RelabelIgnoreOptions(
 					AdvancedIgnoreCountsAlwaysEnabled,
 					secretRedactionsCount: null,
-					_secretRedactionScanState);
+					_secretRedactionScanState,
+					secretMatchesCount: null);
 				return ShowErrorAsync(message);
 			});
 		}
@@ -327,6 +331,7 @@ public partial class MainWindow
 	private CancellationTokenSource? _secretRedactionCountCts;
 	private long _secretRedactionCountRefreshVersion;
 	private int? _secretRedactionCount;
+	private int? _secretRedactionMatchedCount;
 	private SecretScanState _secretRedactionScanState = SecretScanState.Disabled;
 
     public MainWindow(

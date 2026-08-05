@@ -76,8 +76,8 @@ public sealed class AvaloniaCompiledBindingContractTests
 		var root = Assert.IsType<XElement>(document.Root);
 		var avaloniaNamespace = root.Name.Namespace;
 
-		Assert.Equal(3, root.Descendants(avaloniaNamespace + "ListBox").Count());
-		Assert.Equal(3, root.Descendants(avaloniaNamespace + "VirtualizingStackPanel").Count());
+		Assert.Equal(4, root.Descendants(avaloniaNamespace + "ListBox").Count());
+		Assert.Equal(4, root.Descendants(avaloniaNamespace + "VirtualizingStackPanel").Count());
 		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsControl"));
 		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsRepeater"));
 	}

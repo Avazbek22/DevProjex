@@ -5,7 +5,7 @@
 │  > [x] src                           ││├── src                                                   ││  ( ) No Git filtering                          │
 │    [x] README.md                     │││   └── RepositoryMarker.cs                               ││  (*) Use .gitignore                            │
 │                                      ││└── README.md                                             ││  ( ) Tracked Git files only                    │
-│                                      ││                                                          ││  SMART SECRETS:                                │
+│                                      ││                                                          ││  PROCESSING:                                   │
 │                                      ││                                                          ││  [ ] Hide secrets                              │
 │                                      ││                                                          ││  Checks selected text files only. Binary       │
 │                                      ││                                                          ││  files are not inspected, and no matches is    │

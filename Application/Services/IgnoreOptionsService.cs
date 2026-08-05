@@ -7,15 +7,26 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	public string FormatHideSecretsLabel(SecretScanState state, int? redactionCount)
 	{
 		var label = localization["Settings.Ignore.HideSecrets"];
-		return state switch
-		{
-			SecretScanState.Scanning => localization["Settings.Ignore.HideSecrets.Scanning"],
-			SecretScanState.Completed when redactionCount > 0 => $"{label} ({redactionCount})",
-			SecretScanState.Completed when redactionCount == 0 =>
-				localization["Settings.Ignore.HideSecrets.NoMatches"],
-			_ => label
-		};
+		return state == SecretScanState.Completed && redactionCount > 0
+			? $"{label} ({redactionCount})"
+			: label;
 	}
+
+	public string FormatHideSecretsStatus(
+		SecretScanState state,
+		int? matchedCount,
+		int? redactionCount) => state switch
+	{
+		SecretScanState.Scanning => localization["Settings.Secrets.Status.Scanning"],
+		SecretScanState.Failed => localization["Settings.Secrets.Status.Failed"],
+		SecretScanState.Completed when matchedCount == 0 =>
+			localization["Settings.Secrets.Status.NoMatches"],
+		SecretScanState.Completed when matchedCount > 0 && redactionCount == 0 =>
+			localization.Format("Settings.Secrets.Status.AllKept", matchedCount),
+		SecretScanState.Completed when matchedCount > 0 && redactionCount is not null =>
+			localization.Format("Settings.Secrets.Status.Applied", matchedCount, redactionCount),
+		_ => string.Empty
+	};
 
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{

@@ -362,7 +362,7 @@ A descoberta do âmbito do projeto é limitada, pelo que carregar uma pasta de u
 
 As ocorrências são realçadas na pré-visualização. Clique numa delas para manter apenas essa ocorrência sem alterações. No Terminal Workspace, `[` e `]` percorrem as ocorrências e `Enter` ou `Space` alternam a ocorrência ativa. A decisão aplica-se durante a sessão à pré-visualização, área de transferência, exportação de contexto, pasta e ZIP; não é guardada no perfil do projeto.
 
-As saídas com substituições incluem uma explicação. Uma cópia em pasta ou ZIP também altera o texto correspondente e pode deixar de compilar ou executar. Os ficheiros binários não são analisados e são copiados sem alterações. Um ficheiro de texto selecionado com mais de 16 MiB ou uma falha de deteção interrompe a operação em vez de exportar texto não verificado.
+Uma cópia em pasta ou ZIP também altera o texto correspondente e pode deixar de compilar ou executar. Os ficheiros binários não são analisados e são copiados sem alterações. Um ficheiro de texto selecionado com mais de 16 MiB ou uma falha de deteção interrompe a operação em vez de exportar texto não verificado.
 
 O contador informa apenas sobre correspondências com as regras. Zero não significa que o projeto é seguro. Na CLI, utilize `--hide-secrets`; os detalhes estão em `Docs/HideSecrets.md`.
 

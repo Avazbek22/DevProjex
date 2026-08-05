@@ -181,6 +181,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new ResettableObservableCollection<IgnoreOptionViewModel>();
 	public ObservableCollection<IgnoreOptionViewModel> PathIgnoreOptions { get; } =
 		new ResettableObservableCollection<IgnoreOptionViewModel>();
+	public ObservableCollection<IgnoreOptionViewModel> ContentProcessingOptions { get; } =
+		new ResettableObservableCollection<IgnoreOptionViewModel>();
 	public IgnoreOptionViewModel? HideSecretsOption
 	{
 		get => _hideSecretsOption;
@@ -193,6 +195,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		}
 	}
 	public bool HasHideSecretsOption => HideSecretsOption is not null;
+	public bool HasContentProcessingOptions => ContentProcessingOptions.Count > 0;
     public ObservableCollection<FontFamily> FontFamilies { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentFolders { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentRepositories { get; } = [];
@@ -1443,6 +1446,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsNotice { get; private set; } = string.Empty;
+	private string _settingsSecretsStatus = string.Empty;
+	public string SettingsSecretsStatus
+	{
+		get => _settingsSecretsStatus;
+		set
+		{
+			if (_settingsSecretsStatus == value) return;
+			_settingsSecretsStatus = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(HasSettingsSecretsStatus));
+		}
+	}
+	public bool HasSettingsSecretsStatus => !string.IsNullOrWhiteSpace(SettingsSecretsStatus);
+	public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
+	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
     public string SettingsAll { get; private set; } = string.Empty;
     public string SettingsAllIgnore { get; private set; } = string.Empty;
     public string SettingsAllExtensions { get; private set; } = string.Empty;
@@ -1595,6 +1613,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
 		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
 		SettingsSecretsNotice = _localization["Settings.Secrets.Notice"];
+		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
+		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
         SettingsAll = _localization["Settings.All"];
         UpdateAllCheckboxLabels();
         SettingsExtensions = _localization["Settings.Extensions"];
@@ -1741,6 +1761,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(SettingsIgnoreTitle));
 		RaisePropertyChanged(nameof(SettingsSecretsTitle));
 		RaisePropertyChanged(nameof(SettingsSecretsNotice));
+		RaisePropertyChanged(nameof(PreviewSecretRedactedTooltip));
+		RaisePropertyChanged(nameof(PreviewSecretKeptTooltip));
         RaisePropertyChanged(nameof(SettingsAll));
         RaisePropertyChanged(nameof(SettingsExtensions));
         RaisePropertyChanged(nameof(SettingsRootFolders));
@@ -1866,10 +1888,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
 	private void SynchronizeIgnoreOptionSections()
 	{
+		var contentTransformationIds = ProjectPresentationCatalog.ContentTransformations
+			.Select(static descriptor => descriptor.LegacyOptionId)
+			.ToHashSet();
 		((ResettableObservableCollection<IgnoreOptionViewModel>)PathIgnoreOptions).ReplaceAll(
-			IgnoreOptions.Where(static option => option.Id != IgnoreOptionId.HideSecrets));
+			IgnoreOptions.Where(option => !contentTransformationIds.Contains(option.Id)));
+		((ResettableObservableCollection<IgnoreOptionViewModel>)ContentProcessingOptions).ReplaceAll(
+			IgnoreOptions.Where(option => contentTransformationIds.Contains(option.Id)));
 		HideSecretsOption = IgnoreOptions.FirstOrDefault(
 			static option => option.Id == IgnoreOptionId.HideSecrets);
+		RaisePropertyChanged(nameof(HasContentProcessingOptions));
 	}
 
     /// <summary>
@@ -1896,6 +1924,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         TreeNodes.Clear();
         IgnoreOptions.Clear();
 		PathIgnoreOptions.Clear();
+		ContentProcessingOptions.Clear();
 		HideSecretsOption = null;
         Extensions.Clear();
         RootFolders.Clear();

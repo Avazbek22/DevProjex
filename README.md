@@ -118,7 +118,7 @@ Use **File → Export Project → To Folder…** or **To ZIP Archive…** to cre
 
 Project copies respect your chosen root folders, file types, ignore rules, and checked items. If nothing is checked, the whole current tree is exported. Directory structure, binary files, and included empty folders are preserved.
 
-When **Hide Secrets** is enabled, detected values in text files are replaced and a redaction notice is added at the copy root. Binary files remain unchanged. This result is intentionally not a byte-for-byte copy and may not build or run.
+When **Hide Secrets** is enabled, detected values in text files are replaced. Binary files remain unchanged. This result is intentionally not a byte-for-byte copy and may not build or run.
 
 The source project is never modified, and the result can't be written inside it. The same workflow is available through `devprojex export project`.
 

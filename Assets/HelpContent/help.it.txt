@@ -333,7 +333,7 @@ La ricerca di nuove aree di progetto è limitata per evitare l’analisi ripetut
 
 Le corrispondenze sono evidenziate nell’anteprima. Fare clic su una di esse per conservare invariata solo quell’occorrenza. In Terminal Workspace, `[` e `]` scorrono le occorrenze e `Enter` o `Space` attivano o disattivano quella corrente. La decisione vale per la sessione in anteprima, appunti, esportazione del contesto, cartella e ZIP; non viene salvata nel profilo del progetto.
 
-Gli output con sostituzioni includono una spiegazione. Anche una copia in cartella o ZIP modifica il testo corrispondente e potrebbe non compilarsi o avviarsi. I file binari non vengono analizzati e sono copiati senza modifiche. Un file di testo selezionato oltre 16 MiB o un errore di rilevamento interrompe l’operazione anziché esportare testo non controllato.
+Anche una copia in cartella o ZIP modifica il testo corrispondente e potrebbe non compilarsi o avviarsi. I file binari non vengono analizzati e sono copiati senza modifiche. Un file di testo selezionato oltre 16 MiB o un errore di rilevamento interrompe l’operazione anziché esportare testo non controllato.
 
 Il contatore segnala soltanto le corrispondenze con le regole. Zero non significa che il progetto sia sicuro. La CLI usa `--hide-secrets`; i dettagli sono in `Docs/HideSecrets.md`.
 

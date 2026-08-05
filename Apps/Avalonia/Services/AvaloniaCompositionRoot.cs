@@ -66,12 +66,7 @@ public static class AvaloniaCompositionRoot
         var treeExportService = new TreeExportService();
         var fileContentAnalyzer = new FileContentAnalyzer();
 		var secretRedactionSession = new SecretRedactionSession(
-			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService),
-			() => new SecretRedactionLegendText(
-				localization["SecretRedaction.Legend.Summary"],
-				localization["SecretRedaction.Legend.Placeholder"],
-				localization["SecretRedaction.Legend.Notice"],
-				localization["SecretRedaction.NoFindingsNotice"]));
+			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService));
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
         var projectCopyExportService = new ProjectCopyExportService(

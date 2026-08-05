@@ -577,7 +577,8 @@ public sealed partial class SelectionSyncCoordinator(
     public void RelabelIgnoreOptions(
 	    bool showAdvancedCounts,
 	    int? secretRedactionsCount = null,
-	    SecretScanState secretScanState = SecretScanState.Disabled)
+	    SecretScanState secretScanState = SecretScanState.Disabled,
+	    int? secretMatchesCount = null)
     {
         if (viewModel.IgnoreOptions.Count == 0)
             return;
@@ -623,6 +624,12 @@ public sealed partial class SelectionSyncCoordinator(
             if (descriptorsById.TryGetValue(option.Id, out var descriptor))
                 option.Label = descriptor.Label;
         }
+		viewModel.SettingsSecretsStatus = hideSecretsIsChecked
+			? ignoreOptionsService.FormatHideSecretsStatus(
+				secretScanState,
+				secretMatchesCount,
+				secretRedactionsCount)
+			: string.Empty;
 
         _ignoreOptions = localizedDescriptors;
         SynchronizeStableIgnoreOptionLabels();

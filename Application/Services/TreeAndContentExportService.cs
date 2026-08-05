@@ -61,23 +61,13 @@ public sealed class TreeAndContentExportService(
 			files,
 			cancellationToken,
 			contentPathMapper,
-			redactionContext,
-			includeLegend: false).ConfigureAwait(false);
+			redactionContext).ConfigureAwait(false);
 		var content = contentResult.Text;
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;
 
 		// The selected format applies only to the tree block; file content stays plain text.
 		var sb = new StringBuilder();
-		if (contentResult.Redaction is { RedactedCount: > 0 } redaction)
-		{
-			sb.AppendLine(SecretRedactionLegend.CreatePlainText(
-				redaction.RedactedCount,
-				contentResult.PlaceholderExample!,
-				contentResult.LegendText!));
-			AppendClipboardBlankLine(sb);
-			AppendClipboardBlankLine(sb);
-		}
 		sb.Append(tree.TrimEnd('\r', '\n'));
 		sb.AppendLine();
 		AppendClipboardBlankLine(sb);

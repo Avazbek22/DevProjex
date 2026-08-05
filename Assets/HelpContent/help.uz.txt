@@ -333,7 +333,7 @@ Katta foydalanuvchi papkasidagi har bir katalogni qayta tahlil qilmaslik uchun y
 
 Mos kelgan joylar previewda ajratib ko‘rsatiladi. Faqat bitta uchrashuvni o‘zgarishsiz qoldirish uchun uni bosing. Terminal Workspace ichida `[` va `]` uchrashuvlar bo‘ylab yuradi, `Enter` yoki `Space` esa faol uchrashuvni almashtiradi. Qaror shu seans davomida preview, almashish buferi, kontekst eksporti, jild va ZIP uchun amal qiladi; loyiha profilida saqlanmaydi.
 
-Almashtirishlar bor natijaga tushuntirish qo‘shiladi. Jild yoki ZIP nusxasidagi mos matn ham o‘zgaradi, shu sababli natija yig‘ilmasligi yoki ishga tushmasligi mumkin. Ikkilik fayllar tekshirilmaydi va o‘zgarishsiz ko‘chiriladi. 16 MiB dan katta tanlangan matn fayli yoki aniqlash xatosi tekshirilmagan matnni eksport qilish o‘rniga operatsiyani to‘xtatadi.
+Jild yoki ZIP nusxasidagi mos matn ham o‘zgaradi, shu sababli natija yig‘ilmasligi yoki ishga tushmasligi mumkin. Ikkilik fayllar tekshirilmaydi va o‘zgarishsiz ko‘chiriladi. 16 MiB dan katta tanlangan matn fayli yoki aniqlash xatosi tekshirilmagan matnni eksport qilish o‘rniga operatsiyani to‘xtatadi.
 
 Hisoblagich faqat qoidalarga mos kelgan joylarni bildiradi. Nol loyiha xavfsiz degani emas. CLI’da `--hide-secrets` ishlatiladi; tafsilotlar `Docs/HideSecrets.md` faylida.
 

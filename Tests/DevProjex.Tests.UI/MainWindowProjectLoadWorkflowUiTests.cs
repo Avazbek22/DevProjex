@@ -748,9 +748,10 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 				window,
 				() =>
 				{
-					var hideSecrets = UiTestDriver.GetViewModel(window).IgnoreOptions.First(
+					var viewModel = UiTestDriver.GetViewModel(window);
+					var hideSecrets = viewModel.IgnoreOptions.First(
 						static option => option.Id == IgnoreOptionId.HideSecrets);
-					return hideSecrets.IsChecked && IsCompletedHideSecretsLabel(hideSecrets.Label);
+					return hideSecrets.IsChecked && IsCompletedHideSecretsStatus(viewModel.SettingsSecretsStatus);
 				},
 				"enabled Hide Secrets to publish an honest completed state");
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
@@ -1287,23 +1288,7 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
                 continue;
 
 			if (option.Id == IgnoreOptionId.HideSecrets)
-			{
-				if (option.IsChecked)
-				{
-					Assert.True(
-						IsCompletedHideSecretsLabel(option.Label),
-						$"Enabled Hide Secrets must render an honest completed state. Actual label: '{option.Label}'.");
-					Assert.DoesNotMatch(@"\(0\)$", option.Label);
-				}
-				else
-				{
-					Assert.False(
-						Regex.IsMatch(option.Label, @"\(\d+\)$"),
-						$"Disabled Hide Secrets must not imply that a content scan ran. Actual label: '{option.Label}'.");
-                }
-
-                continue;
-            }
+				continue;
 
             var match = Regex.Match(option.Label, @"\((\d+)\)$");
             Assert.True(match.Success, $"Advanced ignore option '{option.Id}' must render a positive count in its label. Actual label: '{option.Label}'.");
@@ -1312,11 +1297,10 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 		}
 	}
 
-	private static bool IsCompletedHideSecretsLabel(string label)
+	private static bool IsCompletedHideSecretsStatus(string status)
 	{
-		var positiveCount = Regex.Match(label, @"\(([1-9]\d*)\)$");
-		return positiveCount.Success ||
-		       label.EndsWith(" — no detected values", StringComparison.Ordinal);
+		return status.StartsWith("Matches: ", StringComparison.Ordinal) ||
+		       string.Equals(status, "The rules matched nothing.", StringComparison.Ordinal);
 	}
 
     private sealed class BlockingFileContentAnalyzer(IFileContentAnalyzer innerAnalyzer) : IFileContentAnalyzer

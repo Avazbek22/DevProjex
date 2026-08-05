@@ -131,6 +131,16 @@ public sealed class VirtualizedPreviewTextControlTests
                     MeasureRenderedPrefixWidth(control, text, prefix.Length + 2, typeface);
             var y = origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2);
             var point = new Point(x, y);
+			var ordinaryTextPoint = new Point(origin.X + control.LeftPadding + 1, y);
+
+			window.MouseMove(ordinaryTextPoint, RawInputModifiers.None);
+			var textCursor = Assert.IsType<Cursor>(control.Cursor);
+			window.MouseMove(point, RawInputModifiers.None);
+			Assert.NotSame(textCursor, control.Cursor);
+			Assert.Contains(
+				"github-pat",
+				Assert.IsType<string>(ToolTip.GetTip(control)),
+				StringComparison.Ordinal);
 
             window.MouseDown(point, MouseButton.Left, RawInputModifiers.LeftMouseButton);
             window.MouseUp(point, MouseButton.Left, RawInputModifiers.None);
@@ -142,6 +152,80 @@ public sealed class VirtualizedPreviewTextControlTests
             window.Close();
         }
     }
+
+	[AvaloniaFact]
+	public void KeyboardNavigation_CyclesFindingsAndEnterTogglesTheActiveOccurrence()
+	{
+		const string firstOccurrence = "first-occurrence";
+		const string secondOccurrence = "second-occurrence";
+		const string firstPlaceholder = "DEVPROJEX_REDACTED[github-pat#1]";
+		const string secondPlaceholder = "DEVPROJEX_REDACTED[aws-access-token#1]";
+		var text = $"first={firstPlaceholder}\nsecond={secondPlaceholder}";
+		using var document = new InMemoryPreviewTextDocument(
+			text,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					firstOccurrence,
+					"github-pat",
+					1,
+					"first=".Length,
+					firstPlaceholder.Length,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					secondOccurrence,
+					"aws-access-token",
+					2,
+					"second=".Length,
+					secondPlaceholder.Length,
+					SecretPreviewSpanState.Redacted)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 160,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 220,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		string? requestedOccurrence = null;
+		control.RedactionToggleRequested += (_, eventArgs) =>
+			requestedOccurrence = eventArgs.OccurrenceId;
+
+		try
+		{
+			window.Show();
+			control.Focus();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			window.KeyPress(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			window.KeyRelease(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+
+			window.KeyPress(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+			Assert.Equal(secondOccurrence, GetActiveRedactionOccurrenceId(control));
+			window.KeyRelease(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+
+			window.KeyPress(Key.F8, RawInputModifiers.Shift, PhysicalKey.F8, null);
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			window.KeyRelease(Key.F8, RawInputModifiers.Shift, PhysicalKey.F8, null);
+
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			Assert.Equal(firstOccurrence, requestedOccurrence);
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
 
     [AvaloniaFact]
     public void SelectAll_WithDocument_SelectsFullNormalizedTextAndRange()
@@ -433,6 +517,17 @@ public sealed class VirtualizedPreviewTextControlTests
         var lineStarts = Assert.IsType<List<int>>(field!.GetValue(control));
         return lineStarts.Capacity;
     }
+
+	private static string? GetActiveRedactionOccurrenceId(
+		VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionOccurrenceId",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+
+		Assert.NotNull(field);
+		return Assert.IsType<string>(field!.GetValue(control));
+	}
 
     private static Dictionary<int, object> GetFormattedLineCacheEntries(
         VirtualizedPreviewTextControl control)

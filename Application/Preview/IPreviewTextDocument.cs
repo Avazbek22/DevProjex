@@ -15,8 +15,6 @@ public interface IPreviewTextDocument : IDisposable
 
 	IReadOnlyList<PreviewRedactionSpan> Redactions => Array.Empty<PreviewRedactionSpan>();
 
-	PreviewRedactionSummary? RedactionSummary => null;
-
     string GetFullText();
 
     string GetLineText(int lineNumber);

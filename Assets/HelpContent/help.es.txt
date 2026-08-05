@@ -362,7 +362,7 @@ El descubrimiento del alcance del proyecto está limitado, por lo que cargar una
 
 Las coincidencias se resaltan en la vista previa. Haga clic en una para conservar únicamente esa aparición sin cambios. En Terminal Workspace, `[` y `]` recorren las apariciones y `Enter` o `Space` alternan la activa. La decisión se aplica durante la sesión a la vista previa, el portapapeles, la exportación de contexto, la carpeta y el ZIP; no se guarda en el perfil del proyecto.
 
-Las salidas con sustituciones incluyen una explicación. Una copia en carpeta o ZIP también modifica el texto coincidente y podría dejar de compilarse o ejecutarse. Los archivos binarios no se analizan y se copian sin cambios. Un archivo de texto seleccionado de más de 16 MiB o un fallo de detección detiene la operación en lugar de exportar texto sin revisar.
+Una copia en carpeta o ZIP también modifica el texto coincidente y podría dejar de compilarse o ejecutarse. Los archivos binarios no se analizan y se copian sin cambios. Un archivo de texto seleccionado de más de 16 MiB o un fallo de detección detiene la operación en lugar de exportar texto sin revisar.
 
 El contador solo informa de coincidencias con las reglas. Cero no significa que el proyecto sea seguro. En la CLI se usa `--hide-secrets`; los detalles están en `Docs/HideSecrets.md`.
 

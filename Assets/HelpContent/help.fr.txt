@@ -333,7 +333,7 @@ La détection de nouvelles zones de projet est limitée afin d’éviter une ana
 
 Les correspondances sont mises en évidence dans l’aperçu. Cliquez sur l’une d’elles pour conserver uniquement cette occurrence. Dans Terminal Workspace, `[` et `]` parcourent les occurrences, et `Enter` ou `Space` basculent l’occurrence active. La décision s’applique pendant la session à l’aperçu, au presse-papiers, aux exports de contexte, au dossier et au ZIP ; elle n’est pas enregistrée dans le profil du projet.
 
-Toute sortie contenant des remplacements comporte une explication. Une copie en dossier ou ZIP modifie également le texte correspondant et peut ne plus se compiler ou s’exécuter. Les fichiers binaires ne sont pas analysés et restent inchangés. Un fichier texte sélectionné de plus de 16 Mio ou une erreur de détection arrête l’opération au lieu d’exporter du texte non vérifié.
+Une copie en dossier ou ZIP modifie également le texte correspondant et peut ne plus se compiler ou s’exécuter. Les fichiers binaires ne sont pas analysés et restent inchangés. Un fichier texte sélectionné de plus de 16 Mio ou une erreur de détection arrête l’opération au lieu d’exporter du texte non vérifié.
 
 Le compteur indique seulement les correspondances aux règles. Zéro ne signifie pas que le projet est sûr. La CLI utilise `--hide-secrets` ; les détails figurent dans `Docs/HideSecrets.md`.
 

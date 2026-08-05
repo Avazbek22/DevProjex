@@ -17,7 +17,6 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		Assert.Equal(6, result.CreatedDirectoryCount);
 		Assert.Equal(workspace.ExpectedBytes, result.BytesWritten);
 		Assert.Equal(0, result.RedactedValueCount);
-		Assert.Null(result.RedactionLegendPath);
 		Assert.Equal(workspace.BinaryBytes, await File.ReadAllBytesAsync(
 			Path.Combine(result.DestinationPath, "assets", "image.bin"),
 			TestContext.Current.CancellationToken));
@@ -56,7 +55,7 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
-	public async Task RedactedFolderExport_AddsLegendToMeasuredProgressWithoutChangingSource()
+	public async Task RedactedFolderExport_CountsOnlyProjectEntriesAndDoesNotChangeSource()
 	{
 		const string secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 		using var workspace = ProjectCopyWorkspace.Create();
@@ -92,7 +91,7 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, result.RedactedValueCount);
-		Assert.Equal("DEVPROJEX_REDACTIONS.txt", result.RedactionLegendPath);
+		Assert.False(File.Exists(Path.Combine(result.DestinationPath, "DEVPROJEX_REDACTIONS.txt")));
 		Assert.DoesNotContain(
 			secret,
 			await File.ReadAllTextAsync(
@@ -104,7 +103,7 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 			await File.ReadAllBytesAsync(
 				Path.Combine(result.DestinationPath, "assets", "image.bin"),
 				TestContext.Current.CancellationToken));
-		Assert.Equal(result.CreatedDirectoryCount + result.CopiedFileCount + 1, updates[^1].TotalEntryCount);
+		Assert.Equal(result.CreatedDirectoryCount + result.CopiedFileCount, updates[^1].TotalEntryCount);
 		Assert.Equal(updates[^1].TotalEntryCount, updates[^1].ProcessedEntryCount);
 		Assert.Equal(100, updates[^1].Percentage);
 		Assert.Equal(

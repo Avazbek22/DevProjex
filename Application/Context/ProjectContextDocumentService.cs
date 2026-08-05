@@ -38,17 +38,6 @@ public sealed class ProjectContextDocumentService(
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
-	private readonly SecretRedactionNotice? _redactionNotice;
-
-	private ProjectContextDocumentService(
-		TreeExportService treeExportService,
-		IFileContentAnalyzer contentAnalyzer,
-		Func<FileContentClassification, string>? omissionMessageProvider,
-		SecretRedactionNotice redactionNotice)
-		: this(treeExportService, contentAnalyzer, omissionMessageProvider, secretRedactionSession: null)
-	{
-		_redactionNotice = redactionNotice;
-	}
 
 	public async Task<string> BuildAsync(
 		ProjectContextPlan plan,
@@ -89,22 +78,12 @@ public sealed class ProjectContextDocumentService(
 			: plan with { ProjectedTree = renderedTree };
 		var truncated = treeTruncated || fileResult.IsTruncated;
 
-		var renderer = prepared is not null && fileResult.RedactedCount > 0
-			? new ProjectContextDocumentService(
-				treeExportService,
-				contentAnalyzer,
-				omissionMessageProvider,
-				new SecretRedactionNotice(
-					fileResult.RedactedCount,
-					fileResult.PlaceholderExample!,
-					prepared.LegendText))
-			: this;
 		return format switch
 		{
-			ProjectContextDocumentFormat.Text => renderer.BuildText(renderedPlan, view, fileResult.Files, truncated),
-			ProjectContextDocumentFormat.Markdown => renderer.BuildMarkdown(renderedPlan, view, fileResult.Files, truncated),
-			ProjectContextDocumentFormat.Json => renderer.BuildJson(renderedPlan, view, fileResult.Files, truncated),
-			ProjectContextDocumentFormat.Xml => renderer.BuildXml(renderedPlan, view, fileResult.Files, truncated),
+			ProjectContextDocumentFormat.Text => BuildText(renderedPlan, view, fileResult.Files, truncated),
+			ProjectContextDocumentFormat.Markdown => BuildMarkdown(renderedPlan, view, fileResult.Files, truncated),
+			ProjectContextDocumentFormat.Json => BuildJson(renderedPlan, view, fileResult.Files, truncated),
+			ProjectContextDocumentFormat.Xml => BuildXml(renderedPlan, view, fileResult.Files, truncated),
 			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
 		};
 	}
@@ -227,7 +206,11 @@ public sealed class ProjectContextDocumentService(
 			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
 			.ConfigureAwait(false);
 		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
-		var service = CreatePreparedService(analyzer, prepared);
+		var service = new ProjectContextDocumentService(
+			treeExportService,
+			analyzer,
+			omissionMessageProvider,
+			secretRedactionSession: null);
 		await service.WriteCompleteAsync(
 				plan,
 				view,
@@ -236,29 +219,6 @@ public sealed class ProjectContextDocumentService(
 				cancellationToken,
 				plain)
 			.ConfigureAwait(false);
-	}
-
-	private ProjectContextDocumentService CreatePreparedService(
-		IFileContentAnalyzer analyzer,
-		PreparedSecretRedactionOutput prepared)
-	{
-		if (prepared.Snapshot.RedactedCount == 0)
-		{
-			return new ProjectContextDocumentService(
-				treeExportService,
-				analyzer,
-				omissionMessageProvider,
-				secretRedactionSession: null);
-		}
-
-		return new ProjectContextDocumentService(
-			treeExportService,
-			analyzer,
-			omissionMessageProvider,
-			new SecretRedactionNotice(
-				prepared.Snapshot.RedactedCount,
-				prepared.PlaceholderExample!,
-				prepared.LegendText));
 	}
 
 	private async Task WriteCompleteTextAsync(
@@ -270,18 +230,6 @@ public sealed class ProjectContextDocumentService(
 	{
 		await using var writer = CreateStreamWriter(destination);
 		var hasOutput = false;
-		if (_redactionNotice is { } redactionNotice)
-		{
-			await writer.WriteAsync(
-				SecretRedactionLegend.CreatePlainText(
-					redactionNotice.Count,
-					redactionNotice.PlaceholderExample,
-					redactionNotice.Text).AsMemory(),
-				cancellationToken).ConfigureAwait(false);
-			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
-			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
-			hasOutput = true;
-		}
 		var includesContent = IncludesContent(view) && plan.IncludedFiles.Count > 0;
 		if (IncludesTree(view))
 		{
@@ -359,17 +307,6 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
-		if (_redactionNotice is { } redactionNotice)
-		{
-			await writer.WriteAsync(
-				SecretRedactionLegend.CreateMarkdown(
-					redactionNotice.Count,
-					redactionNotice.PlaceholderExample,
-					redactionNotice.Text).AsMemory(),
-				cancellationToken).ConfigureAwait(false);
-			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
-			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
-		}
 		await writer.WriteAsync("# ".AsMemory(), cancellationToken).ConfigureAwait(false);
 		await writer.WriteAsync(EscapeMarkdownHeading(GetProjectName(plan)).AsMemory(), cancellationToken)
 			.ConfigureAwait(false);
@@ -470,7 +407,6 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteStartObject();
 		writer.WriteNumber("schemaVersion", SchemaVersion);
 		writer.WriteString("kind", Kind);
-		WriteRedactionJson(writer, _redactionNotice);
 		writer.WriteStartObject("project");
 		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan)));
 		writer.WriteString("name", GetProjectName(plan));
@@ -551,7 +487,6 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteStartElement("devprojexContext");
 		writer.WriteAttributeString("schemaVersion", XmlConvert.ToString(SchemaVersion));
 		writer.WriteAttributeString("kind", Kind);
-		WriteRedactionXml(writer, _redactionNotice);
 		writer.WriteStartElement("project");
 		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan)));
 		writer.WriteElementString("name", GetProjectName(plan));
@@ -696,32 +631,6 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteEndObject();
 	}
 
-	private static void WriteRedactionJson(
-		Utf8JsonWriter writer,
-		SecretRedactionNotice? notice)
-	{
-		if (notice is null)
-			return;
-
-		writer.WriteStartObject("redaction");
-		writer.WriteNumber("count", notice.Count);
-		writer.WriteString("placeholderExample", notice.PlaceholderExample);
-		writer.WriteString("notice", notice.Text.Notice);
-		writer.WriteEndObject();
-	}
-
-	private static void WriteRedactionXml(XmlWriter writer, SecretRedactionNotice? notice)
-	{
-		if (notice is null)
-			return;
-
-		writer.WriteStartElement("redaction");
-		writer.WriteElementString("count", XmlConvert.ToString(notice.Count));
-		writer.WriteElementString("placeholderExample", notice.PlaceholderExample);
-		writer.WriteElementString("notice", notice.Text.Notice);
-		writer.WriteEndElement();
-	}
-
 	private static void WriteContextFileXml(XmlWriter writer, ContextFileDocument file)
 	{
 		writer.WriteStartElement("file");
@@ -746,8 +655,6 @@ public sealed class ProjectContextDocumentService(
 			Math.Min(plan.IncludedFiles.Count, maximumFiles));
 		var remainingCharacters = maximumCharacters;
 		var isTruncated = plan.IncludedFiles.Count > maximumFiles;
-		var redactedCount = 0;
-		string? placeholderExample = null;
 		foreach (var path in plan.IncludedFiles.Take(maximumFiles))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -795,13 +702,6 @@ public sealed class ProjectContextDocumentService(
 					truncatedAtCharacterBoundary = true;
 				}
 
-				var visibleRedactions = preparedFile.GetRedactionsWithin(fileContent.Length);
-				redactedCount += visibleRedactions.Count;
-				if (placeholderExample is null && visibleRedactions.Count > 0)
-				{
-					var first = visibleRedactions[0];
-					placeholderExample = content.Content.Substring(first.Start, first.Length);
-				}
 			}
 			files.Add(new ContextFileDocument(
 				relativePath,
@@ -822,11 +722,7 @@ public sealed class ProjectContextDocumentService(
 			}
 		}
 
-		return new ContextFileReadResult(
-			files,
-			isTruncated,
-			redactedCount,
-			placeholderExample);
+		return new ContextFileReadResult(files, isTruncated);
 	}
 
 	private string BuildText(
@@ -836,14 +732,6 @@ public sealed class ProjectContextDocumentService(
 		bool truncated)
 	{
 		var output = new StringBuilder();
-		if (_redactionNotice is { } redactionNotice)
-		{
-			output.AppendLine(SecretRedactionLegend.CreatePlainText(
-				redactionNotice.Count,
-				redactionNotice.PlaceholderExample,
-				redactionNotice.Text));
-			output.AppendLine();
-		}
 		if (IncludesTree(view))
 		{
 			output.Append(treeExportService.BuildFullTree(
@@ -866,14 +754,6 @@ public sealed class ProjectContextDocumentService(
 		bool truncated)
 	{
 		var output = new StringBuilder();
-		if (_redactionNotice is { } redactionNotice)
-		{
-			output.AppendLine(SecretRedactionLegend.CreateMarkdown(
-				redactionNotice.Count,
-				redactionNotice.PlaceholderExample,
-				redactionNotice.Text));
-			output.AppendLine();
-		}
 		output.Append("# ").AppendLine(EscapeMarkdownHeading(GetProjectName(plan)));
 		output.AppendLine();
 		if (IncludesTree(view))
@@ -934,7 +814,6 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteStartObject();
 		writer.WriteNumber("schemaVersion", SchemaVersion);
 		writer.WriteString("kind", Kind);
-		WriteRedactionJson(writer, _redactionNotice);
 		writer.WriteStartObject("project");
 		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan)));
 		writer.WriteString("name", GetProjectName(plan));
@@ -998,7 +877,6 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteStartElement("devprojexContext");
 		writer.WriteAttributeString("schemaVersion", XmlConvert.ToString(SchemaVersion));
 		writer.WriteAttributeString("kind", Kind);
-		WriteRedactionXml(writer, _redactionNotice);
 		writer.WriteStartElement("project");
 		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan)));
 		writer.WriteElementString("name", GetProjectName(plan));
@@ -1435,14 +1313,7 @@ public sealed class ProjectContextDocumentService(
 
 	private sealed record ContextFileReadResult(
 		IReadOnlyList<ContextFileDocument> Files,
-		bool IsTruncated,
-		int RedactedCount = 0,
-		string? PlaceholderExample = null);
-
-	private sealed record SecretRedactionNotice(
-		int Count,
-		string PlaceholderExample,
-		SecretRedactionLegendText Text);
+		bool IsTruncated);
 
 	private sealed record ContextFileDocument(
 		string Path,

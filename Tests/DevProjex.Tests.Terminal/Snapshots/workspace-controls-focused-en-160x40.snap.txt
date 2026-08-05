@@ -5,7 +5,7 @@
 │  > [x] src                              ││  <d n="src">                                                 ││  ( ) No Git filtering                             │
 │    [x] global.json                      ││    <d n="Feature">                                           ││  (*) Use .gitignore                               │
 │    [x] readme.md                        ││      <f>Handler.cs</f>                                       ││  ( ) Tracked Git files only                       │
-│                                         ││    </d>                                                      ││  SMART SECRETS:                                   │
+│                                         ││    </d>                                                      ││  PROCESSING:                                      │
 │                                         ││    <f>App.cs</f>                                             ││  [ ] Hide secrets                                 │
 │                                         ││  </d>                                                        ││  Checks selected text files only. Binary          │
 │                                         ││  <f>global.json</f>                                          ││  files are not inspected, and no matches is       │

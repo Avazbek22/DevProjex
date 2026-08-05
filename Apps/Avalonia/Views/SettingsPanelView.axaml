@@ -93,7 +93,7 @@
           Background="Transparent"
           BorderThickness="0"
           IsEnabled="{Binding AreFilterSettingsEnabled}">
-    <Grid RowDefinitions="Auto,*,Auto,*,*">
+    <Grid RowDefinitions="Auto,Auto,*,*,*">
       <!-- Apply stays at the top because filter options remain intentionally staged. -->
       <Button Name="ApplySettingsButton"
               Grid.Row="0"
@@ -108,7 +108,7 @@
               CornerRadius="3"/>
 
       <!-- Ignore section - equal star height -->
-      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,2,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="2" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="IgnoreHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="IgnoreHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsIgnoreTitle}" Margin="0" FontSize="15"/>
           <CheckBox Name="IgnoreAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllIgnore}"
@@ -147,31 +147,49 @@
         </Border>
       </Grid>
 
-	  <!-- Smart Secrets transforms selected content; it is intentionally separate from path filters. -->
-	  <Grid Grid.Row="2"
+	  <!-- Content-processing options transform selected bytes without changing the tree. -->
+	  <Grid Grid.Row="1"
 			RowDefinitions="Auto,Auto"
-			Margin="0,10,0,0"
-			IsVisible="{Binding HasHideSecretsOption}"
+			Margin="0,2,0,0"
+			IsVisible="{Binding HasContentProcessingOptions}"
 			IsEnabled="{Binding AreFilterSettingsEnabled}">
-		<TextBlock Grid.Row="0"
+		<TextBlock Name="ContentProcessingHeaderText"
+				   Grid.Row="0"
 				   Classes="section-title"
 				   Text="{Binding SettingsSecretsTitle}"
 				   Margin="0,0,0,6"
 				   FontSize="15" />
-		<Border Grid.Row="1" Classes="checklist-border" Padding="5,3">
+		<Border Grid.Row="1" Classes="checklist-border">
 		  <StackPanel Spacing="2">
-			<ContentControl Content="{Binding HideSecretsOption}">
-			  <ContentControl.ContentTemplate>
+			<ListBox Name="ContentProcessingOptionsList"
+					 Classes="settings-list"
+					 ItemsSource="{Binding ContentProcessingOptions}"
+					 SelectionMode="Multiple"
+					 ScrollViewer.VerticalScrollBarVisibility="Disabled"
+					 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+			  <ListBox.ItemsPanel>
+				<ItemsPanelTemplate>
+				  <VirtualizingStackPanel />
+				</ItemsPanelTemplate>
+			  </ListBox.ItemsPanel>
+			  <ListBox.ItemTemplate>
 				<DataTemplate x:DataType="vm:IgnoreOptionViewModel">
 				  <CheckBox Classes="list-item settings-list-entry"
 							Content="{Binding Label}"
 							IsChecked="{Binding IsChecked, Mode=TwoWay}" />
 				</DataTemplate>
-			  </ContentControl.ContentTemplate>
-			</ContentControl>
+			  </ListBox.ItemTemplate>
+			</ListBox>
+			<TextBlock Text="{Binding SettingsSecretsStatus}"
+					   IsVisible="{Binding HasSettingsSecretsStatus}"
+					   Foreground="{DynamicResource AppAccentBrush}"
+					   FontSize="11"
+					   Margin="5,0"
+					   TextWrapping="Wrap" />
 			<TextBlock Text="{Binding SettingsSecretsNotice}"
 					   Foreground="{DynamicResource AppMutedTextBrush}"
 					   FontSize="11"
+					   Margin="5,0,5,3"
 					   TextWrapping="Wrap" />
 		  </StackPanel>
 		</Border>

@@ -10,13 +10,11 @@ public sealed class InMemoryPreviewTextDocument : IPreviewTextDocument
     public InMemoryPreviewTextDocument(
 		string? text,
 		IReadOnlyList<PreviewDocumentSection>? sections = null,
-		IReadOnlyList<PreviewRedactionSpan>? redactions = null,
-		PreviewRedactionSummary? redactionSummary = null)
+		IReadOnlyList<PreviewRedactionSpan>? redactions = null)
     {
         _text = text ?? string.Empty;
         Sections = sections is { Count: > 0 } ? sections.ToArray() : Array.Empty<PreviewDocumentSection>();
 		Redactions = redactions is { Count: > 0 } ? redactions.ToArray() : Array.Empty<PreviewRedactionSpan>();
-		RedactionSummary = redactionSummary;
         (_lineCount, _maxLineLength) = BuildLineMetadata(_text, _lineStarts);
     }
 
@@ -29,8 +27,6 @@ public sealed class InMemoryPreviewTextDocument : IPreviewTextDocument
     public IReadOnlyList<PreviewDocumentSection> Sections { get; }
 
 	public IReadOnlyList<PreviewRedactionSpan> Redactions { get; }
-
-	public PreviewRedactionSummary? RedactionSummary { get; }
 
     public string GetFullText() => _text;
 

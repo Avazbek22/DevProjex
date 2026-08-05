@@ -95,11 +95,11 @@ public sealed class PreviewDocumentBuilder(
 			redactions,
             cancellationToken).ConfigureAwait(false);
 
-		var redactionSnapshot = redactionScope?.Complete();
+		redactionScope?.Complete();
 		if (!anyWritten)
 			return null;
 
-		return BuildPreviewDocument(builder, sections, redactions, redactionScope, redactionSnapshot);
+		return builder.BuildDocument(sections, redactions);
     }
 
     public async Task<IPreviewTextDocument> BuildTreeAndContentDocumentAsync(
@@ -134,12 +134,12 @@ public sealed class PreviewDocumentBuilder(
 			redactionScope,
 			redactions,
             cancellationToken).ConfigureAwait(false);
-		var redactionSnapshot = redactionScope?.Complete();
+		redactionScope?.Complete();
 
         if (!wroteTree && !wroteContent)
             return CreateInMemory(string.Empty);
 
-        return BuildPreviewDocument(builder, sections, redactions, redactionScope, redactionSnapshot);
+        return builder.BuildDocument(sections, redactions);
     }
 
     private async Task<bool> AppendContentEntriesAsync(
@@ -289,45 +289,6 @@ public sealed class PreviewDocumentBuilder(
 
         return anyWritten;
     }
-
-	private static IPreviewTextDocument BuildPreviewDocument(
-		PreviewTextStorageBuilder body,
-		IReadOnlyList<PreviewDocumentSection> sections,
-		IReadOnlyList<PreviewRedactionSpan> redactions,
-		SecretRedactionScope? scope,
-		SecretRedactionSnapshot? snapshot)
-	{
-		if (scope is null || snapshot is null || snapshot.RedactedCount == 0)
-			return body.BuildDocument(sections, redactions);
-
-		var legendLines = SecretRedactionLegend.BuildPlainLegend(
-			snapshot.RedactedCount,
-			scope.PlaceholderExample!,
-			scope.LegendText);
-		using var final = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
-		foreach (var line in legendLines)
-			final.AppendLine(line);
-		final.AppendLine(ClipboardBlankLine);
-		var lineOffset = final.LineCount;
-		final.AppendFrom(body);
-
-		var shiftedSections = sections
-			.Select(section => section with
-			{
-				StartLine = section.StartLine + lineOffset,
-				EndLine = section.EndLine + lineOffset,
-				HeaderLine = section.HeaderLine + lineOffset,
-				ContentStartLine = section.ContentStartLine + lineOffset
-			})
-			.ToArray();
-		var shiftedRedactions = redactions
-			.Select(span => span with { LineNumber = span.LineNumber + lineOffset })
-			.ToArray();
-		return final.BuildDocument(
-			shiftedSections,
-			shiftedRedactions,
-			new PreviewRedactionSummary(snapshot.RedactedCount, legendLines.Count));
-	}
 
 	private static void AppendPreviewRedactionSpans(
 		ICollection<PreviewRedactionSpan> destination,
@@ -729,8 +690,7 @@ public sealed class PreviewDocumentBuilder(
 
         public IPreviewTextDocument BuildDocument(
 			IReadOnlyList<PreviewDocumentSection>? sections = null,
-			IReadOnlyList<PreviewRedactionSpan>? redactions = null,
-			PreviewRedactionSummary? redactionSummary = null)
+			IReadOnlyList<PreviewRedactionSpan>? redactions = null)
         {
             ThrowIfDisposed();
 
@@ -754,7 +714,7 @@ public sealed class PreviewDocumentBuilder(
 
                 DisposeStorageFile();
                 _disposed = true;
-                return new InMemoryPreviewTextDocument(text, sections, redactions, redactionSummary);
+				return new InMemoryPreviewTextDocument(text, sections, redactions);
             }
 
             _disposed = true;
@@ -765,8 +725,7 @@ public sealed class PreviewDocumentBuilder(
                 _maxLineLength,
                 _characterCount,
                 sections,
-				redactions,
-				redactionSummary);
+				redactions);
         }
 
         public void Dispose()

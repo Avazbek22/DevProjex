@@ -121,24 +121,26 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Values redacted by DevProjex", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Do not treat placeholder text as a real value.", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain('\u001b', environment.StandardOutput);
 		Assert.Empty(environment.StandardError);
 		if (format == "json")
 		{
 			using var document = JsonDocument.Parse(environment.StandardOutput);
-			Assert.Equal(1, document.RootElement.GetProperty("redaction").GetProperty("count").GetInt32());
+			Assert.False(document.RootElement.TryGetProperty("redaction", out _));
 		}
 		else if (format == "xml")
 		{
 			var document = System.Xml.Linq.XDocument.Parse(environment.StandardOutput);
-			Assert.Equal("1", document.Root?.Element("redaction")?.Element("count")?.Value);
+			Assert.Null(document.Root?.Element("redaction"));
 		}
 	}
 
 	[Theory]
 	[InlineData("folder")]
 	[InlineData("zip")]
-	public async Task ExportProject_HideSecretsRedactsPhysicalCopyAndAddsLegend(string kind)
+	public async Task ExportProject_HideSecretsRedactsPhysicalCopyWithoutAddingFiles(string kind)
 	{
 		using var workspace = CreateWorkspace();
 		var environment = new TestTerminalEnvironment();
@@ -164,7 +166,7 @@ public sealed class SecretRedactionCommandContractTests
 		{
 			var content = File.ReadAllText(Path.Combine(destination, "src", "app.cs"));
 			Assert.DoesNotContain(GithubToken, content, StringComparison.Ordinal);
-			Assert.True(File.Exists(Path.Combine(destination, "DEVPROJEX_REDACTIONS.txt")));
+			Assert.False(File.Exists(Path.Combine(destination, "DEVPROJEX_REDACTIONS.txt")));
 		}
 		else
 		{
@@ -173,7 +175,7 @@ public sealed class SecretRedactionCommandContractTests
 				entry.FullName.EndsWith("src/app.cs", StringComparison.Ordinal));
 			using var reader = new StreamReader(source.Open(), Encoding.UTF8);
 			Assert.DoesNotContain(GithubToken, reader.ReadToEnd(), StringComparison.Ordinal);
-			Assert.Contains(archive.Entries, entry =>
+			Assert.DoesNotContain(archive.Entries, entry =>
 				entry.FullName.EndsWith("DEVPROJEX_REDACTIONS.txt", StringComparison.Ordinal));
 		}
 	}

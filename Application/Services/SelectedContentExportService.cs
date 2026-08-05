@@ -4,9 +4,7 @@ using DevProjex.Application.Secrets;
 
 public sealed record SelectedContentExportResult(
 	string Text,
-	SecretRedactionSnapshot? Redaction,
-	string? PlaceholderExample,
-	SecretRedactionLegendText? LegendText);
+	SecretRedactionSnapshot? Redaction);
 
 /// <summary>
 /// Builds clipboard-friendly text export from selected file contents.
@@ -40,15 +38,13 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount: null,
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
-			redactionContext,
-			includeLegend: true).ConfigureAwait(false)).Text;
+			redactionContext).ConfigureAwait(false)).Text;
 
 	public Task<SelectedContentExportResult> BuildResultAsync(
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		SecretRedactionContext? redactionContext,
-		bool includeLegend) =>
+		SecretRedactionContext? redactionContext) =>
 		BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -56,8 +52,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount: null,
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
-			redactionContext,
-			includeLegend);
+			redactionContext);
 
 	public async Task<string> BuildBoundedPreviewAsync(
 		IEnumerable<string> filePaths,
@@ -78,8 +73,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount,
 			maxFileSizeForFullRead,
 			maxOutputCharacters,
-			redactionContext: null,
-			includeLegend: false).ConfigureAwait(false)).Text;
+			redactionContext: null).ConfigureAwait(false)).Text;
 	}
 
 	private async Task<SelectedContentExportResult> BuildCoreAsync(
@@ -89,8 +83,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		int? maxFileCount,
 		long? maxFileSizeForFullRead,
 		int? maxOutputCharacters,
-		SecretRedactionContext? redactionContext,
-		bool includeLegend)
+		SecretRedactionContext? redactionContext)
 	{
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
@@ -101,7 +94,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		}
 
 		if (uniqueFiles.Count == 0)
-			return new SelectedContentExportResult(string.Empty, null, null, null);
+			return new SelectedContentExportResult(string.Empty, null);
 
 		// Convert to list and sort in-place
 		var files = new List<string>(uniqueFiles);
@@ -216,22 +209,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 
 		var snapshot = redactionScope?.Complete();
 		var textOutput = anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
-		if (includeLegend && snapshot is { RedactedCount: > 0 })
-		{
-			var legend = SecretRedactionLegend.CreatePlainText(
-				snapshot.RedactedCount,
-				redactionScope!.PlaceholderExample!,
-				redactionScope.LegendText);
-			textOutput = string.IsNullOrEmpty(textOutput)
-				? legend
-				: $"{legend}{Environment.NewLine}{ClipboardBlankLine}{Environment.NewLine}{ClipboardBlankLine}{Environment.NewLine}{textOutput}";
-		}
 
-		return new SelectedContentExportResult(
-			textOutput,
-			snapshot,
-			redactionScope?.PlaceholderExample,
-			redactionScope?.LegendText);
+		return new SelectedContentExportResult(textOutput, snapshot);
 	}
 
 	private static string MapDisplayPath(string filePath, Func<string, string>? displayPathMapper)

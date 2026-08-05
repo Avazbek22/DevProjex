@@ -1,7 +1,11 @@
 using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Secrets;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Kernel.Abstractions;
+using DevProjex.Avalonia.Views;
+using Avalonia;
+using Avalonia.Input;
 using Avalonia.VisualTree;
 
 namespace DevProjex.Tests.UI;
@@ -45,8 +49,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
                             window,
                             "PreviewTextControl")
                         .Document;
-                    return document?.RedactionSummary?.RedactedCount == 1 &&
-                           document.Redactions.Count == 1;
+					return document?.Redactions.Count == 1 &&
+					       document.Redactions[0].State == SecretPreviewSpanState.Redacted;
                 },
                 "Hide Secrets preview and count to converge");
 
@@ -60,6 +64,32 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.HideSecrets,
                 "Hide secrets (1)");
+
+			var previewControl = UiTestDriver
+				.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+					window,
+					"PreviewTextControl");
+			previewControl.Focus();
+			window.KeyPress(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+			window.KeyRelease(Key.F8, RawInputModifiers.None, PhysicalKey.F8, null);
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => previewControl.Document?.Redactions.Count == 1 &&
+				      previewControl.Document.Redactions[0].State == SecretPreviewSpanState.KeptAsIs,
+				"the keyboard override to restore the detected value");
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Hide secrets");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.GetViewModel(window).SettingsSecretsStatus,
+					"Matches: 1. All values are kept as-is.",
+					StringComparison.Ordinal),
+				"the settings status to preserve the distinction between matched and hidden values");
 
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
@@ -126,9 +156,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 				window,
 				IgnoreOptionId.HideSecrets,
-				expectedCount == 0
-					? "Hide secrets — no detected values"
-					: $"Hide secrets ({expectedCount})");
+				expectedCount == 0 ? "Hide secrets" : $"Hide secrets ({expectedCount})");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.GetViewModel(window).SettingsSecretsStatus,
+					expectedCount == 0
+						? "The rules matched nothing."
+						: $"Matches: {expectedCount}. Hidden: {expectedCount}.",
+					StringComparison.Ordinal),
+				"the content-processing status to report the measured scan result");
 
 			await UiTestDriver.WaitForIgnoreOptionStateAsync(
 				window,
@@ -2542,8 +2579,21 @@ public sealed class MainWindowIgnoreOptionsUiTests
             var hideSecrets = Assert.IsType<IgnoreOptionViewModel>(viewModel.HideSecretsOption);
             Assert.DoesNotContain(viewModel.PathIgnoreOptions, static option => option.Id == IgnoreOptionId.HideSecrets);
             var checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets);
+			var processingList = UiTestDriver.GetRequiredControl<ListBox>(window, "ContentProcessingOptionsList");
             var ignoreList = UiTestDriver.GetRequiredControl<ListBox>(window, "IgnoreOptionsList");
+			Assert.Same(viewModel.ContentProcessingOptions, processingList.ItemsSource);
+			Assert.Single(viewModel.ContentProcessingOptions);
+			Assert.Contains(checkBox.GetVisualAncestors(), ancestor => ReferenceEquals(ancestor, processingList));
             Assert.DoesNotContain(checkBox.GetVisualAncestors(), ancestor => ReferenceEquals(ancestor, ignoreList));
+			var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
+			var processingPosition = Assert.IsType<Point>(processingList.TranslatePoint(default, settingsPanel));
+			var ignorePosition = Assert.IsType<Point>(ignoreList.TranslatePoint(default, settingsPanel));
+			Assert.True(processingPosition.Y < ignorePosition.Y);
+
+			viewModel.ContentProcessingOptions.Add(
+				new IgnoreOptionViewModel(IgnoreOptionId.HiddenFiles, "Future transformation", false));
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(2, processingList.ItemCount);
 
             var ignoreAll = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
             await UiTestDriver.RaiseButtonClickAsync(ignoreAll);

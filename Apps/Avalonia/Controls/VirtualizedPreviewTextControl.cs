@@ -1,3 +1,4 @@
+using System.Globalization;
 using DevProjex.Avalonia.Services;
 using DevProjex.Application.Secrets;
 
@@ -91,6 +92,16 @@ public sealed class VirtualizedPreviewTextControl : Control
     public static readonly StyledProperty<string> ClearSelectionMenuHeaderProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(ClearSelectionMenuHeader), "Clear selection");
 
+	public static readonly StyledProperty<string> RedactedSecretToolTipFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(RedactedSecretToolTipFormat),
+			"Detected {0}. Click to keep the original value. F8 moves to the next finding.");
+
+	public static readonly StyledProperty<string> KeptSecretToolTipFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(KeptSecretToolTipFormat),
+			"Detected {0}; the original value is kept. Click to redact it again.");
+
     private const int RenderBufferLines = 3;
     private const int MaxFallbackVisibleLines = 120;
     private const int MaxRenderedVisibleLines = 512;
@@ -109,6 +120,9 @@ public sealed class VirtualizedPreviewTextControl : Control
     private readonly Dictionary<int, FormattedLineCacheEntry> _formattedLineCache = [];
     private readonly Queue<int> _formattedLineCacheOrder = [];
 	private Dictionary<int, PreviewRedactionSpan[]> _redactionsByLine = [];
+	private PreviewRedactionSpan[] _redactionOccurrences = [];
+	private string? _hoveredRedactionOccurrenceId;
+	private string? _activeRedactionOccurrenceId;
     private string? _formattedLineCacheFontFamilyName;
     private string? _formattedLineCacheCultureName;
     private double _formattedLineCacheFontSize = double.NaN;
@@ -131,6 +145,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     private MenuItem? _clearSelectionMenuItem;
     private static Cursor? _previewTextCursor;
     private static Cursor? _previewMenuCursor;
+	private static Cursor? _previewActionCursor;
 
     // Cursor construction resolves a platform service. Keep it out of the type
     // initializer so geometry helpers and detached controls remain usable before
@@ -140,6 +155,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private static Cursor PreviewMenuCursor =>
         _previewMenuCursor ??= new Cursor(StandardCursorType.Arrow);
+
+	private static Cursor PreviewActionCursor =>
+		_previewActionCursor ??= new Cursor(StandardCursorType.Hand);
 
     static VirtualizedPreviewTextControl()
     {
@@ -166,7 +184,9 @@ public sealed class VirtualizedPreviewTextControl : Control
             StickyHeaderBorderBrushProperty,
             CopyMenuHeaderProperty,
             SelectAllMenuHeaderProperty,
-            ClearSelectionMenuHeaderProperty);
+			ClearSelectionMenuHeaderProperty,
+			RedactedSecretToolTipFormatProperty,
+			KeptSecretToolTipFormatProperty);
 
         AffectsMeasure<VirtualizedPreviewTextControl>(
             TextProperty,
@@ -344,6 +364,18 @@ public sealed class VirtualizedPreviewTextControl : Control
         set => SetValue(ClearSelectionMenuHeaderProperty, value);
     }
 
+	public string RedactedSecretToolTipFormat
+	{
+		get => GetValue(RedactedSecretToolTipFormatProperty);
+		set => SetValue(RedactedSecretToolTipFormatProperty, value);
+	}
+
+	public string KeptSecretToolTipFormat
+	{
+		get => GetValue(KeptSecretToolTipFormatProperty);
+		set => SetValue(KeptSecretToolTipFormatProperty, value);
+	}
+
     public bool HasSelection => TryGetNormalizedSelection(out _, out _);
 
     public VirtualizedPreviewTextControl()
@@ -370,7 +402,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         ClearSelectionState(invalidateVisual: true);
     }
 
-    public string GetSelectedText() => BuildSelectedText(includeRedactionLegend: false);
+    public string GetSelectedText() => BuildSelectedText(normalizeForClipboard: false);
 
     public bool TryGetSelectionRange(out PreviewSelectionRange selectionRange)
     {
@@ -539,8 +571,6 @@ public sealed class VirtualizedPreviewTextControl : Control
 		if (_redactionsByLine.Count == 0)
 			return;
 
-		var redactedBrushes = ResolveRedactionBrushes(SecretPreviewSpanState.Redacted);
-		var keptBrushes = ResolveRedactionBrushes(SecretPreviewSpanState.KeptAsIs);
 		var firstLine = visibleWindow.FirstLine;
 		var lastLine = firstLine + visibleWindow.LineCount - 1;
 		for (var lineNumber = firstLine; lineNumber <= lastLine; lineNumber++)
@@ -564,19 +594,20 @@ public sealed class VirtualizedPreviewTextControl : Control
 					ResolveDistanceFromColumn(lineText, endColumn, typeface) -
 					ResolveDistanceFromColumn(lineText, startColumn, typeface));
 				var y = origin.Y + ((lineNumber - firstLine) * lineHeight);
-				var (background, border) = span.State == SecretPreviewSpanState.Redacted
-					? redactedBrushes
-					: keptBrushes;
+				var isInteractive = span.OccurrenceId == _hoveredRedactionOccurrenceId ||
+				                    span.OccurrenceId == _activeRedactionOccurrenceId;
+				var (background, border) = ResolveRedactionBrushes(span.State, isInteractive);
 				context.DrawRectangle(
 					background,
-					new Pen(border, 1),
+					new Pen(border, isInteractive ? 1.6 : 1.15),
 					new RoundedRect(new Rect(x, y + 1, width, Math.Max(1, lineHeight - 2)), 3));
 			}
 		}
 	}
 
 	private static (IBrush Background, IBrush Border) ResolveRedactionBrushes(
-		SecretPreviewSpanState state)
+		SecretPreviewSpanState state,
+		bool isInteractive)
 	{
 		var application = global::Avalonia.Application.Current;
 		var theme = application?.ActualThemeVariant ?? ThemeVariant.Light;
@@ -584,8 +615,12 @@ public sealed class VirtualizedPreviewTextControl : Control
 		             resource is ISolidColorBrush solid
 			? solid.Color
 			: Color.Parse("#6D5DFB");
-		var backgroundAlpha = state == SecretPreviewSpanState.Redacted ? (byte)54 : (byte)24;
-		var borderAlpha = state == SecretPreviewSpanState.Redacted ? (byte)180 : (byte)90;
+		var backgroundAlpha = state == SecretPreviewSpanState.Redacted
+			? (isInteractive ? (byte)82 : (byte)54)
+			: (isInteractive ? (byte)38 : (byte)14);
+		var borderAlpha = isInteractive
+			? (byte)240
+			: state == SecretPreviewSpanState.Redacted ? (byte)180 : (byte)190;
 		return (
 			new SolidColorBrush(Color.FromArgb(backgroundAlpha, accent.R, accent.G, accent.B)),
 			new SolidColorBrush(Color.FromArgb(borderAlpha, accent.R, accent.G, accent.B)));
@@ -710,6 +745,8 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var hitPosition = HitTestSelectionPosition(e.GetPosition(this));
 		if (TryGetRedactionAt(hitPosition, out var redaction))
 		{
+			_activeRedactionOccurrenceId = redaction.OccurrenceId;
+			InvalidateVisual();
 			RedactionToggleRequested?.Invoke(
 				this,
 				new PreviewRedactionToggleRequestedEventArgs(redaction.OccurrenceId));
@@ -717,6 +754,11 @@ public sealed class VirtualizedPreviewTextControl : Control
 			return;
 		}
 
+		if (_activeRedactionOccurrenceId is not null)
+		{
+			_activeRedactionOccurrenceId = null;
+			InvalidateVisual();
+		}
         CaptureSelectionPointer(e);
         TryStartSelection(e.Pointer, e.GetPosition(this), e.KeyModifiers);
         e.Handled = true;
@@ -726,15 +768,27 @@ public sealed class VirtualizedPreviewTextControl : Control
     {
         base.OnPointerMoved(e);
 
-        if (!_isSelecting || e.Pointer.Captured != this)
-            return;
+		if (!_isSelecting || e.Pointer.Captured != this)
+		{
+			var position = HitTestSelectionPosition(e.GetPosition(this));
+			UpdateHoveredRedaction(TryGetRedactionAt(position, out var hovered) ? hovered : null);
+			return;
+		}
 
+		UpdateHoveredRedaction(null);
         CaptureSelectionPointer(e);
         UpdateSelectionActivePosition(HitTestSelectionPosition(e.GetPosition(this)));
         UpdateSelectionAutoScrollState();
         Cursor = PreviewTextCursor;
         e.Handled = true;
     }
+
+	protected override void OnPointerExited(PointerEventArgs e)
+	{
+		base.OnPointerExited(e);
+		if (!_isSelecting)
+			UpdateHoveredRedaction(null);
+	}
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
@@ -777,23 +831,50 @@ public sealed class VirtualizedPreviewTextControl : Control
             return;
         }
 
-        if (e.Key == Key.Escape && (_selectionAnchor is not null || _selectionActive is not null))
+		if (e.Key == Key.Escape &&
+		    (_selectionAnchor is not null ||
+		     _selectionActive is not null ||
+		     _activeRedactionOccurrenceId is not null))
         {
             ClearSelection();
+			_activeRedactionOccurrenceId = null;
+			InvalidateVisual();
             e.Handled = true;
 			return;
         }
 
 		if (e.Key is Key.Enter or Key.Space &&
-		    _selectionActive is { } active &&
-		    TryGetRedactionAt(active, out var redaction))
+		    TryGetActiveRedaction(out var redaction))
 		{
 			RedactionToggleRequested?.Invoke(
 				this,
 				new PreviewRedactionToggleRequestedEventArgs(redaction.OccurrenceId));
 			e.Handled = true;
+			return;
+		}
+
+		if (e.Key == Key.F8 && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Shift)
+		{
+			MoveToRedaction(forward: e.KeyModifiers != KeyModifiers.Shift);
+			e.Handled = true;
 		}
     }
+
+	private bool TryGetActiveRedaction(out PreviewRedactionSpan redaction)
+	{
+		if (_activeRedactionOccurrenceId is { } occurrenceId)
+		{
+			redaction = _redactionOccurrences.FirstOrDefault(span => span.OccurrenceId == occurrenceId)!;
+			if (redaction is not null)
+				return true;
+		}
+
+		if (_selectionActive is { } active)
+			return TryGetRedactionAt(active, out redaction);
+
+		redaction = null!;
+		return false;
+	}
 
 	private bool TryGetRedactionAt(
 		SelectionPosition position,
@@ -819,11 +900,109 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 	private void RebuildRedactionIndex()
 	{
-		_redactionsByLine = Document?.Redactions
+		var redactions = Document?.Redactions ?? Array.Empty<PreviewRedactionSpan>();
+		_redactionsByLine = redactions
 			.GroupBy(static span => span.LineNumber)
 			.ToDictionary(
 				static group => group.Key,
-				static group => group.OrderBy(static span => span.StartColumn).ToArray()) ?? [];
+				static group => group.OrderBy(static span => span.StartColumn).ToArray());
+		_redactionOccurrences = redactions
+			.GroupBy(static span => span.OccurrenceId, StringComparer.Ordinal)
+			.Select(static group => group
+				.OrderBy(static span => span.LineNumber)
+				.ThenBy(static span => span.StartColumn)
+				.First())
+			.OrderBy(static span => span.LineNumber)
+			.ThenBy(static span => span.StartColumn)
+			.ToArray();
+		if (_activeRedactionOccurrenceId is { } active &&
+		    !_redactionOccurrences.Any(span => span.OccurrenceId == active))
+		{
+			_activeRedactionOccurrenceId = null;
+		}
+		UpdateHoveredRedaction(null);
+	}
+
+	private void UpdateHoveredRedaction(PreviewRedactionSpan? redaction)
+	{
+		var occurrenceId = redaction?.OccurrenceId;
+		var changed = !string.Equals(
+			_hoveredRedactionOccurrenceId,
+			occurrenceId,
+			StringComparison.Ordinal);
+		_hoveredRedactionOccurrenceId = occurrenceId;
+		Cursor = redaction is null ? PreviewTextCursor : PreviewActionCursor;
+		ToolTip.SetTip(
+			this,
+			redaction is null
+				? null
+				: string.Format(
+					CultureInfo.CurrentCulture,
+					redaction.State == SecretPreviewSpanState.Redacted
+						? RedactedSecretToolTipFormat
+						: KeptSecretToolTipFormat,
+					redaction.RuleId));
+		if (changed)
+			InvalidateVisual();
+	}
+
+	private void MoveToRedaction(bool forward)
+	{
+		if (_redactionOccurrences.Length == 0)
+			return;
+
+		var currentIndex = _activeRedactionOccurrenceId is null
+			? -1
+			: Array.FindIndex(
+				_redactionOccurrences,
+				span => span.OccurrenceId == _activeRedactionOccurrenceId);
+		var nextIndex = currentIndex < 0
+			? forward ? 0 : _redactionOccurrences.Length - 1
+			: forward
+				? (currentIndex + 1) % _redactionOccurrences.Length
+				: (currentIndex - 1 + _redactionOccurrences.Length) % _redactionOccurrences.Length;
+		var redaction = _redactionOccurrences[nextIndex];
+		_activeRedactionOccurrenceId = redaction.OccurrenceId;
+		_selectionAnchor = new SelectionPosition(redaction.LineNumber, redaction.StartColumn);
+		_selectionActive = _selectionAnchor;
+		UpdateHoveredRedaction(null);
+		ScrollRedactionIntoView(redaction);
+		InvalidateVisual();
+		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private void ScrollRedactionIntoView(PreviewRedactionSpan redaction)
+	{
+		var scrollViewer = GetOwnerScrollViewer();
+		if (scrollViewer is null)
+			return;
+
+		var lineHeight = ResolveLineHeight();
+		var lineTop = ResolveContentTopPadding() + ((redaction.LineNumber - 1) * lineHeight);
+		var lineBottom = lineTop + lineHeight;
+		var offset = scrollViewer.Offset;
+		var targetY = offset.Y;
+		if (lineTop < offset.Y || lineBottom > offset.Y + scrollViewer.Viewport.Height)
+			targetY = lineTop - (scrollViewer.Viewport.Height * 0.35);
+
+		var lineText = GetLineText(redaction.LineNumber);
+		var typeface = ResolveTypeface();
+		var spanLeft = LeftPadding + ResolveDistanceFromColumn(lineText, redaction.StartColumn, typeface);
+		var spanRight = LeftPadding + ResolveDistanceFromColumn(
+			lineText,
+			redaction.StartColumn + redaction.Length,
+			typeface);
+		var targetX = offset.X;
+		if (spanLeft < offset.X)
+			targetX = spanLeft - LeftPadding;
+		else if (spanRight > offset.X + scrollViewer.Viewport.Width)
+			targetX = spanRight - scrollViewer.Viewport.Width + RightPadding;
+
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+		scrollViewer.Offset = new Vector(
+			Math.Clamp(targetX, 0, maximumX),
+			Math.Clamp(targetY, 0, maximumY));
 	}
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -832,6 +1011,8 @@ public sealed class VirtualizedPreviewTextControl : Control
         _isSelecting = false;
         ReleaseSelectionAutoScrollTimer();
         _ownerScrollViewer = null;
+		_activeRedactionOccurrenceId = null;
+		UpdateHoveredRedaction(null);
         CloseContextMenu();
         ResetVisibleWindowCache();
     }
@@ -1252,7 +1433,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private async Task CopySelectionToClipboardAsync()
     {
-        var selectedText = BuildSelectedText(includeRedactionLegend: true);
+        var selectedText = BuildSelectedText(normalizeForClipboard: true);
         if (string.IsNullOrEmpty(selectedText))
             return;
 
@@ -1292,7 +1473,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private string BuildSelectedText(bool includeRedactionLegend)
+    private string BuildSelectedText(bool normalizeForClipboard)
     {
         if (!TryGetNormalizedSelection(out var start, out var end))
             return string.Empty;
@@ -1307,15 +1488,15 @@ public sealed class VirtualizedPreviewTextControl : Control
                 ? lineText[startColumn..endColumn]
                 : string.Empty;
 
-            return includeRedactionLegend
-                ? PreviewClipboardPayloadBuilder.BuildSelectionPayload(
-                    Document,
-                    start.Line,
-                    startColumn,
-                    end.Line,
-                    endColumn,
-                    selectedText)
-                : selectedText;
+			return normalizeForClipboard
+				? PreviewClipboardPayloadBuilder.BuildSelectionPayload(
+					Document,
+					start.Line,
+					startColumn,
+					end.Line,
+					endColumn,
+					selectedText)
+				: selectedText;
         }
 
         var estimatedLineLength = Math.Max(12, Math.Min(Document?.MaxLineLength ?? _maxLineLength, 256));
@@ -1339,15 +1520,15 @@ public sealed class VirtualizedPreviewTextControl : Control
         }
 
         selectedText = builder.ToString();
-        return includeRedactionLegend
-            ? PreviewClipboardPayloadBuilder.BuildSelectionPayload(
-                Document,
-                start.Line,
-                start.Column,
-                end.Line,
-                end.Column,
-                selectedText)
-            : selectedText;
+		return normalizeForClipboard
+			? PreviewClipboardPayloadBuilder.BuildSelectionPayload(
+				Document,
+				start.Line,
+				start.Column,
+				end.Line,
+				end.Column,
+				selectedText)
+			: selectedText;
     }
 
     private string GetLineText(int lineNumber)

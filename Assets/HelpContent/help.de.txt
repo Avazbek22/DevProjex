@@ -333,7 +333,7 @@ Die Erkennung neuer Projektbereiche ist begrenzt, damit große Benutzerordner ni
 
 Erkannte Stellen werden in der Vorschau hervorgehoben. Ein Klick behält nur dieses Vorkommen unverändert. Im Terminal Workspace wechseln `[` und `]` zwischen den Vorkommen; `Enter` oder `Space` schalten das aktive um. Die Entscheidung gilt während der aktuellen Sitzung für Vorschau, Zwischenablage, Kontextexport, Ordner und ZIP und wird nicht im Projektprofil gespeichert.
 
-Ausgaben mit Ersetzungen enthalten einen Hinweis. Auch eine Ordner- oder ZIP-Kopie ändert passenden Text und lässt sich möglicherweise nicht mehr erstellen oder ausführen. Binärdateien werden unverändert kopiert und nicht geprüft. Eine ausgewählte Textdatei über 16 MiB oder ein Erkennungsfehler beendet den Vorgang, statt ungeprüften Text zu exportieren.
+Auch eine Ordner- oder ZIP-Kopie ändert passenden Text und lässt sich möglicherweise nicht mehr erstellen oder ausführen. Binärdateien werden unverändert kopiert und nicht geprüft. Eine ausgewählte Textdatei über 16 MiB oder ein Erkennungsfehler beendet den Vorgang, statt ungeprüften Text zu exportieren.
 
 Der Zähler meldet nur Regelübereinstimmungen. Null bedeutet nicht, dass das Projekt sicher ist. In der CLI gilt `--hide-secrets`; Einzelheiten stehen in `Docs/HideSecrets.md`.
 

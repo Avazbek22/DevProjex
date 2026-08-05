@@ -362,7 +362,7 @@ Project scope discovery is bounded so loading a large user folder does not becom
 
 Redacted spans are highlighted in Preview. Click one to keep only that occurrence as-is. In Terminal Workspace, use `[` and `]` to move between occurrences and `Enter` or `Space` to toggle the active one. The decision applies to Preview, clipboard, context export, folder copy, and ZIP for the current session; it is not saved in the project profile.
 
-Outputs with replacements include an explanatory legend. A folder or ZIP copy also changes matching text and may no longer build or run. Binary files are copied unchanged and are not scanned. A selected text file above 16 MiB or a detection failure stops the operation instead of exporting uninspected text.
+A folder or ZIP copy also changes matching text and may no longer build or run. Binary files are copied unchanged and are not scanned. A selected text file above 16 MiB or a detection failure stops the operation instead of exporting uninspected text.
 
 The count reports rule matches only. Zero does not mean that the project is safe. CLI uses `--hide-secrets`; technical details and limits are in `Docs/HideSecrets.md`.
 

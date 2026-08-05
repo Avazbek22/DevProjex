@@ -51,8 +51,7 @@ public sealed record ProjectCopyExportResult(
 	int CopiedFileCount,
 	int CreatedDirectoryCount,
 	long BytesWritten,
-	int RedactedValueCount = 0,
-	string? RedactionLegendPath = null);
+	int RedactedValueCount = 0);
 
 public sealed record ProjectCopyExportProgress(
 	int ProcessedEntryCount,

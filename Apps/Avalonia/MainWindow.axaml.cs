@@ -254,7 +254,8 @@ public partial class MainWindow : Window
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
 			_secretRedactionCount,
-			_secretRedactionScanState);
+			_secretRedactionScanState,
+			_secretRedactionMatchedCount);
     }
 
     private async Task ShowErrorAsync(string message)
@@ -393,12 +394,14 @@ public partial class MainWindow : Window
 		{
 			CancelAndDispose(ref _secretRedactionCountCts);
 			_secretRedactionSession.Disable();
+			_secretRedactionMatchedCount = null;
 			_secretRedactionCount = null;
 			_secretRedactionScanState = SecretScanState.Disabled;
 			_selectionCoordinator.RelabelIgnoreOptions(
 				AdvancedIgnoreCountsAlwaysEnabled,
 				secretRedactionsCount: null,
-				_secretRedactionScanState);
+				_secretRedactionScanState,
+				secretMatchesCount: null);
 			if (_viewModel.IsAnyPreviewVisible)
 				_previewPipeline.ScheduleRefresh(immediate: true);
 			return;
@@ -408,14 +411,17 @@ public partial class MainWindow : Window
 		_ = _secretRedactionSession.BeginWarmUp();
 		// A canceled option refresh may restore the exact selection that was already scanned.
 		// Reuse that snapshot synchronously so rollback also restores the measured label.
-		_secretRedactionCount = GetCachedSecretRedactionCountForCurrentSelection();
-		_secretRedactionScanState = _secretRedactionCount is null
+		var cachedRedactionSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
+		_secretRedactionMatchedCount = cachedRedactionSnapshot?.DetectedCount;
+		_secretRedactionCount = cachedRedactionSnapshot?.RedactedCount;
+		_secretRedactionScanState = cachedRedactionSnapshot is null
 			? SecretScanState.Pending
 			: SecretScanState.Completed;
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
 			_secretRedactionCount,
-			_secretRedactionScanState);
+			_secretRedactionScanState,
+			_secretRedactionMatchedCount);
 		if (_viewModel.IsAnyPreviewVisible)
 			_previewPipeline.ScheduleRefresh(immediate: true);
 		ScheduleSecretRedactionCountRefresh();
@@ -432,10 +438,12 @@ public partial class MainWindow : Window
 			: SecretScanState.Disabled;
 		if (_secretRedactionCount is not null)
 			_secretRedactionCount = null;
+		_secretRedactionMatchedCount = null;
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
 			secretRedactionsCount: null,
-			_secretRedactionScanState);
+			_secretRedactionScanState,
+			secretMatchesCount: null);
 
 		ScheduleSecretRedactionCountRefresh();
 	}
@@ -1098,6 +1106,7 @@ public partial class MainWindow : Window
     {
         _memoryCleanup.CancelPreview();
 		_secretRedactionCount = null;
+		_secretRedactionMatchedCount = null;
 		_secretRedactionScanState = SecretScanState.Disabled;
 		_secretRedactionSession.Reset();
 

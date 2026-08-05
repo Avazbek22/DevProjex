@@ -244,8 +244,7 @@ successful interactive operation it shows an equivalent direct command.
 
 When Hide Secrets is enabled, project-copy confirmation states that matching text
 will change, binary files will remain unchanged, and the folder or ZIP may not
-build or run. Outputs containing replacements include the same redaction legend
-and decisions shown in Preview.
+build or run. Keep-as-is decisions made in Preview also apply to the output.
 
 Context, project-copy, ZIP, and portable-profile destinations use the same
 canonical outside-source and existing-parent policy as direct commands. The

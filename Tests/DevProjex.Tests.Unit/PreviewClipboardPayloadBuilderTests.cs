@@ -67,84 +67,62 @@ public sealed class PreviewClipboardPayloadBuilderTests
     }
 
     [Fact]
-    public void BuildSectionPayload_RedactedSection_PrependsEmbeddedLegend()
+    public void BuildSectionPayload_RedactedSection_ReturnsOnlyTheRequestedSection()
     {
         const string documentText =
-            "Values redacted by DevProjex before export: 1.\n" +
-            "Placeholders like DEVPROJEX_REDACTED[github-pat#1] mark removed secrets.\n" +
-            "Do not treat placeholder text as a real value.\n\u00A0\n" +
             "config.txt:\n\u00A0\ntoken=DEVPROJEX_REDACTED[github-pat#1]";
         using var document = new InMemoryPreviewTextDocument(
             documentText,
-            [new PreviewDocumentSection("config.txt", 5, 7, 5, 7)],
-            [new PreviewRedactionSpan("occurrence", "github-pat", 7, 6, 38, SecretPreviewSpanState.Redacted)],
-            new PreviewRedactionSummary(1, 3));
+            [new PreviewDocumentSection("config.txt", 1, 3, 1, 3)],
+            [new PreviewRedactionSpan("occurrence", "github-pat", 3, 6, 38, SecretPreviewSpanState.Redacted)]);
 
         var payload = PreviewClipboardPayloadBuilder.BuildSectionPayload(document, document.Sections[0]);
 
-        Assert.StartsWith(
-            string.Join(
-                Environment.NewLine,
-                "Values redacted by DevProjex before export: 1.",
-                "Placeholders like DEVPROJEX_REDACTED[github-pat#1] mark removed secrets.",
-                "Do not treat placeholder text as a real value.",
-                string.Empty),
-            payload,
-            StringComparison.Ordinal);
-        Assert.Contains("token=DEVPROJEX_REDACTED[github-pat#1]", payload, StringComparison.Ordinal);
+		Assert.Equal(
+			string.Join(Environment.NewLine, "config.txt:", "\u00A0", "token=DEVPROJEX_REDACTED[github-pat#1]"),
+			payload);
     }
 
     [Fact]
-    public void BuildSelectionPayload_IntersectingRedaction_PrependsLegendOnlyOnce()
+    public void BuildSelectionPayload_IntersectingRedaction_ReturnsOnlySelectedText()
     {
-        const string legend = "line one\nline two\nline three";
         using var document = new InMemoryPreviewTextDocument(
-            $"{legend}\n\u00A0\nvalue=DEVPROJEX_REDACTED[aws-access-token#1]",
+			"value=DEVPROJEX_REDACTED[aws-access-token#1]",
             redactions:
             [
                 new PreviewRedactionSpan(
                     "occurrence",
                     "aws-access-token",
-                    5,
+					1,
                     6,
                     45,
                     SecretPreviewSpanState.Redacted)
-            ],
-            redactionSummary: new PreviewRedactionSummary(1, 3));
+			]);
 
         var payload = PreviewClipboardPayloadBuilder.BuildSelectionPayload(
             document,
-            5,
+			1,
             6,
-            5,
+			1,
             51,
             "DEVPROJEX_REDACTED[aws-access-token#1]");
 
-        Assert.Equal(
-            string.Join(
-                Environment.NewLine,
-                "line one",
-                "line two",
-                "line three",
-                string.Empty,
-                "DEVPROJEX_REDACTED[aws-access-token#1]"),
-            payload);
+		Assert.Equal("DEVPROJEX_REDACTED[aws-access-token#1]", payload);
     }
 
     [Fact]
-    public void BuildSelectionPayload_KeptValue_DoesNotAddRedactionLegend()
+    public void BuildSelectionPayload_KeptValue_ReturnsOnlySelectedText()
     {
         using var document = new InMemoryPreviewTextDocument(
-            "legend\n\u00A0\noriginal-value",
+			"original-value",
             redactions:
-            [new PreviewRedactionSpan("occurrence", "generic-api-key", 3, 0, 14, SecretPreviewSpanState.KeptAsIs)],
-            redactionSummary: new PreviewRedactionSummary(0, 1));
+			[new PreviewRedactionSpan("occurrence", "generic-api-key", 1, 0, 14, SecretPreviewSpanState.KeptAsIs)]);
 
         var payload = PreviewClipboardPayloadBuilder.BuildSelectionPayload(
             document,
-            3,
+			1,
             0,
-            3,
+			1,
             14,
             "original-value");
 

@@ -845,10 +845,12 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
             var panelRoot = UiTestDriver.GetRequiredControl<Border>(window, "PanelRoot");
             var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+			var processingHeader = UiTestDriver.GetRequiredControl<TextBlock>(window, "ContentProcessingHeaderText");
             var ignoreHeader = UiTestDriver.GetRequiredControl<Grid>(window, "IgnoreHeaderGrid");
 
             var panelBounds = UiTestDriver.GetBoundsInWindow(panelRoot, window);
             var buttonBounds = UiTestDriver.GetBoundsInWindow(applyButton, window);
+			var processingHeaderBounds = UiTestDriver.GetBoundsInWindow(processingHeader, window);
             var ignoreHeaderBounds = UiTestDriver.GetBoundsInWindow(ignoreHeader, window);
 
             Assert.DoesNotContain(
@@ -866,14 +868,16 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Assert.True(applyButton.Margin.Bottom >= 0);
 
             Assert.InRange(buttonBounds.Left - ignoreHeaderBounds.Left, -1, 1);
+			Assert.InRange(buttonBounds.Left - processingHeaderBounds.Left, -1, 1);
             Assert.True(
                 buttonBounds.Width < ignoreHeaderBounds.Width - 20,
                 $"Apply button should keep its natural width. Button={buttonBounds.Width:F2}, Header={ignoreHeaderBounds.Width:F2}.");
 
             var topGap = buttonBounds.Top - panelBounds.Top;
-            var headerGap = ignoreHeaderBounds.Top - buttonBounds.Bottom;
+			var headerGap = processingHeaderBounds.Top - buttonBounds.Bottom;
             Assert.InRange(topGap, 0, 16);
             Assert.InRange(headerGap, 0, 16);
+			Assert.True(processingHeaderBounds.Bottom < ignoreHeaderBounds.Top);
         }
         finally
         {

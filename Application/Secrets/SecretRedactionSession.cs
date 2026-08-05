@@ -10,7 +10,6 @@ namespace DevProjex.Application.Secrets;
 public sealed class SecretRedactionSession : IDisposable
 {
 	private readonly ISecretDetector _detector;
-	private readonly Func<SecretRedactionLegendText> _legendTextProvider;
 	private readonly SecretScanCache _scanCache;
 	private readonly object _sync = new();
 	private readonly HashSet<string> _keptOccurrenceIds = new(StringComparer.Ordinal);
@@ -21,34 +20,18 @@ public sealed class SecretRedactionSession : IDisposable
 	private int _peakFullContentBuffers;
 	private bool _disposed;
 
-	public SecretRedactionSession(
-		ISecretDetector detector,
-		SecretRedactionLegendText? legendText = null)
-		: this(detector, () => legendText ?? SecretRedactionLegendText.English)
-	{
-	}
-
-	public SecretRedactionSession(
-		ISecretDetector detector,
-		Func<SecretRedactionLegendText> legendTextProvider)
-		: this(detector, legendTextProvider, new SecretScanCache())
+	public SecretRedactionSession(ISecretDetector detector)
+		: this(detector, new SecretScanCache())
 	{
 	}
 
 	internal SecretRedactionSession(
 		ISecretDetector detector,
-		Func<SecretRedactionLegendText> legendTextProvider,
 		SecretScanCache scanCache)
 	{
 		_detector = detector ?? throw new ArgumentNullException(nameof(detector));
-		_legendTextProvider = legendTextProvider ??
-		                      throw new ArgumentNullException(nameof(legendTextProvider));
 		_scanCache = scanCache ?? throw new ArgumentNullException(nameof(scanCache));
 	}
-
-	public SecretRedactionLegendText LegendText =>
-		_legendTextProvider() ??
-		throw new InvalidOperationException("The secret-redaction legend provider returned null.");
 
 	public event EventHandler? OverridesChanged;
 	public event EventHandler<SecretRedactionSnapshotPublishedEventArgs>? SnapshotPublished;
@@ -98,7 +81,6 @@ public sealed class SecretRedactionSession : IDisposable
 			this,
 			projectRoot,
 			orderedFilePaths,
-			LegendText,
 			keptOccurrences,
 			overrideRevision);
 	}
@@ -122,10 +104,15 @@ public sealed class SecretRedactionSession : IDisposable
 	}
 
 	public int? GetRedactionCount(string projectRoot, IReadOnlyList<string> orderedFilePaths)
+		=> GetSnapshot(projectRoot, orderedFilePaths)?.RedactedCount;
+
+	public SecretRedactionSnapshot? GetSnapshot(
+		string projectRoot,
+		IReadOnlyList<string> orderedFilePaths)
 	{
 		var key = BuildSelectionKey(projectRoot, orderedFilePaths);
 		lock (_sync)
-			return _snapshots.TryGetValue(key, out var snapshot) ? snapshot.RedactedCount : null;
+			return _snapshots.GetValueOrDefault(key);
 	}
 
 	public SecretScanCacheDiagnostics GetCacheDiagnostics()
@@ -392,14 +379,12 @@ public sealed class SecretRedactionScope
 	private readonly Dictionary<string, int> _ruleIdentityCounts = new(StringComparer.Ordinal);
 	private int _detectedCount;
 	private int _redactedCount;
-	private string? _placeholderExample;
 	private bool _completed;
 
 	internal SecretRedactionScope(
 		SecretRedactionSession session,
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths,
-		SecretRedactionLegendText legendText,
 		IReadOnlySet<string> keptOccurrenceIds,
 		long overrideRevision)
 	{
@@ -408,15 +393,12 @@ public sealed class SecretRedactionScope
 		_keptOccurrenceIds = keptOccurrenceIds;
 		_overrideRevision = overrideRevision;
 		_detectorScope = session.CreateDetectorScope(_projectRoot);
-		LegendText = legendText;
 		SelectionKey = SecretRedactionSession.BuildSelectionKey(_projectRoot, orderedFilePaths);
 	}
 
 	public string SelectionKey { get; }
 	public int DetectedCount => _detectedCount;
 	public int RedactedCount => _redactedCount;
-	public string? PlaceholderExample => _placeholderExample;
-	public SecretRedactionLegendText LegendText { get; }
 
 	public bool TryAnalyzeCached(string filePath)
 	{
@@ -584,7 +566,6 @@ public sealed class SecretRedactionScope
 			{
 				_redactedCount++;
 				redactedInFile++;
-				_placeholderExample ??= replacement;
 			}
 		}
 

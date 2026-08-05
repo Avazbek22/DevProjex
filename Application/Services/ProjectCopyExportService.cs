@@ -158,8 +158,7 @@ public sealed class ProjectCopyExportService(
 		var processedEntries = 0;
 		var processedFiles = 0;
 		long bytesWritten = 0;
-		var legendName = ResolveLegendName(plan, prepared);
-		var totalEntries = plan.Entries.Count + (legendName is null ? 0 : 1);
+		var totalEntries = plan.Entries.Count;
 		Exception? operationException = null;
 
 		try
@@ -190,16 +189,6 @@ public sealed class ProjectCopyExportService(
 				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 			}
 
-			if (legendName is not null)
-			{
-				var legendPath = ResolveDestinationPath(stagingPath, legendName);
-				var legendBytes = await WriteLegendFileAsync(legendPath, prepared!, cancellationToken)
-					.ConfigureAwait(false);
-				bytesWritten += legendBytes;
-				processedEntries++;
-				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
-			}
-
 			if (totalEntries == 0)
 				ReportProgress(progress, 0, 0, 0);
 
@@ -227,8 +216,7 @@ public sealed class ProjectCopyExportService(
 				processedFiles,
 				plan.DirectoryCount,
 				bytesWritten,
-				prepared?.Snapshot.RedactedCount ?? 0,
-				legendName);
+				prepared?.Snapshot.RedactedCount ?? 0);
 		}
 		catch (Exception exception)
 		{
@@ -296,8 +284,7 @@ public sealed class ProjectCopyExportService(
 		var processedEntries = 0;
 		var processedFiles = 0;
 		long bytesWritten = 0;
-		var legendName = ResolveLegendName(plan, prepared);
-		var totalEntries = plan.Entries.Count + (legendName is null ? 0 : 1);
+		var totalEntries = plan.Entries.Count;
 		Exception? operationException = null;
 
 		try
@@ -331,18 +318,6 @@ public sealed class ProjectCopyExportService(
 					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 				}
 
-				if (legendName is not null)
-				{
-					var entryName = BuildZipEntryName(plan.ProjectName, legendName, isDirectory: false);
-					var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
-					await using var destination = entry.Open();
-					var legendBytes = Encoding.UTF8.GetBytes(BuildLegend(prepared!));
-					await destination.WriteAsync(legendBytes, cancellationToken).ConfigureAwait(false);
-					bytesWritten += legendBytes.Length;
-					processedEntries++;
-					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
-				}
-
 				if (totalEntries == 0)
 					ReportProgress(progress, 0, 0, 0);
 			}
@@ -371,8 +346,7 @@ public sealed class ProjectCopyExportService(
 				processedFiles,
 				plan.DirectoryCount,
 				bytesWritten,
-				prepared?.Snapshot.RedactedCount ?? 0,
-				legendName);
+				prepared?.Snapshot.RedactedCount ?? 0);
 		}
 		catch (Exception exception)
 		{
@@ -1027,50 +1001,6 @@ public sealed class ProjectCopyExportService(
 		await using var source = OpenSourceFile(sourcePath);
 		await using var destination = OpenDestinationFile(destinationPath);
 		return await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
-	}
-
-	private static string? ResolveLegendName(
-		ProjectCopyExportPlan plan,
-		PreparedSecretRedactionOutput? prepared)
-	{
-		if (prepared is null || prepared.Snapshot.RedactedCount == 0)
-			return null;
-
-		var occupiedRootNames = plan.Entries
-			.Where(static entry =>
-				!string.IsNullOrEmpty(entry.RelativePath) &&
-				string.IsNullOrEmpty(Path.GetDirectoryName(entry.RelativePath)))
-			.Select(static entry => Path.GetFileName(entry.RelativePath))
-			.ToHashSet(PathComparer.Default);
-		if (!occupiedRootNames.Contains(SecretRedactionLegend.CopyFileName))
-			return SecretRedactionLegend.CopyFileName;
-
-		for (var suffix = 1; ; suffix++)
-		{
-			var candidate = $"DEVPROJEX_REDACTIONS-{suffix}.txt";
-			if (!occupiedRootNames.Contains(candidate))
-				return candidate;
-		}
-	}
-
-	private static string BuildLegend(PreparedSecretRedactionOutput prepared) =>
-		SecretRedactionLegend.CreatePlainText(
-			prepared.Snapshot.RedactedCount,
-			prepared.PlaceholderExample!,
-			prepared.LegendText) + Environment.NewLine;
-
-	private static async Task<long> WriteLegendFileAsync(
-		string path,
-		PreparedSecretRedactionOutput prepared,
-		CancellationToken cancellationToken)
-	{
-		await File.WriteAllTextAsync(
-				path,
-				BuildLegend(prepared),
-				new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-				cancellationToken)
-			.ConfigureAwait(false);
-		return new FileInfo(path).Length;
 	}
 
 	private static async Task<long> CopyStreamAsync(

@@ -44,17 +44,6 @@ The rule id describes what matched. The index identifies a value within one
 produced output. Repeated occurrences of the same value under the same rule reuse
 the same index across files; different values receive different indexes.
 
-Outputs containing replacements also carry a format-native legend:
-
-- text uses a plain header;
-- Markdown uses an HTML comment;
-- JSON uses a top-level `redaction` object;
-- XML uses a top-level `redaction` element;
-- folder and ZIP copies contain `DEVPROJEX_REDACTIONS.txt` at the copy root.
-
-If that filename is already selected, DevProjex uses the first free deterministic
-suffix, such as `DEVPROJEX_REDACTIONS-1.txt`. The source file is never replaced.
-
 ## Two detection tiers
 
 The engine combines two complementary tiers.
@@ -146,8 +135,8 @@ temporary data is removed after completion or cancellation.
 ## Folder and ZIP copies
 
 With Hide Secrets enabled, a project copy is intentionally not byte-for-byte
-faithful to the source. Matching text changes, a root legend is added, and the
-copy may not build or run. Desktop and TUI confirm this, and CLI `--dry-run`
+faithful to the source. Matching text changes, and the copy may not build or run.
+Desktop and TUI confirm this, and CLI `--dry-run`
 reports it before writing.
 
 Directory structure, included empty folders, timestamps, and binary bytes retain

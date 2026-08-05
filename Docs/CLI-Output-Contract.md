@@ -92,16 +92,6 @@ Property order is deterministic where contract tests require it. Paths use `/`
 inside machine documents. A binary entry has `isBinary: true` and null content;
 binary bytes are never inserted into AI context output.
 
-When at least one value is replaced, JSON adds this top-level object:
-
-```json
-"redaction": {
-  "count": 1,
-  "placeholderExample": "DEVPROJEX_REDACTED[github-pat#1]",
-  "notice": "Do not treat placeholder text as a real value."
-}
-```
-
 For a cached Git clone, `project.source` is an additive object containing the
 source type, safe repository URL, and optional branch/commit metadata. Human
 identity never uses the generated cache-directory suffix. Local projects retain
@@ -114,9 +104,6 @@ XML uses the root element `devprojexContext` with `schemaVersion="1"` and
 `metrics`, `tree`, `files`, `diagnostics`, and `fingerprint` elements. XML is a
 complete well-formed UTF-8 document with escaped values.
 
-When replacements exist, XML includes a top-level `redaction` element with
-`count`, `placeholderExample`, and `notice` children.
-
 ## Markdown and Text
 
 Markdown contains one project heading, an optional fenced tree block, and file
@@ -125,10 +112,6 @@ the document structure.
 
 Text preserves the existing readable tree and file-section semantics. With
 `--plain`, tree connectors use strict ASCII.
-
-When replacements exist, text starts with a plain three-line legend and Markdown
-starts with the equivalent HTML comment. The legend is part of the requested
-payload, not an operational message on stderr.
 
 Context generation streams UTF-8 to stdout or an adjacent temporary file. File
 output is flushed and moved atomically; cancellation or write failure removes

@@ -127,8 +127,8 @@ profile.
 
 `--hide-secrets` is a separate, additive content transformation. It does not
 replace Exclusions or change the effective tree. It replaces detected values in
-selected text files, keeps their surrounding context, and adds a redaction legend
-to output containing replacements. It is off in the `standard` profile. Binary
+selected text files and keeps their surrounding context. It is off in the
+`standard` profile. Binary
 files are not inspected, and no findings is not a security guarantee. See
 [HideSecrets.md](HideSecrets.md).
 
@@ -271,9 +271,8 @@ documents; Markdown contains headings, a fenced tree, and fenced text-file
 content. Binary bytes are never embedded in context output. Machine documents
 mark binary entries with metadata.
 
-With `--hide-secrets`, text, Markdown, JSON, and XML carry a format-native
-redaction legend whenever at least one value is replaced. Detection failure or a
-selected text file above the supported scan limit fails closed and produces no
+With `--hide-secrets`, detection failure or a selected text file above the
+supported scan limit fails closed and produces no
 complete output artifact.
 
 When output is stdout, stdout contains only the context document. When output is a
@@ -320,8 +319,7 @@ structure, and included empty directories. Staging is cleaned after cancellation
 or failure. Canonical destination checks reject destinations equal to or inside
 the source, including paths reached through symlinks or junctions.
 
-With `--hide-secrets`, detected values in text files are replaced and a
-`DEVPROJEX_REDACTIONS.txt` legend is added at the copy root. Binary files remain
+With `--hide-secrets`, detected values in text files are replaced. Binary files remain
 unchanged. The result is intentionally not byte-for-byte faithful and may not
 build or run. `--dry-run` states this before any destination or staging path is
 created.

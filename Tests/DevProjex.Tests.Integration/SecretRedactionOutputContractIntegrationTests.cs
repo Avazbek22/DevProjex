@@ -50,6 +50,14 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				includeOmissionMarkers: true,
 				redactionContext: context);
 		var previewPayload = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
+		using var contentPreview = await new PreviewDocumentBuilder(analyzer)
+			.BuildContentDocumentAsync(
+				plan.IncludedFiles,
+				TestContext.Current.CancellationToken,
+				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
+				includeOmissionMarkers: false,
+				redactionContext: context);
+		var contentPreviewPayload = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(contentPreview);
 		var selectedContent = await new SelectedContentExportService(analyzer).BuildAsync(
 			plan.IncludedFiles,
 			TestContext.Current.CancellationToken,
@@ -70,17 +78,20 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			ProjectCopyExportFormat.Zip);
 
 		Assert.Equal(10, preview.Redactions.Count);
-		Assert.Equal(10, preview.RedactionSummary?.RedactedCount);
+		Assert.Equal(10, preview.Redactions.Count(static span =>
+			span.State == SecretPreviewSpanState.Redacted));
 		Assert.Equal(10, folder.RedactedValueCount);
 		Assert.Equal(10, zip.RedactedValueCount);
+		Assert.Equal(NormalizeForClipboard(selectedContent), contentPreviewPayload);
 		Assert.All(
-			new[] { previewPayload, selectedContent }.Concat(contextDocuments.Values),
+			new[] { previewPayload, contentPreviewPayload, selectedContent }.Concat(contextDocuments.Values),
 			AssertNoTextSecret);
 		Assert.All(
-			new[] { previewPayload, selectedContent }.Concat(contextDocuments.Values),
+			new[] { previewPayload, contentPreviewPayload, selectedContent }.Concat(contextDocuments.Values),
 			AssertExpectedPlaceholderIdentities);
 
-		AssertNativeLegends(contextDocuments);
+		AssertNoOutputLegends(
+			new[] { previewPayload, contentPreviewPayload, selectedContent }.Concat(contextDocuments.Values));
 		AssertFolderCopy(workspace, folder);
 		AssertZipCopy(workspace, zip);
 		AssertSourceBytesUnchanged(sourceBefore, workspace.SourceRoot);
@@ -95,6 +106,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var context = new SecretRedactionContext(workspace.SourceRoot, session);
 		var plan = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: true);
 		var previewBuilder = new PreviewDocumentBuilder(analyzer);
+		var initialLineCount = 0;
+		var toggledLineNumber = 0;
 
 		using (var initialPreview = await previewBuilder.BuildContentDocumentAsync(
 			       plan.IncludedFiles,
@@ -107,6 +120,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				initialPreview!.Redactions
 					.GroupBy(static span => span.OccurrenceId, StringComparer.Ordinal)
 					.First());
+			initialLineCount = initialPreview.LineCount;
+			toggledLineNumber = occurrence.LineNumber;
 			Assert.True(session.ToggleKeepAsIs(occurrence.OccurrenceId));
 		}
 
@@ -131,9 +146,13 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			session,
 			ProjectCopyExportFormat.Zip);
 
-		Assert.Equal(1, decidedPreview!.RedactionSummary?.RedactedCount);
-		Assert.Equal(1, decidedPreview.Redactions.Count(static span =>
-			span.State == SecretPreviewSpanState.KeptAsIs));
+		Assert.Equal(1, decidedPreview!.Redactions.Count(static span =>
+			span.State == SecretPreviewSpanState.Redacted));
+		var keptSpan = Assert.Single(
+			decidedPreview.Redactions,
+			static span => span.State == SecretPreviewSpanState.KeptAsIs);
+		Assert.Equal(initialLineCount, decidedPreview.LineCount);
+		Assert.Equal(toggledLineNumber, keptSpan.LineNumber);
 		AssertDecision(previewPayload);
 		Assert.All(contextDocuments.Values, AssertDecision);
 		AssertKeptOccurrence(File.ReadAllText(Path.Combine(folder.DestinationPath, "a-kept.cs")));
@@ -192,10 +211,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			GithubToken,
 			File.ReadAllText(Path.Combine(folder.DestinationPath, "src", "app.cs")),
 			StringComparison.Ordinal);
-		Assert.Null(folder.RedactionLegendPath);
 		using (var archive = ZipFile.OpenRead(zip.DestinationPath))
 			Assert.Contains(GithubToken, ReadZipText(archive, "src/app.cs"), StringComparison.Ordinal);
-		Assert.Null(zip.RedactionLegendPath);
 		Assert.Equal(0, detector.CallCount);
 	}
 
@@ -303,51 +320,6 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		}
 
 		AssertSourceBytesUnchanged(sourceBefore, sourceRoot);
-	}
-
-	[Fact]
-	public async Task ProjectCopyLegend_UsesDeterministicNonCollidingRootName()
-	{
-		using var temporary = new TemporaryDirectory();
-		var sourceRoot = temporary.CreateDirectory("legend-project");
-		var exportRoot = temporary.CreateDirectory("legend-exports");
-		temporary.CreateFile(
-			"legend-project/DEVPROJEX_REDACTIONS.txt",
-			"source-owned file\n");
-		Directory.CreateDirectory(Path.Combine(sourceRoot, "DEVPROJEX_REDACTIONS-1.txt"));
-		temporary.CreateFile(
-			"legend-project/src/config.cs",
-			$"const string token = \"{GithubToken}\";\n");
-		var binaryPath = Path.Combine(sourceRoot, "blob.bin");
-		File.WriteAllBytes(binaryPath, [0, 1, 0]);
-		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, binaryPath, ownsTemporary: false);
-		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(CreateDetector());
-		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
-
-		var folder = await ExportProjectAsync(
-			workspace,
-			plan,
-			analyzer,
-			session,
-			ProjectCopyExportFormat.Folder);
-		var zip = await ExportProjectAsync(
-			workspace,
-			plan,
-			analyzer,
-			session,
-			ProjectCopyExportFormat.Zip);
-
-		Assert.Equal("DEVPROJEX_REDACTIONS-2.txt", folder.RedactionLegendPath);
-		Assert.Equal("source-owned file\n", File.ReadAllText(
-			Path.Combine(folder.DestinationPath, "DEVPROJEX_REDACTIONS.txt")));
-		Assert.True(Directory.Exists(Path.Combine(folder.DestinationPath, "DEVPROJEX_REDACTIONS-1.txt")));
-		Assert.True(File.Exists(Path.Combine(folder.DestinationPath, folder.RedactionLegendPath!)));
-		Assert.Equal("DEVPROJEX_REDACTIONS-2.txt", zip.RedactionLegendPath);
-		using var archive = ZipFile.OpenRead(zip.DestinationPath);
-		Assert.Contains(
-			archive.Entries,
-			entry => entry.FullName.EndsWith("/DEVPROJEX_REDACTIONS-2.txt", StringComparison.Ordinal));
 	}
 
 	[Fact]
@@ -503,38 +475,6 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
-	public async Task BoundedDocument_LegendCountsOnlyRedactionsPresentInThePayload()
-	{
-		using var temporary = new TemporaryDirectory();
-		var sourceRoot = temporary.CreateDirectory("bounded-project");
-		temporary.CreateFile("bounded-project/a-visible.cs", $"token={GithubToken}\n");
-		temporary.CreateFile("bounded-project/z-omitted.cs", $"token={GithubTokenSecond}\n");
-		var analyzer = new FileContentAnalyzer();
-		var session = new SecretRedactionSession(CreateDetector());
-		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
-		var service = new ProjectContextDocumentService(
-			new TreeExportService(),
-			analyzer,
-			secretRedactionSession: session);
-
-		var document = await service.BuildAsync(
-			plan,
-			ProjectContextView.Content,
-			ProjectContextDocumentFormat.Json,
-			new ProjectContextDocumentLimits(
-				MaximumTreeNodes: 10,
-				MaximumFiles: 1,
-				MaximumCharacters: 4096,
-				MaximumFileBytes: 4096),
-			TestContext.Current.CancellationToken);
-
-		using var json = JsonDocument.Parse(document);
-		Assert.Equal(1, json.RootElement.GetProperty("redaction").GetProperty("count").GetInt32());
-		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", document, StringComparison.Ordinal);
-		Assert.DoesNotContain("DEVPROJEX_REDACTED[github-pat#2]", document, StringComparison.Ordinal);
-	}
-
-	[Fact]
 	public async Task BoundedDocument_NeverCutsAGeneratedPlaceholderOrContinuesPastTheTruncatedFile()
 	{
 		using var temporary = new TemporaryDirectory();
@@ -650,21 +590,22 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				cancellationToken: TestContext.Current.CancellationToken);
 	}
 
-	private static void AssertNativeLegends(
-		IReadOnlyDictionary<ProjectContextDocumentFormat, string> documents)
+	private static void AssertNoOutputLegends(IEnumerable<string> outputs)
 	{
-		Assert.StartsWith("Values redacted by DevProjex before export: 10", documents[ProjectContextDocumentFormat.Text], StringComparison.Ordinal);
-		Assert.StartsWith("<!--", documents[ProjectContextDocumentFormat.Markdown], StringComparison.Ordinal);
-		using var json = JsonDocument.Parse(documents[ProjectContextDocumentFormat.Json]);
-		Assert.Equal(10, json.RootElement.GetProperty("redaction").GetProperty("count").GetInt32());
-		var xml = XDocument.Parse(documents[ProjectContextDocumentFormat.Xml]);
-		Assert.Equal("10", xml.Root?.Element("redaction")?.Element("count")?.Value);
+		Assert.All(outputs, output =>
+		{
+			Assert.DoesNotContain("Values redacted by DevProjex", output, StringComparison.Ordinal);
+			Assert.DoesNotContain("Placeholders like DEVPROJEX_REDACTED", output, StringComparison.Ordinal);
+			Assert.DoesNotContain("Do not treat placeholder text as a real value.", output, StringComparison.Ordinal);
+		});
 	}
 
 	private static void AssertFolderCopy(Workspace workspace, ProjectCopyExportResult result)
 	{
-		Assert.NotNull(result.RedactionLegendPath);
-		Assert.True(File.Exists(Path.Combine(result.DestinationPath, result.RedactionLegendPath!)));
+		Assert.Empty(Directory.EnumerateFiles(
+			result.DestinationPath,
+			"DEVPROJEX_REDACTIONS*.txt",
+			SearchOption.TopDirectoryOnly));
 		var appContent = File.ReadAllText(Path.Combine(result.DestinationPath, "src", "app.cs"));
 		var documentationContent = File.ReadAllText(Path.Combine(result.DestinationPath, "docs", "example.md"));
 		AssertNoTextSecret(appContent);
@@ -702,7 +643,6 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 
 	private static void AssertZipCopy(Workspace workspace, ProjectCopyExportResult result)
 	{
-		Assert.NotNull(result.RedactionLegendPath);
 		using var archive = ZipFile.OpenRead(result.DestinationPath);
 		var appContent = ReadZipText(archive, "src/app.cs");
 		var documentationContent = ReadZipText(archive, "docs/example.md");
@@ -732,8 +672,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			"DEVPROJEX_REDACTED[github-pat#1]",
 			documentationContent,
 			StringComparison.Ordinal);
-		Assert.NotNull(archive.Entries.SingleOrDefault(entry =>
-			entry.FullName.EndsWith(result.RedactionLegendPath!, StringComparison.Ordinal)));
+		Assert.DoesNotContain(archive.Entries, entry =>
+			Path.GetFileName(entry.FullName).StartsWith("DEVPROJEX_REDACTIONS", StringComparison.Ordinal));
 		var binary = Assert.Single(archive.Entries, entry =>
 			entry.FullName.EndsWith("assets/blob.bin", StringComparison.Ordinal));
 		using var stream = binary.Open();
@@ -804,6 +744,14 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		for (var offset = 0; (offset = value.IndexOf(search, offset, StringComparison.Ordinal)) >= 0; offset += search.Length)
 			count++;
 		return count;
+	}
+
+	private static string NormalizeForClipboard(string text)
+	{
+		var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+		return Environment.NewLine == "\n"
+			? normalized
+			: normalized.Replace("\n", Environment.NewLine, StringComparison.Ordinal);
 	}
 
 	private static IReadOnlyDictionary<string, byte[]> CaptureSourceBytes(string sourceRoot) =>

@@ -48,7 +48,6 @@ public sealed class SecretRedactionCacheTests
 		var cache = new SecretScanCache(maximumEntries: 2, maximumRetainedBytes: 2_048);
 		var session = new SecretRedactionSession(
 			new CountingDetector(),
-			() => SecretRedactionLegendText.English,
 			cache);
 
 		_ = Scan(session, workspace.Path, paths);
