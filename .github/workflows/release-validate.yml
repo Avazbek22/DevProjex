@@ -510,12 +510,12 @@ jobs:
           $smartSecretsSourcePath = Join-Path $smartSecretsProject "appsettings.json"
           $originalPassword = "Admin123!"
           $smartSecretsSource = @"
-{
-  "ConnectionStrings": {
-    "Primary": "Host=db;Username=admin;Password=$originalPassword;Database=app"
-  }
-}
-"@
+          {
+            "ConnectionStrings": {
+              "Primary": "Host=db;Username=admin;Password=$originalPassword;Database=app"
+            }
+          }
+          "@
           $smartSecretsSource | Set-Content `
             -LiteralPath $smartSecretsSourcePath `
             -Encoding utf8NoBOM `
