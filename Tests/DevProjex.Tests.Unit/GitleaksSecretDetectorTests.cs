@@ -23,6 +23,14 @@ public sealed class GitleaksSecretDetectorTests
 		Assert.Equal(GitleaksSecretDetector.ExpectedRuleCount, Detector.RuleCount);
 	}
 
+	[Fact]
+	public void WarmUp_ExercisesEverySelectedColdStartRule()
+	{
+		var detector = new GitleaksSecretDetector();
+
+		detector.WarmUp(TestContext.Current.CancellationToken);
+	}
+
 	[Theory]
 	[InlineData("AKIA" + "Z7M3Q5X2P6N4R7T5", "aws-access-token")]
 	[InlineData("ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL", "github-pat")]

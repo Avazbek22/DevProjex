@@ -74,6 +74,66 @@ public sealed class SmartSecretsDetectorRegressionTests
 		Assert.Equal(value, finding.Value);
 	}
 
+	public static TheoryData<string> GeneralSensitiveEnvironmentKeys => new()
+	{
+		"AWS_KEY",
+		"ENCRYPTION_KEY",
+		"encryptionKey",
+		"API_KEY",
+		"ACCESS_KEY",
+		"PRIVATE_KEY",
+		"SIGNING_KEY",
+		"DB_PASSWORD",
+		"PASSWD",
+		"PWD",
+		"CLIENT_SECRET",
+		"AUTH_TOKEN",
+		"API_TOKEN",
+		"SERVICE_CREDENTIAL"
+	};
+
+	[Theory]
+	[MemberData(nameof(GeneralSensitiveEnvironmentKeys))]
+	public void Detect_SensitiveEnvironmentKey_StopwordInsideValueDoesNotChangeScopedVerdict(string key)
+	{
+		const string cleanValue = "A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h";
+		const string valueContainingStopword = "A7d9mQ2xEXAMPLEK4vN8sR6tY3uW5zB1cE0fG2h";
+
+		var cleanFinding = Assert.Single(
+			Detector.Detect(
+				".env",
+				$"{key}={cleanValue}",
+				TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "environment-secret");
+		var stopwordFinding = Assert.Single(
+			Detector.Detect(
+				".env",
+				$"{key}={valueContainingStopword}",
+				TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "environment-secret");
+
+		Assert.Equal(cleanValue, cleanFinding.Value);
+		Assert.Equal(valueContainingStopword, stopwordFinding.Value);
+	}
+
+	[Theory]
+	[InlineData("PUBLIC_KEY")]
+	[InlineData("JWT_PUBLIC_KEY")]
+	[InlineData("publicKey")]
+	[InlineData("KEY")]
+	[InlineData("MONKEY")]
+	public void Detect_NonSecretKeySuffix_DoesNotCreateStructuredFinding(string key)
+	{
+		const string value = "A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h";
+
+		Assert.DoesNotContain(
+			Detector.Detect(
+				".env",
+				$"{key}={value}",
+				TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "environment-secret");
+	}
+
 	[Theory]
 	[InlineData(".env.example", "DB_PASSWORD=changeme\nAPI_TOKEN=replace_me\nJWT_SECRET=your-password-here")]
 	[InlineData(".env.sample", "DB_PASSWORD=none\nAPI_TOKEN=todo")]

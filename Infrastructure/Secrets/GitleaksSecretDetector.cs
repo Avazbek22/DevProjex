@@ -26,9 +26,16 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private const string TwitterBearerPrefix = "AAAAAAAAAAAAAAAAAAAAAA";
 	private const string RegexWarmUpProbe =
 		"apiKey = \"A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h\"; /src/config.json";
-	private static readonly string[] CommonWarmUpRuleIds =
+	private const string RegexWarmUpPath = "src/config.json";
+	private static readonly WarmUpRule[] CommonWarmUpRules =
 	[
-		GenericApiKeyRuleId
+		new(GenericApiKeyRuleId, RegexWarmUpProbe),
+		new(
+			"vault-service-token",
+			"vaultToken = \"hvs.A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL4aS6dF8gH0jK2mN4qR6tU8wX0zB2cD4eF6hJ8kL0nP2rT4vX6zB7yQ\""),
+		new(
+			"curl-auth-user",
+			"curl -u \"warmup-user:A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h\" https://example.invalid")
 	];
 	private static readonly string[] GenericApiKeySignals =
 	[
@@ -64,18 +71,22 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				allowlist.WarmUp();
 			}
 			// Warming all provider-specific expressions allocates hundreds of megabytes and
-			// delays the first result. The generic rule has intentionally broad, ubiquitous
-			// keywords and dominates ordinary source trees; distinctive provider rules stay
-			// lazy until their own value shape is actually present.
-			foreach (var ruleId in CommonWarmUpRuleIds)
+			// delays the first result. This list contains only the generic rule plus expressions
+			// measured as first-content costs on the fixed real-project profiles. Every other
+			// provider rule stays lazy until its distinctive value shape is actually present.
+			foreach (var warmUpRule in CommonWarmUpRules)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var rule = configuration.Rules.Single(candidate =>
-					candidate.Id.Equals(ruleId, StringComparison.Ordinal));
-				_ = rule.ContentRegex?.Value.IsMatch(RegexWarmUpProbe);
-				_ = rule.PathRegex?.Value.IsMatch(RegexWarmUpProbe);
+					candidate.Id.Equals(warmUpRule.RuleId, StringComparison.Ordinal));
+				if (rule.ContentRegex?.Value.IsMatch(warmUpRule.Probe) != true)
+				{
+					throw new SecretDetectionException(
+						$"Warm-up probe no longer exercises rule '{warmUpRule.RuleId}'.");
+				}
+				_ = rule.PathRegex?.Value.IsMatch(RegexWarmUpPath);
 				foreach (var allowlist in rule.Allowlists)
-					allowlist.WarmUp();
+					allowlist.WarmUp(warmUpRule.Probe);
 			}
 		}
 		catch (SecretDetectionException)
@@ -1018,6 +1029,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		IReadOnlyList<CompiledAllowlist> GlobalAllowlists,
 		KeywordPrefilter KeywordPrefilter);
 
+	private readonly record struct WarmUpRule(string RuleId, string Probe);
+
 	private sealed record CompiledRule(
 		string Id,
 		Lazy<Regex>? ContentRegex,
@@ -1185,12 +1198,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		AllowlistRegexTarget RegexTarget,
 		bool RequireAll)
 	{
-		public void WarmUp()
+		public void WarmUp(string probe = RegexWarmUpProbe)
 		{
 			foreach (var path in Paths)
-				_ = path.Value.IsMatch(RegexWarmUpProbe);
+				_ = path.Value.IsMatch(RegexWarmUpPath);
 			foreach (var regex in Regexes)
-				_ = regex.Value.IsMatch(RegexWarmUpProbe);
+				_ = regex.Value.IsMatch(probe);
 		}
 
 		public bool AllowsPath(string path) => Paths.Any(regex => regex.Value.IsMatch(path));

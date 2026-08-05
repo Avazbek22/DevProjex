@@ -1236,6 +1236,7 @@ internal static class StructuredSecretDetector
 		    Contains(normalized, "accesskey") ||
 		    Contains(normalized, "privatekey") ||
 		    Contains(normalized, "signingkey") ||
+		    HasSensitiveTrailingKey(key, normalized) ||
 		    Contains(normalized, "credential"))
 		{
 			return true;
@@ -1246,6 +1247,26 @@ internal static class StructuredSecretDetector
 		       stack.HasFlag(SmartSecretStack.Python) && normalized.Equals("djangokey", StringComparison.Ordinal) ||
 		       stack.HasFlag(SmartSecretStack.Terraform) && normalized.Equals("terraformauth", StringComparison.Ordinal) ||
 		       stack.HasFlag(SmartSecretStack.Container) && normalized.Equals("registryauth", StringComparison.Ordinal);
+	}
+
+	private static bool HasSensitiveTrailingKey(ReadOnlySpan<char> key, ReadOnlySpan<char> normalized)
+	{
+		// PUBLIC_KEY describes material intended for distribution. Check the normalized suffix
+		// so qualified names such as JWT_PUBLIC_KEY remain outside the redaction vocabulary.
+		if (normalized.EndsWith("publickey", StringComparison.Ordinal))
+			return false;
+
+		key = key.Trim();
+		if (key.Length <= 3 || !key.EndsWith("key", StringComparison.OrdinalIgnoreCase))
+			return false;
+
+		var separator = key[^4];
+		if (!char.IsLetterOrDigit(separator))
+			return true;
+
+		// Preserve conventional camelCase/PascalCase config keys without treating ordinary
+		// words ending in lowercase "key" (for example, "monkey") as credential names.
+		return key[^3] == 'K' && char.IsLower(separator);
 	}
 
 	internal static StructuredSecretFileKind ClassifyFile(string path)

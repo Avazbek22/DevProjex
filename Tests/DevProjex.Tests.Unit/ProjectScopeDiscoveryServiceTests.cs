@@ -39,7 +39,14 @@ public sealed class ProjectScopeDiscoveryServiceTests
 			new SmartIgnoreService([]),
 			factsProvider);
 
-		var staleDiscovery = Task.Run(() => discovery.Discover(rootPath, selectedRootFolders: null));
+		// This test intentionally blocks the worker inside the facts builder. A dedicated
+		// thread makes the controlled race independent of ThreadPool saturation from other
+		// parallel unit tests while preserving the production publication boundary under test.
+		var staleDiscovery = Task.Factory.StartNew(
+			() => discovery.Discover(rootPath, selectedRootFolders: null),
+			TestContext.Current.CancellationToken,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+			TaskScheduler.Default);
 		Assert.True(buildStarted.Wait(
 			TimeSpan.FromSeconds(2),
 			TestContext.Current.CancellationToken));
