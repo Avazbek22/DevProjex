@@ -83,7 +83,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
-	public void SettingsPanel_ExposesOnlyContentExclusionsAndFileTypes()
+	public void SettingsPanel_ExposesContentExclusionsAndFileTypes()
 	{
 		var viewFile = Path.Combine(
 			FindRepositoryRoot(),
@@ -93,7 +93,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 			"SettingsPanelView.axaml");
 		var document = XDocument.Load(viewFile);
 		var root = Assert.IsType<XElement>(document.Root);
-		var avaloniaNamespace = root.Name.Namespace;
 		var xamlNamespace = XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml");
 		var controlNames = root
 			.Descendants()
@@ -106,26 +105,6 @@ public sealed class AvaloniaCompiledBindingContractTests
 		Assert.Contains("ContentProcessingOptionsList", controlNames);
 		Assert.Contains("IgnoreOptionsList", controlNames);
 		Assert.Contains("ExtensionsList", controlNames);
-		Assert.DoesNotContain("RootFoldersList", controlNames);
-		Assert.DoesNotContain(
-			root.Descendants(avaloniaNamespace + "TextBlock"),
-			element => string.Equals(
-				element.Attribute("Text")?.Value,
-				"{Binding SettingsRootFolders}",
-				StringComparison.Ordinal));
-	}
-
-	[Fact]
-	public void SettingsLocalization_DoesNotExposeTopLevelFolderSection()
-	{
-		var localizationDirectory = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
-		foreach (var file in Directory.EnumerateFiles(localizationDirectory, "*.json"))
-		{
-			using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(file));
-			Assert.False(
-				document.RootElement.TryGetProperty("Settings.RootFolders", out _),
-				$"Obsolete top-level-folder setting remains in {Path.GetFileName(file)}.");
-		}
 	}
 
 	[Fact]

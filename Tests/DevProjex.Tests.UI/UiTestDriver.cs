@@ -259,13 +259,6 @@ internal static class UiTestDriver
         return Assert.IsType<CheckBox>(checkBox);
     }
 
-    public static CheckBox GetRequiredRootFolderCheckBox(MainWindow window, string rootFolderName)
-    {
-        var checkBox = FindRootFolderCheckBox(window, rootFolderName);
-
-        return Assert.IsType<CheckBox>(checkBox);
-    }
-
     public static CheckBox GetRequiredExtensionCheckBox(MainWindow window, string extensionName)
     {
         var checkBox = FindExtensionCheckBox(window, extensionName);
@@ -1372,16 +1365,6 @@ internal static class UiTestDriver
             .OfType<CheckBox>()
             .FirstOrDefault(control => control.DataContext is IgnoreOptionViewModel option &&
                                        option.Id == optionId &&
-                                       IsInteractableWithinWindow(control, window));
-    }
-
-    private static CheckBox? FindRootFolderCheckBox(MainWindow window, string rootFolderName)
-    {
-        return window
-            .GetVisualDescendants()
-            .OfType<CheckBox>()
-            .FirstOrDefault(control => control.DataContext is SelectionOptionViewModel option &&
-                                       string.Equals(option.Name, rootFolderName, StringComparison.Ordinal) &&
                                        IsInteractableWithinWindow(control, window));
     }
 

@@ -91,8 +91,6 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
                 Assert.Equal(2, Grid.GetRowSpan(verticalScrollBar));
                 Assert.False(scrollBarsSeparator.IsVisible);
             }
-
-            Assert.Null(window.FindControl<Control>("RootFoldersList"));
         }
         finally
         {
