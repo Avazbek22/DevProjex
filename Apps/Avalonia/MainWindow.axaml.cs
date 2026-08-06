@@ -1532,8 +1532,8 @@ public partial class MainWindow : Window
     private IgnoreRules BuildIgnoreRules(string rootPath)
     {
         var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
-        var selectedRoots = _selectionCoordinator.GetSelectedRootFolders();
-        return BuildIgnoreRules(rootPath, selected, selectedRoots);
+        var scanRoots = _selectionCoordinator.GetProjectScanRoots();
+        return BuildIgnoreRules(rootPath, selected, scanRoots);
     }
 
     /// <summary>
@@ -1561,13 +1561,9 @@ public partial class MainWindow : Window
             StatusMetricsVisible: _viewModel.StatusMetricsVisible,
             StatusTreeStatsText: _viewModel.StatusTreeStatsText,
             StatusContentStatsText: _viewModel.StatusContentStatsText,
-            AllRootFoldersChecked: _viewModel.AllRootFoldersChecked,
             AllExtensionsChecked: _viewModel.AllExtensionsChecked,
             AllIgnoreChecked: _viewModel.AllIgnoreChecked,
             HasCompleteMetricsBaseline: _metrics.HasCompleteBaseline,
-            RootFolders: _viewModel.RootFolders
-				.Select(static option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
-				.ToArray(),
             Extensions: _viewModel.Extensions
 				.Select(static option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
 				.ToArray(),
@@ -1640,10 +1636,6 @@ public partial class MainWindow : Window
 
 	private void RestoreLegacySelectionSnapshot(ProjectLoadCancellationSnapshot snapshot)
 	{
-		_viewModel.RootFolders.Clear();
-		foreach (var option in snapshot.RootFolders)
-			_viewModel.RootFolders.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
-
 		_viewModel.Extensions.Clear();
 		foreach (var option in snapshot.Extensions)
 			_viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
@@ -1671,7 +1663,6 @@ public partial class MainWindow : Window
 				isControllerGroupEnd: index == controllerGroupEndIndex));
 		}
 
-		_viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
 		_viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
 		_viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
 		_selectionCoordinator.ReevaluatePendingApplyChanges();
@@ -1720,7 +1711,6 @@ public partial class MainWindow : Window
         _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
         _viewModel.CurrentBranch = string.Empty;
         _viewModel.GitBranches.Clear();
-        _viewModel.RootFolders.Clear();
         _viewModel.Extensions.Clear();
         _viewModel.IgnoreOptions.Clear();
         _selectionCoordinator.ClearAppliedSelectionState();

@@ -53,7 +53,6 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 			{
 				CaptureTreeInventory = scenario.CaptureTreeInventory
 			},
-			CollectCheckedRootNames(fullSnapshot),
 			TestContext.Current.CancellationToken);
 
 		AssertEquivalentDynamicSections(fullSnapshot, liveSnapshot, scenario);

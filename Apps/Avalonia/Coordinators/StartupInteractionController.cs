@@ -39,9 +39,10 @@ internal sealed class StartupInteractionController(
             string.IsNullOrWhiteSpace(currentPath))
         {
             return;
-        }
+		}
 		var applicationIntent = selectionSpec.ApplicationIntent;
-		var rootMode = applicationIntent?.Roots ?? ResolveLegacyMode(selectionSpec.Roots);
+		// TODO(cli): Remove root selection from Desktop requests when the public --root contract
+		// is revised. Desktop intentionally applies the complete project scope.
 		var extensionMode = applicationIntent?.Extensions ?? ResolveLegacyMode(selectionSpec.Extensions);
 		var gitMode = applicationIntent?.GitMode ?? ResolveLegacyMode(selectionSpec.GitMode);
 		var exclusionMode = applicationIntent?.Exclusions ?? ResolveLegacyMode(selectionSpec.Exclusions);
@@ -49,14 +50,6 @@ internal sealed class StartupInteractionController(
 		var applyGitMode = gitMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyExclusions = exclusionMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyHideSecrets = hideSecretsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
-
-        var selectedRoots = rootMode != ProjectSelectionApplicationMode.ApplyResolvedValue ||
-		                    selectionSpec.Roots is null
-            ? null
-            : new HashSet<string>(
-                selectionSpec.Roots,
-                PathComparer.Default);
-
         var selectedExtensions = extensionMode != ProjectSelectionApplicationMode.ApplyResolvedValue ||
 		                         selectionSpec.Extensions is null
             ? null
@@ -86,12 +79,9 @@ internal sealed class StartupInteractionController(
 
 		var pathSelectionChanged = selection.ApplySelectionOverrides(
             currentPath,
-            selectedRoots,
             selectedExtensions,
             selectedIgnoreOptions,
             ignoreOptionStateIsComplete: applyExclusions,
-			resetRootSelectionToDefaults:
-				rootMode == ProjectSelectionApplicationMode.ResetToDefaults,
 			resetExtensionSelectionToDefaults:
 				extensionMode == ProjectSelectionApplicationMode.ResetToDefaults);
 		if (applyHideSecrets)
@@ -102,7 +92,7 @@ internal sealed class StartupInteractionController(
 			await selection.WaitForPendingRefreshesAsync();
 			await refreshTreeAsync();
 
-			await selection.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
+			await selection.UpdateLiveOptionsForProjectScopeIfDirtyAsync(
 				currentPath);
 			await selection.WaitForPendingRefreshesAsync();
 		}

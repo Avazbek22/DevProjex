@@ -45,7 +45,7 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 
 		Assert.True(plan.RequiresIgnoreOptionsRefresh);
 		Assert.False(plan.RequiresSecondSnapshotPass);
-		Assert.False(plan.RequiresRootFolderRefresh);
+		Assert.False(plan.RequiresScanRootRefresh);
 		Assert.Equal(IgnoreOptionRefreshImpact.None, plan.Impact);
 	}
 
@@ -71,7 +71,7 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 
 		Assert.True(plan.RequiresIgnoreOptionsRefresh);
 		Assert.False(plan.RequiresSecondSnapshotPass);
-		Assert.False(plan.RequiresRootFolderRefresh);
+		Assert.False(plan.RequiresScanRootRefresh);
 		Assert.Equal(IgnoreOptionRefreshImpact.None, plan.Impact);
 	}
 
@@ -99,7 +99,7 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 
 		Assert.True(plan.RequiresIgnoreOptionsRefresh);
 		Assert.True(plan.RequiresSecondSnapshotPass);
-		Assert.False(plan.RequiresRootFolderRefresh);
+		Assert.False(plan.RequiresScanRootRefresh);
 		Assert.Equal(IgnoreOptionRefreshImpact.FileVisibility, plan.Impact);
 	}
 
@@ -127,7 +127,7 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 
 		Assert.True(plan.RequiresIgnoreOptionsRefresh);
 		Assert.True(plan.RequiresSecondSnapshotPass);
-		Assert.True(plan.RequiresRootFolderRefresh);
+		Assert.True(plan.RequiresScanRootRefresh);
 		Assert.Equal(IgnoreOptionRefreshImpact.RootStructure, plan.Impact);
 	}
 
@@ -155,7 +155,7 @@ public sealed class IgnoreSectionRefreshPlanBuilderTests
 
 		Assert.True(plan.RequiresIgnoreOptionsRefresh);
 		Assert.True(plan.RequiresSecondSnapshotPass);
-		Assert.True(plan.RequiresRootFolderRefresh);
+		Assert.True(plan.RequiresScanRootRefresh);
 		Assert.Equal(
 			IgnoreOptionRefreshImpact.FileVisibility | IgnoreOptionRefreshImpact.RootStructure,
 			plan.Impact);

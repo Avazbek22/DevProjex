@@ -9,11 +9,10 @@ public sealed partial class SelectionSyncCoordinator
     {
         internal ProjectCheckpoint(
             ProjectSelectionSessionSnapshot session,
-            IReadOnlyList<SelectionOption> rootOptions,
+            IReadOnlyList<string> scanRoots,
             IReadOnlyList<SelectionOption> extensionOptions,
             IReadOnlyList<IgnoreOptionSnapshot> ignoreOptions,
             IReadOnlyList<IgnoreOptionDescriptor> ignoreDescriptors,
-            bool allRootFoldersChecked,
             bool allExtensionsChecked,
             bool allIgnoreChecked,
             bool hasExtensionlessExtensionEntries,
@@ -29,11 +28,10 @@ public sealed partial class SelectionSyncCoordinator
             bool selectionRefreshDirty)
         {
             Session = session;
-            RootOptions = rootOptions;
+            ScanRoots = scanRoots;
             ExtensionOptions = extensionOptions;
             IgnoreOptions = ignoreOptions;
             IgnoreDescriptors = ignoreDescriptors;
-            AllRootFoldersChecked = allRootFoldersChecked;
             AllExtensionsChecked = allExtensionsChecked;
             AllIgnoreChecked = allIgnoreChecked;
             HasExtensionlessExtensionEntries = hasExtensionlessExtensionEntries;
@@ -50,11 +48,10 @@ public sealed partial class SelectionSyncCoordinator
         }
 
         internal ProjectSelectionSessionSnapshot Session { get; }
-        internal IReadOnlyList<SelectionOption> RootOptions { get; }
+        internal IReadOnlyList<string> ScanRoots { get; }
         internal IReadOnlyList<SelectionOption> ExtensionOptions { get; }
         internal IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions { get; }
         internal IReadOnlyList<IgnoreOptionDescriptor> IgnoreDescriptors { get; }
-        internal bool AllRootFoldersChecked { get; }
         internal bool AllExtensionsChecked { get; }
         internal bool AllIgnoreChecked { get; }
         internal bool HasExtensionlessExtensionEntries { get; }
@@ -72,13 +69,6 @@ public sealed partial class SelectionSyncCoordinator
 
     internal ProjectCheckpoint CaptureProjectCheckpoint()
     {
-        var roots = new SelectionOption[viewModel.RootFolders.Count];
-        for (var index = 0; index < roots.Length; index++)
-        {
-            var option = viewModel.RootFolders[index];
-            roots[index] = new SelectionOption(option.Name, option.IsChecked);
-        }
-
         var extensions = new SelectionOption[viewModel.Extensions.Count];
         for (var index = 0; index < extensions.Length; index++)
         {
@@ -95,11 +85,10 @@ public sealed partial class SelectionSyncCoordinator
 
         return new ProjectCheckpoint(
             _session.CaptureSnapshot(),
-            roots,
+            _scanRoots.ToArray(),
             extensions,
             ignoreOptions,
             _ignoreOptions.ToArray(),
-            viewModel.AllRootFoldersChecked,
             viewModel.AllExtensionsChecked,
             viewModel.AllIgnoreChecked,
             _hasExtensionlessExtensionEntries,
@@ -120,13 +109,6 @@ public sealed partial class SelectionSyncCoordinator
         ArgumentNullException.ThrowIfNull(checkpoint);
 
         InvalidatePendingRefreshesForProjectCheckpointRestore();
-
-        var rootOptions = new SelectionOptionViewModel[checkpoint.RootOptions.Count];
-        for (var index = 0; index < rootOptions.Length; index++)
-        {
-            var option = checkpoint.RootOptions[index];
-            rootOptions[index] = new SelectionOptionViewModel(option.Name, option.IsChecked);
-        }
 
         var extensionOptions = new SelectionOptionViewModel[checkpoint.ExtensionOptions.Count];
         for (var index = 0; index < extensionOptions.Length; index++)
@@ -149,19 +131,17 @@ public sealed partial class SelectionSyncCoordinator
                 isControllerGroupEnd: index == controllerGroupEndIndex);
         }
 
-        _suppressRootAllCheck = true;
-        _suppressRootItemCheck = true;
         _suppressExtensionAllCheck = true;
         _suppressExtensionItemCheck = true;
         _suppressIgnoreAllCheck = true;
         _suppressIgnoreItemCheck = true;
         try
         {
-            ReplaceCollectionItems(viewModel.RootFolders, rootOptions);
+            _scanRoots.Clear();
+            _scanRoots.AddRange(checkpoint.ScanRoots);
             ReplaceCollectionItems(viewModel.Extensions, extensionOptions);
             ReplaceCollectionItems(viewModel.IgnoreOptions, ignoreOptions);
 
-            viewModel.AllRootFoldersChecked = checkpoint.AllRootFoldersChecked;
             viewModel.AllExtensionsChecked = checkpoint.AllExtensionsChecked;
             viewModel.AllIgnoreChecked = checkpoint.AllIgnoreChecked;
 
@@ -185,8 +165,6 @@ public sealed partial class SelectionSyncCoordinator
         }
         finally
         {
-            _suppressRootAllCheck = false;
-            _suppressRootItemCheck = false;
             _suppressExtensionAllCheck = false;
             _suppressExtensionItemCheck = false;
             _suppressIgnoreAllCheck = false;
@@ -239,7 +217,6 @@ public sealed partial class SelectionSyncCoordinator
         DisposeCancellationSourceWhenTaskCompletes(liveRefreshCts, liveRefreshTask);
         DisposeCancellationSourceWhenTaskCompletes(fullRefreshCts, fullRefreshTask);
 
-        Interlocked.Increment(ref _rootScanVersion);
         Interlocked.Increment(ref _extensionScanVersion);
         Interlocked.Increment(ref _ignoreOptionsVersion);
     }

@@ -72,11 +72,8 @@ public sealed class SelectionRefreshEngineSmartDotCycleMatrixIntegrationTests
             temp.Path,
             CreateDefaultContext(temp.Path));
         var liveContext = CreateContextFromSnapshot(temp.Path, fullSnapshot);
-        var selectedRoots = CollectCheckedRootNames(fullSnapshot);
-
         var liveSnapshot = services.Engine.ComputeLiveRefreshSnapshot(
             liveContext,
-            selectedRoots,
             CancellationToken.None);
 
         AssertSmartAndDotState(liveSnapshot, smartChecked: true, dotChecked: true);

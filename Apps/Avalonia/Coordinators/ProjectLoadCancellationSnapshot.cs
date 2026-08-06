@@ -16,11 +16,9 @@ public sealed record ProjectLoadCancellationSnapshot(
     bool StatusMetricsVisible,
     string StatusTreeStatsText,
     string StatusContentStatsText,
-    bool AllRootFoldersChecked,
     bool AllExtensionsChecked,
     bool AllIgnoreChecked,
     bool HasCompleteMetricsBaseline,
-    IReadOnlyList<SelectionOptionSnapshot> RootFolders,
     IReadOnlyList<SelectionOptionSnapshot> Extensions,
     IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions)
 {

@@ -3,6 +3,7 @@ using DevProjex.Application.Models;
 namespace DevProjex.Application.Selection;
 
 public sealed record SelectionRefreshSnapshot(
+    // TODO(cli): Retained only for the current --root/profile output contract.
     IReadOnlyList<SelectionOption>? RootOptions,
     // ExtensionOptions retains hidden option state for convergence. UI and tree consumers
     // must use EffectiveExtensionOptions so ignored-only files cannot create no-op choices.

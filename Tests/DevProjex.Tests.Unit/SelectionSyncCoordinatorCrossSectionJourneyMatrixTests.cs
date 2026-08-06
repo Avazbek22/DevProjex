@@ -21,7 +21,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		var viewModel = CreateViewModel();
 		using var coordinator = CreateCoordinator(viewModel, workspace.RootPath);
 
-		await coordinator.RefreshRootAndDependentsAsync(
+		await coordinator.RefreshProjectSelectionAsync(
 			workspace.RootPath,
 			TestContext.Current.CancellationToken);
 		HookAllOptionListeners(coordinator, viewModel);
@@ -214,7 +214,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		var expectedIgnoreStateCache = BuildExpectedIgnoreStateCache(
 			oracle.IgnoreStates,
 			expectedVisibleIgnoreStates);
-		var expectedRootStates = new Dictionary<string, bool>(oracle.RootStates, PathComparer.Default);
 		var expectedExtensionStates = new Dictionary<string, bool>(
 			oracle.ExtensionStates,
 			StringComparer.OrdinalIgnoreCase);
@@ -226,7 +225,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		AssertIslandMatchesOracle(viewModel, coordinator, expectedSnapshot, stepName);
 		AssertOracleStates(
 			oracle,
-			expectedRootStates,
 			expectedExtensionStates,
 			expectedIgnoreStateCache,
 			stepName);
@@ -261,20 +259,17 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			workspace.RootPath,
 			SettingsAction.SetAllIgnore(false));
 
-		var rootNames = viewModel.RootFolders.Select(static option => option.Name).ToArray();
 		var extensionNames = viewModel.Extensions.Select(static option => option.Name).ToArray();
 		var ignoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).ToArray();
-		var totalControlCount = rootNames.Length + extensionNames.Length + ignoreOptionIds.Length;
+		var totalControlCount = extensionNames.Length + ignoreOptionIds.Length;
 		Assert.InRange(totalControlCount, 3, PairwiseColumnCapacity);
 		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), ignoreOptionIds.Order());
 
 		var actions = new List<SettingsAction>(totalControlCount + 2)
 		{
-			SettingsAction.SetAllRoots(false),
 			SettingsAction.SetAllExtensions(false)
 		};
 		var column = 1;
-		var expectedRootStates = BuildPairwiseStates(rootNames, row, ref column, actions, SettingsAction.ToggleRoot);
 		var expectedExtensionStates = BuildPairwiseStates(
 			extensionNames,
 			row,
@@ -292,7 +287,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		var expectedSnapshot = oracle.Recompute();
 		var stepName = $"pairwise row {row}/{PairwiseRowCount - 1}";
 		AssertIslandMatchesOracle(viewModel, coordinator, expectedSnapshot, stepName);
-		AssertOracleStates(oracle, expectedRootStates, expectedExtensionStates, expectedIgnoreStateCache, stepName);
+		AssertOracleStates(oracle, expectedExtensionStates, expectedIgnoreStateCache, stepName);
 		await AssertTreeAndMetricsMatchOracleAsync(
 			workspace.RootPath,
 			viewModel,
@@ -301,15 +296,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			stepName);
 		await AssertIslandRemainsStableAsync(viewModel, coordinator, stepName);
 
-		if (!viewModel.AllRootFoldersChecked)
-		{
-			expectedSnapshot = await ExecuteActionAndRefreshAsync(
-				viewModel,
-				coordinator,
-				oracle,
-				workspace.RootPath,
-				SettingsAction.SetAllRoots(true));
-		}
 		if (!viewModel.AllExtensionsChecked)
 		{
 			expectedSnapshot = await ExecuteActionAndRefreshAsync(
@@ -328,7 +314,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			workspace.RootPath);
 		var restoreSelectionActions = BuildSelectionConvergenceActions(
 			viewModel,
-			expectedRootStates,
 			expectedExtensionStates);
 		if (restoreSelectionActions.Count > 0)
 		{
@@ -343,7 +328,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		}
 
 		AssertIslandMatchesOracle(viewModel, coordinator, expectedSnapshot, $"{stepName}: all ignores exposed");
-		AssertVisibleStates(viewModel.RootFolders, expectedRootStates, PathComparer.Default, $"{stepName}: roots");
 		AssertVisibleStates(
 			viewModel.Extensions,
 			expectedExtensionStates,
@@ -397,10 +381,8 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		}
 
 		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), toggledIgnoreIds.Order());
-		Assert.Contains(SettingsActionKind.ToggleRoot, actionKinds);
 		Assert.Contains(SettingsActionKind.ToggleExtension, actionKinds);
 		Assert.Contains(SettingsActionKind.ToggleIgnore, actionKinds);
-		Assert.Contains(SettingsActionKind.SetAllRoots, actionKinds);
 		Assert.Contains(SettingsActionKind.SetAllExtensions, actionKinds);
 		Assert.Contains(SettingsActionKind.SetAllIgnore, actionKinds);
 		Assert.True(
@@ -472,7 +454,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		MainWindowViewModel viewModel,
 		string rootPath)
 	{
-		await coordinator.RefreshRootAndDependentsAsync(
+		await coordinator.RefreshProjectSelectionAsync(
 			rootPath,
 			TestContext.Current.CancellationToken);
 		HookAllOptionListeners(coordinator, viewModel);
@@ -539,7 +521,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		ICollection<SettingsAction> actions,
 		Func<string, SettingsAction> actionFactory)
 	{
-		var states = new Dictionary<string, bool>(PathComparer.Default);
+		var states = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 		foreach (var name in names)
 		{
 			var isChecked = GetPairwiseState(row, column++);
@@ -585,17 +567,9 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 	private static IReadOnlyList<SettingsAction> BuildSelectionConvergenceActions(
 		MainWindowViewModel viewModel,
-		IReadOnlyDictionary<string, bool> expectedRootStates,
 		IReadOnlyDictionary<string, bool> expectedExtensionStates)
 	{
 		var actions = new List<SettingsAction>();
-		foreach (var option in viewModel.RootFolders)
-		{
-			Assert.True(expectedRootStates.TryGetValue(option.Name, out var expectedState));
-			if (option.IsChecked != expectedState)
-				actions.Add(SettingsAction.ToggleRoot(option.Name));
-		}
-
 		foreach (var option in viewModel.Extensions)
 		{
 			Assert.True(expectedExtensionStates.TryGetValue(option.Name, out var expectedState));
@@ -625,19 +599,16 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		int seed,
 		int stepIndex)
 	{
-		var phase = stepIndex % 12;
-		var cycle = stepIndex / 12;
+		var phase = stepIndex % 10;
+		var cycle = stepIndex / 10;
 		return phase switch
 		{
 			0 => SettingsAction.SetAllIgnore(!viewModel.AllIgnoreChecked),
-			1 => SettingsAction.SetAllRoots(!viewModel.AllRootFoldersChecked),
-			2 => SettingsAction.SetAllExtensions(!viewModel.AllExtensionsChecked),
-			>= 3 and <= 6 => SettingsAction.ToggleIgnore(
-				SelectCombatIgnoreOption(viewModel, toggledIgnoreIds, seed + cycle * 4 + phase - 3)),
-			>= 7 and <= 8 => SettingsAction.ToggleRoot(
-				SelectCombatName(viewModel.RootFolders, seed + cycle * 2 + phase - 7, "root")),
+			1 => SettingsAction.SetAllExtensions(!viewModel.AllExtensionsChecked),
+			>= 2 and <= 6 => SettingsAction.ToggleIgnore(
+				SelectCombatIgnoreOption(viewModel, toggledIgnoreIds, seed + cycle * 5 + phase - 2)),
 			_ => SettingsAction.ToggleExtension(
-				SelectCombatName(viewModel.Extensions, seed + cycle * 3 + phase - 9, "extension"))
+				SelectCombatName(viewModel.Extensions, seed + cycle * 3 + phase - 7, "extension"))
 		};
 	}
 
@@ -719,12 +690,10 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 	private static void AssertOracleStates(
 		SettingsIslandOracle oracle,
-		IReadOnlyDictionary<string, bool> expectedRootStates,
 		IReadOnlyDictionary<string, bool> expectedExtensionStates,
 		IReadOnlyDictionary<IgnoreOptionId, bool> expectedIgnoreStates,
 		string stepName)
 	{
-		AssertDictionaryEqual(expectedRootStates, oracle.RootStates, PathComparer.Default, $"{stepName}: root cache");
 		AssertDictionaryEqual(
 			expectedExtensionStates,
 			oracle.ExtensionStates,
@@ -765,26 +734,23 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 	private static readonly string[] JourneyNames =
 	[
-		"ignore-expansion-with-hidden-root-state",
+		"ignore-extension-round-trip",
 		"master-checkbox-wave-with-explicit-preferences",
-		"dynamic-empty-root-disappear-reappear",
-		"file-filter-and-dot-root-cross-section-round-trip"
+		"dynamic-ignore-availability-round-trip",
+		"file-filter-and-dot-exclusion-round-trip"
 	];
 
 	private static IReadOnlyList<SettingsAction> GetJourney(string journeyName)
 	{
 		return journeyName switch
 		{
-			"ignore-expansion-with-hidden-root-state" =>
+			"ignore-extension-round-trip" =>
 			[
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFiles),
 				SettingsAction.ToggleExtension(".txt"),
-				SettingsAction.ToggleRoot("gamma"),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.UseGitIgnore),
-				SettingsAction.ToggleRoot("artifacts"),
 				SettingsAction.ToggleExtension(".log"),
 				SettingsAction.Checkpoint(),
-				SettingsAction.ToggleRoot("gamma"),
 				SettingsAction.ToggleExtension(".txt"),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFiles),
 				SettingsAction.ToggleExtension(".log"),
@@ -799,9 +765,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			[
 				SettingsAction.SetAllIgnore(true),
 				SettingsAction.SetAllIgnore(false),
-				SettingsAction.SetAllRoots(false),
-				SettingsAction.ToggleRoot("alpha"),
-				SettingsAction.ToggleRoot("gamma"),
 				SettingsAction.SetAllExtensions(false),
 				SettingsAction.ToggleExtension(".cs"),
 				SettingsAction.ToggleExtension(".md"),
@@ -811,7 +774,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				SettingsAction.ToggleIgnore(IgnoreOptionId.DotFolders),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFolders),
 				SettingsAction.Checkpoint(),
-				SettingsAction.SetAllRoots(true),
 				SettingsAction.SetAllExtensions(true),
 				SettingsAction.SetAllIgnore(true),
 				SettingsAction.Checkpoint(),
@@ -820,26 +782,20 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				SettingsAction.SetAllIgnore(true),
 				SettingsAction.Checkpoint()
 			],
-			"dynamic-empty-root-disappear-reappear" =>
+			"dynamic-ignore-availability-round-trip" =>
 			[
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFolders),
-				SettingsAction.ToggleRoot("delta-empty"),
-				SettingsAction.ToggleRoot("beta"),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFolders),
-				SettingsAction.ToggleRoot("alpha"),
-				SettingsAction.ToggleRoot("alpha"),
 				SettingsAction.ToggleExtension(".cs"),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFiles),
 				SettingsAction.Checkpoint(),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFolders),
-				SettingsAction.ToggleRoot("delta-empty"),
-				SettingsAction.ToggleRoot("beta"),
 				SettingsAction.ToggleExtension(".cs"),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFiles),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFolders),
 				SettingsAction.Checkpoint()
 			],
-			"file-filter-and-dot-root-cross-section-round-trip" =>
+			"file-filter-and-dot-exclusion-round-trip" =>
 			[
 				SettingsAction.ToggleExtension(".md"),
 				SettingsAction.ToggleExtension(".txt"),
@@ -847,16 +803,13 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				SettingsAction.ToggleIgnore(IgnoreOptionId.DotFiles),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.EmptyFiles),
 				SettingsAction.Checkpoint(),
-				SettingsAction.ToggleRoot("gamma"),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.DotFolders),
 				SettingsAction.Checkpoint(),
 				SettingsAction.ToggleExtension(".txt"),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.DotFolders),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.DotFolders),
-				SettingsAction.ToggleRootIfVisible(".root-dot"),
 				SettingsAction.Checkpoint(),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.DotFolders),
-				SettingsAction.ToggleRoot("gamma"),
 				SettingsAction.ToggleExtension(".md"),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.ExtensionlessFiles),
 				SettingsAction.ToggleIgnore(IgnoreOptionId.DotFiles),
@@ -879,17 +832,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 	{
 		switch (action.Kind)
 		{
-			case SettingsActionKind.ToggleRoot:
-				var rootOption = Assert.Single(viewModel.RootFolders, option =>
-					string.Equals(option.Name, action.Name, StringComparison.Ordinal));
-				rootOption.IsChecked = !rootOption.IsChecked;
-				break;
-			case SettingsActionKind.ToggleRootIfVisible:
-				var optionalRoot = viewModel.RootFolders.SingleOrDefault(option =>
-					string.Equals(option.Name, action.Name, StringComparison.Ordinal));
-				if (optionalRoot is not null)
-					optionalRoot.IsChecked = !optionalRoot.IsChecked;
-				break;
 			case SettingsActionKind.ToggleExtension:
 				var extensionOption = Assert.Single(viewModel.Extensions, option =>
 					string.Equals(option.Name, action.Name, StringComparison.OrdinalIgnoreCase));
@@ -899,10 +841,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				var ignoreOption = Assert.Single(viewModel.IgnoreOptions, option =>
 					option.Id == action.IgnoreOptionId);
 				ignoreOption.IsChecked = !ignoreOption.IsChecked;
-				break;
-			case SettingsActionKind.SetAllRoots:
-				Assert.NotEqual(action.IsChecked!.Value, viewModel.AllRootFoldersChecked);
-				coordinator.HandleRootAllChanged(action.IsChecked.Value, rootPath);
 				break;
 			case SettingsActionKind.SetAllExtensions:
 				Assert.NotEqual(action.IsChecked!.Value, viewModel.AllExtensionsChecked);
@@ -938,14 +876,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			.ToArray();
 		AssertSequenceEqual(expectedSelectedIgnoreIds, selectedIgnoreIds, $"{stepName}: runtime ignore selection");
 
-		var expectedRoots = expected.RootOptions?
-			.Select(static option => (option.Name, option.IsChecked))
-			.ToArray() ?? [];
-		var actualRoots = viewModel.RootFolders
-			.Select(static option => (option.Name, option.IsChecked))
-			.ToArray();
-		AssertSequenceEqual(expectedRoots, actualRoots, $"{stepName}: root section");
-
 		var expectedExtensions = expected.EffectiveExtensionOptions
 			.Select(static option => (option.Name, option.IsChecked))
 			.ToArray();
@@ -962,15 +892,11 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			.ToArray();
 		AssertSequenceEqual(expectedIgnore, actualIgnore, $"{stepName}: ignore section");
 
-		Assert.Equal(expectedRoots.Length == 0 || expectedRoots.All(static option => option.IsChecked),
-			viewModel.AllRootFoldersChecked);
 		Assert.Equal(expectedExtensions.Length > 0 && expectedExtensions.All(static option => option.IsChecked),
 			viewModel.AllExtensionsChecked);
 		Assert.Equal(AreAllPathIgnoreOptionsChecked(expectedIgnore),
 			viewModel.AllIgnoreChecked);
 
-		Assert.Equal(expectedRoots.Length,
-			expectedRoots.Select(static option => option.Name).Distinct(PathComparer.Default).Count());
 		Assert.Equal(expectedExtensions.Length,
 			expectedExtensions.Select(static option => option.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
 		Assert.Equal(expectedIgnore.Length, expectedIgnore.Select(static option => option.Id).Distinct().Count());
@@ -999,10 +925,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		SelectionRefreshSnapshot expected,
 		string stepName)
 	{
-		var actualSelectedRoots = viewModel.RootFolders
-			.Where(static option => option.IsChecked)
-			.Select(static option => option.Name)
-			.ToHashSet(PathComparer.Default);
+		var actualSelectedRoots = coordinator.GetProjectScanRoots().ToHashSet(PathComparer.Default);
 		var actualSelectedExtensions = viewModel.Extensions
 			.Where(static option => option.IsChecked)
 			.Select(static option => option.Name)
@@ -1025,16 +948,14 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			rootPath,
 			actualSelectedRoots,
 			actualSelectedExtensions,
-			actualSelectedIgnoreOptions,
-			viewModel.RootFolders);
+			actualSelectedIgnoreOptions);
 	}
 
 	private static void AssertTreeFilterContracts(
 		string rootPath,
 		IReadOnlySet<string> selectedRoots,
 		IReadOnlySet<string> selectedExtensions,
-		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
-		IEnumerable<SelectionOptionViewModel> rootOptions)
+		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions)
 	{
 		var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
 		var ignoreRules = ignoreRulesService.Build(rootPath, selectedIgnoreOptions, selectedRoots);
@@ -1047,13 +968,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		var selectedIgnoreSet = selectedIgnoreOptions.ToHashSet();
 		bool RootSelected(string name) => selectedRoots.Contains(name);
 		bool ExtensionSelected(string extension) => selectedExtensions.Contains(extension);
-
-		foreach (var uncheckedRoot in rootOptions.Where(static option => !option.IsChecked))
-		{
-			Assert.DoesNotContain(relativePaths, relativePath =>
-				relativePath.Equals(uncheckedRoot.Name, PathComparison) ||
-				relativePath.StartsWith(uncheckedRoot.Name + "/", PathComparison));
-		}
 
 		var artifactsIgnored = ignoreRules.IsGitIgnored(
 			Path.Combine(rootPath, "artifacts"),
@@ -1250,10 +1164,8 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 	{
 		return string.Join(
 			"|",
-			viewModel.AllRootFoldersChecked,
 			viewModel.AllExtensionsChecked,
 			viewModel.AllIgnoreChecked,
-			string.Join(";", viewModel.RootFolders.Select(static option => $"{option.Name}:{option.IsChecked}")),
 			string.Join(";", viewModel.Extensions.Select(static option => $"{option.Name}:{option.IsChecked}")),
 			string.Join(";", viewModel.IgnoreOptions.Select(static option => $"{option.Id}:{option.Label}:{option.IsChecked}")));
 	}
@@ -1274,7 +1186,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		SelectionSyncCoordinator coordinator,
 		MainWindowViewModel viewModel)
 	{
-		coordinator.HookOptionListeners(viewModel.RootFolders);
 		coordinator.HookOptionListeners(viewModel.Extensions);
 		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
 	}
@@ -1309,11 +1220,8 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 	private enum SettingsActionKind
 	{
-		ToggleRoot,
-		ToggleRootIfVisible,
 		ToggleExtension,
 		ToggleIgnore,
-		SetAllRoots,
 		SetAllExtensions,
 		SetAllIgnore,
 		Checkpoint
@@ -1325,14 +1233,9 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		IgnoreOptionId? IgnoreOptionId = null,
 		bool? IsChecked = null)
 	{
-		public static SettingsAction ToggleRoot(string name) => new(SettingsActionKind.ToggleRoot, Name: name);
-		public static SettingsAction ToggleRootIfVisible(string name) =>
-			new(SettingsActionKind.ToggleRootIfVisible, Name: name);
 		public static SettingsAction ToggleExtension(string name) => new(SettingsActionKind.ToggleExtension, Name: name);
 		public static SettingsAction ToggleIgnore(IgnoreOptionId optionId) =>
 			new(SettingsActionKind.ToggleIgnore, IgnoreOptionId: optionId);
-		public static SettingsAction SetAllRoots(bool isChecked) =>
-			new(SettingsActionKind.SetAllRoots, IsChecked: isChecked);
 		public static SettingsAction SetAllExtensions(bool isChecked) =>
 			new(SettingsActionKind.SetAllExtensions, IsChecked: isChecked);
 		public static SettingsAction SetAllIgnore(bool isChecked) =>
@@ -1343,10 +1246,9 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		{
 			return Kind switch
 			{
-				SettingsActionKind.ToggleRoot or SettingsActionKind.ToggleRootIfVisible or
-					SettingsActionKind.ToggleExtension => $"{Kind}:{Name}",
+				SettingsActionKind.ToggleExtension => $"{Kind}:{Name}",
 				SettingsActionKind.ToggleIgnore => $"{Kind}:{IgnoreOptionId}",
-				SettingsActionKind.SetAllRoots or SettingsActionKind.SetAllExtensions or SettingsActionKind.SetAllIgnore =>
+				SettingsActionKind.SetAllExtensions or SettingsActionKind.SetAllIgnore =>
 					$"{Kind}:{IsChecked}",
 				_ => Kind.ToString()
 			};
@@ -1357,15 +1259,12 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 	{
 		private readonly string _rootPath;
 		private readonly WorkflowServices _services;
-		private readonly Dictionary<string, bool> _rootStates;
 		private readonly Dictionary<string, bool> _extensionStates;
 		private readonly Dictionary<IgnoreOptionId, bool> _ignoreStates;
-		private bool _allRootsChecked;
 		private bool _allExtensionsChecked;
 		private bool? _ignoreAllPreference;
 		private RefreshRoute _nextRefreshRoute;
 		private bool _hasPendingRefresh;
-		private bool _skipNextRecompute;
 
 		private SettingsIslandOracle(
 			string rootPath,
@@ -1375,24 +1274,16 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			_rootPath = rootPath;
 			_services = services;
 			CurrentSnapshot = baseline;
-			_rootStates = baseline.RootOptions?.ToDictionary(
-				static option => option.Name,
-				static option => option.IsChecked,
-				PathComparer.Default) ?? new Dictionary<string, bool>(PathComparer.Default);
 			_extensionStates = baseline.ExtensionOptions.ToDictionary(
 				static option => option.Name,
 				static option => option.IsChecked,
 				StringComparer.OrdinalIgnoreCase);
 			_ignoreStates = new Dictionary<IgnoreOptionId, bool>(baseline.IgnoreOptionStateCache);
-			_allRootsChecked = baseline.RootOptions is null ||
-			                   baseline.RootOptions.Count == 0 ||
-			                   baseline.RootOptions.All(static option => option.IsChecked);
 			_allExtensionsChecked = baseline.EffectiveExtensionOptions.Count > 0 &&
 			                        baseline.EffectiveExtensionOptions.All(static option => option.IsChecked);
 		}
 
 		public SelectionRefreshSnapshot CurrentSnapshot { get; private set; }
-		public IReadOnlyDictionary<string, bool> RootStates => _rootStates;
 		public IReadOnlyDictionary<string, bool> ExtensionStates => _extensionStates;
 		public IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreStates => _ignoreStates;
 
@@ -1409,22 +1300,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		{
 			switch (action.Kind)
 			{
-			case SettingsActionKind.ToggleRoot:
-				ToggleVisibleRoot(action.Name!);
-				PromoteRefreshRoute(RefreshRoute.Live);
-				break;
-			case SettingsActionKind.ToggleRootIfVisible:
-				if ((CurrentSnapshot.RootOptions ?? []).Any(option =>
-				    string.Equals(option.Name, action.Name, StringComparison.Ordinal)))
-				{
-					ToggleVisibleRoot(action.Name!);
-					PromoteRefreshRoute(RefreshRoute.Live);
-				}
-				else
-				{
-					_skipNextRecompute = true;
-				}
-				break;
 				case SettingsActionKind.ToggleExtension:
 					ToggleVisibleExtension(action.Name!);
 					PromoteRefreshRoute(RefreshRoute.Live);
@@ -1437,10 +1312,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 							? RefreshRoute.Live
 							: RefreshRoute.Full);
 					}
-					break;
-				case SettingsActionKind.SetAllRoots:
-					SetAllVisibleRoots(action.IsChecked!.Value);
-					PromoteRefreshRoute(RefreshRoute.Live);
 					break;
 				case SettingsActionKind.SetAllExtensions:
 					SetAllVisibleExtensions(action.IsChecked!.Value);
@@ -1459,12 +1330,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 		public SelectionRefreshSnapshot Recompute()
 		{
-			if (_skipNextRecompute && !_hasPendingRefresh)
-			{
-				_skipNextRecompute = false;
-				return CurrentSnapshot;
-			}
-			_skipNextRecompute = false;
 			if (!_hasPendingRefresh)
 				return CurrentSnapshot;
 
@@ -1473,65 +1338,14 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				? _services.Engine.ComputeFullRefreshSnapshot(context, CancellationToken.None)
 				: _services.Engine.ComputeLiveRefreshSnapshot(
 					context,
-					CollectCurrentlySelectedVisibleRoots(),
 					CancellationToken.None);
-			var snapshot = computedSnapshot.RootOptions is null
-				? computedSnapshot with
-				{
-					RootOptions = CurrentSnapshot.RootOptions?
-						.Select(option => new SelectionOption(
-							option.Name,
-							_rootStates.GetValueOrDefault(option.Name)))
-						.ToArray()
-				}
-				: computedSnapshot;
-			snapshot = ProjectCheckedRootsToFinalTree(snapshot);
-
+			var snapshot = computedSnapshot;
 			MergeNewlyDiscoveredState(snapshot);
 			SynchronizeMasterStates(snapshot);
 			CurrentSnapshot = snapshot;
 			_nextRefreshRoute = RefreshRoute.Live;
 			_hasPendingRefresh = false;
 			return snapshot;
-		}
-
-		private SelectionRefreshSnapshot ProjectCheckedRootsToFinalTree(SelectionRefreshSnapshot snapshot)
-		{
-			if (snapshot.RootOptions is null || snapshot.RootOptions.Count == 0)
-				return snapshot;
-
-			var selectedRoots = snapshot.RootOptions
-				.Where(static option => option.IsChecked)
-				.Select(static option => option.Name)
-				.ToHashSet(PathComparer.Default);
-			var selectedExtensions = snapshot.EffectiveExtensionOptions
-				.Where(static option => option.IsChecked)
-				.Select(static option => option.Name)
-				.ToHashSet(StringComparer.OrdinalIgnoreCase);
-			var selectedIgnoreOptions = _ignoreStates
-				.Where(static pair => pair.Value)
-				.Select(static pair => pair.Key)
-				.ToHashSet();
-			var ignoreRules = _services.IgnoreRulesService.Build(
-				_rootPath,
-				selectedIgnoreOptions,
-				selectedRoots);
-			var tree = ProjectLoadWorkflowRuntime.CreateBuildTreeUseCase().Execute(
-				new BuildTreeRequest(
-					_rootPath,
-					new TreeFilterOptions(selectedExtensions, selectedRoots, ignoreRules)),
-				CancellationToken.None);
-			var visibleRootNames = tree.Root.Children
-				.Where(static node => node.IsDirectory)
-				.Select(static node => node.DisplayName)
-				.ToHashSet(PathComparer.Default);
-			var projectedOptions = snapshot.RootOptions
-				.Where(option => !option.IsChecked || visibleRootNames.Contains(option.Name))
-				.ToArray();
-
-			return projectedOptions.Length == snapshot.RootOptions.Count
-				? snapshot
-				: snapshot with { RootOptions = projectedOptions };
 		}
 
 		private void PromoteRefreshRoute(RefreshRoute requestedRoute)
@@ -1551,49 +1365,34 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				.Select(static pair => pair.Key)
 				.ToHashSet();
 
-			return new SelectionRefreshContext(
-				Path: _rootPath,
-				PreparedSelectionMode: PreparedSelectionMode.Defaults,
-				AllRootFoldersChecked: _allRootsChecked && !_rootStates.Values.Contains(false),
-				AllExtensionsChecked: _allExtensionsChecked && !_extensionStates.Values.Contains(false),
-				RootSelectionInitialized: true,
-				RootSelectionCache: _rootStates.Where(static pair => pair.Value)
-					.Select(static pair => pair.Key)
-					.ToHashSet(PathComparer.Default),
-				ExtensionsSelectionInitialized: true,
-				ExtensionsSelectionCache: _extensionStates.Where(static pair => pair.Value)
+			return SelectionRefreshContext.ForDesktop(
+				path: _rootPath,
+				preparedSelectionMode: PreparedSelectionMode.Defaults,
+				allExtensionsChecked: _allExtensionsChecked && !_extensionStates.Values.Contains(false),
+				extensionsSelectionInitialized: true,
+				extensionsSelectionCache: _extensionStates.Where(static pair => pair.Value)
 					.Select(static pair => pair.Key)
 					.ToHashSet(StringComparer.OrdinalIgnoreCase),
-				IgnoreSelectionInitialized: true,
-				IgnoreSelectionCache: selectedIgnoreIds,
-				IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>(_ignoreStates),
-				IgnoreAllPreference: _ignoreAllPreference,
-				CurrentSnapshotState: new IgnoreSectionSnapshotState(
+				ignoreSelectionInitialized: true,
+				ignoreSelectionCache: selectedIgnoreIds,
+				ignoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>(_ignoreStates),
+				ignoreAllPreference: _ignoreAllPreference,
+				currentSnapshotState: new IgnoreSectionSnapshotState(
 					CurrentSnapshot.HasIgnoreOptionCounts,
 					CurrentSnapshot.IgnoreOptionCounts,
 					CurrentSnapshot.ControllerImpactCounts,
 					CurrentSnapshot.ExtensionlessEntriesCount > 0,
 					CurrentSnapshot.ExtensionlessEntriesCount,
 					CurrentSnapshot.GitEvidence),
-				RootOptionStateCache: new Dictionary<string, bool>(_rootStates, PathComparer.Default),
-				ExtensionOptionStateCache: new Dictionary<string, bool>(
+				extensionOptionStateCache: new Dictionary<string, bool>(
 					_extensionStates,
 					StringComparer.OrdinalIgnoreCase),
-				IgnoreOptionStateCacheIsComplete: true,
-				CaptureTreeInventory: captureTreeInventory,
-				CurrentRootOptions: CurrentSnapshot.RootOptions?
-					.Select(option => new SelectionOption(
-						option.Name,
-						_rootStates.GetValueOrDefault(option.Name)))
-					.ToArray());
-		}
-
-		private HashSet<string> CollectCurrentlySelectedVisibleRoots()
-		{
-			return (CurrentSnapshot.RootOptions ?? [])
-				.Where(option => _rootStates.GetValueOrDefault(option.Name))
-				.Select(static option => option.Name)
-				.ToHashSet(PathComparer.Default);
+				ignoreOptionStateCacheIsComplete: true,
+				captureTreeInventory: captureTreeInventory,
+				currentScanRootOptions: CurrentSnapshot.RootOptions?
+					.Select(static option => new SelectionOption(option.Name, true))
+					.ToArray(),
+				extensionSelectionIsExplicit: false);
 		}
 
 		private static bool IsLiveIgnoreOption(IgnoreOptionId optionId)
@@ -1602,15 +1401,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				or IgnoreOptionId.DotFiles
 				or IgnoreOptionId.EmptyFiles
 				or IgnoreOptionId.ExtensionlessFiles;
-		}
-
-		private void ToggleVisibleRoot(string name)
-		{
-			Assert.Contains(CurrentSnapshot.RootOptions ?? [], option =>
-				string.Equals(option.Name, name, StringComparison.Ordinal));
-			_rootStates[name] = !_rootStates[name];
-			_allRootsChecked = (CurrentSnapshot.RootOptions ?? [])
-				.All(option => _rootStates.GetValueOrDefault(option.Name));
 		}
 
 		private void ToggleVisibleExtension(string name)
@@ -1649,13 +1439,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			};
 		}
 
-		private void SetAllVisibleRoots(bool isChecked)
-		{
-			foreach (var option in CurrentSnapshot.RootOptions ?? [])
-				_rootStates[option.Name] = isChecked;
-			_allRootsChecked = isChecked;
-		}
-
 		private void SetAllVisibleExtensions(bool isChecked)
 		{
 			foreach (var option in CurrentSnapshot.EffectiveExtensionOptions)
@@ -1675,9 +1458,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 		private void MergeNewlyDiscoveredState(SelectionRefreshSnapshot snapshot)
 		{
-			foreach (var option in snapshot.RootOptions ?? [])
-				AssertOrAddState(_rootStates, option.Name, option.IsChecked);
-
 			foreach (var option in snapshot.ExtensionOptions)
 				AssertOrAddState(_extensionStates, option.Name, option.IsChecked);
 
@@ -1708,9 +1488,6 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 
 		private void SynchronizeMasterStates(SelectionRefreshSnapshot snapshot)
 		{
-			_allRootsChecked = snapshot.RootOptions is null ||
-			                   snapshot.RootOptions.Count == 0 ||
-			                   snapshot.RootOptions.All(static option => option.IsChecked);
 			_allExtensionsChecked = snapshot.EffectiveExtensionOptions.Count > 0 &&
 			                        snapshot.EffectiveExtensionOptions.All(static option => option.IsChecked);
 		}

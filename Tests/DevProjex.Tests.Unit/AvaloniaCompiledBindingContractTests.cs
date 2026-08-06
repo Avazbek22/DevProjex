@@ -76,10 +76,35 @@ public sealed class AvaloniaCompiledBindingContractTests
 		var root = Assert.IsType<XElement>(document.Root);
 		var avaloniaNamespace = root.Name.Namespace;
 
-		Assert.Equal(4, root.Descendants(avaloniaNamespace + "ListBox").Count());
-		Assert.Equal(4, root.Descendants(avaloniaNamespace + "VirtualizingStackPanel").Count());
+		Assert.Equal(3, root.Descendants(avaloniaNamespace + "ListBox").Count());
+		Assert.Equal(3, root.Descendants(avaloniaNamespace + "VirtualizingStackPanel").Count());
 		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsControl"));
 		Assert.Empty(root.Descendants(avaloniaNamespace + "ItemsRepeater"));
+	}
+
+	[Fact]
+	public void SettingsPanel_ExposesContentExclusionsAndFileTypes()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"SettingsPanelView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var xamlNamespace = XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml");
+		var controlNames = root
+			.Descendants()
+			.Select(element =>
+				element.Attribute("Name")?.Value ??
+				element.Attribute(xamlNamespace + "Name")?.Value)
+			.Where(static name => name is not null)
+			.ToHashSet(StringComparer.Ordinal);
+
+		Assert.Contains("ContentProcessingOptionsList", controlNames);
+		Assert.Contains("IgnoreOptionsList", controlNames);
+		Assert.Contains("ExtensionsList", controlNames);
 	}
 
 	[Fact]

@@ -28,38 +28,6 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 	}
 
 	[Fact]
-	public void Load_DefaultSelection_ReportsOnlyRootFoldersPresentInProjectedTree()
-	{
-		using var temp = new TemporaryDirectory();
-		temp.CreateFile("App.csproj", "<Project />\n");
-		temp.CreateFile("root-noise.tmp", "not a directory\n");
-		temp.CreateFile(Path.Combine("src", "level-1", "level-2", "App.cs"), "class App {}\n");
-		Directory.CreateDirectory(Path.Combine(temp.Path, "ansel"));
-		foreach (var artifactRoot in new[] { "Infrastructure_artifacts_temp", "avaloniaTemp", "generated-temp" })
-		{
-			temp.CreateFile(
-				Path.Combine(artifactRoot, "temp-build", "obj", "Release", "net10.0", "Generated.g.cs"),
-				"generated\n");
-		}
-		var service = CreateService();
-
-		var loaded = service.Load(
-			new ProjectAnalysisRequest(temp.Path),
-			TestContext.Current.CancellationToken);
-
-		Assert.Equal(["src"], loaded.AvailableRootFolders);
-		Assert.Equal(["src"], loaded.SelectedRootFolders);
-		Assert.Equal(
-			loaded.AvailableRootFolders,
-			loaded.Tree.Root.Children
-				.Where(static child => child.IsDirectory)
-				.Select(static child => child.DisplayName));
-		Assert.Equal(
-			loaded.AvailableRootFolders.Count,
-			loaded.AvailableRootFolders.Distinct(PathComparer.Default).Count());
-	}
-
-	[Fact]
 	public void Load_ExplicitAllIgnoreOff_EmptyAndNestedRootsMatchProjectedTree()
 	{
 		using var temp = new TemporaryDirectory();
@@ -85,6 +53,24 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 		Assert.Equal(loaded.AvailableRootFolders, loaded.SelectedRootFolders);
 		Assert.Equal(loaded.AvailableRootFolders, treeRoots);
 		Assert.Equal(treeRoots.Length, treeRoots.Distinct(PathComparer.Default).Count());
+	}
+
+	[Fact]
+	public async Task AnalyzeAsync_DefaultScopeReportsEveryEffectiveStructuralRoot()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("web", "app.ts"), "export const app = true;\n");
+		var service = CreateService();
+
+		var report = await service.AnalyzeAsync(
+			new ProjectAnalysisRequest(
+				RootPath: temp.Path,
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(["src", "web"], report.Inventory.AvailableRootFolders.Order(PathComparer.Default));
+		Assert.Equal(report.Inventory.AvailableRootFolders, report.Selection.SelectedRootFolders);
 	}
 
 	[Fact]

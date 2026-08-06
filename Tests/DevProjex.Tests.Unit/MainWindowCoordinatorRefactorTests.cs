@@ -1216,55 +1216,6 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Same(previousProject, restored);
     }
 
-    [Fact]
-    public void ProjectProfilePersistenceCoordinator_PersistsOnlyLocalFoldersAndFlushesPendingSave()
-    {
-        var viewModel = CreateViewModel();
-        var store = new FlakyProjectProfileStore();
-        var selectionCoordinator = CreateSelectionCoordinator(viewModel);
-        var coordinator = new ProjectProfilePersistenceCoordinator(viewModel, selectionCoordinator, store);
-
-        viewModel.ProjectSourceType = ProjectSourceType.GitClone;
-        coordinator.PersistIfNeeded(@"C:\Repo");
-
-        Assert.Equal(0, store.SaveAttempts);
-
-        viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("docs", false));
-        viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
-        viewModel.Extensions.Add(new SelectionOptionViewModel(".csv", false));
-        selectionCoordinator.PopulateIgnoreOptionsForRootSelection(["src"], @"C:\Project");
-        viewModel.IgnoreOptions.Single(
-            static option => option.Id == IgnoreOptionId.UseGitIgnore).IsChecked = false;
-        viewModel.IgnoreOptions.Single(
-            static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked = true;
-        viewModel.IgnoreOptions.Single(
-            static option => option.Id == IgnoreOptionId.SmartIgnore).IsChecked = true;
-
-        store.FailNextSave = true;
-        coordinator.PersistIfNeeded(@"C:\Project");
-
-        Assert.Equal(1, store.SaveAttempts);
-        Assert.False(store.HasProfile(@"C:\Project"));
-
-        coordinator.FlushPending();
-
-        Assert.Equal(2, store.SaveAttempts);
-        Assert.True(store.TryLoadProfile(@"C:\Project", out var persisted));
-        Assert.Equal(["src"], persisted.SelectedRootFolders);
-        Assert.Equal([".cs"], persisted.SelectedExtensions);
-        Assert.False(persisted.RootFolderStates!["docs"]);
-        Assert.False(persisted.ExtensionStates![".csv"]);
-        Assert.Contains(IgnoreOptionId.TrackedGitFilesOnly, persisted.SelectedIgnoreOptions);
-        Assert.Contains(IgnoreOptionId.SmartIgnore, persisted.SelectedIgnoreOptions);
-        Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, persisted.SelectedIgnoreOptions);
-        Assert.NotNull(persisted.IgnoreOptionStates);
-        Assert.True(persisted.IgnoreOptionStates![IgnoreOptionId.TrackedGitFilesOnly]);
-        Assert.True(persisted.IgnoreOptionStates[IgnoreOptionId.SmartIgnore]);
-        Assert.False(persisted.IgnoreOptionStates[IgnoreOptionId.UseGitIgnore]);
-    }
-
     private static ProjectLoadCancellationSnapshot CreateProjectLoadSnapshot(bool hadLoadedProjectBefore)
     {
         var viewModel = CreateViewModel();
@@ -1285,11 +1236,9 @@ public sealed class MainWindowCoordinatorRefactorTests
             StatusMetricsVisible: false,
             StatusTreeStatsText: string.Empty,
             StatusContentStatsText: string.Empty,
-            AllRootFoldersChecked: true,
             AllExtensionsChecked: true,
             AllIgnoreChecked: true,
             HasCompleteMetricsBaseline: false,
-            RootFolders: [],
             Extensions: [],
             IgnoreOptions: [])
 		{

@@ -5,6 +5,8 @@ namespace DevProjex.Application.Selection;
 public sealed record SelectionRefreshContext(
     string Path,
     PreparedSelectionMode PreparedSelectionMode,
+    // TODO(cli): Remove the legacy root-selection compatibility fields when --root is revised.
+    // Desktop always supplies the full project scope and does not persist this state.
     bool AllRootFoldersChecked,
     bool AllExtensionsChecked,
     bool RootSelectionInitialized,
@@ -24,4 +26,46 @@ public sealed record SelectionRefreshContext(
     // Explicit CLI collections are closed sets. Persisted settings maps are open-world:
     // known rows retain their state and newly discovered rows receive product defaults.
     bool RootSelectionIsExplicit = false,
-    bool ExtensionSelectionIsExplicit = false);
+    bool ExtensionSelectionIsExplicit = false)
+{
+    private static readonly IReadOnlySet<string> EmptyRootSelection =
+        new HashSet<string>(PathComparer.Default);
+
+    public static SelectionRefreshContext ForDesktop(
+        string path,
+        PreparedSelectionMode preparedSelectionMode,
+        bool allExtensionsChecked,
+        bool extensionsSelectionInitialized,
+        IReadOnlySet<string> extensionsSelectionCache,
+        bool ignoreSelectionInitialized,
+        IReadOnlySet<IgnoreOptionId> ignoreSelectionCache,
+        IReadOnlyDictionary<IgnoreOptionId, bool> ignoreOptionStateCache,
+        bool? ignoreAllPreference,
+        IgnoreSectionSnapshotState currentSnapshotState,
+        IReadOnlyDictionary<string, bool>? extensionOptionStateCache,
+        bool ignoreOptionStateCacheIsComplete,
+        bool captureTreeInventory,
+        IReadOnlyList<SelectionOption>? currentScanRootOptions,
+        bool extensionSelectionIsExplicit) =>
+        new(
+            Path: path,
+            PreparedSelectionMode: preparedSelectionMode,
+            AllRootFoldersChecked: true,
+            AllExtensionsChecked: allExtensionsChecked,
+            RootSelectionInitialized: false,
+            RootSelectionCache: EmptyRootSelection,
+            ExtensionsSelectionInitialized: extensionsSelectionInitialized,
+            ExtensionsSelectionCache: extensionsSelectionCache,
+            IgnoreSelectionInitialized: ignoreSelectionInitialized,
+            IgnoreSelectionCache: ignoreSelectionCache,
+            IgnoreOptionStateCache: ignoreOptionStateCache,
+            IgnoreAllPreference: ignoreAllPreference,
+            CurrentSnapshotState: currentSnapshotState,
+            RootOptionStateCache: null,
+            ExtensionOptionStateCache: extensionOptionStateCache,
+            IgnoreOptionStateCacheIsComplete: ignoreOptionStateCacheIsComplete,
+            CaptureTreeInventory: captureTreeInventory,
+            CurrentRootOptions: currentScanRootOptions,
+            RootSelectionIsExplicit: false,
+            ExtensionSelectionIsExplicit: extensionSelectionIsExplicit);
+}

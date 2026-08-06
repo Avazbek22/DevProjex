@@ -45,6 +45,13 @@ project inventory, effective selection, metrics, diagnostics, and the
 deterministic context fingerprint available to the current engine. v1 does not
 publish a timings field.
 
+`selection.selectedRootFolders` is the validated structural root scope applied
+to that analysis. When no explicit CLI root override is supplied, it contains
+all effective project roots. An explicit `--root` override restricts it to the
+validated requested subset. `inventory.availableRootFolders` remains the set
+discovered before that explicit restriction. The removed Desktop root selector
+does not restrict analysis in the current model.
+
 When Hide Secrets is enabled, analysis adds a top-level `redaction` object with
 `matchedCount`, `redactedCount`, and a non-safety `notice`. Zero means the pinned
 rules matched nothing; it never means that the project is safe.

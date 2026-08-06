@@ -46,37 +46,6 @@ internal static class SelectionSnapshotContractAssertions
         Assert.True(snapshot.ControllerImpactCounts.SmartIgnore >= 0);
         Assert.True(snapshot.ExtensionlessEntriesCount >= 0);
 
-        AssertCheckedRootsMatchTree(rootPath, ignoreRulesService, snapshot);
-    }
-
-    private static void AssertCheckedRootsMatchTree(
-        string rootPath,
-        IgnoreRulesService ignoreRulesService,
-        SelectionRefreshSnapshot snapshot)
-    {
-        var selectedRoots = ProjectLoadWorkflowRefreshHarness.CollectCheckedRootNames(snapshot);
-        var selectedExtensions = snapshot.EffectiveExtensionOptions
-            .Where(static option => option.IsChecked)
-            .Select(static option => option.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var selectedIgnoreOptions = ProjectLoadWorkflowRefreshHarness.CollectCheckedIgnoreOptionIds(snapshot);
-        var rules = ignoreRulesService.Build(rootPath, selectedIgnoreOptions, selectedRoots);
-        var tree = new TreeBuilder().Build(
-            Assert.IsType<ProjectTreeInventorySnapshot>(snapshot.TreeInventory),
-            new TreeFilterOptions(
-                AllowedExtensions: selectedExtensions,
-                AllowedRootFolders: selectedRoots,
-                IgnoreRules: rules),
-            TestContext.Current.CancellationToken);
-        var treeRoots = tree.Root.Children
-            .Where(static child => child.IsDirectory)
-            .Select(static child => child.Name)
-            .ToHashSet(PathComparer.Default);
-
-        Assert.True(
-            selectedRoots.SetEquals(treeRoots),
-            $"Checked root options [{string.Join(", ", selectedRoots.Order(PathComparer.Default))}] " +
-            $"must equal tree roots [{string.Join(", ", treeRoots.Order(PathComparer.Default))}].");
     }
 
     private static void AssertUnique(

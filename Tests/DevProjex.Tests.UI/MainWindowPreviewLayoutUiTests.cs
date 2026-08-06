@@ -47,8 +47,7 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
             foreach (var listName in new[]
                      {
                          "IgnoreOptionsList",
-                         "ExtensionsList",
-                         "RootFoldersList"
+                         "ExtensionsList"
                      })
             {
                 var listBox = UiTestDriver.GetRequiredControl<ListBox>(window, listName);

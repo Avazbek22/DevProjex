@@ -21,26 +21,22 @@ public sealed partial class SelectionSyncCoordinator(
     : IDisposable
 {
     // Store collection references for proper cleanup
-    private ObservableCollection<SelectionOptionViewModel>? _hookedRootFolders;
     private ObservableCollection<SelectionOptionViewModel>? _hookedExtensions;
     private ObservableCollection<IgnoreOptionViewModel>? _hookedIgnoreOptions;
-    private readonly HashSet<SelectionOptionViewModel> _subscribedRootFolderItems =
-        new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<SelectionOptionViewModel> _subscribedExtensionItems =
         new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<IgnoreOptionViewModel> _subscribedIgnoreItems =
         new(ReferenceEqualityComparer.Instance);
 
     // Named handlers for proper unsubscription
-    private NotifyCollectionChangedEventHandler? _rootFoldersCollectionChangedHandler;
     private NotifyCollectionChangedEventHandler? _extensionsCollectionChangedHandler;
     private NotifyCollectionChangedEventHandler? _ignoreOptionsCollectionChangedHandler;
 
     private bool _disposed;
-    private static readonly HashSet<string> EmptyStringSet = new(PathComparer.Default);
 
     private IReadOnlyList<IgnoreOptionDescriptor> _ignoreOptions = [];
     private readonly ProjectSelectionSessionState _session = new();
+    private readonly List<string> _scanRoots = [];
     private bool _hasExtensionlessExtensionEntries;
     private int _extensionlessExtensionEntriesCount;
     private bool _hasIgnoreOptionCounts;
@@ -48,13 +44,10 @@ public sealed partial class SelectionSyncCoordinator(
     private IgnoreControllerImpactCounts _ignoreControllerImpactCounts;
     private GitWorkspaceEvidence _gitWorkspaceEvidence;
 
-    private bool _suppressRootAllCheck;
-    private bool _suppressRootItemCheck;
     private bool _suppressExtensionAllCheck;
     private bool _suppressExtensionItemCheck;
     private bool _suppressIgnoreAllCheck;
     private bool _suppressIgnoreItemCheck;
-    private int _rootScanVersion;
     private int _extensionScanVersion;
     private int _ignoreOptionsVersion;
     private SemaphoreSlim _refreshLock = new(1, 1);
@@ -155,26 +148,12 @@ public sealed partial class SelectionSyncCoordinator(
 
     public void HookOptionListeners(ObservableCollection<SelectionOptionViewModel> options)
     {
-        HashSet<SelectionOptionViewModel> subscribedItems;
-        NotifyCollectionChangedEventHandler? handler;
-        if (_hookedRootFolders is null)
-        {
-            _hookedRootFolders = options;
-            subscribedItems = _subscribedRootFolderItems;
-            handler = CreateSelectionCollectionChangedHandler(options, subscribedItems);
-            _rootFoldersCollectionChangedHandler = handler;
-        }
-        else if (_hookedExtensions is null)
+        if (_hookedExtensions is null)
         {
             _hookedExtensions = options;
-            subscribedItems = _subscribedExtensionItems;
-            handler = CreateSelectionCollectionChangedHandler(options, subscribedItems);
-            _extensionsCollectionChangedHandler = handler;
-        }
-        else if (ReferenceEquals(options, _hookedRootFolders))
-        {
-            SynchronizeSelectionItemSubscriptions(options, _subscribedRootFolderItems);
-            return;
+            _extensionsCollectionChangedHandler = CreateSelectionCollectionChangedHandler(
+                options,
+                _subscribedExtensionItems);
         }
         else if (ReferenceEquals(options, _hookedExtensions))
         {
@@ -183,13 +162,13 @@ public sealed partial class SelectionSyncCoordinator(
         }
         else
         {
-            throw new InvalidOperationException("Only root-folder and extension option collections can be hooked.");
+            throw new InvalidOperationException("Only the extension option collection can be hooked.");
         }
 
         foreach (var item in options)
-            SubscribeSelectionItem(item, subscribedItems);
+            SubscribeSelectionItem(item, _subscribedExtensionItems);
 
-        options.CollectionChanged += handler;
+        options.CollectionChanged += _extensionsCollectionChangedHandler;
     }
 
     private NotifyCollectionChangedEventHandler CreateSelectionCollectionChangedHandler(
@@ -309,21 +288,6 @@ public sealed partial class SelectionSyncCoordinator(
             item.CheckedChanged -= OnIgnoreCheckedChanged;
     }
 
-    public void HandleRootAllChanged(bool isChecked, string? currentPath)
-    {
-        if (_suppressRootAllCheck) return;
-
-        _suppressRootAllCheck = true;
-        viewModel.AllRootFoldersChecked = isChecked;
-        _suppressRootAllCheck = false;
-
-        SetAllChecked(viewModel.RootFolders, isChecked, ref _suppressRootItemCheck);
-        UpdateRootSelectionCache();
-        _session.AdvanceRevision();
-        RequestPendingApplyEvaluation();
-        QueueLiveOptionsRefresh(currentPath, SelectionRefreshOrigin.RootSelection);
-    }
-
     public void HandleExtensionsAllChanged(bool isChecked)
     {
         if (_suppressExtensionAllCheck) return;
@@ -387,9 +351,8 @@ public sealed partial class SelectionSyncCoordinator(
         var extensionScanRules = IgnoreRulesProjection.ForExtensionAvailability(ignoreRules);
         var forceAllExtensionsChecked =
             !ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh();
-        var includeDirectoryToggleProbeRoots =
-            !ShouldSuppressAllTogglesOverride() && ResolveAllRootFoldersCheckedForRefresh();
-        var includeControllerImpactProbeRoots = ShouldIncludeControllerImpactProbeRoots(selectedIgnoreOptions);
+        const bool includeDirectoryToggleProbeRoots = true;
+        const bool includeControllerImpactProbeRoots = true;
         var effectiveExtensionPolicy = BuildEffectiveExtensionPolicyForLiveCounts(forceAllExtensionsChecked);
         return Task.Run(async () =>
         {
@@ -467,58 +430,6 @@ public sealed partial class SelectionSyncCoordinator(
         }, cancellationToken);
     }
 
-    public Task PopulateRootFoldersAsync(string path, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(path)) return Task.CompletedTask;
-        if (IsStalePathRequest(path)) return Task.CompletedTask;
-        var version = Interlocked.Increment(ref _rootScanVersion);
-
-        var hasPreviousSelections = _session.RootFolders.IsInitialized;
-        var prev = hasPreviousSelections
-            ? _session.RootFolders.SnapshotSelectedNames()
-            : new HashSet<string>(PathComparer.Default);
-        var previousRootStates = SnapshotRootOptionStateCacheOrNull(hasPreviousSelections);
-
-        var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
-        var discoveryRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, null);
-        return Task.Run(async () =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (IsStalePathRequest(path)) return;
-
-            // Root folder list does not require full extension scan.
-            var scan = scanOptions.GetRootFolders(path, discoveryRules, cancellationToken);
-            if (scan.RootAccessDenied)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var elevated = await Dispatcher.UIThread.InvokeAsync(() => tryElevateAndRestart(path));
-                if (elevated) return;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, scan.Value);
-            var visibleRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
-                path,
-                scan.Value,
-                ignoreRules,
-                cancellationToken);
-            var options = filterSelectionService.BuildRootFolderOptions(
-                visibleRootFolders,
-                prev,
-                ignoreRules,
-                hasPreviousSelections,
-                previousRootStates);
-            options = ApplyMissingProfileSelectionsFallbackToRootFolders(options, visibleRootFolders, ignoreRules);
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (version != _rootScanVersion) return;
-                if (IsStalePathRequest(path)) return;
-                ApplyRootOptions(options);
-            });
-        }, cancellationToken);
-    }
-
     public async Task PopulateIgnoreOptionsForRootSelectionAsync(
         IReadOnlyCollection<string> rootFolders,
         string? currentPath = null,
@@ -566,10 +477,10 @@ public sealed partial class SelectionSyncCoordinator(
     public void RefreshIgnoreOptionsForCurrentSelection(string? currentPath = null)
     {
         var path = string.IsNullOrWhiteSpace(currentPath) ? currentPathProvider() : currentPath;
-        var selectedRoots = GetSelectedRootFolders();
+        var scanRoots = GetProjectScanRoots();
         var previousSelections = _session.IgnoreOptions.SnapshotSelectedOptions();
         var hasPreviousSelections = _session.IgnoreOptions.IsInitialized;
-        var availability = ResolveIgnoreOptionsAvailability(path, selectedRoots);
+        var availability = ResolveIgnoreOptionsAvailability(path, scanRoots);
         var options = ignoreOptionsService.GetOptions(availability);
         ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
     }
@@ -630,16 +541,9 @@ public sealed partial class SelectionSyncCoordinator(
         SynchronizeStableIgnoreOptionLabels();
     }
 
-    public IReadOnlyCollection<string> GetSelectedRootFolders()
+    public IReadOnlyCollection<string> GetProjectScanRoots()
     {
-        var selected = new List<string>(viewModel.RootFolders.Count);
-        foreach (var option in viewModel.RootFolders)
-        {
-            if (option.IsChecked)
-                selected.Add(option.Name);
-        }
-
-        return selected;
+        return _scanRoots.ToArray();
     }
 
     public void ApplyProjectProfileSelections(string projectPath, ProjectSelectionProfile profile)
@@ -654,16 +558,15 @@ public sealed partial class SelectionSyncCoordinator(
         _session.AdvanceRevision();
 
         // Restore defaults for projects without a saved profile.
-        viewModel.AllRootFoldersChecked = true;
         viewModel.AllExtensionsChecked = true;
         viewModel.AllIgnoreChecked = true;
     }
 
-    public async Task UpdateLiveOptionsFromRootSelectionAsync(
+    public async Task UpdateLiveOptionsForProjectScopeAsync(
         string? currentPath,
         CancellationToken cancellationToken = default)
     {
-        await UpdateLiveOptionsFromRootSelectionCoreAsync(
+        await UpdateLiveOptionsForProjectScopeCoreAsync(
             currentPath,
             expectedRequestVersion: null,
             SelectionRefreshOrigin.Unknown,
@@ -671,18 +574,18 @@ public sealed partial class SelectionSyncCoordinator(
             cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
+    public async Task UpdateLiveOptionsForProjectScopeIfDirtyAsync(
         string? currentPath,
         CancellationToken cancellationToken = default)
     {
         if (!HasDirtySelectionRefresh())
             return;
 
-        await UpdateLiveOptionsFromRootSelectionAsync(currentPath, cancellationToken)
+        await UpdateLiveOptionsForProjectScopeAsync(currentPath, cancellationToken)
             .ConfigureAwait(false);
     }
 
-    private async Task UpdateLiveOptionsFromRootSelectionCoreAsync(
+    private async Task UpdateLiveOptionsForProjectScopeCoreAsync(
         string? currentPath,
         int? expectedRequestVersion,
         SelectionRefreshOrigin origin,
@@ -715,9 +618,7 @@ public sealed partial class SelectionSyncCoordinator(
                 if (TryRestoreKnownSelectionSnapshot(currentPath, origin, changedIgnoreOptionId))
                     return null;
 
-                return new LiveRefreshInput(
-                    CreateSelectionRefreshContext(currentPath),
-                    GetSelectedRootFolders());
+                return new LiveRefreshInput(CreateSelectionRefreshContext(currentPath));
             });
             if (liveInput is null)
                 return;
@@ -725,7 +626,6 @@ public sealed partial class SelectionSyncCoordinator(
             var snapshot = await Task.Run(
                 () => _selectionRefreshEngine.ComputeLiveRefreshSnapshot(
                     liveInput.Context,
-                    liveInput.SelectedRoots,
                     cancellationToken),
                 cancellationToken);
             if (IsSupersededLiveOptionsRequest(expectedRequestVersion))
@@ -757,9 +657,9 @@ public sealed partial class SelectionSyncCoordinator(
         }
     }
 
-    public async Task RefreshRootAndDependentsAsync(string currentPath, CancellationToken cancellationToken = default)
+    public async Task RefreshProjectSelectionAsync(string currentPath, CancellationToken cancellationToken = default)
     {
-        await RefreshRootAndDependentsCoreAsync(
+        await RefreshProjectSelectionCoreAsync(
             currentPath,
             expectedRequestVersion: null,
             changedIgnoreOptionId: null,
@@ -772,17 +672,17 @@ public sealed partial class SelectionSyncCoordinator(
         _ignoreRulesBuildCache.Invalidate();
     }
 
-    public async Task<SelectionRefreshSnapshot?> BuildRootAndDependentsSnapshotAsync(
+    public async Task<SelectionRefreshSnapshot?> BuildProjectSelectionSnapshotAsync(
         string currentPath,
         CancellationToken cancellationToken = default)
     {
-        return await BuildRootAndDependentsSnapshotCoreAsync(
+        return await BuildProjectSelectionSnapshotCoreAsync(
             currentPath,
             expectedRequestVersion: null,
             cancellationToken).ConfigureAwait(false);
     }
 
-    public bool ApplyRootAndDependentsSnapshot(string currentPath, SelectionRefreshSnapshot snapshot)
+    public bool ApplyProjectSelectionSnapshot(string currentPath, SelectionRefreshSnapshot snapshot)
     {
         if (IsStalePathRequest(currentPath) && !HasPreparedSelectionForPath(currentPath))
             return false;
@@ -797,7 +697,7 @@ public sealed partial class SelectionSyncCoordinator(
         return true;
     }
 
-    private async Task RefreshRootAndDependentsCoreAsync(
+    private async Task RefreshProjectSelectionCoreAsync(
         string currentPath,
         int? expectedRequestVersion,
         IgnoreOptionId? changedIgnoreOptionId,
@@ -893,7 +793,7 @@ public sealed partial class SelectionSyncCoordinator(
         }
     }
 
-    private async Task<SelectionRefreshSnapshot?> BuildRootAndDependentsSnapshotCoreAsync(
+    private async Task<SelectionRefreshSnapshot?> BuildProjectSelectionSnapshotCoreAsync(
         string currentPath,
         int? expectedRequestVersion,
         CancellationToken cancellationToken)
@@ -1043,10 +943,6 @@ public sealed partial class SelectionSyncCoordinator(
     /// </summary>
     private void UnsubscribeFromOptionItems()
     {
-        foreach (var item in _subscribedRootFolderItems)
-            item.CheckedChanged -= OnOptionCheckedChanged;
-        _subscribedRootFolderItems.Clear();
-
         foreach (var item in _subscribedExtensionItems)
             item.CheckedChanged -= OnOptionCheckedChanged;
         _subscribedExtensionItems.Clear();
@@ -1087,9 +983,6 @@ public sealed partial class SelectionSyncCoordinator(
         RequestPendingApplyEvaluation();
     }
 
-    public IReadOnlyDictionary<string, bool>? SnapshotRootOptionStatesForPersistence() =>
-        SnapshotRootOptionStateCacheOrNull(_session.RootFolders.IsInitialized);
-
     public IReadOnlyDictionary<string, bool>? SnapshotExtensionOptionStatesForPersistence() =>
         SnapshotExtensionOptionStateCacheOrNull(_session.Extensions.IsInitialized);
 
@@ -1111,8 +1004,8 @@ public sealed partial class SelectionSyncCoordinator(
             return;
 
         var path = currentPathProvider() ?? _session.LastLoadedPath;
-        var selectedRoots = GetSelectedRootFolders();
-        var availability = ResolveIgnoreOptionsAvailability(path, selectedRoots);
+        var scanRoots = GetProjectScanRoots();
+        var availability = ResolveIgnoreOptionsAvailability(path, scanRoots);
         _ignoreOptions = ignoreOptionsService.GetOptions(availability);
         _session.IgnoreOptions.EnsureDefaults(_ignoreOptions);
     }
@@ -1307,21 +1200,7 @@ public sealed partial class SelectionSyncCoordinator(
         if (sender is not SelectionOptionViewModel option)
             return;
 
-        if (viewModel.RootFolders.Contains(option))
-        {
-            if (_suppressRootItemCheck) return;
-
-            SyncAllCheckbox(viewModel.RootFolders, ref _suppressRootAllCheck,
-                value => viewModel.AllRootFoldersChecked = value,
-                emptyValue: true);
-            UpdateRootSelectionCache();
-            _session.AdvanceRevision();
-            RequestPendingApplyEvaluation();
-			selectionContentChanged?.Invoke();
-
-            QueueLiveOptionsRefresh(currentPathProvider(), SelectionRefreshOrigin.RootSelection);
-        }
-        else if (viewModel.Extensions.Contains(option))
+        if (viewModel.Extensions.Contains(option))
         {
             if (_suppressExtensionItemCheck) return;
 
@@ -1505,7 +1384,7 @@ public sealed partial class SelectionSyncCoordinator(
             cancellationToken);
         try
         {
-            await UpdateLiveOptionsFromRootSelectionCoreAsync(
+            await UpdateLiveOptionsForProjectScopeCoreAsync(
                 currentPath,
                 version,
                 origin,
@@ -1542,7 +1421,7 @@ public sealed partial class SelectionSyncCoordinator(
             cancellationToken);
         try
         {
-            await RefreshRootAndDependentsCoreAsync(
+            await RefreshProjectSelectionCoreAsync(
                 currentPath,
                 version,
                 changedIgnoreOptionId,
@@ -1673,39 +1552,17 @@ public sealed partial class SelectionSyncCoordinator(
         RequestPendingApplyEvaluation();
     }
 
-    private void ApplyRootOptions(IReadOnlyList<SelectionOption> options)
+    private void ApplyScanRootOptions(IReadOnlyList<SelectionOption> options)
     {
-        if (SelectionOptionIdentitiesMatch(viewModel.RootFolders, options))
-        {
-            _suppressRootItemCheck = true;
-            try
-            {
-                UpdateSelectionOptionStates(viewModel.RootFolders, options);
-            }
-            finally
-            {
-                _suppressRootItemCheck = false;
-            }
-        }
-        else
-        {
-            var optionViewModels = new List<SelectionOptionViewModel>(options.Count);
-            foreach (var option in options)
-                optionViewModels.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
+        var nextRoots = options
+            .Where(static option => option.IsChecked)
+            .Select(static option => option.Name)
+            .ToArray();
+        if (_scanRoots.SequenceEqual(nextRoots, StringComparer.Ordinal))
+            return;
 
-            _suppressRootItemCheck = true;
-            ReplaceCollectionItems(viewModel.RootFolders, optionViewModels);
-            _suppressRootItemCheck = false;
-        }
-
-        if (!ShouldSuppressAllTogglesOverride() && ResolveAllRootFoldersCheckedForRefresh())
-            SetAllChecked(viewModel.RootFolders, true, ref _suppressRootItemCheck);
-
-        SyncAllCheckbox(viewModel.RootFolders, ref _suppressRootAllCheck,
-            value => viewModel.AllRootFoldersChecked = value,
-            emptyValue: true);
-        UpdateRootSelectionCache();
-        RequestPendingApplyEvaluation();
+        _scanRoots.Clear();
+        _scanRoots.AddRange(nextRoots);
     }
 
     private void ApplyResolvedIgnoreOptions(
@@ -1771,18 +1628,18 @@ public sealed partial class SelectionSyncCoordinator(
         ApplySelectionRefreshSnapshotCore(
             snapshot,
             retainPreviousSnapshot,
-            rootOptionsAreAuthoritative: true);
+            scanRootsAreAuthoritative: true);
 
     private void ApplyLiveSelectionRefreshSnapshot(SelectionRefreshSnapshot snapshot) =>
         ApplySelectionRefreshSnapshotCore(
             snapshot,
             retainPreviousSnapshot: true,
-            rootOptionsAreAuthoritative: false);
+            scanRootsAreAuthoritative: false);
 
     private void ApplySelectionRefreshSnapshotCore(
         SelectionRefreshSnapshot snapshot,
         bool retainPreviousSnapshot,
-        bool rootOptionsAreAuthoritative)
+        bool scanRootsAreAuthoritative)
     {
         // A full/live selection snapshot is the authoritative count-driven ignore state.
         // Invalidate older standalone availability refreshes so they cannot overwrite it.
@@ -1793,7 +1650,7 @@ public sealed partial class SelectionSyncCoordinator(
         {
             _gitWorkspaceEvidence = snapshot.GitEvidence;
             if (snapshot.RootOptions is not null)
-                ApplyRootOptions(snapshot.RootOptions);
+                ApplyScanRootOptions(snapshot.RootOptions);
 
             ApplyExtensionOptions(
                 snapshot.EffectiveExtensionOptions,
@@ -1811,7 +1668,7 @@ public sealed partial class SelectionSyncCoordinator(
         _session.AdvanceRevision();
         MarkSelectionRefreshClean();
         var previousSnapshot = retainPreviousSnapshot ? _stableSelectionSnapshot : null;
-        var appliedSnapshot = CaptureStableSelectionSnapshot(snapshot, rootOptionsAreAuthoritative);
+        var appliedSnapshot = CaptureStableSelectionSnapshot(snapshot, scanRootsAreAuthoritative);
         _stableSelectionSnapshot = appliedSnapshot;
         _reversibleSelectionSnapshot = previousSnapshot is not null &&
                                        PathComparer.Default.Equals(previousSnapshot.Path, appliedSnapshot.Path)
@@ -1821,12 +1678,11 @@ public sealed partial class SelectionSyncCoordinator(
 
     private SelectionRefreshRollbackSnapshot CaptureStableSelectionSnapshot(
         SelectionRefreshSnapshot snapshot,
-        bool rootOptionsAreAuthoritative)
+        bool scanRootsAreAuthoritative)
     {
-        var rootOptions = ResolveStableSelectionOptions(
-            viewModel.RootFolders,
+        var rootOptions = ResolveStableScanRootOptions(
             snapshot.RootOptions,
-            _stableSelectionSnapshot?.RootOptions);
+            _stableSelectionSnapshot?.ScanRootOptions);
         var extensionOptions = ResolveStableSelectionOptions(
             viewModel.Extensions,
             snapshot.EffectiveExtensionOptions,
@@ -1842,19 +1698,12 @@ public sealed partial class SelectionSyncCoordinator(
             snapshot.IgnoreOptionCounts,
             snapshot.ControllerImpactCounts,
             snapshot.IgnoreOptionStateCache,
-            _session.RootFolders.SnapshotSelectedNames(),
-            new Dictionary<string, bool>(
-                _session.RootFolders.OptionStates,
-                PathComparer.Default),
-            _session.RootFolders.IsInitialized,
-            _session.RootFolders.HasFullState,
             _session.Extensions.SnapshotSelectedNames(),
             new Dictionary<string, bool>(
                 _session.Extensions.OptionStates,
                 StringComparer.OrdinalIgnoreCase),
             _session.Extensions.IsInitialized,
             _session.Extensions.HasFullState,
-            viewModel.AllRootFoldersChecked,
             viewModel.AllExtensionsChecked,
             viewModel.AllIgnoreChecked,
             _session.IgnoreOptions.IsInitialized,
@@ -1862,7 +1711,7 @@ public sealed partial class SelectionSyncCoordinator(
             _session.IgnoreOptionStateCacheIsComplete,
             // A live refresh can project known roots but cannot discover roots hidden by
             // its input filters. Structural rollback therefore requires a full snapshot.
-            rootOptionsAreAuthoritative && snapshot.RootOptions is not null,
+            scanRootsAreAuthoritative && snapshot.RootOptions is not null,
             GitEvidence: snapshot.GitEvidence);
     }
 
@@ -1905,7 +1754,7 @@ public sealed partial class SelectionSyncCoordinator(
         SelectionRefreshRollbackSnapshot snapshot)
     {
         return PathComparer.Default.Equals(currentPath, snapshot.Path) &&
-               CurrentRootSelectionMatches(snapshot) &&
+               CurrentScanRootScopeMatches(snapshot) &&
                CurrentExtensionSelectionMatches(snapshot) &&
                CurrentIgnoreSelectionMatches(snapshot);
     }
@@ -1925,15 +1774,15 @@ public sealed partial class SelectionSyncCoordinator(
 
         if (origin == SelectionRefreshOrigin.IgnoreOption &&
             !SelectionRefreshRoutingPolicy.CanUseLiveOptionsRefresh(changedIgnoreOptionId) &&
-            !reversibleSnapshot.HasAuthoritativeRootOptions)
+            !reversibleSnapshot.HasAuthoritativeScanRoots)
         {
             // A live snapshot has no root inventory. Reusing it after a structural
             // ignore reversal could restore roots discovered under different filters.
             return false;
         }
 
-        var rootMatchesKnownState = CurrentRootSelectionMatches(stableSnapshot) ||
-                                    CurrentRootSelectionMatches(reversibleSnapshot);
+        var rootMatchesKnownState = CurrentScanRootScopeMatches(stableSnapshot) ||
+                                    CurrentScanRootScopeMatches(reversibleSnapshot);
         var extensionMatchesKnownState = CurrentExtensionSelectionMatches(stableSnapshot) ||
                                          CurrentExtensionSelectionMatches(reversibleSnapshot);
         var ignoreMatchesKnownState = CurrentIgnoreSelectionMatches(stableSnapshot) ||
@@ -1943,22 +1792,14 @@ public sealed partial class SelectionSyncCoordinator(
         // toggle have no conflicting explicit preferences in the two known states.
         return origin switch
         {
-            SelectionRefreshOrigin.RootSelection =>
-                CurrentRootSelectionMatches(reversibleSnapshot) &&
-                extensionMatchesKnownState &&
-                ignoreMatchesKnownState &&
-                ExtensionPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
-                IgnorePreferencesAreCompatible(stableSnapshot, reversibleSnapshot),
             SelectionRefreshOrigin.ExtensionSelection =>
                 rootMatchesKnownState &&
                 CurrentExtensionSelectionMatches(reversibleSnapshot) &&
                 ignoreMatchesKnownState &&
-                RootPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
                 IgnorePreferencesAreCompatible(stableSnapshot, reversibleSnapshot),
             SelectionRefreshOrigin.IgnoreOption =>
                 rootMatchesKnownState &&
                 extensionMatchesKnownState &&
-                RootPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
                 ExtensionPreferencesAreCompatible(stableSnapshot, reversibleSnapshot) &&
                 CurrentIgnoreSelectionMatchesReversal(
                     stableSnapshot,
@@ -1968,16 +1809,9 @@ public sealed partial class SelectionSyncCoordinator(
         };
     }
 
-    private bool CurrentRootSelectionMatches(SelectionRefreshRollbackSnapshot snapshot)
+    private bool CurrentScanRootScopeMatches(SelectionRefreshRollbackSnapshot snapshot)
     {
-        return viewModel.AllRootFoldersChecked == snapshot.AllRootFoldersChecked &&
-               SelectionOptionStatesMatch(viewModel.RootFolders, snapshot.RootOptions) &&
-               SetStatesMatch(_session.RootFolders.SelectedNames, snapshot.SelectedRootFolders) &&
-               DictionaryStatesMatch(
-                   _session.RootFolders.OptionStates,
-                   snapshot.RootOptionStateCache) &&
-               _session.RootFolders.IsInitialized == snapshot.RootSelectionInitialized &&
-               _session.RootFolders.HasFullState == snapshot.RootOptionStateCacheIsComplete;
+        return ScanRootScopeMatches(snapshot.ScanRootOptions);
     }
 
     private bool CurrentExtensionSelectionMatches(SelectionRefreshRollbackSnapshot snapshot)
@@ -2078,18 +1912,15 @@ public sealed partial class SelectionSyncCoordinator(
     {
         snapshot = RetainUnknownSelectionStates(snapshot);
 
-        _suppressRootAllCheck = true;
         _suppressExtensionAllCheck = true;
         _suppressIgnoreAllCheck = true;
         try
         {
-            viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
             viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
             viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
         }
         finally
         {
-            _suppressRootAllCheck = false;
             _suppressExtensionAllCheck = false;
             _suppressIgnoreAllCheck = false;
         }
@@ -2099,7 +1930,7 @@ public sealed partial class SelectionSyncCoordinator(
         try
         {
             _gitWorkspaceEvidence = snapshot.GitEvidence;
-            ApplyRootOptions(snapshot.RootOptions);
+            ApplyScanRootOptions(snapshot.ScanRootOptions);
             ApplyExtensionOptions(
                 snapshot.ExtensionOptions,
                 snapshot.ExtensionlessEntriesCount,
@@ -2113,12 +1944,6 @@ public sealed partial class SelectionSyncCoordinator(
             EndPendingApplyEvaluationDeferral();
         }
 
-        RestoreSelectionOptionCache(
-            _session.RootFolders,
-            snapshot.SelectedRootFolders,
-            snapshot.RootOptionStateCache,
-            snapshot.RootSelectionInitialized,
-            snapshot.RootOptionStateCacheIsComplete);
         RestoreSelectionOptionCache(
             _session.Extensions,
             snapshot.SelectedExtensions,
@@ -2140,11 +1965,6 @@ public sealed partial class SelectionSyncCoordinator(
     {
         // Visible selections belong to the snapshot, while hidden option preferences
         // must survive until another section makes those options visible again.
-        var rootStates = new Dictionary<string, bool>(
-            snapshot.RootOptionStateCache,
-            PathComparer.Default);
-        RetainUnknownSelectionStates(_session.RootFolders.OptionStates, rootStates);
-
         var extensionStates = new Dictionary<string, bool>(
             snapshot.ExtensionOptionStateCache,
             StringComparer.OrdinalIgnoreCase);
@@ -2154,19 +1974,9 @@ public sealed partial class SelectionSyncCoordinator(
 
         return snapshot with
         {
-            RootOptionStateCache = rootStates,
             ExtensionOptionStateCache = extensionStates
         };
     }
-
-    private static bool RootPreferencesAreCompatible(
-        SelectionRefreshRollbackSnapshot stableSnapshot,
-        SelectionRefreshRollbackSnapshot reversibleSnapshot) =>
-        stableSnapshot.RootSelectionInitialized == reversibleSnapshot.RootSelectionInitialized &&
-        stableSnapshot.RootOptionStateCacheIsComplete == reversibleSnapshot.RootOptionStateCacheIsComplete &&
-        DictionaryStatesAreCompatible(
-            stableSnapshot.RootOptionStateCache,
-            reversibleSnapshot.RootOptionStateCache);
 
     private static bool ExtensionPreferencesAreCompatible(
         SelectionRefreshRollbackSnapshot stableSnapshot,
@@ -2215,6 +2025,37 @@ public sealed partial class SelectionSyncCoordinator(
             captured[index] = new SelectionOption(current[index].Name, current[index].IsChecked);
 
         return captured;
+    }
+
+    private IReadOnlyList<SelectionOption> ResolveStableScanRootOptions(
+        IReadOnlyList<SelectionOption>? primaryCandidate,
+        IReadOnlyList<SelectionOption>? fallbackCandidate)
+    {
+        if (primaryCandidate is not null && ScanRootScopeMatches(primaryCandidate))
+            return primaryCandidate;
+        if (fallbackCandidate is not null && ScanRootScopeMatches(fallbackCandidate))
+            return fallbackCandidate;
+
+        return SnapshotScanRootOptions();
+    }
+
+    private bool ScanRootScopeMatches(IReadOnlyList<SelectionOption> candidate)
+    {
+        var rootIndex = 0;
+        foreach (var option in candidate)
+        {
+            if (!option.IsChecked)
+                continue;
+            if (rootIndex >= _scanRoots.Count ||
+                !string.Equals(_scanRoots[rootIndex], option.Name, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            rootIndex++;
+        }
+
+        return rootIndex == _scanRoots.Count;
     }
 
     private IReadOnlyList<ResolvedIgnoreOptionState> ResolveStableIgnoreOptions(
@@ -2483,45 +2324,33 @@ public sealed partial class SelectionSyncCoordinator(
     }
 
     private SelectionRefreshContext CreateSelectionRefreshContext(string path, bool captureTreeInventory = false) =>
-        new(
-            Path: path,
-            PreparedSelectionMode: _session.PreparedMode,
-            AllRootFoldersChecked: ResolveAllRootFoldersCheckedForRefresh(),
-            AllExtensionsChecked: ResolveAllExtensionsCheckedForRefresh(),
-            RootSelectionInitialized: _session.RootFolders.IsInitialized,
-            RootSelectionCache: _session.RootFolders.SnapshotSelectedNames(),
-            ExtensionsSelectionInitialized: _session.Extensions.IsInitialized,
-            ExtensionsSelectionCache: _session.Extensions.SnapshotSelectedNames(),
-            IgnoreSelectionInitialized: _session.IgnoreOptions.IsInitialized,
-            IgnoreSelectionCache: SnapshotRuntimeSelectedIgnoreOptions(),
-            IgnoreOptionStateCache: _session.IgnoreOptions.SnapshotStateCache(),
-            IgnoreAllPreference: _session.IgnoreOptions.AllPreference,
-            CurrentSnapshotState: CaptureIgnoreSectionSnapshotState(),
-            RootOptionStateCache: SnapshotRootOptionStateCacheOrNull(isInitialized: true),
-            ExtensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
-            IgnoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete,
-            CaptureTreeInventory: captureTreeInventory,
-            CurrentRootOptions: SnapshotVisibleRootOptions(),
-            RootSelectionIsExplicit: _session.RootSelectionIsExplicit,
-            ExtensionSelectionIsExplicit: _session.ExtensionSelectionIsExplicit);
+        SelectionRefreshContext.ForDesktop(
+            path: path,
+            preparedSelectionMode: _session.PreparedMode,
+            allExtensionsChecked: ResolveAllExtensionsCheckedForRefresh(),
+            extensionsSelectionInitialized: _session.Extensions.IsInitialized,
+            extensionsSelectionCache: _session.Extensions.SnapshotSelectedNames(),
+            ignoreSelectionInitialized: _session.IgnoreOptions.IsInitialized,
+            ignoreSelectionCache: SnapshotRuntimeSelectedIgnoreOptions(),
+            ignoreOptionStateCache: _session.IgnoreOptions.SnapshotStateCache(),
+            ignoreAllPreference: _session.IgnoreOptions.AllPreference,
+            currentSnapshotState: CaptureIgnoreSectionSnapshotState(),
+            extensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
+            ignoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete,
+            captureTreeInventory: captureTreeInventory,
+            currentScanRootOptions: _scanRoots.Count == 0
+                ? null
+                : SnapshotScanRootOptions(),
+            extensionSelectionIsExplicit: _session.ExtensionSelectionIsExplicit);
 
-    private IReadOnlyList<SelectionOption> SnapshotVisibleRootOptions()
+    private IReadOnlyList<SelectionOption> SnapshotScanRootOptions()
     {
-        var options = new SelectionOption[viewModel.RootFolders.Count];
-        for (var index = 0; index < viewModel.RootFolders.Count; index++)
-        {
-            var option = viewModel.RootFolders[index];
-            options[index] = new SelectionOption(option.Name, option.IsChecked);
-        }
+        var options = new SelectionOption[_scanRoots.Count];
+        for (var index = 0; index < _scanRoots.Count; index++)
+            options[index] = new SelectionOption(_scanRoots[index], true);
 
         return options;
     }
-
-    // UI master checkboxes only describe visible rows; refresh policy also needs
-    // explicit states retained for rows temporarily hidden by another section.
-    private bool ResolveAllRootFoldersCheckedForRefresh() =>
-        viewModel.AllRootFoldersChecked &&
-        !_session.RootFolders.OptionStates.Values.Contains(false);
 
     private bool ResolveAllExtensionsCheckedForRefresh() =>
         viewModel.AllExtensionsChecked &&
@@ -2571,15 +2400,6 @@ public sealed partial class SelectionSyncCoordinator(
 		return new ExtensionSelectionInclusionPolicy(
             new SelectionStateResolver(previousSelections, stateCache),
             defaultForNewExtension: stateCache is not null);
-    }
-
-    private IReadOnlyDictionary<string, bool>? SnapshotRootOptionStateCacheOrNull(bool isInitialized)
-    {
-        if (!isInitialized)
-            return null;
-
-        return _session.RootFolders.SnapshotOptionStatesOrNull(
-            suppressLegacySelectedOnlyState: ShouldSuppressAllTogglesOverride());
     }
 
     private IReadOnlyDictionary<string, bool>? SnapshotExtensionOptionStateCacheOrNull(bool isInitialized)
@@ -2755,9 +2575,6 @@ public sealed partial class SelectionSyncCoordinator(
         ClearAppliedSelectionState();
 
         // Unsubscribe from collection change events
-        if (_hookedRootFolders is not null && _rootFoldersCollectionChangedHandler is not null)
-            _hookedRootFolders.CollectionChanged -= _rootFoldersCollectionChangedHandler;
-
         if (_hookedExtensions is not null && _extensionsCollectionChangedHandler is not null)
             _hookedExtensions.CollectionChanged -= _extensionsCollectionChangedHandler;
 
@@ -2810,20 +2627,6 @@ public sealed partial class SelectionSyncCoordinator(
     private bool ShouldSuppressAllTogglesOverride()
     {
         return _session.IsPreparedProfile;
-    }
-
-    private bool ShouldIncludeControllerImpactProbeRoots(IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions)
-    {
-        if (selectedIgnoreOptions.Contains(IgnoreOptionId.UseGitIgnore) ||
-            selectedIgnoreOptions.Contains(IgnoreOptionId.TrackedGitFilesOnly) ||
-            selectedIgnoreOptions.Contains(IgnoreOptionId.SmartIgnore))
-        {
-            // Root-level controller impact keeps .gitignore/Smart Ignore visible when the
-            // active controller hides root folders outside the currently selected subset.
-            return true;
-        }
-
-        return !ShouldSuppressAllTogglesOverride() || viewModel.AllRootFoldersChecked;
     }
 
     private bool ResolveIgnoreOptionCheckedState(
@@ -2962,19 +2765,6 @@ public sealed partial class SelectionSyncCoordinator(
             _session.Extensions.SelectedNames,
             options);
 
-    private IReadOnlyList<SelectionOption> ApplyMissingProfileSelectionsFallbackToRootFolders(
-        IReadOnlyList<SelectionOption> options,
-        IReadOnlyList<string> scannedRootFolders,
-        IgnoreRules ignoreRules) =>
-        SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToRootFolders(
-            _session.PreparedMode,
-            _session.RootFolders.SelectedNames,
-            options,
-            scannedRootFolders,
-            ignoreRules,
-            filterSelectionService,
-            EmptyStringSet);
-
     private bool ShouldUseIgnoreDefaultFallback(
         IReadOnlyList<IgnoreOptionDescriptor> options,
         IReadOnlySet<IgnoreOptionId> previousSelections) =>
@@ -2982,11 +2772,5 @@ public sealed partial class SelectionSyncCoordinator(
             _session.PreparedMode,
             options,
             previousSelections);
-
-    private void UpdateRootSelectionCache()
-    {
-        _session.RootFolders.UpdateFromVisibleOptions(
-            viewModel.RootFolders.Select(static option => new SelectionOption(option.Name, option.IsChecked)));
-    }
 
 }

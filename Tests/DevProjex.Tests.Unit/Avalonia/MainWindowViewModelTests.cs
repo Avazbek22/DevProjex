@@ -1,4 +1,4 @@
-﻿namespace DevProjex.Tests.Unit.Avalonia;
+namespace DevProjex.Tests.Unit.Avalonia;
 
 using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
@@ -14,19 +14,6 @@ public sealed class MainWindowViewModelTests
         var localization = new LocalizationService(catalog, AppLanguage.En);
         var helpContentProvider = new HelpContentProvider();
         return new MainWindowViewModel(localization, helpContentProvider);
-    }
-
-    [Fact]
-    public void Constructor_SetsDefaults()
-    {
-        var viewModel = CreateViewModel();
-
-        Assert.True(viewModel.AllExtensionsChecked);
-        Assert.True(viewModel.AllRootFoldersChecked);
-        Assert.True(viewModel.AllIgnoreChecked);
-        Assert.True(viewModel.IsDarkTheme);
-        Assert.True(viewModel.IsTransparentEnabled);
-        Assert.Equal(15, viewModel.TreeFontSize);
     }
 
     [Fact]
@@ -1520,27 +1507,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void AllRootFoldersChecked_Changes()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.AllRootFoldersChecked = false;
-
-        Assert.False(viewModel.AllRootFoldersChecked);
-    }
-
-    [Fact]
-    public void AllRootFoldersChecked_CanToggleTrue()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.AllRootFoldersChecked = false;
-
-        viewModel.AllRootFoldersChecked = true;
-
-        Assert.True(viewModel.AllRootFoldersChecked);
-    }
-
-    [Fact]
     public void AllIgnoreChecked_Changes()
     {
         var viewModel = CreateViewModel();
@@ -1696,17 +1662,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void SettingsAllRootFolders_WhenEmpty_ReturnsBaseText()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        Assert.Equal("All", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
     public void SettingsAllIgnore_WhenHasItems_ReturnsTextWithCount()
     {
         var viewModel = CreateViewModel(new Dictionary<string, string>
@@ -1733,19 +1688,6 @@ public sealed class MainWindowViewModelTests
         viewModel.Extensions.Add(new SelectionOptionViewModel(".ts", true));
 
         Assert.Equal("All (3)", viewModel.SettingsAllExtensions);
-    }
-
-    [Fact]
-    public void SettingsAllRootFolders_WhenHasItems_ReturnsTextWithCount()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-        Assert.Equal("All (1)", viewModel.SettingsAllRootFolders);
     }
 
     [Fact]
@@ -1779,21 +1721,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void SettingsAllRootFolders_WhenItemRemoved_UpdatesCount()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("tests", true));
-
-        viewModel.RootFolders.RemoveAt(0);
-
-        Assert.Equal("All (1)", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
     public void SettingsAllIgnore_WhenCleared_ReturnsBaseText()
     {
         var viewModel = CreateViewModel(new Dictionary<string, string>
@@ -1819,38 +1746,6 @@ public sealed class MainWindowViewModelTests
         viewModel.Extensions.Clear();
 
         Assert.Equal("All", viewModel.SettingsAllExtensions);
-    }
-
-    [Fact]
-    public void SettingsAllRootFolders_WhenCleared_ReturnsBaseText()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-        viewModel.RootFolders.Clear();
-
-        Assert.Equal("All", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
-    public void SettingsAllLabels_AreIndependent()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
-        viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
-        viewModel.Extensions.Add(new SelectionOptionViewModel(".js", true));
-        // RootFolders stays empty
-
-        Assert.Equal("All (1)", viewModel.SettingsAllIgnore);
-        Assert.Equal("All (2)", viewModel.SettingsAllExtensions);
-        Assert.Equal("All", viewModel.SettingsAllRootFolders);
     }
 
     [Fact]
@@ -1909,25 +1804,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void SettingsAllRootFolders_RaisesPropertyChanged_WhenCollectionChanges()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        var raised = false;
-        viewModel.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(viewModel.SettingsAllRootFolders))
-                raised = true;
-        };
-
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-        Assert.True(raised);
-    }
-
-    [Fact]
     public void SettingsAllIgnore_MultipleAdds_UpdatesCorrectly()
     {
         var viewModel = CreateViewModel(new Dictionary<string, string>
@@ -1958,40 +1834,6 @@ public sealed class MainWindowViewModelTests
             viewModel.Extensions.Add(new SelectionOptionViewModel($".ext{i}", true));
             Assert.Equal($"All ({i})", viewModel.SettingsAllExtensions);
         }
-    }
-
-    [Fact]
-    public void SettingsAllRootFolders_MultipleAdds_UpdatesCorrectly()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("tests", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("docs", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("lib", true));
-
-        Assert.Equal("All (4)", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
-    public void UpdateAllCheckboxLabels_ManualCall_UpdatesAllLabels()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
-        viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-        viewModel.UpdateAllCheckboxLabels();
-
-        Assert.Equal("All (1)", viewModel.SettingsAllIgnore);
-        Assert.Equal("All (1)", viewModel.SettingsAllExtensions);
-        Assert.Equal("All (1)", viewModel.SettingsAllRootFolders);
     }
 
     [Fact]
@@ -2039,28 +1881,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void SettingsAllRootFolders_WhenAddAndRemove_UpdatesCorrectly()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        var item1 = new SelectionOptionViewModel("src", true);
-        var item2 = new SelectionOptionViewModel("tests", true);
-
-        viewModel.RootFolders.Add(item1);
-        viewModel.RootFolders.Add(item2);
-        Assert.Equal("All (2)", viewModel.SettingsAllRootFolders);
-
-        viewModel.RootFolders.Remove(item1);
-        Assert.Equal("All (1)", viewModel.SettingsAllRootFolders);
-
-        viewModel.RootFolders.Remove(item2);
-        Assert.Equal("All", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
     public void SettingsAllLabels_LargeCount_FormatsCorrectly()
     {
         var viewModel = CreateViewModel(new Dictionary<string, string>
@@ -2102,20 +1922,6 @@ public sealed class MainWindowViewModelTests
         viewModel.Extensions.Insert(0, new SelectionOptionViewModel(".js", true));
 
         Assert.Equal("All (2)", viewModel.SettingsAllExtensions);
-    }
-
-    [Fact]
-    public void SettingsAllRootFolders_InsertAtIndex_UpdatesCount()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-        viewModel.RootFolders.Insert(0, new SelectionOptionViewModel("tests", true));
-
-        Assert.Equal("All (2)", viewModel.SettingsAllRootFolders);
     }
 
     [Fact]
@@ -2183,26 +1989,6 @@ public sealed class MainWindowViewModelTests
         Assert.True(raised);
     }
 
-    [Fact]
-    public void SettingsAllRootFolders_RaisesPropertyChanged_OnInsert()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        var raised = false;
-        viewModel.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(viewModel.SettingsAllRootFolders))
-                raised = true;
-        };
-
-        viewModel.RootFolders.Insert(0, new SelectionOptionViewModel("src", true));
-
-        Assert.True(raised);
-    }
-
     [Theory]
     [InlineData(1, "All (1)")]
     [InlineData(5, "All (5)")]
@@ -2242,33 +2028,5 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(expected, viewModel.SettingsAllExtensions);
     }
 
-    [Fact]
-    public void AllThreeLabels_IndependentPropertyChangedEvents()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        var ignoreRaised = false;
-        var extensionsRaised = false;
-        var rootFoldersRaised = false;
-
-        viewModel.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(viewModel.SettingsAllIgnore)) ignoreRaised = true;
-            if (e.PropertyName == nameof(viewModel.SettingsAllExtensions)) extensionsRaised = true;
-            if (e.PropertyName == nameof(viewModel.SettingsAllRootFolders)) rootFoldersRaised = true;
-        };
-
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
-
-        // All three should be raised because UpdateAllCheckboxLabels updates all
-        Assert.True(ignoreRaised);
-        Assert.True(extensionsRaised);
-        Assert.True(rootFoldersRaised);
-    }
-
     #endregion
 }
-

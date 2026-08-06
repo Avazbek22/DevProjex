@@ -923,8 +923,7 @@
               <views:SettingsPanelView Name="SettingsPanel"
                                        ApplySettingsRequested="OnApplySettings"
                                        IgnoreAllChanged="OnIgnoreAllChanged"
-                                       ExtensionsAllChanged="OnExtensionsAllChanged"
-                                       RootAllChanged="OnRootAllChanged" />
+                                       ExtensionsAllChanged="OnExtensionsAllChanged" />
             </Border>
           </Grid>
         </Border>

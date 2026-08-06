@@ -77,14 +77,11 @@ public sealed class ProjectProfilePersistenceCoordinator(
     private ProjectSelectionProfile CaptureCurrentProfile()
     {
         return ProjectSelectionProfileBuilder.Create(
-            visibleRootFolders: viewModel.RootFolders.Select(static option => new SelectionOption(option.Name, option.IsChecked)),
             visibleExtensions: viewModel.Extensions.Select(static option => new SelectionOption(option.Name, option.IsChecked)),
             visibleIgnoreOptions: viewModel.IgnoreOptions.Select(static option => new IgnoreSelectionOption(option.Id, option.IsChecked)),
-            cachedRootFolderStates: selectionCoordinator.SnapshotRootOptionStatesForPersistence(),
             cachedExtensionStates: selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
             cachedIgnoreOptionStates: selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
             selectedIgnoreOptions: selectionCoordinator.GetSelectedIgnoreOptionIds(),
-            rootFolderComparer: PathComparer.Default,
             extensionComparer: StringComparer.OrdinalIgnoreCase);
     }
 }

@@ -183,8 +183,8 @@ public sealed class ModernLocalProfileEvolutionContractIntegrationTests
 			new HashSet<string>(["src/App.cs", "web/package.json"], StringComparer.Ordinal),
 			RelativeIncludedFiles(state.Plan));
 
-		// Changing Extensions must close only that island. Roots remain open-world, so a
-		// later repository update can still select a genuinely new root by default.
+		// Changing Extensions must close only that island. Scan roots remain structural,
+		// so directories without a currently selected file type stay in the project scope.
 		await controller.SetExtensionsAsync(state, [".cs"], TestContext.Current.CancellationToken);
 		workspace.CreateFile("project/docs/Guide.cs", "public sealed class Guide {}\n");
 		Directory.SetLastWriteTimeUtc(project, originalRootTimestamp);
@@ -194,9 +194,8 @@ public sealed class ModernLocalProfileEvolutionContractIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(
-			new HashSet<string>(["docs", "src"], PathComparer.Default),
+			new HashSet<string>(["docs", "src", "web"], PathComparer.Default),
 			state.Plan.SelectedRoots.ToHashSet(PathComparer.Default));
-		Assert.Contains("web", state.Plan.Selection.Roots ?? [], PathComparer.Default);
 		Assert.Equal([".cs"], state.Plan.SelectedExtensions);
 		Assert.Equal(
 			new HashSet<string>(["docs/Guide.cs", "src/App.cs"], StringComparer.Ordinal),

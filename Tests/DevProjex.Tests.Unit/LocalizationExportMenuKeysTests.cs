@@ -103,7 +103,7 @@ public sealed class LocalizationExportMenuKeysTests
 	}
 
 	[Fact]
-	public void ProjectCopyMenu_UsesShortParentAndActionSpecificHelpText()
+	public void ProjectCopyMenu_UsesClearActionSpecificHelpText()
 	{
 		var localizationDir = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
 		var english = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "en.json")));
@@ -111,10 +111,18 @@ public sealed class LocalizationExportMenuKeysTests
 
 		Assert.Equal("Export Project", english["Menu.File.ExportProjectCopy"]);
 		Assert.Equal("Экспорт проекта", russian["Menu.File.ExportProjectCopy"]);
-		Assert.StartsWith("Creates a copy of the current tree", english["Menu.File.ExportProjectCopy.Folder.Help"]);
-		Assert.StartsWith("Creates a ZIP archive from the current tree", english["Menu.File.ExportProjectCopy.Zip.Help"]);
-		Assert.StartsWith("Создаёт копию текущего дерева", russian["Menu.File.ExportProjectCopy.Folder.Help"]);
-		Assert.StartsWith("Создаёт ZIP-архив из текущего дерева", russian["Menu.File.ExportProjectCopy.Zip.Help"]);
+		Assert.Equal(
+			"Exports the selected project files and folders to a separate folder. Applies the current selection and processing settings without modifying the source project.",
+			english["Menu.File.ExportProjectCopy.Folder.Help"]);
+		Assert.Equal(
+			"Exports the selected project files and folders to a ZIP archive. Applies the current selection and processing settings without modifying the source project.",
+			english["Menu.File.ExportProjectCopy.Zip.Help"]);
+		Assert.Equal(
+			"Экспортирует выбранные файлы и папки проекта в отдельную папку. Применяет текущие параметры выбора и обработки, не изменяя исходный проект.",
+			russian["Menu.File.ExportProjectCopy.Folder.Help"]);
+		Assert.Equal(
+			"Экспортирует выбранные файлы и папки проекта в ZIP-архив. Применяет текущие параметры выбора и обработки, не изменяя исходный проект.",
+			russian["Menu.File.ExportProjectCopy.Zip.Help"]);
 	}
 
 	[Fact]
