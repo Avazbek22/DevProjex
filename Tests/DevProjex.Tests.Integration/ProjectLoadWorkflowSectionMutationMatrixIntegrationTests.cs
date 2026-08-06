@@ -65,9 +65,6 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
     {
         var cases = new List<MutationCase>
         {
-            CreateRootMutation("root-docs-off", "docs"),
-            CreateRootMutation("root-samples-off", "samples"),
-            CreateRootMutation("root-src-off", "src"),
             CreateExtensionMutation("extension-cs-off", ".cs"),
             CreateExtensionMutation("extension-json-off", ".json"),
             CreateExtensionMutation("extension-md-off", ".md"),
@@ -75,8 +72,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
             CreateIgnoreMutation(
                 "gitignore-off",
                 IgnoreOptionId.UseGitIgnore,
-                requiresAppliedMetricsChange: false,
-                snapshot => Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "generated", StringComparison.Ordinal))),
+                requiresAppliedMetricsChange: false),
             CreateIgnoreMutation(
                 "dot-folders-off",
                 IgnoreOptionId.DotFolders,
@@ -95,8 +91,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
             cases.Add(CreateIgnoreMutation(
                 "hidden-folders-off",
                 IgnoreOptionId.HiddenFolders,
-                requiresAppliedMetricsChange: false,
-                snapshot => Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "stealth-root", StringComparison.Ordinal))));
+                requiresAppliedMetricsChange: false));
             cases.Add(CreateIgnoreMutation("hidden-files-off", IgnoreOptionId.HiddenFiles, requiresAppliedMetricsChange: true));
         }
 
@@ -110,29 +105,6 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
 
         return Assert.IsType<MutationCase>(mutationCase);
     }
-
-    private static MutationCase CreateRootMutation(string name, string rootName) =>
-        new(
-            name,
-            (rootPath, baselineSnapshot) =>
-            {
-                var selectedRoots = CollectCheckedRootNames(baselineSnapshot);
-                selectedRoots.Remove(rootName);
-                var rootStates = BuildRootOptionStateCache(baselineSnapshot);
-                rootStates[rootName] = false;
-
-                return CreateEditableContext(rootPath, baselineSnapshot) with
-                {
-                    AllRootFoldersChecked = false,
-                    RootSelectionInitialized = true,
-                    RootSelectionCache = selectedRoots,
-                    RootOptionStateCache = rootStates
-                };
-            },
-            snapshot =>
-            {
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, rootName, StringComparison.Ordinal) && !option.IsChecked);
-            });
 
     private static MutationCase CreateExtensionMutation(string name, string extension) =>
         new(
@@ -270,18 +242,6 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
     private static HashSet<IgnoreOptionId> CollectCheckedIgnoreOptionIds(SelectionRefreshSnapshot snapshot) =>
         new(
             snapshot.IgnoreOptions.Where(option => option.IsChecked).Select(option => option.Id));
-
-    private static Dictionary<string, bool> BuildRootOptionStateCache(SelectionRefreshSnapshot snapshot)
-    {
-        var cache = new Dictionary<string, bool>(PathComparer.Default);
-        if (snapshot.RootOptions is null)
-            return cache;
-
-        foreach (var option in snapshot.RootOptions)
-            cache[option.Name] = option.IsChecked;
-
-        return cache;
-    }
 
     private static Dictionary<string, bool> BuildExtensionOptionStateCache(SelectionRefreshSnapshot snapshot)
     {

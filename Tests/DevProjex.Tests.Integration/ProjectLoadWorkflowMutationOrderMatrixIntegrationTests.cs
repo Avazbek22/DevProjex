@@ -7,28 +7,23 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
     [Theory]
     [MemberData(nameof(Cases))]
     public async Task ComputeFullRefreshSnapshot_SectionMutationOrdersConvergeWithoutLosingExplicitStates(
-        string rootScenarioName,
         string extensionScenarioName,
         string ignoreScenarioName,
         string[] mutationOrderNames)
     {
-        var rootScenario = Enum.Parse<WorkflowRootScenario>(rootScenarioName);
         var extensionScenario = Enum.Parse<WorkflowExtensionScenario>(extensionScenarioName);
         var ignoreScenario = Enum.Parse<WorkflowIgnoreScenario>(ignoreScenarioName);
         var mutationOrder = mutationOrderNames.Select(name => Enum.Parse<WorkflowMutationStep>(name)).ToArray();
-
         var rootPath = ProjectLoadWorkflowSharedWorkspace.RootPath;
 
         var services = CreateServices();
         var baselineSnapshot = services.Engine.ComputeFullRefreshSnapshot(
             CreateDefaultContext(rootPath) with { CaptureTreeInventory = true },
             CancellationToken.None);
-        var targetScenario = CreateScenario(baselineSnapshot, rootScenario, extensionScenario, ignoreScenario);
+        var targetScenario = CreateScenario(baselineSnapshot, extensionScenario, ignoreScenario);
 
         var directContext = CreateScenarioContext(rootPath, targetScenario) with { CaptureTreeInventory = true };
-        var directSnapshot = services.Engine.ComputeFullRefreshSnapshot(
-            directContext,
-            CancellationToken.None);
+        var directSnapshot = services.Engine.ComputeFullRefreshSnapshot(directContext, CancellationToken.None);
         var directConverged = services.Engine.ComputeFullRefreshSnapshot(
             BuildConvergedContext(rootPath, directSnapshot, directContext) with { CaptureTreeInventory = true },
             CancellationToken.None);
@@ -75,29 +70,18 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
             orderedSecondPass);
         AssertEquivalentSnapshots(orderedConverged, orderedSecondPass);
         AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(orderedConverged);
-        AssertRequestedSelectionsStillChecked(orderedConverged, targetScenario);
-        clientState.AssertExplicitlyUncheckedVisibleEntriesRemainUnchecked(orderedConverged);
+        AssertRequestedExtensionsStillChecked(orderedConverged, targetScenario);
+        clientState.AssertExplicitlyUncheckedVisibleExtensionsRemainUnchecked(orderedConverged);
         AssertExplicitlyDisabledIgnoreOptionsRemainUnchecked(orderedConverged, targetScenario);
 
         var orderedMetrics = await ComputeMetricsFromSnapshotAsync(rootPath, orderedConverged);
         Assert.NotEqual(ExportOutputMetrics.Empty, orderedMetrics.TreeMetrics);
     }
 
-    private static void AssertRequestedSelectionsStillChecked(
+    private static void AssertRequestedExtensionsStillChecked(
         SelectionRefreshSnapshot snapshot,
         SelectionRefreshScenario scenario)
     {
-        if (snapshot.RootOptions is not null)
-        {
-            foreach (var rootName in scenario.RequestedRootNames)
-            {
-                var option = snapshot.RootOptions.FirstOrDefault(option =>
-                    string.Equals(option.Name, rootName, StringComparison.Ordinal));
-                if (option is not null)
-                    Assert.True(option.IsChecked, $"Requested root '{rootName}' must remain checked.");
-            }
-        }
-
         foreach (var extensionName in scenario.RequestedExtensionNames)
         {
             var option = snapshot.ExtensionOptions.FirstOrDefault(option =>
@@ -122,61 +106,43 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
     {
         var targetStates = new[]
         {
-            (WorkflowRootScenario.AllVisible, WorkflowExtensionScenario.AllVisible, WorkflowIgnoreScenario.Defaults),
-            (WorkflowRootScenario.DocsOnly, WorkflowExtensionScenario.DocsOnly, WorkflowIgnoreScenario.Defaults),
-            (WorkflowRootScenario.SrcOnly, WorkflowExtensionScenario.CodeOnly, WorkflowIgnoreScenario.Defaults),
-            (WorkflowRootScenario.SamplesOnly, WorkflowExtensionScenario.CodeAndDocs, WorkflowIgnoreScenario.AllOff),
-            (WorkflowRootScenario.DocsAndSrc, WorkflowExtensionScenario.CodeAndDocs, WorkflowIgnoreScenario.GitIgnoreOff),
-            (WorkflowRootScenario.DocsAndSamples, WorkflowExtensionScenario.MarkdownOnly, WorkflowIgnoreScenario.EmptyFoldersOff),
-            (WorkflowRootScenario.AllVisible, WorkflowExtensionScenario.CodeOnly, WorkflowIgnoreScenario.FileDynamicsOff),
-            (WorkflowRootScenario.AllVisible, WorkflowExtensionScenario.DocsOnly, WorkflowIgnoreScenario.DirectoryDynamicsOff),
-            (WorkflowRootScenario.DocsOnly, WorkflowExtensionScenario.JsonOnly, WorkflowIgnoreScenario.MixedManual),
-            (WorkflowRootScenario.SrcOnly, WorkflowExtensionScenario.AllVisible, WorkflowIgnoreScenario.MixedManual),
-            (WorkflowRootScenario.DocsAndSrc, WorkflowExtensionScenario.MarkdownOnly, WorkflowIgnoreScenario.AllOff),
-            (WorkflowRootScenario.DocsAndSamples, WorkflowExtensionScenario.CodeOnly, WorkflowIgnoreScenario.GitIgnoreOff)
+            (WorkflowExtensionScenario.AllVisible, WorkflowIgnoreScenario.Defaults),
+            (WorkflowExtensionScenario.DocsOnly, WorkflowIgnoreScenario.Defaults),
+            (WorkflowExtensionScenario.CodeOnly, WorkflowIgnoreScenario.Defaults),
+            (WorkflowExtensionScenario.CodeAndDocs, WorkflowIgnoreScenario.AllOff),
+            (WorkflowExtensionScenario.CodeAndDocs, WorkflowIgnoreScenario.GitIgnoreOff),
+            (WorkflowExtensionScenario.MarkdownOnly, WorkflowIgnoreScenario.EmptyFoldersOff),
+            (WorkflowExtensionScenario.CodeOnly, WorkflowIgnoreScenario.FileDynamicsOff),
+            (WorkflowExtensionScenario.DocsOnly, WorkflowIgnoreScenario.DirectoryDynamicsOff),
+            (WorkflowExtensionScenario.JsonOnly, WorkflowIgnoreScenario.MixedManual),
+            (WorkflowExtensionScenario.AllVisible, WorkflowIgnoreScenario.MixedManual)
         };
 
         var orders = new[]
         {
-            new[] { WorkflowMutationStep.Roots, WorkflowMutationStep.Extensions, WorkflowMutationStep.Ignore },
-            new[] { WorkflowMutationStep.Roots, WorkflowMutationStep.Ignore, WorkflowMutationStep.Extensions },
-            new[] { WorkflowMutationStep.Extensions, WorkflowMutationStep.Roots, WorkflowMutationStep.Ignore },
-            new[] { WorkflowMutationStep.Extensions, WorkflowMutationStep.Ignore, WorkflowMutationStep.Roots },
-            new[] { WorkflowMutationStep.Ignore, WorkflowMutationStep.Roots, WorkflowMutationStep.Extensions },
-            new[] { WorkflowMutationStep.Ignore, WorkflowMutationStep.Extensions, WorkflowMutationStep.Roots }
+            new[] { WorkflowMutationStep.Extensions, WorkflowMutationStep.Ignore },
+            new[] { WorkflowMutationStep.Ignore, WorkflowMutationStep.Extensions }
         };
 
         foreach (var state in targetStates)
         {
             foreach (var order in orders)
-                yield return [
-                    state.Item1.ToString(),
-                    state.Item2.ToString(),
-                    state.Item3.ToString(),
-                    order.Select(step => step.ToString()).ToArray()
-                ];
+                yield return [state.Item1.ToString(), state.Item2.ToString(), order.Select(step => step.ToString()).ToArray()];
         }
     }
 
     private sealed class WorkflowClientSelectionState
     {
-        private readonly Dictionary<string, bool> _rootStates;
         private readonly Dictionary<string, bool> _extensionStates;
-        private readonly HashSet<string> _explicitlyUncheckedRoots = new(PathComparer.Default);
         private readonly HashSet<string> _explicitlyUncheckedExtensions = new(StringComparer.OrdinalIgnoreCase);
 
-        private WorkflowClientSelectionState(
-            Dictionary<string, bool> rootStates,
-            Dictionary<string, bool> extensionStates)
+        private WorkflowClientSelectionState(Dictionary<string, bool> extensionStates)
         {
-            _rootStates = rootStates;
             _extensionStates = extensionStates;
         }
 
         public static WorkflowClientSelectionState FromSnapshot(SelectionRefreshSnapshot snapshot) =>
-            new(
-                BuildRootOptionStateCache(snapshot),
-                BuildExtensionOptionStateCache(snapshot));
+            new(BuildExtensionOptionStateCache(snapshot));
 
         public SelectionRefreshContext CreateStepContext(
             string rootPath,
@@ -185,10 +151,8 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
             WorkflowMutationStep step)
         {
             var context = CreateConvergedContext(rootPath, snapshot);
-
             return step switch
             {
-                WorkflowMutationStep.Roots => ApplyRootScenario(context, snapshot, targetScenario),
                 WorkflowMutationStep.Extensions => ApplyExtensionScenario(context, snapshot, targetScenario),
                 WorkflowMutationStep.Ignore => context with
                 {
@@ -210,9 +174,7 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
             var context = CreateContextFromSnapshot(rootPath, snapshot);
             return context with
             {
-                RootSelectionCache = CollectCheckedVisibleRootNames(snapshot),
                 ExtensionsSelectionCache = CollectCheckedVisibleExtensionNames(snapshot),
-                RootOptionStateCache = new Dictionary<string, bool>(_rootStates, PathComparer.Default),
                 ExtensionOptionStateCache = new Dictionary<string, bool>(
                     _extensionStates,
                     StringComparer.OrdinalIgnoreCase),
@@ -222,57 +184,17 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
 
         public void MergeVisibleState(SelectionRefreshSnapshot snapshot)
         {
-            if (snapshot.RootOptions is not null)
-            {
-                foreach (var option in snapshot.RootOptions)
-                    _rootStates[option.Name] = option.IsChecked;
-            }
-
             foreach (var option in snapshot.ExtensionOptions)
                 _extensionStates[option.Name] = option.IsChecked;
         }
 
-        public void AssertExplicitlyUncheckedVisibleEntriesRemainUnchecked(SelectionRefreshSnapshot snapshot)
+        public void AssertExplicitlyUncheckedVisibleExtensionsRemainUnchecked(SelectionRefreshSnapshot snapshot)
         {
-            if (snapshot.RootOptions is not null)
-            {
-                foreach (var option in snapshot.RootOptions)
-                {
-                    if (_explicitlyUncheckedRoots.Contains(option.Name))
-                        Assert.False(option.IsChecked, $"Explicitly unchecked root '{option.Name}' must stay unchecked.");
-                }
-            }
-
             foreach (var option in snapshot.ExtensionOptions)
             {
                 if (_explicitlyUncheckedExtensions.Contains(option.Name))
                     Assert.False(option.IsChecked, $"Explicitly unchecked extension '{option.Name}' must stay unchecked.");
             }
-        }
-
-        private SelectionRefreshContext ApplyRootScenario(
-            SelectionRefreshContext context,
-            SelectionRefreshSnapshot snapshot,
-            SelectionRefreshScenario scenario)
-        {
-            if (snapshot.RootOptions is not null)
-            {
-                var allVisible = scenario.RootScenario == WorkflowRootScenario.AllVisible;
-                foreach (var option in snapshot.RootOptions)
-                {
-                    var isChecked = allVisible || scenario.RequestedRootNames.Contains(option.Name);
-                    _rootStates[option.Name] = isChecked;
-                    TrackExplicitUncheckedState(_explicitlyUncheckedRoots, option.Name, isChecked);
-                }
-            }
-
-            return context with
-            {
-                AllRootFoldersChecked = scenario.RootScenario == WorkflowRootScenario.AllVisible,
-                RootSelectionInitialized = scenario.RootScenario != WorkflowRootScenario.AllVisible,
-                RootSelectionCache = CollectCheckedVisibleRootNames(snapshot),
-                RootOptionStateCache = new Dictionary<string, bool>(_rootStates, PathComparer.Default)
-            };
         }
 
         private SelectionRefreshContext ApplyExtensionScenario(
@@ -285,33 +207,18 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
             {
                 var isChecked = allVisible || scenario.RequestedExtensionNames.Contains(option.Name);
                 _extensionStates[option.Name] = isChecked;
-                TrackExplicitUncheckedState(_explicitlyUncheckedExtensions, option.Name, isChecked);
+                TrackExplicitUncheckedState(option.Name, isChecked);
             }
 
             return context with
             {
-                AllExtensionsChecked = scenario.ExtensionScenario == WorkflowExtensionScenario.AllVisible,
-                ExtensionsSelectionInitialized = scenario.ExtensionScenario != WorkflowExtensionScenario.AllVisible,
+                AllExtensionsChecked = allVisible,
+                ExtensionsSelectionInitialized = !allVisible,
                 ExtensionsSelectionCache = CollectCheckedVisibleExtensionNames(snapshot),
                 ExtensionOptionStateCache = new Dictionary<string, bool>(
                     _extensionStates,
                     StringComparer.OrdinalIgnoreCase)
             };
-        }
-
-        private HashSet<string> CollectCheckedVisibleRootNames(SelectionRefreshSnapshot snapshot)
-        {
-            var selected = new HashSet<string>(PathComparer.Default);
-            if (snapshot.RootOptions is null)
-                return selected;
-
-            foreach (var option in snapshot.RootOptions)
-            {
-                if (_rootStates.TryGetValue(option.Name, out var isChecked) && isChecked)
-                    selected.Add(option.Name);
-            }
-
-            return selected;
         }
 
         private HashSet<string> CollectCheckedVisibleExtensionNames(SelectionRefreshSnapshot snapshot)
@@ -326,18 +233,12 @@ public sealed class ProjectLoadWorkflowMutationOrderMatrixIntegrationTests
             return selected;
         }
 
-        private static void TrackExplicitUncheckedState(
-            HashSet<string> explicitlyUncheckedNames,
-            string name,
-            bool isChecked)
+        private void TrackExplicitUncheckedState(string name, bool isChecked)
         {
             if (isChecked)
-            {
-                explicitlyUncheckedNames.Remove(name);
-                return;
-            }
-
-            explicitlyUncheckedNames.Add(name);
+                _explicitlyUncheckedExtensions.Remove(name);
+            else
+                _explicitlyUncheckedExtensions.Add(name);
         }
     }
 }

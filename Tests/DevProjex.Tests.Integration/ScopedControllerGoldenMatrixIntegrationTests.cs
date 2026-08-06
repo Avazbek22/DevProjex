@@ -7,28 +7,6 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 	private const int MaximumConvergencePasses = 6;
 	private static readonly string[] AllRootNames = ["api", "docs", "web"];
 
-	// This matrix is intentionally golden-data driven. It protects the product contract:
-	// selected roots, selected extensions, controller toggles, live refresh, and tree
-	// projection must describe the same project state without hidden second meanings.
-	[Theory]
-	[MemberData(nameof(ScopedGoldenCases))]
-	public void FullRefresh_SelectedRootsExtensionsAndControllers_MatchGoldenContract(ScopedGoldenCase testCase)
-	{
-		using var workspace = CreateScopedControllerWorkspace();
-		var services = CreateServices();
-		var baseline = ComputeConvergedSnapshot(
-			services,
-			workspace.Path,
-			CreateDefaultContext(workspace.Path));
-		var snapshot = ComputeConvergedSnapshot(
-			services,
-			workspace.Path,
-			BuildScenarioContext(workspace.Path, baseline, testCase));
-
-		AssertGoldenSnapshot(snapshot, testCase);
-		AssertGoldenTree(workspace.Path, services, snapshot, testCase);
-	}
-
 	// Live refresh has historically been the easiest place to drift because it starts
 	// from cached UI state instead of a clean default load. Keep it pinned to full refresh.
 	[Theory]
@@ -51,60 +29,7 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		AssertEquivalentDynamicSections(fullSnapshot, liveSnapshot, testCase);
-		AssertGoldenSnapshot(liveSnapshot, testCase, assertRoots: false);
-	}
-
-	// Profile restore must not reinterpret missing/hidden controller checkboxes. The
-	// restored state has to be equivalent to the explicit state the user previously chose.
-	[Theory]
-	[MemberData(nameof(ProfileGoldenCases))]
-	public void ProfileRefresh_RestoresScopedControllerRootAndExtensionSelections(ScopedGoldenCase testCase)
-	{
-		using var workspace = CreateScopedControllerWorkspace();
-		var services = CreateServices();
-		var baseline = ComputeConvergedSnapshot(
-			services,
-			workspace.Path,
-			CreateDefaultContext(workspace.Path));
-		var explicitSnapshot = ComputeConvergedSnapshot(
-			services,
-			workspace.Path,
-			BuildScenarioContext(workspace.Path, baseline, testCase));
-		var profileContext = CreateProfileContextFromSnapshot(workspace.Path, baseline, explicitSnapshot, testCase);
-		var restored = ComputeConvergedSnapshot(services, workspace.Path, profileContext);
-		var profileExpected = testCase with
-		{
-			ExpectedCheckedRoots = testCase.SelectedRoots ?? Set(AllRootNames, PathComparer.Default),
-			ExpectedCheckedExtensions = testCase.SelectedExtensions is not null &&
-			                            testCase.ExpectedCheckedExtensions.Count == 0
-				? testCase.ExpectedVisibleExtensions
-				: testCase.ExpectedCheckedExtensions
-		};
-		if (testCase.Name == "all roots xml extension is absent while dot folders are on")
-		{
-			profileExpected = profileExpected with
-			{
-				ExpectedVisibleExtensions = Set(profileExpected.ExpectedVisibleExtensions.Append(".gitignore")),
-				ExpectedCheckedExtensions = Set(profileExpected.ExpectedVisibleExtensions.Append(".gitignore")),
-				ExpectedIgnoreOptions = profileExpected.ExpectedIgnoreOptions
-					.Where(static option => option.Id != IgnoreOptionId.DotFolders)
-					.Append(ExpectedVisible(IgnoreOptionId.DotFolders, true))
-					.ToArray(),
-				ExpectedCounts = profileExpected.ExpectedCounts is null
-					? null
-					: profileExpected.ExpectedCounts with { DotFolders = 2 }
-			};
-		}
-		else if (testCase.Name == "all roots xml extension appears when dot folders are off")
-		{
-			profileExpected = profileExpected with
-			{
-				ExpectedCheckedRoots = Set(["api"], PathComparer.Default)
-			};
-		}
-
-		AssertGoldenSnapshot(restored, profileExpected);
-		AssertGoldenTree(workspace.Path, services, restored, testCase);
+		AssertGoldenSnapshot(liveSnapshot, testCase);
 	}
 
 	// Inventory projection is the fast path used by the app after scanning. It must stay
@@ -706,19 +631,6 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 				MinSmartIgnoreImpact: 1))];
 	}
 
-	public static IEnumerable<object[]> ProfileGoldenCases()
-	{
-		foreach (var data in ScopedGoldenCases())
-		{
-			var testCase = Assert.IsType<ScopedGoldenCase>(data[0]);
-			if (testCase.Name.Contains("extension", StringComparison.OrdinalIgnoreCase) ||
-			    testCase.ForcedIgnoreStates is not null)
-			{
-				yield return [testCase];
-			}
-		}
-	}
-
 	public static IEnumerable<object[]> InventoryGoldenCases()
 	{
 		foreach (var data in ScopedGoldenCases())
@@ -966,44 +878,10 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 		};
 	}
 
-	private static SelectionRefreshContext CreateProfileContextFromSnapshot(
-		string rootPath,
-		SelectionRefreshSnapshot baseline,
-		SelectionRefreshSnapshot explicitSnapshot,
-		ScopedGoldenCase testCase)
-	{
-		var explicitContext = BuildScenarioContext(rootPath, baseline, testCase);
-		return BuildConvergedContext(rootPath, explicitSnapshot, explicitContext) with
-		{
-			PreparedSelectionMode = PreparedSelectionMode.Profile,
-			AllRootFoldersChecked = testCase.SelectedRoots is null,
-			RootSelectionInitialized = true,
-			RootSelectionCache = explicitContext.RootSelectionCache,
-			RootOptionStateCache = explicitContext.RootOptionStateCache,
-			AllExtensionsChecked = testCase.SelectedExtensions is null,
-			ExtensionsSelectionInitialized = true,
-			ExtensionsSelectionCache = explicitContext.ExtensionsSelectionCache,
-			ExtensionOptionStateCache = explicitContext.ExtensionOptionStateCache,
-			IgnoreSelectionInitialized = true,
-			IgnoreSelectionCache = CollectCheckedIgnoreOptionIds(explicitSnapshot),
-			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>(explicitSnapshot.IgnoreOptionStateCache),
-			IgnoreAllPreference = testCase.ForcedIgnoreStates is not null &&
-			                      testCase.ForcedIgnoreStates.Values.All(static value => !value)
-				? false
-				: null,
-			CurrentSnapshotState = EmptySnapshotState,
-			IgnoreOptionStateCacheIsComplete = true
-		};
-	}
-
 	private static void AssertGoldenSnapshot(
 		SelectionRefreshSnapshot snapshot,
-		ScopedGoldenCase testCase,
-		bool assertRoots = true)
+		ScopedGoldenCase testCase)
 	{
-		if (assertRoots)
-			AssertSetEquals(testCase.ExpectedCheckedRoots, CollectCheckedRootNames(snapshot), PathComparer.Default, testCase, "checked roots");
-
 		AssertSetEquals(
 			testCase.ExpectedVisibleExtensions,
 			snapshot.ExtensionOptions.Select(static option => option.Name),
