@@ -31,7 +31,7 @@ internal sealed record ProjectTreeInventoryReuseScope(
         if (!PathComparer.Default.Equals(RootPath, rootPath))
             return false;
 
-        if (!IsRootSelectionCovered(options.AllowedRootFolders))
+        if (!IsRequestedScopeCovered(options.AllowedRootFolders))
             return false;
 
         var rules = options.IgnoreRules;
@@ -52,7 +52,7 @@ internal sealed record ProjectTreeInventoryReuseScope(
         return true;
     }
 
-    private bool IsRootSelectionCovered(IReadOnlySet<string> requestedRootFolders)
+    private bool IsRequestedScopeCovered(IReadOnlySet<string> requestedRootFolders)
     {
         foreach (var rootFolder in requestedRootFolders)
         {

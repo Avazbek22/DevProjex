@@ -29,7 +29,7 @@ Hotkeys:
 
 Export project creates a separate folder or ZIP archive from the current tree while preserving the directory structure.
 
-Selected root folders, file types, exclusion rules, and checked items are respected. If nothing is checked, the entire current tree is exported.
+Selected file types, exclusion rules, and checked items are respected. If nothing is checked, the entire current tree is exported.
 
 Text and binary files are copied, and included empty folders are preserved. The source files are not modified. The result cannot be saved inside the source project.
 
@@ -279,9 +279,8 @@ Available on the right:
 * Apply settings
 * Exclusions
 * Extensions
-* Root folders
 
-Changes in “Exclusions”, “Extensions”, and “Root folders” are staged in the panel and applied after clicking “Apply settings”.
+Changes in “Exclusions” and “Extensions” are staged in the panel and applied after clicking “Apply settings”.
 
 After a checkbox changes, the app may update available options and their counts in the background. The resulting tree is rebuilt only after clicking “Apply settings”.
 
@@ -297,7 +296,6 @@ Ctrl+P — show/hide the panel.
 
 ### 11.1 Local project parameter profiles
 For local folders, DevProjex remembers the last applied project parameters:
-* selected top-level folders;
 * selected file types;
 * selected options in the "Exclusions" section.
 
@@ -308,14 +306,13 @@ Important:
 * profiles are saved only for local projects;
 * for projects opened via Git Clone, profiles are not saved;
 * if some saved options are no longer available in the current project, they are skipped, and the remaining parameters are applied.
-* if refresh or reopening reveals a new top-level folder, file type, or option in "Exclusions", it is enabled by default;
+* if refresh or reopening reveals a new file type or option in "Exclusions", it is enabled by default;
 * options already seen keep the user's explicit choice: new files of a disabled type do not enable that type again.
 
 ## 12) Exclusions
 The "Exclusions" section controls which files and folders are excluded from the tree, content, copy, and export results.
 
 An item is shown only when all of these conditions are met:
-* its top-level folder is selected;
 * its file type is selected, if the file has a type;
 * no enabled ignore rule excludes it.
 
@@ -335,7 +332,7 @@ Depending on the project contents, the following options may be shown:
 * Dot-prefixed files
 * Files without extension
 
-Inside a Git repository, "Use .gitignore" and "Tracked Git files only" remain visible as a stable checkbox pair. Enabling one clears the other. Clicking the active checkbox again clears it, leaving both Git filters off without changing Smart Ignore or the basic exclusions. Other options are shown when their rules can change the current tree. The list may therefore change after switching another rule, a top-level folder, or a file type.
+Inside a Git repository, "Use .gitignore" and "Tracked Git files only" remain visible as a stable checkbox pair. Enabling one clears the other. Clicking the active checkbox again clears it, leaving both Git filters off without changing Smart Ignore or the basic exclusions. Other options are shown when their rules can change the current tree. The list may therefore change after switching another rule or a file type.
 
 A new option is enabled by default when it first appears. A known option keeps the user's choice even if it temporarily disappears from the list.
 
@@ -394,7 +391,7 @@ Every reachable nested repository and worktree is resolved independently at any 
 
 In an already-open Desktop workspace, the explicit tracked selection remains visible and fail-closed: output and export are blocked when readiness fails, while partial readiness continues with a localized warning.
 
-"Use .gitignore" and "Tracked Git files only" are mutually exclusive when enabled. The active checkbox may also be cleared to disable Git filtering. For local projects that support profiles, this state is saved with the root-folder, file-type, and other ignore settings.
+"Use .gitignore" and "Tracked Git files only" are mutually exclusive when enabled. The active checkbox may also be cleared to disable Git filtering. For local projects that support profiles, this state is saved with the file-type and other exclusion settings.
 
 ### 12.6 Relationship between Git filtering and Smart Ignore
 The Git checkboxes and Smart Ignore are independent controls. The selected Git mode applies first at every reachable Git scope. Smart Ignore then processes the remaining items, and the basic rules run last.
@@ -435,7 +432,6 @@ If settings preparation is cancelled, DevProjex returns the panel to the last fu
 
 ## 13) How the tree and metrics are calculated
 Result depends on:
-* selected Root folders
 * selected Extensions
 * Ignore rules
 * active Filter
@@ -472,7 +468,7 @@ Content metrics:
 ### 13.3 When counters update
 Recalculation runs:
 * after opening/refreshing a project;
-* after applying settings (exclusions, extensions, root folders);
+* after applying settings (exclusions and extensions);
 * when tree checkboxes change (with debounce);
 * when switching tree format (for operations where tree output is used).
 * when background calculation is canceled, counters are set to 0 until the next completed recalculation.
@@ -514,7 +510,6 @@ Reset settings (Help → Reset settings) restores the default theme, effects, Co
 
 ### 16.3 Reset data
 Reset data (Help → Reset data) removes saved local-project parameter profiles:
-* selected top-level folders;
 * selected file types;
 * selected options in the "Exclusions" section.
 

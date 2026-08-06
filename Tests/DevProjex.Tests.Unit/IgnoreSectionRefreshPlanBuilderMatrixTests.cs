@@ -36,7 +36,7 @@ public sealed class IgnoreSectionRefreshPlanBuilderMatrixTests
 
         Assert.True(plan.RequiresIgnoreOptionsRefresh);
         Assert.Equal(expectSecondSnapshotPass, plan.RequiresSecondSnapshotPass);
-        Assert.Equal(expectRootRefresh, plan.RequiresRootFolderRefresh);
+        Assert.Equal(expectRootRefresh, plan.RequiresScanRootRefresh);
         Assert.Equal(expectedImpactValue, (int)plan.Impact);
     }
 

@@ -189,7 +189,6 @@ public sealed class SelectionRefreshExtensionAvailabilityIntegrationTests
 
         return services.Engine.ComputeLiveRefreshSnapshot(
             context,
-            selectedRoots,
             TestContext.Current.CancellationToken);
     }
 

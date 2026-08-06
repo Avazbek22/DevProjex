@@ -707,7 +707,6 @@ public partial class MainWindow
         }
 
         RefreshTreeFontMenu();
-        _selectionCoordinator.HookOptionListeners(_viewModel.RootFolders);
         _selectionCoordinator.HookOptionListeners(_viewModel.Extensions);
         _selectionCoordinator.HookIgnoreListeners(_viewModel.IgnoreOptions);
 

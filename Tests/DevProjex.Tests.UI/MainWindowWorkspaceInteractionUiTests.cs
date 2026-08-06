@@ -893,7 +893,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
         try
         {
-            foreach (var listName in new[] { "IgnoreOptionsList", "ExtensionsList", "RootFoldersList" })
+            foreach (var listName in new[] { "IgnoreOptionsList", "ExtensionsList" })
             {
                 var listBox = UiTestDriver.GetRequiredControl<ListBox>(window, listName);
                 var firstItem = Assert.IsAssignableFrom<object>(listBox.Items.FirstOrDefault());

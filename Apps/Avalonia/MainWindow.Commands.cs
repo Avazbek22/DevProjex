@@ -534,13 +534,6 @@ public partial class MainWindow
     private Task PrepareSearchAndFilterForProjectLoadAsync() =>
         _searchFilterController.PrepareForProjectLoadAsync();
 
-    private void OnRootAllChanged(object? sender, RoutedEventArgs e)
-    {
-        // Get value directly from control - event fires BEFORE binding updates ViewModel
-        var check = (sender as CheckBox)?.IsChecked == true;
-        _selectionCoordinator.HandleRootAllChanged(check, _currentPath);
-    }
-
     private void OnExtensionsAllChanged(object? sender, RoutedEventArgs e)
     {
         // Get value directly from control - event fires BEFORE binding updates ViewModel
@@ -603,7 +596,7 @@ public partial class MainWindow
                 do
                 {
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
-                    await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
+                    await _selectionCoordinator.UpdateLiveOptionsForProjectScopeIfDirtyAsync(
                         _currentPath,
                         cancellationToken);
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);

@@ -301,12 +301,16 @@ public sealed class SelectionRefreshEngineTests
 				return BuildIgnoreRules(path, selectedIgnoreOptions, selectedRootFolders);
 			},
 			GetIgnoreAvailability);
-		var context = CreateDefaultsContext();
+		var context = CreateDefaultsContext() with
+		{
+			CurrentRootOptions = [new SelectionOption("src", true)]
+		};
 
-		_ = engine.ComputeLiveRefreshSnapshot(context, ["src"], CancellationToken.None);
-		_ = engine.ComputeLiveRefreshSnapshot(context, ["src"], CancellationToken.None);
+		_ = engine.ComputeLiveRefreshSnapshot(context, CancellationToken.None);
+		_ = engine.ComputeLiveRefreshSnapshot(context, CancellationToken.None);
 
 		Assert.Equal(1, buildCount);
+		Assert.Equal(0, scanner.RootFolderScanCount);
 	}
 
 	[Fact]
@@ -1142,6 +1146,8 @@ public sealed class SelectionRefreshEngineTests
 	private sealed class StableSnapshotScanner
 		: IFileSystemScanner, IFileSystemScannerExtensionPolicySnapshotProvider
 	{
+		public int RootFolderScanCount { get; private set; }
+
 		public bool CanReadRoot(string rootPath) => true;
 
 		public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
@@ -1151,7 +1157,10 @@ public sealed class SelectionRefreshEngineTests
 			=> new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
 
 		public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
-			=> new(new List<string> { "src" }, false, false);
+		{
+			RootFolderScanCount++;
+			return new(new List<string> { "src" }, false, false);
+		}
 
 		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
 			string rootPath,

@@ -29,7 +29,7 @@ Raccourcis :
 
 L’export du projet crée un dossier distinct ou une archive ZIP à partir de l’arborescence actuelle, tout en conservant la structure des répertoires.
 
-Les dossiers de premier niveau, types de fichiers, règles d’exclusion et éléments cochés sont pris en compte. Si rien n’est coché, toute l’arborescence actuelle est exportée.
+Les types de fichiers, règles d’exclusion et éléments cochés sont pris en compte. Si rien n’est coché, toute l’arborescence actuelle est exportée.
 
 Les fichiers texte et binaires sont copiés, et les dossiers vides inclus sont conservés. Les fichiers sources ne sont pas modifiés. Le résultat ne peut pas être enregistré dans le projet source.
 
@@ -279,9 +279,8 @@ Limitations :
 * Appliquer
 * Exclusions
 * Types de fichiers
-* Dossiers de premier niveau
 
-Les changements dans « Exclusions », « Types de fichiers » et « Dossiers de premier niveau » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
+Les changements dans « Exclusions » et « Types de fichiers » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
 
 Après la modification d’une case, l’application peut actualiser en arrière-plan les options disponibles et leurs compteurs. L’arborescence résultante n’est reconstruite qu’après un clic sur « Appliquer ».
 
@@ -297,7 +296,6 @@ Ctrl+P — afficher/masquer le panneau.
 
 ### 11.1 Profils de paramètres des projets locaux
 Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :
-* dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
 * options sélectionnées dans la section « Exclusions ».
 
@@ -308,18 +306,18 @@ Important :
 * les profils sont enregistrés uniquement pour les projets locaux ;
 * pour les projets ouverts via Git Clone, les profils ne sont pas enregistrés ;
 * si certaines options enregistrées ne sont plus disponibles dans le projet actuel, elles sont ignorées, les autres paramètres sont appliqués.
-* si l’actualisation ou la réouverture fait apparaître un nouveau dossier de premier niveau, un nouveau type de fichiers ou une nouvelle option dans « Exclusions », cet élément est activé par défaut ;
+* si l’actualisation ou la réouverture fait apparaître un nouveau type de fichiers ou une nouvelle option dans « Exclusions », cet élément est activé par défaut ;
 * les éléments déjà connus conservent le choix explicite de l’utilisateur : de nouveaux fichiers d’un type désactivé ne réactivent pas ce type.
 
 ## 12) Exclusions
 La section « Exclusions » détermine les fichiers et dossiers exclus de l’arbre, du contenu, de la copie et de l’export.
 
-Un élément n’est affiché que si son dossier de premier niveau et son type de fichier sont sélectionnés et si aucune règle active ne l’exclut. Les règles se cumulent : si l’une d’elles masque un élément, une autre ne peut pas le rendre visible.
+Un élément n’est affiché que si son type de fichier est sélectionné et si aucune règle active ne l’exclut. Les règles se cumulent : si l’une d’elles masque un élément, une autre ne peut pas le rendre visible.
 
 ### 12.1 Règles disponibles
 Selon le contenu du projet, Smart Ignore, « Utiliser .gitignore », « Uniquement les fichiers suivis par Git », les dossiers et fichiers vides, cachés ou commençant par un point, ainsi que les fichiers sans extension peuvent être proposés.
 
-Dans un dépôt Git, « Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » restent visibles sous la forme de deux cases. Activer l’une désactive l’autre ; cliquer de nouveau sur la case active désactive entièrement le filtrage Git sans modifier Smart Ignore ni les règles de base. Les autres options apparaissent lorsqu’elles peuvent modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle, d’un dossier de premier niveau ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
+Dans un dépôt Git, « Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » restent visibles sous la forme de deux cases. Activer l’une désactive l’autre ; cliquer de nouveau sur la case active désactive entièrement le filtrage Git sans modifier Smart Ignore ni les règles de base. Les autres options apparaissent lorsqu’elles peuvent modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
 
 ### 12.2 Smart Ignore
 Smart Ignore masque les dépendances, résultats de build, caches et autres artefacts de service. DevProjex identifie le type du projet à partir de sa structure et de fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml`. Les règles de la technologie reconnue restent dans la zone du projet et ne s’étendent pas aux projets voisins d’une autre technologie.
@@ -357,7 +355,7 @@ Chaque dépôt imbriqué et chaque worktree accessible sont traités indépendam
 
 Dans un espace de travail Desktop déjà ouvert, la sélection explicite reste visible et échoue de façon sûre : la sortie et l’exportation sont bloquées si la disponibilité échoue, tandis qu’une disponibilité partielle permet de continuer avec un avertissement localisé.
 
-« Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » s’excluent lors de l’activation. La case active peut aussi être décochée pour désactiver le filtrage Git. Pour les projets locaux prenant en charge les profils, cet état est enregistré avec les dossiers de premier niveau, les types de fichiers et les autres règles d’exclusion.
+« Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » s’excluent lors de l’activation. La case active peut aussi être décochée pour désactiver le filtrage Git. Pour les projets locaux prenant en charge les profils, cet état est enregistré avec les types de fichiers et les autres règles d’exclusion.
 
 ### 12.6 Relation entre le filtrage Git et Smart Ignore
 Le mode Git sélectionné et Smart Ignore sont contrôlés indépendamment. Le mode Git est appliqué en premier dans chaque zone Git accessible, puis Smart Ignore traite les éléments restants et les règles de base s’appliquent en dernier.
@@ -383,7 +381,6 @@ Les cases à cocher mettent d’abord à jour les options disponibles et leurs c
 
 ## 13) Comment l'arbre et les métriques sont calculés
 Le résultat dépend de :
-* dossiers de premier niveau sélectionnés
 * types de fichiers sélectionnés
 * règles d’exclusion
 * filtre actif
@@ -462,7 +459,6 @@ Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétabl
 
 ### 16.3 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
-* dossiers de premier niveau sélectionnés ;
 * types de fichiers sélectionnés ;
 * options sélectionnées dans la section « Exclusions ».
 

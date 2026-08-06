@@ -99,7 +99,7 @@
           Background="Transparent"
           BorderThickness="0"
           IsEnabled="{Binding AreFilterSettingsEnabled}">
-    <Grid RowDefinitions="Auto,Auto,*,*,*">
+    <Grid RowDefinitions="Auto,Auto,*,*">
       <!-- Apply stays at the top because filter options remain intentionally staged. -->
       <Button Name="ApplySettingsButton"
               Grid.Row="0"
@@ -280,37 +280,6 @@
         </Border>
       </Grid>
 
-      <!-- RootFolders section - equal star height -->
-      <Grid Grid.Row="4" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
-        <Grid Name="RootFoldersHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
-          <TextBlock Name="RootFoldersHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsRootFolders}" Margin="0" FontSize="15"/>
-          <CheckBox Name="RootFoldersAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"
-                    IsChecked="{Binding AllRootFoldersChecked, Mode=TwoWay}"
-                    IsEnabled="{Binding HasRootFolderOptions}"
-                    IsCheckedChanged="OnRootAllChanged" />
-        </Grid>
-        <Border Grid.Row="1" Classes="checklist-border">
-          <ListBox Name="RootFoldersList"
-                   Classes="settings-list"
-                   ItemsSource="{Binding RootFolders}"
-                   SelectionMode="Multiple"
-                   ScrollViewer.IsScrollInertiaEnabled="True"
-                   ScrollViewer.VerticalScrollBarVisibility="Auto"
-                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-            <ListBox.ItemsPanel>
-              <ItemsPanelTemplate>
-                <VirtualizingStackPanel />
-              </ItemsPanelTemplate>
-            </ListBox.ItemsPanel>
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="vm:SelectionOptionViewModel">
-                <CheckBox Classes="list-item settings-list-entry" Content="{Binding Name}"
-                          IsChecked="{Binding IsChecked, Mode=TwoWay}" />
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </Border>
-      </Grid>
     </Grid>
   </Border>
 </UserControl>

@@ -5,20 +5,16 @@ namespace DevProjex.Application.Selection;
 public static class ProjectSelectionProfileBuilder
 {
     public static ProjectSelectionProfile Create(
-        IEnumerable<SelectionOption> visibleRootFolders,
         IEnumerable<SelectionOption> visibleExtensions,
         IEnumerable<IgnoreSelectionOption> visibleIgnoreOptions,
-        IReadOnlyDictionary<string, bool>? cachedRootFolderStates,
         IReadOnlyDictionary<string, bool>? cachedExtensionStates,
         IReadOnlyDictionary<IgnoreOptionId, bool>? cachedIgnoreOptionStates,
         IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
-        StringComparer rootFolderComparer,
         StringComparer extensionComparer)
     {
-		// Selected arrays are the effective projection used by older readers. Full state
-		// maps are the durable local-profile contract because unchecked and temporarily
-		// hidden rows carry user intent just as strongly as visible checked rows.
-        var rootOptions = MaterializeSelectionOptions(visibleRootFolders);
+        // Selected arrays are the effective projection used by older readers. Full state
+        // maps are the durable local-profile contract because unchecked and temporarily
+        // hidden rows carry user intent just as strongly as visible checked rows.
         var extensionOptions = MaterializeSelectionOptions(visibleExtensions);
         var ignoreOptions = MaterializeIgnoreOptions(visibleIgnoreOptions);
         var selectedIgnoreOptionSet = new HashSet<IgnoreOptionId>(selectedIgnoreOptions);
@@ -28,10 +24,12 @@ public static class ProjectSelectionProfileBuilder
         GitFilteringModeResolver.Normalize(ignoreOptionStates, preferredGitMode);
 
         return new ProjectSelectionProfile(
-            SelectedRootFolders: CollectCheckedNames(rootOptions, rootFolderComparer),
+            // TODO(cli): Remove the legacy root-selection fields from portable and CLI profile
+            // contracts when the public --root option is revised. Desktop no longer persists them.
+            SelectedRootFolders: [],
             SelectedExtensions: CollectCheckedNames(extensionOptions, extensionComparer),
             SelectedIgnoreOptions: selectedIgnoreOptionSet.ToArray(),
-            RootFolderStates: MergeSelectionStates(cachedRootFolderStates, rootOptions, rootFolderComparer),
+            RootFolderStates: null,
             ExtensionStates: MergeSelectionStates(cachedExtensionStates, extensionOptions, extensionComparer),
             IgnoreOptionStates: ignoreOptionStates);
     }

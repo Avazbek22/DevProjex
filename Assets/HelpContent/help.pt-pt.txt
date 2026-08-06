@@ -29,7 +29,7 @@ Teclas de atalho:
 
 A exportação do projeto cria uma pasta separada ou um arquivo ZIP a partir da árvore atual, preservando a estrutura dos diretórios.
 
-São respeitadas as pastas raiz selecionadas, os tipos de ficheiro, as regras de exclusão e os itens assinalados. Se nada estiver assinalado, é exportada toda a árvore atual.
+São respeitados os tipos de ficheiro, as regras de exclusão e os itens assinalados. Se nada estiver assinalado, é exportada toda a árvore atual.
 
 Os ficheiros de texto e binários são copiados, e as pastas vazias incluídas são preservadas. Os ficheiros de origem não são alterados. O resultado não pode ser guardado dentro do projeto de origem.
 
@@ -279,9 +279,8 @@ Disponível à direita:
 * Aplicar definições
 * Exclusões
 * Extensões
-* Pastas raiz
 
-As alterações em “Exclusões”, “Extensões” e “Pastas raiz” são preparadas no painel e aplicadas após clicar em “Aplicar definições”.
+As alterações em “Exclusões” e “Extensões” são preparadas no painel e aplicadas após clicar em “Aplicar definições”.
 
 Assim que uma caixa de seleção for alterada, a aplicação poderá atualizar as opções disponíveis e as suas contagens em segundo plano. A árvore resultante é reconstruída apenas após clicar em “Aplicar definições”.
 
@@ -297,7 +296,6 @@ Ctrl+P — mostra/oculta o painel.
 
 ### 11.1 Perfis de parâmetros de projetos locais
 Para pastas locais, o DevProjex recorda os últimos parâmetros de projeto aplicados:
-* pastas de nível superior selecionadas;
 * tipos de ficheiro selecionados;
 * opções selecionadas na secção "Exclusões".
 
@@ -308,14 +306,13 @@ Importante:
 * os perfis são guardados apenas para projetos locais;
 * para projetos abertos através do Git Clone, os perfis não são guardados;
 * se algumas opções guardadas já não estiverem disponíveis no projeto atual, serão ignoradas e os restantes parâmetros serão aplicados.
-* se a atualização ou reabertura revelar uma nova pasta de nível superior, tipo de ficheiro ou opção em "Exclusões", esta será ativada por defeito;
+* se a atualização ou reabertura revelar um novo tipo de ficheiro ou opção em "Exclusões", esta será ativada por defeito;
 * as opções já vistas mantêm a escolha explícita do utilizador: novos ficheiros de um tipo desativado não voltam a ativar esse tipo.
 
 ## 12) Exclusões
 A secção "Exclusões" controla quais os ficheiros e pastas que são excluídos da árvore, conteúdo, cópia e resultados de exportação.
 
 Um item é mostrado apenas quando todas estas condições são satisfeitas:
-* a sua pasta de nível superior está selecionada;
 * o seu tipo de ficheiro é selecionado, se o ficheiro tiver um tipo;
 * nenhuma regra de ignorar ativada a exclui.
 
@@ -335,7 +332,7 @@ Dependendo do conteúdo do projeto, poderão ser apresentadas as seguintes opç�
 * Ficheiros com prefixo de ponto
 * Ficheiros sem extensão
 
-Dentro de um repositório Git, "Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" permanecem visíveis como duas caixas. Ativar uma desmarca a outra; clicar novamente na caixa ativa desativa por completo a filtragem Git sem alterar o Smart Ignore nem as regras básicas. As restantes opções são mostradas quando as suas regras podem alterar a árvore atual. A lista pode, portanto, mudar após a alteração de outra regra, uma pasta de nível superior ou um tipo de ficheiro.
+Dentro de um repositório Git, "Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" permanecem visíveis como duas caixas. Ativar uma desmarca a outra; clicar novamente na caixa ativa desativa por completo a filtragem Git sem alterar o Smart Ignore nem as regras básicas. As restantes opções são mostradas quando as suas regras podem alterar a árvore atual. A lista pode, portanto, mudar após a alteração de outra regra ou um tipo de ficheiro.
 
 Uma nova opção é ativada por defeito quando aparece pela primeira vez. Uma opção conhecida mantém a escolha do utilizador mesmo que desapareça temporariamente da lista.
 
@@ -396,7 +393,7 @@ Cada repositório aninhado e cada worktree acessível são processados de forma 
 
 Num espaço de trabalho Desktop já aberto, a seleção explícita permanece visível e falha em segurança: a saída e a exportação são bloqueadas quando a prontidão falha, enquanto a prontidão parcial permite continuar com um aviso localizado.
 
-"Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" excluem-se ao serem ativados. A caixa ativa também pode ser desmarcada para desativar a filtragem Git. Nos projetos locais que suportam perfis, este estado é guardado com as pastas de nível superior, os tipos de ficheiro e as restantes regras de exclusão.
+"Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" excluem-se ao serem ativados. A caixa ativa também pode ser desmarcada para desativar a filtragem Git. Nos projetos locais que suportam perfis, este estado é guardado com os tipos de ficheiro e as restantes regras de exclusão.
 
 ### 12.6 Relação entre a filtragem Git e o Smart Ignore
 O modo Git selecionado e o Smart Ignore são controlos independentes. O modo Git é aplicado primeiro em cada âmbito Git acessível; depois, o Smart Ignore processa os elementos restantes; por fim, atuam as regras básicas.
@@ -437,7 +434,6 @@ Se a preparação das definições for cancelada, o DevProjex faz com que o pain
 
 ## 13) Como são calculadas a árvore e as métricas
 O resultado depende de:
-* pastas raiz selecionadas
 * Extensões selecionadas
 * Ignorar regras
 * filtro ativo
@@ -474,7 +470,7 @@ Métricas de conteúdo:
 ### 13.3 Quando os contadores são atualizados
 O recálculo é executado:
 * depois de abrir/atualizar um projeto;
-* após a aplicação de definições (exclusões, extensões, pastas raiz);
+* após a aplicação de definições (exclusões e extensões);
 * quando as caixas de seleção da árvore mudam (com debounce);
 * ao mudar o formato de árvore (para operações em que é utilizada a saída de árvore).
 * quando o cálculo em segundo plano é cancelado, os contadores são definidos como 0 até ao próximo recálculo concluído.
@@ -516,7 +512,6 @@ Repor definições (Ajuda → Repor definições) restaura o tema predefinido, o
 
 ### 16.3 Repor dados
 Repor dados (Ajuda → Repor dados) remove os perfis de parâmetros de projeto local guardados:
-* pastas de nível superior selecionadas;
 * tipos de ficheiro selecionados;
 * opções selecionadas na secção "Exclusões".
 

@@ -3,24 +3,15 @@ namespace DevProjex.Avalonia.Coordinators;
 public sealed partial class SelectionSyncCoordinator
 {
     private sealed record LiveRefreshInput(
-        SelectionRefreshContext Context,
-        IReadOnlyCollection<string> SelectedRoots);
+        SelectionRefreshContext Context);
 
     internal sealed class AppliedSelectionState(
         string projectPath,
-        HashSet<string> selectedRootFolders,
         HashSet<string> selectedExtensions,
         HashSet<IgnoreOptionId> selectedIgnoreOptions)
     {
         public static AppliedSelectionState Capture(string projectPath, MainWindowViewModel viewModel)
         {
-            var roots = new HashSet<string>(PathComparer.Default);
-            foreach (var option in viewModel.RootFolders)
-            {
-                if (option.IsChecked)
-                    roots.Add(option.Name);
-            }
-
             var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var option in viewModel.Extensions)
             {
@@ -35,7 +26,7 @@ public sealed partial class SelectionSyncCoordinator
                     ignoreOptions.Add(option.Id);
             }
 
-            return new AppliedSelectionState(projectPath, roots, extensions, ignoreOptions);
+            return new AppliedSelectionState(projectPath, extensions, ignoreOptions);
         }
 
         public bool Matches(string? currentProjectPath, MainWindowViewModel viewModel)
@@ -46,25 +37,8 @@ public sealed partial class SelectionSyncCoordinator
                 return false;
             }
 
-            return MatchesSelectedRootFolders(viewModel.RootFolders) &&
-                   MatchesSelectedExtensions(viewModel.Extensions) &&
+            return MatchesSelectedExtensions(viewModel.Extensions) &&
                    MatchesSelectedIgnoreOptions(viewModel.IgnoreOptions);
-        }
-
-        private bool MatchesSelectedRootFolders(IReadOnlyCollection<SelectionOptionViewModel> options)
-        {
-            var selectedCount = 0;
-            foreach (var option in options)
-            {
-                if (!option.IsChecked)
-                    continue;
-
-                selectedCount++;
-                if (!selectedRootFolders.Contains(option.Name))
-                    return false;
-            }
-
-            return selectedCount == selectedRootFolders.Count;
         }
 
         private bool MatchesSelectedExtensions(IReadOnlyCollection<SelectionOptionViewModel> options)

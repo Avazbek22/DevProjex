@@ -14,9 +14,6 @@ public partial class SettingsPanelView : UserControl
     private Grid? _extensionsHeaderGrid;
     private TextBlock? _extensionsHeaderText;
     private CheckBox? _extensionsAllCheckBox;
-    private Grid? _rootFoldersHeaderGrid;
-    private TextBlock? _rootFoldersHeaderText;
-    private CheckBox? _rootFoldersAllCheckBox;
     private double _lastReportedMinimumWidth;
     private bool _minimumWidthRefreshQueued;
     private bool _pendingForcedMinimumWidthRefresh;
@@ -25,7 +22,6 @@ public partial class SettingsPanelView : UserControl
     public event EventHandler<RoutedEventArgs>? ApplySettingsRequested;
     public event EventHandler<RoutedEventArgs>? IgnoreAllChanged;
     public event EventHandler<RoutedEventArgs>? ExtensionsAllChanged;
-    public event EventHandler<RoutedEventArgs>? RootAllChanged;
     public event EventHandler<SettingsPanelMinimumWidthChangedEventArgs>? MinimumWidthChanged;
 
     public SettingsPanelView()
@@ -39,9 +35,6 @@ public partial class SettingsPanelView : UserControl
         _extensionsHeaderGrid = this.FindControl<Grid>("ExtensionsHeaderGrid");
         _extensionsHeaderText = this.FindControl<TextBlock>("ExtensionsHeaderText");
         _extensionsAllCheckBox = this.FindControl<CheckBox>("ExtensionsAllCheckBox");
-        _rootFoldersHeaderGrid = this.FindControl<Grid>("RootFoldersHeaderGrid");
-        _rootFoldersHeaderText = this.FindControl<TextBlock>("RootFoldersHeaderText");
-        _rootFoldersAllCheckBox = this.FindControl<CheckBox>("RootFoldersAllCheckBox");
 
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
@@ -55,9 +48,6 @@ public partial class SettingsPanelView : UserControl
 
     private void OnExtensionsAllChanged(object? sender, RoutedEventArgs e)
         => ExtensionsAllChanged?.Invoke(sender, e);
-
-    private void OnRootAllChanged(object? sender, RoutedEventArgs e)
-        => RootAllChanged?.Invoke(sender, e);
 
 	private void OnContentProcessingToolTipLoaded(object? sender, RoutedEventArgs e)
 	{
@@ -127,9 +117,7 @@ public partial class SettingsPanelView : UserControl
 
         var contentWidth = Math.Max(
             MeasureHeaderWidth(_ignoreHeaderGrid, _ignoreHeaderText, _ignoreAllCheckBox),
-            Math.Max(
-                MeasureHeaderWidth(_extensionsHeaderGrid, _extensionsHeaderText, _extensionsAllCheckBox),
-                MeasureHeaderWidth(_rootFoldersHeaderGrid, _rootFoldersHeaderText, _rootFoldersAllCheckBox)));
+            MeasureHeaderWidth(_extensionsHeaderGrid, _extensionsHeaderText, _extensionsAllCheckBox));
 
         var panelPadding = _panelRoot?.Padding ?? default;
         var borderThickness = _panelRoot?.BorderThickness ?? default;
@@ -205,8 +193,6 @@ public partial class SettingsPanelView : UserControl
         ToggleMinimumWidthAffectingSizeChanges(_ignoreAllCheckBox, subscribe: true);
         ToggleMinimumWidthAffectingSizeChanges(_extensionsHeaderText, subscribe: true);
         ToggleMinimumWidthAffectingSizeChanges(_extensionsAllCheckBox, subscribe: true);
-        ToggleMinimumWidthAffectingSizeChanges(_rootFoldersHeaderText, subscribe: true);
-        ToggleMinimumWidthAffectingSizeChanges(_rootFoldersAllCheckBox, subscribe: true);
         _minimumWidthSizeSubscriptionsAttached = true;
     }
 
@@ -219,8 +205,6 @@ public partial class SettingsPanelView : UserControl
         ToggleMinimumWidthAffectingSizeChanges(_ignoreAllCheckBox, subscribe: false);
         ToggleMinimumWidthAffectingSizeChanges(_extensionsHeaderText, subscribe: false);
         ToggleMinimumWidthAffectingSizeChanges(_extensionsAllCheckBox, subscribe: false);
-        ToggleMinimumWidthAffectingSizeChanges(_rootFoldersHeaderText, subscribe: false);
-        ToggleMinimumWidthAffectingSizeChanges(_rootFoldersAllCheckBox, subscribe: false);
         _minimumWidthSizeSubscriptionsAttached = false;
     }
 

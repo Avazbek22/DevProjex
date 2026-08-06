@@ -7,64 +7,6 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowProjectLoadWorkflowUiTests
 {
-    [AvaloniaFact]
-    public async Task CancelledBaselineRootSelection_PublishesTreeMetricsBeforeContentMetricsFinish()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
-        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
-
-        try
-        {
-            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () => !UiTestDriver.GetViewModel(window).StatusBusy,
-                "initial baseline metrics cancellation to settle");
-
-            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
-            var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, rootNode.DisplayName);
-            await UiTestDriver.ClickAsync(window, checkBox);
-
-            ExportOutputMetrics pendingTreeMetrics = default;
-            ExportOutputMetrics pendingContentMetrics = default;
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () =>
-                {
-                    var viewModel = UiTestDriver.GetViewModel(window);
-                    if (!viewModel.StatusBusy)
-                        return false;
-
-                    if (!UiTestDriver.TryGetCurrentStatusMetrics(window, out var actualTreeMetrics, out var actualContentMetrics))
-                        return false;
-
-                    pendingTreeMetrics = actualTreeMetrics;
-                    pendingContentMetrics = actualContentMetrics;
-                    return actualTreeMetrics != ExportOutputMetrics.Empty &&
-                           actualContentMetrics == ExportOutputMetrics.Empty;
-                },
-                "tree metrics to appear while selected content metrics are still warming up");
-
-            analyzer.Release();
-            var expected = await ComputeExpectedAppliedMetricsAsync(window);
-
-            Assert.Equal(expected.TreeMetrics, pendingTreeMetrics);
-            Assert.Equal(ExportOutputMetrics.Empty, pendingContentMetrics);
-            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
-
-            await UiTestDriver.WaitForStatusMetricsAsync(
-                window,
-                expected.TreeMetrics,
-                expected.ContentMetrics,
-                waitForSelectionRefreshIdle: false);
-        }
-        finally
-        {
-            analyzer.Release();
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
 
     [AvaloniaFact]
     public async Task SelectingRootWhileBaselineMetricsAreStillRunning_AutoTransitionsToSelectionMetrics()
@@ -176,53 +118,6 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
     }
 
     [AvaloniaFact]
-    public async Task CancelledBaselineClearingRootSelection_RestoresWholeWorkspaceMetricsInsteadOfZeroingStatusBar()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
-        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
-
-        try
-        {
-            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () => !UiTestDriver.GetViewModel(window).StatusBusy,
-                "initial baseline metrics cancellation to settle");
-
-            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
-            var rootCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, rootNode.DisplayName);
-
-            await UiTestDriver.ClickAsync(window, rootCheckBox);
-            analyzer.Release();
-
-            var selectedExpected = await ComputeExpectedAppliedMetricsAsync(window);
-            Assert.NotEqual(ExportOutputMetrics.Empty, selectedExpected.ContentMetrics);
-            await UiTestDriver.WaitForStatusMetricsAsync(
-                window,
-                selectedExpected.TreeMetrics,
-                selectedExpected.ContentMetrics,
-                waitForSelectionRefreshIdle: false);
-
-            await UiTestDriver.ClickAsync(window, rootCheckBox);
-
-            var fullWorkspaceExpected = await ComputeExpectedAppliedMetricsAsync(window);
-            Assert.NotEqual(ExportOutputMetrics.Empty, fullWorkspaceExpected.TreeMetrics);
-            Assert.NotEqual(ExportOutputMetrics.Empty, fullWorkspaceExpected.ContentMetrics);
-            await UiTestDriver.WaitForStatusMetricsAsync(
-                window,
-                fullWorkspaceExpected.TreeMetrics,
-                fullWorkspaceExpected.ContentMetrics,
-                waitForSelectionRefreshIdle: false);
-        }
-        finally
-        {
-            analyzer.Release();
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
     public async Task CancelledBaselineFolderSelection_WithBinaryFiles_StillPublishesFinalContentMetrics()
     {
         using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
@@ -243,44 +138,6 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 
             var checkBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
             await UiTestDriver.ClickAsync(window, checkBox);
-
-            analyzer.Release();
-
-            var expected = await ComputeExpectedAppliedMetricsAsync(window);
-            Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
-            Assert.NotEqual(ExportOutputMetrics.Empty, expected.ContentMetrics);
-
-            await UiTestDriver.WaitForStatusMetricsAsync(
-                window,
-                expected.TreeMetrics,
-                expected.ContentMetrics,
-                waitForSelectionRefreshIdle: false);
-        }
-        finally
-        {
-            analyzer.Release();
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
-    public async Task CancelledBaselineRootSelection_WithBinaryFiles_StillPublishesFinalContentMetrics()
-    {
-        using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
-        var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
-        var window = await CreateWindowDuringInitialMetricsWarmupAsync(project, analyzer);
-
-        try
-        {
-            await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () => !UiTestDriver.GetViewModel(window).StatusBusy,
-                "initial baseline metrics cancellation to settle");
-
-            var rootNode = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
-            var rootCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, rootNode.DisplayName);
-            await UiTestDriver.ClickAsync(window, rootCheckBox);
 
             analyzer.Release();
 
@@ -536,276 +393,6 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
     }
 
     [AvaloniaFact]
-    public async Task InitialLoad_ProjectWorkflowWorkspace_StatusBarMatchesExpectedExportMetrics()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
-
-        try
-        {
-            var expected = await ComputeExpectedAppliedMetricsAsync(window);
-            await UiTestDriver.WaitForStatusMetricsAsync(window, expected.TreeMetrics, expected.ContentMetrics);
-
-            var viewModel = UiTestDriver.GetViewModel(window);
-            Assert.Contains(viewModel.RootFolders, option => string.Equals(option.Name, "docs", StringComparison.Ordinal));
-            Assert.Contains(viewModel.RootFolders, option => string.Equals(option.Name, "samples", StringComparison.Ordinal));
-            Assert.Contains(viewModel.RootFolders, option => string.Equals(option.Name, "src", StringComparison.Ordinal));
-            Assert.Contains(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore && option.IsChecked);
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(viewModel.IgnoreOptions);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
-    public async Task PendingCombinedSectionChanges_DoNotAffectAppliedStatusMetricsUntilApply()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
-
-        try
-        {
-            var initialExpected = await ComputeExpectedAppliedMetricsAsync(window);
-            await UiTestDriver.WaitForStatusMetricsAsync(window, initialExpected.TreeMetrics, initialExpected.ContentMetrics);
-
-            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
-            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
-            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
-
-            var pendingExpected = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
-            Assert.NotEqual(initialExpected.TreeMetrics, pendingExpected.TreeMetrics);
-
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () =>
-                {
-                    var viewModel = UiTestDriver.GetViewModel(window);
-                    return UiTestDriver.TryParseStatusMetrics(viewModel.StatusTreeStatsText, out var actualTreeMetrics) &&
-                           UiTestDriver.TryParseStatusMetrics(viewModel.StatusContentStatsText, out var actualContentMetrics) &&
-                           actualTreeMetrics == initialExpected.TreeMetrics &&
-                           actualContentMetrics == initialExpected.ContentMetrics;
-                },
-                "pending settings to leave the applied status metrics unchanged");
-
-            var appliedExpected = await ApplySettingsAndWaitForExpectedMetricsAsync(window);
-            Assert.Equal(pendingExpected.TreeMetrics, appliedExpected.TreeMetrics);
-            Assert.Equal(pendingExpected.ContentMetrics, appliedExpected.ContentMetrics);
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
-    public async Task ApplySettings_DisablingAllIgnoreRules_RebuildsStatusMetricsForFullWorkspace()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
-
-        try
-        {
-            var ignoreAllCheckBox = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
-            if (!UiTestDriver.GetViewModel(window).AllIgnoreChecked)
-            {
-                await UiTestDriver.ClickAsync(window, ignoreAllCheckBox);
-                await UiTestDriver.WaitForConditionAsync(
-                    window,
-                    () => UiTestDriver.GetViewModel(window).AllIgnoreChecked,
-                    "all ignore rules to become selected before testing the all-off transition");
-                await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
-            }
-
-            await UiTestDriver.ClickAsync(window, ignoreAllCheckBox);
-
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () =>
-                {
-                    var rootNames = UiTestDriver.GetViewModel(window).RootFolders.Select(option => option.Name).ToArray();
-                    return rootNames.Contains(".cache", StringComparer.Ordinal) &&
-                           rootNames.Contains("generated", StringComparer.Ordinal) &&
-                           rootNames.Contains("logs", StringComparer.Ordinal) &&
-                           rootNames.Contains("node_modules", StringComparer.Ordinal);
-                },
-                "all root folders hidden by ignore rules to reappear after disabling all ignore rules");
-
-            await ApplySettingsAndWaitForExpectedMetricsAsync(window);
-
-            var viewModel = UiTestDriver.GetViewModel(window);
-            Assert.Contains(viewModel.Extensions, option => string.Equals(option.Name, ".js", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(viewModel.Extensions, option => string.Equals(option.Name, ".log", StringComparison.OrdinalIgnoreCase));
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(viewModel.IgnoreOptions);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
-    public async Task RapidMixedMutations_ApplyUsesLatestSelectionsInsteadOfIntermediateState()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
-
-        try
-        {
-            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
-            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
-            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
-            var intermediateExpected = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
-
-            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
-            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "samples");
-            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".json");
-            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.ExtensionlessFiles);
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
-
-            var pendingFinalExpected = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
-            Assert.NotEqual(intermediateExpected.TreeMetrics, pendingFinalExpected.TreeMetrics);
-
-            var finalExpected = await ApplySettingsAndWaitForExpectedMetricsAsync(window);
-            Assert.Equal(pendingFinalExpected.TreeMetrics, finalExpected.TreeMetrics);
-            Assert.Equal(pendingFinalExpected.ContentMetrics, finalExpected.ContentMetrics);
-
-            var viewModel = UiTestDriver.GetViewModel(window);
-            Assert.True(UiTestDriver.TryParseStatusMetrics(viewModel.StatusTreeStatsText, out var finalTreeMetrics));
-            Assert.NotEqual(intermediateExpected.TreeMetrics, finalTreeMetrics);
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(viewModel.IgnoreOptions);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
-    public async Task BurstMixedMutations_QueuedRefreshesConvergeBeforeApply()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
-
-        try
-        {
-            var baseline = await ComputeExpectedAppliedMetricsAsync(window);
-            await UiTestDriver.WaitForStatusMetricsAsync(window, baseline.TreeMetrics, baseline.ContentMetrics);
-
-            for (var cycle = 0; cycle < 3; cycle++)
-            {
-                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
-                await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
-                await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
-                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
-                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "samples");
-                await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".json");
-                await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.ExtensionlessFiles);
-            }
-
-            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
-
-            var pendingExpected = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
-            AssertMetricsChanged(baseline, pendingExpected, "burst mixed root/extension/ignore changes");
-
-            var appliedExpected = await ApplySettingsAndWaitForExpectedMetricsAsync(window);
-            Assert.Equal(pendingExpected.TreeMetrics, appliedExpected.TreeMetrics);
-            Assert.Equal(pendingExpected.ContentMetrics, appliedExpected.ContentMetrics);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
-    public async Task LiveSectionRefresh_NeverShowsAdvancedIgnoreOptionWithoutPositiveCount()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
-
-        try
-        {
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
-
-            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
-
-            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
-
-			await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
-			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
-			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() =>
-				{
-					var viewModel = UiTestDriver.GetViewModel(window);
-					var hideSecrets = viewModel.IgnoreOptions.First(
-						static option => option.Id == IgnoreOptionId.HideSecrets);
-					return hideSecrets.IsChecked &&
-					       Regex.IsMatch(hideSecrets.Label, @"\(\d+/\d+\)$", RegexOptions.CultureInvariant);
-				},
-				"enabled Hide Secrets to publish measured matched/hidden counts");
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
-    public async Task PendingGitIgnoreToggle_RevealsAdditionalRootFoldersWithoutChangingAppliedStatusBarUntilApply()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
-
-        try
-        {
-            var baseline = await ComputeExpectedAppliedMetricsAsync(window);
-            await UiTestDriver.WaitForStatusMetricsAsync(window, baseline.TreeMetrics, baseline.ContentMetrics);
-
-            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.UseGitIgnore);
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () =>
-                {
-                    var rootNames = UiTestDriver.GetViewModel(window).RootFolders.Select(option => option.Name).ToArray();
-                    return rootNames.Contains("generated", StringComparer.Ordinal) &&
-                           rootNames.Contains("logs", StringComparer.Ordinal);
-                },
-                "gitignored root folders to appear in the pending selection state");
-
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () =>
-                {
-                    var viewModel = UiTestDriver.GetViewModel(window);
-                    return UiTestDriver.TryParseStatusMetrics(viewModel.StatusTreeStatsText, out var actualTreeMetrics) &&
-                           UiTestDriver.TryParseStatusMetrics(viewModel.StatusContentStatsText, out var actualContentMetrics) &&
-                           actualTreeMetrics == baseline.TreeMetrics &&
-                           actualContentMetrics == baseline.ContentMetrics;
-                },
-                "pending gitignore change to leave the applied status bar unchanged");
-
-            await ApplySettingsAndWaitForExpectedMetricsAsync(window);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
     public async Task ApplySettings_GitIgnoreRoundTrip_RestoresBaselineMetrics()
     {
         using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
@@ -845,10 +432,10 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         {
             var finalExpectedA = await ApplyCombinedScenarioAsync(
                 windowA,
-                [WorkflowUiMutationStep.Roots, WorkflowUiMutationStep.Extensions, WorkflowUiMutationStep.Ignore]);
+                [WorkflowUiMutationStep.Extensions, WorkflowUiMutationStep.Ignore]);
             var finalExpectedB = await ApplyCombinedScenarioAsync(
                 windowB,
-                [WorkflowUiMutationStep.Ignore, WorkflowUiMutationStep.Extensions, WorkflowUiMutationStep.Roots]);
+                [WorkflowUiMutationStep.Ignore, WorkflowUiMutationStep.Extensions]);
 
             Assert.Equal(finalExpectedA.TreeMetrics, finalExpectedB.TreeMetrics);
             Assert.Equal(finalExpectedA.ContentMetrics, finalExpectedB.ContentMetrics);
@@ -875,8 +462,8 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
             var baselineB = await ComputeExpectedAppliedMetricsAsync(windowB);
             await UiTestDriver.WaitForStatusMetricsAsync(windowB, baselineB.TreeMetrics, baselineB.ContentMetrics);
 
-            await ApplyPendingCombinedScenarioAsync(windowA, [WorkflowUiMutationStep.Roots, WorkflowUiMutationStep.Extensions, WorkflowUiMutationStep.Ignore]);
-            await ApplyPendingCombinedScenarioAsync(windowB, [WorkflowUiMutationStep.Ignore, WorkflowUiMutationStep.Extensions, WorkflowUiMutationStep.Roots]);
+            await ApplyPendingCombinedScenarioAsync(windowA, [WorkflowUiMutationStep.Extensions, WorkflowUiMutationStep.Ignore]);
+            await ApplyPendingCombinedScenarioAsync(windowB, [WorkflowUiMutationStep.Ignore, WorkflowUiMutationStep.Extensions]);
 
             await UiTestDriver.WaitForStatusMetricsAsync(windowA, baselineA.TreeMetrics, baselineA.ContentMetrics);
             await UiTestDriver.WaitForStatusMetricsAsync(windowB, baselineB.TreeMetrics, baselineB.ContentMetrics);
@@ -901,67 +488,14 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 
             var changed = await ApplyCombinedScenarioAsync(
                 window,
-                [WorkflowUiMutationStep.Roots, WorkflowUiMutationStep.Extensions, WorkflowUiMutationStep.Ignore]);
+                [WorkflowUiMutationStep.Extensions, WorkflowUiMutationStep.Ignore]);
             AssertMetricsChanged(baseline, changed, "combined all-sections scenario");
 
-            await ApplyPendingCombinedScenarioAsync(window, [WorkflowUiMutationStep.Ignore, WorkflowUiMutationStep.Extensions, WorkflowUiMutationStep.Roots]);
+            await ApplyPendingCombinedScenarioAsync(window, [WorkflowUiMutationStep.Ignore, WorkflowUiMutationStep.Extensions]);
             var restored = await ApplySettingsAndWaitForExpectedMetricsAsync(window);
             Assert.Equal(baseline.TreeMetrics, restored.TreeMetrics);
             Assert.Equal(baseline.ContentMetrics, restored.ContentMetrics);
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
-    public async Task ApplySettings_EachCheckedRootFolderToggle_RebuildsMetricsAndRestoresBaseline()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
-
-        try
-        {
-            var baseline = await ComputeExpectedAppliedMetricsAsync(window);
-            await UiTestDriver.WaitForStatusMetricsAsync(window, baseline.TreeMetrics, baseline.ContentMetrics);
-
-            var checkedRoots = UiTestDriver.GetViewModel(window).RootFolders
-                .Where(option => option.IsChecked)
-                // Some checked root folders can be neutralized by active ignore/file filters.
-                // The round-trip metric assertion targets roots that contain applied content
-                // in the seeded workflow workspace.
-                .Where(option => option.Name is "docs" or "samples" or "src" or "stealth-root")
-                .Select(option => option.Name)
-                .ToArray();
-            Assert.NotEmpty(checkedRoots);
-
-            foreach (var rootName in checkedRoots)
-            {
-                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, rootName);
-                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
-
-                var expectedWithoutRoot = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
-                AssertMetricsChanged(baseline, expectedWithoutRoot, $"root folder '{rootName}'");
-
-                var appliedWithoutRoot = await ApplySettingsAndWaitForExpectedMetricsAsync(window);
-                Assert.False(UiTestDriver.GetViewModel(window).RootFolders.First(option => option.Name == rootName).IsChecked);
-                Assert.Equal(expectedWithoutRoot.TreeMetrics, appliedWithoutRoot.TreeMetrics);
-                Assert.Equal(expectedWithoutRoot.ContentMetrics, appliedWithoutRoot.ContentMetrics);
-
-                await UiTestDriver.ClickRootFolderCheckBoxAsync(window, rootName);
-                await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
-
-                var restoredExpected = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
-                Assert.Equal(baseline.TreeMetrics, restoredExpected.TreeMetrics);
-                Assert.Equal(baseline.ContentMetrics, restoredExpected.ContentMetrics);
-
-                var appliedRestored = await ApplySettingsAndWaitForExpectedMetricsAsync(window);
-                Assert.True(UiTestDriver.GetViewModel(window).RootFolders.First(option => option.Name == rootName).IsChecked);
-                Assert.Equal(baseline.TreeMetrics, appliedRestored.TreeMetrics);
-                Assert.Equal(baseline.ContentMetrics, appliedRestored.ContentMetrics);
-            }
         }
         finally
         {
@@ -1083,52 +617,6 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task RevertingPendingChangesAcrossSections_KeepsAppliedMetricsStable()
-    {
-        using var project = UiTestProject.CreateWithProjectLoadWorkflowWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
-
-        try
-        {
-            var baseline = await ComputeExpectedAppliedMetricsAsync(window);
-            await UiTestDriver.WaitForStatusMetricsAsync(window, baseline.TreeMetrics, baseline.ContentMetrics);
-
-            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
-            await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "docs");
-
-            var extension = UiTestDriver.GetViewModel(window).Extensions.First(option => option.IsChecked).Name;
-            await UiTestDriver.ClickExtensionCheckBoxAsync(window, extension);
-            await UiTestDriver.ClickExtensionCheckBoxAsync(window, extension);
-
-            var reversibleIgnore = UiTestDriver.GetViewModel(window).IgnoreOptions
-                .Where(option => option.IsChecked)
-                .Select(option => option.Id)
-                .First(id => id is IgnoreOptionId.EmptyFiles
-                    or IgnoreOptionId.EmptyFolders
-                    or IgnoreOptionId.ExtensionlessFiles
-                    or IgnoreOptionId.DotFiles
-                    or IgnoreOptionId.HiddenFiles);
-            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, reversibleIgnore);
-            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, reversibleIgnore);
-
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
-
-            var revertedExpected = await ComputeProjectedMetricsFromSettingsAsync(project.RootPath, window);
-            Assert.Equal(baseline.TreeMetrics, revertedExpected.TreeMetrics);
-            Assert.Equal(baseline.ContentMetrics, revertedExpected.ContentMetrics);
-
-            var appliedRestored = await ApplySettingsAndWaitForExpectedMetricsAsync(window);
-            Assert.Equal(baseline.TreeMetrics, appliedRestored.TreeMetrics);
-            Assert.Equal(baseline.ContentMetrics, appliedRestored.ContentMetrics);
-            AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
     private static async Task<ProjectLoadWorkflowRuntime.ProjectLoadWorkflowMetrics> ComputeExpectedAppliedMetricsAsync(
         MainWindow window)
     {
@@ -1183,25 +671,6 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         };
     }
 
-    private static async Task<ProjectLoadWorkflowRuntime.ProjectLoadWorkflowMetrics> ComputeProjectedMetricsFromSettingsAsync(
-        string rootPath,
-        MainWindow window)
-    {
-        await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
-
-        var viewModel = UiTestDriver.GetViewModel(window);
-        var selectedRoots = CollectCheckedNames(viewModel.RootFolders, PathComparer.Default);
-        var allowedExtensions = CollectCheckedNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
-        var selectedIgnoreOptions = UiTestDriver.GetSelectedIgnoreOptionIds(window);
-
-        return await ProjectLoadWorkflowRuntime.ComputeMetricsAsync(
-            rootPath,
-            selectedRoots,
-            allowedExtensions,
-            selectedIgnoreOptions,
-            CancellationToken.None);
-    }
-
     private static HashSet<string> CollectCheckedNames(
         IEnumerable<SelectionOptionViewModel> options,
         IEqualityComparer<string> comparer)
@@ -1214,6 +683,29 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         }
 
         return selected;
+    }
+
+    private static async Task<ProjectLoadWorkflowRuntime.ProjectLoadWorkflowMetrics> ComputeProjectedMetricsFromSettingsAsync(
+        string rootPath,
+        MainWindow window)
+    {
+        await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+
+        var viewModel = UiTestDriver.GetViewModel(window);
+        var scanRoots = Directory.EnumerateDirectories(rootPath)
+            .Select(Path.GetFileName)
+            .Where(static name => !string.IsNullOrEmpty(name))
+            .Select(static name => name!)
+            .ToHashSet(PathComparer.Default);
+        var allowedExtensions = CollectCheckedNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
+        var selectedIgnoreOptions = UiTestDriver.GetSelectedIgnoreOptionIds(window);
+
+        return await ProjectLoadWorkflowRuntime.ComputeMetricsAsync(
+            rootPath,
+            scanRoots,
+            allowedExtensions,
+            selectedIgnoreOptions,
+            CancellationToken.None);
     }
 
     private static void AssertMetricsChanged(
@@ -1256,9 +748,6 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         {
             switch (step)
             {
-                case WorkflowUiMutationStep.Roots:
-                    await UiTestDriver.ClickRootFolderCheckBoxAsync(window, "samples");
-                    break;
                 case WorkflowUiMutationStep.Extensions:
                     await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".json");
                     break;
@@ -1275,7 +764,6 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 
     private enum WorkflowUiMutationStep
     {
-        Roots,
         Extensions,
         Ignore
     }

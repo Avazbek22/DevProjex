@@ -48,7 +48,6 @@ public sealed class ScopedControllerGoldenMatrixIntegrationTests
 			scenarioContext);
 		var liveSnapshot = services.Engine.ComputeLiveRefreshSnapshot(
 			BuildConvergedContext(workspace.Path, fullSnapshot, scenarioContext),
-			CollectCheckedRootNames(fullSnapshot),
 			TestContext.Current.CancellationToken);
 
 		AssertEquivalentDynamicSections(fullSnapshot, liveSnapshot, testCase);

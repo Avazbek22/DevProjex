@@ -42,7 +42,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // Event handler delegates for proper cleanup
     private readonly NotifyCollectionChangedEventHandler _ignoreOptionsChangedHandler;
     private readonly NotifyCollectionChangedEventHandler _extensionsChangedHandler;
-    private readonly NotifyCollectionChangedEventHandler _rootFoldersChangedHandler;
     private readonly NotifyCollectionChangedEventHandler _recentFoldersChangedHandler;
     private readonly NotifyCollectionChangedEventHandler _recentRepositoriesChangedHandler;
     private bool _disposed;
@@ -66,7 +65,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private double _previewFontSize = DefaultPreviewFontSize;
 
     private bool _allExtensionsChecked;
-    private bool _allRootFoldersChecked;
     private bool _allIgnoreChecked;
 	private IgnoreOptionViewModel? _hideSecretsOption;
 	private bool? _contentProcessingHasFindings;
@@ -136,7 +134,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _helpContentProvider = helpContentProvider;
         _title = BaseTitle;
         _allExtensionsChecked = true;
-        _allRootFoldersChecked = true;
         _allIgnoreChecked = true;
         UpdateLocalization();
 
@@ -147,7 +144,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			UpdateAllCheckboxLabels();
 		};
         _extensionsChangedHandler = (_, _) => UpdateAllCheckboxLabels();
-        _rootFoldersChangedHandler = (_, _) => UpdateAllCheckboxLabels();
         _recentFoldersChangedHandler = (_, _) =>
         {
             RaisePropertyChanged(nameof(HasRecentFolders));
@@ -162,7 +158,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Subscribe to collection changes to update "All" checkbox labels with counts
         IgnoreOptions.CollectionChanged += _ignoreOptionsChangedHandler;
         Extensions.CollectionChanged += _extensionsChangedHandler;
-        RootFolders.CollectionChanged += _rootFoldersChangedHandler;
         RecentFolders.CollectionChanged += _recentFoldersChangedHandler;
         RecentRepositories.CollectionChanged += _recentRepositoriesChangedHandler;
         ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
@@ -180,7 +175,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
         }
     }
-    public ObservableCollection<SelectionOptionViewModel> RootFolders { get; } = new ResettableObservableCollection<SelectionOptionViewModel>();
     public ObservableCollection<SelectionOptionViewModel> Extensions { get; } = new ResettableObservableCollection<SelectionOptionViewModel>();
     public ObservableCollection<IgnoreOptionViewModel> IgnoreOptions { get; } = new ResettableObservableCollection<IgnoreOptionViewModel>();
 	public ObservableCollection<IgnoreOptionViewModel> PathIgnoreOptions { get; } =
@@ -1316,19 +1310,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool AllRootFoldersChecked
-    {
-        get => _allRootFoldersChecked;
-        set
-        {
-            if (_allRootFoldersChecked == value) return;
-            _allRootFoldersChecked = value;
-            RaisePropertyChanged();
-        }
-    }
-
-    public bool HasRootFolderOptions => RootFolders.Count > 0;
-
     public bool HasRecentFolders => RecentFolders.Count > 0;
 
     // Expose File > Recent as soon as at least one persisted folder exists.
@@ -1463,9 +1444,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsAll { get; private set; } = string.Empty;
     public string SettingsAllIgnore { get; private set; } = string.Empty;
     public string SettingsAllExtensions { get; private set; } = string.Empty;
-    public string SettingsAllRootFolders { get; private set; } = string.Empty;
     public string SettingsExtensions { get; private set; } = string.Empty;
-    public string SettingsRootFolders { get; private set; } = string.Empty;
     public string SettingsFont { get; private set; } = string.Empty;
     public string SettingsFontDefault { get; private set; } = string.Empty;
     public string SettingsApply { get; private set; } = string.Empty;
@@ -1617,7 +1596,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsAll = _localization["Settings.All"];
         UpdateAllCheckboxLabels();
         SettingsExtensions = _localization["Settings.Extensions"];
-        SettingsRootFolders = _localization["Settings.RootFolders"];
         SettingsFont = _localization["Settings.Font"];
         SettingsFontDefault = _localization["Settings.Font.Default"];
         SettingsApply = _localization["Settings.Apply"];
@@ -1764,7 +1742,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		RaisePropertyChanged(nameof(PreviewSecretKeptTooltip));
         RaisePropertyChanged(nameof(SettingsAll));
         RaisePropertyChanged(nameof(SettingsExtensions));
-        RaisePropertyChanged(nameof(SettingsRootFolders));
         RaisePropertyChanged(nameof(SettingsFont));
         RaisePropertyChanged(nameof(SettingsFontDefault));
         RaisePropertyChanged(nameof(SettingsApply));
@@ -1877,12 +1854,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
 		SettingsAllIgnore = PathIgnoreOptions.Count > 0 ? $"{baseText} ({PathIgnoreOptions.Count})" : baseText;
         SettingsAllExtensions = Extensions.Count > 0 ? $"{baseText} ({Extensions.Count})" : baseText;
-        SettingsAllRootFolders = RootFolders.Count > 0 ? $"{baseText} ({RootFolders.Count})" : baseText;
-
         RaisePropertyChanged(nameof(SettingsAllIgnore));
         RaisePropertyChanged(nameof(SettingsAllExtensions));
-        RaisePropertyChanged(nameof(SettingsAllRootFolders));
-        RaisePropertyChanged(nameof(HasRootFolderOptions));
     }
 
 	private void SynchronizeIgnoreOptionSections()
@@ -1961,7 +1934,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Unsubscribe from collection change events
         IgnoreOptions.CollectionChanged -= _ignoreOptionsChangedHandler;
         Extensions.CollectionChanged -= _extensionsChangedHandler;
-        RootFolders.CollectionChanged -= _rootFoldersChangedHandler;
         RecentFolders.CollectionChanged -= _recentFoldersChangedHandler;
         RecentRepositories.CollectionChanged -= _recentRepositoriesChangedHandler;
         ToastItems.CollectionChanged -= OnToastItemsCollectionChanged;
@@ -1977,7 +1949,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		_contentProcessingHiddenCount = null;
 		HideSecretsOption = null;
         Extensions.Clear();
-        RootFolders.Clear();
         FontFamilies.Clear();
         GitBranches.Clear();
         ToastItems.Clear();

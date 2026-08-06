@@ -483,10 +483,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		{
 			[optionId] = isChecked
 		};
-		var selectedRoots = snapshot.RootOptions!
-			.Where(static option => option.IsChecked)
-			.Select(static option => option.Name)
-			.ToHashSet(PathComparer.Default);
 		var liveSnapshot = services.Engine.ComputeLiveRefreshSnapshot(
 			context with
 			{
@@ -498,7 +494,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 				IgnoreAllPreference = null,
 				CaptureTreeInventory = true
 			},
-			selectedRoots,
 			TestContext.Current.CancellationToken);
 
 		return liveSnapshot with { RootOptions = snapshot.RootOptions };

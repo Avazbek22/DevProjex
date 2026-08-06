@@ -10,7 +10,7 @@ DevProjex combines four independent controls:
 
 1. **Git filtering** chooses one mode: no Git filtering, `.gitignore`, or tracked files only.
 2. **Exclusions** enable Smart Ignore and the hidden, dot-name, empty, and extensionless filters.
-3. **Parameters** select top-level folders and file extensions.
+3. **Parameters** select file extensions. The current Terminal/CLI compatibility contract can additionally constrain root folders.
 4. **Tree selection** includes or excludes individual files and subtrees.
 
 Conceptually, all four narrow the same project inventory before preview, copy, context export, or project export:
@@ -19,7 +19,7 @@ Conceptually, all four narrow the same project inventory before preview, copy, c
 project inventory
   -> Git filtering
   -> Smart Ignore and ordinary exclusions
-  -> root-folder and extension selection
+  -> extension selection (and optional Terminal/CLI root scope)
   -> checked tree items
   -> preview / copy / export
 ```
@@ -144,7 +144,7 @@ The interface may omit an option that cannot affect the current workspace. This 
 
 The built-in `standard` profile selects `.gitignore` mode and all eight ordinary exclusion groups, including Smart Ignore. A selected Git mode remains selected even when its current rule set is empty.
 
-Desktop and TUI workflows can use the local project profile. Known checkbox states are restored exactly. A newly discovered root folder, extension, or exclusion row that was not present when the profile was saved uses the current product default. Explicit CLI overrides affect only that invocation and do not rewrite the local profile.
+Desktop local-project settings persist file-type and exclusion choices. Known checkbox states are restored exactly, while a newly discovered extension or exclusion row uses the current product default. Terminal/CLI root-scope compatibility remains a separate contract until the public `--root` workflow is revised. Explicit CLI overrides affect only that invocation and do not rewrite the local settings.
 
 For the complete profile precedence rules, see [`CLI-Profiles.md`](CLI-Profiles.md) and [`CLI-V1-Contract.md`](CLI-V1-Contract.md).
 
@@ -201,7 +201,7 @@ If a path is missing, check the controls independently:
 1. Confirm the active Git mode.
 2. Temporarily disable Smart Ignore.
 3. Check hidden, dot-name, empty, and extensionless exclusions.
-4. Check selected root folders and extensions.
+4. Check selected extensions. For Terminal/CLI invocations, also check an explicit root scope.
 5. Check the individual tree selection.
 
 If disabling Smart Ignore alone restores a source directory, report the directory name, relevant project markers, and a minimal redacted top-level layout. Do not attach private source contents, credentials, or repository URLs.

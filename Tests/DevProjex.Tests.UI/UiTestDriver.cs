@@ -273,19 +273,6 @@ internal static class UiTestDriver
         return Assert.IsType<CheckBox>(checkBox);
     }
 
-    public static async Task ClickRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
-    {
-        await ScrollSettingsItemIntoViewAsync(
-            window,
-            "RootFoldersList",
-            GetViewModel(window).RootFolders.FirstOrDefault(option =>
-                string.Equals(option.Name, rootFolderName, StringComparison.Ordinal)));
-        await ClickResolvedControlAsync(
-            window,
-            () => FindRootFolderCheckBox(window, rootFolderName),
-            $"root folder checkbox '{rootFolderName}'");
-    }
-
     public static async Task ClickExtensionCheckBoxAsync(MainWindow window, string extensionName)
     {
         await ScrollSettingsItemIntoViewAsync(
@@ -1417,16 +1404,6 @@ internal static class UiTestDriver
             .FirstOrDefault(control => control.DataContext is TreeNodeViewModel node &&
                                        string.Equals(node.DisplayName, displayName, StringComparison.Ordinal) &&
                                        IsInteractableWithinWindow(control, window));
-    }
-
-    private static async Task<CheckBox> WaitForRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
-    {
-        await WaitForConditionAsync(
-            window,
-            () => FindRootFolderCheckBox(window, rootFolderName) is not null,
-            $"root folder checkbox '{rootFolderName}' to become interactable");
-
-        return GetRequiredRootFolderCheckBox(window, rootFolderName);
     }
 
     private static async Task<CheckBox> WaitForExtensionCheckBoxAsync(MainWindow window, string extensionName)

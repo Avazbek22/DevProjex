@@ -8,7 +8,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
     Task<SelectionRefreshSnapshot?> IProjectLoadSnapshotPipelineHost.BuildSelectionSnapshotAsync(
         string currentPath,
         CancellationToken cancellationToken) =>
-        _selectionCoordinator.BuildRootAndDependentsSnapshotAsync(currentPath, cancellationToken);
+        _selectionCoordinator.BuildProjectSelectionSnapshotAsync(currentPath, cancellationToken);
 
     bool IProjectLoadSnapshotPipelineHost.TryHandleSelectionRootAccessDenied(
         string currentPath,
@@ -95,7 +95,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!_selectionCoordinator.ApplyRootAndDependentsSnapshot(
+        if (!_selectionCoordinator.ApplyProjectSelectionSnapshot(
             snapshot.TreeInput.CurrentPath,
             snapshot.SelectionSnapshot))
         {
