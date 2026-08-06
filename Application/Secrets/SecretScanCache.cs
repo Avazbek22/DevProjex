@@ -36,13 +36,16 @@ internal sealed record SecretFindingMetadata(
 	int Start,
 	int Length,
 	string ValueFingerprint,
-	int RuleOrder);
+	int RuleOrder,
+	SecretFindingSource Source,
+	string? PersistentMarkHash);
 
 internal sealed record SecretScanCacheEntry(
 	string NormalizedPath,
 	SecretFileMetadata FileMetadata,
 	string ContentFingerprint,
 	string RulesIdentity,
+	int MarkedSecretsRevision,
 	bool IsBinary,
 	IReadOnlyList<SecretFindingMetadata> Findings,
 	long ApproximateRetainedBytes);
@@ -99,11 +102,12 @@ internal sealed class SecretScanCache
 		string path,
 		SecretFileMetadata metadata,
 		string rulesIdentity,
+		int markedSecretsRevision,
 		out SecretScanCacheEntry entry)
 	{
 		lock (_sync)
 		{
-			if (TryGetNodeLocked(path, metadata, rulesIdentity, out var node))
+			if (TryGetNodeLocked(path, metadata, rulesIdentity, markedSecretsRevision, out var node))
 			{
 				_cacheHits++;
 				TouchLocked(node);
@@ -122,11 +126,12 @@ internal sealed class SecretScanCache
 		SecretFileMetadata metadata,
 		string contentFingerprint,
 		string rulesIdentity,
+		int markedSecretsRevision,
 		out SecretScanCacheEntry entry)
 	{
 		lock (_sync)
 		{
-			if (TryGetNodeLocked(path, metadata, rulesIdentity, out var node) &&
+			if (TryGetNodeLocked(path, metadata, rulesIdentity, markedSecretsRevision, out var node) &&
 			    node.Value.ContentFingerprint.Equals(contentFingerprint, StringComparison.Ordinal))
 			{
 				_cacheHits++;
@@ -184,12 +189,14 @@ internal sealed class SecretScanCache
 		string path,
 		SecretFileMetadata metadata,
 		string rulesIdentity,
+		int markedSecretsRevision,
 		out LinkedListNode<SecretScanCacheEntry> node)
 	{
 		var normalizedPath = Path.GetFullPath(path);
 		if (_entries.TryGetValue(normalizedPath, out node!) &&
 		    node.Value.FileMetadata == metadata &&
-		    node.Value.RulesIdentity.Equals(rulesIdentity, StringComparison.Ordinal))
+		    node.Value.RulesIdentity.Equals(rulesIdentity, StringComparison.Ordinal) &&
+		    node.Value.MarkedSecretsRevision == markedSecretsRevision)
 		{
 			return true;
 		}

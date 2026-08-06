@@ -733,7 +733,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		character is '`' or '\'' or '"' or ';' or '\\' || char.IsWhiteSpace(character);
 
 	private static bool IsWordCharacter(char character) =>
-		char.IsLetterOrDigit(character) || character == '_';
+		SecretTokenBoundary.IsContinuation(character);
 
 	private static bool IsBase64Character(char character) =>
 		char.IsAsciiLetterOrDigit(character) || character is '+' or '/' or '=';

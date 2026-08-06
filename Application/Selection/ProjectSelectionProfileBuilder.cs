@@ -10,7 +10,8 @@ public static class ProjectSelectionProfileBuilder
         IReadOnlyDictionary<string, bool>? cachedExtensionStates,
         IReadOnlyDictionary<IgnoreOptionId, bool>? cachedIgnoreOptionStates,
         IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
-        StringComparer extensionComparer)
+        StringComparer extensionComparer,
+		IReadOnlyCollection<MarkedSecretProfileEntry>? markedSecrets = null)
     {
         // Selected arrays are the effective projection used by older readers. Full state
         // maps are the durable local-profile contract because unchecked and temporarily
@@ -31,7 +32,8 @@ public static class ProjectSelectionProfileBuilder
             SelectedIgnoreOptions: selectedIgnoreOptionSet.ToArray(),
             RootFolderStates: null,
             ExtensionStates: MergeSelectionStates(cachedExtensionStates, extensionOptions, extensionComparer),
-            IgnoreOptionStates: ignoreOptionStates);
+            IgnoreOptionStates: ignoreOptionStates,
+			MarkedSecrets: markedSecrets?.ToArray() ?? []);
     }
 
     public static ProjectSelectionProfile Clone(ProjectSelectionProfile profile)
@@ -56,7 +58,8 @@ public static class ProjectSelectionProfileBuilder
                 ? null
                 : new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),
             IgnoreOptionStates: ignoreOptionStates,
-            SelectedPaths: profile.SelectedPaths?.ToArray());
+			SelectedPaths: profile.SelectedPaths?.ToArray(),
+			MarkedSecrets: profile.MarkedSecrets?.ToArray());
     }
 
     private static List<SelectionOption> MaterializeSelectionOptions(IEnumerable<SelectionOption> options)

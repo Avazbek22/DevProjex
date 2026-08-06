@@ -31,6 +31,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly IToastService _toastService;
     private readonly PreviewDocumentBuilder _previewDocumentBuilder;
 	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
+	private readonly SecretRedactionSession _secretRedactionSession;
     private readonly SelectedContentExportService _contentExport;
     private readonly ProjectTextOutputPipeline _textOutputPipeline;
     private readonly TreeExportService _treeExport;
@@ -41,6 +42,8 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly Func<string, Task> _showErrorAsync;
 	private readonly Func<SecretRedactionContext?> _redactionContextProvider;
 	private readonly Action _requestRedactionRefresh;
+	private readonly Func<bool> _ensureHideSecretsEnabled;
+	private readonly Action _persistProjectProfile;
 
     private CancellationTokenSource? _selectionMetricsCts;
     private DispatcherTimer? _selectionMetricsDebounceTimer;
@@ -50,6 +53,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private bool _hasSelectionMetricsSnapshot;
     private bool _scrollSyncActive;
 	private Vector? _pendingRedactionViewportOffset;
+	private string? _pendingMarkedSecretHash;
     private bool _disposed;
 
     public PreviewSurfaceController(
@@ -60,6 +64,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         IToastService toastService,
         PreviewDocumentBuilder previewDocumentBuilder,
 		SecretRedactionOutputPreparer secretRedactionPreparer,
+		SecretRedactionSession secretRedactionSession,
         SelectedContentExportService contentExport,
         ProjectTextOutputPipeline textOutputPipeline,
         TreeExportService treeExport,
@@ -69,7 +74,9 @@ internal sealed class PreviewSurfaceController : IDisposable
         Func<string, Task> setClipboardTextAsync,
         Func<string, Task> showErrorAsync,
 		Func<SecretRedactionContext?> redactionContextProvider,
-		Action requestRedactionRefresh)
+		Action requestRedactionRefresh,
+		Func<bool> ensureHideSecretsEnabled,
+		Action persistProjectProfile)
     {
         _window = window;
         _viewModel = viewModel;
@@ -78,6 +85,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         _toastService = toastService;
         _previewDocumentBuilder = previewDocumentBuilder;
 		_secretRedactionPreparer = secretRedactionPreparer;
+		_secretRedactionSession = secretRedactionSession;
         _contentExport = contentExport;
         _textOutputPipeline = textOutputPipeline;
         _treeExport = treeExport;
@@ -88,6 +96,8 @@ internal sealed class PreviewSurfaceController : IDisposable
         _showErrorAsync = showErrorAsync;
 		_redactionContextProvider = redactionContextProvider;
 		_requestRedactionRefresh = requestRedactionRefresh;
+		_ensureHideSecretsEnabled = ensureHideSecretsEnabled;
+		_persistProjectProfile = persistProjectProfile;
 
         controls.TextControl.VerticalOffset =
             Math.Max(0, controls.TextScrollViewer.Offset.Y);
@@ -100,6 +110,8 @@ internal sealed class PreviewSurfaceController : IDisposable
         controls.TextControl.PreviewSelectionChanged +=
             OnSelectionChanged;
 		controls.TextControl.RedactionToggleRequested += OnRedactionToggleRequested;
+		controls.TextControl.ManualSecretMarkRequested += OnManualSecretMarkRequested;
+		controls.TextControl.ManualSecretUnmarkRequested += OnManualSecretUnmarkRequested;
     }
 
 	private void OnRedactionToggleRequested(
@@ -113,6 +125,89 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
 		context.Session.ToggleKeepAsIs(e.OccurrenceId);
 		_requestRedactionRefresh();
+	}
+
+	private void OnManualSecretMarkRequested(
+		object? sender,
+		PreviewManualSecretMarkRequestedEventArgs e)
+	{
+		var document = _controls.TextControl.Document ?? _viewModel.PreviewDocument;
+		if (document is null || !TryResolveManualMarkLocation(document, e, out var location))
+			return;
+
+		var changed = e.Persistent
+			? _secretRedactionSession.AddMarkedSecret(
+				new MarkedSecretProfileEntry(e.Value.Hash, location.Key, e.Value.Length))
+			: _secretRedactionSession.AddSessionMarkedSecret(
+				location.RelativePath,
+				location.LineIndex,
+				location.Column,
+				e.Value);
+		if (!changed && !e.Persistent)
+			return;
+
+		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+		if (e.Persistent)
+			_pendingMarkedSecretHash = e.Value.Hash;
+		var hideSecretsChanged = _ensureHideSecretsEnabled();
+		if (e.Persistent)
+			_persistProjectProfile();
+		if (!hideSecretsChanged)
+			_requestRedactionRefresh();
+	}
+
+	private void OnManualSecretUnmarkRequested(
+		object? sender,
+		PreviewManualSecretUnmarkRequestedEventArgs e)
+	{
+		if (!_secretRedactionSession.RemoveMarkedSecret(e.Hash))
+			return;
+
+		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+		_persistProjectProfile();
+		_toastService.Show(_localization[
+			e.AlsoDetected
+				? "Toast.Secret.MarkRemovedStillDetected"
+				: "Toast.Secret.MarkRemoved"]);
+		_requestRedactionRefresh();
+	}
+
+	private static bool TryResolveManualMarkLocation(
+		IPreviewTextDocument document,
+		PreviewManualSecretMarkRequestedEventArgs request,
+		out ManualSecretLocation location)
+	{
+		location = default;
+		var selection = request.Selection.Normalize();
+		if (selection.StartLine != selection.EndLine)
+			return false;
+		var section = PreviewDocumentSectionLookup.FindContainingSection(
+			document.Sections,
+			selection.StartLine);
+		if (section is null || selection.StartLine < section.ContentStartLine)
+			return false;
+
+		var sourceColumn = selection.StartColumn + request.Value.LeadingCharactersRemoved;
+		foreach (var redaction in document.Redactions)
+		{
+			if (redaction.LineNumber != selection.StartLine ||
+			    redaction.StartColumn + redaction.Length > selection.StartColumn)
+			{
+				continue;
+			}
+			sourceColumn += redaction.SourceLength - redaction.Length;
+		}
+
+		var previewLine = document.GetLineText(selection.StartLine);
+		var key = MarkedSecretValueNormalizer.ExtractKey(
+			previewLine,
+			selection.StartColumn + request.Value.LeadingCharactersRemoved);
+		location = new ManualSecretLocation(
+			section.DisplayPath,
+			selection.StartLine - section.ContentStartLine,
+			sourceColumn,
+			key);
+		return true;
 	}
 
     public bool HasSelectionMetricsSnapshot =>
@@ -717,6 +812,9 @@ internal sealed class PreviewSurfaceController : IDisposable
             OnCopiedToClipboard;
         _controls.TextControl.PreviewSelectionChanged -=
             OnSelectionChanged;
+		_controls.TextControl.RedactionToggleRequested -= OnRedactionToggleRequested;
+		_controls.TextControl.ManualSecretMarkRequested -= OnManualSecretMarkRequested;
+		_controls.TextControl.ManualSecretUnmarkRequested -= OnManualSecretUnmarkRequested;
 
         if (_selectionMetricsDebounceTimer is not null)
         {
@@ -760,6 +858,19 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (!ReferenceEquals(previousDocument, document))
             previousDocument?.Dispose();
 
+		if (_pendingMarkedSecretHash is { Length: > 0 } markHash)
+		{
+			_pendingMarkedSecretHash = null;
+			var hiddenCount = document.Redactions
+				.Where(span =>
+					span.State == SecretPreviewSpanState.Redacted &&
+					string.Equals(span.PersistentMarkHash, markHash, StringComparison.OrdinalIgnoreCase))
+				.Select(static span => span.OccurrenceId)
+				.Distinct(StringComparer.Ordinal)
+				.Count();
+			_toastService.Show(_localization.Format("Toast.Secret.HiddenCount", hiddenCount));
+		}
+
         UpdateStickyPath();
         Dispatcher.UIThread.Post(
 			() =>
@@ -771,6 +882,12 @@ internal sealed class PreviewSurfaceController : IDisposable
 			},
             DispatcherPriority.Render);
     }
+
+	private readonly record struct ManualSecretLocation(
+		string RelativePath,
+		int LineIndex,
+		int Column,
+		string? Key);
 
 	private void RestoreViewportAfterRedaction(Vector requestedOffset)
 	{

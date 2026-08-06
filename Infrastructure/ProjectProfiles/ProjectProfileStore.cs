@@ -1,3 +1,4 @@
+using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.ProjectProfiles;
@@ -300,6 +301,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		profile.IgnoreOptionStates ??= [];
 		profile.SelectedPaths ??= [];
+		profile.MarkedSecrets ??= [];
 
 		profile.SelectedRootFolders = profile.SelectedRootFolders
 			.Where(static item => !string.IsNullOrWhiteSpace(item))
@@ -318,6 +320,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			.Distinct(PathComparer.Default)
 			.OrderBy(static item => item, PathComparer.Default)
 			.ToList();
+		profile.MarkedSecrets = NormalizeMarkedSecrets(profile.MarkedSecrets);
 
 		if (sourceSchemaVersion < 3 &&
 		    !profile.IgnoreOptionStates.ContainsKey(IgnoreOptionId.SmartIgnore))
@@ -400,6 +403,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				.Distinct(PathComparer.Default)
 				.OrderBy(static item => item, PathComparer.Default)
 				.ToList(),
+			MarkedSecrets = NormalizeMarkedSecrets(profile.MarkedSecrets),
 			UpdatedUtc = updatedUtc
 		};
 	}
@@ -425,7 +429,28 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			RootFolderStates: rootStates,
 			ExtensionStates: extensionStates,
 			IgnoreOptionStates: ignoreStates,
-			SelectedPaths: profile.SelectedPaths.ToArray());
+			SelectedPaths: profile.SelectedPaths.ToArray(),
+			MarkedSecrets: profile.MarkedSecrets.ToArray());
+	}
+
+	private static List<MarkedSecretProfileEntry> NormalizeMarkedSecrets(
+		IEnumerable<MarkedSecretProfileEntry>? marks)
+	{
+		return (marks ?? [])
+			.Where(static mark =>
+				mark is not null &&
+				mark.H.Length == MarkedSecretValueNormalizer.PersistedHashLength &&
+				mark.H.All(char.IsAsciiHexDigit) &&
+				mark.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength)
+			.Select(static mark => mark with
+			{
+				H = mark.H.ToLowerInvariant(),
+				Key = string.IsNullOrWhiteSpace(mark.Key) ? null : mark.Key.Trim()
+			})
+			.GroupBy(static mark => mark.H, StringComparer.OrdinalIgnoreCase)
+			.Select(static group => group.First())
+			.OrderBy(static mark => mark.H, StringComparer.Ordinal)
+			.ToList();
 	}
 
 	private static void NormalizeGitFilteringState(

@@ -319,7 +319,12 @@ public sealed class PreviewDocumentBuilder(
 						line,
 						column,
 						segmentLength,
-						span.State));
+						span.State,
+						span.State == SecretPreviewSpanState.KeptAsIs
+							? segmentLength
+							: span.SourceLength,
+						span.Source,
+						span.PersistentMarkHash));
 				}
 
 				if (index < spanText.Length)

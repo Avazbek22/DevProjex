@@ -1096,10 +1096,16 @@ public partial class MainWindow : Window
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (profileSnapshot is { HasProfile: true, Profile: not null })
-                _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
-            else
-                _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
+			if (profileSnapshot is { HasProfile: true, Profile: not null })
+			{
+				_selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
+				_secretRedactionSession.ReplaceMarkedSecrets(profileSnapshot.Profile.MarkedSecrets);
+			}
+			else
+			{
+				_selectionCoordinator.ResetProjectProfileSelections(_currentPath);
+				_secretRedactionSession.ReplaceMarkedSecrets([]);
+			}
         }
 
         await _projectLoadSnapshotPipeline.ReloadAsync(_currentPath, cancellationToken);

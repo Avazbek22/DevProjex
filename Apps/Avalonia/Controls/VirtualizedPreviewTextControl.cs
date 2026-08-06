@@ -9,6 +9,24 @@ public sealed class PreviewRedactionToggleRequestedEventArgs(string occurrenceId
 	public string OccurrenceId { get; } = occurrenceId;
 }
 
+public sealed class PreviewManualSecretMarkRequestedEventArgs(
+	MarkedSecretValue value,
+	PreviewSelectionRange selection,
+	bool persistent) : EventArgs
+{
+	public MarkedSecretValue Value { get; } = value;
+	public PreviewSelectionRange Selection { get; } = selection;
+	public bool Persistent { get; } = persistent;
+}
+
+public sealed class PreviewManualSecretUnmarkRequestedEventArgs(
+	string hash,
+	bool alsoDetected) : EventArgs
+{
+	public string Hash { get; } = hash;
+	public bool AlsoDetected { get; } = alsoDetected;
+}
+
 /// <summary>
 /// Draws only visible preview text lines for large payloads.
 /// Rendering stays virtualized while the underlying document can be either in-memory
@@ -20,6 +38,8 @@ public sealed class VirtualizedPreviewTextControl : Control
     public event EventHandler? CopiedToClipboard;
     public event EventHandler? PreviewSelectionChanged;
 	public event EventHandler<PreviewRedactionToggleRequestedEventArgs>? RedactionToggleRequested;
+	public event EventHandler<PreviewManualSecretMarkRequestedEventArgs>? ManualSecretMarkRequested;
+	public event EventHandler<PreviewManualSecretUnmarkRequestedEventArgs>? ManualSecretUnmarkRequested;
 
     public static readonly StyledProperty<string> TextProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(Text), string.Empty);
@@ -89,9 +109,6 @@ public sealed class VirtualizedPreviewTextControl : Control
     public static readonly StyledProperty<string> SelectAllMenuHeaderProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(SelectAllMenuHeader), "Select All");
 
-    public static readonly StyledProperty<string> ClearSelectionMenuHeaderProperty =
-        AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(ClearSelectionMenuHeader), "Clear selection");
-
 	public static readonly StyledProperty<string> RedactedSecretToolTipFormatProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(RedactedSecretToolTipFormat),
@@ -101,6 +118,41 @@ public sealed class VirtualizedPreviewTextControl : Control
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(KeptSecretToolTipFormat),
 			"Detected {0}.\nThe original value is kept.\nClick to redact it again.");
+
+	public static readonly StyledProperty<string> AlwaysHideSecretFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(AlwaysHideSecretFormat),
+			"Always hide \"{0}\"");
+
+	public static readonly StyledProperty<string> HideSecretHereFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(HideSecretHereFormat),
+			"Hide \"{0}\" here");
+
+	public static readonly StyledProperty<string> RemoveSecretMarkHeaderProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(RemoveSecretMarkHeader),
+			"Remove mark");
+
+	public static readonly StyledProperty<string> SecretSelectionTooShortProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(SecretSelectionTooShort),
+			"Select at least 8 characters.");
+
+	public static readonly StyledProperty<string> SecretSelectionTooLongProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(SecretSelectionTooLong),
+			"Select no more than 512 characters.");
+
+	public static readonly StyledProperty<string> SecretSelectionMultilineProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(SecretSelectionMultiline),
+			"Multiline values are not supported.");
+
+	public static readonly StyledProperty<string> SecretSelectionContentOnlyProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(SecretSelectionContentOnly),
+			"Select a value inside file content.");
 
     private const int RenderBufferLines = 3;
     private const int MaxFallbackVisibleLines = 120;
@@ -139,12 +191,17 @@ public sealed class VirtualizedPreviewTextControl : Control
     private IBrush? _cachedSelectionForeground;
     private StickyHeaderTrimCacheKey? _cachedStickyHeaderTrimKey;
     private string? _cachedStickyHeaderTrimText;
-    private ContextMenu? _contextMenu;
+	private MenuFlyout? _contextFlyout;
+	private MenuItem? _alwaysHideSecretMenuItem;
+	private MenuItem? _hideSecretHereMenuItem;
+	private MenuItem? _removeSecretMarkMenuItem;
     private MenuItem? _copyMenuItem;
     private MenuItem? _selectAllMenuItem;
-    private MenuItem? _clearSelectionMenuItem;
 	private ToolTip? _redactionToolTip;
 	private TextBlock? _redactionToolTipText;
+	private MarkedSecretValue? _contextMarkedSecret;
+	private PreviewSelectionRange _contextSelectionRange;
+	private PreviewRedactionSpan? _contextManualRedaction;
     private static Cursor? _previewTextCursor;
     private static Cursor? _previewMenuCursor;
 	private static Cursor? _previewActionCursor;
@@ -186,9 +243,15 @@ public sealed class VirtualizedPreviewTextControl : Control
             StickyHeaderBorderBrushProperty,
             CopyMenuHeaderProperty,
             SelectAllMenuHeaderProperty,
-			ClearSelectionMenuHeaderProperty,
 			RedactedSecretToolTipFormatProperty,
-			KeptSecretToolTipFormatProperty);
+			KeptSecretToolTipFormatProperty,
+			AlwaysHideSecretFormatProperty,
+			HideSecretHereFormatProperty,
+			RemoveSecretMarkHeaderProperty,
+			SecretSelectionTooShortProperty,
+			SecretSelectionTooLongProperty,
+			SecretSelectionMultilineProperty,
+			SecretSelectionContentOnlyProperty);
 
         AffectsMeasure<VirtualizedPreviewTextControl>(
             TextProperty,
@@ -222,10 +285,20 @@ public sealed class VirtualizedPreviewTextControl : Control
             control.UpdateContextMenuHeaders();
         });
 
-        ClearSelectionMenuHeaderProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
-        {
-            control.UpdateContextMenuHeaders();
-        });
+		AlwaysHideSecretFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		HideSecretHereFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		RemoveSecretMarkHeaderProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
     }
 
     public string Text
@@ -360,12 +433,6 @@ public sealed class VirtualizedPreviewTextControl : Control
         set => SetValue(SelectAllMenuHeaderProperty, value);
     }
 
-    public string ClearSelectionMenuHeader
-    {
-        get => GetValue(ClearSelectionMenuHeaderProperty);
-        set => SetValue(ClearSelectionMenuHeaderProperty, value);
-    }
-
 	public string RedactedSecretToolTipFormat
 	{
 		get => GetValue(RedactedSecretToolTipFormatProperty);
@@ -376,6 +443,48 @@ public sealed class VirtualizedPreviewTextControl : Control
 	{
 		get => GetValue(KeptSecretToolTipFormatProperty);
 		set => SetValue(KeptSecretToolTipFormatProperty, value);
+	}
+
+	public string AlwaysHideSecretFormat
+	{
+		get => GetValue(AlwaysHideSecretFormatProperty);
+		set => SetValue(AlwaysHideSecretFormatProperty, value);
+	}
+
+	public string HideSecretHereFormat
+	{
+		get => GetValue(HideSecretHereFormatProperty);
+		set => SetValue(HideSecretHereFormatProperty, value);
+	}
+
+	public string RemoveSecretMarkHeader
+	{
+		get => GetValue(RemoveSecretMarkHeaderProperty);
+		set => SetValue(RemoveSecretMarkHeaderProperty, value);
+	}
+
+	public string SecretSelectionTooShort
+	{
+		get => GetValue(SecretSelectionTooShortProperty);
+		set => SetValue(SecretSelectionTooShortProperty, value);
+	}
+
+	public string SecretSelectionTooLong
+	{
+		get => GetValue(SecretSelectionTooLongProperty);
+		set => SetValue(SecretSelectionTooLongProperty, value);
+	}
+
+	public string SecretSelectionMultiline
+	{
+		get => GetValue(SecretSelectionMultilineProperty);
+		set => SetValue(SecretSelectionMultilineProperty, value);
+	}
+
+	public string SecretSelectionContentOnly
+	{
+		get => GetValue(SecretSelectionContentOnlyProperty);
+		set => SetValue(SecretSelectionContentOnlyProperty, value);
 	}
 
     public bool HasSelection => TryGetNormalizedSelection(out _, out _);
@@ -732,10 +841,17 @@ public sealed class VirtualizedPreviewTextControl : Control
         base.OnPointerPressed(e);
 
         var properties = e.GetCurrentPoint(this).Properties;
-        if (properties.IsRightButtonPressed)
+		var isContextGesture = properties.IsRightButtonPressed ||
+			properties.PointerUpdateKind == PointerUpdateKind.RightButtonPressed ||
+			(OperatingSystem.IsMacOS() &&
+			 (properties.IsLeftButtonPressed ||
+			  properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed) &&
+			 e.KeyModifiers.HasFlag(KeyModifiers.Control));
+		if (isContextGesture)
         {
             Focus();
-            OpenContextMenu();
+			PrepareContextSelection(e.GetPosition(this));
+			OpenContextMenu();
             e.Handled = true;
             return;
         }
@@ -1829,32 +1945,39 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private void EnsureContextMenu()
     {
-        if (_contextMenu is not null)
+		if (_contextFlyout is not null)
             return;
 
-        _copyMenuItem = new MenuItem();
-        _copyMenuItem.Cursor = PreviewMenuCursor;
-        _copyMenuItem.Click += OnCopyMenuItemClick;
+		_alwaysHideSecretMenuItem = CreateContextMenuItem(OnAlwaysHideSecretMenuItemClick);
+		_hideSecretHereMenuItem = CreateContextMenuItem(OnHideSecretHereMenuItemClick);
+		_removeSecretMarkMenuItem = CreateContextMenuItem(OnRemoveSecretMarkMenuItemClick);
+		ToolTip.SetShowOnDisabled(_alwaysHideSecretMenuItem, true);
+		ToolTip.SetShowOnDisabled(_hideSecretHereMenuItem, true);
 
-        _selectAllMenuItem = new MenuItem();
-        _selectAllMenuItem.Cursor = PreviewMenuCursor;
-        _selectAllMenuItem.Click += OnSelectAllMenuItemClick;
+		_copyMenuItem = CreateContextMenuItem(OnCopyMenuItemClick);
 
-        _clearSelectionMenuItem = new MenuItem();
-        _clearSelectionMenuItem.Cursor = PreviewMenuCursor;
-        _clearSelectionMenuItem.Click += OnClearSelectionMenuItemClick;
+		_selectAllMenuItem = CreateContextMenuItem(OnSelectAllMenuItemClick);
 
-        _contextMenu = new ContextMenu();
-        _contextMenu.Cursor = PreviewMenuCursor;
-        _contextMenu.Items.Add(_copyMenuItem);
-        _contextMenu.Items.Add(_selectAllMenuItem);
-        _contextMenu.Items.Add(new Separator());
-        _contextMenu.Items.Add(_clearSelectionMenuItem);
-        _contextMenu.Opening += OnContextMenuOpening;
-        _contextMenu.Opened += OnContextMenuOpened;
+		_contextFlyout = new MenuFlyout();
+		_contextFlyout.Items.Add(_copyMenuItem);
+		_contextFlyout.Items.Add(_selectAllMenuItem);
+		_contextFlyout.Items.Add(new Separator());
+		_contextFlyout.Items.Add(_alwaysHideSecretMenuItem);
+		_contextFlyout.Items.Add(_hideSecretHereMenuItem);
+		_contextFlyout.Items.Add(_removeSecretMarkMenuItem);
+		_contextFlyout.Opening += OnContextMenuOpening;
+		_contextFlyout.Opened += OnContextMenuOpened;
+		ContextFlyout = _contextFlyout;
 
         UpdateContextMenuHeaders();
     }
+
+	private static MenuItem CreateContextMenuItem(EventHandler<RoutedEventArgs> clickHandler)
+	{
+		var item = new MenuItem { Cursor = PreviewMenuCursor };
+		item.Click += clickHandler;
+		return item;
+	}
 
     private void UpdateContextMenuHeaders()
     {
@@ -1864,37 +1987,44 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (_selectAllMenuItem is not null)
             _selectAllMenuItem.Header = SelectAllMenuHeader;
 
-        if (_clearSelectionMenuItem is not null)
-            _clearSelectionMenuItem.Header = ClearSelectionMenuHeader;
+		if (_removeSecretMarkMenuItem is not null)
+			_removeSecretMarkMenuItem.Header = RemoveSecretMarkHeader;
     }
 
     private void OpenContextMenu()
     {
         EnsureContextMenu();
-        _contextMenu?.Open(this);
+		_contextFlyout?.ShowAt(this, showAtPointer: true);
     }
 
     private void CloseContextMenu()
     {
-        _contextMenu?.Close();
+		_contextFlyout?.Hide();
     }
 
-    private void OnContextMenuOpening(object? sender, CancelEventArgs e)
+    private void OnContextMenuOpening(object? sender, EventArgs e)
     {
+		PrepareManualSecretMenuItems();
+
         if (_copyMenuItem is not null)
             _copyMenuItem.IsEnabled = HasSelection;
 
         if (_selectAllMenuItem is not null)
             _selectAllMenuItem.IsEnabled = ResolveLineCount() > 0 && (ResolveLineCount() > 1 || GetLineText(1).Length > 0);
 
-        if (_clearSelectionMenuItem is not null)
-            _clearSelectionMenuItem.IsEnabled = HasSelection;
-    }
+	}
 
-    private void OnContextMenuOpened(object? sender, RoutedEventArgs e)
-    {
-        ApplyContextMenuBackdrop();
-    }
+	private void OnContextMenuOpened(object? sender, EventArgs e)
+	{
+		if (DataContext is not MainWindowViewModel viewModel)
+			return;
+
+		PopupBackdropConfigurator.TryApply(
+			_copyMenuItem,
+			TopLevel.GetTopLevel(this),
+			viewModel.ActiveThemeEffect,
+			PopupBackdropTransparencyFallback.Transparent);
+	}
 
     private void OnCopyMenuItemClick(object? sender, RoutedEventArgs e)
     {
@@ -1906,22 +2036,196 @@ public sealed class VirtualizedPreviewTextControl : Control
         SelectAll();
     }
 
-    private void OnClearSelectionMenuItemClick(object? sender, RoutedEventArgs e)
-    {
-        ClearSelection();
-    }
+	private void OnAlwaysHideSecretMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseManualSecretMarkRequested(persistent: true);
 
-    private void ApplyContextMenuBackdrop()
-    {
-        if (DataContext is not MainWindowViewModel viewModel)
-            return;
+	private void OnHideSecretHereMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseManualSecretMarkRequested(persistent: false);
 
-        PopupBackdropConfigurator.TryApply(
-            _contextMenu,
-            TopLevel.GetTopLevel(this),
-            viewModel.ActiveThemeEffect,
-            PopupBackdropTransparencyFallback.Transparent);
-    }
+	private void OnRemoveSecretMarkMenuItemClick(object? sender, RoutedEventArgs e)
+	{
+		if (_contextManualRedaction?.PersistentMarkHash is not { Length: > 0 } hash)
+			return;
+		ManualSecretUnmarkRequested?.Invoke(
+			this,
+			new PreviewManualSecretUnmarkRequestedEventArgs(
+				hash,
+				_contextManualRedaction.Source.HasFlag(SecretFindingSource.Detector)));
+	}
+
+	private void RaiseManualSecretMarkRequested(bool persistent)
+	{
+		if (_contextMarkedSecret is null || _contextSelectionRange.IsCollapsed)
+			return;
+		ManualSecretMarkRequested?.Invoke(
+			this,
+			new PreviewManualSecretMarkRequestedEventArgs(
+				_contextMarkedSecret,
+				_contextSelectionRange,
+				persistent));
+	}
+
+	private void PrepareContextSelection(Point point)
+	{
+		_contextManualRedaction = null;
+		var hit = HitTestSelectionPosition(point);
+		if (TryGetRedactionAt(hit, out var redaction))
+		{
+			if (redaction.State == SecretPreviewSpanState.Redacted &&
+			    redaction.PersistentMarkHash is { Length: > 0 })
+			{
+				_contextManualRedaction = redaction;
+			}
+			else
+			{
+				ClearSelection();
+			}
+			return;
+		}
+
+		if (TryGetNormalizedSelection(out var selectionStart, out var selectionEnd) &&
+		    IsWithinSelection(hit, selectionStart, selectionEnd))
+		{
+			return;
+		}
+
+		SelectTokenAt(hit);
+	}
+
+	private void PrepareManualSecretMenuItems()
+	{
+		if (_alwaysHideSecretMenuItem is null ||
+		    _hideSecretHereMenuItem is null ||
+		    _removeSecretMarkMenuItem is null)
+		{
+			return;
+		}
+
+		var removeVisible = _contextManualRedaction?.PersistentMarkHash is { Length: > 0 };
+		_removeSecretMarkMenuItem.IsVisible = removeVisible;
+		_alwaysHideSecretMenuItem.IsVisible = !removeVisible && HasSelection;
+		_hideSecretHereMenuItem.IsVisible = !removeVisible && HasSelection;
+		_contextMarkedSecret = null;
+		_contextSelectionRange = default;
+		if (removeVisible || !HasSelection)
+			return;
+
+		var selectedText = GetSelectedText();
+		var hasRange = TryGetSelectionRange(out _contextSelectionRange);
+		var isContentSelection = hasRange && IsFileContentSelection(_contextSelectionRange);
+		var isValid = MarkedSecretValueNormalizer.TryCreate(
+			selectedText,
+			out var candidate,
+			out var validationError);
+		if (isValid)
+			_contextMarkedSecret = candidate;
+
+		var displayValue = (isValid ? candidate.NormalizedValue : selectedText.Trim())
+			.Replace('\r', ' ')
+			.Replace('\n', ' ');
+		var masked = MaskSecretValue(displayValue);
+		_alwaysHideSecretMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			AlwaysHideSecretFormat,
+			masked);
+		_hideSecretHereMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			HideSecretHereFormat,
+			masked);
+
+		var enabled = isValid && isContentSelection;
+		_alwaysHideSecretMenuItem.IsEnabled = enabled;
+		_hideSecretHereMenuItem.IsEnabled = enabled;
+		var reason = !isValid
+			? GetValidationMessage(validationError)
+			: SecretSelectionContentOnly;
+		ToolTip.SetTip(_alwaysHideSecretMenuItem, enabled ? null : reason);
+		ToolTip.SetTip(_hideSecretHereMenuItem, enabled ? null : reason);
+	}
+
+	private bool IsFileContentSelection(PreviewSelectionRange selection)
+	{
+		if (selection.StartLine != selection.EndLine || Document is not { } document)
+			return false;
+		var section = PreviewDocumentSectionLookup.FindContainingSection(
+			document.Sections,
+			selection.StartLine);
+		return section is not null &&
+		       selection.StartLine >= section.ContentStartLine &&
+		       selection.EndLine <= section.EndLine;
+	}
+
+	private string GetValidationMessage(MarkedSecretValidationError error) => error switch
+	{
+		MarkedSecretValidationError.TooLong => SecretSelectionTooLong,
+		MarkedSecretValidationError.Multiline => SecretSelectionMultiline,
+		_ => SecretSelectionTooShort
+	};
+
+	private void SelectTokenAt(SelectionPosition position)
+	{
+		var line = GetLineText(position.Line);
+		if (line.Length == 0)
+		{
+			ClearSelection();
+			return;
+		}
+
+		var column = Math.Clamp(position.Column, 0, line.Length - 1);
+		if (!IsSecretSelectionCharacter(line[column]) &&
+		    column > 0 &&
+		    IsSecretSelectionCharacter(line[column - 1]))
+		{
+			column--;
+		}
+		if (!IsSecretSelectionCharacter(line[column]))
+		{
+			ClearSelection();
+			return;
+		}
+
+		var start = column;
+		while (start > 0 && IsSecretSelectionCharacter(line[start - 1]))
+			start--;
+		var end = column + 1;
+		while (end < line.Length && IsSecretSelectionCharacter(line[end]))
+			end++;
+
+		_selectionAnchor = new SelectionPosition(position.Line, start);
+		_selectionActive = new SelectionPosition(position.Line, end);
+		InvalidateVisual();
+		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private static bool IsWithinSelection(
+		SelectionPosition position,
+		SelectionPosition start,
+		SelectionPosition end) =>
+		ComparePositions(position, start) >= 0 && ComparePositions(position, end) < 0;
+
+	private static bool IsSecretSelectionCharacter(char character) =>
+		!char.IsWhiteSpace(character) && character is not ('\'' or '"' or '`' or '=' or ',' or ';' or
+			'(' or ')' or '[' or ']' or '{' or '}' or '<' or '>');
+
+	private static string MaskSecretValue(string value)
+	{
+		var elements = StringInfo.GetTextElementEnumerator(value);
+		var graphemes = new List<string>();
+		while (elements.MoveNext())
+			graphemes.Add(elements.GetTextElement());
+		if (graphemes.Count == 0)
+			return string.Empty;
+
+		var leadingCount = Math.Min(8, Math.Max(2, graphemes.Count - 6));
+		var trailingCount = Math.Min(4, Math.Max(2, graphemes.Count - leadingCount - 2));
+		if (leadingCount + trailingCount >= graphemes.Count)
+		{
+			leadingCount = Math.Max(1, graphemes.Count / 2 - 1);
+			trailingCount = Math.Max(1, graphemes.Count - leadingCount - 2);
+		}
+		return string.Concat(graphemes.Take(leadingCount)) + "…" +
+		       string.Concat(graphemes.Skip(graphemes.Count - trailingCount));
+	}
 
     private static IBrush EnsureOpaqueSelectionBrush(IBrush brush)
     {

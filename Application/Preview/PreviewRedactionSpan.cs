@@ -12,4 +12,7 @@ public sealed record PreviewRedactionSpan(
 	int LineNumber,
 	int StartColumn,
 	int Length,
-	SecretPreviewSpanState State);
+	SecretPreviewSpanState State,
+	int SourceLength = 0,
+	SecretFindingSource Source = SecretFindingSource.Detector,
+	string? PersistentMarkHash = null);

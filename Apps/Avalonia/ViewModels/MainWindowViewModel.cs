@@ -1441,6 +1441,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		_contentProcessingScanState == SecretScanState.Failed;
 	public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
+	public string PreviewSecretAlwaysHideFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideHereFormat { get; private set; } = string.Empty;
+	public string PreviewSecretRemoveMark { get; private set; } = string.Empty;
+	public string PreviewSecretSelectionTooShort { get; private set; } = string.Empty;
+	public string PreviewSecretSelectionTooLong { get; private set; } = string.Empty;
+	public string PreviewSecretSelectionMultiline { get; private set; } = string.Empty;
+	public string PreviewSecretSelectionContentOnly { get; private set; } = string.Empty;
     public string SettingsAll { get; private set; } = string.Empty;
     public string SettingsAllIgnore { get; private set; } = string.Empty;
     public string SettingsAllExtensions { get; private set; } = string.Empty;
@@ -1465,7 +1472,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string PreviewNoDataText { get; private set; } = string.Empty;
     public string PreviewSelectionCopy { get; private set; } = string.Empty;
     public string PreviewSelectionSelectAll { get; private set; } = string.Empty;
-    public string PreviewSelectionClear { get; private set; } = string.Empty;
     public string PreviewCopyFilePathTooltip { get; private set; } = string.Empty;
     public string PreviewCopyCurrentModeTooltip => _selectedPreviewContentMode switch
     {
@@ -1593,6 +1599,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		UpdateSettingsSecretsNotice();
 		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
 		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
+		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Always"];
+		PreviewSecretHideHereFormat = _localization["Preview.Secret.Mark.Here"];
+		PreviewSecretRemoveMark = _localization["Preview.Secret.Mark.Remove"];
+		PreviewSecretSelectionTooShort = _localization["Preview.Secret.Mark.Validation.TooShort"];
+		PreviewSecretSelectionTooLong = _localization["Preview.Secret.Mark.Validation.TooLong"];
+		PreviewSecretSelectionMultiline = _localization["Preview.Secret.Mark.Validation.Multiline"];
+		PreviewSecretSelectionContentOnly = _localization["Preview.Secret.Mark.Validation.ContentOnly"];
         SettingsAll = _localization["Settings.All"];
         UpdateAllCheckboxLabels();
         SettingsExtensions = _localization["Settings.Extensions"];
@@ -1616,7 +1629,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         PreviewNoDataText = _localization["Preview.NoData"];
         PreviewSelectionCopy = _localization["Preview.Selection.Copy"];
         PreviewSelectionSelectAll = _localization["Preview.Selection.SelectAll"];
-        PreviewSelectionClear = _localization["Preview.Selection.Clear"];
         PreviewCopyFilePathTooltip = _localization["Preview.FilePath.Copy.Tooltip"];
 
         // StatusBar labels
@@ -1740,6 +1752,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		RaisePropertyChanged(nameof(SettingsSecretsNotice));
 		RaisePropertyChanged(nameof(PreviewSecretRedactedTooltip));
 		RaisePropertyChanged(nameof(PreviewSecretKeptTooltip));
+		RaisePropertyChanged(nameof(PreviewSecretAlwaysHideFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideHereFormat));
+		RaisePropertyChanged(nameof(PreviewSecretRemoveMark));
+		RaisePropertyChanged(nameof(PreviewSecretSelectionTooShort));
+		RaisePropertyChanged(nameof(PreviewSecretSelectionTooLong));
+		RaisePropertyChanged(nameof(PreviewSecretSelectionMultiline));
+		RaisePropertyChanged(nameof(PreviewSecretSelectionContentOnly));
         RaisePropertyChanged(nameof(SettingsAll));
         RaisePropertyChanged(nameof(SettingsExtensions));
         RaisePropertyChanged(nameof(SettingsFont));
@@ -1762,7 +1781,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(PreviewNoDataText));
         RaisePropertyChanged(nameof(PreviewSelectionCopy));
         RaisePropertyChanged(nameof(PreviewSelectionSelectAll));
-        RaisePropertyChanged(nameof(PreviewSelectionClear));
         RaisePropertyChanged(nameof(PreviewCopyFilePathTooltip));
         RaisePropertyChanged(nameof(PreviewCopyCurrentModeTooltip));
 
