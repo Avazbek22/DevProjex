@@ -5,11 +5,12 @@
 │  > [x] src                           ││├── src                                                   ││  ( ) No Git filtering                          │
 │    [x] README.md                     │││   └── RepositoryMarker.cs                               ││  (*) Use .gitignore                            │
 │                                      ││└── README.md                                             ││  ( ) Tracked Git files only                    │
-│                                      ││                                                          ││  PROCESSING:                                   │
+│                                      ││                                                          ││  CONTENT PROCESSING:                           │
 │                                      ││                                                          ││  [ ] Hide secrets                              │
-│                                      ││                                                          ││  Checks selected text files only. Binary       │
-│                                      ││                                                          ││  files are not inspected, and no matches is    │
-│                                      ││                                                          ││  not a safety guarantee.                       │
+│                                      ││                                                          ││  The counter (N/N) shows detected / hidden     │
+│                                      ││                                                          ││  values. Only selected text files are          │
+│                                      ││                                                          ││  checked. Binary files are not inspected, and  │
+│                                      ││                                                          ││  no matches is not a safety guarantee.         │
 │                                      ││                                                          ││  EXCLUSIONS                                    │
 │                                      ││                                                          ││  [x] All                                       │
 │                                      ││                                                          ││  [x] Smart ignore                              │
@@ -27,7 +28,6 @@
 │                                      ││                                                          ││  ROOT FOLDERS                                  │
 │                                      ││                                                          ││  [x] All                                       │
 │                                      ││                                                          ││  [x] src                                       │
-│                                      ││                                                          ││                                                │
 │                                      ││ Files 2  |  Lines 1-5/5                                  ││                                                │
 └──────────────────────────────────────┘└──────────────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
 

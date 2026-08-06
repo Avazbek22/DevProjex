@@ -502,6 +502,62 @@ jobs:
             throw "Published export smoke did not print the expected tree for ${{ matrix.rid }}. StdOut=$exportStdout"
           }
 
+      - name: Extended Command-line Contracts (Native Published Artifact)
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-native-export-project-${{ matrix.rid }}"
+          $sourceDirectory = Join-Path $projectDirectory "src"
+
+          function Invoke-NativeCommand {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string] $Name,
+              [Parameter(Mandatory = $true)]
+              [string[]] $Arguments,
+              [hashtable] $Environment = @{}
+            )
+
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $exePath
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $Arguments) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+            foreach ($entry in $Environment.GetEnumerator()) {
+              if ($null -eq $entry.Value) {
+                $startInfo.Environment.Remove([string] $entry.Key)
+              }
+              else {
+                $startInfo.Environment[[string] $entry.Key] = [string] $entry.Value
+              }
+            }
+
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+              throw "Could not start published command '$Name'."
+            }
+
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit(60000)) {
+              $process.Kill($true)
+              throw "Published command '$Name' timed out."
+            }
+
+            $result = [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              StdOut = $stdoutTask.GetAwaiter().GetResult()
+              StdErr = $stderrTask.GetAwaiter().GetResult()
+            }
+            $process.Dispose()
+            return $result
+          }
+
           $smartSecretsProject = Join-Path `
             $env:RUNNER_TEMP `
             "devprojex-smart-secrets-${{ matrix.rid }}"
@@ -683,6 +739,61 @@ jobs:
           if ([Convert]::ToBase64String($sourceBytesBeforeProjectExport) -ne
               [Convert]::ToBase64String($sourceBytesAfterProjectExport)) {
             throw "Published project export modified the source file."
+          }
+
+      - name: Machine-output and Failure Contracts (Native Published Artifact)
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-native-export-project-${{ matrix.rid }}"
+
+          function Invoke-NativeCommand {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string] $Name,
+              [Parameter(Mandatory = $true)]
+              [string[]] $Arguments,
+              [hashtable] $Environment = @{}
+            )
+
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $exePath
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $Arguments) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+            foreach ($entry in $Environment.GetEnumerator()) {
+              if ($null -eq $entry.Value) {
+                $startInfo.Environment.Remove([string] $entry.Key)
+              }
+              else {
+                $startInfo.Environment[[string] $entry.Key] = [string] $entry.Value
+              }
+            }
+
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+              throw "Could not start published command '$Name'."
+            }
+
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit(60000)) {
+              $process.Kill($true)
+              throw "Published command '$Name' timed out."
+            }
+
+            $result = [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              StdOut = $stdoutTask.GetAwaiter().GetResult()
+              StdErr = $stderrTask.GetAwaiter().GetResult()
+            }
+            $process.Dispose()
+            return $result
           }
 
           $analysis = Invoke-NativeCommand -Name "mixed-case analysis JSON" -Arguments @(
