@@ -56,6 +56,24 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task AnalyzeAsync_DefaultScopeReportsEveryEffectiveStructuralRoot()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("src", "App.cs"), "class App {}\n");
+		temp.CreateFile(Path.Combine("web", "app.ts"), "export const app = true;\n");
+		var service = CreateService();
+
+		var report = await service.AnalyzeAsync(
+			new ProjectAnalysisRequest(
+				RootPath: temp.Path,
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(["src", "web"], report.Inventory.AvailableRootFolders.Order(PathComparer.Default));
+		Assert.Equal(report.Inventory.AvailableRootFolders, report.Selection.SelectedRootFolders);
+	}
+
+	[Fact]
 	public async Task AnalyzeAsync_WithRootExtensionAndIgnoreOverrides_ReportsFilteredProject()
 	{
 		using var temp = new TemporaryDirectory();

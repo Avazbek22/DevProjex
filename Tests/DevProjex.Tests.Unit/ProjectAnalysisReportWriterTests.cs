@@ -18,6 +18,7 @@ public sealed class ProjectAnalysisReportWriterTests
 		var root = document.RootElement;
 		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("first", root.GetProperty("rootPath").GetString());
+		Assert.Equal("src", root.GetProperty("selection").GetProperty("selectedRootFolders")[0].GetString());
 		Assert.Equal("dotFolders", root.GetProperty("selection").GetProperty("selectedIgnoreOptions")[0].GetString());
 		Assert.False(Directory.EnumerateFiles(Path.GetDirectoryName(path)!, "*.tmp").Any());
 	}
@@ -101,6 +102,7 @@ public sealed class ProjectAnalysisReportWriterTests
 		var root = document.RootElement;
 		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("stdout-root", root.GetProperty("rootPath").GetString());
+		Assert.Equal("src", root.GetProperty("selection").GetProperty("selectedRootFolders")[0].GetString());
 		Assert.Equal("dotFolders", root.GetProperty("selection").GetProperty("selectedIgnoreOptions")[0].GetString());
 	}
 
