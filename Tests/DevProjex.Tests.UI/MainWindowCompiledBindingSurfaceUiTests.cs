@@ -180,7 +180,6 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
             Assert.Same(viewModel.PreviewDocument, previewText.Document);
             Assert.Equal(viewModel.PreviewSelectionCopy, previewText.CopyMenuHeader);
             Assert.Equal(viewModel.PreviewSelectionSelectAll, previewText.SelectAllMenuHeader);
-            Assert.Equal(viewModel.PreviewSelectionClear, previewText.ClearSelectionMenuHeader);
             Assert.Equal(viewModel.SelectedFontFamily, previewText.TextFontFamily);
             Assert.Equal(viewModel.PreviewFontSize, previewText.TextFontSize);
 

@@ -426,9 +426,10 @@ public partial class MainWindow
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(
-            _viewModel,
-            _selectionCoordinator,
-            services.ProjectProfileStore);
+			_viewModel,
+			_selectionCoordinator,
+			services.ProjectProfileStore,
+			_secretRedactionSession);
         _taskbarProgress = new TaskbarProgressCoordinator(
             _viewModel,
             services.TaskbarProgressService);
@@ -589,6 +590,7 @@ public partial class MainWindow
             _toastService,
             _previewDocumentBuilder,
 			_secretRedactionPreparer,
+			_secretRedactionSession,
             _contentExport,
             _textOutputPipeline,
             _treeExport,
@@ -598,7 +600,9 @@ public partial class MainWindow
             SetClipboardTextAsync,
 			ShowErrorAsync,
 			CreateSecretRedactionContext,
-			ScheduleContentTransformationRefresh);
+			ScheduleContentTransformationRefresh,
+			() => _selectionCoordinator.ApplyHideSecretsOverride(true),
+			() => _projectProfiles.PersistIfNeeded(_currentPath));
         _previewWorkspaceController = new PreviewWorkspaceController(
             this,
             _viewModel,

@@ -401,6 +401,59 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task PersistentManualMark_RedactsMarkdownAndPhysicalProjectCopy()
+	{
+		const string manuallyMarked = "ordinary-manual-value-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("manual-project");
+		var sourcePath = temporary.CreateFile(
+			"manual-project/src/config.cs",
+			$"const string value = \"{manuallyMarked}\";");
+		var analyzer = new FileContentAnalyzer();
+		using var session = new SecretRedactionSession(new NoFindingsDetector());
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(
+			manuallyMarked,
+			out var normalized,
+			out _));
+		session.ReplaceMarkedSecrets([
+			new MarkedSecretProfileEntry(normalized.Hash, "value", normalized.Length)
+		]);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+		var documentService = new ProjectContextDocumentService(
+			new TreeExportService(),
+			analyzer,
+			secretRedactionSession: session);
+		var markdown = await WriteContextAsync(
+			documentService,
+			plan,
+			ProjectContextDocumentFormat.Markdown);
+		var destination = Path.Combine(temporary.Path, "copy");
+		var copy = await new ProjectCopyExportService(
+				new ProjectCopyExportPlanBuilder(),
+				analyzer,
+				session)
+			.ExportAsync(
+				new ProjectCopyExportRequest(
+					plan.SourceRoot,
+					"project",
+					plan.ProjectedTree,
+					new HashSet<string>(PathComparer.Default),
+					destination,
+					ProjectCopyExportFormat.Folder,
+					ProjectCopyDestinationMode.Exact,
+					ProjectCopyConflictPolicy.Fail,
+					RedactSecrets: true),
+				cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(manuallyMarked, markdown, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[manual-secret#1]", markdown, StringComparison.Ordinal);
+		var copied = File.ReadAllText(Path.Combine(copy.DestinationPath, "src", "config.cs"));
+		Assert.DoesNotContain(manuallyMarked, copied, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[manual-secret#1]", copied, StringComparison.Ordinal);
+		Assert.Equal($"const string value = \"{manuallyMarked}\";", File.ReadAllText(sourcePath));
+	}
+
+	[Fact]
 	public void LocalProfile_RoundTripsHideSecretsAsContentTransformation()
 	{
 		using var temporary = new TemporaryDirectory();
@@ -528,6 +581,14 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 					Exclusions: [],
 					HideSecrets: hideSecrets)),
 			TestContext.Current.CancellationToken);
+	}
+
+	private sealed class NoFindingsDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
 	}
 
 	private static async Task<Dictionary<ProjectContextDocumentFormat, string>> BuildContextDocumentsAsync(

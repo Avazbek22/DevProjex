@@ -13,9 +13,13 @@ public sealed class SecretRedactionSession : IDisposable
 	private readonly SecretScanCache _scanCache;
 	private readonly object _sync = new();
 	private readonly HashSet<string> _keptOccurrenceIds = new(StringComparer.Ordinal);
+	private readonly Dictionary<string, MarkedSecretProfileEntry> _persistentMarks =
+		new(StringComparer.OrdinalIgnoreCase);
+	private readonly List<SessionMarkedSecret> _sessionMarks = [];
 	private readonly Dictionary<string, SecretRedactionSnapshot> _snapshots = new(StringComparer.Ordinal);
 	private Task? _detectorWarmUpTask;
 	private long _overrideRevision;
+	private int _markedSecretsRevision;
 	private int _activeFullContentBuffers;
 	private int _peakFullContentBuffers;
 	private bool _disposed;
@@ -71,10 +75,16 @@ public sealed class SecretRedactionSession : IDisposable
 
 		HashSet<string> keptOccurrences;
 		long overrideRevision;
+		MarkedSecretsMatcher markedSecretsMatcher;
+		int markedSecretsRevision;
 		lock (_sync)
 		{
 			keptOccurrences = new HashSet<string>(_keptOccurrenceIds, StringComparer.Ordinal);
 			overrideRevision = _overrideRevision;
+			markedSecretsRevision = _markedSecretsRevision;
+			markedSecretsMatcher = new MarkedSecretsMatcher(
+				_persistentMarks.Values,
+				_sessionMarks);
 		}
 
 		return new SecretRedactionScope(
@@ -82,7 +92,123 @@ public sealed class SecretRedactionSession : IDisposable
 			projectRoot,
 			orderedFilePaths,
 			keptOccurrences,
-			overrideRevision);
+			overrideRevision,
+			markedSecretsMatcher,
+			markedSecretsRevision);
+	}
+
+	public IReadOnlyCollection<MarkedSecretProfileEntry> GetMarkedSecrets()
+	{
+		lock (_sync)
+			return _persistentMarks.Values.OrderBy(static mark => mark.H, StringComparer.Ordinal).ToArray();
+	}
+
+	public void ReplaceMarkedSecrets(IEnumerable<MarkedSecretProfileEntry>? marks)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		var replacement = (marks ?? [])
+			.Where(static mark => mark is not null)
+			.GroupBy(static mark => mark.H, StringComparer.OrdinalIgnoreCase)
+			.Select(static group => group.First())
+			.ToDictionary(static mark => mark.H, StringComparer.OrdinalIgnoreCase);
+
+		lock (_sync)
+		{
+			if (_persistentMarks.Count == replacement.Count &&
+			    _persistentMarks.All(pair => replacement.TryGetValue(pair.Key, out var value) && value == pair.Value))
+			{
+				return;
+			}
+
+			_persistentMarks.Clear();
+			foreach (var (hash, mark) in replacement)
+				_persistentMarks.Add(hash, mark);
+			AdvanceMarkedSecretsRevisionLocked();
+		}
+		OverridesChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	public bool AddMarkedSecret(MarkedSecretProfileEntry mark)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		ArgumentNullException.ThrowIfNull(mark);
+		bool changed;
+		lock (_sync)
+		{
+			changed = !_persistentMarks.TryGetValue(mark.H, out var existing) || existing != mark;
+			_persistentMarks[mark.H] = mark;
+			if (changed)
+				AdvanceMarkedSecretsRevisionLocked();
+		}
+		if (changed)
+			OverridesChanged?.Invoke(this, EventArgs.Empty);
+		return changed;
+	}
+
+	public bool RemoveMarkedSecret(string hash)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(hash);
+		return RemoveManualSecret(hash, null).PersistentMarkRemoved;
+	}
+
+	public bool AddSessionMarkedSecret(
+		string relativePath,
+		int lineIndex,
+		int column,
+		MarkedSecretValue value)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentNullException.ThrowIfNull(value);
+		var mark = new SessionMarkedSecret(
+			relativePath.Replace('\\', '/'),
+			lineIndex,
+			column,
+			value.Length,
+			value.Hash);
+		bool added;
+		lock (_sync)
+		{
+			added = !_sessionMarks.Contains(mark);
+			if (added)
+			{
+				_sessionMarks.Add(mark);
+				AdvanceMarkedSecretsRevisionLocked();
+			}
+		}
+		if (added)
+			OverridesChanged?.Invoke(this, EventArgs.Empty);
+		return added;
+	}
+
+	public bool RemoveSessionMarkedSecret(string sessionMarkId)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(sessionMarkId);
+		return RemoveManualSecret(null, sessionMarkId).SessionMarkRemoved;
+	}
+
+	public ManualSecretMarkRemovalResult RemoveManualSecret(
+		string? persistentMarkHash,
+		string? sessionMarkId)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		var persistentRemoved = false;
+		var sessionRemoved = false;
+		lock (_sync)
+		{
+			if (!string.IsNullOrWhiteSpace(persistentMarkHash))
+				persistentRemoved = _persistentMarks.Remove(persistentMarkHash);
+			if (!string.IsNullOrWhiteSpace(sessionMarkId))
+			{
+				sessionRemoved = _sessionMarks.RemoveAll(mark =>
+					string.Equals(mark.Id, sessionMarkId, StringComparison.Ordinal)) > 0;
+			}
+			if (persistentRemoved || sessionRemoved)
+				AdvanceMarkedSecretsRevisionLocked();
+		}
+		if (persistentRemoved || sessionRemoved)
+			OverridesChanged?.Invoke(this, EventArgs.Empty);
+		return new ManualSecretMarkRemovalResult(persistentRemoved, sessionRemoved);
 	}
 
 	public bool ToggleKeepAsIs(string occurrenceId)
@@ -156,6 +282,9 @@ public sealed class SecretRedactionSession : IDisposable
 		{
 			_snapshots.Clear();
 			_keptOccurrenceIds.Clear();
+			_persistentMarks.Clear();
+			_sessionMarks.Clear();
+			_markedSecretsRevision++;
 			_overrideRevision++;
 		}
 	}
@@ -173,6 +302,7 @@ public sealed class SecretRedactionSession : IDisposable
 		string filePath,
 		SecretFileMetadata metadata,
 		ISecretDetectionScope detectorScope,
+		int markedSecretsRevision,
 		out SecretScanCacheEntry entry) =>
 		_scanCache.TryGetByMetadata(
 			filePath,
@@ -180,6 +310,7 @@ public sealed class SecretRedactionSession : IDisposable
 			detectorScope.GetRulesIdentity(
 				filePath,
 				NormalizeRelativePath(projectRoot, filePath)),
+			markedSecretsRevision,
 			out entry);
 
 	internal SecretScanCacheEntry GetOrDetectFindings(
@@ -188,6 +319,8 @@ public sealed class SecretRedactionSession : IDisposable
 		string content,
 		SecretFileMetadata metadata,
 		ISecretDetectionScope detectorScope,
+		MarkedSecretsMatcher markedSecretsMatcher,
+		int markedSecretsRevision,
 		CancellationToken cancellationToken) =>
 		GetOrDetectFindings(
 			projectRoot,
@@ -195,6 +328,8 @@ public sealed class SecretRedactionSession : IDisposable
 			content.AsSpan(),
 			metadata,
 			detectorScope,
+			markedSecretsMatcher,
+			markedSecretsRevision,
 			cancellationToken);
 
 	internal SecretScanCacheEntry GetOrDetectFindings(
@@ -203,6 +338,8 @@ public sealed class SecretRedactionSession : IDisposable
 		ReadOnlySpan<char> content,
 		SecretFileMetadata metadata,
 		ISecretDetectionScope detectorScope,
+		MarkedSecretsMatcher markedSecretsMatcher,
+		int markedSecretsRevision,
 		CancellationToken cancellationToken)
 	{
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
@@ -213,13 +350,20 @@ public sealed class SecretRedactionSession : IDisposable
 			    metadata,
 			    contentFingerprint,
 			    rulesIdentity,
+			    markedSecretsRevision,
 			    out var cached))
 		{
 			return cached;
 		}
 
+		var detectorFindings = detectorScope.Detect(filePath, relativePath, content, cancellationToken);
+		var markedFindings = markedSecretsMatcher.Match(relativePath, content, cancellationToken);
 		var detected = SecretRedactionScope.ResolveNonOverlappingMatches(
-			detectorScope.Detect(filePath, relativePath, content, cancellationToken));
+			detectorFindings.Count == 0
+				? markedFindings
+				: markedFindings.Count == 0
+					? detectorFindings
+					: [..markedFindings, ..detectorFindings]);
 		var findings = new SecretFindingMetadata[detected.Count];
 		for (var index = 0; index < detected.Count; index++)
 		{
@@ -232,7 +376,10 @@ public sealed class SecretRedactionSession : IDisposable
 				finding.Start,
 				finding.Length,
 				HashValue(content.Slice(finding.Start, finding.Length)),
-				finding.RuleOrder);
+				finding.RuleOrder,
+				finding.Source,
+				finding.PersistentMarkHash,
+				finding.SessionMarkId);
 		}
 
 		var normalizedPath = Path.GetFullPath(filePath);
@@ -241,6 +388,7 @@ public sealed class SecretRedactionSession : IDisposable
 			metadata,
 			contentFingerprint,
 			rulesIdentity,
+			markedSecretsRevision,
 			IsBinary: false,
 			findings,
 			EstimateRetainedBytes(
@@ -256,7 +404,8 @@ public sealed class SecretRedactionSession : IDisposable
 		string projectRoot,
 		string filePath,
 		SecretFileMetadata metadata,
-		ISecretDetectionScope detectorScope)
+		ISecretDetectionScope detectorScope,
+		int markedSecretsRevision)
 	{
 		var normalizedPath = Path.GetFullPath(filePath);
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
@@ -266,6 +415,7 @@ public sealed class SecretRedactionSession : IDisposable
 			metadata,
 			ContentFingerprint: string.Empty,
 			rulesIdentity,
+			markedSecretsRevision,
 			IsBinary: true,
 			Findings: [],
 			ApproximateRetainedBytes: 96 +
@@ -350,6 +500,13 @@ public sealed class SecretRedactionSession : IDisposable
 		hash.AppendData(bytes);
 	}
 
+	private void AdvanceMarkedSecretsRevisionLocked()
+	{
+		_markedSecretsRevision++;
+		_overrideRevision++;
+		_snapshots.Clear();
+	}
+
 	private sealed class FullContentBufferLease(SecretRedactionSession owner) : IDisposable
 	{
 		private SecretRedactionSession? _owner = owner;
@@ -374,9 +531,12 @@ public sealed class SecretRedactionScope
 	private readonly string _projectRoot;
 	private readonly IReadOnlySet<string> _keptOccurrenceIds;
 	private readonly long _overrideRevision;
+	private readonly MarkedSecretsMatcher _markedSecretsMatcher;
+	private readonly int _markedSecretsRevision;
 	private readonly ISecretDetectionScope _detectorScope;
 	private readonly Dictionary<string, int> _identityIndexes = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, int> _ruleIdentityCounts = new(StringComparer.Ordinal);
+	private readonly Dictionary<string, int> _markedSecretCounts = new(StringComparer.OrdinalIgnoreCase);
 	private int _detectedCount;
 	private int _redactedCount;
 	private bool _completed;
@@ -386,12 +546,16 @@ public sealed class SecretRedactionScope
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths,
 		IReadOnlySet<string> keptOccurrenceIds,
-		long overrideRevision)
+		long overrideRevision,
+		MarkedSecretsMatcher markedSecretsMatcher,
+		int markedSecretsRevision)
 	{
 		_session = session;
 		_projectRoot = Path.GetFullPath(projectRoot);
 		_keptOccurrenceIds = keptOccurrenceIds;
 		_overrideRevision = overrideRevision;
+		_markedSecretsMatcher = markedSecretsMatcher;
+		_markedSecretsRevision = markedSecretsRevision;
 		_detectorScope = session.CreateDetectorScope(_projectRoot);
 		SelectionKey = SecretRedactionSession.BuildSelectionKey(_projectRoot, orderedFilePaths);
 	}
@@ -420,6 +584,7 @@ public sealed class SecretRedactionScope
 			filePath,
 			metadata,
 			_detectorScope,
+			_markedSecretsRevision,
 			out entry);
 	}
 
@@ -457,19 +622,31 @@ public sealed class SecretRedactionScope
 			content,
 			metadata,
 			_detectorScope,
+			_markedSecretsMatcher,
+			_markedSecretsRevision,
 			cancellationToken);
 	}
 
 	internal void AnalyzeBinary(string filePath, SecretFileMetadata metadata)
 	{
 		EnsureActive();
-		_session.StoreBinary(_projectRoot, filePath, metadata, _detectorScope);
+		_session.StoreBinary(
+			_projectRoot,
+			filePath,
+			metadata,
+			_detectorScope,
+			_markedSecretsRevision);
 	}
 
 	internal SecretScanCacheEntry StoreBinary(string filePath, SecretFileMetadata metadata)
 	{
 		EnsureActive();
-		return _session.StoreBinary(_projectRoot, filePath, metadata, _detectorScope);
+		return _session.StoreBinary(
+			_projectRoot,
+			filePath,
+			metadata,
+			_detectorScope,
+			_markedSecretsRevision);
 	}
 
 	internal void ProcessEntry(string filePath, SecretScanCacheEntry entry)
@@ -507,6 +684,8 @@ public sealed class SecretRedactionScope
 			content,
 			metadata,
 			_detectorScope,
+			_markedSecretsMatcher,
+			_markedSecretsRevision,
 			cancellationToken);
 		return ProcessFindings(filePath, entry.Findings);
 	}
@@ -517,7 +696,11 @@ public sealed class SecretRedactionScope
 	{
 		EnsureActive();
 		_completed = true;
-		var snapshot = new SecretRedactionSnapshot(SelectionKey, _detectedCount, _redactedCount);
+		var snapshot = new SecretRedactionSnapshot(
+			SelectionKey,
+			_detectedCount,
+			_redactedCount,
+			new Dictionary<string, int>(_markedSecretCounts, StringComparer.OrdinalIgnoreCase));
 		_session.Publish(snapshot, _overrideRevision);
 		return snapshot;
 	}
@@ -559,13 +742,19 @@ public sealed class SecretRedactionScope
 				finding.RuleId,
 				outputStart,
 				outputLength,
-				kept ? SecretPreviewSpanState.KeptAsIs : SecretPreviewSpanState.Redacted);
+				kept ? SecretPreviewSpanState.KeptAsIs : SecretPreviewSpanState.Redacted,
+				finding.Length,
+				finding.Source,
+				finding.PersistentMarkHash,
+				finding.SessionMarkId);
 			outputDelta = checked(outputDelta + outputLength - finding.Length);
 			_detectedCount++;
 			if (!kept)
 			{
 				_redactedCount++;
 				redactedInFile++;
+				if (finding.PersistentMarkHash is { Length: > 0 } markHash)
+					_markedSecretCounts[markHash] = _markedSecretCounts.GetValueOrDefault(markHash) + 1;
 			}
 		}
 
@@ -584,8 +773,14 @@ public sealed class SecretRedactionScope
 		if (matches.Count <= 1)
 			return matches;
 
-		var candidates = matches
-			.OrderBy(static match => IsGenericRule(match.RuleId))
+		var mergedExactMatches = matches
+			.GroupBy(static match => (match.Start, match.Length))
+			.Select(static group => MergeExactMatches(group))
+			.ToArray();
+		var candidates = mergedExactMatches
+			.OrderByDescending(static match =>
+				(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0)
+			.ThenBy(static match => IsGenericRule(match.RuleId))
 			.ThenBy(static match => match.RuleOrder)
 			.ThenBy(static match => match.Start)
 			.ThenByDescending(static match => match.Length)
@@ -614,6 +809,32 @@ public sealed class SecretRedactionScope
 		}
 
 		return accepted.Select(static interval => interval.Match!).ToArray();
+	}
+
+	private static DetectedSecret MergeExactMatches(IEnumerable<DetectedSecret> group)
+	{
+		var matches = group.ToArray();
+		var winner = matches
+			.OrderByDescending(static match =>
+				(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0)
+			.ThenBy(static match => IsGenericRule(match.RuleId))
+			.ThenBy(static match => match.RuleOrder)
+			.First();
+		var source = matches.Aggregate(
+			(SecretFindingSource)0,
+			static (current, match) => current | match.Source);
+		var persistentHash = matches
+			.Select(static match => match.PersistentMarkHash)
+			.FirstOrDefault(static hash => !string.IsNullOrWhiteSpace(hash));
+		var sessionMarkId = matches
+			.Select(static match => match.SessionMarkId)
+			.FirstOrDefault(static id => !string.IsNullOrWhiteSpace(id));
+		return winner with
+		{
+			Source = source,
+			PersistentMarkHash = persistentHash,
+			SessionMarkId = sessionMarkId
+		};
 	}
 
 	private static bool IsGenericRule(string ruleId) =>

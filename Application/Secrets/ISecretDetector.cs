@@ -72,7 +72,18 @@ public sealed record DetectedSecret(
 	int Start,
 	int Length,
 	string Value,
-	int RuleOrder);
+	int RuleOrder,
+	SecretFindingSource Source = SecretFindingSource.Detector,
+	string? PersistentMarkHash = null,
+	string? SessionMarkId = null);
+
+[Flags]
+public enum SecretFindingSource
+{
+	Detector = 1,
+	PersistentMark = 2,
+	SessionMark = 4
+}
 
 public sealed class SecretDetectionException(
 	string message,

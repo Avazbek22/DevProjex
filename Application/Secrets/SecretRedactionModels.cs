@@ -11,7 +11,11 @@ public sealed record SecretPreviewSpan(
 	string RuleId,
 	int Start,
 	int Length,
-	SecretPreviewSpanState State);
+	SecretPreviewSpanState State,
+	int SourceLength = 0,
+	SecretFindingSource Source = SecretFindingSource.Detector,
+	string? PersistentMarkHash = null,
+	string? SessionMarkId = null);
 
 public sealed record SecretTextRedactionResult(
 	string Text,
@@ -22,7 +26,15 @@ public sealed record SecretTextRedactionResult(
 public sealed record SecretRedactionSnapshot(
 	string SelectionKey,
 	int DetectedCount,
-	int RedactedCount);
+	int RedactedCount,
+	IReadOnlyDictionary<string, int>? MarkedSecretCounts = null);
+
+public readonly record struct ManualSecretMarkRemovalResult(
+	bool PersistentMarkRemoved,
+	bool SessionMarkRemoved)
+{
+	public bool Removed => PersistentMarkRemoved || SessionMarkRemoved;
+}
 
 public sealed class SecretScanLimitExceededException(
 	string path,

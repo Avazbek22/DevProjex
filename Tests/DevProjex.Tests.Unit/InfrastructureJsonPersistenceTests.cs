@@ -64,6 +64,39 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void ProjectProfileStore_LoadsMissingMarkedSecretsAndAddsTheFieldOnSave()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new ProjectProfileStore(() => Path.Combine(temp.Path, "appdata"));
+		var projectPath = Path.Combine(temp.Path, "RepoBeforeManualMarks");
+		var storePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+		File.WriteAllText(storePath, CreateLegacyProfileJson(projectPath));
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Empty(loaded.MarkedSecrets!);
+
+		var marked = loaded with
+		{
+			MarkedSecrets = [new MarkedSecretProfileEntry("9f2a4c1e8b3d", "STRIPE_SECRET_KEY", 24)]
+		};
+		store.SaveProfile(projectPath, marked);
+
+		using var document = JsonDocument.Parse(File.ReadAllText(storePath));
+		var persistedMark = document.RootElement
+			.GetProperty("profiles")
+			.EnumerateObject()
+			.Single()
+			.Value
+			.GetProperty("markedSecrets")
+			.EnumerateArray()
+			.Single();
+		Assert.Equal("9f2a4c1e8b3d", persistedMark.GetProperty("h").GetString());
+		Assert.Equal("STRIPE_SECRET_KEY", persistedMark.GetProperty("key").GetString());
+		Assert.Equal(24, persistedMark.GetProperty("length").GetInt32());
+	}
+
+	[Fact]
 	public void ProjectProfileStore_LoadsLegacySelectedOnlyPayloadAndRewritesFullStateShape()
 	{
 		using var temp = new TemporaryDirectory();

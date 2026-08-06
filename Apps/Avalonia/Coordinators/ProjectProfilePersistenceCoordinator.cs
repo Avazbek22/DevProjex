@@ -5,7 +5,8 @@ namespace DevProjex.Avalonia.Coordinators;
 public sealed class ProjectProfilePersistenceCoordinator(
     MainWindowViewModel viewModel,
     SelectionSyncCoordinator selectionCoordinator,
-    IProjectProfileStore profileStore)
+	IProjectProfileStore profileStore,
+	SecretRedactionSession secretRedactionSession)
 {
     private string? _lastPersistedPath;
     private ProjectSelectionProfile? _lastPersistedProfile;
@@ -70,8 +71,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
 
     private bool IsApplicable(string? currentPath)
     {
-        return viewModel.ProjectSourceType == ProjectSourceType.LocalFolder &&
-               !string.IsNullOrWhiteSpace(currentPath);
+		return !string.IsNullOrWhiteSpace(currentPath);
     }
 
     private ProjectSelectionProfile CaptureCurrentProfile()
@@ -82,6 +82,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
             cachedExtensionStates: selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
             cachedIgnoreOptionStates: selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
             selectedIgnoreOptions: selectionCoordinator.GetSelectedIgnoreOptionIds(),
-            extensionComparer: StringComparer.OrdinalIgnoreCase);
+			extensionComparer: StringComparer.OrdinalIgnoreCase,
+			markedSecrets: secretRedactionSession.GetMarkedSecrets());
     }
 }
