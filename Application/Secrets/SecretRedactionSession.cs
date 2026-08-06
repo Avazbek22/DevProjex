@@ -147,18 +147,8 @@ public sealed class SecretRedactionSession : IDisposable
 
 	public bool RemoveMarkedSecret(string hash)
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(hash);
-		bool removed;
-		lock (_sync)
-		{
-			removed = _persistentMarks.Remove(hash);
-			if (removed)
-				AdvanceMarkedSecretsRevisionLocked();
-		}
-		if (removed)
-			OverridesChanged?.Invoke(this, EventArgs.Empty);
-		return removed;
+		return RemoveManualSecret(hash, null).PersistentMarkRemoved;
 	}
 
 	public bool AddSessionMarkedSecret(
@@ -189,6 +179,36 @@ public sealed class SecretRedactionSession : IDisposable
 		if (added)
 			OverridesChanged?.Invoke(this, EventArgs.Empty);
 		return added;
+	}
+
+	public bool RemoveSessionMarkedSecret(string sessionMarkId)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(sessionMarkId);
+		return RemoveManualSecret(null, sessionMarkId).SessionMarkRemoved;
+	}
+
+	public ManualSecretMarkRemovalResult RemoveManualSecret(
+		string? persistentMarkHash,
+		string? sessionMarkId)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		var persistentRemoved = false;
+		var sessionRemoved = false;
+		lock (_sync)
+		{
+			if (!string.IsNullOrWhiteSpace(persistentMarkHash))
+				persistentRemoved = _persistentMarks.Remove(persistentMarkHash);
+			if (!string.IsNullOrWhiteSpace(sessionMarkId))
+			{
+				sessionRemoved = _sessionMarks.RemoveAll(mark =>
+					string.Equals(mark.Id, sessionMarkId, StringComparison.Ordinal)) > 0;
+			}
+			if (persistentRemoved || sessionRemoved)
+				AdvanceMarkedSecretsRevisionLocked();
+		}
+		if (persistentRemoved || sessionRemoved)
+			OverridesChanged?.Invoke(this, EventArgs.Empty);
+		return new ManualSecretMarkRemovalResult(persistentRemoved, sessionRemoved);
 	}
 
 	public bool ToggleKeepAsIs(string occurrenceId)
@@ -358,7 +378,8 @@ public sealed class SecretRedactionSession : IDisposable
 				HashValue(content.Slice(finding.Start, finding.Length)),
 				finding.RuleOrder,
 				finding.Source,
-				finding.PersistentMarkHash);
+				finding.PersistentMarkHash,
+				finding.SessionMarkId);
 		}
 
 		var normalizedPath = Path.GetFullPath(filePath);
@@ -724,7 +745,8 @@ public sealed class SecretRedactionScope
 				kept ? SecretPreviewSpanState.KeptAsIs : SecretPreviewSpanState.Redacted,
 				finding.Length,
 				finding.Source,
-				finding.PersistentMarkHash);
+				finding.PersistentMarkHash,
+				finding.SessionMarkId);
 			outputDelta = checked(outputDelta + outputLength - finding.Length);
 			_detectedCount++;
 			if (!kept)
@@ -804,7 +826,15 @@ public sealed class SecretRedactionScope
 		var persistentHash = matches
 			.Select(static match => match.PersistentMarkHash)
 			.FirstOrDefault(static hash => !string.IsNullOrWhiteSpace(hash));
-		return winner with { Source = source, PersistentMarkHash = persistentHash };
+		var sessionMarkId = matches
+			.Select(static match => match.SessionMarkId)
+			.FirstOrDefault(static id => !string.IsNullOrWhiteSpace(id));
+		return winner with
+		{
+			Source = source,
+			PersistentMarkHash = persistentHash,
+			SessionMarkId = sessionMarkId
+		};
 	}
 
 	private static bool IsGenericRule(string ruleId) =>

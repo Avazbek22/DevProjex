@@ -175,7 +175,7 @@
   "Preview.Secret.Kept.Tooltip": "Erkannt: {0}.\nDer Originalwert bleibt erhalten.\nKlicken, um ihn wieder auszublenden.\nAlt+↑ / Alt+↓ — navigieren.",
   "Preview.Secret.Mark.Always": "\"{0}\" immer ausblenden",
   "Preview.Secret.Mark.Here": "\"{0}\" hier ausblenden",
-  "Preview.Secret.Mark.Remove": "Markierung entfernen",
+  "Preview.Secret.Mark.Remove": "Geheimnismarkierung entfernen",
   "Preview.Secret.Mark.Validation.TooShort": "Wählen Sie mindestens 8 Zeichen aus.",
   "Preview.Secret.Mark.Validation.TooLong": "Wählen Sie höchstens 512 Zeichen aus.",
   "Preview.Secret.Mark.Validation.Multiline": "Mehrzeilige Werte werden nicht unterstützt.",

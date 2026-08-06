@@ -49,6 +49,34 @@ public sealed class ManualSecretRedactionSessionTests
 	}
 
 	[Fact]
+	public void RemovingSessionMark_UnmarksOnlyTheSelectedOccurrence()
+	{
+		using var workspace = new TemporaryDirectory();
+		var content = $"FIRST={Secret}\nSECOND={Secret}";
+		var path = workspace.CreateFile("config.env", content);
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		Assert.True(session.AddSessionMarkedSecret("config.env", 0, "FIRST=".Length, CreateValue(Secret)));
+		Assert.True(session.AddSessionMarkedSecret("config.env", 1, "SECOND=".Length, CreateValue(Secret)));
+
+		var initialScope = session.BeginOutput(workspace.Path, [path]);
+		var initial = initialScope.Redact(path, content, TestContext.Current.CancellationToken);
+		initialScope.Complete();
+		var firstSessionMarkId = Assert.IsType<string>(initial.Spans[0].SessionMarkId);
+		var secondSessionMarkId = Assert.IsType<string>(initial.Spans[1].SessionMarkId);
+
+		Assert.True(session.RemoveSessionMarkedSecret(firstSessionMarkId));
+		var updatedScope = session.BeginOutput(workspace.Path, [path]);
+		var updated = updatedScope.Redact(path, content, TestContext.Current.CancellationToken);
+		updatedScope.Complete();
+
+		Assert.Contains($"FIRST={Secret}", updated.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain($"SECOND={Secret}", updated.Text, StringComparison.Ordinal);
+		var remaining = Assert.Single(updated.Spans);
+		Assert.Equal(secondSessionMarkId, remaining.SessionMarkId);
+		Assert.True(remaining.Source.HasFlag(SecretFindingSource.SessionMark));
+	}
+
+	[Fact]
 	public void RemovingPersistentMark_LeavesAnEngineFindingActive()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -69,6 +97,38 @@ public sealed class ManualSecretRedactionSessionTests
 		detectorScope.Complete();
 
 		Assert.DoesNotContain(Secret, detected.Text, StringComparison.Ordinal);
+		Assert.Equal(SecretFindingSource.Detector, Assert.Single(detected.Spans).Source);
+	}
+
+	[Fact]
+	public void RemovingCombinedManualMark_RemovesBothSourcesWithOneInvalidationAndLeavesDetectorActive()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("config.env", $"TOKEN={Secret}");
+		using var session = new SecretRedactionSession(new ExactDetector());
+		var value = CreateValue(Secret);
+		var persistentMark = CreateProfileMark(Secret, "TOKEN");
+		session.ReplaceMarkedSecrets([persistentMark]);
+		Assert.True(session.AddSessionMarkedSecret("config.env", 0, "TOKEN=".Length, value));
+		var markedScope = session.BeginOutput(workspace.Path, [path]);
+		var marked = markedScope.Redact(path, File.ReadAllText(path), TestContext.Current.CancellationToken);
+		markedScope.Complete();
+		var markedSpan = Assert.Single(marked.Spans);
+		Assert.True(markedSpan.Source.HasFlag(SecretFindingSource.PersistentMark));
+		Assert.True(markedSpan.Source.HasFlag(SecretFindingSource.SessionMark));
+		Assert.True(markedSpan.Source.HasFlag(SecretFindingSource.Detector));
+		var sessionMarkId = Assert.IsType<string>(markedSpan.SessionMarkId);
+		var invalidationCount = 0;
+		session.OverridesChanged += (_, _) => invalidationCount++;
+
+		var removal = session.RemoveManualSecret(persistentMark.H, sessionMarkId);
+
+		Assert.True(removal.PersistentMarkRemoved);
+		Assert.True(removal.SessionMarkRemoved);
+		Assert.Equal(1, invalidationCount);
+		var detectorScope = session.BeginOutput(workspace.Path, [path]);
+		var detected = detectorScope.Redact(path, File.ReadAllText(path), TestContext.Current.CancellationToken);
+		detectorScope.Complete();
 		Assert.Equal(SecretFindingSource.Detector, Assert.Single(detected.Spans).Source);
 	}
 

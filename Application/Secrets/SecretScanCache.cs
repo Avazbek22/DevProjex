@@ -38,7 +38,8 @@ internal sealed record SecretFindingMetadata(
 	string ValueFingerprint,
 	int RuleOrder,
 	SecretFindingSource Source,
-	string? PersistentMarkHash);
+	string? PersistentMarkHash,
+	string? SessionMarkId);
 
 internal sealed record SecretScanCacheEntry(
 	string NormalizedPath,

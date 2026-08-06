@@ -175,7 +175,7 @@
   "Preview.Secret.Kept.Tooltip": "Detetado: {0}.\nO valor original foi mantido.\nClique para o ocultar novamente.\nAlt+↑ / Alt+↓ — navegar.",
   "Preview.Secret.Mark.Always": "Ocultar sempre \"{0}\"",
   "Preview.Secret.Mark.Here": "Ocultar \"{0}\" aqui",
-  "Preview.Secret.Mark.Remove": "Remover marcação",
+  "Preview.Secret.Mark.Remove": "Remover marcação como segredo",
   "Preview.Secret.Mark.Validation.TooShort": "Selecione pelo menos 8 caracteres.",
   "Preview.Secret.Mark.Validation.TooLong": "Selecione no máximo 512 caracteres.",
   "Preview.Secret.Mark.Validation.Multiline": "Não são suportados valores com várias linhas.",

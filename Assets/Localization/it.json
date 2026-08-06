@@ -175,7 +175,7 @@
   "Preview.Secret.Kept.Tooltip": "Rilevato: {0}.\nIl valore originale viene mantenuto.\nFai clic per nasconderlo di nuovo.\nAlt+↑ / Alt+↓ — naviga.",
   "Preview.Secret.Mark.Always": "Nascondi sempre \"{0}\"",
   "Preview.Secret.Mark.Here": "Nascondi \"{0}\" qui",
-  "Preview.Secret.Mark.Remove": "Rimuovi contrassegno",
+  "Preview.Secret.Mark.Remove": "Rimuovi contrassegno come segreto",
   "Preview.Secret.Mark.Validation.TooShort": "Seleziona almeno 8 caratteri.",
   "Preview.Secret.Mark.Validation.TooLong": "Seleziona non più di 512 caratteri.",
   "Preview.Secret.Mark.Validation.Multiline": "I valori su più righe non sono supportati.",

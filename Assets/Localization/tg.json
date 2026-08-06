@@ -175,7 +175,7 @@
   "Preview.Secret.Kept.Tooltip": "Ошкор шуд: {0}.\nҚимати аслӣ нигоҳ дошта шудааст.\nБарои боз пинҳон кардан пахш кунед.\nAlt+↑ / Alt+↓ — гузариш.",
   "Preview.Secret.Mark.Always": "Ҳамеша \"{0}\"-ро пинҳон кардан",
   "Preview.Secret.Mark.Here": "\"{0}\"-ро дар ин ҷо пинҳон кардан",
-  "Preview.Secret.Mark.Remove": "Нишонаро хориҷ кардан",
+  "Preview.Secret.Mark.Remove": "Нишонаи сирро хориҷ кардан",
   "Preview.Secret.Mark.Validation.TooShort": "Камаш 8 аломатро интихоб кунед.",
   "Preview.Secret.Mark.Validation.TooLong": "На бештар аз 512 аломатро интихоб кунед.",
   "Preview.Secret.Mark.Validation.Multiline": "Қиматҳои бисёрсатра дастгирӣ намешаванд.",

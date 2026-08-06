@@ -175,7 +175,7 @@
   "Preview.Secret.Kept.Tooltip": "Aniqlandi: {0}.\nAsl qiymat saqlandi.\nUni yana yashirish uchun bosing.\nAlt+↑ / Alt+↓ — o‘tish.",
   "Preview.Secret.Mark.Always": "\"{0}\" qiymatini doim yashirish",
   "Preview.Secret.Mark.Here": "\"{0}\" qiymatini shu yerda yashirish",
-  "Preview.Secret.Mark.Remove": "Belgini olib tashlash",
+  "Preview.Secret.Mark.Remove": "Sir belgisini olib tashlash",
   "Preview.Secret.Mark.Validation.TooShort": "Kamida 8 ta belgini tanlang.",
   "Preview.Secret.Mark.Validation.TooLong": "Ko‘pi bilan 512 ta belgini tanlang.",
   "Preview.Secret.Mark.Validation.Multiline": "Ko‘p qatorli qiymatlar qo‘llab-quvvatlanmaydi.",

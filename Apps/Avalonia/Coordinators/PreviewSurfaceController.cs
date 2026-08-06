@@ -160,11 +160,15 @@ internal sealed class PreviewSurfaceController : IDisposable
 		object? sender,
 		PreviewManualSecretUnmarkRequestedEventArgs e)
 	{
-		if (!_secretRedactionSession.RemoveMarkedSecret(e.Hash))
+		var result = _secretRedactionSession.RemoveManualSecret(
+			e.PersistentMarkHash,
+			e.SessionMarkId);
+		if (!result.Removed)
 			return;
 
 		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
-		_persistProjectProfile();
+		if (result.PersistentMarkRemoved)
+			_persistProjectProfile();
 		_toastService.Show(_localization[
 			e.AlsoDetected
 				? "Toast.Secret.MarkRemovedStillDetected"

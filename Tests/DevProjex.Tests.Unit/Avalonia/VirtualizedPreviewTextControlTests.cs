@@ -222,7 +222,7 @@ public sealed class VirtualizedPreviewTextControlTests
 	}
 
 	[AvaloniaFact]
-	public void ManualPlaceholder_ContextActionRequestsRemovalAndReportsDetectorOverlap()
+	public void PersistentManualPlaceholder_RightClickOffersUndoAndReportsDetectorOverlap()
 	{
 		const string hash = "9f2a4c1e8b3d";
 		const string placeholder = "DEVPROJEX_REDACTED[manual-secret#1]";
@@ -241,24 +241,120 @@ public sealed class VirtualizedPreviewTextControlTests
 					SecretFindingSource.PersistentMark | SecretFindingSource.Detector,
 					hash)
 			]);
-		var control = new VirtualizedPreviewTextControl { Document = document };
-		InvokePrivate(control, "EnsureContextMenu");
-		SetPrivateField(
-			control,
-			"_contextManualRedaction",
-			document.Redactions.Single());
-		InvokePrivate(control, "PrepareManualSecretMenuItems");
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 120,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 180,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
 		PreviewManualSecretUnmarkRequestedEventArgs? requested = null;
 		control.ManualSecretUnmarkRequested += (_, eventArgs) => requested = eventArgs;
 
-		GetMenuItem(control, "_removeSecretMarkMenuItem")
-			.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+			var typeface = ResolveTestTypeface(control);
+			var point = new Point(
+				origin.X + control.LeftPadding + MeasureRenderedPrefixWidth(control, placeholder, 3, typeface),
+				origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2));
+			window.MouseDown(point, MouseButton.Right, RawInputModifiers.RightMouseButton);
+			window.MouseUp(point, MouseButton.Right, RawInputModifiers.None);
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			var undoItem = GetMenuItem(control, "_removeSecretMarkMenuItem");
+			Assert.True(undoItem.IsVisible);
+			Assert.Equal("Remove secret mark", undoItem.Header);
+			Assert.False(GetMenuItem(control, "_alwaysHideSecretMenuItem").IsVisible);
+			Assert.False(GetMenuItem(control, "_hideSecretHereMenuItem").IsVisible);
+			undoItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		}
+		finally
+		{
+			window.Close();
+		}
 
 		Assert.NotNull(requested);
-		Assert.Equal(hash, requested!.Hash);
+		Assert.Equal(hash, requested!.PersistentMarkHash);
+		Assert.Null(requested.SessionMarkId);
 		Assert.True(requested.AlsoDetected);
-		Assert.False(GetMenuItem(control, "_alwaysHideSecretMenuItem").IsVisible);
-		Assert.False(GetMenuItem(control, "_hideSecretHereMenuItem").IsVisible);
+	}
+
+	[AvaloniaFact]
+	public void SessionManualPlaceholder_RightClickOffersUndoForThatOccurrence()
+	{
+		const string sessionMarkId = "session-mark-id";
+		const string placeholder = "DEVPROJEX_REDACTED[manual-secret#1]";
+		using var document = new InMemoryPreviewTextDocument(
+			placeholder,
+			[new PreviewDocumentSection("config.env", 1, 1, 1, 1)],
+			[
+				new PreviewRedactionSpan(
+					"occurrence",
+					"manual-secret",
+					1,
+					0,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					20,
+					SecretFindingSource.SessionMark,
+					null,
+					sessionMarkId)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 120,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 180,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		PreviewManualSecretUnmarkRequestedEventArgs? requested = null;
+		control.ManualSecretUnmarkRequested += (_, eventArgs) => requested = eventArgs;
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+			var typeface = ResolveTestTypeface(control);
+			var point = new Point(
+				origin.X + control.LeftPadding + MeasureRenderedPrefixWidth(control, placeholder, 3, typeface),
+				origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2));
+			window.MouseDown(point, MouseButton.Right, RawInputModifiers.RightMouseButton);
+			window.MouseUp(point, MouseButton.Right, RawInputModifiers.None);
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			var undoItem = GetMenuItem(control, "_removeSecretMarkMenuItem");
+			Assert.True(undoItem.IsVisible);
+			undoItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		Assert.NotNull(requested);
+		Assert.Null(requested!.PersistentMarkHash);
+		Assert.Equal(sessionMarkId, requested.SessionMarkId);
+		Assert.False(requested.AlsoDetected);
 	}
 
 	[AvaloniaFact]
@@ -712,18 +808,6 @@ public sealed class VirtualizedPreviewTextControlTests
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(field);
 		return Assert.IsType<MenuItem>(field!.GetValue(control));
-	}
-
-	private static void SetPrivateField(
-		VirtualizedPreviewTextControl control,
-		string fieldName,
-		object value)
-	{
-		var field = typeof(VirtualizedPreviewTextControl).GetField(
-			fieldName,
-			BindingFlags.Instance | BindingFlags.NonPublic);
-		Assert.NotNull(field);
-		field!.SetValue(control, value);
 	}
 
 	private static void InvokePrivate(

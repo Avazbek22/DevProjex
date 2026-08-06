@@ -175,7 +175,7 @@
   "Preview.Secret.Kept.Tooltip": "Анықталды: {0}.\nБастапқы мән қалдырылды.\nҚайта жасыру үшін басыңыз.\nAlt+↑ / Alt+↓ — ауысу.",
   "Preview.Secret.Mark.Always": "\"{0}\" мәнін әрқашан жасыру",
   "Preview.Secret.Mark.Here": "\"{0}\" мәнін осында жасыру",
-  "Preview.Secret.Mark.Remove": "Белгіні алып тастау",
+  "Preview.Secret.Mark.Remove": "Құпия белгісін алып тастау",
   "Preview.Secret.Mark.Validation.TooShort": "Кемінде 8 таңба таңдаңыз.",
   "Preview.Secret.Mark.Validation.TooLong": "512 таңбадан артық таңдамаңыз.",
   "Preview.Secret.Mark.Validation.Multiline": "Көпжолды мәндерге қолдау көрсетілмейді.",

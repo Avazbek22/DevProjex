@@ -5,7 +5,13 @@ internal sealed record SessionMarkedSecret(
 	int LineIndex,
 	int Column,
 	int Length,
-	string Hash);
+	string Hash)
+{
+	public string Id { get; } = SecretRedactionSession.HashValue(
+		$"{NormalizePath(RelativePath)}\n{LineIndex}\n{Column}\n{Length}\n{Hash}".AsSpan());
+
+	private static string NormalizePath(string path) => path.Replace('\\', '/');
+}
 
 internal sealed class MarkedSecretsMatcher
 {
@@ -127,7 +133,13 @@ internal sealed class MarkedSecretsMatcher
 			if (!candidateHash.SequenceEqual(preparedMark.HashBytes))
 				continue;
 
-			findings.Add(CreateFinding(content, start, mark.Length, mark.Hash, SecretFindingSource.SessionMark));
+			findings.Add(CreateFinding(
+				content,
+				start,
+				mark.Length,
+				mark.Hash,
+				SecretFindingSource.SessionMark,
+				mark.Id));
 		}
 	}
 
@@ -136,7 +148,8 @@ internal sealed class MarkedSecretsMatcher
 		int start,
 		int length,
 		string hash,
-		SecretFindingSource source) =>
+		SecretFindingSource source,
+		string? sessionMarkId = null) =>
 		new(
 			RuleId,
 			start,
@@ -144,7 +157,8 @@ internal sealed class MarkedSecretsMatcher
 			content.Slice(start, length).ToString(),
 			RuleOrder,
 			source,
-			source == SecretFindingSource.PersistentMark ? hash : null);
+			source == SecretFindingSource.PersistentMark ? hash : null,
+			sessionMarkId);
 
 	private static bool TryResolveHash(
 		IReadOnlyList<PersistentHash> hashes,

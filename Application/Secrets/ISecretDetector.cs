@@ -74,7 +74,8 @@ public sealed record DetectedSecret(
 	string Value,
 	int RuleOrder,
 	SecretFindingSource Source = SecretFindingSource.Detector,
-	string? PersistentMarkHash = null);
+	string? PersistentMarkHash = null,
+	string? SessionMarkId = null);
 
 [Flags]
 public enum SecretFindingSource

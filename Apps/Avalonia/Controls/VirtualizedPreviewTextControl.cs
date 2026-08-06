@@ -20,10 +20,12 @@ public sealed class PreviewManualSecretMarkRequestedEventArgs(
 }
 
 public sealed class PreviewManualSecretUnmarkRequestedEventArgs(
-	string hash,
+	string? persistentMarkHash,
+	string? sessionMarkId,
 	bool alsoDetected) : EventArgs
 {
-	public string Hash { get; } = hash;
+	public string? PersistentMarkHash { get; } = persistentMarkHash;
+	public string? SessionMarkId { get; } = sessionMarkId;
 	public bool AlsoDetected { get; } = alsoDetected;
 }
 
@@ -132,7 +134,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	public static readonly StyledProperty<string> RemoveSecretMarkHeaderProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(RemoveSecretMarkHeader),
-			"Remove mark");
+			"Remove secret mark");
 
 	public static readonly StyledProperty<string> SecretSelectionTooShortProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
@@ -2044,13 +2046,14 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 	private void OnRemoveSecretMarkMenuItemClick(object? sender, RoutedEventArgs e)
 	{
-		if (_contextManualRedaction?.PersistentMarkHash is not { Length: > 0 } hash)
+		if (_contextManualRedaction is not { } redaction || !HasManualMarkIdentity(redaction))
 			return;
 		ManualSecretUnmarkRequested?.Invoke(
 			this,
 			new PreviewManualSecretUnmarkRequestedEventArgs(
-				hash,
-				_contextManualRedaction.Source.HasFlag(SecretFindingSource.Detector)));
+				redaction.PersistentMarkHash,
+				redaction.SessionMarkId,
+				redaction.Source.HasFlag(SecretFindingSource.Detector)));
 	}
 
 	private void RaiseManualSecretMarkRequested(bool persistent)
@@ -2071,8 +2074,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var hit = HitTestSelectionPosition(point);
 		if (TryGetRedactionAt(hit, out var redaction))
 		{
-			if (redaction.State == SecretPreviewSpanState.Redacted &&
-			    redaction.PersistentMarkHash is { Length: > 0 })
+			if (HasManualMarkIdentity(redaction))
 			{
 				_contextManualRedaction = redaction;
 			}
@@ -2101,7 +2103,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 			return;
 		}
 
-		var removeVisible = _contextManualRedaction?.PersistentMarkHash is { Length: > 0 };
+		var removeVisible = _contextManualRedaction is { } redaction && HasManualMarkIdentity(redaction);
 		_removeSecretMarkMenuItem.IsVisible = removeVisible;
 		_alwaysHideSecretMenuItem.IsVisible = !removeVisible && HasSelection;
 		_hideSecretHereMenuItem.IsVisible = !removeVisible && HasSelection;
@@ -2142,6 +2144,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 		ToolTip.SetTip(_alwaysHideSecretMenuItem, enabled ? null : reason);
 		ToolTip.SetTip(_hideSecretHereMenuItem, enabled ? null : reason);
 	}
+
+	private static bool HasManualMarkIdentity(PreviewRedactionSpan redaction) =>
+		redaction.PersistentMarkHash is { Length: > 0 } ||
+		redaction.SessionMarkId is { Length: > 0 };
 
 	private bool IsFileContentSelection(PreviewSelectionRange selection)
 	{
