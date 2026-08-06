@@ -69,6 +69,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _allRootFoldersChecked;
     private bool _allIgnoreChecked;
 	private IgnoreOptionViewModel? _hideSecretsOption;
+	private bool? _contentProcessingHasFindings;
+	private SecretScanState _contentProcessingScanState;
+	private int? _contentProcessingDetectedCount;
+	private int? _contentProcessingHiddenCount;
     private bool _isDarkTheme = true;
     private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
@@ -195,7 +199,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		}
 	}
 	public bool HasHideSecretsOption => HideSecretsOption is not null;
-	public bool HasContentProcessingOptions => ContentProcessingOptions.Count > 0;
+	public bool HasContentProcessingOptions =>
+		ContentProcessingOptions.Count > 0 && _contentProcessingHasFindings is not false;
     public ObservableCollection<FontFamily> FontFamilies { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentFolders { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentRepositories { get; } = [];
@@ -1445,6 +1450,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemeMenuTransparency { get; private set; } = string.Empty;
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsTitle { get; private set; } = string.Empty;
+	public string SettingsSecretsNotice { get; private set; } = string.Empty;
+	public bool HasContentProcessingStatus =>
+		_contentProcessingScanState == SecretScanState.Failed ||
+		(_contentProcessingScanState == SecretScanState.Completed &&
+		 _contentProcessingDetectedCount.HasValue &&
+		 _contentProcessingHiddenCount.HasValue);
+	public bool IsContentProcessingAnalysisFailed =>
+		_contentProcessingScanState == SecretScanState.Failed;
 	public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
     public string SettingsAll { get; private set; } = string.Empty;
@@ -1597,7 +1610,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
         UpdateApplicationUpdateLocalization();
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
-		SettingsSecretsTitle = _localization["Settings.ContentProcessing.Title"];
+		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
+		UpdateSettingsSecretsNotice();
 		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
 		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
         SettingsAll = _localization["Settings.All"];
@@ -1745,6 +1759,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HelpAboutOpenLink));
         RaisePropertyChanged(nameof(SettingsIgnoreTitle));
 		RaisePropertyChanged(nameof(SettingsSecretsTitle));
+		RaisePropertyChanged(nameof(SettingsSecretsNotice));
 		RaisePropertyChanged(nameof(PreviewSecretRedactedTooltip));
 		RaisePropertyChanged(nameof(PreviewSecretKeptTooltip));
         RaisePropertyChanged(nameof(SettingsAll));
@@ -1884,6 +1899,53 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		RaisePropertyChanged(nameof(HasContentProcessingOptions));
 	}
 
+	internal void SetContentProcessingStatus(
+		SecretScanState scanState,
+		int? detectedCount = null,
+		int? hiddenCount = null)
+	{
+		bool? hasFindings = scanState == SecretScanState.Completed
+			? detectedCount > 0
+			: null;
+		if (_contentProcessingScanState == scanState &&
+		    _contentProcessingDetectedCount == detectedCount &&
+		    _contentProcessingHiddenCount == hiddenCount &&
+		    _contentProcessingHasFindings == hasFindings)
+		{
+			return;
+		}
+
+		_contentProcessingScanState = scanState;
+		_contentProcessingDetectedCount = detectedCount;
+		_contentProcessingHiddenCount = hiddenCount;
+		_contentProcessingHasFindings = hasFindings;
+		UpdateSettingsSecretsNotice();
+		RaisePropertyChanged(nameof(HasContentProcessingStatus));
+		RaisePropertyChanged(nameof(IsContentProcessingAnalysisFailed));
+		RaisePropertyChanged(nameof(HasContentProcessingOptions));
+	}
+
+	private void UpdateSettingsSecretsNotice()
+	{
+		var value = _contentProcessingScanState switch
+		{
+			SecretScanState.Failed => _localization["Settings.Secrets.Status.Failed"],
+			SecretScanState.Completed when
+				_contentProcessingDetectedCount is { } detected &&
+				_contentProcessingHiddenCount is { } hidden &&
+				detected > 0 =>
+				_localization.Format("Settings.Secrets.Status.Applied", detected, hidden),
+			SecretScanState.Completed when _contentProcessingDetectedCount == 0 =>
+				_localization["Settings.Ignore.HideSecrets.NoMatches"],
+			_ => string.Empty
+		};
+		if (string.Equals(SettingsSecretsNotice, value, StringComparison.Ordinal))
+			return;
+
+		SettingsSecretsNotice = value;
+		RaisePropertyChanged(nameof(SettingsSecretsNotice));
+	}
+
     /// <summary>
     /// Cleans up event subscriptions and resources to prevent memory leaks.
     /// </summary>
@@ -1909,6 +1971,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         IgnoreOptions.Clear();
 		PathIgnoreOptions.Clear();
 		ContentProcessingOptions.Clear();
+		_contentProcessingHasFindings = null;
+		_contentProcessingScanState = SecretScanState.Disabled;
+		_contentProcessingDetectedCount = null;
+		_contentProcessingHiddenCount = null;
 		HideSecretsOption = null;
         Extensions.Clear();
         RootFolders.Clear();

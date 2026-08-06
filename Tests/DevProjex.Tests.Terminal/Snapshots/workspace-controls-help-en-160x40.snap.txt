@@ -5,22 +5,22 @@
 │  > [x] src                              ││  <d n="src">                                                 ││  ( ) No Git filtering                             │
 │    [x] global.json                      ││    <d n="Feature">                                           ││  (*) Use .gitignore                               │
 │    [x] readme.md                        ││      <f>Handler.cs</f>                                       ││  ( ) Tracked Git files only                       │
-│                                 ┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐                                  │
+│                                 ┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐ING:                              │
 │                                 │ PARAMETERS                                                                            ▲ │s                                 │
-│                                 │ Up/Down or j/k selects a row; Enter changes the selected radio button, checkbox, or   █ │ text files only. Binary          │
-│                                 │ All control. This panel contains Git filtering, Smart Secrets, Exclusions, File       █ │nspected, and no matches is       │
-│                                 │ Types, Root Folders, and an unobtrusive saved-settings indicator when applicable. Use █ │arantee.                          │
-│                                 │ Ctrl+P for actions, E for context export, and Z for folder/ZIP export. Tab/F6 returns █ │                                  │
+│                                 │ Up/Down or j/k selects a row; Enter changes the selected radio button, checkbox, or   █ │N) shows detected / hidden        │
+│                                 │ All control. This panel contains Git filtering, Smart Secrets, Exclusions, File       █ │lected text files are             │
+│                                 │ Types, Root Folders, and an unobtrusive saved-settings indicator when applicable. Use █ │ files are not inspected, and     │
+│                                 │ Ctrl+P for actions, E for context export, and Z for folder/ZIP export. Tab/F6 returns █ │ot a safety guarantee.            │
 │                                 │ to Tree; Shift+Tab/Shift+F6 moves to Preview.                                         █ │                                  │
-│                                 │                                                                                       █ │e                                 │
-│                                 │ WORKSPACE                                                                             █ │rs                                │
-│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      █ │                                  │
-│                                 │ changes Git filtering, Smart Secrets, Exclusions, File Types, and Root Folders.       █ │ers                               │
-│                                 │                                                                                       ░ │s                                 │
-│                                 │ ACTION PALETTE                                                                        ░ │                                  │
+│                                 │                                                                                       █ │                                  │
+│                                 │ WORKSPACE                                                                             █ │e                                 │
+│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      █ │rs                                │
+│                                 │ changes Git filtering, Smart Secrets, Exclusions, File Types, and Root Folders.       █ │                                  │
+│                                 │                                                                                       ░ │ers                               │
+│                                 │ ACTION PALETTE                                                                        ░ │s                                 │
 │                                 │ Ctrl+P lists every important action and shortcut. Type to filter, use Up/Down, then   ░ │                                  │
-│                                 │ Enter. Esc restores the previous pane.                                                ░ │ut extension                      │
-│                                 │                                                                                       ░ │                                  │
+│                                 │ Enter. Esc restores the previous pane.                                                ░ │                                  │
+│                                 │                                                                                       ░ │ut extension                      │
 │                                 │ PREVIEW AND SEARCH                                                                    ░ │                                  │
 │                                 │ 1/2/3 selects Tree, Content, or Tree + Content. F selects ASCII, JSON, XML, or        ░ │                                  │
 │                                 │ Markdown. / filters Tree names when Tree is focused and searches the complete Preview ▼ │                                  │

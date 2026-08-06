@@ -5,22 +5,22 @@
 │  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
 │    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
 │    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
-│                                 │ Filter actions:                                                                         │                                  │
+│                                 │ Filter actions:                                                                         │ING:                              │
 │                                 │                                                                                         │s                                 │
-│                                 │                                                                                         │ text files only. Binary          │
-│                                 │ Analyze  [A]                                                                            │nspected, and no matches is       │
-│                                 │ Search  [/]                                                                             │arantee.                          │
-│                                 │ Preview mode: Tree  [1/2/3]                                                             │                                  │
+│                                 │                                                                                         │N) shows detected / hidden        │
+│                                 │ Analyze  [A]                                                                            │lected text files are             │
+│                                 │ Search  [/]                                                                             │ files are not inspected, and     │
+│                                 │ Preview mode: Tree  [1/2/3]                                                             │ot a safety guarantee.            │
 │                                 │ Preview format: ASCII  [F]                                                              │                                  │
-│                                 │ Git filtering: Use .gitignore  [M]                                                      │e                                 │
-│                                 │ Exclusions: 8  [X]                                                                      │rs                                │
-│                                 │ Root folders: All (1)  [R]                                                              │                                  │
-│                                 │ File types: All (3)  [T]                                                                │ers                               │
-│                                 │ Export context  [E]                                                                     │s                                 │
-│                                 │ To Folder…  [Z]                                                                         │                                  │
+│                                 │ Git filtering: Use .gitignore  [M]                                                      │                                  │
+│                                 │ Exclusions: 8  [X]                                                                      │e                                 │
+│                                 │ Root folders: All (1)  [R]                                                              │rs                                │
+│                                 │ File types: All (3)  [T]                                                                │                                  │
+│                                 │ Export context  [E]                                                                     │ers                               │
+│                                 │ To Folder…  [Z]                                                                         │s                                 │
 │                                 │ To ZIP Archive…  [Z]                                                                    │                                  │
-│                                 │ Export settings...  [P]                                                                 │ut extension                      │
-│                                 │                                                                                         │                                  │
+│                                 │ Export settings...  [P]                                                                 │                                  │
+│                                 │                                                                                         │ut extension                      │
 │                                 │ Diagnostics · Analyze                                                                   │                                  │
 │                                 │ Analyze the effective project context.                                                  │                                  │
 │                                 │                                                                                         │                                  │

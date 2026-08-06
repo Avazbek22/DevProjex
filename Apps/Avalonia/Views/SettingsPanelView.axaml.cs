@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Services;
+
 namespace DevProjex.Avalonia.Views;
 
 public partial class SettingsPanelView : UserControl
@@ -56,6 +58,36 @@ public partial class SettingsPanelView : UserControl
 
     private void OnRootAllChanged(object? sender, RoutedEventArgs e)
         => RootAllChanged?.Invoke(sender, e);
+
+	private void OnContentProcessingToolTipLoaded(object? sender, RoutedEventArgs e)
+	{
+		if (sender is not ToolTip toolTip || DataContext is not MainWindowViewModel viewModel)
+			return;
+
+		toolTip.DataContext = viewModel;
+		PopupBackdropConfigurator.TryApply(
+			toolTip,
+			TopLevel.GetTopLevel(this),
+			viewModel.ActiveThemeEffect,
+			PopupBackdropTransparencyFallback.Transparent);
+	}
+
+	private void OnContentProcessingHelpIndicatorPointerPressed(
+		object? sender,
+		PointerPressedEventArgs e)
+	{
+		e.Handled = true;
+	}
+
+	private void OnContentProcessingHelpIndicatorPointerReleased(
+		object? sender,
+		PointerReleasedEventArgs e)
+	{
+		if (sender is Control indicator)
+			ToolTip.SetIsOpen(indicator, true);
+
+		e.Handled = true;
+	}
 
     public void RequestMinimumWidthRefresh()
         => QueueMinimumWidthRefresh(force: true);

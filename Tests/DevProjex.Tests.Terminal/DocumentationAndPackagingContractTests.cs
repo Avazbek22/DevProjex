@@ -443,6 +443,42 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void ReleaseValidationInlineScriptsStayBelowGitHubExpressionLimit()
+	{
+		const int inlineScriptSafetyLimit = 18_000;
+		var rootPath = FindRepositoryRoot();
+		var workflowPath = Path.Combine(rootPath, ".github", "workflows", "release-validate.yml");
+		var lines = File.ReadAllLines(workflowPath);
+
+		for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+		{
+			var runBlockMatch = Regex.Match(lines[lineIndex], "^(\\s*)run:\\s*[|>]\\s*$");
+			if (!runBlockMatch.Success)
+				continue;
+
+			var runIndent = runBlockMatch.Groups[1].Value.Length;
+			var bodyLength = 0;
+			for (var bodyLineIndex = lineIndex + 1; bodyLineIndex < lines.Length; bodyLineIndex++)
+			{
+				var bodyLine = lines[bodyLineIndex];
+				if (bodyLine.Length > 0)
+				{
+					var bodyIndent = bodyLine.Length - bodyLine.TrimStart().Length;
+					if (bodyIndent <= runIndent)
+						break;
+				}
+
+				bodyLength += bodyLine.Length + 1;
+			}
+
+			Assert.True(
+				bodyLength < inlineScriptSafetyLimit,
+				$"Inline run block at {Path.GetFileName(workflowPath)}:{lineIndex + 1} is " +
+				$"{bodyLength} characters. Split it before GitHub's 21,000-character expression limit.");
+		}
+	}
+
+	[Fact]
 	public void NativePtyAutomationDependencyIsPinnedAndTestOnly()
 	{
 		var rootPath = FindRepositoryRoot();

@@ -5,30 +5,30 @@
 │  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
 │    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
 │    [x] readme.md                        │││   │   └── Handler.cs                                        ││  ( ) Tracked Git files only                       │
-│                                         │││   └── App.cs                                                ││  PROCESSING:                                      │
+│                                         │││   └── App.cs                                                ││  CONTENT PROCESSING:                              │
 │                                         ││├── global.json                                               ││  [ ] Hide secrets                                 │
-│                                         ││└── readme.md                                                 ││  Checks selected text files only. Binary          │
-│                                         ││                                                              ││  files are not inspected, and no matches is       │
-│                                         ││                                                              ││  not a safety guarantee.                          │
-│                                         ││                                                              ││  EXCLUSIONS                                       │
-│                                         ││        ┌┤Preview format├─────────────────────────────────────┐│  [x] All                                          │
-│                                         ││        │ Choose ASCII, JSON, XML, or Markdown for the tree.  ││  [x] Smart ignore                                 │
-│                                         ││        │                                                     ││  [x] Empty folders                                │
-│                                         ││        │ ASCII                                               ││  [x] Empty files                                  │
-│                                         ││        │ JSON                                                ││  [x] Hidden folders                               │
-│                                         ││        │ XML                                                 ││  [x] Hidden files                                 │
-│                                         ││        │ Markdown                                            ││  [x] dot folders                                  │
+│                                         ││└── readme.md                                                 ││  The counter (N/N) shows detected / hidden        │
+│                                         ││                                                              ││  values. Only selected text files are             │
+│                                         ││                                                              ││  checked. Binary files are not inspected, and     │
+│                                         ││                                                              ││  no matches is not a safety guarantee.            │
+│                                         ││        ┌┤Preview format├─────────────────────────────────────┐│  EXCLUSIONS                                       │
+│                                         ││        │ Choose ASCII, JSON, XML, or Markdown for the tree.  ││  [x] All                                          │
+│                                         ││        │                                                     ││  [x] Smart ignore                                 │
+│                                         ││        │ ASCII                                               ││  [x] Empty folders                                │
+│                                         ││        │ JSON                                                ││  [x] Empty files                                  │
+│                                         ││        │ XML                                                 ││  [x] Hidden folders                               │
+│                                         ││        │ Markdown                                            ││  [x] Hidden files                                 │
+│                                         ││        │                                                     ││  [x] dot folders                                  │
 │                                         ││        │                                                     ││  [x] dot files                                    │
-│                                         ││        │                                                     ││  [x] Files without extension                      │
-│                                         ││        │                     ⟦► Back ◄⟧▖                     ││  FILE TYPES                                       │
-│                                         ││        │                     ▝▀▀▀▀▀▀▀▀▀▘                     ││  [x] All                                          │
-│                                         ││        └─────────────────────────────────────────────────────┘│  [x] .cs                                          │
+│                                         ││        │                     ⟦► Back ◄⟧▖                     ││  [x] Files without extension                      │
+│                                         ││        │                     ▝▀▀▀▀▀▀▀▀▀▘                     ││  FILE TYPES                                       │
+│                                         ││        └─────────────────────────────────────────────────────┘│  [x] All                                          │
+│                                         ││                                                              ││  [x] .cs                                          │
 │                                         ││                                                              ││  [x] .json                                        │
 │                                         ││                                                              ││  [x] .md                                          │
 │                                         ││                                                              ││  ROOT FOLDERS                                     │
 │                                         ││                                                              ││  [x] All                                          │
 │                                         ││                                                              ││  [x] src                                          │
-│                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │

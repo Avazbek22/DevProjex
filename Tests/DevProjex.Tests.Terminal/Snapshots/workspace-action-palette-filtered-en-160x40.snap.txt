@@ -5,11 +5,12 @@
 │  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
 │    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
 │    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
-│                                 │ Filter actions:                                                                         │                                  │
+│                                 │ Filter actions:                                                                         │ING:                              │
 │                                 │ Preview format                                                                          │s                                 │
-│                                 │                                                                                         │ text files only. Binary          │
-│                                 │ Preview format: ASCII  [F]                                                              │nspected, and no matches is       │
-│                                 │                                                                                         │arantee.                          │
+│                                 │                                                                                         │N) shows detected / hidden        │
+│                                 │ Preview format: ASCII  [F]                                                              │lected text files are             │
+│                                 │                                                                                         │ files are not inspected, and     │
+│                                 │                                                                                         │ot a safety guarantee.            │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │e                                 │
@@ -20,7 +21,6 @@
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │ut extension                      │
-│                                 │                                                                                         │                                  │
 │                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │                                  │
 │                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │                                  │
 │                                 │                                                                                         │                                  │

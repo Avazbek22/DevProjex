@@ -229,6 +229,85 @@ public sealed class VirtualizedPreviewTextControlTests
 		}
 	}
 
+	[AvaloniaFact]
+	public void KeyboardNavigation_AfterManualScroll_ContinuesFromViewportInsteadOfHiddenActiveFinding()
+	{
+		const string firstOccurrence = "first-occurrence";
+		const string secondOccurrence = "second-occurrence";
+		const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
+		var lines = Enumerable.Range(1, 100)
+			.Select(lineNumber => lineNumber is 40 or 80
+				? $"secret-{lineNumber}={placeholder}"
+				: $"preview line {lineNumber}")
+			.ToArray();
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', lines),
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					firstOccurrence,
+					"github-pat",
+					40,
+					"secret-40=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					secondOccurrence,
+					"github-pat",
+					80,
+					"secret-80=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var scrollViewer = new ScrollViewer
+		{
+			Width = 720,
+			Height = 160,
+			Content = control
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 220,
+			WindowDecorations = WindowDecorations.None,
+			Content = scrollViewer
+		};
+
+		try
+		{
+			window.Show();
+			control.Focus();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(2);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			Assert.True(scrollViewer.Offset.Y > 0);
+
+			scrollViewer.Offset = default;
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			Assert.True(scrollViewer.Offset.Y > 0);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(secondOccurrence, GetActiveRedactionOccurrenceId(control));
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
+
     [AvaloniaFact]
     public void SelectAll_WithDocument_SelectsFullNormalizedTextAndRange()
     {

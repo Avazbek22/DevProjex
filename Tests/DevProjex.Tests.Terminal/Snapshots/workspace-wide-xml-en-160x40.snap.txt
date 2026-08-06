@@ -5,12 +5,13 @@
 │  > [x] src                              ││  <d n="src">                                                 ││  ( ) No Git filtering                             │
 │    [x] global.json                      ││    <d n="Feature">                                           ││  (*) Use .gitignore                               │
 │    [x] readme.md                        ││      <f>Handler.cs</f>                                       ││  ( ) Tracked Git files only                       │
-│                                         ││    </d>                                                      ││  PROCESSING:                                      │
+│                                         ││    </d>                                                      ││  CONTENT PROCESSING:                              │
 │                                         ││    <f>App.cs</f>                                             ││  [ ] Hide secrets                                 │
-│                                         ││  </d>                                                        ││  Checks selected text files only. Binary          │
-│                                         ││  <f>global.json</f>                                          ││  files are not inspected, and no matches is       │
-│                                         ││  <f>readme.md</f>                                            ││  not a safety guarantee.                          │
-│                                         ││</d>                                                          ││  EXCLUSIONS                                       │
+│                                         ││  </d>                                                        ││  The counter (N/N) shows detected / hidden        │
+│                                         ││  <f>global.json</f>                                          ││  values. Only selected text files are             │
+│                                         ││  <f>readme.md</f>                                            ││  checked. Binary files are not inspected, and     │
+│                                         ││</d>                                                          ││  no matches is not a safety guarantee.            │
+│                                         ││                                                              ││  EXCLUSIONS                                       │
 │                                         ││                                                              ││  [x] All                                          │
 │                                         ││                                                              ││  [x] Smart ignore                                 │
 │                                         ││                                                              ││  [x] Empty folders                                │
@@ -28,7 +29,6 @@
 │                                         ││                                                              ││  ROOT FOLDERS                                     │
 │                                         ││                                                              ││  [x] All                                          │
 │                                         ││                                                              ││  [x] src                                          │
-│                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │

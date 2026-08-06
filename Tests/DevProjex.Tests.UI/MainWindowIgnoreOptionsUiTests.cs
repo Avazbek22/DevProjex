@@ -68,6 +68,13 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.HideSecrets,
                 "Hide secrets (1/1)");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.GetViewModel(window).SettingsSecretsNotice,
+					"Found: 1. Hidden: 1.",
+					StringComparison.Ordinal),
+				"the content-processing tooltip to publish detected and hidden counts");
 
 			var previewControl = UiTestDriver
 				.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
@@ -93,6 +100,13 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				window,
 				IgnoreOptionId.HideSecrets,
 				"Hide secrets (1/0)");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.GetViewModel(window).SettingsSecretsNotice,
+					"Found: 1. Hidden: 0.",
+					StringComparison.Ordinal),
+				"the content-processing tooltip to update after a redaction override");
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.InRange(
 				Math.Abs(previewScrollViewer.Offset.Y - viewportBeforeOverride.Y),
@@ -165,6 +179,20 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				window,
 				IgnoreOptionId.HideSecrets,
 				$"Hide secrets ({expectedCount}/{expectedCount})");
+			var viewModel = UiTestDriver.GetViewModel(window);
+			if (expectedCount == 0)
+			{
+				await UiTestDriver.WaitForConditionAsync(
+					window,
+					() => !viewModel.HasContentProcessingOptions &&
+					      !UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible,
+					"the content-processing section to hide after a completed empty scan");
+				Assert.True(viewModel.HideSecretsOption?.IsChecked);
+			}
+			else
+			{
+				Assert.True(UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible);
+			}
 
 			await UiTestDriver.WaitForIgnoreOptionStateAsync(
 				window,
@@ -176,16 +204,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Same(previewDocument, UiTestDriver.GetViewModel(window).PreviewDocument);
 			Assert.Equal(selectionRevision, UiTestDriver.GetSelectionRevision(window));
 
-			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
-			await UiTestDriver.WaitForIgnoreOptionStateAsync(
-				window,
-				IgnoreOptionId.HideSecrets,
-				visible: true,
-				isChecked: false);
-			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
-				window,
-				IgnoreOptionId.HideSecrets,
-				"Hide secrets");
+			if (expectedCount > 0)
+			{
+				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+				await UiTestDriver.WaitForIgnoreOptionStateAsync(
+					window,
+					IgnoreOptionId.HideSecrets,
+					visible: true,
+					isChecked: false);
+				await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+					window,
+					IgnoreOptionId.HideSecrets,
+					"Hide secrets");
+			}
 			await UiTestDriver.WaitForIgnoreOptionStateAsync(
 				window,
 				IgnoreOptionId.SmartIgnore,
@@ -2580,9 +2611,49 @@ public sealed class MainWindowIgnoreOptionsUiTests
             var checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets);
 			var processingList = UiTestDriver.GetRequiredControl<ListBox>(window, "ContentProcessingOptionsList");
 			var processingBorder = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
+			var processingContent = Assert.IsType<Grid>(processingBorder.Child);
+			var helpIndicator = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingHelpIndicator");
+			var questionIcon = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingQuestionIcon");
+			var warningIcon = UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingWarningIcon");
             var ignoreList = UiTestDriver.GetRequiredControl<ListBox>(window, "IgnoreOptionsList");
 			Assert.Equal("Content processing:", UiTestDriver.GetRequiredControl<TextBlock>(window, "ContentProcessingHeaderText").Text);
-			Assert.Same(processingList, processingBorder.Child);
+			Assert.Contains(processingList, processingContent.Children);
+			Assert.Contains(helpIndicator, processingContent.Children);
+			Assert.Null(helpIndicator.Cursor);
+			Assert.False(helpIndicator.IsVisible);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 3, hiddenCount: 2);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.True(helpIndicator.IsVisible);
+			await UiTestDriver.ClickAsync(window, helpIndicator);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => ToolTip.GetIsOpen(helpIndicator),
+				"the content-processing tooltip to open on click");
+			var helpToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(helpIndicator));
+			var helpText = Assert.IsType<TextBlock>(helpToolTip.Content);
+			Assert.Equal("Found: 3. Hidden: 2.", helpText.Text);
+			Assert.Equal(PlacementMode.Left, ToolTip.GetPlacement(helpIndicator));
+			Assert.True(questionIcon.IsVisible);
+			Assert.False(warningIcon.IsVisible);
+			var helpIndicatorTransform = helpIndicator.RenderTransform?.Value ?? Matrix.Identity;
+			Assert.InRange(helpIndicatorTransform.M32, 3, 5);
+			var questionIconTransform = questionIcon.RenderTransform?.Value ?? Matrix.Identity;
+			Assert.InRange(questionIconTransform.M32, -1.5, -0.5);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Failed);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal("The analysis could not be completed.", helpText.Text);
+			Assert.False(questionIcon.IsVisible);
+			Assert.True(warningIcon.IsVisible);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 0, hiddenCount: 0);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal("DevProjex found no secrets", viewModel.SettingsSecretsNotice);
+			Assert.False(UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Same(viewModel.ContentProcessingOptions, processingList.ItemsSource);
 			Assert.Single(viewModel.ContentProcessingOptions);
 			Assert.Contains(checkBox.GetVisualAncestors(), ancestor => ReferenceEquals(ancestor, processingList));

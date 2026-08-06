@@ -27,6 +27,10 @@ public partial class MainWindow
 			_secretRedactionMatchedCount = snapshot.DetectedCount;
 			_secretRedactionCount = snapshot.RedactedCount;
 			_secretRedactionScanState = SecretScanState.Completed;
+			_viewModel.SetContentProcessingStatus(
+				SecretScanState.Completed,
+				snapshot.DetectedCount,
+				snapshot.RedactedCount);
 			_selectionCoordinator.RelabelIgnoreOptions(
 				AdvancedIgnoreCountsAlwaysEnabled,
 				snapshot.RedactedCount,
@@ -80,6 +84,7 @@ public partial class MainWindow
 		}
 
 		_secretRedactionScanState = SecretScanState.Scanning;
+		_viewModel.SetContentProcessingStatus(SecretScanState.Scanning);
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
 			secretRedactionsCount: null,
@@ -129,6 +134,7 @@ public partial class MainWindow
 			await Dispatcher.UIThread.InvokeAsync(() =>
 			{
 				_secretRedactionScanState = SecretScanState.Failed;
+				_viewModel.SetContentProcessingStatus(SecretScanState.Failed);
 				_selectionCoordinator.RelabelIgnoreOptions(
 					AdvancedIgnoreCountsAlwaysEnabled,
 					secretRedactionsCount: null,

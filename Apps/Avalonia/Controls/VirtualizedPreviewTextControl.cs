@@ -95,7 +95,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	public static readonly StyledProperty<string> RedactedSecretToolTipFormatProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(RedactedSecretToolTipFormat),
-			"Detected {0}. Click to keep the original value. F8 moves to the next finding.");
+			"Detected {0}. Click to keep the original value. Alt+Up / Alt+Down navigates findings.");
 
 	public static readonly StyledProperty<string> KeptSecretToolTipFormatProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
@@ -989,16 +989,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		if (_redactionOccurrences.Length == 0)
 			return;
 
-		var currentIndex = _activeRedactionOccurrenceId is null
-			? -1
-			: Array.FindIndex(
-				_redactionOccurrences,
-				span => span.OccurrenceId == _activeRedactionOccurrenceId);
-		var nextIndex = currentIndex < 0
-			? forward ? 0 : _redactionOccurrences.Length - 1
-			: forward
-				? (currentIndex + 1) % _redactionOccurrences.Length
-				: (currentIndex - 1 + _redactionOccurrences.Length) % _redactionOccurrences.Length;
+		var nextIndex = ResolveRedactionNavigationIndex(forward);
 		var redaction = _redactionOccurrences[nextIndex];
 		_activeRedactionOccurrenceId = redaction.OccurrenceId;
 		_selectionAnchor = new SelectionPosition(redaction.LineNumber, redaction.StartColumn);
@@ -1009,6 +1000,60 @@ public sealed class VirtualizedPreviewTextControl : Control
 		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
 	}
 
+	private int ResolveRedactionNavigationIndex(bool forward)
+	{
+		var currentIndex = _activeRedactionOccurrenceId is null
+			? -1
+			: Array.FindIndex(
+				_redactionOccurrences,
+				span => span.OccurrenceId == _activeRedactionOccurrenceId);
+		var scrollViewer = GetOwnerScrollViewer();
+		if (currentIndex >= 0 &&
+		    (scrollViewer is null || IsRedactionVisible(_redactionOccurrences[currentIndex], scrollViewer)))
+		{
+			return forward
+				? (currentIndex + 1) % _redactionOccurrences.Length
+				: (currentIndex - 1 + _redactionOccurrences.Length) % _redactionOccurrences.Length;
+		}
+
+		if (scrollViewer is null || scrollViewer.Viewport.Height <= 0)
+			return forward ? 0 : _redactionOccurrences.Length - 1;
+
+		var lineHeight = ResolveLineHeight();
+		var viewportTop = scrollViewer.Offset.Y;
+		var viewportBottom = viewportTop + scrollViewer.Viewport.Height;
+		if (forward)
+		{
+			var index = Array.FindIndex(
+				_redactionOccurrences,
+				span => ResolveRedactionLineBottom(span, lineHeight) > viewportTop);
+			return index >= 0 ? index : 0;
+		}
+
+		var previousIndex = Array.FindLastIndex(
+			_redactionOccurrences,
+			span => ResolveRedactionLineTop(span, lineHeight) < viewportBottom);
+		return previousIndex >= 0 ? previousIndex : _redactionOccurrences.Length - 1;
+	}
+
+	private bool IsRedactionVisible(PreviewRedactionSpan redaction, ScrollViewer scrollViewer)
+	{
+		if (scrollViewer.Viewport.Height <= 0)
+			return true;
+
+		var lineHeight = ResolveLineHeight();
+		var viewportTop = scrollViewer.Offset.Y;
+		var viewportBottom = viewportTop + scrollViewer.Viewport.Height;
+		return ResolveRedactionLineBottom(redaction, lineHeight) > viewportTop &&
+		       ResolveRedactionLineTop(redaction, lineHeight) < viewportBottom;
+	}
+
+	private double ResolveRedactionLineTop(PreviewRedactionSpan redaction, double lineHeight)
+		=> ResolveContentTopPadding() + ((redaction.LineNumber - 1) * lineHeight);
+
+	private double ResolveRedactionLineBottom(PreviewRedactionSpan redaction, double lineHeight)
+		=> ResolveRedactionLineTop(redaction, lineHeight) + lineHeight;
+
 	private void ScrollRedactionIntoView(PreviewRedactionSpan redaction)
 	{
 		var scrollViewer = GetOwnerScrollViewer();
@@ -1016,8 +1061,8 @@ public sealed class VirtualizedPreviewTextControl : Control
 			return;
 
 		var lineHeight = ResolveLineHeight();
-		var lineTop = ResolveContentTopPadding() + ((redaction.LineNumber - 1) * lineHeight);
-		var lineBottom = lineTop + lineHeight;
+		var lineTop = ResolveRedactionLineTop(redaction, lineHeight);
+		var lineBottom = ResolveRedactionLineBottom(redaction, lineHeight);
 		var offset = scrollViewer.Offset;
 		var targetY = offset.Y;
 		if (lineTop < offset.Y || lineBottom > offset.Y + scrollViewer.Viewport.Height)

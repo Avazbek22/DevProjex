@@ -5,11 +5,12 @@
 │  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
 │    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
 │    [x] readme.md                        │││   │   └── Handler.cs                                        ││  ( ) Tracked Git files only                       │
-│                                         │││   └── App.cs                                                ││  PROCESSING:                                      │
+│                                         │││   └── App.cs                                                ││  CONTENT PROCESSING:                              │
 │                                         ││├── global.json                                               ││  [ ] Hide secrets                                 │
-│                                         ││└── readme.md                                                 ││  Checks selected text files only. Binary          │
-│                                         ││                                                              ││  files are not inspected, and no matches is       │
-│                                         ││                                                              ││  not a safety guarantee.                          │
+│                                         ││└── readme.md                                                 ││  The counter (N/N) shows detected / hidden        │
+│                                         ││                                                              ││  values. Only selected text files are             │
+│                                         ││                                                              ││  checked. Binary files are not inspected, and     │
+│                                         ││                                                              ││  no matches is not a safety guarantee.            │
 │                                         ││                                                              ││  EXCLUSIONS                                       │
 │                                         ││                                                              ││  [x] All                                          │
 │                                         ││                                                              ││  [x] Smart ignore                                 │
@@ -28,7 +29,6 @@
 │                                         ││                                                              ││  ROOT FOLDERS                                     │
 │                                         ││                                                              ││  [x] All                                          │
 │                                         ││                                                              ││  [x] src                                          │
-│                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │

@@ -397,6 +397,7 @@ public partial class MainWindow : Window
 			_secretRedactionMatchedCount = null;
 			_secretRedactionCount = null;
 			_secretRedactionScanState = SecretScanState.Disabled;
+			_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
 			_selectionCoordinator.RelabelIgnoreOptions(
 				AdvancedIgnoreCountsAlwaysEnabled,
 				secretRedactionsCount: null,
@@ -417,6 +418,10 @@ public partial class MainWindow : Window
 		_secretRedactionScanState = cachedRedactionSnapshot is null
 			? SecretScanState.Pending
 			: SecretScanState.Completed;
+		_viewModel.SetContentProcessingStatus(
+			_secretRedactionScanState,
+			cachedRedactionSnapshot?.DetectedCount,
+			cachedRedactionSnapshot?.RedactedCount);
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
 			_secretRedactionCount,
@@ -436,6 +441,7 @@ public partial class MainWindow : Window
 		_secretRedactionScanState = enabled
 			? SecretScanState.Pending
 			: SecretScanState.Disabled;
+		_viewModel.SetContentProcessingStatus(_secretRedactionScanState);
 		if (_secretRedactionCount is not null)
 			_secretRedactionCount = null;
 		_secretRedactionMatchedCount = null;
@@ -1108,6 +1114,7 @@ public partial class MainWindow : Window
 		_secretRedactionCount = null;
 		_secretRedactionMatchedCount = null;
 		_secretRedactionScanState = SecretScanState.Disabled;
+		_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
 		_secretRedactionSession.Reset();
 
         // Background metrics become stale as soon as the visible tree is about to change.
