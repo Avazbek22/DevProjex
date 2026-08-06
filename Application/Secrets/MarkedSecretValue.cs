@@ -24,7 +24,9 @@ public static class MarkedSecretValueNormalizer
 {
 	public const int MinimumLength = 8;
 	public const int MaximumLength = 512;
-	public const int PersistedHashLength = 12;
+	public const int PersistedHashByteLength = 6;
+	public const int PersistedHashLength = PersistedHashByteLength * 2;
+	private const int StackUtf8BufferLimit = 2 * 1024;
 
 	public static bool TryCreate(
 		string? value,
@@ -88,18 +90,36 @@ public static class MarkedSecretValueNormalizer
 
 	public static string ComputeHash(ReadOnlySpan<char> normalizedValue)
 	{
+		Span<byte> persistedHash = stackalloc byte[PersistedHashByteLength];
+		ComputeHash(normalizedValue, persistedHash);
+		return Convert.ToHexString(persistedHash).ToLowerInvariant();
+	}
+
+	public static void ComputeHash(ReadOnlySpan<char> normalizedValue, Span<byte> destination)
+	{
+		if (destination.Length < PersistedHashByteLength)
+			throw new ArgumentException(
+				$"The destination must contain at least {PersistedHashByteLength} bytes.",
+				nameof(destination));
+
 		var maximumByteCount = Encoding.UTF8.GetMaxByteCount(normalizedValue.Length);
-		var rented = ArrayPool<byte>.Shared.Rent(maximumByteCount);
+		byte[]? rented = null;
+		Span<byte> utf8 = maximumByteCount <= StackUtf8BufferLimit
+			? stackalloc byte[maximumByteCount]
+			: (rented = ArrayPool<byte>.Shared.Rent(maximumByteCount));
 		try
 		{
-			var byteCount = Encoding.UTF8.GetBytes(normalizedValue, rented);
-			Span<byte> hash = stackalloc byte[32];
-			SHA256.HashData(rented.AsSpan(0, byteCount), hash);
-			return Convert.ToHexString(hash[..6]).ToLowerInvariant();
+			var byteCount = Encoding.UTF8.GetBytes(normalizedValue, utf8);
+			Span<byte> fullHash = stackalloc byte[SHA256.HashSizeInBytes];
+			SHA256.HashData(utf8[..byteCount], fullHash);
+			fullHash[..PersistedHashByteLength].CopyTo(destination);
+			CryptographicOperations.ZeroMemory(fullHash);
+			CryptographicOperations.ZeroMemory(utf8[..byteCount]);
 		}
 		finally
 		{
-			ArrayPool<byte>.Shared.Return(rented, clearArray: true);
+			if (rented is not null)
+				ArrayPool<byte>.Shared.Return(rented, clearArray: true);
 		}
 	}
 

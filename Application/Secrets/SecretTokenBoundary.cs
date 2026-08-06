@@ -12,7 +12,7 @@ public static class SecretTokenBoundary
 	public static bool IsContinuation(char character) =>
 		char.IsLetterOrDigit(character) || character == '_';
 
-	private static bool IsBoundary(ReadOnlySpan<char> content, int position) =>
+	internal static bool IsBoundary(ReadOnlySpan<char> content, int position) =>
 		position == 0 ||
 		position == content.Length ||
 		!IsContinuation(content[position - 1]) ||

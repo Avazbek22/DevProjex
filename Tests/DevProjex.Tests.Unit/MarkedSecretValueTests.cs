@@ -34,6 +34,22 @@ public sealed class MarkedSecretValueTests
 	}
 
 	[Fact]
+	public void HashRepresentations_UseTheSinglePersistedLengthContract()
+	{
+		const string value = "ExampleSecret";
+		Span<byte> bytes = stackalloc byte[MarkedSecretValueNormalizer.PersistedHashByteLength];
+
+		MarkedSecretValueNormalizer.ComputeHash(value, bytes);
+		var hex = MarkedSecretValueNormalizer.ComputeHash(value);
+
+		Assert.Equal(
+			MarkedSecretValueNormalizer.PersistedHashByteLength * 2,
+			MarkedSecretValueNormalizer.PersistedHashLength);
+		Assert.Equal(MarkedSecretValueNormalizer.PersistedHashLength, hex.Length);
+		Assert.Equal(hex, Convert.ToHexString(bytes).ToLowerInvariant());
+	}
+
+	[Fact]
 	public void Validation_RejectsMultilineValueAfterCrlfNormalization()
 	{
 		var success = MarkedSecretValueNormalizer.TryCreate(
@@ -45,15 +61,18 @@ public sealed class MarkedSecretValueTests
 		Assert.Equal(MarkedSecretValidationError.Multiline, error);
 	}
 
-	[Fact]
-	public void KeyExtraction_ReadsAssignmentIdentifierToTheLeftOfValue()
+	[Theory]
+	[InlineData("STRIPE_SECRET_KEY = \"value\"", "STRIPE_SECRET_KEY")]
+	[InlineData("\"STRIPE_SECRET_KEY\": \"value\"", "STRIPE_SECRET_KEY")]
+	[InlineData("aws:access:key: value", "aws:access:key")]
+	[InlineData("prefix value", null)]
+	public void KeyExtraction_PreservesSupportedAssignmentForms(string line, string? expected)
 	{
-		const string line = "STRIPE_SECRET_KEY = \"sk_live_example_value\"";
-		var valueStart = line.IndexOf("sk_live", StringComparison.Ordinal);
+		var valueStart = line.IndexOf("value", StringComparison.Ordinal);
 
 		var key = MarkedSecretValueNormalizer.ExtractKey(line, valueStart);
 
-		Assert.Equal("STRIPE_SECRET_KEY", key);
+		Assert.Equal(expected, key);
 	}
 
 	[Theory]

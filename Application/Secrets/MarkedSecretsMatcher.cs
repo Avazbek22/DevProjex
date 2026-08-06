@@ -11,26 +11,36 @@ internal sealed class MarkedSecretsMatcher
 {
 	internal const string RuleId = "manual-secret";
 	internal const int RuleOrder = int.MinValue;
+	private const int CancellationCheckMask = 0xFFF;
 
-	private readonly IReadOnlyDictionary<int, HashSet<string>> _persistentHashesByLength;
-	private readonly IReadOnlyDictionary<string, SessionMarkedSecret[]> _sessionMarksByPath;
+	private readonly PersistentHashGroup[] _persistentHashGroups;
+	private readonly IReadOnlyDictionary<string, PreparedSessionMark[]> _sessionMarksByPath;
 
 	public MarkedSecretsMatcher(
 		IEnumerable<MarkedSecretProfileEntry> persistentMarks,
 		IEnumerable<SessionMarkedSecret> sessionMarks)
 	{
-		_persistentHashesByLength = persistentMarks
+		_persistentHashGroups = persistentMarks
 			.Where(IsValid)
 			.GroupBy(static mark => mark.Length)
-			.ToDictionary(
-				static group => group.Key,
-				static group => group.Select(static mark => mark.H)
-					.ToHashSet(StringComparer.OrdinalIgnoreCase));
+			.Select(static group => new PersistentHashGroup(
+				group.Key,
+				group
+					.GroupBy(static mark => mark.H, StringComparer.OrdinalIgnoreCase)
+					.Select(static marks => PersistentHash.Create(marks.First().H))
+					.ToArray()))
+			.OrderBy(static group => group.Length)
+			.ToArray();
 		_sessionMarksByPath = sessionMarks
+			.Where(static mark => IsValidHash(mark.Hash))
 			.GroupBy(static mark => NormalizePath(mark.RelativePath), PathComparer.Default)
 			.ToDictionary(
 				static group => group.Key,
-				static group => group.ToArray(),
+				static group => group
+					.Select(static mark => new PreparedSessionMark(
+						mark,
+						Convert.FromHexString(mark.Hash)))
+					.ToArray(),
 				PathComparer.Default);
 	}
 
@@ -39,41 +49,54 @@ internal sealed class MarkedSecretsMatcher
 		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken)
 	{
-		if (_persistentHashesByLength.Count == 0 && _sessionMarksByPath.Count == 0)
+		if (_persistentHashGroups.Length == 0 && _sessionMarksByPath.Count == 0)
 			return [];
 
+		var positions = TextPositionIndex.Create(content, cancellationToken);
 		var findings = new List<DetectedSecret>();
-		MatchPersistent(content, findings, cancellationToken);
-		MatchSession(relativePath, content, findings);
+		MatchPersistent(content, positions, findings, cancellationToken);
+		MatchSession(relativePath, content, positions, findings);
 		return findings;
 	}
 
 	private void MatchPersistent(
 		ReadOnlySpan<char> content,
+		TextPositionIndex positions,
 		ICollection<DetectedSecret> findings,
 		CancellationToken cancellationToken)
 	{
-		foreach (var (length, hashes) in _persistentHashesByLength)
-		{
-			if (length > content.Length)
-				continue;
+		if (_persistentHashGroups.Length == 0)
+			return;
 
-			for (var start = 0; start <= content.Length - length; start++)
+		Span<byte> candidateHash = stackalloc byte[MarkedSecretValueNormalizer.PersistedHashByteLength];
+		var candidateIndex = 0;
+		foreach (var start in positions.BoundaryPositions)
+		{
+			if ((candidateIndex++ & CancellationCheckMask) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+
+			foreach (var group in _persistentHashGroups)
 			{
-				if ((start & 0xFFF) == 0)
-					cancellationToken.ThrowIfCancellationRequested();
-				var end = start + length;
-				if (!SecretTokenBoundary.HasBoundaries(content, start, length) ||
-				    content.Slice(start, length).IndexOfAny('\r', '\n') >= 0)
+				var end = start + group.Length;
+				if (end > content.Length ||
+				    !positions.IsBoundary(end) ||
+				    positions.ContainsLineBreak(start, end))
 				{
 					continue;
 				}
 
-				var hash = MarkedSecretValueNormalizer.ComputeHash(content.Slice(start, length));
-				if (!hashes.Contains(hash))
+				MarkedSecretValueNormalizer.ComputeHash(
+					content.Slice(start, group.Length),
+					candidateHash);
+				if (!TryResolveHash(group.Hashes, candidateHash, out var persistedHash))
 					continue;
 
-				findings.Add(CreateFinding(content, start, length, hash, SecretFindingSource.PersistentMark));
+				findings.Add(CreateFinding(
+					content,
+					start,
+					group.Length,
+					persistedHash,
+					SecretFindingSource.PersistentMark));
 			}
 		}
 	}
@@ -81,22 +104,27 @@ internal sealed class MarkedSecretsMatcher
 	private void MatchSession(
 		string relativePath,
 		ReadOnlySpan<char> content,
+		TextPositionIndex positions,
 		ICollection<DetectedSecret> findings)
 	{
 		if (!_sessionMarksByPath.TryGetValue(NormalizePath(relativePath), out var marks))
 			return;
 
-		foreach (var mark in marks)
+		Span<byte> candidateHash = stackalloc byte[MarkedSecretValueNormalizer.PersistedHashByteLength];
+		foreach (var preparedMark in marks)
 		{
-			var start = ResolveOffset(content, mark.LineIndex, mark.Column);
+			var mark = preparedMark.Mark;
+			var start = positions.ResolveOffset(content, mark.LineIndex, mark.Column);
 			if (start < 0 || start > content.Length - mark.Length ||
-			    !SecretTokenBoundary.HasBoundaries(content, start, mark.Length))
+			    !positions.IsBoundary(start) ||
+			    !positions.IsBoundary(start + mark.Length))
 			{
 				continue;
 			}
 
 			var value = content.Slice(start, mark.Length);
-			if (!MarkedSecretValueNormalizer.ComputeHash(value).Equals(mark.Hash, StringComparison.OrdinalIgnoreCase))
+			MarkedSecretValueNormalizer.ComputeHash(value, candidateHash);
+			if (!candidateHash.SequenceEqual(preparedMark.HashBytes))
 				continue;
 
 			findings.Add(CreateFinding(content, start, mark.Length, mark.Hash, SecretFindingSource.SessionMark));
@@ -118,31 +146,109 @@ internal sealed class MarkedSecretsMatcher
 			source,
 			source == SecretFindingSource.PersistentMark ? hash : null);
 
-	private static int ResolveOffset(ReadOnlySpan<char> content, int lineIndex, int column)
+	private static bool TryResolveHash(
+		IReadOnlyList<PersistentHash> hashes,
+		ReadOnlySpan<byte> candidate,
+		out string persistedHash)
 	{
-		if (lineIndex < 0 || column < 0)
-			return -1;
-
-		var offset = 0;
-		for (var currentLine = 0; currentLine < lineIndex; currentLine++)
+		foreach (var hash in hashes)
 		{
-			var newline = content[offset..].IndexOf('\n');
-			if (newline < 0)
-				return -1;
-			offset += newline + 1;
+			if (!candidate.SequenceEqual(hash.Bytes))
+				continue;
+
+			persistedHash = hash.Hex;
+			return true;
 		}
 
-		var lineEnd = content[offset..].IndexOf('\n');
-		lineEnd = lineEnd < 0 ? content.Length : offset + lineEnd;
-		if (lineEnd > offset && content[lineEnd - 1] == '\r')
-			lineEnd--;
-		return column <= lineEnd - offset ? offset + column : -1;
+		persistedHash = string.Empty;
+		return false;
 	}
 
 	private static bool IsValid(MarkedSecretProfileEntry mark) =>
 		mark.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength &&
-		mark.H.Length == MarkedSecretValueNormalizer.PersistedHashLength &&
-		mark.H.All(char.IsAsciiHexDigit);
+		IsValidHash(mark.H);
+
+	private static bool IsValidHash(string? hash) =>
+		hash is not null &&
+		hash.Length == MarkedSecretValueNormalizer.PersistedHashLength &&
+		hash.All(char.IsAsciiHexDigit);
 
 	private static string NormalizePath(string path) => path.Replace('\\', '/');
+
+	private sealed record PersistentHashGroup(int Length, PersistentHash[] Hashes);
+
+	private sealed record PersistentHash(string Hex, byte[] Bytes)
+	{
+		public static PersistentHash Create(string hex) =>
+			new(hex.ToLowerInvariant(), Convert.FromHexString(hex));
+	}
+
+	private sealed record PreparedSessionMark(SessionMarkedSecret Mark, byte[] HashBytes);
+
+	private sealed class TextPositionIndex(
+		bool[] boundaries,
+		int[] boundaryPositions,
+		int[] lineBreakPrefixCounts,
+		int[] newlinePositions)
+	{
+		public IReadOnlyList<int> BoundaryPositions { get; } = boundaryPositions;
+
+		public static TextPositionIndex Create(
+			ReadOnlySpan<char> content,
+			CancellationToken cancellationToken)
+		{
+			var boundaries = new bool[content.Length + 1];
+			var boundaryPositions = new List<int>();
+			var lineBreakPrefixCounts = new int[content.Length + 1];
+			var newlinePositions = new List<int>();
+
+			for (var position = 0; position <= content.Length; position++)
+			{
+				if ((position & CancellationCheckMask) == 0)
+					cancellationToken.ThrowIfCancellationRequested();
+
+				if (SecretTokenBoundary.IsBoundary(content, position))
+				{
+					boundaries[position] = true;
+					boundaryPositions.Add(position);
+				}
+
+				if (position == content.Length)
+					continue;
+
+				var character = content[position];
+				lineBreakPrefixCounts[position + 1] =
+					lineBreakPrefixCounts[position] + (character is '\r' or '\n' ? 1 : 0);
+				if (character == '\n')
+					newlinePositions.Add(position);
+			}
+
+			return new TextPositionIndex(
+				boundaries,
+				boundaryPositions.ToArray(),
+				lineBreakPrefixCounts,
+				newlinePositions.ToArray());
+		}
+
+		public bool IsBoundary(int position) =>
+			(uint)position < (uint)boundaries.Length && boundaries[position];
+
+		public bool ContainsLineBreak(int start, int end) =>
+			lineBreakPrefixCounts[end] != lineBreakPrefixCounts[start];
+
+		public int ResolveOffset(ReadOnlySpan<char> content, int lineIndex, int column)
+		{
+			if (lineIndex < 0 || column < 0 || lineIndex > newlinePositions.Length)
+				return -1;
+
+			var lineStart = lineIndex == 0 ? 0 : newlinePositions[lineIndex - 1] + 1;
+			var lineEnd = lineIndex < newlinePositions.Length
+				? newlinePositions[lineIndex]
+				: content.Length;
+			if (lineEnd > lineStart && content[lineEnd - 1] == '\r')
+				lineEnd--;
+
+			return column <= lineEnd - lineStart ? lineStart + column : -1;
+		}
+	}
 }
