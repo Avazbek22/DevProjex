@@ -1092,8 +1092,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1));
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], "C:\\ProjectA");
 		coordinator.HandleIgnoreAllChanged(false, currentPath: null);
-		viewModel.IgnoreOptions[0].IsChecked = true;
-		viewModel.IgnoreOptions[1].IsChecked = false;
+		viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HiddenFolders).IsChecked = true;
+		viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HiddenFiles).IsChecked = false;
 		coordinator.UpdateIgnoreSelectionCache();
 
 		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(HiddenFolders: 1, HiddenFiles: 1));
@@ -1301,6 +1301,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.True(hiddenFiles.IsChecked);
 		Assert.True(dotFolders.IsChecked);
 		Assert.True(dotFiles.IsChecked);
+		Assert.False(viewModel.IgnoreOptions.Single(option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
 		Assert.True(viewModel.AllIgnoreChecked);
 	}
 
@@ -1475,6 +1476,72 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			viewModel.Extensions.Select(static option => option.Name));
 	}
 
+	[AvaloniaFact]
+	public async Task ApplyHideSecretsOverride_ChangesOnlyContentTransformationState()
+	{
+		const string path = @"C:\Project";
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		var contentTransformationChanges = 0;
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			scanner,
+			() => path,
+			contentTransformationChanged: () => contentTransformationChanges++);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
+		HookAllOptionListeners(coordinator, viewModel);
+		var revisionBefore = coordinator.CurrentSelectionRevision;
+		var scansBefore = scanner.TotalScanCount;
+
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+		Assert.Equal(1, contentTransformationChanges);
+		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
+		Assert.Equal(scansBefore, scanner.TotalScanCount);
+		Assert.False(coordinator.ApplyHideSecretsOverride(true));
+		Assert.Equal(1, contentTransformationChanges);
+	}
+
+	[Fact]
+	public void ReversibleRefresh_CoupledGitModeSnapshotIsNotRestoredForSingleCheckboxClear()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => path);
+		var template = CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433);
+		var trackedSnapshot = WithGitMode(template, useGitIgnore: false, trackedOnly: true);
+		var gitIgnoreSnapshot = WithGitMode(template, useGitIgnore: true, trackedOnly: false);
+
+		ApplySelectionRefreshSnapshot(coordinator, trackedSnapshot);
+		ApplyCurrentSelectionState(coordinator, viewModel, gitIgnoreSnapshot);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			gitIgnoreSnapshot,
+			retainPreviousSnapshot: true);
+
+		var noGitFilteringSnapshot = WithGitMode(
+			gitIgnoreSnapshot,
+			useGitIgnore: false,
+			trackedOnly: false);
+		ApplyCurrentSelectionState(coordinator, viewModel, noGitFilteringSnapshot);
+
+		Assert.False(TryRestoreKnownSelectionSnapshot(
+			coordinator,
+			path,
+			SelectionRefreshOrigin.IgnoreOption,
+			IgnoreOptionId.UseGitIgnore));
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.UseGitIgnore).IsChecked);
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked);
+	}
+
 	[AvaloniaTheory]
 	[InlineData(IgnoreOptionId.HiddenFiles)]
 	[InlineData(IgnoreOptionId.DotFiles)]
@@ -1602,6 +1669,57 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			Assert.True(viewModel.AllIgnoreChecked);
 			Assert.Equal(["src"], viewModel.RootFolders.Select(static option => option.Name));
 			Assert.Equal([".cs"], viewModel.Extensions.Select(static option => option.Name));
+		}
+		finally
+		{
+			releaseScan.Set();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task CancelPendingPathRefresh_PreservesHideSecretsWithoutContentNotification()
+	{
+		const string path = @"C:\Project";
+		using var scanStarted = new ManualResetEventSlim();
+		using var releaseScan = new ManualResetEventSlim();
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			BeforeRootSelectionSnapshot = _ =>
+			{
+				scanStarted.Set();
+				if (!releaseScan.Wait(TimeSpan.FromSeconds(3)))
+					throw new TimeoutException("The controlled selection scan was not released.");
+			}
+		};
+		var contentTransformationChanges = 0;
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			scanner,
+			() => path,
+			contentTransformationChanged: () => contentTransformationChanges++);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(emptyFolderCount: 433));
+
+		try
+		{
+			coordinator.HandleIgnoreAllChanged(isChecked: false, path);
+			Assert.True(await Task.Run(
+				() => scanStarted.Wait(TimeSpan.FromSeconds(2)),
+				TestContext.Current.CancellationToken));
+			Assert.True(viewModel.IgnoreOptions.Single(
+				static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+			Assert.Equal(0, contentTransformationChanges);
+
+			Assert.True(coordinator.CancelPendingRefreshes());
+			Assert.True(viewModel.IgnoreOptions.Single(
+				static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+			Assert.Equal(0, contentTransformationChanges);
+
+			releaseScan.Set();
+			await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(0, contentTransformationChanges);
 		}
 		finally
 		{
@@ -2331,7 +2449,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		MainWindowViewModel viewModel,
 		IFileSystemScanner? scanner = null,
 		Func<string?>? currentPathProvider = null,
-		Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability>? availabilityProvider = null)
+		Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability>? availabilityProvider = null,
+		Action? contentTransformationChanged = null)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		scanner ??= new StubFileSystemScanner();
@@ -2345,7 +2464,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			new HashSet<string>(),
 			new HashSet<string>());
 
-		if (availabilityProvider is null)
+		if (availabilityProvider is null && contentTransformationChanged is null)
 		{
 			return new SelectionSyncCoordinator(
 				viewModel,
@@ -2357,6 +2476,10 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 				currentPathProvider ?? (() => null));
 		}
 
+		availabilityProvider ??= static (_, _) => new IgnoreOptionsAvailability(
+			IncludeGitIgnore: true,
+			IncludeSmartIgnore: true);
+
 		return new SelectionSyncCoordinator(
 			viewModel,
 			scanOptions,
@@ -2365,7 +2488,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			(path, _, _) => buildIgnoreRules(path),
 			availabilityProvider,
 			_ => false,
-			currentPathProvider ?? (() => null));
+			currentPathProvider ?? (() => null),
+			contentTransformationChanged: contentTransformationChanged);
 	}
 
 	[Fact]
@@ -2681,6 +2805,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
@@ -2694,6 +2819,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			[AppLanguage.Ru] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Умное исключение",
+				["Settings.Ignore.HideSecrets"] = "Скрывать секреты",
 				["Settings.Ignore.UseGitIgnore"] = "Использовать .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Только файлы под контролем Git",
 				["Settings.Ignore.HiddenFolders"] = "Скрытые папки",
@@ -2887,6 +3013,37 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		return stableSnapshot with
 		{
 			IgnoreOptions = ignoreOptions,
+			IgnoreOptionStateCache = stateCache
+		};
+	}
+
+	private static SelectionRefreshSnapshot WithGitMode(
+		SelectionRefreshSnapshot snapshot,
+		bool useGitIgnore,
+		bool trackedOnly)
+	{
+		var options = snapshot.IgnoreOptions
+			.Where(static option => option.Id is not IgnoreOptionId.UseGitIgnore and not IgnoreOptionId.TrackedGitFilesOnly)
+			.Prepend(new ResolvedIgnoreOptionState(
+				IgnoreOptionId.TrackedGitFilesOnly,
+				"Tracked Git files only",
+				DefaultChecked: false,
+				IsChecked: trackedOnly))
+			.Prepend(new ResolvedIgnoreOptionState(
+				IgnoreOptionId.UseGitIgnore,
+				"Use .gitignore",
+				DefaultChecked: true,
+				IsChecked: useGitIgnore))
+			.ToArray();
+		var stateCache = new Dictionary<IgnoreOptionId, bool>(snapshot.IgnoreOptionStateCache)
+		{
+			[IgnoreOptionId.UseGitIgnore] = useGitIgnore,
+			[IgnoreOptionId.TrackedGitFilesOnly] = trackedOnly
+		};
+
+		return snapshot with
+		{
+			IgnoreOptions = options,
 			IgnoreOptionStateCache = stateCache
 		};
 	}

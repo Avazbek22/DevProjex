@@ -1,5 +1,3 @@
-using DevProjex.Kernel;
-
 namespace DevProjex.Avalonia.Coordinators;
 
 public sealed class TreeSearchCoordinator(

@@ -1,5 +1,3 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
-
 namespace DevProjex.Tests.UI;
 
 internal sealed class UiTestProject : IDisposable
@@ -23,6 +21,18 @@ internal sealed class UiTestProject : IDisposable
         return Create(static rootPath =>
         {
             SeedDefaultWorkspace(rootPath);
+        });
+    }
+
+    public static UiTestProject CreateWithSecretRedactionWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(
+                rootPath,
+                Path.Combine("src", "Secrets.cs"),
+                "const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";\n");
+            WriteFile(rootPath, "README.md", "# Secret redaction UI fixture\n");
         });
     }
 

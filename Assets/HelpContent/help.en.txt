@@ -1,7 +1,7 @@
 ﻿## 1) What it is and why
 DevProjex quickly prepares project context: shows the folder/file structure, lets you select items with checkboxes, and copy the tree and/or file contents to the clipboard. Useful for code review, support, learning, and sharing project structure with an AI assistant.
 
-Important: the app is read-only and never modifies files.
+Important: DevProjex does not modify files in the project you open.
 
 ## 2) Project tree
 * File/folder type icons.
@@ -90,7 +90,7 @@ Notes:
 * paths with spaces must be wrapped in quotes;
 * `--git-mode` selects no Git filtering, `.gitignore`, or tracked Git files;
 * `--exclude` controls ordinary exclusions separately from Git filtering;
-* direct commands are deterministic and do not open the desktop interface;
+* analysis and export commands are deterministic and do not open the desktop interface;
 * the command does not modify project files — DevProjex works in read-only mode.
 
 If the `devprojex` command does not work, open in DevProjex:
@@ -357,7 +357,16 @@ Some dependency stores and service directories can be recognized by their charac
 
 Project scope discovery is bounded so loading a large user folder does not become a full repeated analysis of every directory. Regular structures use shallow discovery, while recognized monorepos are searched more deeply. After a scope is found, Smart Ignore applies to its entire subtree without a depth limit.
 
-### 12.3 Use .gitignore
+### 12.3 Hide Secrets
+"Hide Secrets" is off by default. It scans only selected text content and replaces each detected value in place, keeping the file and its surrounding code. While the option is off, no scan runs and no count is shown. After the current selection is scanned, the label shows how many values remain redacted.
+
+Redacted spans are highlighted in Preview. Click one to keep only that occurrence as-is. In Terminal Workspace, use `[` and `]` to move between occurrences and `Enter` or `Space` to toggle the active one. The decision applies to Preview, clipboard, context export, folder copy, and ZIP for the current session; it is not saved in the project profile.
+
+A folder or ZIP copy also changes matching text and may no longer build or run. Binary files are copied unchanged and are not scanned. A selected text file above 16 MiB or a detection failure stops the operation instead of exporting uninspected text.
+
+The count reports rule matches only. Zero does not mean that the project is safe. CLI uses `--hide-secrets`; technical details and limits are in `Docs/HideSecrets.md`.
+
+### 12.4 Use .gitignore
 When enabled, DevProjex applies every reachable `.gitignore`, not only the file at the root of the opened folder.
 
 Each `.gitignore` applies:
@@ -378,7 +387,7 @@ This option covers regular working-tree `.gitignore` files only. Rules from `.gi
 
 The built-in `standard` profile selects `gitignore` plus `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files`, and `extensionless-files`.
 
-### 12.4 Tracked Git files only
+### 12.5 Tracked Git files only
 "Tracked Git files only" builds the Git stage of the tree from existing working-tree files recorded in each readable Git index. Modified tracked files and staged additions remain included; untracked files are excluded. This is the current working tree, not a historical snapshot of `HEAD` or a remote repository.
 
 Every reachable nested repository and worktree is resolved independently at any reachable nesting level. A child repository does not inherit tracked paths from its parent or sibling. This mode requires the Git CLI; a readable empty index is valid. If the Terminal Workspace (TUI) starts in this mode and no applicable index can be loaded, the workspace does not open. If the mode is selected interactively in an open TUI workspace and no applicable index can be loaded, the change is rejected and the last usable Git mode remains active. In the same situation, direct commands return a policy or check failure. DevProjex never silently falls back to `.gitignore`. If another applicable index is readable, unavailable nested scopes are excluded with a warning.
@@ -387,14 +396,14 @@ In an already-open Desktop workspace, the explicit tracked selection remains vis
 
 "Use .gitignore" and "Tracked Git files only" are mutually exclusive when enabled. The active checkbox may also be cleared to disable Git filtering. For local projects that support profiles, this state is saved with the root-folder, file-type, and other ignore settings.
 
-### 12.5 Relationship between Git filtering and Smart Ignore
+### 12.6 Relationship between Git filtering and Smart Ignore
 The Git checkboxes and Smart Ignore are independent controls. The selected Git mode applies first at every reachable Git scope. Smart Ignore then processes the remaining items, and the basic rules run last.
 
 Smart Ignore can stay hidden while the selected Git mode already covers all of its candidates, then appear after the Git mode is changed or cleared. Both Git checkboxes remain available inside a Git repository.
 
 A Git negation rule starting with `!` cancels only a Git result. It does not disable Smart Ignore or a basic rule.
 
-### 12.6 Basic rules
+### 12.7 Basic rules
 "Dot-prefixed folders" and "Dot-prefixed files" inspect the item name.
 
 "Hidden folders" and "Hidden files" inspect the system hidden attribute. On some platforms, a dot-prefixed name and the system attribute may describe the same item or different items.
@@ -407,7 +416,7 @@ A Git negation rule starting with `!` cancels only a Git result. It does not dis
 
 The empty-folder count can therefore change after another rule is switched: hiding files can make their containing folders logically empty.
 
-### 12.7 Counters
+### 12.8 Counters
 The count next to a rule shows its direct contribution under the current settings, not the physical number of similar items on disk.
 
 One item is not attributed to several overlapping counters at the same time. For example, the `.git` folder may have both a dot-prefixed name and the system Hidden attribute, but its exclusion is attributed to only one rule.
@@ -419,7 +428,7 @@ A stable order is used to select the owner of an exclusion:
 
 This order affects counters only. Final visibility follows a simpler rule: an item is hidden if any enabled mechanism excludes it.
 
-### 12.8 Applying changes
+### 12.9 Applying changes
 Switching checkboxes first updates the available settings and counters in the panel. The final tree is rebuilt after "Apply settings" is selected.
 
 If settings preparation is cancelled, DevProjex returns the panel to the last fully completed state. Partially calculated rules are not applied.

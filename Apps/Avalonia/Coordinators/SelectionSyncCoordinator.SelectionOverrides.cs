@@ -2,6 +2,43 @@ namespace DevProjex.Avalonia.Coordinators;
 
 public sealed partial class SelectionSyncCoordinator
 {
+	internal bool ApplyHideSecretsOverride(bool? enabled)
+	{
+		if (enabled is null)
+			return false;
+
+		var currentState = _session.IgnoreOptions.TryGetCachedState(
+			IgnoreOptionId.HideSecrets,
+			out var cachedState)
+			? cachedState
+			: viewModel.IgnoreOptions.FirstOrDefault(
+				static option => option.Id == IgnoreOptionId.HideSecrets)?.IsChecked == true;
+		if (currentState == enabled.Value)
+			return false;
+
+		var stateCache = _session.IgnoreOptions.SnapshotStateCache();
+		stateCache[IgnoreOptionId.HideSecrets] = enabled.Value;
+		_session.IgnoreOptions.ReplaceStateCache(stateCache);
+		_session.IgnoreOptions.IsInitialized = true;
+
+		_suppressIgnoreItemCheck = true;
+		try
+		{
+			var option = viewModel.IgnoreOptions.FirstOrDefault(
+				static candidate => candidate.Id == IgnoreOptionId.HideSecrets);
+			if (option is not null)
+				option.IsChecked = enabled.Value;
+		}
+		finally
+		{
+			_suppressIgnoreItemCheck = false;
+		}
+
+		RequestPendingApplyEvaluation();
+		contentTransformationChanged?.Invoke();
+		return true;
+	}
+
     internal bool ApplySelectionOverrides(
         string currentPath,
         IReadOnlyCollection<string>? selectedRootFolders,

@@ -1,5 +1,3 @@
-using DevProjex.Kernel;
-
 namespace DevProjex.Avalonia.Services;
 
 public static class RecentProjectPresentationService

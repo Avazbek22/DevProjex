@@ -13,6 +13,8 @@ public interface IPreviewTextDocument : IDisposable
 
     IReadOnlyList<PreviewDocumentSection> Sections { get; }
 
+	IReadOnlyList<PreviewRedactionSpan> Redactions => Array.Empty<PreviewRedactionSpan>();
+
     string GetFullText();
 
     string GetLineText(int lineNumber);

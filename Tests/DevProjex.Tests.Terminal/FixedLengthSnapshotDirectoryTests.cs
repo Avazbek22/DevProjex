@@ -1,5 +1,3 @@
-using DevProjex.Terminal.CommandLine;
-
 namespace DevProjex.Tests.Terminal;
 
 public sealed class FixedLengthSnapshotDirectoryTests

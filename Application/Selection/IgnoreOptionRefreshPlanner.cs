@@ -39,6 +39,7 @@ public static class IgnoreOptionRefreshPlanner
             IgnoreOptionId.DotFiles => IgnoreOptionRefreshImpact.FileVisibility,
             IgnoreOptionId.EmptyFiles => IgnoreOptionRefreshImpact.FileVisibility,
             IgnoreOptionId.ExtensionlessFiles => IgnoreOptionRefreshImpact.FileVisibility,
+			IgnoreOptionId.HideSecrets => IgnoreOptionRefreshImpact.None,
             _ => IgnoreOptionRefreshImpact.RootStructure
         };
     }

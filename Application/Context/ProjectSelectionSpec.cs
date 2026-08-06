@@ -9,7 +9,8 @@ public enum ProjectExclusion
 	DotFiles,
 	EmptyFolders,
 	EmptyFiles,
-	ExtensionlessFiles
+	ExtensionlessFiles,
+	HideSecrets
 }
 
 public enum ProjectProfileSourceKind
@@ -37,6 +38,7 @@ public sealed record ProjectSelectionSpec(
 	IReadOnlyCollection<string>? SelectedPaths = null,
 	GitFilteringMode? GitMode = null,
 	IReadOnlyCollection<ProjectExclusion>? Exclusions = null,
+	bool? HideSecrets = null,
 	ProjectProfileReference? ProfileSource = null)
 {
 	/// <summary>
@@ -66,6 +68,7 @@ public sealed record ProjectSelectionSpec(
 	public static ProjectSelectionSpec Standard { get; } = new(
 		GitMode: GitFilteringMode.RespectGitIgnore,
 		Exclusions: StandardExclusions,
+		HideSecrets: false,
 		ProfileSource: ProjectProfileReference.Standard);
 }
 
@@ -80,7 +83,8 @@ public sealed record ProjectSelectionApplicationIntent(
 	ProjectSelectionApplicationMode Roots,
 	ProjectSelectionApplicationMode Extensions,
 	ProjectSelectionApplicationMode GitMode,
-	ProjectSelectionApplicationMode Exclusions);
+	ProjectSelectionApplicationMode Exclusions,
+	ProjectSelectionApplicationMode HideSecrets = ProjectSelectionApplicationMode.Preserve);
 
 internal sealed record LocalProjectSelectionState(
 	ProjectSelectionProfile Profile,

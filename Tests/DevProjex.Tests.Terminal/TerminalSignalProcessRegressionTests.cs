@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using DevProjex.Tests.Terminal.Progress;
 
 namespace DevProjex.Tests.Terminal;
 

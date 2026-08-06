@@ -1,6 +1,5 @@
 using Avalonia.Controls.Documents;
 using DevProjex.Avalonia.Collections;
-using DevProjex.Kernel;
 using System.Runtime.CompilerServices;
 
 namespace DevProjex.Avalonia.ViewModels;

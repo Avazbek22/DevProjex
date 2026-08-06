@@ -21,7 +21,22 @@ public static class PreviewClipboardPayloadBuilder
         // stored section metadata while the preview keeps a line-based model.
         var firstLine = Math.Max(1, section.HeaderLine);
         var lastLine = Math.Min(document.LineCount, Math.Max(firstLine, section.EndLine));
-        return NormalizeLineEndingsForClipboard(document.GetLineRangeText(firstLine, lastLine));
+        var payload = document.GetLineRangeText(firstLine, lastLine);
+        return NormalizeLineEndingsForClipboard(payload);
+    }
+
+    public static string BuildSelectionPayload(
+        IPreviewTextDocument? document,
+        int firstLine,
+        int firstColumn,
+        int lastLine,
+        int lastColumn,
+        string selectedText)
+    {
+        if (document is null || string.IsNullOrEmpty(selectedText))
+            return selectedText;
+
+		return NormalizeLineEndingsForClipboard(selectedText);
     }
 
     private static string NormalizeLineEndingsForClipboard(string text)

@@ -1,9 +1,9 @@
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Input.Raw;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using DevProjex.Application.Preview;
+using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Controls;
 
 namespace DevProjex.Tests.Unit.Avalonia;
@@ -82,6 +82,232 @@ public sealed class VirtualizedPreviewTextControlTests
             window.Close();
         }
     }
+
+    [AvaloniaFact]
+    public void ClickingRedactedSpan_RequestsOnlyThatOccurrenceOverride()
+    {
+        const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
+        const string occurrenceId = "github-occurrence";
+        const string prefix = "token = \"";
+        var text = prefix + placeholder + "\";";
+        using var document = new InMemoryPreviewTextDocument(
+            text,
+            redactions:
+            [
+                new PreviewRedactionSpan(
+                    occurrenceId,
+                    "github-pat",
+                    1,
+                    prefix.Length,
+                    placeholder.Length,
+                    SecretPreviewSpanState.Redacted)
+            ]);
+        var control = new VirtualizedPreviewTextControl
+        {
+            Document = document,
+            Width = 720,
+            Height = 120,
+            TextFontSize = 16,
+            TextBrush = Brushes.White
+        };
+        var window = new Window
+        {
+            Width = 760,
+            Height = 180,
+            WindowDecorations = WindowDecorations.None,
+            Content = control
+        };
+        string? requestedOccurrence = null;
+        control.RedactionToggleRequested += (_, eventArgs) =>
+            requestedOccurrence = eventArgs.OccurrenceId;
+
+        try
+        {
+            window.Show();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+            var typeface = ResolveTestTypeface(control);
+            var x = origin.X + control.LeftPadding +
+                    MeasureRenderedPrefixWidth(control, text, prefix.Length + 2, typeface);
+            var y = origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2);
+            var point = new Point(x, y);
+			var ordinaryTextPoint = new Point(origin.X + control.LeftPadding + 1, y);
+
+			window.MouseMove(ordinaryTextPoint, RawInputModifiers.None);
+			var textCursor = Assert.IsType<Cursor>(control.Cursor);
+			window.MouseMove(point, RawInputModifiers.None);
+			Assert.NotSame(textCursor, control.Cursor);
+			var toolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(control));
+			Assert.Contains("preview-blurred-tooltip", toolTip.Classes);
+			Assert.Equal(
+				"Detected github-pat.\n" +
+				"Click to keep the original value.\n" +
+				"Alt+Up / Alt+Down navigates findings.",
+				Assert.IsType<TextBlock>(toolTip.Content).Text);
+
+            window.MouseDown(point, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(point, MouseButton.Left, RawInputModifiers.None);
+
+            Assert.Equal(occurrenceId, requestedOccurrence);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+	[AvaloniaFact]
+	public void KeyboardNavigation_CyclesFindingsAndEnterTogglesTheActiveOccurrence()
+	{
+		const string firstOccurrence = "first-occurrence";
+		const string secondOccurrence = "second-occurrence";
+		const string firstPlaceholder = "DEVPROJEX_REDACTED[github-pat#1]";
+		const string secondPlaceholder = "DEVPROJEX_REDACTED[aws-access-token#1]";
+		var text = $"first={firstPlaceholder}\nsecond={secondPlaceholder}";
+		using var document = new InMemoryPreviewTextDocument(
+			text,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					firstOccurrence,
+					"github-pat",
+					1,
+					"first=".Length,
+					firstPlaceholder.Length,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					secondOccurrence,
+					"aws-access-token",
+					2,
+					"second=".Length,
+					secondPlaceholder.Length,
+					SecretPreviewSpanState.Redacted)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 160,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 220,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		string? requestedOccurrence = null;
+		control.RedactionToggleRequested += (_, eventArgs) =>
+			requestedOccurrence = eventArgs.OccurrenceId;
+
+		try
+		{
+			window.Show();
+			control.Focus();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(secondOccurrence, GetActiveRedactionOccurrenceId(control));
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+
+			window.KeyPress(Key.Up, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			window.KeyRelease(Key.Up, RawInputModifiers.Alt, PhysicalKey.None, null);
+
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			Assert.Equal(firstOccurrence, requestedOccurrence);
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public void KeyboardNavigation_AfterManualScroll_ContinuesFromViewportInsteadOfHiddenActiveFinding()
+	{
+		const string firstOccurrence = "first-occurrence";
+		const string secondOccurrence = "second-occurrence";
+		const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
+		var lines = Enumerable.Range(1, 100)
+			.Select(lineNumber => lineNumber is 40 or 80
+				? $"secret-{lineNumber}={placeholder}"
+				: $"preview line {lineNumber}")
+			.ToArray();
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', lines),
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					firstOccurrence,
+					"github-pat",
+					40,
+					"secret-40=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					secondOccurrence,
+					"github-pat",
+					80,
+					"secret-80=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var scrollViewer = new ScrollViewer
+		{
+			Width = 720,
+			Height = 160,
+			Content = control
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 220,
+			WindowDecorations = WindowDecorations.None,
+			Content = scrollViewer
+		};
+
+		try
+		{
+			window.Show();
+			control.Focus();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(2);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			Assert.True(scrollViewer.Offset.Y > 0);
+
+			scrollViewer.Offset = default;
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			Assert.True(scrollViewer.Offset.Y > 0);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(secondOccurrence, GetActiveRedactionOccurrenceId(control));
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
 
     [AvaloniaFact]
     public void SelectAll_WithDocument_SelectsFullNormalizedTextAndRange()
@@ -373,6 +599,17 @@ public sealed class VirtualizedPreviewTextControlTests
         var lineStarts = Assert.IsType<List<int>>(field!.GetValue(control));
         return lineStarts.Capacity;
     }
+
+	private static string? GetActiveRedactionOccurrenceId(
+		VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionOccurrenceId",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+
+		Assert.NotNull(field);
+		return Assert.IsType<string>(field!.GetValue(control));
+	}
 
     private static Dictionary<int, object> GetFormattedLineCacheEntries(
         VirtualizedPreviewTextControl control)

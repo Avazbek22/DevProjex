@@ -214,7 +214,7 @@ internal static class ProjectLoadWorkflowRefreshHarness
     {
         foreach (var option in snapshot.IgnoreOptions)
         {
-            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
+            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore or IgnoreOptionId.HideSecrets)
                 continue;
 
             var expectedCount = GetIgnoreCount(snapshot.IgnoreOptionCounts, option.Id);
@@ -625,7 +625,10 @@ internal static class ProjectLoadWorkflowRefreshHarness
             return true;
         }
 
-        if (ignoreOptions.All(option => !option.IsChecked))
+        // A lone default-off option does not prove that the user pressed "Ignore all: off".
+        // Preserve null intent so a later default-on controller can still appear checked.
+        if (ignoreOptions.Any(static option => option.DefaultChecked) &&
+            ignoreOptions.All(static option => !option.IsChecked))
             return false;
 
         return null;

@@ -1,7 +1,6 @@
 using System.IO.Compression;
-using System.Diagnostics;
-using DevProjex.Application.Services;
-using DevProjex.Tests.Integration.Helpers;
+using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Tests.Integration;
 
@@ -17,6 +16,7 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		Assert.Equal(5, result.CopiedFileCount);
 		Assert.Equal(6, result.CreatedDirectoryCount);
 		Assert.Equal(workspace.ExpectedBytes, result.BytesWritten);
+		Assert.Equal(0, result.RedactedValueCount);
 		Assert.Equal(workspace.BinaryBytes, await File.ReadAllBytesAsync(
 			Path.Combine(result.DestinationPath, "assets", "image.bin"),
 			TestContext.Current.CancellationToken));
@@ -52,6 +52,66 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		Assert.All(updates, update => Assert.Equal(expectedEntryCount, update.TotalEntryCount));
 		Assert.True(updates.Select(update => update.ProcessedEntryCount).SequenceEqual(
 			updates.Select(update => update.ProcessedEntryCount).Order()));
+	}
+
+	[Fact]
+	public async Task RedactedFolderExport_CountsOnlyProjectEntriesAndDoesNotChangeSource()
+	{
+		const string secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		using var workspace = ProjectCopyWorkspace.Create();
+		await File.WriteAllTextAsync(
+			workspace.Paths["readme"],
+			$"token={secret}\n",
+			TestContext.Current.CancellationToken);
+		var sourceText = await File.ReadAllBytesAsync(
+			workspace.Paths["readme"],
+			TestContext.Current.CancellationToken);
+		var sourceBinary = await File.ReadAllBytesAsync(
+			workspace.Paths["binary"],
+			TestContext.Current.CancellationToken);
+		var updates = new List<ProjectCopyExportProgress>();
+		var service = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			new FileContentAnalyzer(),
+			new SecretRedactionSession(new GitleaksSecretDetector()));
+		var destination = Path.Combine(workspace.DestinationParent, "redacted");
+
+		var result = await service.ExportAsync(
+			new ProjectCopyExportRequest(
+				workspace.SourceRoot,
+				"Sample",
+				workspace.Root,
+				new HashSet<string>(PathComparer.Default),
+				destination,
+				ProjectCopyExportFormat.Folder,
+				ProjectCopyDestinationMode.Exact,
+				ProjectCopyConflictPolicy.Fail,
+				RedactSecrets: true),
+			new CallbackProgress<ProjectCopyExportProgress>(updates.Add),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, result.RedactedValueCount);
+		Assert.False(File.Exists(Path.Combine(result.DestinationPath, "DEVPROJEX_REDACTIONS.txt")));
+		Assert.DoesNotContain(
+			secret,
+			await File.ReadAllTextAsync(
+				Path.Combine(result.DestinationPath, "README.md"),
+				TestContext.Current.CancellationToken),
+			StringComparison.Ordinal);
+		Assert.Equal(
+			sourceBinary,
+			await File.ReadAllBytesAsync(
+				Path.Combine(result.DestinationPath, "assets", "image.bin"),
+				TestContext.Current.CancellationToken));
+		Assert.Equal(result.CreatedDirectoryCount + result.CopiedFileCount, updates[^1].TotalEntryCount);
+		Assert.Equal(updates[^1].TotalEntryCount, updates[^1].ProcessedEntryCount);
+		Assert.Equal(100, updates[^1].Percentage);
+		Assert.Equal(
+			sourceText,
+			await File.ReadAllBytesAsync(workspace.Paths["readme"], TestContext.Current.CancellationToken));
+		Assert.Equal(
+			sourceBinary,
+			await File.ReadAllBytesAsync(workspace.Paths["binary"], TestContext.Current.CancellationToken));
 	}
 
 	[Fact]

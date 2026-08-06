@@ -5,18 +5,18 @@
 │  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
 │    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
 │    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
-│                                 │ Filter actions:                                                                         │                                  │
+│                                 │ Filter actions:                                                                         │ING:                              │
+│                                 │                                                                                         │s                                 │
 │                                 │                                                                                         │                                  │
-│                                 │                                                                                         │e                                 │
-│                                 │ Analyze  [A]                                                                            │rs                                │
-│                                 │ Search  [/]                                                                             │                                  │
-│                                 │ Preview mode: Tree  [1/2/3]                                                             │ers                               │
-│                                 │ Preview format: ASCII  [F]                                                              │s                                 │
-│                                 │ Git filtering: Use .gitignore  [M]                                                      │                                  │
-│                                 │ Exclusions: 8  [X]                                                                      │                                  │
-│                                 │ Root folders: All (1)  [R]                                                              │ut extension                      │
+│                                 │ Analyze  [A]                                                                            │                                  │
+│                                 │ Search  [/]                                                                             │e                                 │
+│                                 │ Preview mode: Tree  [1/2/3]                                                             │rs                                │
+│                                 │ Preview format: ASCII  [F]                                                              │                                  │
+│                                 │ Git filtering: Use .gitignore  [M]                                                      │ers                               │
+│                                 │ Exclusions: 8  [X]                                                                      │s                                 │
+│                                 │ Root folders: All (1)  [R]                                                              │                                  │
 │                                 │ File types: All (3)  [T]                                                                │                                  │
-│                                 │ Export context  [E]                                                                     │                                  │
+│                                 │ Export context  [E]                                                                     │ut extension                      │
 │                                 │ To Folder…  [Z]                                                                         │                                  │
 │                                 │ To ZIP Archive…  [Z]                                                                    │                                  │
 │                                 │ Export settings...  [P]                                                                 │                                  │

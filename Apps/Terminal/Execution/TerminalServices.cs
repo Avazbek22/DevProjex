@@ -1,4 +1,5 @@
 using DevProjex.Terminal.Tui;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -24,4 +25,6 @@ public sealed record TerminalServices(
 	RecentWorkspacesService RecentWorkspacesService,
 	RecentProjectsStore RecentProjectsStore,
 	IGitRepositoryService GitRepositoryService,
-	IRepoCacheService RepoCacheService);
+	IRepoCacheService RepoCacheService,
+	SecretRedactionSession SecretRedactionSession,
+	SecretRedactionOutputPreparer SecretRedactionOutputPreparer);

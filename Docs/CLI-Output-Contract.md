@@ -45,6 +45,10 @@ project inventory, effective selection, metrics, diagnostics, and the
 deterministic context fingerprint available to the current engine. v1 does not
 publish a timings field.
 
+When Hide Secrets is enabled, analysis adds a top-level `redaction` object with
+`matchedCount`, `redactedCount`, and a non-safety `notice`. Zero means the pinned
+rules matched nothing; it never means that the project is safe.
+
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
 
@@ -129,6 +133,10 @@ preflight is ready; it is not a result path.
 The readiness line is the requested dry-run result and remains visible at
 `quiet` and `minimal`; incidental status and progress remain suppressed.
 
+A project-copy dry run with Hide Secrets enabled also states that detected text
+will be changed, binary files will remain unchanged, and the result may not build
+or run. This warning does not create or scan an output artifact.
+
 ## Errors
 
 Human errors follow:
@@ -145,6 +153,12 @@ The `DPX-*` code is stable and language-independent. Normal verbosity never
 prints raw `Exception.Message`, an inner exception, or a platform-localized I/O
 message. Diagnostic verbosity may report an exception type, safe path context,
 stack trace, and request identifier, but never file content or secrets.
+
+Secret inspection is fail-closed. `DPX-SECRET-SCAN-LIMIT-EXCEEDED` identifies a
+selected text file above the supported 16 MiB limit;
+`DPX-SECRET-DETECTION-FAILED` identifies rule loading, matching, timeout, or
+classified-read failure. Both are runtime failures (exit `1`) and never fall back to an
+unredacted artifact.
 
 ## Exit Codes
 

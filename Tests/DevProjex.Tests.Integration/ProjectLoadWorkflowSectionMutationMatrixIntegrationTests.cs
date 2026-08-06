@@ -1,5 +1,4 @@
 using DevProjex.Application.Models;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
 
@@ -372,7 +371,7 @@ public sealed class ProjectLoadWorkflowSectionMutationMatrixIntegrationTests
     {
         foreach (var option in snapshot.IgnoreOptions)
         {
-            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
+            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore or IgnoreOptionId.HideSecrets)
                 continue;
 
             var expectedCount = GetIgnoreCount(snapshot.IgnoreOptionCounts, option.Id);

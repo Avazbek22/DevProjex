@@ -10,6 +10,7 @@ public partial class MainWindow
     private void OnTreeNodeCheckedChanged(TreeNodeViewModel _)
     {
         _treeSelectionSnapshotCache.Invalidate();
+		InvalidateSecretRedactionCount();
         _metrics.ScheduleRecalculate();
         SchedulePreviewRefresh();
     }

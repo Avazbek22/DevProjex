@@ -20,6 +20,12 @@
     <Style Selector="Border.checklist-border">
       <Setter Property="Padding" Value="0" />
     </Style>
+    <Style Selector="Border.content-processing-status-indicator">
+      <Setter Property="Opacity" Value="0.72" />
+    </Style>
+    <Style Selector="Border.content-processing-status-indicator:pointerover">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
     <Style Selector="ListBox.settings-list /template/ ScrollViewer">
       <Setter Property="Padding" Value="5" />
       <Setter Property="Background" Value="Transparent" />
@@ -93,7 +99,7 @@
           Background="Transparent"
           BorderThickness="0"
           IsEnabled="{Binding AreFilterSettingsEnabled}">
-    <Grid RowDefinitions="Auto,*,*,*">
+    <Grid RowDefinitions="Auto,Auto,*,*,*">
       <!-- Apply stays at the top because filter options remain intentionally staged. -->
       <Button Name="ApplySettingsButton"
               Grid.Row="0"
@@ -108,7 +114,7 @@
               CornerRadius="3"/>
 
       <!-- Ignore section - equal star height -->
-      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,2,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="2" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="IgnoreHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="IgnoreHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsIgnoreTitle}" Margin="0" FontSize="15"/>
           <CheckBox Name="IgnoreAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllIgnore}"
@@ -118,7 +124,7 @@
         <Border Grid.Row="1" Classes="checklist-border">
           <ListBox Name="IgnoreOptionsList"
                    Classes="settings-list"
-                   ItemsSource="{Binding IgnoreOptions}"
+                   ItemsSource="{Binding PathIgnoreOptions}"
                    SelectionMode="Multiple"
                    ScrollViewer.IsScrollInertiaEnabled="True"
                    ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -147,8 +153,104 @@
         </Border>
       </Grid>
 
+	  <!-- Content-processing options transform selected bytes without changing the tree. -->
+	  <Grid Name="ContentProcessingSection"
+			Grid.Row="1"
+			RowDefinitions="Auto,*"
+			Margin="0,10,0,0"
+			IsVisible="{Binding HasContentProcessingOptions}"
+			IsEnabled="{Binding AreFilterSettingsEnabled}">
+		<TextBlock Name="ContentProcessingHeaderText"
+				   Grid.Row="0"
+				   Classes="section-title"
+				   Text="{Binding SettingsSecretsTitle}"
+				   Margin="0,0,0,6"
+				   FontSize="15" />
+		<Border Name="ContentProcessingOptionsBorder" Grid.Row="1" Classes="checklist-border">
+		  <Grid ColumnDefinitions="Auto,6,16,*">
+			<ListBox Name="ContentProcessingOptionsList"
+					   Grid.Column="0"
+					   Classes="settings-list"
+					   ItemsSource="{Binding ContentProcessingOptions}"
+					   SelectionMode="Multiple"
+					   ScrollViewer.VerticalScrollBarVisibility="Disabled"
+					   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+			  <ListBox.ItemsPanel>
+				<ItemsPanelTemplate>
+				  <VirtualizingStackPanel />
+				</ItemsPanelTemplate>
+			  </ListBox.ItemsPanel>
+			  <ListBox.ItemTemplate>
+				<DataTemplate x:DataType="vm:IgnoreOptionViewModel">
+				  <CheckBox Classes="list-item settings-list-entry"
+							Content="{Binding Label}"
+							IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+				</DataTemplate>
+			  </ListBox.ItemTemplate>
+			</ListBox>
+			<Border Name="ContentProcessingHelpIndicator"
+					Classes="content-processing-status-indicator"
+					Grid.Column="2"
+					Width="16"
+					Height="16"
+					Background="Transparent"
+					RenderTransform="translate(0px, 4px)"
+					VerticalAlignment="Center"
+					IsVisible="{Binding HasContentProcessingStatus}"
+					AutomationProperties.HelpText="{Binding SettingsSecretsNotice}"
+					PointerPressed="OnContentProcessingHelpIndicatorPointerPressed"
+					PointerReleased="OnContentProcessingHelpIndicatorPointerReleased"
+					ToolTip.ShowDelay="450"
+					ToolTip.Placement="Left">
+			  <ToolTip.Tip>
+				<ToolTip Loaded="OnContentProcessingToolTipLoaded"
+						 DataContext="{Binding #SettingsPanelViewRoot.DataContext}"
+						 MaxWidth="260">
+				  <TextBlock x:DataType="vm:MainWindowViewModel"
+							 Text="{Binding SettingsSecretsNotice}"
+							 MaxWidth="240"
+							 TextWrapping="Wrap" />
+				</ToolTip>
+			  </ToolTip.Tip>
+			  <Grid>
+				<Border Name="ContentProcessingQuestionIcon"
+						Width="16"
+						Height="16"
+						CornerRadius="8"
+						BorderThickness="1"
+						BorderBrush="{DynamicResource AppMutedTextBrush}"
+						Background="{DynamicResource MenuPressedBrush}"
+						RenderTransform="translate(0px, -1px)"
+						IsVisible="{Binding !IsContentProcessingAnalysisFailed}">
+				  <TextBlock Text="?"
+							 FontSize="10"
+							 FontWeight="SemiBold"
+							 Foreground="{DynamicResource AppTextBrush}"
+							 HorizontalAlignment="Center"
+							 VerticalAlignment="Center" />
+				</Border>
+				<Grid Name="ContentProcessingWarningIcon"
+					  Width="16"
+					  Height="16"
+					  IsVisible="{Binding IsContentProcessingAnalysisFailed}">
+				  <PathIcon Data="M 8,1 L 15,14 L 1,14 Z"
+							Foreground="{DynamicResource AppMutedTextBrush}" />
+				  <TextBlock Text="!"
+							 FontSize="9"
+							 FontWeight="Bold"
+							 Foreground="{DynamicResource AppPanelBrush}"
+							 HorizontalAlignment="Center"
+							 VerticalAlignment="Bottom"
+							 Margin="0,0,0,1" />
+				</Grid>
+			  </Grid>
+			</Border>
+		  </Grid>
+		</Border>
+	  </Grid>
+
       <!-- Extensions section - equal star height -->
-      <Grid Grid.Row="2" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="ExtensionsHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="ExtensionsHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsExtensions}" Margin="0" FontSize="15"/>
           <CheckBox Name="ExtensionsAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllExtensions}"
@@ -179,7 +281,7 @@
       </Grid>
 
       <!-- RootFolders section - equal star height -->
-      <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="4" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="RootFoldersHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="RootFoldersHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsRootFolders}" Margin="0" FontSize="15"/>
           <CheckBox Name="RootFoldersAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"

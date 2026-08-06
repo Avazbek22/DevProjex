@@ -14,6 +14,7 @@ global using Avalonia.VisualTree;
 global using DevProjex.Application.Preview;
 global using DevProjex.Application.Presentation;
 global using DevProjex.Application.Selection;
+global using DevProjex.Application.Secrets;
 global using DevProjex.Application.Services;
 global using DevProjex.Application.UseCases;
 global using DevProjex.Application.Workspaces;

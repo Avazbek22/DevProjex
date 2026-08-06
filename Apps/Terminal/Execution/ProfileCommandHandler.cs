@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
@@ -170,6 +171,8 @@ public sealed class ProfileCommandHandler(
 			.AppendLine(string.Join(
 				", ",
 				(selection.Exclusions ?? []).Select(ProjectSelectionTokens.ToToken)));
+		output.Append(services.Localization["Settings.Ignore.HideSecrets"]).Append(": ")
+			.AppendLine((selection.HideSecrets == true).ToString(CultureInfo.InvariantCulture));
 		return output.ToString().TrimEnd('\r', '\n');
 	}
 
@@ -199,7 +202,8 @@ public sealed class ProfileCommandHandler(
 						: null,
 					exclusions = (selection.Exclusions ?? [])
 						.Select(ProjectSelectionTokens.ToToken)
-						.ToArray()
+						.ToArray(),
+					hideSecrets = selection.HideSecrets == true
 				}
 			},
 			new JsonSerializerOptions

@@ -1,5 +1,4 @@
 using DevProjex.Application.Models;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 

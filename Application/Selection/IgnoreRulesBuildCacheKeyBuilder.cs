@@ -35,7 +35,14 @@ public static class IgnoreRulesBuildCacheKeyBuilder
 
 		var unique = new HashSet<int>(selectedIgnoreOptions.Count);
 		foreach (var option in selectedIgnoreOptions)
-			unique.Add((int)option);
+		{
+			// Hide Secrets transforms selected text after traversal. It must not split or
+			// invalidate the path-ignore cache because it cannot change the scanned tree.
+			if (option != IgnoreOptionId.HideSecrets)
+				unique.Add((int)option);
+		}
+		if (unique.Count == 0)
+			return "<none>";
 
 		var ordered = new List<int>(unique);
 		ordered.Sort();

@@ -1,5 +1,3 @@
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class AppLanguageUtilityTests

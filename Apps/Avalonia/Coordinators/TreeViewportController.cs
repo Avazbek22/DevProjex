@@ -1,4 +1,3 @@
-using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Coordinators;

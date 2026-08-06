@@ -308,7 +308,7 @@ internal sealed class PreviewWorkspacePipeline(
                 IsCurrentRefreshRequest(requestVersion))
             {
                 InvalidateCache();
-                host.ApplyPreviewText(ex.Message);
+                host.ApplyPreviewText(host.ResolvePreviewErrorMessage(ex));
                 CompleteFirstContentReady(firstContentReady, buildVersion);
                 CompleteRefreshRequest(requestVersion);
                 host.SchedulePreviewMemoryCleanup();

@@ -1,5 +1,6 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -19,6 +20,21 @@ public sealed class AnalyzeCommandHandler(
 					request.Selection,
 					cancellationToken: cancellationToken))
 			.ConfigureAwait(false);
+		if (plan.Selection.HideSecrets == true)
+		{
+			var redaction = await services.SecretRedactionOutputPreparer
+				.AnalyzeAsync(
+					new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession),
+					plan.IncludedFiles,
+					cancellationToken)
+				.ConfigureAwait(false);
+			plan = plan with
+			{
+				Redaction = new SecretRedactionSummary(
+					redaction.DetectedCount,
+					redaction.RedactedCount)
+			};
+		}
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 
@@ -146,6 +162,21 @@ internal static class AnalysisTextFormatter
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Tokens"],
 			plan.Analysis.Metrics.Content.Tokens.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+		if (plan.Redaction is { } redaction)
+		{
+			rows.Add(new AnalysisTextRow(
+				localization["Terminal.Analysis.SecretRuleMatches"],
+				redaction.MatchedCount.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+			rows.Add(new AnalysisTextRow(
+				localization["Terminal.Analysis.RedactedValues"],
+				redaction.RedactedCount.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+			if (redaction.MatchedCount == 0)
+			{
+				rows.Add(new AnalysisTextRow(
+					localization["Terminal.Analysis.SecretScanNotice"],
+					localization["SecretRedaction.NoFindingsNotice"]));
+			}
+		}
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Fingerprint"],
 			plan.Fingerprint));

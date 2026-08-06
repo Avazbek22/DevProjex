@@ -1,5 +1,3 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class GitCloneIgnoreLifecycleIntegrationTests
@@ -363,6 +361,11 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		AssertStableCloneBoundary(baseline, expectedDotFileCount);
 		var baselineRootNames = SnapshotRootNames(baseline);
 		var baselineIgnoreOptions = baseline.IgnoreOptions.ToArray();
+		var allEnabledIgnoreOptions = baselineIgnoreOptions
+			.Select(static option => option.Id == IgnoreOptionId.HideSecrets
+				? option with { IsChecked = true }
+				: option)
+			.ToArray();
 
 		var current = baseline;
 		for (var cycle = 0; cycle < 3; cycle++)
@@ -382,7 +385,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			current = ApplyAll(workspace.Path, services, current, isChecked: true);
 			AssertStableCloneBoundary(current, expectedDotFileCount);
 			Assert.Equal(baselineRootNames, SnapshotRootNames(current));
-			Assert.Equal(baselineIgnoreOptions, current.IgnoreOptions);
+			Assert.Equal(allEnabledIgnoreOptions, current.IgnoreOptions);
 
 			current = ToggleFileOption(
 				workspace.Path,
@@ -400,7 +403,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 				IgnoreOptionId.DotFiles,
 				isChecked: true);
 			AssertStableCloneBoundary(current, expectedDotFileCount);
-			Assert.Equal(baselineIgnoreOptions, current.IgnoreOptions);
+			Assert.Equal(allEnabledIgnoreOptions, current.IgnoreOptions);
 		}
 
 		current = RefreshFull(
@@ -410,7 +413,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 
 		AssertStableCloneBoundary(current, expectedDotFileCount);
 		Assert.Equal(baselineRootNames, SnapshotRootNames(current));
-		Assert.Equal(baselineIgnoreOptions, current.IgnoreOptions);
+		Assert.Equal(allEnabledIgnoreOptions, current.IgnoreOptions);
 	}
 
 	[Fact]

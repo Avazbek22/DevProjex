@@ -50,7 +50,7 @@ public sealed class ProjectCopyExportUiContractTests
         Assert.Equal("16", Attribute(indicator, "Width"));
         Assert.Equal("16", Attribute(indicator, "Height"));
         Assert.Equal("8", Attribute(indicator, "CornerRadius"));
-        Assert.Equal("Help", Attribute(indicator, "Cursor"));
+        Assert.Null(Attribute(indicator, "Cursor"));
         Assert.Equal("OnProjectCopyHelpIndicatorPointerPressed", Attribute(indicator, "PointerPressed"));
         Assert.Equal("OnProjectCopyHelpIndicatorPointerReleased", Attribute(indicator, "PointerReleased"));
         Assert.Equal("OnToolTipLoaded", Attribute(tooltip, "Loaded"));
@@ -70,6 +70,7 @@ public sealed class ProjectCopyExportUiContractTests
             "TopMenuBarView.axaml.cs");
         AssertPointerHandlerConsumes(source, "OnProjectCopyHelpIndicatorPointerPressed");
         AssertPointerHandlerConsumes(source, "OnProjectCopyHelpIndicatorPointerReleased");
+        Assert.Contains("ToolTip.SetIsOpen(indicator, true);", source, StringComparison.Ordinal);
     }
 
     [Fact]

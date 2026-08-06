@@ -1,12 +1,246 @@
+using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Secrets;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Kernel.Abstractions;
+using DevProjex.Avalonia.Views;
+using Avalonia;
+using Avalonia.Input;
+using Avalonia.VisualTree;
 
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowIgnoreOptionsUiTests
 {
+    [AvaloniaFact]
+    public async Task HideSecrets_IsOptInAndUpdatesPreviewCountWithoutChangingSource()
+    {
+        const string secret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+        using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+        var sourcePath = Path.Combine(project.RootPath, "src", "Secrets.cs");
+		var sourceText = await File.ReadAllTextAsync(sourcePath);
+		await File.WriteAllTextAsync(
+			sourcePath,
+			string.Concat(Enumerable.Repeat("// preview padding\n", 240)) + sourceText);
+        var sourceBefore = File.ReadAllBytes(sourcePath);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HideSecrets,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+            var originalPreview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            Assert.Contains(secret, originalPreview, StringComparison.Ordinal);
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HideSecrets,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var document = UiTestDriver
+                        .GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+                            window,
+                            "PreviewTextControl")
+                        .Document;
+					return document?.Redactions.Count == 1 &&
+					       document.Redactions[0].State == SecretPreviewSpanState.Redacted;
+                },
+                "Hide Secrets preview and count to converge");
+
+            var redactedPreview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+            Assert.DoesNotContain(secret, redactedPreview, StringComparison.Ordinal);
+            Assert.Contains(
+                "DEVPROJEX_REDACTED[aws-access-token#1]",
+                redactedPreview,
+                StringComparison.Ordinal);
+            await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+                window,
+                IgnoreOptionId.HideSecrets,
+                "Hide secrets (1/1)");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.GetViewModel(window).SettingsSecretsNotice,
+					"Found: 1. Hidden: 1.",
+					StringComparison.Ordinal),
+				"the content-processing tooltip to publish detected and hidden counts");
+
+			var previewControl = UiTestDriver
+				.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+					window,
+					"PreviewTextControl");
+			var previewScrollViewer = UiTestDriver.GetRequiredControl<ScrollViewer>(
+				window,
+				"PreviewTextScrollViewer");
+			previewControl.Focus();
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			var viewportBeforeOverride = previewScrollViewer.Offset;
+			Assert.True(viewportBeforeOverride.Y > 0);
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => previewControl.Document?.Redactions.Count == 1 &&
+				      previewControl.Document.Redactions[0].State == SecretPreviewSpanState.KeptAsIs,
+				"the keyboard override to restore the detected value");
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Hide secrets (1/0)");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.GetViewModel(window).SettingsSecretsNotice,
+					"Found: 1. Hidden: 0.",
+					StringComparison.Ordinal),
+				"the content-processing tooltip to update after a redaction override");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.InRange(
+				Math.Abs(previewScrollViewer.Offset.Y - viewportBeforeOverride.Y),
+				0,
+				1);
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HideSecrets,
+                visible: true,
+                isChecked: false);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => string.Equals(
+                    UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+                    originalPreview,
+                    StringComparison.Ordinal),
+                "disabled Hide Secrets preview to return to the original payload");
+
+            Assert.Equal(sourceBefore, File.ReadAllBytes(sourcePath));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+	[AvaloniaFact]
+	public async Task HideSecrets_WithNoFindings_UpdatesOnlyContentState()
+	{
+		using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
+		await AssertHideSecretsIsolatedFromPathSelectionAsync(project, expectedCount: 0);
+	}
+
+	[AvaloniaFact]
+	public async Task HideSecrets_WithFindings_UpdatesOnlyContentState()
+	{
+		using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
+		Directory.CreateDirectory(Path.Combine(project.RootPath, "secrets"));
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "secrets", "credentials.env"),
+			"AWS_ACCESS_KEY_ID=AKIA" + "Z7M3Q5X2P6N4R7T5\n");
+
+		await AssertHideSecretsIsolatedFromPathSelectionAsync(project, expectedCount: 1);
+	}
+
+	private static async Task AssertHideSecretsIsolatedFromPathSelectionAsync(
+		UiTestProject project,
+		int expectedCount)
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.SmartIgnore,
+				visible: true,
+				isChecked: true);
+			Assert.False(UiTestDriver.GetViewModel(window).IsAnyPreviewVisible);
+
+			var tree = UiTestDriver.GetCurrentTreeIdentity(window);
+			var inventory = UiTestDriver.GetCurrentTreeInventoryIdentity(window);
+			var previewDocument = UiTestDriver.GetViewModel(window).PreviewDocument;
+			var selectionRevision = UiTestDriver.GetSelectionRevision(window);
+			using var measurement = IgnorePipelineDiagnostics.BeginMeasurement();
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				$"Hide secrets ({expectedCount}/{expectedCount})");
+			var viewModel = UiTestDriver.GetViewModel(window);
+			if (expectedCount == 0)
+			{
+				await UiTestDriver.WaitForConditionAsync(
+					window,
+					() => !viewModel.HasContentProcessingOptions &&
+					      !UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible,
+					"the content-processing section to hide after a completed empty scan");
+				Assert.True(viewModel.HideSecretsOption?.IsChecked);
+			}
+			else
+			{
+				Assert.True(UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible);
+			}
+
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.SmartIgnore,
+				visible: true,
+				isChecked: true);
+			Assert.Same(tree, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Same(inventory, UiTestDriver.GetCurrentTreeInventoryIdentity(window));
+			Assert.Same(previewDocument, UiTestDriver.GetViewModel(window).PreviewDocument);
+			Assert.Equal(selectionRevision, UiTestDriver.GetSelectionRevision(window));
+
+			if (expectedCount > 0)
+			{
+				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+				await UiTestDriver.WaitForIgnoreOptionStateAsync(
+					window,
+					IgnoreOptionId.HideSecrets,
+					visible: true,
+					isChecked: false);
+				await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+					window,
+					IgnoreOptionId.HideSecrets,
+					"Hide secrets");
+			}
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.SmartIgnore,
+				visible: true,
+				isChecked: true);
+
+			Assert.Same(tree, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Same(inventory, UiTestDriver.GetCurrentTreeInventoryIdentity(window));
+			Assert.Same(previewDocument, UiTestDriver.GetViewModel(window).PreviewDocument);
+			Assert.Equal(selectionRevision, UiTestDriver.GetSelectionRevision(window));
+			var diagnostics = measurement.Capture();
+			Assert.Equal(0, diagnostics.WorkspaceScans);
+			Assert.Equal(0, diagnostics.DirectoryEnumerations);
+			Assert.Equal(0, diagnostics.FileEnumerations);
+			Assert.Equal(0, diagnostics.IgnoreRulesBuilds);
+			Assert.Equal(0, diagnostics.FullSelectionRefreshes);
+			Assert.Equal(0, diagnostics.LiveSelectionRefreshes);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task IgnoredNumericExtensions_AreNotOfferedUntilTheirOwningIgnoreRuleIsDisabled()
     {
@@ -70,7 +304,12 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 visible: true,
                 isChecked: true);
 
-            Assert.True(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.HideSecrets,
+                visible: true,
+                isChecked: false);
+			Assert.True(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
         }
         finally
         {
@@ -339,12 +578,23 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 visible: true,
                 isChecked: false);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.UseGitIgnore,
+                visible: true,
+                isChecked: true);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.TrackedGitFilesOnly,
+                visible: true,
+                isChecked: false);
             await WaitForProjectTreePathStateAsync(window, exists: true, "LocalOnly.cs");
 
             await SetIgnoreOptionCheckedAsync(
                 window,
                 IgnoreOptionId.UseGitIgnore,
                 isChecked: false);
+            await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.TrackedGitFilesOnly,
@@ -359,10 +609,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
             Assert.Equal(
                 [
                     IgnoreOptionId.SmartIgnore,
+                    IgnoreOptionId.HideSecrets,
                     IgnoreOptionId.UseGitIgnore,
                     IgnoreOptionId.TrackedGitFilesOnly
                 ],
-                smartOnlyIgnoreOptions.Take(3).Select(static option => option.Id));
+                smartOnlyIgnoreOptions.Take(4).Select(static option => option.Id));
             Assert.False(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
@@ -480,6 +731,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 visible: true,
                 isChecked: true);
 
+            await SetIgnoreAllCheckedAsync(window, isChecked: true);
             await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: false);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: false);
@@ -540,6 +792,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 UiTestDriver.GetViewModel(window).RootFolders,
                 option => string.Equals(option.Name, "obj", StringComparison.OrdinalIgnoreCase));
 
+            await SetIgnoreAllCheckedAsync(window, isChecked: true);
             await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
 
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
@@ -1871,6 +2124,13 @@ public sealed class MainWindowIgnoreOptionsUiTests
                     viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label))),
                 "ignore option labels to be localized before the rollback baseline is exercised");
 
+            await SetIgnoreAllCheckedAsync(window, isChecked: true);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Скрывать секреты");
+			Assert.False(viewModel.HideSecretsOption?.IsChecked);
+
             var stableRoots = viewModel.RootFolders
                 .Select(static option => (option.Name, option.IsChecked))
                 .ToArray();
@@ -1905,8 +2165,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                           StringComparison.Ordinal),
                 "the blocked ignore-all refresh to expose its cancellation action");
 
-            Assert.False(viewModel.AllIgnoreChecked);
-            Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
+			Assert.False(viewModel.AllIgnoreChecked);
+			Assert.All(
+				viewModel.PathIgnoreOptions,
+				static option => Assert.False(option.IsChecked));
+			Assert.False(viewModel.HideSecretsOption?.IsChecked);
 
             await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
 
@@ -1919,12 +2182,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
             Assert.Equal(
                 stableExtensions,
                 viewModel.Extensions.Select(static option => (option.Name, option.IsChecked)).ToArray());
-            Assert.Equal(
-                stableIgnoreOptions,
-                viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label, option.IsChecked)).ToArray());
+			Assert.Equal(
+				stableIgnoreOptions.Select(static option => (option.Id, option.IsChecked)).ToArray(),
+				viewModel.IgnoreOptions.Select(static option => (option.Id, option.IsChecked)).ToArray());
             Assert.Equal(stableTreeNodes.Length, viewModel.TreeNodes.Count);
             for (var index = 0; index < stableTreeNodes.Length; index++)
                 Assert.Same(stableTreeNodes[index], viewModel.TreeNodes[index]);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Скрывать секреты");
+			Assert.Equal(
+				stableIgnoreOptions,
+				viewModel.IgnoreOptions.Select(static option => (option.Id, option.Label, option.IsChecked)).ToArray());
 
             // The scanner intentionally ignores cancellation. Releasing it verifies that the
             // invalidated late result cannot overwrite the synchronously restored presentation.
@@ -2326,6 +2596,104 @@ public sealed class MainWindowIgnoreOptionsUiTests
             optionId,
             visible: true,
             isChecked: isChecked);
+    }
+
+    [AvaloniaFact]
+    public async Task HideSecrets_IsRenderedInItsOwnSectionAndIsIndependentFromIgnoreAll()
+    {
+        using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var hideSecrets = Assert.IsType<IgnoreOptionViewModel>(viewModel.HideSecretsOption);
+            Assert.DoesNotContain(viewModel.PathIgnoreOptions, static option => option.Id == IgnoreOptionId.HideSecrets);
+            var checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets);
+			var processingList = UiTestDriver.GetRequiredControl<ListBox>(window, "ContentProcessingOptionsList");
+			var processingBorder = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
+			var processingContent = Assert.IsType<Grid>(processingBorder.Child);
+			var helpIndicator = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingHelpIndicator");
+			var questionIcon = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingQuestionIcon");
+			var warningIcon = UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingWarningIcon");
+            var ignoreList = UiTestDriver.GetRequiredControl<ListBox>(window, "IgnoreOptionsList");
+			Assert.Equal("Content processing:", UiTestDriver.GetRequiredControl<TextBlock>(window, "ContentProcessingHeaderText").Text);
+			Assert.Contains(processingList, processingContent.Children);
+			Assert.Contains(helpIndicator, processingContent.Children);
+			Assert.Null(helpIndicator.Cursor);
+			Assert.False(helpIndicator.IsVisible);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 3, hiddenCount: 2);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.True(helpIndicator.IsVisible);
+			await UiTestDriver.ClickAsync(window, helpIndicator);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => ToolTip.GetIsOpen(helpIndicator),
+				"the content-processing tooltip to open on click");
+			var helpToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(helpIndicator));
+			var helpText = Assert.IsType<TextBlock>(helpToolTip.Content);
+			Assert.Equal("Found: 3. Hidden: 2.", helpText.Text);
+			Assert.Equal(PlacementMode.Left, ToolTip.GetPlacement(helpIndicator));
+			Assert.True(questionIcon.IsVisible);
+			Assert.False(warningIcon.IsVisible);
+			var helpIndicatorTransform = helpIndicator.RenderTransform?.Value ?? Matrix.Identity;
+			Assert.InRange(helpIndicatorTransform.M32, 3, 5);
+			var questionIconTransform = questionIcon.RenderTransform?.Value ?? Matrix.Identity;
+			Assert.InRange(questionIconTransform.M32, -1.5, -0.5);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Failed);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal("The analysis could not be completed.", helpText.Text);
+			Assert.False(questionIcon.IsVisible);
+			Assert.True(warningIcon.IsVisible);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 0, hiddenCount: 0);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal("DevProjex found no secrets", viewModel.SettingsSecretsNotice);
+			Assert.False(UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Same(viewModel.ContentProcessingOptions, processingList.ItemsSource);
+			Assert.Single(viewModel.ContentProcessingOptions);
+			Assert.Contains(checkBox.GetVisualAncestors(), ancestor => ReferenceEquals(ancestor, processingList));
+            Assert.DoesNotContain(checkBox.GetVisualAncestors(), ancestor => ReferenceEquals(ancestor, ignoreList));
+			var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
+			var processingPosition = Assert.IsType<Point>(processingList.TranslatePoint(default, settingsPanel));
+			var ignorePosition = Assert.IsType<Point>(ignoreList.TranslatePoint(default, settingsPanel));
+			Assert.True(processingPosition.Y < ignorePosition.Y);
+
+			viewModel.ContentProcessingOptions.Add(
+				new IgnoreOptionViewModel(IgnoreOptionId.HiddenFiles, "Future transformation", false));
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(2, processingList.ItemCount);
+
+            var ignoreAll = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
+            await UiTestDriver.RaiseButtonClickAsync(ignoreAll);
+            Assert.False(hideSecrets.IsChecked);
+            await UiTestDriver.RaiseButtonClickAsync(ignoreAll);
+            Assert.False(hideSecrets.IsChecked);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    private static async Task SetIgnoreAllCheckedAsync(MainWindow window, bool isChecked)
+    {
+        var viewModel = UiTestDriver.GetViewModel(window);
+        if (viewModel.AllIgnoreChecked == isChecked)
+            return;
+
+        await UiTestDriver.ClickAsync(
+            window,
+            UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+        await UiTestDriver.WaitForConditionAsync(
+            window,
+            () => viewModel.AllIgnoreChecked == isChecked,
+            $"the all-ignore checkbox to become {isChecked}");
+        await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
     }
 
     private static void EnsureGitAvailable()

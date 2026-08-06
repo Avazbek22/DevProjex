@@ -4,7 +4,7 @@
 │v [x] <PROJECT>               ││+ <PROJECT>                             │
 │  > [x] src                                          ││  + src                                                        │
 │    [┌┤Export project├─────────────────────────────────────────────────────────────────────────────────────────┐      │
-│    [│ Destination: <OUTPUT_ROOT>\project-export           ▲ │      │
+│    [│ Destination: <OUTPUT_ROOT>/project-export           ▲ │      │
 │     │ Files: 4  |  Folders: 3  |  Size: 76 B                                                                █ │      │
 │     │ Elapsed: <ELAPSED>                                                                                         █ │      │
 │     │                                                                                                       █ │      │

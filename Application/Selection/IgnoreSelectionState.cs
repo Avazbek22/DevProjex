@@ -117,7 +117,9 @@ public sealed class IgnoreSelectionState
 		RebuildSelectedOptions();
 	}
 
-	public void ApplyAllPreferenceToKnownStates(bool isChecked)
+	public void ApplyAllPreferenceToKnownStates(
+		bool isChecked,
+		IgnoreOptionId? excludedOption = null)
 	{
 		if (_optionStateCache.Count == 0)
 			return;
@@ -125,7 +127,11 @@ public sealed class IgnoreSelectionState
 		RememberActiveGitFilteringMode();
 		var knownIds = new List<IgnoreOptionId>(_optionStateCache.Keys);
 		foreach (var id in knownIds)
+		{
+			if (id == excludedOption)
+				continue;
 			_optionStateCache[id] = isChecked;
+		}
 
 		if (isChecked &&
 		    _optionStateCache.ContainsKey(IgnoreOptionId.UseGitIgnore) &&

@@ -1,4 +1,5 @@
 using DevProjex.Application.Selection;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Application.Services;
 
@@ -36,7 +37,8 @@ public sealed class TreeAndContentExportService(
 		IReadOnlySet<string> selectedPaths,
 		TreeTextFormat format,
 		CancellationToken cancellationToken,
-		ExportPathPresentation? pathPresentation = null)
+		ExportPathPresentation? pathPresentation = null,
+		SecretRedactionContext? redactionContext = null)
 	{
 		var displayRootPath = pathPresentation?.DisplayRootPath;
 		var displayRootName = pathPresentation?.DisplayRootName;
@@ -55,7 +57,12 @@ public sealed class TreeAndContentExportService(
 			ensureExists: hasSelection);
 		var contentPathMapper = CreateRelativeContentHeaderPathMapper(rootPath);
 
-		var content = await contentExport.BuildAsync(files, cancellationToken, contentPathMapper).ConfigureAwait(false);
+		var contentResult = await contentExport.BuildResultAsync(
+			files,
+			cancellationToken,
+			contentPathMapper,
+			redactionContext).ConfigureAwait(false);
+		var content = contentResult.Text;
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;
 

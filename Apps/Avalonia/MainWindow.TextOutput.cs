@@ -86,7 +86,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveUserFacingOutputErrorMessage(ex));
         }
     }
 
@@ -131,7 +131,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveUserFacingOutputErrorMessage(ex));
         }
     }
 
@@ -142,7 +142,8 @@ public partial class MainWindow
             GetCheckedPaths(),
             _currentTree.OrderedFilePaths,
             GetCurrentTreeTextFormat(),
-            CreateExportPathPresentation());
+			CreateExportPathPresentation(),
+			CreateSecretRedactionContext());
 
     private bool EnsureTrackedGitOutputReady()
     {

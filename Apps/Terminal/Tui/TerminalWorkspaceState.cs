@@ -111,6 +111,21 @@ public sealed class TerminalWorkspaceState : IDisposable
 		SetPreviewDocument(new InMemoryPreviewTextDocument(BuildTreePreview()));
 	}
 
+	public void ReplaceContentTransformationPlan(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		if (!ReferenceEquals(Plan.EffectiveTree, plan.EffectiveTree) ||
+		    !ReferenceEquals(Plan.ProjectedTree, plan.ProjectedTree))
+		{
+			throw new ArgumentException(
+				"A content-only plan update must preserve both tree instances.",
+				nameof(plan));
+		}
+
+		Interlocked.Increment(ref _revision);
+		Plan = plan;
+	}
+
 	public bool TryReplacePlan(ProjectContextPlan plan, long expectedRevision)
 	{
 		if (Revision != expectedRevision)

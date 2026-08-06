@@ -198,6 +198,34 @@ public sealed partial class TerminalLocalizationContractTests
 		Assert.Equal("Файл параметров:", catalogs["ru"]["Terminal.Tui.ProfileFile"]);
 	}
 
+	[Fact]
+	public void ContentProcessingTitleAndStatusUseOneSharedDesktopAndTuiContract()
+	{
+		var catalogs = ReadCatalogs();
+		foreach (var (locale, catalog) in catalogs)
+		{
+			Assert.True(
+				catalog.TryGetValue("Settings.Secrets.Title", out var title) &&
+				!string.IsNullOrWhiteSpace(title),
+				$"Settings.Secrets.Title is missing in {locale}.json.");
+			Assert.False(
+				catalog.ContainsKey("Settings.ContentProcessing.Title"),
+				$"{locale}.json contains a second content-processing title contract.");
+			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.Secrets.Status.Failed"]));
+			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.Ignore.HideSecrets.NoMatches"]));
+			Assert.Contains("{0}", catalog["Settings.Secrets.Status.Applied"], StringComparison.Ordinal);
+			Assert.Contains("{1}", catalog["Settings.Secrets.Status.Applied"], StringComparison.Ordinal);
+			Assert.Equal(3, catalog["Preview.Secret.Redacted.Tooltip"].Split('\n').Length);
+			Assert.Equal(4, catalog["Preview.Secret.Kept.Tooltip"].Split('\n').Length);
+		}
+
+		Assert.Equal("Content processing:", catalogs["en"]["Settings.Secrets.Title"]);
+		Assert.Equal("Обработка содержимого:", catalogs["ru"]["Settings.Secrets.Title"]);
+		Assert.Equal("DevProjex не нашел секреты", catalogs["ru"]["Settings.Ignore.HideSecrets.NoMatches"]);
+		Assert.Equal("Найдено: {0}. Скрыто: {1}.", catalogs["ru"]["Settings.Secrets.Status.Applied"]);
+		Assert.Equal("Не удалось завершить анализ.", catalogs["ru"]["Settings.Secrets.Status.Failed"]);
+	}
+
 	private static Dictionary<string, Dictionary<string, string>> ReadCatalogs()
 	{
 		var directory = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");

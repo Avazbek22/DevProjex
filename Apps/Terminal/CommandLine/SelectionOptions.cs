@@ -11,6 +11,7 @@ internal sealed class SelectionOptions
 	public Option<string[]> SelectedPaths { get; }
 	public Option<GitFilteringMode?> GitMode { get; }
 	public Option<CliExclusionValue[]> Exclusions { get; }
+	public Option<bool> HideSecrets { get; }
 
 	public SelectionOptions(
 		LocalizationService localization,
@@ -41,6 +42,10 @@ internal sealed class SelectionOptions
 			CliChoiceSets.GitMode,
 			localization);
 		Exclusions = RepeatableExclusions(localization);
+		HideSecrets = new Option<bool>("--hide-secrets")
+		{
+			Description = localization["Terminal.Option.HideSecrets"]
+		};
 	}
 
 	public void AddTo(Command command)
@@ -51,6 +56,7 @@ internal sealed class SelectionOptions
 		command.Options.Add(SelectedPaths);
 		command.Options.Add(GitMode);
 		command.Options.Add(Exclusions);
+		command.Options.Add(HideSecrets);
 	}
 
 	public async Task<ProjectSelectionSpec> ResolveAsync(
@@ -67,12 +73,16 @@ internal sealed class SelectionOptions
 		var exclusions = parseResult.GetResult(Exclusions) is null
 			? null
 			: ParseExclusions(parseResult.GetValue(Exclusions) ?? []);
+		bool? hideSecrets = parseResult.GetResult(HideSecrets) is { Implicit: false }
+			? parseResult.GetValue(HideSecrets)
+			: null;
 		var overrides = new ProjectSelectionSpec(
 			Roots: GetExplicitValues(parseResult, Roots),
 			Extensions: GetExplicitValues(parseResult, Extensions),
 			SelectedPaths: GetExplicitValues(parseResult, SelectedPaths),
 			GitMode: gitMode,
 			Exclusions: exclusions,
+			HideSecrets: hideSecrets,
 			ProfileSource: profile);
 
 		return await services.SelectionResolver

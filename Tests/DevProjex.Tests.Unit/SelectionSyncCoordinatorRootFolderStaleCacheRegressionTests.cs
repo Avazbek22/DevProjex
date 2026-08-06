@@ -1,6 +1,5 @@
 using DevProjex.Application.Models;
 using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Unit;
 

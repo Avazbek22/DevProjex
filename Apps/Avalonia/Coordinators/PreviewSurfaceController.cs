@@ -1,7 +1,5 @@
-using System.ComponentModel;
-using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -32,6 +30,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly LocalizationService _localization;
     private readonly IToastService _toastService;
     private readonly PreviewDocumentBuilder _previewDocumentBuilder;
+	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
     private readonly SelectedContentExportService _contentExport;
     private readonly ProjectTextOutputPipeline _textOutputPipeline;
     private readonly TreeExportService _treeExport;
@@ -40,6 +39,8 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly Func<bool> _ensureClipboardOutputReady;
     private readonly Func<string, Task> _setClipboardTextAsync;
     private readonly Func<string, Task> _showErrorAsync;
+	private readonly Func<SecretRedactionContext?> _redactionContextProvider;
+	private readonly Action _requestRedactionRefresh;
 
     private CancellationTokenSource? _selectionMetricsCts;
     private DispatcherTimer? _selectionMetricsDebounceTimer;
@@ -48,6 +49,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         ExportOutputMetrics.Empty;
     private bool _hasSelectionMetricsSnapshot;
     private bool _scrollSyncActive;
+	private Vector? _pendingRedactionViewportOffset;
     private bool _disposed;
 
     public PreviewSurfaceController(
@@ -57,6 +59,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         LocalizationService localization,
         IToastService toastService,
         PreviewDocumentBuilder previewDocumentBuilder,
+		SecretRedactionOutputPreparer secretRedactionPreparer,
         SelectedContentExportService contentExport,
         ProjectTextOutputPipeline textOutputPipeline,
         TreeExportService treeExport,
@@ -64,7 +67,9 @@ internal sealed class PreviewSurfaceController : IDisposable
         PreviewWorkspacePipeline previewPipeline,
         Func<bool> ensureClipboardOutputReady,
         Func<string, Task> setClipboardTextAsync,
-        Func<string, Task> showErrorAsync)
+        Func<string, Task> showErrorAsync,
+		Func<SecretRedactionContext?> redactionContextProvider,
+		Action requestRedactionRefresh)
     {
         _window = window;
         _viewModel = viewModel;
@@ -72,6 +77,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         _localization = localization;
         _toastService = toastService;
         _previewDocumentBuilder = previewDocumentBuilder;
+		_secretRedactionPreparer = secretRedactionPreparer;
         _contentExport = contentExport;
         _textOutputPipeline = textOutputPipeline;
         _treeExport = treeExport;
@@ -80,6 +86,8 @@ internal sealed class PreviewSurfaceController : IDisposable
         _ensureClipboardOutputReady = ensureClipboardOutputReady;
         _setClipboardTextAsync = setClipboardTextAsync;
         _showErrorAsync = showErrorAsync;
+		_redactionContextProvider = redactionContextProvider;
+		_requestRedactionRefresh = requestRedactionRefresh;
 
         controls.TextControl.VerticalOffset =
             Math.Max(0, controls.TextScrollViewer.Offset.Y);
@@ -91,7 +99,21 @@ internal sealed class PreviewSurfaceController : IDisposable
         controls.TextControl.CopiedToClipboard += OnCopiedToClipboard;
         controls.TextControl.PreviewSelectionChanged +=
             OnSelectionChanged;
+		controls.TextControl.RedactionToggleRequested += OnRedactionToggleRequested;
     }
+
+	private void OnRedactionToggleRequested(
+		object? sender,
+		PreviewRedactionToggleRequestedEventArgs e)
+	{
+		var context = _redactionContextProvider();
+		if (context is null)
+			return;
+
+		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+		context.Session.ToggleKeepAsIs(e.OccurrenceId);
+		_requestRedactionRefresh();
+	}
 
     public bool HasSelectionMetricsSnapshot =>
         _hasSelectionMetricsSnapshot;
@@ -325,6 +347,11 @@ internal sealed class PreviewSurfaceController : IDisposable
             string noCheckedFilesText,
             CancellationToken cancellationToken)
     {
+		// A partial warmup cannot assign the same deterministic secret indexes as the full
+		// selection. Skip it instead of briefly presenting an unredacted or inconsistent preview.
+		if (_redactionContextProvider() is not null)
+			return null;
+
         if (!PreviewWarmupPolicy.ShouldBuildPreviewWarmup(
                 mode,
                 hasSelection,
@@ -451,6 +478,20 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         if (selectedMode == PreviewContentMode.Tree)
         {
+			var redactionContext = _redactionContextProvider();
+			if (redactionContext is not null && currentTreeRoot is not null)
+			{
+				var selectedFiles = ResolvePreviewFiles(
+					selectedPaths,
+					hasSelection,
+					currentTreeRoot,
+					currentTreeOrderedFilePaths);
+				_secretRedactionPreparer
+					.AnalyzeAsync(redactionContext, selectedFiles, cancellationToken)
+					.GetAwaiter()
+					.GetResult();
+			}
+
             var treePreviewText =
                 !string.IsNullOrWhiteSpace(currentPath) &&
                 currentTreeRoot is not null
@@ -495,7 +536,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                 _previewDocumentBuilder.BuildContentDocumentAsync(
                         files,
                         cancellationToken,
-                        pathPresentation?.MapFilePath)
+						pathPresentation?.MapFilePath,
+						redactionContext: _redactionContextProvider())
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -558,7 +600,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     cancellationToken,
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
-                            currentPath))
+							currentPath),
+					redactionContext: _redactionContextProvider())
                 .GetAwaiter()
                 .GetResult();
         return new PreviewBuildResult(document);
@@ -588,6 +631,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     public void ClearDocument()
     {
+		_pendingRedactionViewportOffset = null;
         ClearSelectionMetrics();
         var previousDocument = _viewModel.PreviewDocument;
         _viewModel.PreviewDocument = null;
@@ -668,6 +712,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         _disposed = true;
         _controls.TextControl.CopyingToClipboard -=
             OnCopyingToClipboard;
+		_controls.TextControl.RedactionToggleRequested -= OnRedactionToggleRequested;
         _controls.TextControl.CopiedToClipboard -=
             OnCopiedToClipboard;
         _controls.TextControl.PreviewSelectionChanged -=
@@ -691,19 +736,22 @@ internal sealed class PreviewSurfaceController : IDisposable
         IPreviewTextDocument document,
         int lineCount)
     {
+		var preservedOffset = _pendingRedactionViewportOffset;
+		_pendingRedactionViewportOffset = null;
         ClearSelectionMetrics();
         var previousDocument = _viewModel.PreviewDocument;
         _viewModel.PreviewDocument = document;
         _viewModel.PreviewText = string.Empty;
         _viewModel.PreviewLineCount = Math.Max(1, lineCount);
 
-        _controls.TextScrollViewer.Offset = default;
-        _controls.LineNumbersControl.VerticalOffset = 0;
+		if (preservedOffset is null)
+			_controls.TextScrollViewer.Offset = default;
+		_controls.LineNumbersControl.VerticalOffset = preservedOffset?.Y ?? 0;
         _controls.LineNumbersControl.ExtentHeight =
             Math.Max(0, _controls.TextScrollViewer.Extent.Height);
         _controls.LineNumbersControl.ViewportHeight =
             Math.Max(0, _controls.TextScrollViewer.Viewport.Height);
-        _controls.TextControl.VerticalOffset = 0;
+		_controls.TextControl.VerticalOffset = preservedOffset?.Y ?? 0;
         _controls.TextControl.ViewportHeight =
             Math.Max(0, _controls.TextScrollViewer.Viewport.Height);
         _controls.TextControl.ViewportWidth =
@@ -714,9 +762,40 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         UpdateStickyPath();
         Dispatcher.UIThread.Post(
-            UpdateStickyPath,
+			() =>
+			{
+				if (preservedOffset is { } offset)
+					RestoreViewportAfterRedaction(offset);
+				else
+					UpdateStickyPath();
+			},
             DispatcherPriority.Render);
     }
+
+	private void RestoreViewportAfterRedaction(Vector requestedOffset)
+	{
+		var scrollViewer = _controls.TextScrollViewer;
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+		var restoredOffset = new Vector(
+			Math.Clamp(requestedOffset.X, 0, maximumX),
+			Math.Clamp(requestedOffset.Y, 0, maximumY));
+
+		try
+		{
+			_scrollSyncActive = true;
+			scrollViewer.Offset = restoredOffset;
+			_controls.LineNumbersControl.VerticalOffset = restoredOffset.Y;
+			_controls.TextControl.HorizontalOffset = restoredOffset.X;
+			_controls.TextControl.VerticalOffset = restoredOffset.Y;
+		}
+		finally
+		{
+			_scrollSyncActive = false;
+		}
+
+		UpdateStickyPath();
+	}
 
     private IReadOnlyList<string> ResolvePreviewFiles(
         IReadOnlySet<string> selectedPaths,

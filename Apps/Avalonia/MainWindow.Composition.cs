@@ -1,12 +1,9 @@
-using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
-using DevProjex.Application.Context;
 using DevProjex.Application.DesktopControl;
+using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.RecentProjects;
-using DevProjex.Infrastructure.Reports;
-using DevProjex.Kernel;
 using DevProjex.Terminal.DesktopControl;
 using ThemeSettingsStore =
     DevProjex.Infrastructure.ThemePresets.ThemeSettingsStore;
@@ -17,6 +14,150 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow
 {
+	private void OnSecretRedactionSnapshotPublished(
+		object? sender,
+		SecretRedactionSnapshotPublishedEventArgs eventArgs)
+	{
+		Dispatcher.UIThread.Post(() =>
+		{
+			var snapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
+			if (snapshot is null || snapshot.SelectionKey != eventArgs.Snapshot.SelectionKey)
+				return;
+
+			_secretRedactionMatchedCount = snapshot.DetectedCount;
+			_secretRedactionCount = snapshot.RedactedCount;
+			_secretRedactionScanState = SecretScanState.Completed;
+			_viewModel.SetContentProcessingStatus(
+				SecretScanState.Completed,
+				snapshot.DetectedCount,
+				snapshot.RedactedCount);
+			_selectionCoordinator.RelabelIgnoreOptions(
+				AdvancedIgnoreCountsAlwaysEnabled,
+				snapshot.RedactedCount,
+				_secretRedactionScanState,
+				snapshot.DetectedCount);
+		});
+	}
+
+	private SecretRedactionSnapshot? GetCachedSecretRedactionSnapshotForCurrentSelection()
+	{
+		if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
+		    _currentTree is null ||
+		    string.IsNullOrWhiteSpace(_currentPath) ||
+		    !_selectionCoordinator.GetSelectedIgnoreOptionIds().Contains(IgnoreOptionId.HideSecrets))
+		{
+			return null;
+		}
+
+		var selectedPaths = GetCheckedPaths();
+		var files = selectedPaths.Count > 0
+			? BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths)
+			: _currentTree.OrderedFilePaths ??
+			  PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(_currentTree.Root);
+		return _secretRedactionSession.GetSnapshot(_currentPath, files);
+	}
+
+	private SecretRedactionContext? CreateSecretRedactionContext()
+	{
+		if (string.IsNullOrWhiteSpace(_currentPath) ||
+		    !_selectionCoordinator.GetSelectedIgnoreOptionIds().Contains(IgnoreOptionId.HideSecrets))
+		{
+			return null;
+		}
+
+		return new SecretRedactionContext(_currentPath, _secretRedactionSession);
+	}
+
+	private void ScheduleSecretRedactionCountRefresh()
+	{
+		var refreshVersion = Interlocked.Increment(ref _secretRedactionCountRefreshVersion);
+		CancelAndDispose(ref _secretRedactionCountCts);
+
+		if (_secretRedactionCount is not null ||
+		    _viewModel.IsAnyPreviewVisible ||
+		    _windowLifetimeCts is not { IsCancellationRequested: false } ||
+		    _currentTree is null ||
+		    string.IsNullOrWhiteSpace(_currentPath) ||
+		    !_selectionCoordinator.GetSelectedIgnoreOptionIds().Contains(IgnoreOptionId.HideSecrets))
+		{
+			return;
+		}
+
+		_secretRedactionScanState = SecretScanState.Scanning;
+		_viewModel.SetContentProcessingStatus(SecretScanState.Scanning);
+		_selectionCoordinator.RelabelIgnoreOptions(
+			AdvancedIgnoreCountsAlwaysEnabled,
+			secretRedactionsCount: null,
+			_secretRedactionScanState,
+			secretMatchesCount: null);
+
+		var selectedPaths = GetCheckedPaths();
+		var files = selectedPaths.Count > 0
+			? BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths)
+			: _currentTree.OrderedFilePaths ??
+			  PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(_currentTree.Root);
+		var projectPath = _currentPath;
+		var countCts = new CancellationTokenSource();
+		_secretRedactionCountCts = countCts;
+		_ = RefreshSecretRedactionCountAsync(
+			new SecretRedactionContext(projectPath, _secretRedactionSession),
+			files,
+			refreshVersion,
+			countCts);
+	}
+
+	private async Task RefreshSecretRedactionCountAsync(
+		SecretRedactionContext context,
+		IReadOnlyList<string> files,
+		long refreshVersion,
+		CancellationTokenSource countCts)
+	{
+		try
+		{
+			await _secretRedactionPreparer
+				.AnalyzeAsync(context, files, countCts.Token)
+				.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (countCts.IsCancellationRequested)
+		{
+			// A newer selection or the real Preview owns the next scan.
+		}
+		catch (Exception exception)
+		{
+			if (refreshVersion != Volatile.Read(ref _secretRedactionCountRefreshVersion) ||
+			    _windowLifetimeCts is not { IsCancellationRequested: false })
+			{
+				return;
+			}
+
+			var message = ResolveUserFacingOutputErrorMessage(exception);
+			await Dispatcher.UIThread.InvokeAsync(() =>
+			{
+				_secretRedactionScanState = SecretScanState.Failed;
+				_viewModel.SetContentProcessingStatus(SecretScanState.Failed);
+				_selectionCoordinator.RelabelIgnoreOptions(
+					AdvancedIgnoreCountsAlwaysEnabled,
+					secretRedactionsCount: null,
+					_secretRedactionScanState,
+					secretMatchesCount: null);
+				return ShowErrorAsync(message);
+			});
+		}
+		finally
+		{
+			DisposeIfCurrent(ref _secretRedactionCountCts, countCts);
+		}
+	}
+
+	private string ResolveUserFacingOutputErrorMessage(Exception exception) => exception switch
+	{
+		SecretScanLimitExceededException =>
+			_localization["Error.ProjectCopy.SecretScanLimitExceeded"],
+		SecretDetectionException =>
+			_localization["Error.ProjectCopy.SecretDetectionFailed"],
+		_ => exception.Message
+	};
+
     public MainWindow()
         : this(DesktopStartupOptions.Default, AvaloniaCompositionRoot.CreateDefault(DesktopStartupOptions.Default))
     {
@@ -191,6 +332,13 @@ public partial class MainWindow
     private readonly IReadOnlyList<string> _startupErrors;
     private readonly ITerminalCommandSetupService _terminalCommandSetupService;
     private readonly SessionMetricsRecorder _sessionMetrics;
+	private readonly SecretRedactionSession _secretRedactionSession;
+	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
+	private CancellationTokenSource? _secretRedactionCountCts;
+	private long _secretRedactionCountRefreshVersion;
+	private int? _secretRedactionCount;
+	private int? _secretRedactionMatchedCount;
+	private SecretScanState _secretRedactionScanState = SecretScanState.Disabled;
 
     public MainWindow(
         DesktopStartupOptions startupOptions,
@@ -223,6 +371,9 @@ public partial class MainWindow
         _zipDownloadService = services.ZipDownloadService;
         _terminalCommandSetupService = services.TerminalCommandSetupService;
         _sessionMetrics = services.SessionMetricsRecorder;
+		_secretRedactionSession = services.SecretRedactionSession;
+		_secretRedactionPreparer = new SecretRedactionOutputPreparer(services.FileContentAnalyzer);
+		_secretRedactionSession.SnapshotPublished += OnSecretRedactionSnapshotPublished;
         _recentProjectsStore = services.RecentProjectsStore;
         _recentWorkspacesService = services.RecentWorkspacesService;
         _recentFolderAvailabilityService = services.RecentFolderAvailabilityService;
@@ -269,7 +420,9 @@ public partial class MainWindow
             GetIgnoreOptionsAvailability,
             TryElevateAndRestart,
             () => _currentPath,
-            _statusOperations);
+            _statusOperations,
+            ScheduleContentTransformationRefresh,
+            InvalidateSecretRedactionCount);
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(
@@ -435,6 +588,7 @@ public partial class MainWindow
             _localization,
             _toastService,
             _previewDocumentBuilder,
+			_secretRedactionPreparer,
             _contentExport,
             _textOutputPipeline,
             _treeExport,
@@ -442,7 +596,9 @@ public partial class MainWindow
             _previewPipeline,
             EnsureTrackedGitOutputReady,
             SetClipboardTextAsync,
-            ShowErrorAsync);
+			ShowErrorAsync,
+			CreateSecretRedactionContext,
+			ScheduleContentTransformationRefresh);
         _previewWorkspaceController = new PreviewWorkspaceController(
             this,
             _viewModel,
@@ -610,6 +766,10 @@ public partial class MainWindow
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.IsAnyPreviewVisible))
             {
+				if (_viewModel.IsAnyPreviewVisible)
+					CancelAndDispose(ref _secretRedactionCountCts);
+				else
+					ScheduleSecretRedactionCountRefresh();
                 if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
                     _metrics.RenderStatusBarMetrics();
                 _sessionMetrics.RecordPreviewModeChanged(

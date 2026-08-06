@@ -16,8 +16,27 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Architecture.md",
 		"CLI-Profiles.md",
 		"Desktop-Control.md",
-		"SmartIgnore.md"
+		"SmartIgnore.md",
+		"HideSecrets.md"
 	];
+
+	[Fact]
+	public void SecretRuleAttributionShipsWithTheEmbeddedConfiguration()
+	{
+		var rootPath = FindRepositoryRoot();
+		var infrastructureProject = XDocument.Load(
+			Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var embeddedResources = infrastructureProject
+			.Descendants("EmbeddedResource")
+			.Select(element => element.Attribute("Include")?.Value)
+			.ToArray();
+
+		Assert.Contains("Secrets\\Rules\\gitleaks-v8.30.1.toml", embeddedResources);
+		Assert.Contains("..\\THIRD-PARTY-NOTICES.md", embeddedResources);
+		var notices = File.ReadAllText(Path.Combine(rootPath, "THIRD-PARTY-NOTICES.md"));
+		Assert.Contains("Copyright (c) 2019 Zachary Rice", notices, StringComparison.Ordinal);
+		Assert.Contains("Copyright (c) 2019-2026, Alexandre Mutel", notices, StringComparison.Ordinal);
+	}
 
 	[Fact]
 	public void ReadmeCommandExamplesParseAgainstTheProductionCommandTree()
@@ -307,6 +326,12 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Published Broken Pipe Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Startup Smoke (macOS)", workflow, StringComparison.Ordinal);
+		Assert.Contains("branches: [ \"master\", \"v5.1\" ]", workflow, StringComparison.Ordinal);
+		Assert.Contains("Smart Secrets context contract", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"Password=DEVPROJEX_REDACTED[connection-password#1]",
+			workflow,
+			StringComparison.Ordinal);
 		Assert.Contains("mixed-case analysis JSON", workflow, StringComparison.Ordinal);
 		Assert.Contains("NO_COLOR analysis", workflow, StringComparison.Ordinal);
 		Assert.Contains("context dry-run", workflow, StringComparison.Ordinal);
@@ -415,6 +440,42 @@ public sealed class DocumentationAndPackagingContractTests
 			element =>
 				element.Attribute("Remove")?.Value == "@(ResolvedFileToPublish)" &&
 				element.Attribute("Condition")?.Value.Contains(".pdb", StringComparison.Ordinal) == true);
+	}
+
+	[Fact]
+	public void ReleaseValidationInlineScriptsStayBelowGitHubExpressionLimit()
+	{
+		const int inlineScriptSafetyLimit = 18_000;
+		var rootPath = FindRepositoryRoot();
+		var workflowPath = Path.Combine(rootPath, ".github", "workflows", "release-validate.yml");
+		var lines = File.ReadAllLines(workflowPath);
+
+		for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+		{
+			var runBlockMatch = Regex.Match(lines[lineIndex], "^(\\s*)run:\\s*[|>]\\s*$");
+			if (!runBlockMatch.Success)
+				continue;
+
+			var runIndent = runBlockMatch.Groups[1].Value.Length;
+			var bodyLength = 0;
+			for (var bodyLineIndex = lineIndex + 1; bodyLineIndex < lines.Length; bodyLineIndex++)
+			{
+				var bodyLine = lines[bodyLineIndex];
+				if (bodyLine.Length > 0)
+				{
+					var bodyIndent = bodyLine.Length - bodyLine.TrimStart().Length;
+					if (bodyIndent <= runIndent)
+						break;
+				}
+
+				bodyLength += bodyLine.Length + 1;
+			}
+
+			Assert.True(
+				bodyLength < inlineScriptSafetyLimit,
+				$"Inline run block at {Path.GetFileName(workflowPath)}:{lineIndex + 1} is " +
+				$"{bodyLength} characters. Split it before GitHub's 21,000-character expression limit.");
+		}
 	}
 
 	[Fact]

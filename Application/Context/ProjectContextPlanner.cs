@@ -106,6 +106,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Extensions = ResolveExtensionSelectionIntent(selection, refreshedLocalState, loaded),
 			GitMode = ResolveGitModeIntent(selection, refreshedLocalState, loaded),
 			Exclusions = ResolveExclusionIntent(selection, refreshedLocalState, loaded),
+			HideSecrets = ResolveHideSecretsIntent(selection, refreshedLocalState, loaded),
 			SelectedPaths = NormalizeRelativeSelectionForOutput(
 				sourceRoot,
 				selectedFullPaths),
@@ -223,6 +224,26 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				selection,
 				includedNodes),
 			IncludedBytes = includedBytes
+		};
+	}
+
+	/// <summary>
+	/// Applies a content transformation without touching discovery, ignore rules, or the tree.
+	/// </summary>
+	public ProjectContextPlan ApplyContentTransformationSelection(
+		ProjectContextPlan baseline,
+		bool hideSecrets)
+	{
+		ArgumentNullException.ThrowIfNull(baseline);
+		var selection = baseline.Selection with { HideSecrets = hideSecrets };
+		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodes(
+			baseline.EffectiveTree,
+			baseline.SelectedFullPaths);
+		return baseline with
+		{
+			Selection = selection,
+			Fingerprint = BuildFingerprint(baseline.SourceRoot, selection, includedNodes),
+			Redaction = null
 		};
 	}
 
@@ -349,7 +370,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				"Selection profile was not fully resolved.");
 		}
 
-		return selection;
+		var legacyHideSecrets = selection.Exclusions.Contains(ProjectExclusion.HideSecrets);
+		return selection with
+		{
+			Exclusions = selection.Exclusions
+				.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
+				.OrderBy(static exclusion => (int)exclusion)
+				.ToArray(),
+			HideSecrets = selection.HideSecrets ?? legacyHideSecrets
+		};
 	}
 
 	private static ProjectSelectionSpec ResolveLocalOverrideIntent(ProjectSelectionSpec selection)
@@ -375,7 +404,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			                          !SetEquals(
 				                          selection.Exclusions,
 				                          ProjectSelectionAdapter.ToExclusions(profileIgnoreOptions),
-				                          EqualityComparer<ProjectExclusion>.Default)
+				                          EqualityComparer<ProjectExclusion>.Default) ||
+			                          selection.HideSecrets != profileIgnoreOptions.Contains(IgnoreOptionId.HideSecrets)
 		};
 
 		return selection with { LocalProfileState = inferredState };
@@ -530,6 +560,16 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				? ProjectSelectionAdapter.ToExclusions(loaded.SelectedIgnoreOptions)
 				: selection.Exclusions ?? []
 			: ProjectSelectionAdapter.ToExclusions(ResolveStoredIgnoreSelection(state.Profile));
+
+	private static bool ResolveHideSecretsIntent(
+		ProjectSelectionSpec selection,
+		LocalProjectSelectionState? state,
+		LoadedProjectAnalysisRequest loaded) =>
+		state is null || state.IgnoreOptionsOverridden
+			? state is null
+				? loaded.SelectedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets)
+				: selection.HideSecrets == true
+			: ResolveStoredIgnoreSelection(state.Profile).Contains(IgnoreOptionId.HideSecrets);
 
 	private static IReadOnlyCollection<string> ResolveStoredSelection(
 		IReadOnlyCollection<string> selected,
@@ -719,6 +759,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		Append(selection.GitMode!.Value.ToString());
 		foreach (var exclusion in selection.Exclusions!.OrderBy(static value => value))
 			Append(exclusion.ToString());
+		Append($"hide-secrets:{selection.HideSecrets == true}");
 		foreach (var root in selection.Roots ?? [])
 			Append("r:" + root);
 		foreach (var extension in selection.Extensions ?? [])

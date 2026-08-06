@@ -1,4 +1,3 @@
-using System.Text;
 using Terminal.Gui.Text;
 
 namespace DevProjex.Terminal.Tui;

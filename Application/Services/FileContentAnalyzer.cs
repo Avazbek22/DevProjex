@@ -106,6 +106,158 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		CancellationToken cancellationToken = default) =>
 		ValueTask.FromResult(OpenCompleteSnapshotSync(path, cancellationToken));
 
+	public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+		string path,
+		long maximumBytes,
+		CancellationToken cancellationToken = default) =>
+		ValueTask.FromResult(OpenCompleteTextBufferSync(path, maximumBytes, cancellationToken));
+
+	private static ICompleteTextFileBuffer OpenCompleteTextBufferSync(
+		string path,
+		long maximumBytes,
+		CancellationToken cancellationToken)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(maximumBytes);
+		char[]? buffer = null;
+		var written = 0;
+		try
+		{
+			if (HasKnownBinaryExtension(path))
+				return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary);
+
+			using var stream = OpenSequentialRead(
+				path,
+				bufferSize: 1,
+				FileShare.Read | FileShare.Delete);
+			var sizeBytes = stream.Length;
+			if (sizeBytes == 0)
+				return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Text);
+
+			var bomEncoding = DetectBomEncoding(stream, cancellationToken);
+			var encoding = bomEncoding ?? StrictUtf8;
+			if (!CheckForNullBytes(stream, cancellationToken))
+				return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary, sizeBytes);
+			// The scan limit is a text-buffer bound, not a project-copy size limit.
+			// Classify known and null-bearing binaries first so large binary assets still
+			// pass through folder and ZIP exports unchanged.
+			if (sizeBytes > maximumBytes || sizeBytes > int.MaxValue)
+			{
+				return new ClassifiedCompleteTextFileBuffer(
+					FileContentClassification.TooLarge,
+					sizeBytes);
+			}
+
+			var capacity = Math.Max(1, encoding.GetMaxCharCount(checked((int)sizeBytes)));
+			buffer = ArrayPool<char>.Shared.Rent(capacity);
+			stream.Position = GetPreambleLength(bomEncoding);
+			var byteBuffer = ArrayPool<byte>.Shared.Rent(StreamingBufferSize);
+			try
+			{
+				var decoder = encoding.GetDecoder();
+				while (true)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					var bytesRead = stream.Read(byteBuffer, 0, StreamingBufferSize);
+					if (bytesRead == 0)
+						break;
+
+					var consumed = 0;
+					while (consumed < bytesRead)
+					{
+						decoder.Convert(
+							byteBuffer.AsSpan(consumed, bytesRead - consumed),
+							buffer.AsSpan(written),
+							flush: false,
+							out var bytesUsed,
+							out var charsUsed,
+							out _);
+						if (bytesUsed == 0 && charsUsed == 0)
+							throw new IOException("The complete text buffer capacity was exhausted.");
+						consumed += bytesUsed;
+						written = checked(written + charsUsed);
+					}
+				}
+
+				decoder.Convert(
+					ReadOnlySpan<byte>.Empty,
+					buffer.AsSpan(written),
+					flush: true,
+					out _,
+					out var finalChars,
+					out var completed);
+				written = checked(written + finalChars);
+				if (!completed)
+					throw new IOException("The complete text buffer capacity was exhausted.");
+			}
+			finally
+			{
+				CryptographicOperations.ZeroMemory(byteBuffer.AsSpan());
+				ArrayPool<byte>.Shared.Return(byteBuffer);
+			}
+
+			if (stream.Length != sizeBytes)
+				throw new IOException("The file changed while its text buffer was being read.");
+			if (buffer.AsSpan(0, written).Contains('\0'))
+				return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary, sizeBytes);
+
+			var result = new PooledCompleteTextFileBuffer(buffer, written, sizeBytes);
+			buffer = null;
+			written = 0;
+			return result;
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (UnauthorizedAccessException)
+		{
+			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.AccessDenied);
+		}
+		catch (FileNotFoundException)
+		{
+			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Missing);
+		}
+		catch (DirectoryNotFoundException)
+		{
+			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Missing);
+		}
+		catch (DecoderFallbackException)
+		{
+			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.UnsupportedEncoding);
+		}
+		catch (SecurityException)
+		{
+			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.AccessDenied);
+		}
+		catch (IOException)
+		{
+			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Unreadable);
+		}
+		finally
+		{
+			if (buffer is not null)
+			{
+				CryptographicOperations.ZeroMemory(
+					MemoryMarshal.AsBytes(buffer.AsSpan(0, written)));
+				ArrayPool<char>.Shared.Return(buffer);
+			}
+		}
+	}
+
+	private static int GetPreambleLength(Encoding? bomEncoding)
+	{
+		if (bomEncoding is null)
+			return 0;
+		if (ReferenceEquals(bomEncoding, StrictUtf8))
+			return 3;
+		if (ReferenceEquals(bomEncoding, StrictUtf16Le) ||
+		    ReferenceEquals(bomEncoding, StrictUtf16Be))
+		{
+			return 2;
+		}
+		return 4;
+	}
+
 	private static FileContentMetricsResult GetClassifiedMetricsSync(
 		string path,
 		CancellationToken cancellationToken)
@@ -348,7 +500,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 						CharCount: 0,
 						IsEmpty: true,
 						IsWhitespaceOnly: false,
-						IsEstimated: false));
+						IsEstimated: false),
+					TextFileEncoding.Utf8);
 			}
 
 			var encoding = DetectBomEncoding(stream, cancellationToken);
@@ -369,7 +522,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 						IsWhitespaceOnly: false,
 						IsEstimated: true,
 						TrailingNewlineChars: 0,
-						TrailingNewlineLineBreaks: 0));
+						TrailingNewlineLineBreaks: 0),
+					ResolveTextEncoding(encoding));
 			}
 
 			return new FileContentReadResult(
@@ -378,7 +532,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 					stream,
 					sizeBytes,
 					encoding ?? StrictUtf8,
-					cancellationToken));
+					cancellationToken),
+				ResolveTextEncoding(encoding));
 		}
 		catch (OperationCanceledException)
 		{
@@ -412,6 +567,23 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		{
 			return new FileContentReadResult(FileContentClassification.Unreadable);
 		}
+	}
+
+	private static TextFileEncoding ResolveTextEncoding(Encoding? bomEncoding)
+	{
+		if (bomEncoding is null)
+			return TextFileEncoding.Utf8;
+		if (ReferenceEquals(bomEncoding, StrictUtf8))
+			return TextFileEncoding.Utf8Bom;
+		if (ReferenceEquals(bomEncoding, StrictUtf16Le))
+			return TextFileEncoding.Utf16LittleEndian;
+		if (ReferenceEquals(bomEncoding, StrictUtf16Be))
+			return TextFileEncoding.Utf16BigEndian;
+		if (ReferenceEquals(bomEncoding, StrictUtf32Le))
+			return TextFileEncoding.Utf32LittleEndian;
+		if (ReferenceEquals(bomEncoding, StrictUtf32Be))
+			return TextFileEncoding.Utf32BigEndian;
+		throw new ArgumentOutOfRangeException(nameof(bomEncoding));
 	}
 
 	/// <summary>
@@ -753,6 +925,41 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		}
 
 		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	private sealed class ClassifiedCompleteTextFileBuffer(
+		FileContentClassification classification,
+		long sizeBytes = 0) : ICompleteTextFileBuffer
+	{
+		public FileContentClassification Classification { get; } = classification;
+		public long SizeBytes { get; } = sizeBytes;
+		public ReadOnlyMemory<char> Content => ReadOnlyMemory<char>.Empty;
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	private sealed class PooledCompleteTextFileBuffer(
+		char[] buffer,
+		int length,
+		long sizeBytes) : ICompleteTextFileBuffer
+	{
+		private char[]? _buffer = buffer;
+
+		public FileContentClassification Classification => FileContentClassification.Text;
+		public long SizeBytes { get; } = sizeBytes;
+		public ReadOnlyMemory<char> Content => (_buffer ??
+			throw new ObjectDisposedException(nameof(PooledCompleteTextFileBuffer))).AsMemory(0, length);
+
+		public ValueTask DisposeAsync()
+		{
+			var current = Interlocked.Exchange(ref _buffer, null);
+			if (current is not null)
+			{
+				CryptographicOperations.ZeroMemory(
+					MemoryMarshal.AsBytes(current.AsSpan(0, length)));
+				ArrayPool<char>.Shared.Return(current);
+			}
+			return ValueTask.CompletedTask;
+		}
 	}
 
 	private sealed class StreamFileContentSnapshot(

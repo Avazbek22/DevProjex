@@ -124,6 +124,7 @@ The workspace supports:
 - root and extension selection;
 - one Git filtering choice: none, `.gitignore`, or tracked files;
 - ordinary Exclusions independent from Git filtering;
+- opt-in Hide Secrets redaction with a count after the current selection is scanned;
 - tree, content, and tree-plus-content preview;
 - ASCII, JSON, XML, and Markdown formats;
 - file, folder, character, token, and byte metrics;
@@ -182,6 +183,10 @@ moving focus also makes the corresponding Tree, Preview, or Parameters pane visi
 focus and preview position survive Help, settings overlays, refreshes, exports,
 cancellation, and terminal resize.
 
+When Hide Secrets has findings, `[` and `]` move between highlighted occurrences;
+`Enter` or `Space` toggles keep-as-is for the active occurrence. That decision is
+used by every output in the current session and is not saved in the project profile.
+
 ## Preview
 
 The regular Preview follows the Desktop model: Tree, Content, or Tree + Content
@@ -219,25 +224,27 @@ boundary.
 `--no-mouse`, `--color never`, and `--plain` provide conservative fallbacks.
 `NO_COLOR`, `TERM=dumb`, redirected streams, and CI are also respected.
 
-Native macOS TUI beta validation covers published startup, keyboard navigation,
+Native macOS TUI validation covers published startup, keyboard navigation,
 resize, normal exit, and observable parent-shell usability. Extended `Ctrl+Z`
-and job-control scenarios are not part of this beta's certified contract.
+and job-control scenarios are not part of the certified contract.
 
-Release validation currently has one upstream blocker: Terminal.Gui 2.4.17
-unconditionally writes its mouse-enable sequence while constructing the ANSI
-output driver, before the application mouse policy is available. DevProjex
-immediately disables tracking before processing input, ignores mouse input for
-`--no-mouse`, and restores terminal state, but the stricter invariant “no
-mouse-enable sequence is ever emitted” is not certified. This is tracked by an
-explicitly skipped PTY gate tied to the
-[pinned upstream implementation](https://github.com/tui-cs/Terminal.Gui/blob/d0a0ed9b150d3fc8aacf4ab07b7f7d91264fe6d6/Terminal.Gui/Drivers/AnsiDriver/AnsiOutput.cs#L128-L150);
-the skip must be removed before release-candidate approval.
+Terminal.Gui 2.4.17 may briefly emit a mouse-enable sequence while initializing
+its ANSI driver, before DevProjex applies `--no-mouse`. In `--no-mouse` sessions,
+DevProjex disables tracking before normal input, ignores mouse events, and
+restores the terminal on exit. Release validation checks observable behavior and
+shell usability; it does not promise that Terminal.Gui emits no initialization
+sequence at all. The upstream behavior is documented in the
+[pinned implementation](https://github.com/tui-cs/Terminal.Gui/blob/d0a0ed9b150d3fc8aacf4ab07b7f7d91264fe6d6/Terminal.Gui/Drivers/AnsiDriver/AnsiOutput.cs#L128-L150).
 
 ## Export
 
 The export dialog reports output kind, view/format, destination, selected counts,
 estimated metrics, Git mode, Exclusions, conflicts, and warnings. After a
 successful interactive operation it shows an equivalent direct command.
+
+When Hide Secrets is enabled, project-copy confirmation states that matching text
+will change, binary files will remain unchanged, and the folder or ZIP may not
+build or run. Keep-as-is decisions made in Preview also apply to the output.
 
 Context, project-copy, ZIP, and portable-profile destinations use the same
 canonical outside-source and existing-parent policy as direct commands. The

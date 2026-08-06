@@ -1,5 +1,6 @@
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -102,14 +103,31 @@ public sealed class TerminalWorkspaceController(
 		state.ReplacePlan(plan);
 	}
 
-	public Task SetExclusionsAsync(
+	public async Task SetExclusionsAsync(
 		TerminalWorkspaceState state,
 		IReadOnlyCollection<ProjectExclusion> exclusions,
-		CancellationToken cancellationToken) =>
-		RebuildAsync(
-			state,
-			state.BuildSelection() with { Exclusions = exclusions },
-			cancellationToken);
+		CancellationToken cancellationToken)
+	{
+		await RebuildAsync(
+				state,
+				state.BuildSelection() with { Exclusions = exclusions },
+				cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	public void SetHideSecrets(
+		TerminalWorkspaceState state,
+		bool enabled,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		var plan = services.ContextPlanner.ApplyContentTransformationSelection(
+			state.Plan,
+			enabled);
+		state.ReplaceContentTransformationPlan(plan);
+		if (!enabled)
+			services.SecretRedactionSession.Disable();
+	}
 
 	public Task SetRootsAsync(
 		TerminalWorkspaceState state,
@@ -217,6 +235,13 @@ public sealed class TerminalWorkspaceController(
 		var files = view is ProjectContextView.Content or ProjectContextView.TreeContent
 			? plan.IncludedFiles
 			: [];
+		var redactionContext = CreateRedactionContext(plan);
+		if (view == ProjectContextView.Tree && redactionContext is not null)
+		{
+			await services.SecretRedactionOutputPreparer
+				.AnalyzeAsync(redactionContext, plan.IncludedFiles, cancellationToken)
+				.ConfigureAwait(false);
+		}
 		string MapDisplayPath(string path) =>
 			Path.GetRelativePath(plan.SourceRoot, path).Replace('\\', '/');
 
@@ -230,7 +255,8 @@ public sealed class TerminalWorkspaceController(
 						files,
 						cancellationToken,
 						MapDisplayPath,
-						includeOmissionMarkers: true)
+						includeOmissionMarkers: true,
+						redactionContext: redactionContext)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
 			ProjectContextView.TreeContent => await services.PreviewDocumentBuilder
@@ -239,11 +265,17 @@ public sealed class TerminalWorkspaceController(
 					files,
 					cancellationToken,
 					MapDisplayPath,
-					includeOmissionMarkers: true)
+					includeOmissionMarkers: true,
+					redactionContext: redactionContext)
 				.ConfigureAwait(false),
 			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};
 	}
+
+	private SecretRedactionContext? CreateRedactionContext(ProjectContextPlan plan) =>
+		plan.Selection.HideSecrets == true
+			? new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession)
+			: null;
 
 	private static TreeTextFormat MapTreeFormat(ProjectContextDocumentFormat format) =>
 		format switch
@@ -363,7 +395,8 @@ public sealed class TerminalWorkspaceController(
 					DestinationPath: requestedDestination,
 					Format: format,
 					DestinationMode: ProjectCopyDestinationMode.Exact,
-					ConflictPolicy: ProjectCopyConflictPolicy.Fail),
+					ConflictPolicy: ProjectCopyConflictPolicy.Fail,
+					RedactSecrets: plan.Selection.HideSecrets == true),
 				progress,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
@@ -626,6 +659,8 @@ public sealed class TerminalWorkspaceController(
 				arguments.Add(ProjectSelectionTokens.ToToken(exclusion));
 			}
 		}
+		if (plan.Selection.HideSecrets == true)
+			arguments.Add("--hide-secrets");
 
 		if (!SetEquals(plan.AvailableRoots, plan.SelectedRoots, PathComparer.Default))
 		{

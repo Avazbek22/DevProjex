@@ -1,5 +1,3 @@
-using DevProjex.Terminal.Tui;
-
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalPathPickerModelTests

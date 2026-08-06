@@ -5,18 +5,18 @@
 │  > [x] src                              ││  <d n="src">                                                 ││  ( ) No Git filtering                             │
 │    [x] global.json                      ││    <d n="Feature">                                           ││  (*) Use .gitignore                               │
 │    [x] readme.md                        ││      <f>Handler.cs</f>                                       ││  ( ) Tracked Git files only                       │
-│                                 ┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐                                  │
-│                                 │ PARAMETERS                                                                            ▲ │                                  │
-│                                 │ Up/Down or j/k selects a row; Enter changes the selected radio button, checkbox, or   █ │e                                 │
-│                                 │ All control. This panel contains only Git filtering, Exclusions, File Types, Root     █ │rs                                │
-│                                 │ Folders, and an unobtrusive saved-settings indicator when applicable. Use Ctrl+P for  █ │                                  │
-│                                 │ actions, E for context export, and Z for folder/ZIP export. Tab/F6 returns to Tree;   █ │ers                               │
-│                                 │ Shift+Tab/Shift+F6 moves to Preview.                                                  █ │s                                 │
-│                                 │                                                                                       █ │                                  │
-│                                 │ WORKSPACE                                                                             █ │                                  │
-│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      █ │ut extension                      │
-│                                 │ changes Git filtering, Exclusions, File Types, and Root Folders.                      █ │                                  │
-│                                 │                                                                                       ░ │                                  │
+│                                 ┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐ING:                              │
+│                                 │ PARAMETERS                                                                            ▲ │s                                 │
+│                                 │ Up/Down or j/k selects a row; Enter changes the selected radio button, checkbox, or   █ │                                  │
+│                                 │ All control. This panel contains Git filtering, Smart Secrets, Exclusions, File       █ │                                  │
+│                                 │ Types, Root Folders, and an unobtrusive saved-settings indicator when applicable. Use █ │e                                 │
+│                                 │ Ctrl+P for actions, E for context export, and Z for folder/ZIP export. Tab/F6 returns █ │rs                                │
+│                                 │ to Tree; Shift+Tab/Shift+F6 moves to Preview.                                         █ │                                  │
+│                                 │                                                                                       █ │ers                               │
+│                                 │ WORKSPACE                                                                             █ │s                                 │
+│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      █ │                                  │
+│                                 │ changes Git filtering, Smart Secrets, Exclusions, File Types, and Root Folders.       █ │                                  │
+│                                 │                                                                                       ░ │ut extension                      │
 │                                 │ ACTION PALETTE                                                                        ░ │                                  │
 │                                 │ Ctrl+P lists every important action and shortcut. Type to filter, use Up/Down, then   ░ │                                  │
 │                                 │ Enter. Esc restores the previous pane.                                                ░ │                                  │

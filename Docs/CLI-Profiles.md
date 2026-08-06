@@ -38,6 +38,11 @@ maps by retaining their selected values as checked entries; all other rows use c
 defaults consistently across surfaces. Explicit CLI fields are exact for that invocation
 and never mutate the stored maps.
 
+The Hide Secrets content-transformation state is stored separately from path
+Exclusions and remains off in the built-in `standard` profile. Individual
+keep-as-is decisions are session-only: profiles never store secret fingerprints,
+values, or occurrence locations.
+
 ## Schema v1
 
 ```json
@@ -49,6 +54,7 @@ and never mutate the stored maps.
     "extensions": null,
     "selectedPaths": [],
     "gitMode": "gitignore",
+    "hideSecrets": false,
     "exclusions": [
       "smart-ignore",
       "hidden-folders",
@@ -66,7 +72,13 @@ Semantics:
 - selected file and directory paths are relative to the source root;
 - a directory includes its effective subtree;
 - Git mode is exactly one of `none`, `gitignore`, or `tracked`;
-- Exclusions contain only ordinary exclusion tokens.
+- `hideSecrets` independently enables the content transformation;
+- Exclusions contain only known path-filter tokens.
+
+Profiles written by current DevProjex versions keep `hideSecrets` separate. For
+v5 compatibility, a portable profile containing `hide-secrets` in `exclusions`
+still loads with the transformation enabled. The legacy token is removed from the
+canonical Exclusions collection, and an explicit `hideSecrets` property wins.
 
 Nonblank root values are exact top-level filesystem names. They are compared with the
 effective host path semantics and are not whitespace-trimmed.

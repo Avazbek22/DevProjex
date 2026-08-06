@@ -1,8 +1,6 @@
-using Avalonia.Threading;
 using DevProjex.Application.Context;
 using DevProjex.Application.DesktopControl;
 using DevProjex.Avalonia.Coordinators;
-using DevProjex.Kernel;
 using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Avalonia;

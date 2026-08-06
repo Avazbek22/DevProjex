@@ -46,7 +46,9 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 		var selected = coordinator.GetSelectedIgnoreOptionIds();
 		Assert.DoesNotContain(IgnoreOptionId.DotFolders, selected);
 		Assert.DoesNotContain(IgnoreOptionId.EmptyFolders, selected);
-		Assert.Empty(viewModel.IgnoreOptions);
+		var hideSecrets = Assert.Single(viewModel.IgnoreOptions);
+		Assert.Equal(IgnoreOptionId.HideSecrets, hideSecrets.Id);
+		Assert.False(hideSecrets.IsChecked);
 	}
 
 	[Fact]
@@ -202,6 +204,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",

@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Abstractions;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.UI;
 
@@ -611,6 +610,16 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         try
         {
             var ignoreAllCheckBox = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
+            if (!UiTestDriver.GetViewModel(window).AllIgnoreChecked)
+            {
+                await UiTestDriver.ClickAsync(window, ignoreAllCheckBox);
+                await UiTestDriver.WaitForConditionAsync(
+                    window,
+                    () => UiTestDriver.GetViewModel(window).AllIgnoreChecked,
+                    "all ignore rules to become selected before testing the all-off transition");
+                await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+            }
+
             await UiTestDriver.ClickAsync(window, ignoreAllCheckBox);
 
             await UiTestDriver.WaitForConditionAsync(
@@ -732,8 +741,20 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
 
-            await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
-            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
+			await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 10);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var viewModel = UiTestDriver.GetViewModel(window);
+					var hideSecrets = viewModel.IgnoreOptions.First(
+						static option => option.Id == IgnoreOptionId.HideSecrets);
+					return hideSecrets.IsChecked &&
+					       Regex.IsMatch(hideSecrets.Label, @"\(\d+/\d+\)$", RegexOptions.CultureInvariant);
+				},
+				"enabled Hide Secrets to publish measured matched/hidden counts");
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(UiTestDriver.GetViewModel(window).IgnoreOptions);
         }
         finally
@@ -1267,12 +1288,15 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
             if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
                 continue;
 
+			if (option.Id == IgnoreOptionId.HideSecrets)
+				continue;
+
             var match = Regex.Match(option.Label, @"\((\d+)\)$");
             Assert.True(match.Success, $"Advanced ignore option '{option.Id}' must render a positive count in its label. Actual label: '{option.Label}'.");
             Assert.True(int.TryParse(match.Groups[1].Value, out var count) && count > 0,
                 $"Advanced ignore option '{option.Id}' must never stay visible with a zero/invalid count. Actual label: '{option.Label}'.");
-        }
-    }
+		}
+	}
 
     private sealed class BlockingFileContentAnalyzer(IFileContentAnalyzer innerAnalyzer) : IFileContentAnalyzer
     {

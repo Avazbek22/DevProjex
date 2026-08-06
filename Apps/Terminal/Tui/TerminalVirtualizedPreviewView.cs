@@ -1,5 +1,4 @@
 using System.Drawing;
-using System.Text;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.Text;
@@ -16,6 +15,9 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private readonly Rune _horizontalScrollThumb;
 	private readonly Rune _verticalScrollThumb;
 	private readonly Rune _scrollTrack;
+	private Dictionary<int, PreviewRedactionSpan[]> _redactionsByLine = [];
+	private List<PreviewRedactionSpan> _redactionOccurrences = [];
+	private string? _activeRedactionOccurrenceId;
 
 	public TerminalVirtualizedPreviewView(
 		bool useUnicode = true,
@@ -44,6 +46,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	}
 
 	public event EventHandler? VisibleRangeChanged;
+	public event EventHandler<TerminalPreviewRedactionToggleRequestedEventArgs>? RedactionToggleRequested;
 
 	public int FirstVisibleLine => Viewport.Y;
 
@@ -87,6 +90,12 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 		var previousLocation = Viewport.Location;
 		_document = document;
+		RebuildRedactionIndex(document.Redactions);
+		if (_activeRedactionOccurrenceId is not null &&
+		    !_redactionOccurrences.Any(span => span.OccurrenceId == _activeRedactionOccurrenceId))
+		{
+			_activeRedactionOccurrenceId = null;
+		}
 		SetContentSize(new Size(
 			Math.Max(1, document.MaxLineLength),
 			Math.Max(1, document.LineCount)));
@@ -95,6 +104,38 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		ScrollTo(
 			preserveViewport ? previousLocation.Y : 0,
 			preserveViewport ? previousLocation.X : 0);
+		return true;
+	}
+
+	public bool MoveActiveRedaction(bool reverse)
+	{
+		var occurrences = _redactionOccurrences;
+		if (occurrences.Count == 0)
+			return false;
+
+		var currentIndex = _activeRedactionOccurrenceId is null
+			? -1
+			: occurrences.FindIndex(span => span.OccurrenceId == _activeRedactionOccurrenceId);
+		var nextIndex = reverse
+			? currentIndex <= 0 ? occurrences.Count - 1 : currentIndex - 1
+			: currentIndex < 0 || currentIndex == occurrences.Count - 1 ? 0 : currentIndex + 1;
+		var next = occurrences[nextIndex];
+		_activeRedactionOccurrenceId = next.OccurrenceId;
+		ScrollTo(Math.Max(0, next.LineNumber - 1), Math.Max(0, next.StartColumn - 2));
+		SetNeedsDraw();
+		return true;
+	}
+
+	public bool TryToggleActiveRedaction()
+	{
+		var occurrenceId = ResolveActiveOrFirstVisibleOccurrenceId();
+		if (occurrenceId is null)
+			return false;
+
+		_activeRedactionOccurrenceId = occurrenceId;
+		RedactionToggleRequested?.Invoke(
+			this,
+			new TerminalPreviewRedactionToggleRequestedEventArgs(occurrenceId));
 		return true;
 	}
 
@@ -190,15 +231,13 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_document is null)
 			return true;
 
-		SetAttributeForRole(VisualRole.ReadOnly);
 		for (var row = 0; row < Viewport.Height; row++)
 		{
 			var lineIndex = FirstVisibleLine + row;
 			if (lineIndex >= LineCount)
 				break;
 
-			var line = _document.GetLineText(lineIndex + 1);
-			AddStr(0, row, SliceColumns(line, HorizontalOffset, VisibleTextWidth));
+			DrawPreviewLine(_document.GetLineText(lineIndex + 1), lineIndex + 1, row);
 		}
 
 		return true;
@@ -206,8 +245,22 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
-		if (mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed) ||
-		    mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+		if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+		{
+			SetFocus();
+			var occurrenceId = mouse.Position is { } position
+				? FindOccurrenceAt(position.X, position.Y)
+				: null;
+			if (occurrenceId is not null)
+			{
+				_activeRedactionOccurrenceId = occurrenceId;
+				RedactionToggleRequested?.Invoke(
+					this,
+					new TerminalPreviewRedactionToggleRequestedEventArgs(occurrenceId));
+			}
+			return true;
+		}
+		if (mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed))
 		{
 			SetFocus();
 			return true;
@@ -234,6 +287,94 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		}
 
 		return base.OnMouseEvent(mouse);
+	}
+
+	private void DrawPreviewLine(string line, int lineNumber, int row)
+	{
+		SetAttributeForRole(VisualRole.ReadOnly);
+		AddStr(0, row, SliceColumns(line, HorizontalOffset, VisibleTextWidth));
+		if (!_redactionsByLine.TryGetValue(lineNumber, out var redactions))
+			return;
+
+		foreach (var span in redactions)
+		{
+			var startIndex = Math.Clamp(span.StartColumn, 0, line.Length);
+			var length = Math.Clamp(span.Length, 0, line.Length - startIndex);
+			if (length == 0)
+				continue;
+
+			var startColumn = GetColumns(line.AsSpan(0, startIndex));
+			var endColumn = startColumn + GetColumns(line.AsSpan(startIndex, length));
+			var visibleStart = Math.Max(startColumn, HorizontalOffset);
+			var visibleEnd = Math.Min(endColumn, HorizontalOffset + VisibleTextWidth);
+			if (visibleStart >= visibleEnd)
+				continue;
+
+			var skipColumns = visibleStart - startColumn;
+			var text = SliceColumns(
+				line.Substring(startIndex, length),
+				skipColumns,
+				visibleEnd - visibleStart);
+			SetAttribute(GetAttributeForRole(
+				span.OccurrenceId == _activeRedactionOccurrenceId
+					? VisualRole.HotFocus
+					: VisualRole.HotNormal));
+			AddStr(visibleStart - HorizontalOffset, row, text);
+		}
+	}
+
+	private string? FindOccurrenceAt(int viewportColumn, int viewportRow)
+	{
+		var lineNumber = FirstVisibleLine + viewportRow + 1;
+		if (_document is null || !_redactionsByLine.TryGetValue(lineNumber, out var redactions))
+			return null;
+
+		var line = _document.GetLineText(lineNumber);
+		var documentColumn = HorizontalOffset + viewportColumn;
+		foreach (var span in redactions)
+		{
+			var startIndex = Math.Clamp(span.StartColumn, 0, line.Length);
+			var length = Math.Clamp(span.Length, 0, line.Length - startIndex);
+			var startColumn = GetColumns(line.AsSpan(0, startIndex));
+			var endColumn = startColumn + GetColumns(line.AsSpan(startIndex, length));
+			if (documentColumn >= startColumn && documentColumn < endColumn)
+				return span.OccurrenceId;
+		}
+
+		return null;
+	}
+
+	private string? ResolveActiveOrFirstVisibleOccurrenceId()
+	{
+		if (_redactionOccurrences.Count == 0)
+			return null;
+		if (_activeRedactionOccurrenceId is not null &&
+		    _redactionOccurrences.Any(span => span.OccurrenceId == _activeRedactionOccurrenceId))
+		{
+			return _activeRedactionOccurrenceId;
+		}
+
+		var firstVisibleLine = FirstVisibleLine + 1;
+		var lastVisibleLine = VisibleLastLine;
+		return _redactionOccurrences.FirstOrDefault(span =>
+			span.LineNumber >= firstVisibleLine && span.LineNumber <= lastVisibleLine)?.OccurrenceId;
+	}
+
+	private void RebuildRedactionIndex(IReadOnlyList<PreviewRedactionSpan> redactions)
+	{
+		_redactionsByLine = redactions
+			.GroupBy(static span => span.LineNumber)
+			.ToDictionary(
+				static group => group.Key,
+				static group => group.OrderBy(static span => span.StartColumn).ToArray());
+		_redactionOccurrences = redactions
+			.GroupBy(static span => span.OccurrenceId, StringComparer.Ordinal)
+			.Select(static group => group.OrderBy(static span => span.LineNumber)
+				.ThenBy(static span => span.StartColumn)
+				.First())
+			.OrderBy(static span => span.LineNumber)
+			.ThenBy(static span => span.StartColumn)
+			.ToList();
 	}
 
 	private void RaiseVisibleRangeChanged() =>
@@ -282,4 +423,17 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 		return output.ToString();
 	}
+
+	private static int GetColumns(ReadOnlySpan<char> value)
+	{
+		var columns = 0;
+		foreach (var rune in value.EnumerateRunes())
+			columns += Math.Max(0, rune.GetColumns());
+		return columns;
+	}
+}
+
+internal sealed class TerminalPreviewRedactionToggleRequestedEventArgs(string occurrenceId) : EventArgs
+{
+	public string OccurrenceId { get; } = occurrenceId;
 }

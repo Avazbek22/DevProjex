@@ -1,3 +1,5 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed class ProjectTextOutputPipeline(
@@ -42,7 +44,8 @@ internal sealed class ProjectTextOutputPipeline(
                         snapshot.SelectedPaths,
                         snapshot.TreeFormat,
                         cancellationToken,
-                        snapshot.PathPresentation)
+						snapshot.PathPresentation,
+						snapshot.RedactionContext)
                     .ConfigureAwait(false),
                 CandidateFileCount: 0),
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported project text output mode.")
@@ -60,7 +63,8 @@ internal sealed class ProjectTextOutputPipeline(
         var content = await contentExport.BuildAsync(
                 files,
                 cancellationToken,
-                snapshot.PathPresentation?.MapFilePath)
+				snapshot.PathPresentation?.MapFilePath,
+				snapshot.RedactionContext)
             .ConfigureAwait(false);
 
         return new ProjectTextOutputResult(content, files.Count);
@@ -143,7 +147,8 @@ internal sealed record ProjectTextOutputSnapshot(
     IReadOnlySet<string> SelectedPaths,
     IReadOnlyList<string>? OrderedFilePaths,
     TreeTextFormat TreeFormat,
-    ExportPathPresentation? PathPresentation);
+    ExportPathPresentation? PathPresentation,
+	SecretRedactionContext? RedactionContext = null);
 
 internal sealed record ProjectTextOutputResult(
     string Content,

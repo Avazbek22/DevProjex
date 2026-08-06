@@ -5,18 +5,18 @@
 │  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
 │    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
 │    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
-│                                 │ Filter actions:                                                                         │                                  │
-│                                 │ Preview format                                                                          │                                  │
+│                                 │ Filter actions:                                                                         │ING:                              │
+│                                 │ Preview format                                                                          │s                                 │
+│                                 │                                                                                         │                                  │
+│                                 │ Preview format: ASCII  [F]                                                              │                                  │
 │                                 │                                                                                         │e                                 │
-│                                 │ Preview format: ASCII  [F]                                                              │rs                                │
+│                                 │                                                                                         │rs                                │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │ers                               │
 │                                 │                                                                                         │s                                 │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │ut extension                      │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │

@@ -47,7 +47,7 @@ Copying files into a chat window one by one **doesn't scale**. CLI tools pack a 
 DevProjex works differently — visual, precise, and local-first:
 
 * **You see what leaves your project** — file tree, live preview, token estimate
-* **You control what leaves it** — Smart Ignore, Git modes, name filters, saved profiles
+* **You control what leaves it** — Smart Ignore, Git modes, Hide Secrets, name filters, saved profiles
 * **You get more than text** — a real project copy as a folder or ZIP
 
 ### Use it for
@@ -72,6 +72,7 @@ Works with any language, repository, or project structure.
 
 **Choose and control**
 * **Smart Ignore** — filters stack-specific build output, dependency folders, and caches without touching your source. [How it works ↓](#how-smart-ignore-works-)
+* **Hide Secrets** — replaces detected credential values in place while keeping the file and surrounding code. [Details](Docs/HideSecrets.md)
 * File tree with checkboxes, search, and name filters
 * Two Git-aware modes: follow `.gitignore`, or show only tracked files
 
@@ -103,6 +104,7 @@ Works with any language, repository, or project structure.
 | Live preview before export | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
 | Tracked-files-only Git mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Scope-aware, evidence-based Smart Ignore (monorepo-safe) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| In-place secret redaction with per-match Preview override | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Dedicated ASCII-tree-only export | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -115,6 +117,8 @@ Works with any language, repository, or project structure.
 Use **File → Export Project → To Folder…** or **To ZIP Archive…** to create a separate copy of your current selection.
 
 Project copies respect your chosen root folders, file types, ignore rules, and checked items. If nothing is checked, the whole current tree is exported. Directory structure, binary files, and included empty folders are preserved.
+
+When **Hide Secrets** is enabled, detected values in text files are replaced. Binary files remain unchanged. This result is intentionally not a byte-for-byte copy and may not build or run.
 
 The source project is never modified, and the result can't be written inside it. The same workflow is available through `devprojex export project`.
 
@@ -129,6 +133,7 @@ devprojex
 devprojex open . --preview
 devprojex analyze . --format json
 devprojex export context . --format markdown -o ../devprojex-context.md
+devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
 devprojex export project . --as folder -o ../devprojex-submission
 devprojex export project . --as zip -o ../devprojex-submission.zip
 devprojex analyze . --git-mode tracked --exclude smart-ignore
@@ -151,7 +156,7 @@ DevProjex keeps your source projects read-only, with clear limits on what it doe
 
 * Does not edit, rename, move, or delete files in the opened source project
 * Does not commit, merge, push, or switch branches in the source repository opened from the user's filesystem. Branch operations are limited to application-owned cached clones.
-* Does not include binary file contents in text or AI-context output
+* Does not include binary file contents in text or AI-context output; Hide Secrets does not scan binary data
 * Writes generated files and project copies only to destinations you choose, outside the source project
 
 ---
@@ -182,7 +187,7 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
 
 ## Documentation 📚
 
-[Smart Ignore](Docs/SmartIgnore.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+[Smart Ignore](Docs/SmartIgnore.md) · [Hide Secrets](Docs/HideSecrets.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ---
 

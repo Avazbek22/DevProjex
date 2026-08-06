@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using DevProjex.Terminal.CommandLine;
-using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -105,6 +104,17 @@ internal sealed partial class TerminalWorkspaceSession
 				L(descriptor.LabelKey),
 				plan.GitReadiness.Mode == descriptor.Id,
 				GitMode: descriptor.Id)));
+		var secretDescriptor = ProjectPresentationCatalog.ContentTransformations.Single();
+		rows.Add(new TerminalParameterRow(
+			"section:secrets",
+			TerminalParameterRowKind.Section,
+			L("Settings.Secrets.Title")));
+		rows.Add(new TerminalParameterRow(
+			$"exclusion:{secretDescriptor.Token}",
+			TerminalParameterRowKind.Exclusion,
+			FormatExclusionLabel(secretDescriptor, plan),
+			plan.Selection.HideSecrets == true,
+			Exclusion: secretDescriptor.Id));
 		rows.Add(new TerminalParameterRow(
 			"section:exclusions",
 			TerminalParameterRowKind.Section,
@@ -113,12 +123,12 @@ internal sealed partial class TerminalWorkspaceSession
 			"exclusions:all",
 			TerminalParameterRowKind.ToggleAllExclusions,
 			L("Settings.All"),
-			exclusions.Count == ProjectPresentationCatalog.Exclusions.Count));
+			ProjectPresentationCatalog.Exclusions.All(descriptor => exclusions.Contains(descriptor.Id))));
 		rows.AddRange(ProjectPresentationCatalog.Exclusions.Select(descriptor =>
 			new TerminalParameterRow(
 				$"exclusion:{descriptor.Token}",
 				TerminalParameterRowKind.Exclusion,
-				L(descriptor.LabelKey),
+				FormatExclusionLabel(descriptor, plan),
 				exclusions.Contains(descriptor.Id),
 				Exclusion: descriptor.Id)));
 		rows.Add(new TerminalParameterRow(
@@ -174,6 +184,28 @@ internal sealed partial class TerminalWorkspaceSession
 				TerminalParameterRowKind.Information,
 				$"{L("Terminal.Tui.Recent.Unavailable")}: {root}")));
 		return rows;
+	}
+
+	private string FormatExclusionLabel(
+		ProjectExclusionDescriptor descriptor,
+		ProjectContextPlan plan)
+	{
+		var label = L(descriptor.LabelKey);
+		if (descriptor.Id != ProjectExclusion.HideSecrets ||
+		    plan.Selection.HideSecrets != true)
+		{
+			return label;
+		}
+
+		var redactionCount = _services.SecretRedactionSession.GetRedactionCount(
+			plan.SourceRoot,
+			plan.IncludedFiles);
+		return redactionCount switch
+		{
+			> 0 => $"{label} ({redactionCount:N0})",
+			0 => L("Settings.Ignore.HideSecrets.NoMatches"),
+			_ => label
+		};
 	}
 
 	private void TrackSelectedControl()
@@ -327,10 +359,14 @@ internal sealed partial class TerminalWorkspaceSession
 	private string FormatGitMode(GitFilteringMode mode) =>
 		L(ProjectPresentationCatalog.Get(mode).LabelKey);
 
-	private string FormatExclusions(IReadOnlyCollection<ProjectExclusion> exclusions) =>
-		exclusions.Count == 0
+	private string FormatExclusions(IReadOnlyCollection<ProjectExclusion> exclusions)
+	{
+		var pathExclusionCount = ProjectPresentationCatalog.Exclusions.Count(
+			descriptor => exclusions.Contains(descriptor.Id));
+		return pathExclusionCount == 0
 			? L("Terminal.Tui.NoneAvailable")
-			: exclusions.Count.ToString("N0", CultureInfo.CurrentCulture);
+			: pathExclusionCount.ToString("N0", CultureInfo.CurrentCulture);
+	}
 
 	private string FormatSelectionCount(int selected, int available) =>
 		selected == available
@@ -366,12 +402,16 @@ internal sealed partial class TerminalWorkspaceSession
 				ApplyGitMode(mode);
 				return;
 			case TerminalParameterRowKind.ToggleAllExclusions:
-				ApplyExclusions(
-					row.IsSelected == true
-						? []
-						: ProjectPresentationCatalog.Exclusions
-							.Select(static descriptor => descriptor.Id)
-							.ToArray());
+			{
+				var values = new HashSet<ProjectExclusion>();
+				if (row.IsSelected != true)
+					values.UnionWith(ProjectPresentationCatalog.Exclusions.Select(static descriptor => descriptor.Id));
+				ApplyExclusions(values);
+				return;
+			}
+			case TerminalParameterRowKind.Exclusion
+				when row.Exclusion == ProjectExclusion.HideSecrets:
+				ApplyHideSecrets(row.IsSelected != true);
 				return;
 			case TerminalParameterRowKind.Exclusion when row.Exclusion is { } exclusion:
 			{
@@ -438,6 +478,20 @@ internal sealed partial class TerminalWorkspaceSession
 			{
 				await _controller.SetExclusionsAsync(state, exclusions, token).ConfigureAwait(false);
 				return null;
+			});
+	}
+
+	private void ApplyHideSecrets(bool enabled)
+	{
+		if (_state is null)
+			return;
+		var state = _state;
+		_activeOperationTask = RunOperationAsync(
+			L("Settings.Secrets.Title"),
+			token =>
+			{
+				_controller.SetHideSecrets(state, enabled, token);
+				return Task.FromResult<string?>(null);
 			});
 	}
 

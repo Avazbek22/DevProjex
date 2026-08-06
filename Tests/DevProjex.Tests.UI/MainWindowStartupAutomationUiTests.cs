@@ -2,8 +2,6 @@ using System.Reflection;
 using System.Text.Json;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Context;
-using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.ThemePresets;
 

@@ -119,8 +119,13 @@ public partial class TopMenuBarView : UserControl
         e.Handled = true;
     }
 
-    private void OnProjectCopyHelpIndicatorPointerReleased(object? sender, PointerReleasedEventArgs e) =>
+    private void OnProjectCopyHelpIndicatorPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (sender is Control indicator)
+            ToolTip.SetIsOpen(indicator, true);
+
         e.Handled = true;
+    }
 
     private void OnExit(object? sender, RoutedEventArgs e) => ExitRequested?.Invoke(sender, e);
 

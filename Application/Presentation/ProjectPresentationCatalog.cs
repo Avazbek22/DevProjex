@@ -64,44 +64,65 @@ public static class ProjectPresentationCatalog
 			IgnoreOptionId.EmptyFolders,
 			"empty-folders",
 			"Settings.Ignore.EmptyFolders",
-			1),
+			2),
 		new(
 			ProjectExclusion.EmptyFiles,
 			IgnoreOptionId.EmptyFiles,
 			"empty-files",
 			"Settings.Ignore.EmptyFiles",
-			2),
+			3),
 		new(
 			ProjectExclusion.HiddenFolders,
 			IgnoreOptionId.HiddenFolders,
 			"hidden-folders",
 			"Settings.Ignore.HiddenFolders",
-			3),
+			4),
 		new(
 			ProjectExclusion.HiddenFiles,
 			IgnoreOptionId.HiddenFiles,
 			"hidden-files",
 			"Settings.Ignore.HiddenFiles",
-			4),
+			5),
 		new(
 			ProjectExclusion.DotFolders,
 			IgnoreOptionId.DotFolders,
 			"dot-folders",
 			"Settings.Ignore.DotFolders",
-			5),
+			6),
 		new(
 			ProjectExclusion.DotFiles,
 			IgnoreOptionId.DotFiles,
 			"dot-files",
 			"Settings.Ignore.DotFiles",
-			6),
+			7),
 		new(
 			ProjectExclusion.ExtensionlessFiles,
 			IgnoreOptionId.ExtensionlessFiles,
 			"extensionless-files",
 			"Settings.Ignore.ExtensionlessFiles",
-			7)
+			8)
 	];
+
+	/// <summary>
+	/// Content transformations operate on selected bytes after path filtering. Keeping them out
+	/// of <see cref="Exclusions"/> prevents UI and cache consumers from treating them as tree rules.
+	/// </summary>
+	public static IReadOnlyList<ProjectExclusionDescriptor> ContentTransformations { get; } =
+	[
+		new(
+			ProjectExclusion.HideSecrets,
+			IgnoreOptionId.HideSecrets,
+			"hide-secrets",
+			"Settings.Ignore.HideSecrets",
+			0)
+	];
+
+	/// <summary>
+	/// Preserves parsing of v5 --exclude tokens while new command surfaces expose transformations
+	/// through dedicated additive options.
+	/// </summary>
+	public static IReadOnlyList<ProjectExclusionDescriptor> LegacyExclusionChoices { get; } =
+		[.. Exclusions, .. ContentTransformations];
 
 	public static IReadOnlyList<ProjectContextViewDescriptor> PreviewModes { get; } =
 	[
@@ -119,7 +140,7 @@ public static class ProjectPresentationCatalog
 	];
 
 	public static ProjectExclusionDescriptor Get(ProjectExclusion exclusion) =>
-		Exclusions.FirstOrDefault(descriptor => descriptor.Id == exclusion) ??
+		LegacyExclusionChoices.FirstOrDefault(descriptor => descriptor.Id == exclusion) ??
 		throw new ArgumentOutOfRangeException(nameof(exclusion), exclusion, null);
 
 	public static GitFilteringDescriptor Get(GitFilteringMode mode) =>

@@ -116,7 +116,8 @@ public static class SelectionRefreshPolicy
     public static bool CanUseIgnoreDefaultFallback(IgnoreOptionId optionId) =>
         optionId is not IgnoreOptionId.UseGitIgnore
             and not IgnoreOptionId.TrackedGitFilesOnly
-            and not IgnoreOptionId.SmartIgnore;
+            and not IgnoreOptionId.SmartIgnore
+            and not IgnoreOptionId.HideSecrets;
 
     private static bool HasPreparedSelectionForPath(string? preparedSelectionPath, string path)
     {

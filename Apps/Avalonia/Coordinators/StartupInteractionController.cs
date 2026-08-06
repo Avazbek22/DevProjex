@@ -1,7 +1,6 @@
 using DevProjex.Avalonia.Services;
 using DevProjex.Application.Context;
 using DevProjex.Application.DesktopControl;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 
@@ -46,8 +45,10 @@ internal sealed class StartupInteractionController(
 		var extensionMode = applicationIntent?.Extensions ?? ResolveLegacyMode(selectionSpec.Extensions);
 		var gitMode = applicationIntent?.GitMode ?? ResolveLegacyMode(selectionSpec.GitMode);
 		var exclusionMode = applicationIntent?.Exclusions ?? ResolveLegacyMode(selectionSpec.Exclusions);
+		var hideSecretsMode = applicationIntent?.HideSecrets ?? ResolveLegacyMode(selectionSpec.HideSecrets);
 		var applyGitMode = gitMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyExclusions = exclusionMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+		var applyHideSecrets = hideSecretsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 
         var selectedRoots = rootMode != ProjectSelectionApplicationMode.ApplyResolvedValue ||
 		                    selectionSpec.Roots is null
@@ -64,7 +65,7 @@ internal sealed class StartupInteractionController(
                 StringComparer.OrdinalIgnoreCase);
 
         HashSet<IgnoreOptionId>? selectedIgnoreOptions = null;
-        if (applyGitMode || applyExclusions)
+		if (applyGitMode || applyExclusions)
         {
             var persistedIgnoreStates = selection.SnapshotIgnoreOptionStatesForPersistence();
             var inheritedIgnoreOptions = persistedIgnoreStates is null
@@ -77,12 +78,13 @@ internal sealed class StartupInteractionController(
 				selectionSpec with
 				{
 					GitMode = applyGitMode ? selectionSpec.GitMode : null,
-					Exclusions = applyExclusions ? selectionSpec.Exclusions : null
+					Exclusions = applyExclusions ? selectionSpec.Exclusions : null,
+					HideSecrets = null
 				},
                 inheritedIgnoreOptions);
         }
 
-        selection.ApplySelectionOverrides(
+		var pathSelectionChanged = selection.ApplySelectionOverrides(
             currentPath,
             selectedRoots,
             selectedExtensions,
@@ -92,13 +94,18 @@ internal sealed class StartupInteractionController(
 				rootMode == ProjectSelectionApplicationMode.ResetToDefaults,
 			resetExtensionSelectionToDefaults:
 				extensionMode == ProjectSelectionApplicationMode.ResetToDefaults);
+		if (applyHideSecrets)
+			selection.ApplyHideSecretsOverride(selectionSpec.HideSecrets);
 
-        await selection.WaitForPendingRefreshesAsync();
-        await refreshTreeAsync();
+		if (pathSelectionChanged)
+		{
+			await selection.WaitForPendingRefreshesAsync();
+			await refreshTreeAsync();
 
-        await selection.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
-            currentPath);
-        await selection.WaitForPendingRefreshesAsync();
+			await selection.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
+				currentPath);
+			await selection.WaitForPendingRefreshesAsync();
+		}
 
         if (selectionSpec.SelectedPaths is { Count: > 0 })
             await ApplySelectedPathsAsync(selectionSpec.SelectedPaths);
@@ -115,14 +122,17 @@ internal sealed class StartupInteractionController(
         // every exclusion without silently replacing the independently selected Git mode.
         var resolvedGitMode = selectionSpec.GitMode ??
                               GitFilteringModeResolver.Resolve(inheritedIgnoreOptions);
-        var resolvedExclusions = selectionSpec.Exclusions ??
+		var resolvedExclusions = selectionSpec.Exclusions ??
                                  ProjectSelectionAdapter.ToExclusions(inheritedIgnoreOptions);
+		var resolvedHideSecrets = selectionSpec.HideSecrets ??
+		                          inheritedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets);
         return new HashSet<IgnoreOptionId>(
             ProjectSelectionAdapter.ToIgnoreOptions(
                 selectionSpec with
                 {
                     GitMode = resolvedGitMode,
-                    Exclusions = resolvedExclusions
+					Exclusions = resolvedExclusions,
+					HideSecrets = resolvedHideSecrets
                 }));
     }
 

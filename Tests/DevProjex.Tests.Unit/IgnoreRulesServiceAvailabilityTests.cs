@@ -175,9 +175,10 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 
 		Assert.True(availability.IncludeGitIgnore);
 		Assert.True(availability.IncludeSmartIgnore);
-		Assert.Equal(6, options.Count);
+		Assert.Equal(7, options.Count);
 		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
+		Assert.Equal(IgnoreOptionId.HideSecrets, options[1].Id);
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[2].Id);
 	}
 
 	[Fact]
@@ -369,6 +370,7 @@ public sealed class IgnoreRulesServiceAvailabilityTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart Ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",

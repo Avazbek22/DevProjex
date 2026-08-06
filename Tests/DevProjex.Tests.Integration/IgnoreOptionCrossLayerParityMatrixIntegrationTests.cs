@@ -527,7 +527,7 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 	{
 		foreach (var option in snapshot.IgnoreOptions)
 		{
-			if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
+			if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore or IgnoreOptionId.HideSecrets)
 			{
 				Assert.DoesNotMatch(@"\(\d+\)$", option.Label);
 				continue;

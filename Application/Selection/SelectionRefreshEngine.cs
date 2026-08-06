@@ -965,6 +965,7 @@ public sealed class SelectionRefreshEngine(
             IgnoreOptionId.UseGitIgnore => controllerImpactCounts.GitIgnore > 0,
             IgnoreOptionId.TrackedGitFilesOnly => true,
             IgnoreOptionId.SmartIgnore => controllerImpactCounts.SmartIgnore > 0,
+			IgnoreOptionId.HideSecrets => true,
             IgnoreOptionId.HiddenFolders => counts.HiddenFolders > 0,
             IgnoreOptionId.HiddenFiles => counts.HiddenFiles > 0,
             IgnoreOptionId.DotFolders => counts.DotFolders > 0,
@@ -1082,7 +1083,7 @@ public sealed class SelectionRefreshEngine(
         bool stateCacheIsComplete,
         bool useDefaultCheckedFallback)
     {
-        if (stateCache.TryGetValue(option.Id, out var cachedState))
+		if (stateCache.TryGetValue(option.Id, out var cachedState))
         {
             if (!cachedState &&
                 useDefaultCheckedFallback &&

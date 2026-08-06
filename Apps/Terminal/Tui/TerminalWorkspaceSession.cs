@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
-using DevProjex.Application.Services;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
@@ -1034,6 +1033,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Height = Dim.Fill(1)
 		};
 		_preview.SetDocument(state.PreviewDocument, preserveViewport: false);
+		_preview.RedactionToggleRequested += OnPreviewRedactionToggleRequested;
 		_previewRange = new TerminalLiteralLabel
 		{
 			X = 1,
@@ -1755,6 +1755,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		if (_preview.HasFocus && TryHandlePreviewNavigation(key))
 			return;
+		if (_preview.HasFocus && (key == Key.Enter || key == Key.Space))
+		{
+			if (_preview.TryToggleActiveRedaction())
+				key.Handled = true;
+			return;
+		}
+		if (_preview.HasFocus && (key == new Key('[') || key == new Key(']')))
+		{
+			key.Handled = _preview.MoveActiveRedaction(reverse: key == new Key('['));
+			return;
+		}
 		if (_tree.HasFocus && TryHandleTreeNavigation(key))
 			return;
 		if (key == Key.Enter && _tree.HasFocus)
@@ -1858,6 +1869,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			key.Handled = true;
 			ChangeRootsOrTypes(key.NoShift == Key.R);
 		}
+	}
+
+	private void OnPreviewRedactionToggleRequested(
+		object? sender,
+		TerminalPreviewRedactionToggleRequestedEventArgs eventArgs)
+	{
+		var kept = _services.SecretRedactionSession.ToggleKeepAsIs(eventArgs.OccurrenceId);
+		SetOperationStatus(
+			L(kept
+				? "Terminal.Tui.Secret.Kept"
+				: "Terminal.Tui.Secret.Redacted"),
+			kept ? TerminalWorkspaceTheme.Warning : TerminalWorkspaceTheme.Accent);
+		SchedulePreviewRefresh();
 	}
 
 	private void SearchTree()
@@ -2176,6 +2200,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (kind is null)
 			return;
 		var selectedKind = kind.Value;
+		if (_state.Plan.Selection.HideSecrets == true &&
+		    !Confirm(
+			    L("Dialog.ProjectCopy.Redaction.Title"),
+			    L("Dialog.ProjectCopy.Redaction.Message")))
+		{
+			return;
+		}
 		var defaultPath = BuildDefaultExportPath(
 			_state.Plan.SourceRoot,
 			Directory.GetCurrentDirectory(),
@@ -3335,9 +3366,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var values = SelectValues(
 			L("Terminal.Tui.Exclusions"),
 			available.Select(static item => item.Label).ToArray(),
-			current.Select(exclusion => labelsById[exclusion]).ToArray());
-		return values?.Select(value => idsByLabel[value])
-			.ToArray();
+			current.Where(labelsById.ContainsKey).Select(exclusion => labelsById[exclusion]).ToArray());
+		return values?.Select(value => idsByLabel[value]).ToArray();
 	}
 
 	private IReadOnlyCollection<string>? SelectValues(

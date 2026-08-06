@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Text.Json;
 using DevProjex.Infrastructure.Persistence;
-using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
 

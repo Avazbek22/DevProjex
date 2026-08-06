@@ -1,7 +1,7 @@
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.RecentProjects;
-using DevProjex.Infrastructure.Reports;
 using DevProjex.Application.Updates;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -39,4 +39,5 @@ public sealed record AvaloniaAppServices(
     IApplicationUpdateService ApplicationUpdateService,
     ITerminalCommandSetupService TerminalCommandSetupService,
     ITaskbarProgressService TaskbarProgressService,
-    SessionMetricsRecorder SessionMetricsRecorder);
+    SessionMetricsRecorder SessionMetricsRecorder,
+	SecretRedactionSession SecretRedactionSession);

@@ -184,6 +184,7 @@ public static class ProjectLoadWorkflowRuntime
                 ["Tree.AccessDeniedRoot"] = "Access denied",
                 ["Tree.AccessDenied"] = "Access denied",
                 ["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+                ["Settings.Ignore.HideSecrets"] = "Hide secrets",
                 ["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
                 ["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
                 ["Settings.Ignore.HiddenFolders"] = "Hidden folders",

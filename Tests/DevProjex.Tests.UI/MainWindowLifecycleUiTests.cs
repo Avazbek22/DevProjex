@@ -1,7 +1,6 @@
 using System.Reflection;
 using Avalonia.Media;
 using DevProjex.Avalonia.Coordinators;
-using DevProjex.Avalonia.Views;
 using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.UI;

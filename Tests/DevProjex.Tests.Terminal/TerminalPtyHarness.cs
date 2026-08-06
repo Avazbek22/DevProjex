@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Hex1b;
-using XTerm;
 using XTerm.Options;
 using XTermTerminal = XTerm.Terminal;
 

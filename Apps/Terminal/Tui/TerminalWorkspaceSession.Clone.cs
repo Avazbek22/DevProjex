@@ -1,6 +1,3 @@
-using Terminal.Gui.Drawing;
-using Terminal.Gui.Views;
-
 namespace DevProjex.Terminal.Tui;
 
 #pragma warning disable CS0618

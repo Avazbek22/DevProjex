@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
@@ -1141,7 +1140,8 @@ public sealed class DevProjexCommandTree
 		result.GetResult(selection.Extensions) is { Implicit: false } ||
 		result.GetResult(selection.SelectedPaths) is { Implicit: false } ||
 		result.GetResult(selection.GitMode) is { Implicit: false } ||
-		result.GetResult(selection.Exclusions) is { Implicit: false };
+		result.GetResult(selection.Exclusions) is { Implicit: false } ||
+		result.GetResult(selection.HideSecrets) is { Implicit: false };
 
 	private int? ValidateDesktopOpenGitReadiness(
 		TerminalServices services,

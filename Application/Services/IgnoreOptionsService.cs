@@ -1,13 +1,30 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Application.Services;
 
 public sealed class IgnoreOptionsService(LocalizationService localization)
 {
+	public string FormatHideSecretsLabel(
+		SecretScanState state,
+		int? matchedCount,
+		int? redactionCount)
+	{
+		var label = localization["Settings.Ignore.HideSecrets"];
+		return state == SecretScanState.Completed &&
+		       matchedCount is not null &&
+		       redactionCount is not null
+			? $"{label} ({matchedCount}/{redactionCount})"
+			: label;
+	}
+
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{
 		var options = new List<IgnoreOptionDescriptor>();
-		// Smart Ignore is the primary exclusion controller in the Desktop list. Keep it
-		// above both optional Git modes whenever project evidence makes it available.
-		AppendExclusionOptions(options, availability, smartIgnoreOnly: true);
+		// Content-level protection belongs with the primary controllers, before Git modes.
+		// Unlike path filters, Hide Secrets is always offered because availability cannot
+		// be known without reading the selected content.
+		AppendPrimaryExclusionOptions(options, availability);
+		AppendContentTransformationOptions(options, availability);
 
 		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering)
 		{
@@ -30,23 +47,41 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 			}
 		}
 
-		AppendExclusionOptions(options, availability, smartIgnoreOnly: false);
+		AppendPathExclusionOptions(options, availability);
 		return options;
 	}
 
-	private void AppendExclusionOptions(
+	private void AppendPrimaryExclusionOptions(
 		List<IgnoreOptionDescriptor> options,
-		IgnoreOptionsAvailability availability,
-		bool smartIgnoreOnly)
+		IgnoreOptionsAvailability availability)
 	{
 		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
 		{
-			if ((descriptor.Id == ProjectExclusion.SmartIgnore) != smartIgnoreOnly)
+			if (descriptor.Id != ProjectExclusion.SmartIgnore)
+				continue;
+
+			var included = availability.IncludeSmartIgnore;
+			if (!included)
+				continue;
+
+			options.Add(new IgnoreOptionDescriptor(
+				descriptor.LegacyOptionId,
+				localization[descriptor.LabelKey],
+				true));
+		}
+	}
+
+	private void AppendPathExclusionOptions(
+		List<IgnoreOptionDescriptor> options,
+		IgnoreOptionsAvailability availability)
+	{
+		foreach (var descriptor in ProjectPresentationCatalog.Exclusions)
+		{
+			if (descriptor.Id == ProjectExclusion.SmartIgnore)
 				continue;
 
 			var (included, count) = descriptor.Id switch
 			{
-				ProjectExclusion.SmartIgnore => (availability.IncludeSmartIgnore, 0),
 				ProjectExclusion.HiddenFolders =>
 					(availability.IncludeHiddenFolders, availability.HiddenFoldersCount),
 				ProjectExclusion.HiddenFiles =>
@@ -72,6 +107,20 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 					count,
 					availability.ShowAdvancedCounts),
 				true));
+		}
+	}
+
+	private void AppendContentTransformationOptions(
+		List<IgnoreOptionDescriptor> options,
+		IgnoreOptionsAvailability availability)
+	{
+		foreach (var descriptor in ProjectPresentationCatalog.ContentTransformations)
+		{
+			var label = availability.SecretMatchesCount is { } matchedCount &&
+			            availability.SecretRedactionsCount is { } redactionCount
+				? FormatHideSecretsLabel(SecretScanState.Completed, matchedCount, redactionCount)
+				: localization[descriptor.LabelKey];
+			options.Add(new IgnoreOptionDescriptor(descriptor.LegacyOptionId, label, false));
 		}
 	}
 

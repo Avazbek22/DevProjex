@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Unicode;
 using System.Runtime.InteropServices;
 using System.Xml;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Application.Context;
 
@@ -31,7 +32,8 @@ public sealed record ProjectContextDocumentLimits(
 public sealed class ProjectContextDocumentService(
 	TreeExportService treeExportService,
 	IFileContentAnalyzer contentAnalyzer,
-	Func<FileContentClassification, string>? omissionMessageProvider = null)
+	Func<FileContentClassification, string>? omissionMessageProvider = null,
+	SecretRedactionSession? secretRedactionSession = null)
 {
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
@@ -48,12 +50,28 @@ public sealed class ProjectContextDocumentService(
 		ArgumentNullException.ThrowIfNull(limits);
 		ValidateView(view);
 		ValidateDocumentFormat(format);
+		if (ShouldRedact(plan, view))
+		{
+			return await BuildRedactedAsync(plan, view, format, limits, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		return await BuildBoundedAsync(plan, view, format, limits, cancellationToken)
+			.ConfigureAwait(false);
+	}
 
+	private async Task<string> BuildBoundedAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		ProjectContextDocumentLimits limits,
+		CancellationToken cancellationToken,
+		PreparedSecretRedactionOutput? prepared = null)
+	{
 		var (renderedTree, treeTruncated) = IncludesTree(view)
 			? BuildBoundedTree(plan.ProjectedTree, limits.MaximumTreeNodes)
 			: (plan.ProjectedTree, false);
 		var fileResult = IncludesContent(view)
-			? await ReadFilesAsync(plan, limits, cancellationToken).ConfigureAwait(false)
+			? await ReadFilesAsync(plan, limits, cancellationToken, prepared).ConfigureAwait(false)
 			: new ContextFileReadResult([], false);
 		var renderedPlan = ReferenceEquals(renderedTree, plan.ProjectedTree)
 			? plan
@@ -84,6 +102,18 @@ public sealed class ProjectContextDocumentService(
 		ValidateDocumentFormat(format);
 		if (!destination.CanWrite)
 			throw new ArgumentException("Destination must be writable.", nameof(destination));
+		if (ShouldRedact(plan, view))
+		{
+			await WriteCompleteRedactedAsync(
+					plan,
+					view,
+					format,
+					destination,
+					cancellationToken,
+					plain)
+				.ConfigureAwait(false);
+			return;
+		}
 		using var cancellationDestination = new CancellationBoundWriteStream(
 			destination,
 			cancellationToken);
@@ -127,6 +157,68 @@ public sealed class ProjectContextDocumentService(
 			default:
 				throw new ArgumentOutOfRangeException(nameof(format), format, null);
 		}
+	}
+
+	private bool ShouldRedact(ProjectContextPlan plan, ProjectContextView view) =>
+		secretRedactionSession is not null &&
+		IncludesContent(view) &&
+		plan.Selection.HideSecrets == true;
+
+	private async Task<string> BuildRedactedAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		ProjectContextDocumentLimits limits,
+		CancellationToken cancellationToken)
+	{
+		var context = new SecretRedactionContext(plan.SourceRoot, secretRedactionSession!);
+		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
+		await using var prepared = await preparer
+			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
+			.ConfigureAwait(false);
+		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		var service = new ProjectContextDocumentService(
+			treeExportService,
+			analyzer,
+			omissionMessageProvider,
+			secretRedactionSession: null);
+		return await service.BuildBoundedAsync(
+				plan,
+				view,
+				format,
+				limits,
+				cancellationToken,
+				prepared)
+			.ConfigureAwait(false);
+	}
+
+	private async Task WriteCompleteRedactedAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		Stream destination,
+		CancellationToken cancellationToken,
+		bool plain)
+	{
+		var context = new SecretRedactionContext(plan.SourceRoot, secretRedactionSession!);
+		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
+		await using var prepared = await preparer
+			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
+			.ConfigureAwait(false);
+		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		var service = new ProjectContextDocumentService(
+			treeExportService,
+			analyzer,
+			omissionMessageProvider,
+			secretRedactionSession: null);
+		await service.WriteCompleteAsync(
+				plan,
+				view,
+				format,
+				destination,
+				cancellationToken,
+				plain)
+			.ConfigureAwait(false);
 	}
 
 	private async Task WriteCompleteTextAsync(
@@ -553,7 +645,8 @@ public sealed class ProjectContextDocumentService(
 	private async Task<ContextFileReadResult> ReadFilesAsync(
 		ProjectContextPlan plan,
 		ProjectContextDocumentLimits limits,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		PreparedSecretRedactionOutput? prepared = null)
 	{
 		var maximumFiles = Math.Max(0, limits.MaximumFiles);
 		var maximumCharacters = Math.Max(0, limits.MaximumCharacters);
@@ -591,10 +684,24 @@ public sealed class ProjectContextDocumentService(
 			}
 
 			var fileContent = content.Content;
+			var truncatedAtCharacterBoundary = false;
 			if (fileContent.Length > remainingCharacters)
 			{
 				fileContent = fileContent[..remainingCharacters];
 				isTruncated = true;
+				truncatedAtCharacterBoundary = true;
+			}
+			if (prepared is not null)
+			{
+				var preparedFile = prepared.GetFile(path);
+				var completeLength = preparedFile.ClampLengthToCompleteRedactions(fileContent.Length);
+				if (completeLength != fileContent.Length)
+				{
+					fileContent = fileContent[..completeLength];
+					isTruncated = true;
+					truncatedAtCharacterBoundary = true;
+				}
+
 			}
 			files.Add(new ContextFileDocument(
 				relativePath,
@@ -602,6 +709,11 @@ public sealed class ProjectContextDocumentService(
 				fileContent,
 				IsTruncated: fileContent.Length != content.Content.Length));
 			remainingCharacters -= fileContent.Length;
+			// Once a file is truncated, later files are not part of the bounded prefix.
+			// Continuing merely because a placeholder was removed at the boundary would
+			// make the limit select non-contiguous content and violate deterministic ordering.
+			if (truncatedAtCharacterBoundary)
+				break;
 			if (remainingCharacters == 0 &&
 			    files.Count < Math.Min(plan.IncludedFiles.Count, maximumFiles))
 			{
@@ -686,7 +798,7 @@ public sealed class ProjectContextDocumentService(
 		return output.ToString().TrimEnd('\r', '\n');
 	}
 
-	private static string BuildJson(
+	private string BuildJson(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		IReadOnlyList<ContextFileDocument> files,
@@ -741,7 +853,7 @@ public sealed class ProjectContextDocumentService(
 		return Encoding.UTF8.GetString(buffer.WrittenSpan);
 	}
 
-	private static string BuildXml(
+	private string BuildXml(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		IReadOnlyList<ContextFileDocument> files,

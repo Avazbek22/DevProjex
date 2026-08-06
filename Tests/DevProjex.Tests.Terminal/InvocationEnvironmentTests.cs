@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
-using DevProjex.Terminal.CommandLine;
 
 namespace DevProjex.Tests.Terminal;
 

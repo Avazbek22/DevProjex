@@ -5,7 +5,6 @@ using DevProjex.Application.Context;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Contracts;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -302,10 +301,13 @@ internal static class UiTestDriver
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
-        await ScrollSettingsItemIntoViewAsync(
-            window,
-            "IgnoreOptionsList",
-            GetViewModel(window).IgnoreOptions.FirstOrDefault(option => option.Id == optionId));
+        if (optionId != IgnoreOptionId.HideSecrets)
+        {
+            await ScrollSettingsItemIntoViewAsync(
+                window,
+                "IgnoreOptionsList",
+                GetViewModel(window).IgnoreOptions.FirstOrDefault(option => option.Id == optionId));
+        }
         await ClickResolvedControlAsync(
             window,
             () => FindIgnoreOptionCheckBox(window, optionId),
@@ -875,6 +877,15 @@ internal static class UiTestDriver
         return GetSelectionCoordinator(window).GetSelectedIgnoreOptionIds();
     }
 
+	public static long GetSelectionRevision(MainWindow window) =>
+		GetSelectionCoordinator(window).CurrentSelectionRevision;
+
+	public static object GetCurrentTreeIdentity(MainWindow window) =>
+		GetRequiredPrivateFieldValue(window, "_currentTree");
+
+	public static object GetCurrentTreeInventoryIdentity(MainWindow window) =>
+		GetRequiredPrivateFieldValue(window, "_currentTreeInventory");
+
     public static ContextDiagnostic? GetAppliedGitReadinessDiagnostic(
         MainWindow window,
         string projectPath) =>
@@ -1339,6 +1350,9 @@ internal static class UiTestDriver
         var settingsWidth = settingsContainer is null
             ? 0.0
             : GetActualWidth(settingsContainer);
+        var ignoreOptions = string.Join(
+            ";",
+            viewModel.IgnoreOptions.Select(static option => $"{option.Id}:{option.IsChecked}"));
         return string.Join(
             ", ",
             [
@@ -1355,6 +1369,7 @@ internal static class UiTestDriver
                 $"SearchBusy={viewModel.IsSearchInProgress}",
                 $"FilterBusy={viewModel.IsFilterInProgress}",
                 $"StatusBusy={viewModel.StatusBusy}",
+                $"IgnoreOptions=[{ignoreOptions}]",
                 $"StatusTree={viewModel.StatusTreeStatsText}",
                 $"StatusContent={viewModel.StatusContentStatsText}"
             ]);
@@ -1479,6 +1494,15 @@ internal static class UiTestDriver
         var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<T>(field?.GetValue(window));
     }
+
+	private static object GetRequiredPrivateFieldValue(MainWindow window, string fieldName)
+	{
+		var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		var value = field!.GetValue(window);
+		Assert.NotNull(value);
+		return value!;
+	}
 
     private static void SetRequiredPrivateField(MainWindow window, string fieldName, object? value)
     {

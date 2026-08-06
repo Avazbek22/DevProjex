@@ -1,8 +1,6 @@
 using System.Text.Encodings.Web;
-using System.Text.Json.Serialization;
 using DevProjex.Application.Context;
 using DevProjex.Application.Services;
-using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.ProjectProfiles;
 
@@ -171,6 +169,7 @@ public sealed class PortableProjectProfileService
 		}
 
 		var exclusions = new HashSet<ProjectExclusion>();
+		var legacyHideSecrets = false;
 		foreach (var value in document.Selection.Exclusions ?? [])
 		{
 			if (!ProjectSelectionTokens.TryParseExclusion(value, out var exclusion))
@@ -180,7 +179,10 @@ public sealed class PortableProjectProfileService
 					"Portable profile contains an unknown exclusion.");
 			}
 
-			exclusions.Add(exclusion);
+			if (exclusion == ProjectExclusion.HideSecrets)
+				legacyHideSecrets = true;
+			else
+				exclusions.Add(exclusion);
 		}
 
 		IReadOnlyCollection<string> selectedPaths;
@@ -202,6 +204,7 @@ public sealed class PortableProjectProfileService
 			SelectedPaths: selectedPaths,
 			GitMode: gitMode,
 			Exclusions: exclusions.OrderBy(static exclusion => exclusion).ToArray(),
+			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
 			ProfileSource: new ProjectProfileReference(ProjectProfileSourceKind.Portable, fullPath));
 	}
 
@@ -225,9 +228,11 @@ public sealed class PortableProjectProfileService
 				SelectedPaths = (selection.SelectedPaths ?? []).OrderBy(static value => value, PathComparer.Default).ToArray(),
 				GitMode = ProjectSelectionTokens.ToToken(selection.GitMode.Value),
 				Exclusions = selection.Exclusions
+					.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
 					.Select(ProjectSelectionTokens.ToToken)
 					.OrderBy(static value => value, StringComparer.Ordinal)
-					.ToArray()
+					.ToArray(),
+				HideSecrets = selection.HideSecrets == true
 			}
 		};
 	}
@@ -296,6 +301,7 @@ public sealed class PortableProjectProfileService
 		public IReadOnlyList<string> SelectedPaths { get; set; } = [];
 		public string? GitMode { get; set; }
 		public IReadOnlyList<string> Exclusions { get; set; } = [];
+		public bool? HideSecrets { get; set; }
 
 		[JsonExtensionData]
 		public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }

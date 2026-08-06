@@ -1,5 +1,3 @@
-using DevProjex.Kernel;
-
 namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed record ProjectTreeInventoryReuseScope(
