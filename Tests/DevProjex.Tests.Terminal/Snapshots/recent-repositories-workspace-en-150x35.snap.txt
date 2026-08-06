@@ -7,10 +7,6 @@
 │                                      ││└── README.md                                             ││  ( ) Tracked Git files only                    │
 │                                      ││                                                          ││  CONTENT PROCESSING:                           │
 │                                      ││                                                          ││  [ ] Hide secrets                              │
-│                                      ││                                                          ││  The counter (N/N) shows detected / hidden     │
-│                                      ││                                                          ││  values. Only selected text files are          │
-│                                      ││                                                          ││  checked. Binary files are not inspected, and  │
-│                                      ││                                                          ││  no matches is not a safety guarantee.         │
 │                                      ││                                                          ││  EXCLUSIONS                                    │
 │                                      ││                                                          ││  [x] All                                       │
 │                                      ││                                                          ││  [x] Smart ignore                              │
@@ -28,6 +24,10 @@
 │                                      ││                                                          ││  ROOT FOLDERS                                  │
 │                                      ││                                                          ││  [x] All                                       │
 │                                      ││                                                          ││  [x] src                                       │
+│                                      ││                                                          ││                                                │
+│                                      ││                                                          ││                                                │
+│                                      ││                                                          ││                                                │
+│                                      ││                                                          ││                                                │
 │                                      ││ Files 2  |  Lines 1-5/5                                  ││                                                │
 └──────────────────────────────────────┘└──────────────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
 

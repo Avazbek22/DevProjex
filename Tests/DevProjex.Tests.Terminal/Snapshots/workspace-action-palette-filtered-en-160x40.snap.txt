@@ -7,12 +7,8 @@
 │    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
 │                                 │ Filter actions:                                                                         │ING:                              │
 │                                 │ Preview format                                                                          │s                                 │
-│                                 │                                                                                         │N) shows detected / hidden        │
-│                                 │ Preview format: ASCII  [F]                                                              │lected text files are             │
-│                                 │                                                                                         │ files are not inspected, and     │
-│                                 │                                                                                         │ot a safety guarantee.            │
 │                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
+│                                 │ Preview format: ASCII  [F]                                                              │                                  │
 │                                 │                                                                                         │e                                 │
 │                                 │                                                                                         │rs                                │
 │                                 │                                                                                         │                                  │
@@ -21,6 +17,10 @@
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │                                  │
 │                                 │                                                                                         │ut extension                      │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
+│                                 │                                                                                         │                                  │
 │                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │                                  │
 │                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │                                  │
 │                                 │                                                                                         │                                  │

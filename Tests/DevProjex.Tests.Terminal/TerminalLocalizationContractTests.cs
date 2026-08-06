@@ -199,7 +199,7 @@ public sealed partial class TerminalLocalizationContractTests
 	}
 
 	[Fact]
-	public void ContentProcessingTitleAndCounterHelpUseOneSharedDesktopAndTuiContract()
+	public void ContentProcessingTitleAndStatusUseOneSharedDesktopAndTuiContract()
 	{
 		var catalogs = ReadCatalogs();
 		foreach (var (locale, catalog) in catalogs)
@@ -211,11 +211,12 @@ public sealed partial class TerminalLocalizationContractTests
 			Assert.False(
 				catalog.ContainsKey("Settings.ContentProcessing.Title"),
 				$"{locale}.json contains a second content-processing title contract.");
-			Assert.Contains("(N/N)", catalog["Settings.Secrets.Notice"], StringComparison.Ordinal);
 			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.Secrets.Status.Failed"]));
 			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.Ignore.HideSecrets.NoMatches"]));
 			Assert.Contains("{0}", catalog["Settings.Secrets.Status.Applied"], StringComparison.Ordinal);
 			Assert.Contains("{1}", catalog["Settings.Secrets.Status.Applied"], StringComparison.Ordinal);
+			Assert.Equal(3, catalog["Preview.Secret.Redacted.Tooltip"].Split('\n').Length);
+			Assert.Equal(4, catalog["Preview.Secret.Kept.Tooltip"].Split('\n').Length);
 		}
 
 		Assert.Equal("Content processing:", catalogs["en"]["Settings.Secrets.Title"]);

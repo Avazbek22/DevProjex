@@ -7,11 +7,7 @@
 │    [x] readme.md                        │││   │   └── Handler.cs                                        ││  ( ) Tracked Git files only                       │
 │                                         │││   └── App.cs                                                ││  CONTENT PROCESSING:                              │
 │                                         ││├── global.json                                               ││  [ ] Hide secrets                                 │
-│                                         ││└── readme.md                                                 ││  The counter (N/N) shows detected / hidden        │
-│                                         ││                                                              ││  values. Only selected text files are             │
-│                                         ││                                                              ││  checked. Binary files are not inspected, and     │
-│                                         ││                                                              ││  no matches is not a safety guarantee.            │
-│                                         ││                                                              ││  EXCLUSIONS                                       │
+│                                         ││└── readme.md                                                 ││  EXCLUSIONS                                       │
 │                                         ││                                                              ││  [x] All                                          │
 │                                         ││                                                              ││  [x] Smart ignore                                 │
 │                                         ││                                                              ││  [x] Empty folders                                │
@@ -29,6 +25,10 @@
 │                                         ││                                                              ││  ROOT FOLDERS                                     │
 │                                         ││                                                              ││  [x] All                                          │
 │                                         ││                                                              ││  [x] src                                          │
+│                                         ││                                                              ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││                                                              ││                                                   │
+│                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │
 │                                         ││                                                              ││                                                   │

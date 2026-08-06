@@ -115,14 +115,6 @@ internal sealed partial class TerminalWorkspaceSession
 			FormatExclusionLabel(secretDescriptor, plan),
 			plan.Selection.HideSecrets == true,
 			Exclusion: secretDescriptor.Id));
-		// ListView does not wrap rows. Split the safety notice explicitly so the
-		// binary-file and no-guarantee clauses remain visible in the narrow pane.
-		rows.AddRange(TerminalCellWidth
-			.Wrap(L("Settings.Secrets.Notice"), 44)
-			.Select((line, index) => new TerminalParameterRow(
-				$"secrets:notice:{index}",
-				TerminalParameterRowKind.Information,
-				line)));
 		rows.Add(new TerminalParameterRow(
 			"section:exclusions",
 			TerminalParameterRowKind.Section,

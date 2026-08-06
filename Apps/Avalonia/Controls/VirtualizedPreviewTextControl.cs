@@ -95,12 +95,12 @@ public sealed class VirtualizedPreviewTextControl : Control
 	public static readonly StyledProperty<string> RedactedSecretToolTipFormatProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(RedactedSecretToolTipFormat),
-			"Detected {0}. Click to keep the original value. Alt+Up / Alt+Down navigates findings.");
+			"Detected {0}.\nClick to keep the original value.\nAlt+Up / Alt+Down navigates findings.");
 
 	public static readonly StyledProperty<string> KeptSecretToolTipFormatProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(KeptSecretToolTipFormat),
-			"Detected {0}; the original value is kept. Click to redact it again.");
+			"Detected {0}.\nThe original value is kept.\nClick to redact it again.");
 
     private const int RenderBufferLines = 3;
     private const int MaxFallbackVisibleLines = 120;
