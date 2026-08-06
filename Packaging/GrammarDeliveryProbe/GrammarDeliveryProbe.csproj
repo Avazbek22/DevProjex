@@ -1,0 +1,127 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Verifies that tree-sitter grammars can actually be delivered and loaded in every shape
+    DevProjex ships. It is deliberately NOT part of DevProjex.sln: it is built only by
+    .github/workflows/grammar-delivery.yml, so a normal dev build never pulls the native package.
+
+    Two facts this project exists to guard, both measured rather than assumed:
+      * A RID-specific publish bundles ALL 30 grammars of that architecture (+68 MB), so the
+        publish list must be filtered down to the curated set.
+      * Under PublishSingleFile the natives are extracted to a directory that the OS loader does
+        not search, so TreeSitter's Language(id) constructor throws DllNotFoundException. Only
+        loading by absolute path works, and that is what both delivery strategies below do.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DevProjex.Packaging.GrammarDeliveryProbe</RootNamespace>
+    <AssemblyName>GrammarDeliveryProbe</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Embedded: portable single-file builds carry grammars as resources and materialize them.
+         Content:  MSIX builds ship them as ordinary package files, signed with the package. -->
+    <GrammarDeliveryStrategy Condition="'$(GrammarDeliveryStrategy)'==''">Embedded</GrammarDeliveryStrategy>
+    <!-- Publishes with no grammars at all, so the workflow can measure the true delta. -->
+    <GrammarDeliveryBaseline Condition="'$(GrammarDeliveryBaseline)'==''">false</GrammarDeliveryBaseline>
+    <DefineConstants Condition="'$(GrammarDeliveryStrategy)'=='Content'">$(DefineConstants);GRAMMAR_DELIVERY_CONTENT</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TreeSitter.DotNet" />
+  </ItemGroup>
+
+  <!-- The curated set. Adding a language here is the only place the list is declared. -->
+  <ItemGroup>
+    <DevProjexGrammar Include="tree-sitter-c-sharp" />
+    <DevProjexGrammar Include="tree-sitter-java" />
+    <DevProjexGrammar Include="tree-sitter-python" />
+    <DevProjexGrammar Include="tree-sitter-javascript" />
+    <DevProjexGrammar Include="tree-sitter-typescript" />
+    <DevProjexGrammar Include="tree-sitter-tsx" />
+    <DevProjexGrammar Include="tree-sitter-go" />
+    <DevProjexGrammar Include="tree-sitter-rust" />
+    <DevProjexGrammar Include="tree-sitter-c" />
+    <DevProjexGrammar Include="tree-sitter-cpp" />
+  </ItemGroup>
+
+  <!-- Resolved during evaluation, not in a target: items created inside a target are too late
+       for the copy-to-output and resource pipelines. RuntimeIdentifier and NuGetPackageRoot are
+       both available here because the RID comes from the command line and nuget.g.props is
+       imported before this file. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)'!=''">
+    <_GrammarSourceDir>$(NuGetPackageRoot)treesitter.dotnet/$(TreeSitterDotNetVersion)/runtimes/$(RuntimeIdentifier)/native/</_GrammarSourceDir>
+    <_GrammarPrefix Condition="!$(RuntimeIdentifier.StartsWith('win'))">lib</_GrammarPrefix>
+    <_GrammarExtension Condition="$(RuntimeIdentifier.StartsWith('win'))">.dll</_GrammarExtension>
+    <_GrammarExtension Condition="$(RuntimeIdentifier.StartsWith('linux'))">.so</_GrammarExtension>
+    <_GrammarExtension Condition="$(RuntimeIdentifier.StartsWith('osx'))">.dylib</_GrammarExtension>
+  </PropertyGroup>
+
+  <!-- Item transform, not %(...) batching: an Include attribute cannot batch over a different
+       item type, and the silent result would be a single literal path. -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)'!='' and '$(GrammarDeliveryBaseline)'!='true'">
+    <CuratedGrammarFile Include="@(DevProjexGrammar->'$(_GrammarSourceDir)$(_GrammarPrefix)%(Identity)$(_GrammarExtension)')" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'@(CuratedGrammarFile)'!='' and '$(GrammarDeliveryStrategy)'=='Embedded'">
+    <EmbeddedResource Include="@(CuratedGrammarFile)">
+      <LogicalName>Grammars/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup Condition="'@(CuratedGrammarFile)'!='' and '$(GrammarDeliveryStrategy)'=='Content'">
+    <Content Include="@(CuratedGrammarFile)">
+      <Link>grammars\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Fail closed. A grammar renamed by a package update must break the build loudly rather
+       than ship a binary that only fails at runtime on a user's machine. -->
+  <Target Name="VerifyCuratedGrammarsExist" BeforeTargets="PrepareForBuild"
+          Condition="'$(RuntimeIdentifier)'!='' and '$(GrammarDeliveryBaseline)'!='true'">
+    <Error Condition="!Exists('%(CuratedGrammarFile.Identity)')"
+           Text="Curated grammar missing: %(CuratedGrammarFile.Identity). The package layout changed - update DevProjexGrammar or the naming convention." />
+    <Error Condition="'@(CuratedGrammarFile->Count())'!='10'"
+           Text="Expected 10 curated grammars, resolved @(CuratedGrammarFile->Count()). Refusing to publish an incomplete set." />
+  </Target>
+
+  <!--
+    The package puts every grammar of the target architecture into the output. Only the core
+    tree-sitter library may stay: it is resolved by DllImport, which does work in single-file,
+    and removing it breaks the managed binding itself. The filter is scoped to the package's own
+    native assets so the curated copies under grammars/ are never touched.
+  -->
+  <Target Name="StripGrammarNativesFromBuildOutput" AfterTargets="ResolveLockFileCopyLocalFiles">
+    <ItemGroup>
+      <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
+        Condition="$([System.String]::Copy('%(Filename)').Contains('tree-sitter-'))" />
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+        Condition="$([System.String]::Copy('%(Filename)').Contains('tree-sitter-'))" />
+    </ItemGroup>
+  </Target>
+
+  <!-- MSBuild runs a target at most once, so the single-file and folder publish paths need
+       separate hooks; listing both as BeforeTargets would fire while the list is still empty. -->
+  <Target Name="StripGrammarNativesFromBundle" BeforeTargets="_ComputeFilesToBundle">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.NuGetPackageId)'=='TreeSitter.DotNet' and
+                   $([System.String]::Copy('%(Filename)').Contains('tree-sitter-'))" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="StripGrammarNativesFromPublishFolder"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition="'$(PublishSingleFile)'!='true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.NuGetPackageId)'=='TreeSitter.DotNet' and
+                   $([System.String]::Copy('%(Filename)').Contains('tree-sitter-'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>
