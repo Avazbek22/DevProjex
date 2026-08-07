@@ -225,7 +225,7 @@ public sealed class ProjectCopyExportService(
 				processedFiles,
 				plan.DirectoryCount,
 				bytesWritten,
-				prepared?.Snapshot.RedactedCount ?? 0);
+				prepared?.Snapshot?.RedactedCount ?? 0);
 		}
 		catch (Exception exception)
 		{
@@ -355,7 +355,7 @@ public sealed class ProjectCopyExportService(
 				processedFiles,
 				plan.DirectoryCount,
 				bytesWritten,
-				prepared?.Snapshot.RedactedCount ?? 0);
+				prepared?.Snapshot?.RedactedCount ?? 0);
 		}
 		catch (Exception exception)
 		{
