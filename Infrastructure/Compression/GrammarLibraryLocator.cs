@@ -16,6 +16,12 @@ public interface IGrammarLibraryLocator
 {
 	string StrategyName { get; }
 
+	/// <summary>
+	/// The grammar libraries this build can actually serve, derived from the delivery source itself
+	/// rather than a parallel list that can drift from what shipped.
+	/// </summary>
+	IReadOnlyList<string> EnumerateLibraries();
+
 	string Resolve(string libraryBaseName);
 }
 
@@ -66,21 +72,12 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 			$"tree-sitter-{bindingVersion}",
 			GrammarPlatform.RuntimeIdentifier);
 
-	/// <summary>
-	/// The grammar libraries this build actually carries, derived from the embedded resources
-	/// rather than a parallel list that can drift from what was shipped.
-	/// </summary>
-	public IReadOnlyList<string> EnumerateEmbeddedLibraries()
-	{
-		var suffix = GrammarPlatform.ResolveFileName(string.Empty);
-		return _assembly.GetManifestResourceNames()
+	public IReadOnlyList<string> EnumerateLibraries() =>
+		_assembly.GetManifestResourceNames()
 			.Where(name => name.StartsWith(_resourcePrefix, StringComparison.Ordinal))
-			.Select(name => name[_resourcePrefix.Length..])
-			.Select(name => name.EndsWith(suffix, StringComparison.Ordinal) ? name[..^suffix.Length] : name)
-			.Select(name => name.StartsWith("lib", StringComparison.Ordinal) ? name[3..] : name)
+			.Select(name => GrammarPlatform.ToBaseName(name[_resourcePrefix.Length..]))
 			.OrderBy(static name => name, StringComparer.Ordinal)
 			.ToArray();
-	}
 
 	/// <summary>Hash of the library as embedded, so a caller can prove a copy on disk is identical.</summary>
 	public byte[] GetEmbeddedHash(string libraryBaseName)
@@ -226,6 +223,14 @@ public sealed class ContentGrammarLibraryLocator : IGrammarLibraryLocator
 
 	public string RootDirectory { get; } = Path.Combine(AppContext.BaseDirectory, "grammars");
 
+	public IReadOnlyList<string> EnumerateLibraries() =>
+		Directory.Exists(RootDirectory)
+			? Directory.EnumerateFiles(RootDirectory)
+				.Select(path => GrammarPlatform.ToBaseName(Path.GetFileName(path)))
+				.OrderBy(static name => name, StringComparer.Ordinal)
+				.ToArray()
+			: [];
+
 	public string Resolve(string libraryBaseName)
 	{
 		var path = Path.Combine(RootDirectory, GrammarPlatform.ResolveFileName(libraryBaseName));
@@ -239,13 +244,26 @@ public sealed class ContentGrammarLibraryLocator : IGrammarLibraryLocator
 public static class GrammarPlatform
 {
 	/// <summary>Windows ships tree-sitter-c-sharp.dll; Unix ships libtree-sitter-c-sharp.so/.dylib.</summary>
-	public static string ResolveFileName(string libraryBaseName)
+	public static string LibraryPrefix => OperatingSystem.IsWindows() ? string.Empty : "lib";
+
+	public static string LibraryExtension =>
+		OperatingSystem.IsWindows() ? ".dll" : OperatingSystem.IsMacOS() ? ".dylib" : ".so";
+
+	public static string ResolveFileName(string libraryBaseName) =>
+		$"{LibraryPrefix}{libraryBaseName}{LibraryExtension}";
+
+	/// <summary>
+	/// Inverse of <see cref="ResolveFileName"/>. Derived from the prefix and extension rather than
+	/// from ResolveFileName(string.Empty), which yields "lib.so" on Unix and silently fails to strip.
+	/// </summary>
+	public static string ToBaseName(string fileName)
 	{
-		if (OperatingSystem.IsWindows())
-			return $"{libraryBaseName}.dll";
-		return OperatingSystem.IsMacOS()
-			? $"lib{libraryBaseName}.dylib"
-			: $"lib{libraryBaseName}.so";
+		var name = fileName;
+		if (name.EndsWith(LibraryExtension, StringComparison.Ordinal))
+			name = name[..^LibraryExtension.Length];
+		if (LibraryPrefix.Length > 0 && name.StartsWith(LibraryPrefix, StringComparison.Ordinal))
+			name = name[LibraryPrefix.Length..];
+		return name;
 	}
 
 	public static string RuntimeIdentifier

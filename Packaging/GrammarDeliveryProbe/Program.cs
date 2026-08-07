@@ -50,7 +50,7 @@ if (!useContent)
 	Console.WriteLine();
 }
 
-var libraries = embedded.EnumerateEmbeddedLibraries();
+var libraries = locator.EnumerateLibraries();
 Console.WriteLine($"grammars carried by this build: {libraries.Count}");
 
 if (args.Contains("--verify-recovery", StringComparer.Ordinal) && libraries.Count > 0 && !useContent)
