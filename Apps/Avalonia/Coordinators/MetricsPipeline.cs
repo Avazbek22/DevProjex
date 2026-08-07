@@ -495,6 +495,9 @@ internal sealed class MetricsPipeline(
             stagedFilePaths = filePaths;
             stagedResults = new FileMetricsScanResult[filePaths.Count];
 
+            // Recorded against the pass that is about to fill the cache, so the reconciliation on
+            // the next recalculation sees its own measurements and does not discard them.
+            SynchronizeTransformIdentity();
             ClearFileMetricsCache(trimCapacity: true);
 
             var totalFiles = filePaths.Count;
@@ -748,6 +751,11 @@ internal sealed class MetricsPipeline(
                 await Dispatcher.UIThread.InvokeAsync(() => UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0));
                 return;
             }
+
+            // Before the missing-file sweep, never after: dropping measurements taken under a
+            // different transformation is only safe while there is still a pass left to refill
+            // them. Doing it while reading the cache would publish the empty result instead.
+            SynchronizeTransformIdentity();
 
             var targetFilePaths = await Task.Run(
                 () => hasAnyChecked
@@ -1129,9 +1137,9 @@ internal sealed class MetricsPipeline(
         var effectiveHasSelection = hasSelection && !isFullTreeSelection;
         var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
         var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
-        // Checked before the key is built: the per-file cache is keyed on path alone, so a change of
-        // transformation has to invalidate it here rather than being caught by the key comparison.
-        SynchronizeTransformIdentity();
+        // The transformation belongs in the key rather than being reconciled here: this method only
+        // reads the per-file cache, and clearing it mid-read would publish an empty project.
+        // Reconciliation happens where a pass can still refill what it drops.
         var cacheKey = new ContentMetricsCacheKey(
             TreeIdentity: RuntimeHelpers.GetHashCode(currentTree.Root),
             SelectedCount: selectedCount,
