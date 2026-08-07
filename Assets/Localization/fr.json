@@ -200,6 +200,7 @@
   "Dialog.ProjectCopy.Redaction.Continue": "Exporter la copie masquée",
   "Error.ProjectCopy.SecretDetectionFailed": "Impossible d’analyser tous les fichiers texte sélectionnés. Aucune sortie n’a été créée.",
   "Error.ProjectCopy.SecretScanLimitExceeded": "Un fichier texte sélectionné dépasse la limite d’analyse de 16 Mio. Aucune sortie n’a été créée.",
+  "ProjectCopy.Notice.UnscannableExcluded": "Les fichiers ci-dessous ne figurent pas dans cette copie : ils dépassent la limite d’analyse de 16 Mio de Hide Secrets, leur contenu n’a pas pu être inspecté.",
   "Terminal.DryRun.ProjectCopy.RedactionWarning": "Le masquage des secrets est activé : les fichiers texte de cette copie du projet seront modifiés. Il ne s’agira pas d’une copie à l’identique et elle peut ne plus se compiler ou s’exécuter. Les fichiers binaires restent inchangés.",
   "Terminal.Analysis.RedactedValues": "Valeurs masquées",
   "Terminal.Analysis.SecretRuleMatches": "Correspondances des règles",

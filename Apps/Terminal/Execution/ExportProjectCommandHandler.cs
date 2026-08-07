@@ -49,6 +49,7 @@ public sealed class ExportProjectCommandHandler(
 		if (request.DryRun)
 		{
 			var redactSecrets = plan.Selection.HideSecrets == true;
+			string? unscannablePath = null;
 			if (redactSecrets)
 			{
 				var preflight = await services.SecretRedactionOutputPreparer
@@ -57,15 +58,7 @@ public sealed class ExportProjectCommandHandler(
 						plan.IncludedFiles,
 						cancellationToken)
 					.ConfigureAwait(false);
-				// A dry run has to predict the real run. The copy refuses a file the scanner may not
-				// read, so the preflight has to refuse it too rather than report readiness.
-				if (preflight.UnscannablePath is { } unscannablePath)
-				{
-					throw new SecretScanLimitExceededException(
-						unscannablePath,
-						new FileInfo(unscannablePath).Length,
-						SecretRedactionOutputPreparer.MaximumScannableFileBytes);
-				}
+				unscannablePath = preflight.UnscannablePath;
 			}
 			DryRunRenderer.WritePlan(
 				environment,
@@ -75,6 +68,13 @@ public sealed class ExportProjectCommandHandler(
 			{
 				environment.Error.WriteLine(
 					services.Localization["Terminal.DryRun.ProjectCopy.RedactionWarning"]);
+				// A dry run has to predict the real run, and the real run now leaves such a file
+				// out rather than refusing, so this says which one instead of failing.
+				if (unscannablePath is not null)
+				{
+					environment.Error.WriteLine(
+						services.Localization["ProjectCopy.Notice.UnscannableExcluded"]);
+				}
 			}
 
 			if (plan.Selection.CompressCode == true)

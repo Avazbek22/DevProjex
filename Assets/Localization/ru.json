@@ -200,6 +200,7 @@
   "Dialog.ProjectCopy.Redaction.Continue": "Экспортировать копию",
   "Error.ProjectCopy.SecretDetectionFailed": "Не удалось проверить все выбранные текстовые файлы. Результат не создан.",
   "Error.ProjectCopy.SecretScanLimitExceeded": "Выбранный текстовый файл превышает лимит проверки 16 МиБ. Результат не создан.",
+  "ProjectCopy.Notice.UnscannableExcluded": "Перечисленные ниже файлы не вошли в эту копию: они превышают лимит проверки Hide Secrets в 16 МиБ, поэтому их содержимое не проверено.",
   "Terminal.DryRun.ProjectCopy.RedactionWarning": "Скрытие секретов включено: текстовые файлы в копии проекта будут изменены. Это не будет побайтовая копия, и она может не собираться или не запускаться. Двоичные файлы останутся без изменений.",
   "Terminal.Analysis.RedactedValues": "Скрытые значения",
   "Terminal.Analysis.SecretRuleMatches": "Совпадения правил",

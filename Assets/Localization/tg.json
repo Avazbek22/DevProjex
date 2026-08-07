@@ -200,6 +200,7 @@
   "Dialog.ProjectCopy.Redaction.Continue": "Содир кардани нусхаи тағйирёфта",
   "Error.ProjectCopy.SecretDetectionFailed": "Ҳамаи файлҳои матнии интихобшударо санҷидан нашуд. Натиҷа сохта нашуд.",
   "Error.ProjectCopy.SecretScanLimitExceeded": "Файли матнии интихобшуда аз ҳадди санҷиши 16 МиБ калон аст. Натиҷа сохта нашуд.",
+  "ProjectCopy.Notice.UnscannableExcluded": "Файлҳои зерин ба ин нусха дохил нашуданд: онҳо аз ҳадди санҷиши Hide Secrets (16 МиБ) зиёданд, бинобар ин мундариҷаи онҳо санҷида нашуд.",
   "Terminal.DryRun.ProjectCopy.RedactionWarning": "Пинҳон кардани сирҳо фаъол аст: файлҳои матнии нусхаи лоиҳа тағйир меёбанд. Ин нусхаи дақиқи байтӣ нахоҳад буд ва метавонад ҷамъ ё иҷро нашавад. Файлҳои дуӣ бетағйир мемонанд.",
   "Terminal.Analysis.RedactedValues": "Қиматҳои пинҳоншуда",
   "Terminal.Analysis.SecretRuleMatches": "Мутобиқатҳои қоидаҳо",

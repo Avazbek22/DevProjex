@@ -25,8 +25,8 @@ public sealed record SecretTextRedactionResult(
 
 /// <param name="UnscannablePath">
 /// One selected text file the scanner was not allowed to read, or null. Documents omit such a file
-/// and report a count for everything else; a project copy reproduces bytes and refuses instead, so
-/// it is the surface that has to look at this.
+/// and report a count for everything else; a project copy leaves it out and names it. The dry run
+/// reads this to say the same thing before anything is written.
 /// </param>
 public sealed record SecretRedactionSnapshot(
 	string SelectionKey,

@@ -200,6 +200,7 @@
   "Dialog.ProjectCopy.Redaction.Continue": "Өзгертілген көшірмені экспорттау",
   "Error.ProjectCopy.SecretDetectionFailed": "Таңдалған мәтіндік файлдардың барлығын тексеру мүмкін болмады. Нәтиже жасалмады.",
   "Error.ProjectCopy.SecretScanLimitExceeded": "Таңдалған мәтіндік файл 16 МиБ тексеру шегінен асады. Нәтиже жасалмады.",
+  "ProjectCopy.Notice.UnscannableExcluded": "Төмендегі файлдар осы көшірмеге кірмеді: олар Hide Secrets тексеру шегінен (16 МиБ) асады, сондықтан мазмұны тексерілмеді.",
   "Terminal.DryRun.ProjectCopy.RedactionWarning": "Құпияларды жасыру қосулы: жоба көшірмесіндегі мәтіндік файлдар өзгертіледі. Бұл байттық дәл көшірме болмайды және жиналмауы немесе іске қосылмауы мүмкін. Екілік файлдар өзгеріссіз қалады.",
   "Terminal.Analysis.RedactedValues": "Жасырылған мәндер",
   "Terminal.Analysis.SecretRuleMatches": "Ереже сәйкестіктері",

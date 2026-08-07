@@ -200,6 +200,7 @@
   "Dialog.ProjectCopy.Redaction.Continue": "Export redacted copy",
   "Error.ProjectCopy.SecretDetectionFailed": "Hide Secrets could not inspect every selected text file. No output was created.",
   "Error.ProjectCopy.SecretScanLimitExceeded": "A selected text file exceeds the 16 MiB Hide Secrets scan limit. No output was created.",
+  "ProjectCopy.Notice.UnscannableExcluded": "Files below were left out of this copy: they exceed the 16 MiB Hide Secrets scan limit, so their contents could not be inspected.",
   "Terminal.DryRun.ProjectCopy.RedactionWarning": "Hide Secrets is enabled: text files in this project copy will be changed. It will not be a byte-for-byte copy and may not build or run. Binary files remain unchanged.",
   "Terminal.Analysis.RedactedValues": "Redacted values",
   "Terminal.Analysis.SecretRuleMatches": "Rule matches",

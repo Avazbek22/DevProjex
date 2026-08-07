@@ -287,25 +287,45 @@ public sealed class SecretRedactionCommandContractTests
 
 		var exitCode = await RunAsync(workspace, environment, arguments);
 
-		if (command == "project")
-		{
-			Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
-			Assert.Empty(environment.StandardOutput);
-			Assert.Contains(
-				"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
-				environment.StandardError,
-				StringComparison.Ordinal);
-			Assert.DoesNotContain("Dry run:", environment.StandardError, StringComparison.OrdinalIgnoreCase);
-		}
-		else
-		{
-			Assert.Equal(CommandLineExitCodes.Success, exitCode);
-			Assert.DoesNotContain(
-				"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
-				environment.StandardError,
-				StringComparison.Ordinal);
-		}
+		// Both commands now complete: neither refuses a whole operation over one unreadable file.
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(
+			"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
+			environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.False(Path.Exists(destination));
+	}
 
+	/// <summary>
+	/// A dry run has to predict the real run. The copy leaves an unreadable file out, so the dry
+	/// run says so rather than reporting a faithful copy.
+	/// </summary>
+	[Fact]
+	public async Task ExportProjectDryRun_AnnouncesThatAnUnreadableFileWillBeLeftOut()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		var environment = new TestTerminalEnvironment();
+		var destination = Path.Combine(workspace.OutputRoot, "project-copy");
+		await File.WriteAllTextAsync(
+			Path.Combine(workspace.ProjectRoot, "oversized.txt"),
+			new string('a', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1)),
+			TestContext.Current.CancellationToken);
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "project", workspace.ProjectRoot,
+				"--as", "folder",
+				"--git-mode", "none",
+				"--hide-secrets",
+				"--dry-run",
+				"--language", "en",
+				"-o", destination
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("left out of this copy", environment.StandardError, StringComparison.OrdinalIgnoreCase);
 		Assert.False(Path.Exists(destination));
 	}
 

@@ -35,17 +35,6 @@ public sealed class ProjectCopyExportService(
 			await using var prepared = request.RedactSecrets || request.CompressCode
 				? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
 				: null;
-			// A copy reproduces the project byte for byte. A file the scanner could not read has no
-			// redacted stand-in to copy, and copying the original would hand over text Hide Secrets
-			// never inspected - so this surface still fails closed, before anything is written.
-			if (request.RedactSecrets && prepared?.FirstUnscannablePath is { } unscannablePath)
-			{
-				throw new SecretScanLimitExceededException(
-					unscannablePath,
-					new FileInfo(unscannablePath).Length,
-					SecretRedactionOutputPreparer.MaximumScannableFileBytes);
-			}
-
 			return request.Format switch
 			{
 				ProjectCopyExportFormat.Folder => await ExportFolderAsync(
@@ -101,19 +90,59 @@ public sealed class ProjectCopyExportService(
 	/// </summary>
 	private static string? BuildTransformationNotice(
 		PreparedSecretRedactionOutput? prepared,
+		ProjectCopyExportPlan plan,
 		ProjectCopyNoticeText? noticeText)
 	{
 		if (prepared is null || noticeText is null)
 			return null;
 
-		var lines = new List<string>(2);
+		var lines = new List<string>(3);
 		if (prepared.Snapshot is { } redaction && redaction.RedactedCount > 0)
 			lines.Add(noticeText.Redaction);
 		if (prepared.CompressionSnapshot is { CompressedFiles: > 0 })
 			lines.Add(noticeText.Compression);
+		// Named, not merely counted: a copy that is missing a file has to say which one, or the
+		// reader cannot tell an omission from a file that was never in the project.
+		if (ShouldExcludeUnscannable(prepared) && prepared.UnscannablePaths.Count > 0)
+		{
+			var relativePaths = prepared.UnscannablePaths
+				.Select(path => NormalizeNoticePath(plan.ProjectRootPath, path))
+				.OrderBy(static path => path, StringComparer.Ordinal);
+			lines.Add(
+				noticeText.ExcludedUnscannable +
+				Environment.NewLine +
+				string.Join(Environment.NewLine, relativePaths.Select(static path => "  " + path)));
+		}
+
 		return lines.Count == 0
 			? null
 			: string.Join(Environment.NewLine + Environment.NewLine, lines) + Environment.NewLine;
+	}
+
+	/// <summary>
+	/// A file the scanner never read is left out of a copy only when Hide Secrets is on. With
+	/// compression alone there is no promise about its contents to keep, so it ships as it is.
+	/// </summary>
+	private static bool ShouldExcludeUnscannable(PreparedSecretRedactionOutput prepared) =>
+		prepared.Snapshot is not null;
+
+	private static bool IsExcludedFromCopy(
+		PreparedSecretRedactionOutput? prepared,
+		string sourcePath) =>
+		prepared is not null &&
+		ShouldExcludeUnscannable(prepared) &&
+		prepared.GetFile(sourcePath).IsUnscannable;
+
+	private static string NormalizeNoticePath(string projectRoot, string fullPath)
+	{
+		try
+		{
+			return Path.GetRelativePath(projectRoot, fullPath).Replace('\\', '/');
+		}
+		catch (ArgumentException)
+		{
+			return Path.GetFileName(fullPath);
+		}
 	}
 
 	private async Task<PreparedSecretRedactionOutput?> PrepareRedactedOutputAsync(
@@ -148,14 +177,15 @@ public sealed class ProjectCopyExportService(
 	}
 
 	/// <summary>
-	/// The two notice lines a transformed project copy can carry, in the user's language. Reuses the
+	/// The notice lines a transformed project copy can carry, in the user's language. Reuses the
 	/// wording the dry-run and the confirmation dialog already show, so the copy says the same thing
 	/// the user was told before agreeing to it.
 	/// </summary>
 	public static ProjectCopyNoticeText BuildProjectCopyNoticeText(LocalizationService localization) =>
 		new(
 			localization["Terminal.DryRun.ProjectCopy.RedactionWarning"],
-			localization["Compression.CopyNotice"]);
+			localization["Compression.CopyNotice"],
+			localization["ProjectCopy.Notice.UnscannableExcluded"]);
 
 	public static void EnsureDestinationOutsideProject(string projectRootPath, string destinationPath)
 	{
@@ -240,6 +270,13 @@ public sealed class ProjectCopyExportService(
 			foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
+				if (IsExcludedFromCopy(prepared, file.SourcePath))
+				{
+					processedEntries++;
+					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+					continue;
+				}
+
 				var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
 				Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
 				var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
@@ -256,7 +293,7 @@ public sealed class ProjectCopyExportService(
 				ReportProgress(progress, 0, 0, 0);
 
 			cancellationToken.ThrowIfCancellationRequested();
-			if (BuildTransformationNotice(prepared, noticeText) is { } notice)
+			if (BuildTransformationNotice(prepared, plan, noticeText) is { } notice)
 			{
 				await File.WriteAllTextAsync(
 						Path.Combine(stagingPath, TransformationNoticeFileName),
@@ -379,6 +416,13 @@ public sealed class ProjectCopyExportService(
 				foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
 				{
 					cancellationToken.ThrowIfCancellationRequested();
+					if (IsExcludedFromCopy(prepared, file.SourcePath))
+					{
+						processedEntries++;
+						ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+						continue;
+					}
+
 					var entryName = BuildZipEntryName(plan.ProjectName, file.RelativePath, isDirectory: false);
 					var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
 					TrySetZipLastWriteTime(entry, file.SourcePath);
@@ -395,7 +439,7 @@ public sealed class ProjectCopyExportService(
 				if (totalEntries == 0)
 					ReportProgress(progress, 0, 0, 0);
 
-				if (BuildTransformationNotice(prepared, noticeText) is { } notice)
+				if (BuildTransformationNotice(prepared, plan, noticeText) is { } notice)
 				{
 					var noticeEntry = archive.CreateEntry(
 						BuildZipEntryName(plan.ProjectName, TransformationNoticeFileName, isDirectory: false),

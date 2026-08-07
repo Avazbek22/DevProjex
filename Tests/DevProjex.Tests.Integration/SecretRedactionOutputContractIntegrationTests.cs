@@ -368,11 +368,13 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	/// <summary>
-	/// The one surface that reproduces bytes rather than rendering them. It has no redacted
-	/// stand-in to copy for a file the scanner never read, so it still refuses - before writing.
+	/// A copy reproduces bytes, so it cannot ship text the scanner never read. Refusing the whole
+	/// copy over one file is the worse trade: the user asked for a copy of the project and would
+	/// get nothing. The file is left out instead, and the notice names it - dropping it silently is
+	/// what the notice exists to prevent.
 	/// </summary>
 	[Fact]
-	public async Task OversizedSelectedText_StillFailsTheProjectCopyBeforeWritingAnyOutput()
+	public async Task OversizedSelectedText_IsLeftOutOfTheProjectCopyAndNamedInTheNotice()
 	{
 		using var temporary = new TemporaryDirectory();
 		var sourceRoot = temporary.CreateDirectory("oversized-copy-project");
@@ -389,22 +391,39 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
 		var copyDestination = Path.Combine(exportRoot, "copy");
 
-		var copyException = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
-			new ProjectCopyExportService(new ProjectCopyExportPlanBuilder(), analyzer, session)
-				.ExportAsync(
-					new ProjectCopyExportRequest(
-						plan.SourceRoot,
-						"project",
-						plan.ProjectedTree,
-						new HashSet<string>(PathComparer.Default),
-						copyDestination,
-						ProjectCopyExportFormat.Folder,
-						ProjectCopyDestinationMode.Exact,
-						RedactSecrets: true),
-					cancellationToken: TestContext.Current.CancellationToken));
+		var result = await new ProjectCopyExportService(
+				new ProjectCopyExportPlanBuilder(),
+				analyzer,
+				session)
+			.ExportAsync(
+				new ProjectCopyExportRequest(
+					plan.SourceRoot,
+					"project",
+					plan.ProjectedTree,
+					new HashSet<string>(PathComparer.Default),
+					copyDestination,
+					ProjectCopyExportFormat.Folder,
+					ProjectCopyDestinationMode.Exact,
+					RedactSecrets: true,
+					NoticeText: new ProjectCopyNoticeText(
+						"redaction notice",
+						"compression notice",
+						"excluded notice")),
+				cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Equal(ProjectCopyExportError.SecretScanLimitExceeded, copyException.Error);
-		Assert.False(Path.Exists(copyDestination));
+		// The rest of the project is there, redacted.
+		var settings = await File.ReadAllTextAsync(
+			Path.Combine(result.DestinationPath, "settings.txt"),
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(GithubToken, settings, StringComparison.Ordinal);
+		// The unreadable file is not, and no truncated stand-in was written in its place.
+		Assert.False(File.Exists(Path.Combine(result.DestinationPath, "oversized.txt")));
+
+		var notice = await File.ReadAllTextAsync(
+			Path.Combine(result.DestinationPath, ProjectCopyExportService.TransformationNoticeFileName),
+			TestContext.Current.CancellationToken);
+		Assert.Contains("excluded notice", notice, StringComparison.Ordinal);
+		Assert.Contains("oversized.txt", notice, StringComparison.Ordinal);
 	}
 
 	/// <summary>

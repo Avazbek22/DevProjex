@@ -200,6 +200,7 @@
   "Dialog.ProjectCopy.Redaction.Continue": "O‘zgartirilgan nusxani eksport qilish",
   "Error.ProjectCopy.SecretDetectionFailed": "Tanlangan barcha matn fayllarini tekshirib bo‘lmadi. Natija yaratilmadi.",
   "Error.ProjectCopy.SecretScanLimitExceeded": "Tanlangan matn fayli 16 MiB tekshirish chegarasidan oshadi. Natija yaratilmadi.",
+  "ProjectCopy.Notice.UnscannableExcluded": "Quyidagi fayllar bu nusxaga kirmadi: ular Hide Secrets tekshirish chegarasidan (16 MiB) oshadi, shuning uchun mazmuni tekshirilmadi.",
   "Terminal.DryRun.ProjectCopy.RedactionWarning": "Sirlarni yashirish yoqilgan: loyiha nusxasidagi matn fayllari o‘zgartiriladi. Bu baytma-bayt nusxa bo‘lmaydi va yig‘ilmasligi yoki ishga tushmasligi mumkin. Ikkilik fayllar o‘zgarishsiz qoladi.",
   "Terminal.Analysis.RedactedValues": "Yashirilgan qiymatlar",
   "Terminal.Analysis.SecretRuleMatches": "Qoida mosliklari",

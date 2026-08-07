@@ -31,7 +31,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 
 		var workingDirectory = CreateWorkingDirectory();
 		var preparedFiles = new Dictionary<string, PreparedSecretFile>(PathComparer.Default);
-		string? firstUnscannablePath = null;
+		var unscannablePaths = new List<string>();
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
 		var scope = transformationScope.Redaction;
 		try
@@ -58,14 +58,14 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 						// compressor already follows for text past its parse limit. Redaction cannot
 						// promise anything about text it never read, so the file is recorded as
 						// unscanned and its content is withheld: every document surface omits text
-						// this large anyway, so nothing that used to ship stops shipping. The one
-						// surface that would copy the bytes verbatim is the project copy, and that
-						// is where the refusal now lives.
+						// this large anyway, so nothing that used to ship stops shipping. A project
+						// copy leaves it out and names it in the notice, because copying the bytes
+						// would hand over text the scanner never saw.
 						if (scope is not null)
 						{
 							scope.AnalyzeUnscannable(sourcePath, metadataAfterRead);
 							preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(sourcePath);
-							firstUnscannablePath ??= sourcePath;
+							unscannablePaths.Add(sourcePath);
 							continue;
 						}
 
@@ -125,7 +125,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				preparedFiles,
 				snapshot,
 				compression,
-				firstUnscannablePath);
+				unscannablePaths);
 		}
 		catch
 		{
@@ -410,22 +410,23 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 		IReadOnlyDictionary<string, PreparedSecretFile> files,
 		SecretRedactionSnapshot? snapshot,
 		Compression.CodeCompressionSnapshot? compressionSnapshot = null,
-		string? firstUnscannablePath = null)
+		IReadOnlyList<string>? unscannablePaths = null)
 	{
 		_workingDirectory = workingDirectory;
 		_files = files;
 		Snapshot = snapshot;
 		CompressionSnapshot = compressionSnapshot;
-		FirstUnscannablePath = firstUnscannablePath;
+		UnscannablePaths = unscannablePaths ?? [];
 	}
 
 	/// <summary>
-	/// The first selected file Hide Secrets could not read, in selection order, or null.
+	/// Selected files Hide Secrets was not allowed to read, in selection order.
 	///
-	/// Document surfaces omit such a file and carry on. A project copy cannot: it reproduces bytes,
-	/// so shipping one would hand over text the scanner never saw. That surface refuses instead.
+	/// Document surfaces omit their text and carry on. A project copy reproduces bytes, so it
+	/// leaves them out entirely and names them in the notice rather than copying text the scanner
+	/// never saw - or refusing the whole copy over one file.
 	/// </summary>
-	public string? FirstUnscannablePath { get; }
+	public IReadOnlyList<string> UnscannablePaths { get; }
 
 	/// <summary>Null when redaction was not part of this run - compression can be enabled alone.</summary>
 	public SecretRedactionSnapshot? Snapshot { get; }

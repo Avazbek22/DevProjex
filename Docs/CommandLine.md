@@ -273,8 +273,8 @@ mark binary entries with metadata.
 
 With `--hide-secrets`, detection failure fails closed and produces no complete output
 artifact. A selected text file above the supported scan limit is omitted from the
-context document, the same as without `--hide-secrets`; `export project` refuses
-instead, because a copy would reproduce its bytes.
+context document, the same as without `--hide-secrets`; `export project` leaves it out
+of the copy and names it in `DEVPROJEX-NOTICE.txt`.
 
 When output is stdout, stdout contains only the context document. When output is a
 file, stdout contains one absolute result path. Existing files are conflicts

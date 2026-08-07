@@ -200,6 +200,7 @@
     "Dialog.ProjectCopy.Redaction.Continue":  "Exportar cópia modificada",
     "Error.ProjectCopy.SecretDetectionFailed":  "Não foi possível analisar todos os ficheiros de texto selecionados. Não foi criada qualquer saída.",
     "Error.ProjectCopy.SecretScanLimitExceeded":  "Um ficheiro de texto selecionado excede o limite de análise de 16 MiB. Não foi criada qualquer saída.",
+    "ProjectCopy.Notice.UnscannableExcluded": "Os ficheiros abaixo ficaram de fora desta cópia: excedem o limite de análise de 16 MiB do Hide Secrets, pelo que o seu conteúdo não foi inspecionado.",
     "Terminal.DryRun.ProjectCopy.RedactionWarning":  "Ocultar segredos está ativado: os ficheiros de texto desta cópia do projeto serão alterados. Não será uma cópia byte a byte e pode não compilar ou executar. Os ficheiros binários permanecem inalterados.",
     "Terminal.Analysis.RedactedValues":  "Valores ocultos",
     "Terminal.Analysis.SecretRuleMatches":  "Correspondências das regras",

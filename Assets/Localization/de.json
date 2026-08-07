@@ -200,6 +200,7 @@
   "Dialog.ProjectCopy.Redaction.Continue": "Bearbeitete Kopie exportieren",
   "Error.ProjectCopy.SecretDetectionFailed": "Nicht alle ausgewählten Textdateien konnten geprüft werden. Es wurde keine Ausgabe erstellt.",
   "Error.ProjectCopy.SecretScanLimitExceeded": "Eine ausgewählte Textdatei überschreitet das Prüflimit von 16 MiB. Es wurde keine Ausgabe erstellt.",
+  "ProjectCopy.Notice.UnscannableExcluded": "Die folgenden Dateien fehlen in dieser Kopie: Sie überschreiten das 16-MiB-Prüflimit von Hide Secrets, ihr Inhalt konnte nicht geprüft werden.",
   "Terminal.DryRun.ProjectCopy.RedactionWarning": "„Geheimnisse verbergen“ ist aktiviert: Textdateien in dieser Projektkopie werden geändert. Sie ist keine bytegenaue Kopie und lässt sich möglicherweise nicht erstellen oder ausführen. Binärdateien bleiben unverändert.",
   "Terminal.Analysis.RedactedValues": "Unkenntlich gemachte Werte",
   "Terminal.Analysis.SecretRuleMatches": "Regelübereinstimmungen",

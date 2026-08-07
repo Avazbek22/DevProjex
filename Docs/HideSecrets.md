@@ -122,14 +122,16 @@ Only selected text files are inspected. Binary files are not scanned and pass
 through unchanged in folder and ZIP copies; context documents continue to mark
 them as binary without embedding their bytes.
 
-A selected text file above 16 MiB is not scanned, and what happens next depends on
-what the surface produces. Documents — preview, clipboard, and every context format —
-omit its text and mark the entry, which is what they already do for a file that large
-with Hide Secrets off; the rest of the selection is produced normally. A folder or ZIP
-project copy reproduces bytes rather than rendering them, so it has nothing safe to
-write for that file and fails the operation closed before writing anything. Detection
-errors and regex timeouts stop the operation on every surface. Text that was never
-inspected is never emitted, and an uninspected file is never passed off as inspected.
+A selected text file above 16 MiB is not scanned, and what happens next depends on what
+the surface produces. Documents — preview, clipboard, and every context format — omit
+its text and mark the entry, which is what they already do for a file that large with
+Hide Secrets off. A folder or ZIP project copy reproduces bytes rather than rendering
+them, so it leaves the file out of the copy entirely and names it in
+`DEVPROJEX-NOTICE.txt` under the copy's root; the rest of the project is copied
+normally. One unreadable file therefore costs that file, never the whole operation.
+Detection errors and regex timeouts still stop the operation on every surface. Text that
+was never inspected is never emitted, an uninspected file is never passed off as
+inspected, and a file left out of a copy is always named.
 
 The count scan stores compact spans, rule ids, file fingerprints, and hashed value
 identities in a bounded LRU cache. It does not retain complete source or redacted

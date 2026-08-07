@@ -183,11 +183,12 @@ application session and deliberately do not persist in profiles.
 
 Detection failure and regex timeout fail closed on every command, reporting
 `DPX-SECRET-DETECTION-FAILED` and exit `1`; no complete artifact is published. A
-selected text file above the 16 MiB scan limit is not inspected: `export project`
-reports `DPX-SECRET-SCAN-LIMIT-EXCEEDED` and exits `1` because a copy reproduces its
-bytes, while `export context` omits that file's text and completes, exactly as it does
-for a file that large without `--hide-secrets`. Uninspected text is never emitted, and
-no result describes zero matches as safe or clean.
+selected text file above the 16 MiB scan limit is not inspected, and costs only itself:
+`export context` omits that file's text and completes, exactly as it does for a file
+that large without `--hide-secrets`, while `export project` leaves it out of the copy
+and names it in `DEVPROJEX-NOTICE.txt`. `--dry-run` announces the same omission.
+Uninspected text is never emitted, a file left out of a copy is always named, and no
+result describes zero matches as safe or clean.
 
 For v5 compatibility, `--exclude hide-secrets` remains parseable but is omitted
 from current help and completion choices. Resolution migrates it to the separate

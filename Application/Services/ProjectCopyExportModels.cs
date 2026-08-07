@@ -52,7 +52,14 @@ public sealed record ProjectCopyExportRequest(
 /// Localized text for the notice a transformed copy carries in its root. Passed in rather than
 /// resolved here so the Application layer keeps no opinion about the user's language.
 /// </summary>
-public sealed record ProjectCopyNoticeText(string Redaction, string Compression);
+/// <param name="ExcludedUnscannable">
+/// Header for the list of files left out because Hide Secrets could not read them. The paths
+/// follow on their own lines, so the reader can tell an omission from a file that never existed.
+/// </param>
+public sealed record ProjectCopyNoticeText(
+	string Redaction,
+	string Compression,
+	string ExcludedUnscannable = "");
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,
