@@ -46,9 +46,10 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 		var selected = coordinator.GetSelectedIgnoreOptionIds();
 		Assert.DoesNotContain(IgnoreOptionId.DotFolders, selected);
 		Assert.DoesNotContain(IgnoreOptionId.EmptyFolders, selected);
-		var hideSecrets = Assert.Single(viewModel.IgnoreOptions);
-		Assert.Equal(IgnoreOptionId.HideSecrets, hideSecrets.Id);
-		Assert.False(hideSecrets.IsChecked);
+		Assert.Equal(
+			IgnoreOptionOrder.ContentTransformations,
+			viewModel.IgnoreOptions.Select(static option => option.Id));
+		Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
 	}
 
 	[Fact]

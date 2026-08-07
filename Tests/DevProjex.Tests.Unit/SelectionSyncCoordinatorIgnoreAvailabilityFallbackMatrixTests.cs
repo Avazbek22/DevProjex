@@ -202,7 +202,8 @@ public sealed class SelectionSyncCoordinatorIgnoreAvailabilityFallbackMatrixTest
 		var ids = new List<IgnoreOptionId>(3);
 		if (includeSmartIgnore)
 			ids.Add(IgnoreOptionId.SmartIgnore);
-		ids.Add(IgnoreOptionId.HideSecrets);
+		// Every content transformation is always offered, so the block comes from the catalog.
+		ids.AddRange(IgnoreOptionOrder.ContentTransformations);
 		if (includeGitIgnore)
 			ids.Add(IgnoreOptionId.UseGitIgnore);
 

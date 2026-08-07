@@ -30,7 +30,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		SecretRedactionContext? redactionContext = null)
+		ContentTransformationContext? transformationContext = null)
 		=> (await BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -38,13 +38,13 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount: null,
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
-			redactionContext).ConfigureAwait(false)).Text;
+			transformationContext).ConfigureAwait(false)).Text;
 
 	public Task<SelectedContentExportResult> BuildResultAsync(
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		SecretRedactionContext? redactionContext) =>
+		ContentTransformationContext? transformationContext) =>
 		BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -52,7 +52,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount: null,
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
-			redactionContext);
+			transformationContext);
 
 	public async Task<string> BuildBoundedPreviewAsync(
 		IEnumerable<string> filePaths,
@@ -73,7 +73,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount,
 			maxFileSizeForFullRead,
 			maxOutputCharacters,
-			redactionContext: null).ConfigureAwait(false)).Text;
+			transformationContext: null).ConfigureAwait(false)).Text;
 	}
 
 	private async Task<SelectedContentExportResult> BuildCoreAsync(
@@ -83,7 +83,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		int? maxFileCount,
 		long? maxFileSizeForFullRead,
 		int? maxOutputCharacters,
-		SecretRedactionContext? redactionContext)
+		ContentTransformationContext? transformationContext)
 	{
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
@@ -99,7 +99,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		// Convert to list and sort in-place
 		var files = new List<string>(uniqueFiles);
 		files.Sort(PathComparer.Default);
-		var redactionScope = redactionContext?.BeginOutput(files);
+		using var transformationScope = transformationContext?.BeginOutput(files);
+		var redactionScope = transformationScope?.Redaction;
 
 		var sb = new StringBuilder();
 		bool anyWritten = false;
@@ -155,9 +156,16 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			}
 
 			using var contentLease = redactionScope?.TrackFullContentBuffer();
+			// Compression first, then secrets: the clipboard must carry exactly what the preview
+			// showed, and the secret counter must describe the text that actually leaves.
+			var transformedText = transformationScope?.Compress(
+				file,
+				MapDisplayPath(file, displayPathMapper),
+				content.Content,
+				cancellationToken).Text ?? content.Content;
 			var redactionPlan = redactionScope?.CreatePlan(
 				file,
-				content.Content,
+				transformedText,
 				cancellationToken);
 
 			processedFileCount++;
@@ -208,6 +216,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		}
 
 		var snapshot = redactionScope?.Complete();
+		transformationScope?.Compression?.Complete();
 		var textOutput = anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
 
 		return new SelectedContentExportResult(textOutput, snapshot);

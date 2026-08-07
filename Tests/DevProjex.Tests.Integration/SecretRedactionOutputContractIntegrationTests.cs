@@ -48,7 +48,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				TestContext.Current.CancellationToken,
 				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
 				includeOmissionMarkers: true,
-				redactionContext: context);
+				transformationContext: context);
 		var previewPayload = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
 		using var contentPreview = await new PreviewDocumentBuilder(analyzer)
 			.BuildContentDocumentAsync(
@@ -56,7 +56,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				TestContext.Current.CancellationToken,
 				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
 				includeOmissionMarkers: false,
-				redactionContext: context);
+				transformationContext: context);
 		var contentPreviewPayload = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(contentPreview);
 		var selectedContent = await new SelectedContentExportService(analyzer).BuildAsync(
 			plan.IncludedFiles,
@@ -114,7 +114,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			       TestContext.Current.CancellationToken,
 			       TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
 			       includeOmissionMarkers: true,
-			       redactionContext: context))
+			       transformationContext: context))
 		{
 			var occurrence = Assert.Single(
 				initialPreview!.Redactions
@@ -130,7 +130,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			TestContext.Current.CancellationToken,
 			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
 			includeOmissionMarkers: true,
-			redactionContext: context);
+			transformationContext: context);
 		var previewPayload = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(decidedPreview);
 		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
 		var folder = await ExportProjectAsync(

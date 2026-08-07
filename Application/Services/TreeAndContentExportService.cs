@@ -38,7 +38,7 @@ public sealed class TreeAndContentExportService(
 		TreeTextFormat format,
 		CancellationToken cancellationToken,
 		ExportPathPresentation? pathPresentation = null,
-		SecretRedactionContext? redactionContext = null)
+		ContentTransformationContext? transformationContext = null)
 	{
 		var displayRootPath = pathPresentation?.DisplayRootPath;
 		var displayRootName = pathPresentation?.DisplayRootName;
@@ -61,7 +61,7 @@ public sealed class TreeAndContentExportService(
 			files,
 			cancellationToken,
 			contentPathMapper,
-			redactionContext).ConfigureAwait(false);
+			transformationContext).ConfigureAwait(false);
 		var content = contentResult.Text;
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;

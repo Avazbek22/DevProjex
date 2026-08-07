@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 namespace DevProjex.Tests.Unit;
 
 public sealed class IgnoreOptionsServiceTests
@@ -11,6 +12,7 @@ public sealed class IgnoreOptionsServiceTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
 				["Settings.Ignore.HiddenFiles"] = "HiddenFiles",
@@ -23,10 +25,10 @@ public sealed class IgnoreOptionsServiceTests
 
 		var options = service.GetOptions();
 
-		Assert.Equal(5, options.Count);
+		Assert.Equal(5 + IgnoreOptionOrder.Count - 1, options.Count);
 		Assert.False(options.Single(option => option.Id == IgnoreOptionId.HideSecrets).DefaultChecked);
 		Assert.All(
-			options.Where(option => option.Id != IgnoreOptionId.HideSecrets),
+			options.Where(option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id)),
 			option => Assert.True(option.DefaultChecked));
 		Assert.Contains(options, option => option.Id == IgnoreOptionId.HiddenFolders && option.Label == "HiddenFolders");
 		Assert.Contains(options, option => option.Id == IgnoreOptionId.DotFiles && option.Label == "DotFiles");
@@ -41,6 +43,7 @@ public sealed class IgnoreOptionsServiceTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
 				["Settings.Ignore.HiddenFiles"] = "HiddenFiles",
@@ -53,11 +56,11 @@ public sealed class IgnoreOptionsServiceTests
 
 		var options = service.GetOptions();
 
-		Assert.Equal(IgnoreOptionId.HideSecrets, options[0].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFolders, options[1].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFiles, options[2].Id);
-		Assert.Equal(IgnoreOptionId.DotFolders, options[3].Id);
-		Assert.Equal(IgnoreOptionId.DotFiles, options[4].Id);
+		Assert.Equal(IgnoreOptionOrder.ContentTransformations, options.Skip(0).Take(IgnoreOptionOrder.Count).Select(static option => option.Id));
+		Assert.Equal(IgnoreOptionId.HiddenFolders, options[IgnoreOptionOrder.Count].Id);
+		Assert.Equal(IgnoreOptionId.HiddenFiles, options[IgnoreOptionOrder.Count + 1].Id);
+		Assert.Equal(IgnoreOptionId.DotFolders, options[IgnoreOptionOrder.Count + 2].Id);
+		Assert.Equal(IgnoreOptionId.DotFiles, options[IgnoreOptionOrder.Count + 3].Id);
 	}
 
 	// Verifies localized labels are populated for all options.
@@ -69,6 +72,7 @@ public sealed class IgnoreOptionsServiceTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
 				["Settings.Ignore.HiddenFiles"] = "HiddenFiles",
@@ -92,6 +96,7 @@ public sealed class IgnoreOptionsServiceTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
 				["Settings.Ignore.HiddenFiles"] = "HiddenFiles",
@@ -104,10 +109,10 @@ public sealed class IgnoreOptionsServiceTests
 
 		var options = service.GetOptions(includeGitIgnore: true);
 
-		Assert.Equal(6, options.Count);
-		Assert.Equal(IgnoreOptionId.HideSecrets, options[0].Id);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[1].Id);
-		Assert.Equal("Use GitIgnore", options[1].Label);
-		Assert.True(options[1].DefaultChecked);
+		Assert.Equal(6 + IgnoreOptionOrder.Count - 1, options.Count);
+		Assert.Equal(IgnoreOptionOrder.ContentTransformations, options.Skip(0).Take(IgnoreOptionOrder.Count).Select(static option => option.Id));
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[IgnoreOptionOrder.Count].Id);
+		Assert.Equal("Use GitIgnore", options[IgnoreOptionOrder.Count].Label);
+		Assert.True(options[IgnoreOptionOrder.Count].DefaultChecked);
 	}
 }

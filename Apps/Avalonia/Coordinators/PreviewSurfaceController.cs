@@ -636,7 +636,7 @@ internal sealed class PreviewSurfaceController : IDisposable
                         files,
                         cancellationToken,
 						pathPresentation?.MapFilePath,
-						redactionContext: _redactionContextProvider())
+						transformationContext: _redactionContextProvider())
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -700,7 +700,7 @@ internal sealed class PreviewSurfaceController : IDisposable
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
 							currentPath),
-					redactionContext: _redactionContextProvider())
+					transformationContext: _redactionContextProvider())
                 .GetAwaiter()
                 .GetResult();
         return new PreviewBuildResult(document);

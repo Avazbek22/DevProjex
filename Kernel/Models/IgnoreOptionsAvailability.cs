@@ -20,4 +20,6 @@ public sealed record IgnoreOptionsAvailability(
 	bool ShowAdvancedCounts = false,
 	bool IncludeTrackedGitFilesOnly = false,
 	int? SecretRedactionsCount = null,
-	int? SecretMatchesCount = null);
+	int? SecretMatchesCount = null,
+	int? CompressedFilesCount = null,
+	int? UncompressedFilesCount = null);

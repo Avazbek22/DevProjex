@@ -71,19 +71,20 @@ public sealed class PreviewDocumentBuilder(
         CancellationToken cancellationToken,
         Func<string, string>? displayPathMapper,
         bool includeOmissionMarkers = false,
-		SecretRedactionContext? redactionContext = null)
+		ContentTransformationContext? transformationContext = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
         if (orderedFiles.Count == 0)
         {
-			redactionContext?.BeginOutput(orderedFiles).Complete();
+			transformationContext?.Redaction?.BeginOutput(orderedFiles).Complete();
             return null;
 		}
 
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
         var sections = new List<PreviewDocumentSection>(orderedFiles.Count);
 		var redactions = new List<PreviewRedactionSpan>();
-		var redactionScope = redactionContext?.BeginOutput(orderedFiles);
+		using var transformationScope = transformationContext?.BeginOutput(orderedFiles);
+		var redactionScope = transformationScope?.Redaction;
         var anyWritten = await AppendContentEntriesAsync(
             builder,
             orderedFiles,
@@ -92,10 +93,12 @@ public sealed class PreviewDocumentBuilder(
             prependSectionSeparator: false,
             includeOmissionMarkers,
 			redactionScope,
+			transformationScope,
 			redactions,
             cancellationToken).ConfigureAwait(false);
 
 		redactionScope?.Complete();
+		transformationScope?.Compression?.Complete();
 		if (!anyWritten)
 			return null;
 
@@ -108,21 +111,22 @@ public sealed class PreviewDocumentBuilder(
         CancellationToken cancellationToken,
         Func<string, string>? displayPathMapper,
         bool includeOmissionMarkers = false,
-		SecretRedactionContext? redactionContext = null)
+		ContentTransformationContext? transformationContext = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
         var normalizedTreeText = treeText.TrimEnd('\r', '\n');
 
         if (orderedFiles.Count == 0)
         {
-			redactionContext?.BeginOutput(orderedFiles).Complete();
+			transformationContext?.Redaction?.BeginOutput(orderedFiles).Complete();
             return CreateInMemory(normalizedTreeText);
 		}
 
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
         var sections = new List<PreviewDocumentSection>(orderedFiles.Count);
 		var redactions = new List<PreviewRedactionSpan>();
-		var redactionScope = redactionContext?.BeginOutput(orderedFiles);
+		using var transformationScope = transformationContext?.BeginOutput(orderedFiles);
+		var redactionScope = transformationScope?.Redaction;
         var wroteTree = AppendMultilineText(builder, normalizedTreeText.AsSpan());
         var wroteContent = await AppendContentEntriesAsync(
             builder,
@@ -132,9 +136,11 @@ public sealed class PreviewDocumentBuilder(
             prependSectionSeparator: wroteTree,
             includeOmissionMarkers,
 			redactionScope,
+			transformationScope,
 			redactions,
             cancellationToken).ConfigureAwait(false);
 		redactionScope?.Complete();
+		transformationScope?.Compression?.Complete();
 
         if (!wroteTree && !wroteContent)
             return CreateInMemory(string.Empty);
@@ -150,6 +156,7 @@ public sealed class PreviewDocumentBuilder(
         bool prependSectionSeparator,
         bool includeOmissionMarkers,
 		SecretRedactionScope? redactionScope,
+		ContentTransformationScope? transformationScope,
 		ICollection<PreviewRedactionSpan> redactions,
         CancellationToken cancellationToken)
     {
@@ -266,8 +273,15 @@ public sealed class PreviewDocumentBuilder(
 
             trimTrailingEstimatedLine = false;
 			using var contentLease = redactionScope?.TrackFullContentBuffer();
-			var transformed = redactionScope?.Redact(file, content.Content, cancellationToken);
-			var text = transformed?.Text ?? content.Content;
+			// Compression first: secrets must be detected in the text that actually ships, so a
+			// value inside a removed body is neither redacted nor counted.
+			var compressed = transformationScope?.Compress(
+				file,
+				displayPath,
+				content.Content,
+				cancellationToken).Text ?? content.Content;
+			var transformed = redactionScope?.Redact(file, compressed, cancellationToken);
+			var text = transformed?.Text ?? compressed;
 			if (transformed is { Spans.Count: > 0 })
 			{
 				AppendPreviewRedactionSpans(

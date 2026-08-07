@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 namespace DevProjex.Tests.Integration;
 
 public sealed class GitCloneIgnoreLifecycleIntegrationTests
@@ -342,7 +343,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		AssertStableCloneBoundary(baseline, expectedDotFileCount);
 		var baselineIgnoreOptions = baseline.IgnoreOptions.ToArray();
 		var allEnabledIgnoreOptions = baselineIgnoreOptions
-			.Select(static option => option.Id == IgnoreOptionId.HideSecrets
+			.Select(static option => ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id)
 				? option with { IsChecked = true }
 				: option)
 			.ToArray();

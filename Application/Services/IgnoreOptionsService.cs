@@ -110,16 +110,32 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 		}
 	}
 
+	public string FormatCompressCodeLabel(int? compressedFiles, int? uncompressedFiles)
+	{
+		var label = localization["Settings.Ignore.CompressCode"];
+		return compressedFiles is { } compressed && uncompressedFiles is { } uncompressed
+			? $"{label} ({compressed}/{compressed + uncompressed})"
+			: label;
+	}
+
 	private void AppendContentTransformationOptions(
 		List<IgnoreOptionDescriptor> options,
 		IgnoreOptionsAvailability availability)
 	{
+		// Dispatched per descriptor: a single shared formatter would give every transformation the
+		// secret counters, so the compression row would silently advertise someone else's numbers.
 		foreach (var descriptor in ProjectPresentationCatalog.ContentTransformations)
 		{
-			var label = availability.SecretMatchesCount is { } matchedCount &&
-			            availability.SecretRedactionsCount is { } redactionCount
-				? FormatHideSecretsLabel(SecretScanState.Completed, matchedCount, redactionCount)
-				: localization[descriptor.LabelKey];
+			var label = descriptor.LegacyOptionId switch
+			{
+				IgnoreOptionId.HideSecrets when
+					availability.SecretMatchesCount is { } matchedCount &&
+					availability.SecretRedactionsCount is { } redactionCount =>
+					FormatHideSecretsLabel(SecretScanState.Completed, matchedCount, redactionCount),
+				IgnoreOptionId.CompressCode =>
+					FormatCompressCodeLabel(availability.CompressedFilesCount, availability.UncompressedFilesCount),
+				_ => localization[descriptor.LabelKey]
+			};
 			options.Add(new IgnoreOptionDescriptor(descriptor.LegacyOptionId, label, false));
 		}
 	}

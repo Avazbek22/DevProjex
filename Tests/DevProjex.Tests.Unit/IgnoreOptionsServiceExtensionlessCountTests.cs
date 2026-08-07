@@ -69,16 +69,17 @@ public sealed class IgnoreOptionsServiceExtensionlessCountTests
 			ExtensionlessFilesCount: 2,
 			ShowAdvancedCounts: true));
 
-		Assert.Equal(8, options.Count);
+		Assert.Equal(8 + IgnoreOptionOrder.Count - 1, options.Count);
 		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
-		Assert.Equal(IgnoreOptionId.HideSecrets, options[1].Id);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[2].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFolders, options[3].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFiles, options[4].Id);
-		Assert.Equal(IgnoreOptionId.DotFolders, options[5].Id);
-		Assert.Equal(IgnoreOptionId.DotFiles, options[6].Id);
-		Assert.Equal(IgnoreOptionId.ExtensionlessFiles, options[7].Id);
-		Assert.Equal("Files without extension (2)", options[7].Label);
+		Assert.Equal(IgnoreOptionOrder.ContentTransformations, options.Skip(1).Take(IgnoreOptionOrder.Count).Select(static option => option.Id));
+		var afterTransformations = 1 + IgnoreOptionOrder.Count;
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[afterTransformations].Id);
+		Assert.Equal(IgnoreOptionId.HiddenFolders, options[afterTransformations + 1].Id);
+		Assert.Equal(IgnoreOptionId.HiddenFiles, options[afterTransformations + 2].Id);
+		Assert.Equal(IgnoreOptionId.DotFolders, options[afterTransformations + 3].Id);
+		Assert.Equal(IgnoreOptionId.DotFiles, options[afterTransformations + 4].Id);
+		Assert.Equal(IgnoreOptionId.ExtensionlessFiles, options[^1].Id);
+		Assert.Equal("Files without extension (2)", options[^1].Label);
 	}
 
 	private static IgnoreOptionsService CreateService()

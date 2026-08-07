@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 using DevProjex.Application.Models;
 
 namespace DevProjex.Tests.Integration;
@@ -351,7 +352,8 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
     {
         foreach (var option in snapshot.IgnoreOptions)
         {
-            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore or IgnoreOptionId.HideSecrets)
+            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore ||
+                ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
                 continue;
 
             var expectedCount = GetIgnoreCount(snapshot.IgnoreOptionCounts, option.Id);

@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 using DevProjex.Application.Models;
 using DevProjex.Infrastructure.FileSystem;
 
@@ -352,7 +353,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
 					 new ResolvedIgnoreOptionState(
 						 option.Id,
 						 option.Label,
-						 DefaultChecked: option.Id != IgnoreOptionId.HideSecrets,
+						 DefaultChecked: !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id),
 						 option.IsChecked))),
             $"{step}: ignore options differ from a cold refresh.");
 
@@ -408,7 +409,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
 	private static bool AreAllPathIgnoreOptionsChecked(IEnumerable<IgnoreOptionViewModel> options)
 	{
 		var pathOptions = options
-			.Where(static option => option.Id != IgnoreOptionId.HideSecrets)
+			.Where(static option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
 			.ToArray();
 		if (pathOptions.Length == 0)
 			return false;

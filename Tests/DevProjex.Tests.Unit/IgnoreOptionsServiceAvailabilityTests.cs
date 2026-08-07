@@ -19,10 +19,12 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 		};
 
 	[Theory]
-	[InlineData(false, false, 5)]
-	[InlineData(true, false, 6)]
-	[InlineData(false, true, 6)]
-	[InlineData(true, true, 7)]
+	// Counts include every content transformation: they are always offered, because whether they
+	// would change anything cannot be known without reading the selected content.
+	[InlineData(false, false, 6)]
+	[InlineData(true, false, 7)]
+	[InlineData(false, true, 7)]
+	[InlineData(true, true, 8)]
 	public void GetOptions_RespectsAvailabilityFlags(bool includeGitIgnore, bool includeSmartIgnore, int expectedCount)
 	{
 		var service = CreateService();
@@ -42,13 +44,17 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 			IncludeGitIgnore: true,
 			IncludeSmartIgnore: true));
 
-		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
-		Assert.Equal(IgnoreOptionId.HideSecrets, options[1].Id);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[2].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFolders, options[3].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFiles, options[4].Id);
-		Assert.Equal(IgnoreOptionId.DotFolders, options[5].Id);
-		Assert.Equal(IgnoreOptionId.DotFiles, options[6].Id);
+		Assert.Equal(
+			IgnoreOptionOrder.Expected(
+				[IgnoreOptionId.SmartIgnore],
+				[
+					IgnoreOptionId.UseGitIgnore,
+					IgnoreOptionId.HiddenFolders,
+					IgnoreOptionId.HiddenFiles,
+					IgnoreOptionId.DotFolders,
+					IgnoreOptionId.DotFiles
+				]),
+			options.Select(static option => option.Id));
 	}
 
 	[Fact]
@@ -62,20 +68,23 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 			IncludeTrackedGitFilesOnly: true));
 
 		Assert.Equal(
-			[
-				IgnoreOptionId.SmartIgnore,
-				IgnoreOptionId.HideSecrets,
-				IgnoreOptionId.UseGitIgnore,
-				IgnoreOptionId.TrackedGitFilesOnly,
-				IgnoreOptionId.HiddenFolders,
-				IgnoreOptionId.HiddenFiles,
-				IgnoreOptionId.DotFolders,
-				IgnoreOptionId.DotFiles
-			],
+			IgnoreOptionOrder.Expected(
+				[IgnoreOptionId.SmartIgnore],
+				[
+					IgnoreOptionId.UseGitIgnore,
+					IgnoreOptionId.TrackedGitFilesOnly,
+					IgnoreOptionId.HiddenFolders,
+					IgnoreOptionId.HiddenFiles,
+					IgnoreOptionId.DotFolders,
+					IgnoreOptionId.DotFiles
+				]),
 			options.Select(static option => option.Id));
-		Assert.False(options[1].DefaultChecked);
-		Assert.True(options[2].DefaultChecked);
-		Assert.False(options[3].DefaultChecked);
+		// The whole transformation block is opt-in; the Git modes that follow keep their defaults.
+		Assert.All(
+			options.Skip(1).Take(IgnoreOptionOrder.Count),
+			static option => Assert.False(option.DefaultChecked));
+		Assert.True(options[1 + IgnoreOptionOrder.Count].DefaultChecked);
+		Assert.False(options[2 + IgnoreOptionOrder.Count].DefaultChecked);
 	}
 
 	[Fact]

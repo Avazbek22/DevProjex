@@ -119,7 +119,7 @@ public sealed class IgnoreSelectionState
 
 	public void ApplyAllPreferenceToKnownStates(
 		bool isChecked,
-		IgnoreOptionId? excludedOption = null)
+		IReadOnlySet<IgnoreOptionId>? excludedOptions = null)
 	{
 		if (_optionStateCache.Count == 0)
 			return;
@@ -128,7 +128,7 @@ public sealed class IgnoreSelectionState
 		var knownIds = new List<IgnoreOptionId>(_optionStateCache.Keys);
 		foreach (var id in knownIds)
 		{
-			if (id == excludedOption)
+			if (excludedOptions is not null && excludedOptions.Contains(id))
 				continue;
 			_optionStateCache[id] = isChecked;
 		}

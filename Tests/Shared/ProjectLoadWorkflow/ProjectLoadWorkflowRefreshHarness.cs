@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 using System.Text.RegularExpressions;
 using DevProjex.Application.Services;
 using DevProjex.Application.Models;
@@ -201,7 +202,8 @@ internal static class ProjectLoadWorkflowRefreshHarness
     {
         foreach (var option in snapshot.IgnoreOptions)
         {
-            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore or IgnoreOptionId.HideSecrets)
+            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore ||
+                ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
                 continue;
 
             var expectedCount = GetIgnoreCount(snapshot.IgnoreOptionCounts, option.Id);

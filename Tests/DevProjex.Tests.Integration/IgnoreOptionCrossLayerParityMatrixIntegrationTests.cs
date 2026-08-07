@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 
 namespace DevProjex.Tests.Integration;
@@ -526,7 +527,8 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 	{
 		foreach (var option in snapshot.IgnoreOptions)
 		{
-			if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore or IgnoreOptionId.HideSecrets)
+			if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore ||
+                ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
 			{
 				Assert.DoesNotMatch(@"\(\d+\)$", option.Label);
 				continue;

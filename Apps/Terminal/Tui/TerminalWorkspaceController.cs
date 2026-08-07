@@ -256,7 +256,7 @@ public sealed class TerminalWorkspaceController(
 						cancellationToken,
 						MapDisplayPath,
 						includeOmissionMarkers: true,
-						redactionContext: redactionContext)
+						transformationContext: redactionContext)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
 			ProjectContextView.TreeContent => await services.PreviewDocumentBuilder
@@ -266,7 +266,7 @@ public sealed class TerminalWorkspaceController(
 					cancellationToken,
 					MapDisplayPath,
 					includeOmissionMarkers: true,
-					redactionContext: redactionContext)
+					transformationContext: redactionContext)
 				.ConfigureAwait(false),
 			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};

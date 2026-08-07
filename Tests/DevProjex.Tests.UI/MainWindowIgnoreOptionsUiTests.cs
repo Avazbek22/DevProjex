@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.UseCases;
@@ -559,11 +560,15 @@ public sealed class MainWindowIgnoreOptionsUiTests
             Assert.Equal(
                 [
                     IgnoreOptionId.SmartIgnore,
-                    IgnoreOptionId.HideSecrets,
+                    .. ProjectPresentationCatalog.ContentTransformations
+                        .OrderBy(static descriptor => descriptor.Order)
+                        .Select(static descriptor => descriptor.LegacyOptionId),
                     IgnoreOptionId.UseGitIgnore,
                     IgnoreOptionId.TrackedGitFilesOnly
                 ],
-                smartOnlyIgnoreOptions.Take(4).Select(static option => option.Id));
+                smartOnlyIgnoreOptions
+                    .Take(3 + ProjectPresentationCatalog.ContentTransformationOptionIds.Count)
+                    .Select(static option => option.Id));
             Assert.False(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
@@ -1778,7 +1783,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Same(viewModel.ContentProcessingOptions, processingList.ItemsSource);
-			Assert.Single(viewModel.ContentProcessingOptions);
+			Assert.Equal(
+				ProjectPresentationCatalog.ContentTransformationOptionIds.Count,
+				viewModel.ContentProcessingOptions.Count);
 			Assert.Contains(checkBox.GetVisualAncestors(), ancestor => ReferenceEquals(ancestor, processingList));
             Assert.DoesNotContain(checkBox.GetVisualAncestors(), ancestor => ReferenceEquals(ancestor, ignoreList));
 			var settingsPanel = UiTestDriver.GetRequiredControl<SettingsPanelView>(window, "SettingsPanel");
@@ -1786,10 +1793,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var ignorePosition = Assert.IsType<Point>(ignoreList.TranslatePoint(default, settingsPanel));
 			Assert.True(processingPosition.Y < ignorePosition.Y);
 
+			var processingCount = viewModel.ContentProcessingOptions.Count;
 			viewModel.ContentProcessingOptions.Add(
 				new IgnoreOptionViewModel(IgnoreOptionId.HiddenFiles, "Future transformation", false));
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
-			Assert.Equal(2, processingList.ItemCount);
+			Assert.Equal(processingCount + 1, processingList.ItemCount);
 
             var ignoreAll = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
             await UiTestDriver.RaiseButtonClickAsync(ignoreAll);

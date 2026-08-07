@@ -3354,7 +3354,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		IReadOnlyCollection<ProjectExclusion> current)
 	{
 		var available = ProjectPresentationCatalog.Exclusions
-			.Select(descriptor => (descriptor.Id, Label: L(descriptor.LabelKey)))
+			.Select(descriptor => (Id: descriptor.RequireId(), Label: L(descriptor.LabelKey)))
 			.ToArray();
 		var labelsById = available.ToDictionary(
 			static item => item.Id,

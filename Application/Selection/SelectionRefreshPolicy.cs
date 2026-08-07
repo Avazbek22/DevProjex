@@ -109,7 +109,8 @@ public static class SelectionRefreshPolicy
         optionId is not IgnoreOptionId.UseGitIgnore
             and not IgnoreOptionId.TrackedGitFilesOnly
             and not IgnoreOptionId.SmartIgnore
-            and not IgnoreOptionId.HideSecrets;
+            and not IgnoreOptionId.HideSecrets
+            and not IgnoreOptionId.CompressCode;
 
     private static bool HasPreparedSelectionForPath(string? preparedSelectionPath, string path)
     {

@@ -2,22 +2,28 @@ namespace DevProjex.Avalonia.Coordinators;
 
 public sealed partial class SelectionSyncCoordinator
 {
-	internal bool ApplyHideSecretsOverride(bool? enabled)
+	internal bool ApplyHideSecretsOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.HideSecrets, enabled);
+
+	internal bool ApplyCompressCodeOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.CompressCode, enabled);
+
+	private bool ApplyContentTransformationOverride(IgnoreOptionId optionId, bool? enabled)
 	{
 		if (enabled is null)
 			return false;
 
 		var currentState = _session.IgnoreOptions.TryGetCachedState(
-			IgnoreOptionId.HideSecrets,
+			optionId,
 			out var cachedState)
 			? cachedState
 			: viewModel.IgnoreOptions.FirstOrDefault(
-				static option => option.Id == IgnoreOptionId.HideSecrets)?.IsChecked == true;
+				option => option.Id == optionId)?.IsChecked == true;
 		if (currentState == enabled.Value)
 			return false;
 
 		var stateCache = _session.IgnoreOptions.SnapshotStateCache();
-		stateCache[IgnoreOptionId.HideSecrets] = enabled.Value;
+		stateCache[optionId] = enabled.Value;
 		_session.IgnoreOptions.ReplaceStateCache(stateCache);
 		_session.IgnoreOptions.IsInitialized = true;
 
@@ -25,7 +31,7 @@ public sealed partial class SelectionSyncCoordinator
 		try
 		{
 			var option = viewModel.IgnoreOptions.FirstOrDefault(
-				static candidate => candidate.Id == IgnoreOptionId.HideSecrets);
+				candidate => candidate.Id == optionId);
 			if (option is not null)
 				option.IsChecked = enabled.Value;
 		}

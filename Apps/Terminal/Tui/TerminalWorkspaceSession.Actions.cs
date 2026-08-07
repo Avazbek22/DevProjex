@@ -104,7 +104,10 @@ internal sealed partial class TerminalWorkspaceSession
 				L(descriptor.LabelKey),
 				plan.GitReadiness.Mode == descriptor.Id,
 				GitMode: descriptor.Id)));
-		var secretDescriptor = ProjectPresentationCatalog.ContentTransformations.Single();
+		// Selected by id, not by Single(): there is more than one content transformation now, and the
+		// TUI deliberately surfaces only this one.
+		var secretDescriptor = ProjectPresentationCatalog.ContentTransformations
+			.Single(static descriptor => descriptor.LegacyOptionId == IgnoreOptionId.HideSecrets);
 		rows.Add(new TerminalParameterRow(
 			"section:secrets",
 			TerminalParameterRowKind.Section,
@@ -114,7 +117,7 @@ internal sealed partial class TerminalWorkspaceSession
 			TerminalParameterRowKind.Exclusion,
 			FormatExclusionLabel(secretDescriptor, plan),
 			plan.Selection.HideSecrets == true,
-			Exclusion: secretDescriptor.Id));
+			Exclusion: secretDescriptor.RequireId()));
 		rows.Add(new TerminalParameterRow(
 			"section:exclusions",
 			TerminalParameterRowKind.Section,
@@ -123,14 +126,14 @@ internal sealed partial class TerminalWorkspaceSession
 			"exclusions:all",
 			TerminalParameterRowKind.ToggleAllExclusions,
 			L("Settings.All"),
-			ProjectPresentationCatalog.Exclusions.All(descriptor => exclusions.Contains(descriptor.Id))));
+			ProjectPresentationCatalog.Exclusions.All(descriptor => exclusions.Contains(descriptor.RequireId()))));
 		rows.AddRange(ProjectPresentationCatalog.Exclusions.Select(descriptor =>
 			new TerminalParameterRow(
 				$"exclusion:{descriptor.Token}",
 				TerminalParameterRowKind.Exclusion,
 				FormatExclusionLabel(descriptor, plan),
-				exclusions.Contains(descriptor.Id),
-				Exclusion: descriptor.Id)));
+				exclusions.Contains(descriptor.RequireId()),
+				Exclusion: descriptor.RequireId())));
 		rows.Add(new TerminalParameterRow(
 			"section:extensions",
 			TerminalParameterRowKind.Section,
@@ -362,7 +365,7 @@ internal sealed partial class TerminalWorkspaceSession
 	private string FormatExclusions(IReadOnlyCollection<ProjectExclusion> exclusions)
 	{
 		var pathExclusionCount = ProjectPresentationCatalog.Exclusions.Count(
-			descriptor => exclusions.Contains(descriptor.Id));
+			descriptor => exclusions.Contains(descriptor.RequireId()));
 		return pathExclusionCount == 0
 			? L("Terminal.Tui.NoneAvailable")
 			: pathExclusionCount.ToString("N0", CultureInfo.CurrentCulture);
@@ -405,7 +408,7 @@ internal sealed partial class TerminalWorkspaceSession
 			{
 				var values = new HashSet<ProjectExclusion>();
 				if (row.IsSelected != true)
-					values.UnionWith(ProjectPresentationCatalog.Exclusions.Select(static descriptor => descriptor.Id));
+					values.UnionWith(ProjectPresentationCatalog.Exclusions.Select(static descriptor => descriptor.RequireId()));
 				ApplyExclusions(values);
 				return;
 			}
