@@ -1,0 +1,106 @@
+namespace DevProjex.Tests.Unit;
+
+/// <summary>
+/// Golden inputs for compression. Each one carries a trap that has already caused, or would cause,
+/// a silent defect — they are not decorative samples.
+/// </summary>
+internal static class CodeCompressionFixtures
+{
+	/// <summary>
+	/// Traps: a nested type inside a class body; a local function declared inside a method body
+	/// (which legitimately disappears and would otherwise make the gate reject the file forever);
+	/// an expression-bodied member too short to be worth replacing; a collection expression, which
+	/// the shipped grammar does not understand and which therefore parses with a defect.
+	/// </summary>
+	public const string CSharp = """
+		namespace Sample.Services;
+
+		public sealed class Widget : IWidget
+		{
+		    private readonly IStore _store;
+		    private const string Key = "widget";
+
+		    public Widget(IStore store)
+		    {
+		        _store = store;
+		    }
+
+		    public int Count => _store.Count;
+
+		    public IReadOnlyList<string> Names { get; } = [];
+
+		    public async Task<int> SumAsync(IEnumerable<int> values)
+		    {
+		        static int Double(int value) => value * 2;
+
+		        var total = 0;
+		        foreach (var value in values)
+		            total += Double(value);
+		        return await Task.FromResult(total);
+		    }
+
+		    private string Describe(int value)
+		    {
+		        // implementation comment, not documentation
+		        return $"{Key}:{value}";
+		    }
+
+		    public enum Mode
+		    {
+		        Fast,
+		        Slow
+		    }
+
+		    private sealed class Nested
+		    {
+		        public void Work()
+		        {
+		            Console.WriteLine("nested");
+		        }
+		    }
+		}
+		""";
+
+	/// <summary>
+	/// Traps: a docstring, which lives INSIDE the body and must survive; a leading implementation
+	/// comment, which must NOT be mistaken for one; a body that is only a docstring; a one-line
+	/// body too short to pay for a placeholder; a nested class whose suite must never be collapsed.
+	/// </summary>
+	public const string Python = """
+		import os
+
+
+		class Model:
+		    \"\"\"Trains and evaluates a model.\"\"\"
+
+		    def __init__(self, options):
+		        \"\"\"Build a model.
+
+		        Multi-line docstring.
+		        \"\"\"
+		        self.options = options
+		        self._cache = {}
+
+		    def run(self, data):
+		        # implementation comment, not a docstring
+		        total = 0
+		        for row in data:
+		            total += row
+		        return total
+
+		    def only_doc(self):
+		        \"\"\"Nothing but documentation.\"\"\"
+
+		    class Inner:
+		        def work(self):
+		            print("nested")
+
+
+		def free_function(a, b):
+		    \"\"\"Doc.\"\"\"
+		    return a + b
+		""";
+
+	/// <summary>Python source with the escaped triple quotes turned back into real ones.</summary>
+	public static string PythonSource => Python.Replace("\\\"\\\"\\\"", "\"\"\"", StringComparison.Ordinal);
+}

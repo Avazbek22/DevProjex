@@ -1,0 +1,20 @@
+{
+  "id": "python",
+  "displayName": "Python",
+  "extensions": [
+    ".py",
+    ".pyi"
+  ],
+  "library": "tree-sitter-python",
+  "export": "tree_sitter_python",
+  "queryVersion": 1,
+  "blockPlaceholder": "...",
+  "expressionPlaceholder": null,
+  "containerNodeTypes": [
+    "module",
+    "class_definition"
+  ],
+  "executableOwnerKinds": [
+    "function_definition"
+  ]
+}
