@@ -31,13 +31,55 @@ public partial class MainWindow
 				SecretScanState.Completed,
 				snapshot.DetectedCount,
 				snapshot.RedactedCount);
-			_selectionCoordinator.RelabelIgnoreOptions(
-				AdvancedIgnoreCountsAlwaysEnabled,
-				snapshot.RedactedCount,
-				_secretRedactionScanState,
-				snapshot.DetectedCount);
+			RelabelIgnoreOptionsWithCurrentCounts();
 		});
 	}
+
+	/// <summary>
+	/// Reports what compression did to the selection that is on screen. A snapshot for a different
+	/// selection is ignored rather than shown: stale counts next to a live preview read as a claim
+	/// about the current files.
+	/// </summary>
+	private void OnCodeCompressionSnapshotPublished(object? sender, EventArgs eventArgs)
+	{
+		Dispatcher.UIThread.Post(() =>
+		{
+			if (_windowLifetimeCts is not { IsCancellationRequested: false })
+				return;
+
+			var enabled = CreateCodeCompressionContext() is not null;
+			var snapshot = enabled ? GetCompressionSnapshotForCurrentSelection() : null;
+			_codeCompressionSnapshot = snapshot;
+			_viewModel.SetCompressionStatus(snapshot, enabled);
+			RelabelIgnoreOptionsWithCurrentCounts();
+		});
+	}
+
+	private CodeCompressionSnapshot? GetCompressionSnapshotForCurrentSelection()
+	{
+		if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath))
+			return null;
+
+		var selectedPaths = GetCheckedPaths();
+		var files = selectedPaths.Count > 0
+			? BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths)
+			: _currentTree.OrderedFilePaths ??
+			  PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(_currentTree.Root);
+		var snapshot = _codeCompressionSession.Snapshot;
+		return snapshot.SelectionKey == CodeCompressionSession.BuildSelectionKey(_currentPath, files)
+			? snapshot
+			: null;
+	}
+
+	/// <summary>Relabels every content transformation row from the counts published so far.</summary>
+	private void RelabelIgnoreOptionsWithCurrentCounts() =>
+		_selectionCoordinator.RelabelIgnoreOptions(
+			AdvancedIgnoreCountsAlwaysEnabled,
+			_secretRedactionCount,
+			_secretRedactionScanState,
+			_secretRedactionMatchedCount,
+			_codeCompressionSnapshot?.CompressedFiles,
+			_codeCompressionSnapshot?.UnchangedFiles);
 
 	private SecretRedactionSnapshot? GetCachedSecretRedactionSnapshotForCurrentSelection()
 	{
@@ -352,6 +394,7 @@ public partial class MainWindow
     private readonly SessionMetricsRecorder _sessionMetrics;
 	private readonly SecretRedactionSession _secretRedactionSession;
 	private readonly CodeCompressionSession _codeCompressionSession;
+	private CodeCompressionSnapshot? _codeCompressionSnapshot;
 	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
 	private CancellationTokenSource? _secretRedactionCountCts;
 	private long _secretRedactionCountRefreshVersion;
@@ -394,6 +437,7 @@ public partial class MainWindow
 		_codeCompressionSession = services.CodeCompressionSession;
 		_secretRedactionPreparer = new SecretRedactionOutputPreparer(services.FileContentAnalyzer);
 		_secretRedactionSession.SnapshotPublished += OnSecretRedactionSnapshotPublished;
+		_codeCompressionSession.SnapshotPublished += OnCodeCompressionSnapshotPublished;
         _recentProjectsStore = services.RecentProjectsStore;
         _recentWorkspacesService = services.RecentWorkspacesService;
         _recentFolderAvailabilityService = services.RecentFolderAvailabilityService;

@@ -491,7 +491,9 @@ public sealed partial class SelectionSyncCoordinator(
 	    bool showAdvancedCounts,
 	    int? secretRedactionsCount = null,
 	    SecretScanState secretScanState = SecretScanState.Disabled,
-	    int? secretMatchesCount = null)
+	    int? secretMatchesCount = null,
+	    int? compressedFilesCount = null,
+	    int? uncompressedFilesCount = null)
     {
         if (viewModel.IgnoreOptions.Count == 0)
             return;
@@ -503,6 +505,8 @@ public sealed partial class SelectionSyncCoordinator(
 		// attached to a row that did not produce them.
 		var hideSecretsIsChecked = viewModel.IgnoreOptions.Any(static option =>
 			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
+		var compressCodeIsChecked = viewModel.IgnoreOptions.Any(static option =>
+			option.Id == IgnoreOptionId.CompressCode && option.IsChecked);
         var counts = _ignoreOptionCounts;
         var availability = new IgnoreOptionsAvailability(
             IncludeGitIgnore: visibleIds.Contains(IgnoreOptionId.UseGitIgnore),
@@ -524,6 +528,8 @@ public sealed partial class SelectionSyncCoordinator(
 			IncludeTrackedGitFilesOnly: visibleIds.Contains(IgnoreOptionId.TrackedGitFilesOnly),
 			SecretRedactionsCount: hideSecretsIsChecked ? secretRedactionsCount : null,
 			SecretMatchesCount: hideSecretsIsChecked ? secretMatchesCount : null,
+			CompressedFilesCount: compressCodeIsChecked ? compressedFilesCount : null,
+			UncompressedFilesCount: compressCodeIsChecked ? uncompressedFilesCount : null,
             ShowAdvancedCounts: showAdvancedCounts);
         var localizedDescriptors = ignoreOptionsService.GetOptions(availability);
         var descriptorsById = localizedDescriptors.ToDictionary(static descriptor => descriptor.Id);

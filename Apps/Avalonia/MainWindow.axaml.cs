@@ -387,6 +387,17 @@ public partial class MainWindow : Window
 		// overrides are separate content state, so invalidate only when that state changes;
 		// invalidating every preview refresh would rescan all selected text unnecessarily.
 		InvalidatePreviewCache();
+		// Compression publishes its counts only once an output has been produced, so switching the
+		// option off has to clear them here. Leaving them would attach the last run's numbers to a
+		// row that is no longer doing anything.
+		var compressionEnabled = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.CompressCode);
+		if (!compressionEnabled)
+			_codeCompressionSnapshot = null;
+		_viewModel.SetCompressionStatus(
+			compressionEnabled ? _codeCompressionSnapshot : null,
+			compressionEnabled);
 		var enabled = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
 			.Contains(IgnoreOptionId.HideSecrets);
@@ -398,11 +409,7 @@ public partial class MainWindow : Window
 			_secretRedactionCount = null;
 			_secretRedactionScanState = SecretScanState.Disabled;
 			_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
-			_selectionCoordinator.RelabelIgnoreOptions(
-				AdvancedIgnoreCountsAlwaysEnabled,
-				secretRedactionsCount: null,
-				_secretRedactionScanState,
-				secretMatchesCount: null);
+			RelabelIgnoreOptionsWithCurrentCounts();
 			if (_viewModel.IsAnyPreviewVisible)
 				_previewPipeline.ScheduleRefresh(immediate: true);
 			return;
@@ -422,11 +429,7 @@ public partial class MainWindow : Window
 			_secretRedactionScanState,
 			cachedRedactionSnapshot?.DetectedCount,
 			cachedRedactionSnapshot?.RedactedCount);
-		_selectionCoordinator.RelabelIgnoreOptions(
-			AdvancedIgnoreCountsAlwaysEnabled,
-			_secretRedactionCount,
-			_secretRedactionScanState,
-			_secretRedactionMatchedCount);
+		RelabelIgnoreOptionsWithCurrentCounts();
 		if (_viewModel.IsAnyPreviewVisible)
 			_previewPipeline.ScheduleRefresh(immediate: true);
 		ScheduleSecretRedactionCountRefresh();
@@ -445,11 +448,7 @@ public partial class MainWindow : Window
 		if (_secretRedactionCount is not null)
 			_secretRedactionCount = null;
 		_secretRedactionMatchedCount = null;
-		_selectionCoordinator.RelabelIgnoreOptions(
-			AdvancedIgnoreCountsAlwaysEnabled,
-			secretRedactionsCount: null,
-			_secretRedactionScanState,
-			secretMatchesCount: null);
+		RelabelIgnoreOptionsWithCurrentCounts();
 
 		ScheduleSecretRedactionCountRefresh();
 	}
@@ -1122,6 +1121,9 @@ public partial class MainWindow : Window
 		_secretRedactionScanState = SecretScanState.Disabled;
 		_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
 		_secretRedactionSession.Reset();
+		_codeCompressionSnapshot = null;
+		_viewModel.SetCompressionStatus(null, enabled: false);
+		_codeCompressionSession.Reset();
 
         // Background metrics become stale as soon as the visible tree is about to change.
         // Cancel them before tearing down the current project state to avoid wasted I/O.

@@ -130,6 +130,11 @@ internal sealed class MarkedSecretsMatcher
 
 			var value = content.Slice(start, mark.Length);
 			MarkedSecretValueNormalizer.ComputeHash(value, candidateHash);
+			// The hash is what makes a session mark safe across content transformations. A mark is
+			// anchored in the text that was on screen when it was made, so enabling or disabling code
+			// compression moves every line after the first removed body. Verifying the value here
+			// means a moved anchor simply stops matching and the mark is skipped - it can never
+			// redact whatever happens to sit at those coordinates now.
 			if (!candidateHash.SequenceEqual(preparedMark.HashBytes))
 				continue;
 
