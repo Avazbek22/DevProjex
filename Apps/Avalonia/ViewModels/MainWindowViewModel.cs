@@ -1939,6 +1939,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 							snapshot.TotalFiles,
 							CodeCompressionSnapshot.EstimateTokens(snapshot.SourceCharacters),
 							CodeCompressionSnapshot.EstimateTokens(snapshot.TransformedCharacters));
+		if (enabled && !failed && snapshot is { Unchanged.Count: > 0 })
+			value = $"{value}{Environment.NewLine}{DescribeUnchangedFiles(snapshot)}";
 		if (string.Equals(_compressionNotice, value, StringComparison.Ordinal))
 			return;
 
@@ -1946,6 +1948,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		UpdateSettingsSecretsNotice();
 		RaisePropertyChanged(nameof(HasContentProcessingStatus));
 	}
+
+	/// <summary>
+	/// Why files were left in full, grouped by reason rather than listed one by one. A user needs to
+	/// know that nothing was dropped and roughly why, not to read a file manifest in a tooltip.
+	/// </summary>
+	private string DescribeUnchangedFiles(CodeCompressionSnapshot snapshot) =>
+		string.Join(
+			Environment.NewLine,
+			snapshot.Unchanged
+				.GroupBy(static file => file.Outcome)
+				.OrderByDescending(static group => group.Count())
+				.Select(group => $"{_localization[ReasonKey(group.Key)]} — {group.Count()}"));
+
+	private static string ReasonKey(CodeCompressionOutcome outcome) => outcome switch
+	{
+		CodeCompressionOutcome.UnchangedUnsupportedLanguage => "Compression.Reason.UnsupportedLanguage",
+		CodeCompressionOutcome.UnchangedTooLarge => "Compression.Reason.TooLarge",
+		CodeCompressionOutcome.UnchangedParseFailed => "Compression.Reason.ParseFailed",
+		CodeCompressionOutcome.UnchangedGateRejected => "Compression.Reason.GateRejected",
+		_ => "Compression.Reason.NoBenefit"
+	};
 
 	private void UpdateSettingsSecretsNotice()
 	{
