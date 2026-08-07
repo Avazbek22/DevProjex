@@ -72,7 +72,12 @@ public partial class MainWindow
 	}
 
 	/// <summary>Relabels every content transformation row from the counts published so far.</summary>
-	private void RelabelIgnoreOptionsWithCurrentCounts() =>
+	private void RelabelIgnoreOptionsWithCurrentCounts()
+	{
+		// This runs on the UI thread whenever the transformation rows change - on toggle, on project
+		// load, and after a snapshot - which makes it the right place to refresh the copy the
+		// metrics worker reads.
+		PublishTransformationContext();
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
 			_secretRedactionCount,
@@ -80,6 +85,7 @@ public partial class MainWindow
 			_secretRedactionMatchedCount,
 			_codeCompressionSnapshot?.CompressedFiles,
 			_codeCompressionSnapshot?.UnchangedFiles);
+	}
 
 	private SecretRedactionSnapshot? GetCachedSecretRedactionSnapshotForCurrentSelection()
 	{
@@ -109,6 +115,17 @@ public partial class MainWindow
 
 		return new CodeCompressionContext(_currentPath, _codeCompressionSession);
 	}
+
+	/// <summary>
+	/// The transformation state as last seen on the UI thread, for callers that run on a worker.
+	/// The metrics pipeline is one of them, and resolving the context there would read the option
+	/// collection and the current path off-thread while the UI is free to be mutating both.
+	/// </summary>
+	private ContentTransformationContext? PublishedTransformationContext =>
+		Volatile.Read(ref _publishedTransformationContext);
+
+	private void PublishTransformationContext() =>
+		Volatile.Write(ref _publishedTransformationContext, CreateContentTransformationContext());
 
 	/// <summary>
 	/// The enabled transformations as one ordered pipeline. Every output surface takes this, so
@@ -395,6 +412,7 @@ public partial class MainWindow
 	private readonly SecretRedactionSession _secretRedactionSession;
 	private readonly CodeCompressionSession _codeCompressionSession;
 	private CodeCompressionSnapshot? _codeCompressionSnapshot;
+	private ContentTransformationContext? _publishedTransformationContext;
 	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
 	private CancellationTokenSource? _secretRedactionCountCts;
 	private long _secretRedactionCountRefreshVersion;
@@ -466,7 +484,7 @@ public partial class MainWindow
             CreateExportPathPresentation,
             () => Bounds.Width,
             ScheduleBackgroundMemoryCleanup,
-            CreateContentTransformationContext);
+            () => PublishedTransformationContext);
         _previewPipeline = new PreviewWorkspacePipeline(
             this,
             // 350ms delay ensures thumb animation (250ms) completes fully before loading.

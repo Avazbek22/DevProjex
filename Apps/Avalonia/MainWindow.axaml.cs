@@ -387,6 +387,7 @@ public partial class MainWindow : Window
 		// overrides are separate content state, so invalidate only when that state changes;
 		// invalidating every preview refresh would rescan all selected text unnecessarily.
 		InvalidatePreviewCache();
+		PublishTransformationContext();
 		// Compression publishes its counts only once an output has been produced, so switching the
 		// option off has to clear them here. Leaving them would attach the last run's numbers to a
 		// row that is no longer doing anything.
@@ -1121,6 +1122,7 @@ public partial class MainWindow : Window
 		_secretRedactionScanState = SecretScanState.Disabled;
 		_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
 		_secretRedactionSession.Reset();
+		PublishTransformationContext();
 		_codeCompressionSnapshot = null;
 		_viewModel.SetCompressionStatus(null, enabled: false);
 		_codeCompressionSession.Reset();
