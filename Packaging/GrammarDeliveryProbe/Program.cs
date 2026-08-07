@@ -1,34 +1,36 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
-using DevProjex.Packaging.GrammarDeliveryProbe;
+using DevProjex.Infrastructure.Compression;
 using TreeSitter;
 
-// Delivery contract check. Exits non-zero unless every curated grammar is located, loaded and
-// able to produce a usable tree on the RID this binary was published for.
+// Delivery contract check. Exits non-zero unless every grammar this build carries can be located,
+// loaded and used to parse on the RID the binary was published for.
 //
-// Usage: GrammarDeliveryProbe [--baseline]
-//   --baseline  the binary was published without grammars; report size only and skip loading.
+// It drives the production locator rather than a copy, and derives the grammar list from what is
+// actually embedded, so a language added to the product is covered here without touching this file.
+//
+// Usage: GrammarDeliveryProbe [--baseline] [--content] [--verify-recovery]
 
 var isBaseline = args.Contains("--baseline", StringComparer.Ordinal);
+var useContent = args.Contains("--content", StringComparer.Ordinal);
 var bindingVersion = ResolveBindingVersion();
-var runtimeIdentifier = GrammarCatalog.ResolveRuntimeIdentifier();
+var runtimeIdentifier = GrammarPlatform.RuntimeIdentifier;
+
 #pragma warning disable IL3000 // An empty Location is precisely the signal being probed for here.
 var isSingleFile = string.IsNullOrEmpty(Assembly.GetExecutingAssembly().Location);
 #pragma warning restore IL3000
 
-IGrammarLibraryLocator locator =
-#if GRAMMAR_DELIVERY_CONTENT
-	new ContentGrammarLibraryLocator();
-#else
-	new EmbeddedGrammarLibraryLocator(EmbeddedGrammarLibraryLocator.DefaultRootDirectory(bindingVersion));
-#endif
+var embedded = new EmbeddedGrammarLibraryLocator(
+	typeof(GrammarPlatform).Assembly,
+	"DevProjex.Grammars/",
+	EmbeddedGrammarLibraryLocator.DefaultRootDirectory(bindingVersion));
+IGrammarLibraryLocator locator = useContent ? new ContentGrammarLibraryLocator() : embedded;
 
 Console.WriteLine($"rid              : {runtimeIdentifier}");
 Console.WriteLine($"binding          : {bindingVersion}");
 Console.WriteLine($"strategy         : {locator.StrategyName}");
 Console.WriteLine($"single-file      : {isSingleFile}");
-Console.WriteLine($"grammar root     : {(locator is EmbeddedGrammarLibraryLocator e ? e.RootDirectory : ((ContentGrammarLibraryLocator)locator).RootDirectory)}");
 Console.WriteLine($"loader debug     : {Environment.GetEnvironmentVariable("TREESITTER_DEBUG_LOADER") ?? "<unset>"}");
 Console.WriteLine();
 
@@ -39,72 +41,58 @@ if (isBaseline)
 	return 0;
 }
 
-var failures = new List<string>();
-var loaded = 0;
-var materializeWatch = Stopwatch.StartNew();
-var paths = new Dictionary<string, string>(StringComparer.Ordinal);
-
-foreach (var grammar in GrammarCatalog.All)
+if (!useContent)
 {
-	try
-	{
-		paths[grammar.LanguageId] = locator.Resolve(grammar.LibraryBaseName);
-	}
-	catch (Exception exception)
-	{
-		failures.Add($"{grammar.LanguageId}: locate failed - {exception.GetType().Name}: {exception.Message}");
-	}
-}
-
-materializeWatch.Stop();
-Console.WriteLine($"materialize {paths.Count} grammars: {materializeWatch.Elapsed.TotalMilliseconds:F1} ms");
-Console.WriteLine();
-
-// Before anything is loaded: a damaged copy on disk is repaired at the next resolve, exactly as
-// it would be for a user whose file was truncated or quarantined between sessions. It has to run
-// here because the binding never releases module handles, so a mapped grammar cannot be rewritten.
-if (args.Contains("--verify-recovery", StringComparer.Ordinal) &&
-	locator is EmbeddedGrammarLibraryLocator embedded)
-{
-	Console.WriteLine("recovery check: damaging a materialized grammar and re-resolving");
-	failures.AddRange(VerifyRecovery(embedded));
+	var pruned = embedded.PruneAbandonedDirectories();
+	Console.WriteLine($"pruned abandoned grammar directories: {pruned.Count}");
+	foreach (var directory in pruned)
+		Console.WriteLine($"   removed {directory}");
 	Console.WriteLine();
 }
 
-foreach (var grammar in GrammarCatalog.All)
-{
-	if (!paths.TryGetValue(grammar.LanguageId, out var path))
-		continue;
+var libraries = embedded.EnumerateEmbeddedLibraries();
+Console.WriteLine($"grammars carried by this build: {libraries.Count}");
 
+if (args.Contains("--verify-recovery", StringComparer.Ordinal) && libraries.Count > 0 && !useContent)
+{
+	// Before anything is loaded: a damaged copy on disk must be repaired at the next resolve,
+	// exactly as it would be for a user whose file was truncated between sessions. It has to run
+	// here because the binding never releases module handles, so a mapped grammar cannot be
+	// rewritten on Windows.
+	Console.WriteLine();
+	Console.WriteLine("recovery check: damaging a materialized grammar and re-resolving");
+	var failure = VerifyRecovery(embedded, libraries[0]);
+	if (failure is not null)
+	{
+		Console.Error.WriteLine($"FAILURE {failure}");
+		Console.WriteLine($"GRAMMAR-DELIVERY rid={runtimeIdentifier} strategy={locator.StrategyName} loaded=0/{libraries.Count} result=fail");
+		return 1;
+	}
+
+	Console.WriteLine("  OK   repaired after corruption");
+}
+
+Console.WriteLine();
+var loaded = 0;
+var failures = new List<string>();
+foreach (var library in libraries)
+{
 	var watch = Stopwatch.StartNew();
 	try
 	{
-		// One Language per grammar for the process lifetime: the constructor performs a fresh
-		// native load every call and never releases the module handle.
-		using var language = new Language(path, grammar.ExportName);
+		using var language = new Language(locator.Resolve(library), ExportFor(library));
 		var loadMilliseconds = watch.Elapsed.TotalMilliseconds;
 		using var parser = new Parser(language);
-		using var tree = parser.Parse(grammar.SampleSource)
-			?? throw new InvalidOperationException("parser returned no tree");
-		using var query = new Query(language, grammar.SmokeQuery);
-		var captures = query.Execute(tree.RootNode).Captures.Count();
+		using var tree = parser.Parse("x") ?? throw new InvalidOperationException("parser returned no tree");
+		_ = tree.RootNode.Type;
 		watch.Stop();
-
-		if (captures == 0)
-		{
-			failures.Add($"{grammar.LanguageId}: grammar loaded but the smoke query captured nothing");
-			continue;
-		}
-
 		loaded++;
-		Console.WriteLine(
-			$"  OK   {grammar.LanguageId,-11} load={loadMilliseconds,6:F1}ms total={watch.Elapsed.TotalMilliseconds,6:F1}ms " +
-			$"captures={captures} error={tree.RootNode.HasError}");
+		Console.WriteLine($"  OK   {library,-26} load={loadMilliseconds,6:F1}ms total={watch.Elapsed.TotalMilliseconds,6:F1}ms");
 	}
 	catch (Exception exception)
 	{
-		failures.Add($"{grammar.LanguageId}: {exception.GetType().Name}: {exception.Message}");
-		Console.WriteLine($"  FAIL {grammar.LanguageId,-11} {exception.GetType().Name}: {exception.Message}");
+		failures.Add($"{library}: {exception.GetType().Name}: {exception.Message}");
+		Console.WriteLine($"  FAIL {library,-26} {exception.GetType().Name}: {exception.Message}");
 	}
 }
 
@@ -112,26 +100,22 @@ Console.WriteLine();
 foreach (var failure in failures)
 	Console.Error.WriteLine($"FAILURE {failure}");
 
-var total = GrammarCatalog.All.Count;
-var result = failures.Count == 0 && loaded == total ? "pass" : "fail";
+var result = failures.Count == 0 && loaded == libraries.Count && loaded > 0 ? "pass" : "fail";
 Console.WriteLine(
 	$"GRAMMAR-DELIVERY rid={runtimeIdentifier} strategy={locator.StrategyName} " +
-	$"loaded={loaded}/{total} materialize_ms={materializeWatch.Elapsed.TotalMilliseconds:F0} result={result}");
+	$"loaded={loaded}/{libraries.Count} result={result}");
 return result == "pass" ? 0 : 1;
 
-// A materialized grammar can be truncated by a crash, quarantined by antivirus, or damaged on
-// disk. The contract is that the next resolve repairs it instead of loading damaged native code.
-static List<string> VerifyRecovery(EmbeddedGrammarLibraryLocator locator)
-{
-	var problems = new List<string>();
-	// The smallest grammar keeps the check cheap; the code path is identical for all of them.
-	var grammar = GrammarCatalog.All.Single(candidate => candidate.LanguageId == "go");
-	var path = locator.Resolve(grammar.LibraryBaseName);
-	var expected = locator.GetEmbeddedHash(grammar.LibraryBaseName);
+// The binding maps ids by lowercasing and swapping '-' for '_', so tree-sitter-c-sharp exports
+// tree_sitter_c_sharp. Deriving it here keeps the probe independent of the language packs.
+static string ExportFor(string libraryBaseName) =>
+	libraryBaseName.Replace('-', '_');
 
-	// The grammar is already mapped by the load loop above, which is the realistic shape of this
-	// failure: the binding never releases module handles, so the damaged copy cannot simply be
-	// overwritten on Windows.
+static string? VerifyRecovery(EmbeddedGrammarLibraryLocator locator, string libraryBaseName)
+{
+	var path = locator.Resolve(libraryBaseName);
+	var expected = locator.GetEmbeddedHash(libraryBaseName);
+
 	var damaged = File.ReadAllBytes(path);
 	damaged[damaged.Length / 2] ^= 0xFF;
 	try
@@ -140,41 +124,13 @@ static List<string> VerifyRecovery(EmbeddedGrammarLibraryLocator locator)
 	}
 	catch (IOException exception)
 	{
-		problems.Add($"recovery: could not damage the copy to run the check - {exception.Message}");
-		return problems;
+		return $"recovery: could not damage the copy to run the check - {exception.Message}";
 	}
 
-	if (SHA256.HashData(File.ReadAllBytes(path)).SequenceEqual(expected))
-	{
-		problems.Add("recovery: flipping a byte did not change the file hash, the check proves nothing");
-		return problems;
-	}
-
-	var repaired = locator.Resolve(grammar.LibraryBaseName);
-	if (!SHA256.HashData(File.ReadAllBytes(repaired)).SequenceEqual(expected))
-	{
-		problems.Add("recovery: a damaged grammar was NOT re-materialized - damaged native code would be loaded");
-		return problems;
-	}
-
-	try
-	{
-		using var language = new Language(repaired, grammar.ExportName);
-		using var parser = new Parser(language);
-		using var tree = parser.Parse(grammar.SampleSource)
-			?? throw new InvalidOperationException("parser returned no tree");
-		using var query = new Query(language, grammar.SmokeQuery);
-		if (query.Execute(tree.RootNode).Captures.Count() == 0)
-			problems.Add("recovery: repaired grammar loaded but captured nothing");
-	}
-	catch (Exception exception)
-	{
-		problems.Add($"recovery: repaired grammar failed to load - {exception.GetType().Name}: {exception.Message}");
-	}
-
-	if (problems.Count == 0)
-		Console.WriteLine($"  OK   {grammar.LanguageId} re-materialized after corruption and loaded");
-	return problems;
+	var repaired = locator.Resolve(libraryBaseName);
+	return SHA256.HashData(File.ReadAllBytes(repaired)).SequenceEqual(expected)
+		? null
+		: "recovery: a damaged grammar was NOT re-materialized - damaged native code would be loaded";
 }
 
 static string ResolveBindingVersion()

@@ -14,6 +14,70 @@
 
   <ItemGroup>
     <PackageReference Include="Tomlyn" />
+    <PackageReference Include="TreeSitter.DotNet" />
+  </ItemGroup>
+
+  <!--
+    The curated grammar set. Declared once here; Directory.Build.targets removes the package's own
+    copies from every output so only these embedded ones ship.
+
+    Grammars are embedded rather than left as native assets because a single-file publish extracts
+    natives to a directory the OS loader does not search, so TreeSitter's Language(id) constructor
+    cannot find them. Everything is loaded by absolute path instead.
+  -->
+  <ItemGroup>
+    <DevProjexGrammar Include="tree-sitter-c-sharp" />
+    <DevProjexGrammar Include="tree-sitter-python" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- A RID-less build (dotnet build, and therefore every test run) still needs grammars, so it
+         embeds the host's. A RID-specific publish embeds that RID's. -->
+    <_GrammarRid Condition="'$(RuntimeIdentifier)'!=''">$(RuntimeIdentifier)</_GrammarRid>
+    <_GrammarRid Condition="'$(_GrammarRid)'==''">$(NETCoreSdkPortableRuntimeIdentifier)</_GrammarRid>
+    <_GrammarSourceDir>$(NuGetPackageRoot)treesitter.dotnet/$(TreeSitterDotNetVersion)/runtimes/$(_GrammarRid)/native/</_GrammarSourceDir>
+    <_GrammarPrefix Condition="!$(_GrammarRid.StartsWith('win'))">lib</_GrammarPrefix>
+    <_GrammarExtension Condition="$(_GrammarRid.StartsWith('win'))">.dll</_GrammarExtension>
+    <_GrammarExtension Condition="$(_GrammarRid.StartsWith('linux'))">.so</_GrammarExtension>
+    <_GrammarExtension Condition="$(_GrammarRid.StartsWith('osx'))">.dylib</_GrammarExtension>
+  </PropertyGroup>
+
+  <!-- Item transform, not %(...) batching: an Include attribute cannot batch over a different item
+       type and would silently collapse to a single literal path. -->
+  <!-- DevProjexExcludeGrammars=true publishes without the payload, so the exact cost of the
+       feature can be measured rather than estimated. Never set in a shipping build. -->
+  <ItemGroup Condition="'$(DevProjexExcludeGrammars)'!='true'">
+    <CuratedGrammarFile Include="@(DevProjexGrammar->'$(_GrammarSourceDir)$(_GrammarPrefix)%(Identity)$(_GrammarExtension)')" />
+  </ItemGroup>
+
+  <!-- Embedded is the portable default. The MSIX build sets DevProjexGrammarDelivery=Content so
+       grammars ship as ordinary package files and inherit the package signature: a library written
+       at run time would not, and Smart App Control and S mode block exactly that. -->
+  <ItemGroup Condition="'@(CuratedGrammarFile)'!='' and '$(DevProjexGrammarDelivery)'!='Content'">
+    <EmbeddedResource Include="@(CuratedGrammarFile)">
+      <LogicalName>DevProjex.Grammars/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup Condition="'@(CuratedGrammarFile)'!='' and '$(DevProjexGrammarDelivery)'=='Content'">
+    <Content Include="@(CuratedGrammarFile)">
+      <Link>grammars\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Fail closed: a grammar renamed by a package update breaks the build instead of shipping a
+       binary that only fails on a user's machine. -->
+  <Target Name="VerifyCuratedGrammarsExist" BeforeTargets="PrepareForBuild"
+          Condition="'@(CuratedGrammarFile)'!=''">
+    <Error Condition="!Exists('%(CuratedGrammarFile.Identity)')"
+           Text="Curated grammar missing: %(CuratedGrammarFile.Identity). The package layout changed - update DevProjexGrammar or the naming convention." />
+  </Target>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Compression\Languages\**\*.json" />
+    <EmbeddedResource Include="Compression\Languages\**\*.scm" />
   </ItemGroup>
 
   <ItemGroup>

@@ -99,7 +99,7 @@ jobs:
           -p:PublishTrimmed=false
           -p:DebugType=None
           -p:DebugSymbols=false
-          -p:GrammarDeliveryBaseline=true
+          -p:DevProjexExcludeGrammars=true
           -o artifacts/grammar-delivery/baseline
 
       - name: Publish with curated grammars
@@ -187,7 +187,7 @@ jobs:
           -p:PublishTrimmed=false
           -p:DebugType=None
           -p:DebugSymbols=false
-          -p:GrammarDeliveryStrategy=Content
+          -p:DevProjexGrammarDelivery=Content
           -o artifacts/grammar-delivery/content
 
       - name: Assert the packaged layout
@@ -196,9 +196,12 @@ jobs:
           # The MSIX build must never write executable code at runtime: grammars ship as ordinary
           # package files so they inherit the package signature. Extracted DLLs would not, and are
           # blocked by Smart App Control and S mode.
+          # The count is not hard-coded: it must match what Infrastructure actually embeds, or the
+          # check silently stops covering a language that was added.
+          expected=$(grep -c '<DevProjexGrammar Include=' Infrastructure/Infrastructure.csproj)
           grammars=$(find artifacts/grammar-delivery/content/grammars -type f | wc -l)
-          if [ "$grammars" -ne 10 ]; then
-            echo "::error::Expected 10 packaged grammars, found $grammars"
+          if [ "$grammars" -ne "$expected" ]; then
+            echo "::error::Expected $expected packaged grammars, found $grammars"
             find artifacts/grammar-delivery/content/grammars -type f
             exit 1
           fi
@@ -215,7 +218,7 @@ jobs:
 
       - name: Load and parse from the packaged layout
         shell: bash
-        run: artifacts/grammar-delivery/content/GrammarDeliveryProbe.exe
+        run: artifacts/grammar-delivery/content/GrammarDeliveryProbe.exe --content
 
   gate:
     name: Grammar Delivery Gate
