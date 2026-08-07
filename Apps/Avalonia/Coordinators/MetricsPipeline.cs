@@ -296,16 +296,28 @@ internal sealed class MetricsPipeline(
     }
 
     /// <summary>
+    /// One compression scope for a whole metrics pass, or null when compression is off.
+    ///
+    /// Never one per file: constructing a tree-sitter Language performs a fresh native load and the
+    /// binding never releases the module handle, so a scope per file would leak one load per file.
+    /// The scope it returns is never Completed - metrics must not publish a snapshot, because the
+    /// files it measured are not the ordered selection an output would have produced.
+    /// </summary>
+    private CodeCompressionScope? BeginTransformationScope(IReadOnlyList<string> filePaths) =>
+        transformationContextProvider?.Invoke()?.Compression?.BeginOutput(filePaths);
+
+    /// <summary>
     /// Re-measures one file through the enabled transformations. A file the compressor leaves alone
     /// keeps its original metrics, so unsupported languages cost only the supported-extension check.
     /// </summary>
     private async Task<TextFileMetrics?> MeasureTransformedAsync(
+        CodeCompressionScope? scope,
+        string projectRoot,
         string filePath,
         TextFileMetrics metrics,
         CancellationToken cancellationToken)
     {
-        var context = transformationContextProvider?.Invoke();
-        if (context?.Compression is not { } compression || !compression.Session.IsSupported(filePath))
+        if (scope is null || !IsCompressible(filePath))
             return metrics;
 
         var content = await fileContentAnalyzer
@@ -314,8 +326,7 @@ internal sealed class MetricsPipeline(
         if (content is null || content.IsEstimated || content.Content.Length == 0)
             return metrics;
 
-        using var scope = compression.BeginOutput([filePath]);
-        var relativePath = BuildRelativePath(compression.ProjectRoot, filePath);
+        var relativePath = BuildRelativePath(projectRoot, filePath);
         var transformed = scope.Transform(filePath, relativePath, content.Content, cancellationToken).Text;
         if (ReferenceEquals(transformed, content.Content))
             return metrics;
@@ -324,6 +335,12 @@ internal sealed class MetricsPipeline(
             transformed,
             Encoding.UTF8.GetByteCount(transformed));
     }
+
+    private bool IsCompressible(string filePath) =>
+        transformationContextProvider?.Invoke()?.Compression?.Session.IsSupported(filePath) == true;
+
+    private string ResolveTransformationProjectRoot() =>
+        transformationContextProvider?.Invoke()?.Compression?.ProjectRoot ?? string.Empty;
 
     private static string BuildRelativePath(string projectRoot, string fullPath)
     {
@@ -609,6 +626,8 @@ internal sealed class MetricsPipeline(
             MaxDegreeOfParallelism = maxDegreeOfParallelism,
             CancellationToken = cancellationToken
         };
+        using var transformationScope = BeginTransformationScope(filePaths);
+        var transformationProjectRoot = ResolveTransformationProjectRoot();
 
         await Parallel.ForAsync(0, filePaths.Count, parallelOptions, async (index, ct) =>
         {
@@ -632,7 +651,15 @@ internal sealed class MetricsPipeline(
                 // on, that is the transformed text, so the file is measured after compression rather
                 // than as it sits on disk.
                 if (metrics is { IsEstimated: false })
-                    metrics = await MeasureTransformedAsync(filePath, metrics, ct).ConfigureAwait(false);
+                {
+                    metrics = await MeasureTransformedAsync(
+                            transformationScope,
+                            transformationProjectRoot,
+                            filePath,
+                            metrics,
+                            ct)
+                        .ConfigureAwait(false);
+                }
 
                 if (metrics is not null)
                 {

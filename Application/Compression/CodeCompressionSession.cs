@@ -131,11 +131,25 @@ public sealed class CodeCompressionScope(
 	string selectionKey) : IDisposable
 {
 	private readonly List<CodeCompressionFileOutcome> _unchanged = [];
+	// One scope is shared by the parallel metrics scan, and the underlying parser is native state
+	// that cannot be entered twice. Serializing here rather than at each call site also keeps the
+	// accumulated counts from tearing.
+	private readonly Lock _sync = new();
 	private int _compressed;
 	private long _sourceCharacters;
 	private long _transformedCharacters;
 
 	public CodeCompressionResult Transform(
+		string fullPath,
+		string relativePath,
+		string content,
+		CancellationToken cancellationToken)
+	{
+		lock (_sync)
+			return TransformCore(fullPath, relativePath, content, cancellationToken);
+	}
+
+	private CodeCompressionResult TransformCore(
 		string fullPath,
 		string relativePath,
 		string content,
@@ -161,6 +175,12 @@ public sealed class CodeCompressionScope(
 	}
 
 	public CodeCompressionSnapshot Complete()
+	{
+		lock (_sync)
+			return CompleteCore();
+	}
+
+	private CodeCompressionSnapshot CompleteCore()
 	{
 		var snapshot = new CodeCompressionSnapshot(
 			selectionKey,
