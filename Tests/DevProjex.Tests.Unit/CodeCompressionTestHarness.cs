@@ -16,6 +16,8 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 	public static IReadOnlyList<string> LanguageIds { get; } =
 		Packs.Select(static pack => pack.Id).ToArray();
 
+	public static IReadOnlyList<CompressionLanguagePack> LanguagePacks => Packs;
+
 	private CodeCompressionTestHarness(CompressionLanguagePack pack, Language language, string fixture)
 	{
 		Pack = pack;

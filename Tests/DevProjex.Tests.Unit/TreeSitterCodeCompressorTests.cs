@@ -106,6 +106,41 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.DoesNotContain("running", text, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void CSharp_ConditionalAttributesDoNotTurnConstructorSignaturesIntoBodies()
+	{
+		const string source = """
+			using System;
+			using System.Runtime.Serialization;
+
+			public sealed class ValidationException : Exception
+			{
+			    public ValidationException(string message) : base(message)
+			    {
+			        Console.WriteLine("ordinary implementation");
+			    }
+
+			#if NET8_0_OR_GREATER
+			    [Obsolete(DiagnosticId = "SYSLIB0051")]
+			#endif
+			    public ValidationException(SerializationInfo info, StreamingContext context) : base(info, context)
+			    {
+			        Console.WriteLine("conditional implementation");
+			    }
+			}
+			""";
+
+		var (plan, text) = Compress("ValidationException.cs", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.Contains(
+			"public ValidationException(SerializationInfo info, StreamingContext context)",
+			text,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("ordinary implementation", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("conditional implementation", text, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[MemberData(nameof(ShippedLanguages))]
 	public void EveryShippedLanguage_CompressesItsProductionFixture(string languageId)
@@ -125,6 +160,39 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.True(analysis.GetResult(harness.Fixture).Text.Length < harness.Fixture.Length);
 	}
 
+	[Fact]
+	public async Task ColdStart_AllShippedLanguagesMaterializeAndCompressConcurrently()
+	{
+		using var temp = new TemporaryDirectory();
+		var locator = new EmbeddedGrammarLibraryLocator(
+			typeof(TreeSitterCodeCompressor).Assembly,
+			CodeCompressionFactory.EmbeddedResourcePrefix,
+			Path.Combine(temp.Path, "grammars"));
+		using var compressor = new TreeSitterCodeCompressor(
+			locator,
+			CodeCompressionTestHarness.LanguagePacks);
+		using var scope = compressor.CreateScope(temp.Path);
+		using var start = new ManualResetEventSlim();
+
+		var tasks = CodeCompressionTestHarness.LanguagePacks.Select(pack => Task.Run(() =>
+		{
+			start.Wait(TestContext.Current.CancellationToken);
+			var source = CodeCompressionTestHarness.FixtureFor(pack.Id);
+			var path = $"sample{pack.Extensions[0]}";
+			return scope.Analyze(
+				path,
+				path,
+				source,
+				TestContext.Current.CancellationToken).Plan;
+		}, TestContext.Current.CancellationToken)).ToArray();
+
+		start.Set();
+		var plans = await Task.WhenAll(tasks);
+
+		Assert.All(plans, plan => Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome));
+		Assert.Equal(CodeCompressionTestHarness.LanguagePacks.Count, Directory.GetFiles(locator.RootDirectory).Length);
+	}
+
 	[Theory]
 	[InlineData(
 		"sample.cpp",
@@ -140,6 +208,75 @@ public sealed class TreeSitterCodeCompressorTests
 
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.DoesNotContain(removedText, text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Cpp_PreprocessorBeforeClassDoesNotTurnTheClassBodyIntoAFunctionBody()
+	{
+		const string source = """
+			#ifdef _WIN32
+			int system_category();
+			#else
+			inline auto system_category() -> int
+			{
+			    return 1;
+			}
+			#endif
+
+			class buffered_file
+			{
+			private:
+			    int descriptor_;
+
+			public:
+			    int descriptor() const
+			    {
+			        return descriptor_;
+			    }
+
+			    void close()
+			    {
+			        descriptor_ = -1;
+			    }
+			};
+			""";
+
+		var (plan, text) = Compress("os.h", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.Equal("cpp", plan.LanguageId);
+		Assert.Contains("class buffered_file", text, StringComparison.Ordinal);
+		Assert.Contains("int descriptor_;", text, StringComparison.Ordinal);
+		Assert.Contains("int descriptor() const", text, StringComparison.Ordinal);
+		Assert.Contains("void close()", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("return descriptor_;", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("descriptor_ = -1", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void CHeader_WithoutCppConstructsUsesTheCGrammar()
+	{
+		const string source = """
+			#ifndef COUNTER_H
+			#define COUNTER_H
+
+			struct counter { int value; };
+
+			static inline int counter_read(const struct counter* counter)
+			{
+			    return counter->value;
+			}
+
+			#endif
+			""";
+
+		var (plan, text) = Compress("counter.h", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.Equal("c", plan.LanguageId);
+		Assert.Contains("struct counter { int value; };", text, StringComparison.Ordinal);
+		Assert.Contains("counter_read", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("return counter->value", text, StringComparison.Ordinal);
 	}
 
 	[Fact]

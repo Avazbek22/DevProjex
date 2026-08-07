@@ -69,7 +69,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private IgnoreOptionViewModel? _hideSecretsOption;
 	private bool? _contentProcessingHasFindings;
 	private SecretScanState _contentProcessingScanState;
-	private string _compressionNotice = string.Empty;
 	private int? _contentProcessingDetectedCount;
 	private int? _contentProcessingHiddenCount;
     private bool _isDarkTheme = true;
@@ -1432,15 +1431,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsNotice { get; private set; } = string.Empty;
-	public bool HasContentProcessingStatus =>
-		_contentProcessingScanState == SecretScanState.Failed ||
-		(_contentProcessingHasFindings is true &&
-		 _contentProcessingScanState == SecretScanState.Completed &&
-		 _contentProcessingDetectedCount.HasValue &&
-		 _contentProcessingHiddenCount.HasValue) ||
-		_compressionNotice.Length > 0;
-	public bool IsContentProcessingAnalysisFailed =>
-		_contentProcessingScanState == SecretScanState.Failed;
+	public bool HasSecretsStatus =>
+		_contentProcessingHasFindings is true &&
+		_contentProcessingScanState == SecretScanState.Completed &&
+		_contentProcessingDetectedCount.HasValue &&
+		_contentProcessingHiddenCount.HasValue;
 	public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretAlwaysHideFormat { get; private set; } = string.Empty;
@@ -1922,62 +1917,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		_contentProcessingHasFindings = hasFindings;
 		SynchronizeContentProcessingOptions();
 		UpdateSettingsSecretsNotice();
-		RaisePropertyChanged(nameof(HasContentProcessingStatus));
-		RaisePropertyChanged(nameof(IsContentProcessingAnalysisFailed));
+		RaisePropertyChanged(nameof(HasSecretsStatus));
 		RaisePropertyChanged(nameof(HasContentProcessingOptions));
 	}
-
-	/// <summary>
-	/// Publishes what compression actually did. Counts only - the notice never claims the project
-	/// "is compressed", because some files are always left in full and the user has to be able to
-	/// see how many.
-	/// </summary>
-	internal void SetCompressionStatus(CodeCompressionSnapshot? snapshot, bool enabled, bool failed = false)
-	{
-		var value = !enabled
-			? string.Empty
-			: failed
-				? _localization["Settings.Compression.Status.Failed"]
-				: snapshot is null
-					? _localization["Settings.Compression.Status.Scanning"]
-					: snapshot.CompressedFiles == 0
-						? _localization["Settings.Compression.Status.NothingToCompress"]
-						: _localization.Format(
-							"Settings.Compression.Status.Applied",
-							snapshot.CompressedFiles,
-							snapshot.TotalFiles,
-							CodeCompressionSnapshot.EstimateTokens(snapshot.SourceCharacters),
-							CodeCompressionSnapshot.EstimateTokens(snapshot.TransformedCharacters));
-		if (enabled && !failed && snapshot is { Unchanged.Count: > 0 })
-			value = $"{value}{Environment.NewLine}{DescribeUnchangedFiles(snapshot)}";
-		if (string.Equals(_compressionNotice, value, StringComparison.Ordinal))
-			return;
-
-		_compressionNotice = value;
-		UpdateSettingsSecretsNotice();
-		RaisePropertyChanged(nameof(HasContentProcessingStatus));
-	}
-
-	/// <summary>
-	/// Why files were left in full, grouped by reason rather than listed one by one. A user needs to
-	/// know that nothing was dropped and roughly why, not to read a file manifest in a tooltip.
-	/// </summary>
-	private string DescribeUnchangedFiles(CodeCompressionSnapshot snapshot) =>
-		string.Join(
-			Environment.NewLine,
-			snapshot.Unchanged
-				.GroupBy(static file => file.Outcome)
-				.OrderByDescending(static group => group.Count())
-				.Select(group => $"{_localization[ReasonKey(group.Key)]} — {group.Count()}"));
-
-	private static string ReasonKey(CodeCompressionOutcome outcome) => outcome switch
-	{
-		CodeCompressionOutcome.UnchangedUnsupportedLanguage => "Compression.Reason.UnsupportedLanguage",
-		CodeCompressionOutcome.UnchangedTooLarge => "Compression.Reason.TooLarge",
-		CodeCompressionOutcome.UnchangedParseFailed => "Compression.Reason.ParseFailed",
-		CodeCompressionOutcome.UnchangedGateRejected => "Compression.Reason.GateRejected",
-		_ => "Compression.Reason.NoBenefit"
-	};
 
 	private void UpdateSettingsSecretsNotice()
 	{
@@ -1993,17 +1935,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 				_localization["Settings.Ignore.HideSecrets.NoMatches"],
 			_ => string.Empty
 		};
-		// One indicator serves the whole content-processing group, so both transformations report
-		// through it. Each contributes a line only when it has something to say.
-		var value = secrets.Length > 0 && _compressionNotice.Length > 0
-			? $"{secrets}{Environment.NewLine}{_compressionNotice}"
-			: secrets.Length > 0
-				? secrets
-				: _compressionNotice;
-		if (string.Equals(SettingsSecretsNotice, value, StringComparison.Ordinal))
+		if (string.Equals(SettingsSecretsNotice, secrets, StringComparison.Ordinal))
 			return;
 
-		SettingsSecretsNotice = value;
+		SettingsSecretsNotice = secrets;
 		RaisePropertyChanged(nameof(SettingsSecretsNotice));
 	}
 

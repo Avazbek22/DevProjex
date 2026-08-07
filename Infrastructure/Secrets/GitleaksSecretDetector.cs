@@ -19,7 +19,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	public const int ExpectedContentRuleCount = 221;
 	public const string PathOnlyRuleId = "pkcs12-file";
 	public const string ConfigurationSha256 = "0CEEB4F9C567F9F80EE05E8E37EEBA4646DF809F69C736A64D5B8B1398EB3E4C";
-	internal static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(250);
+	private static readonly TimeSpan NonBacktrackingRegexTimeout = TimeSpan.FromSeconds(2);
+	private static readonly TimeSpan BacktrackingRegexTimeout = TimeSpan.FromMilliseconds(250);
 	private const string ResourceSuffix = ".Secrets.Rules.gitleaks-v8.30.1.toml";
 	private static readonly string EmbeddedConfigurationFileName = $"gitleaks-{RulesVersion}.toml";
 	private const string GitleaksAllowSignature = "gitleaks:allow";
@@ -977,7 +978,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			return new Regex(
 				translated,
 				options,
-				RegexTimeout);
+				useNonBacktracking ? NonBacktrackingRegexTimeout : BacktrackingRegexTimeout);
 		}
 		catch (ArgumentException exception)
 		{

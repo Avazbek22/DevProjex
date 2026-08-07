@@ -397,9 +397,6 @@ public partial class MainWindow : Window
 		_codeCompressionSnapshot = compressionEnabled
 			? GetCompressionSnapshotForCurrentSelection()
 			: null;
-		_viewModel.SetCompressionStatus(
-			compressionEnabled ? _codeCompressionSnapshot : null,
-			compressionEnabled);
 		var enabled = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
 			.Contains(IgnoreOptionId.HideSecrets);
@@ -1125,7 +1122,6 @@ public partial class MainWindow : Window
 		_secretRedactionSession.Reset();
 		PublishTransformationContext();
 		_codeCompressionSnapshot = null;
-		_viewModel.SetCompressionStatus(null, enabled: false);
 		_codeCompressionSession.Reset();
 
         // Background metrics become stale as soon as the visible tree is about to change.

@@ -52,6 +52,7 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 	private readonly Assembly _assembly;
 	private readonly string _resourcePrefix;
 	private readonly HashSet<string> _inUse = new(PathComparer);
+	private readonly object _inUseSync = new();
 
 	public EmbeddedGrammarLibraryLocator(Assembly assembly, string resourcePrefix, string rootDirectory)
 	{
@@ -109,7 +110,7 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 
 		try
 		{
-			_inUse.Add(Path.TrimEndingDirectorySeparator(RootDirectory));
+			MarkInUse(Path.TrimEndingDirectorySeparator(RootDirectory));
 			return Materialize(source, RootDirectory, fileName);
 		}
 		catch (IOException)
@@ -121,7 +122,7 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 			source.Position = 0;
 			var repairDirectory = Path.Combine(RootDirectory, $"repair-{Environment.ProcessId}");
 			Directory.CreateDirectory(repairDirectory);
-			_inUse.Add(repairDirectory);
+			MarkInUse(repairDirectory);
 			return Materialize(source, repairDirectory, fileName);
 		}
 	}
@@ -157,12 +158,24 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 		{
 			if (!Path.GetFileName(candidate).StartsWith("repair-", StringComparison.Ordinal))
 				continue;
-			if (_inUse.Contains(candidate))
+			if (IsInUse(candidate))
 				continue;
 			TryRemove(candidate, removed);
 		}
 
 		return removed;
+	}
+
+	private void MarkInUse(string directory)
+	{
+		lock (_inUseSync)
+			_inUse.Add(directory);
+	}
+
+	private bool IsInUse(string directory)
+	{
+		lock (_inUseSync)
+			return _inUse.Contains(directory);
 	}
 
 	private static string Materialize(Stream source, string directory, string fileName)

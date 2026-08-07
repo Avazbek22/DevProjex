@@ -28,7 +28,7 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 
 	private readonly IGrammarLibraryLocator _locator;
 	private readonly IReadOnlyList<CompressionLanguagePack> _packs;
-	private readonly Dictionary<string, CompressionLanguagePack> _byExtension;
+	private readonly Dictionary<string, IReadOnlyList<CompressionLanguagePack>> _byExtension;
 	private readonly ConcurrentDictionary<string, Lazy<LanguageWorkerPool>> _languagePools = [];
 	private bool _disposed;
 
@@ -43,7 +43,14 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 		_packs = packs;
 		_byExtension = packs
 			.SelectMany(pack => pack.Extensions.Select(extension => (extension, pack)))
-			.ToDictionary(pair => pair.extension, pair => pair.pack, StringComparer.OrdinalIgnoreCase);
+			.GroupBy(static pair => pair.extension, StringComparer.OrdinalIgnoreCase)
+			.ToDictionary(
+				static group => group.Key,
+				static group => (IReadOnlyList<CompressionLanguagePack>)group
+					.Select(static pair => pair.pack)
+					.OrderBy(static pack => pack.Id, StringComparer.Ordinal)
+					.ToArray(),
+				StringComparer.OrdinalIgnoreCase);
 		TransformIdentity = "tree-sitter:" + string.Join(",", packs.Select(static pack => pack.Identity));
 	}
 
@@ -98,7 +105,7 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 /// actually appear; the scope itself owns no native parser and is safe for parallel file analysis.
 /// </summary>
 internal sealed class TreeSitterCompressionScope(
-	IReadOnlyDictionary<string, CompressionLanguagePack> byExtension,
+	IReadOnlyDictionary<string, IReadOnlyList<CompressionLanguagePack>> byExtension,
 	string transformIdentity,
 	Func<CompressionLanguagePack, LanguageWorkerPool> languagePoolProvider) : ICodeCompressionScope
 {
@@ -112,8 +119,9 @@ internal sealed class TreeSitterCompressionScope(
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 
-		if (!byExtension.TryGetValue(Path.GetExtension(relativePath), out var pack))
+		if (!byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates))
 			return Refused(relativePath, "unknown", CodeCompressionOutcome.UnchangedUnsupportedLanguage, content.Length);
+		var pack = ResolveLanguagePack(candidates, relativePath, content);
 
 		if (content.Length > TreeSitterCodeCompressor.MaximumParsableCharacters)
 			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedTooLarge, content.Length);
@@ -183,6 +191,44 @@ internal sealed class TreeSitterCompressionScope(
 		int length) =>
 		new(CodeCompressionPlan.Unchanged(relativePath, languageId, outcome, length, transformIdentity), null);
 
+	private static CompressionLanguagePack ResolveLanguagePack(
+		IReadOnlyList<CompressionLanguagePack> candidates,
+		string relativePath,
+		string source)
+	{
+		if (candidates.Count == 1)
+			return candidates[0];
+
+		if (Path.GetExtension(relativePath).Equals(".h", StringComparison.OrdinalIgnoreCase))
+		{
+			var languageId = ContainsCppHeaderEvidence(source) ? "cpp" : "c";
+			var selected = candidates.FirstOrDefault(candidate =>
+				candidate.Id.Equals(languageId, StringComparison.Ordinal));
+			if (selected is not null)
+				return selected;
+		}
+
+		return candidates[0];
+	}
+
+	private static bool ContainsCppHeaderEvidence(string source)
+	{
+		// A .h file is ambiguous by design. Keep ordinary C headers on the stricter C grammar, but
+		// never let that grammar reinterpret an explicit C++ class or template as a function body.
+		ReadOnlySpan<string> evidence =
+		[
+			"namespace ", "template<", "template <", "class ", "public:", "private:",
+			"protected:", "std::", "constexpr ", "typename ", "using namespace "
+		];
+		foreach (var marker in evidence)
+		{
+			if (source.Contains(marker, StringComparison.Ordinal))
+				return true;
+		}
+
+		return false;
+	}
+
 	private static List<CodeCompressionEdit> CollectEdits(
 		CompressionLanguagePack pack,
 		LoadedLanguage language,
@@ -214,6 +260,8 @@ internal sealed class TreeSitterCompressionScope(
 			// silently delete a class body.
 			if (pack.ContainerNodeTypes.Contains(node.Type))
 				continue;
+			if (IsMisparsedCppClassBody(pack, node, source))
+				continue;
 
 			int start;
 			if (docstringEnds.TryGetValue(node.StartIndex, out var docEnd))
@@ -225,7 +273,9 @@ internal sealed class TreeSitterCompressionScope(
 				// A comment on the first line of a body is lexically inside the function but is an
 				// "extra" node that sits BEFORE the body node, so the query never reaches it.
 				// Leaving it behind would print a comment describing code that is gone.
-				start = ExtendOverLeadingComments(source, node);
+				start = pack.Id.Equals("python", StringComparison.Ordinal)
+					? ExtendOverLeadingPythonComments(source, node)
+					: node.StartIndex;
 			}
 
 			if (start < 0 || node.EndIndex > source.Length || node.EndIndex <= start)
@@ -248,12 +298,62 @@ internal sealed class TreeSitterCompressionScope(
 		return edits;
 	}
 
+	private static bool IsMisparsedCppClassBody(
+		CompressionLanguagePack pack,
+		Node node,
+		string source)
+	{
+		if (!pack.Id.Equals("cpp", StringComparison.Ordinal) ||
+		    node.Parent is not { Type: "function_definition" } function)
+		{
+			return false;
+		}
+
+		if (node.Children.Any(child => IsCppAccessLabel(child, source)))
+			return true;
+
+		var declarator = function.GetChildForField("declarator");
+		return declarator is null ||
+		       declarator.EndIndex > node.StartIndex ||
+		       !ContainsNodeTypeBefore(declarator, "parameter_list", node.StartIndex);
+	}
+
+	private static bool IsCppAccessLabel(Node node, string source)
+	{
+		if (!node.Type.Equals("labeled_statement", StringComparison.Ordinal) ||
+		    node.StartIndex < 0 ||
+		    node.EndIndex > source.Length)
+		{
+			return false;
+		}
+
+		var label = source.AsSpan(node.StartIndex, Math.Min(node.EndIndex - node.StartIndex, 16)).TrimStart();
+		return label.StartsWith("public:", StringComparison.Ordinal) ||
+		       label.StartsWith("private:", StringComparison.Ordinal) ||
+		       label.StartsWith("protected:", StringComparison.Ordinal);
+	}
+
+	private static bool ContainsNodeTypeBefore(Node root, string nodeType, int maximumEnd)
+	{
+		var stack = new Stack<Node>();
+		stack.Push(root);
+		while (stack.Count > 0)
+		{
+			var node = stack.Pop();
+			if (node.EndIndex <= maximumEnd && node.Type.Equals(nodeType, StringComparison.Ordinal))
+				return true;
+			foreach (var child in node.Children)
+				stack.Push(child);
+		}
+
+		return false;
+	}
+
 	/// <summary>
-	/// Walks the edit start back over whole comment-only lines that sit between the declaration and
-	/// its body. Only complete lines are taken, and never past the declaration itself, so nothing
-	/// the query did not intend to remove can be swallowed.
+	/// Python comments before the first statement are extra nodes outside the block captured by the
+	/// query. Include only those complete lines, never preprocessor directives from other languages.
 	/// </summary>
-	private static int ExtendOverLeadingComments(string source, Node body)
+	private static int ExtendOverLeadingPythonComments(string source, Node body)
 	{
 		var limit = body.Parent?.StartIndex ?? 0;
 		var start = body.StartIndex;
@@ -268,7 +368,7 @@ internal sealed class TreeSitterCompressionScope(
 				return start;
 
 			var line = source[(previousLineStart + 1)..lineStart].Trim();
-			if (line.Length == 0 || !(line.StartsWith('#') || line.StartsWith("//", StringComparison.Ordinal)))
+			if (line.Length == 0 || !line.StartsWith('#'))
 				return start;
 
 			start = previousLineStart + 1;

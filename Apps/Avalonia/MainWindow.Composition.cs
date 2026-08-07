@@ -55,7 +55,6 @@ public partial class MainWindow
 			var enabled = CreateCodeCompressionContext() is not null;
 			var snapshot = enabled ? GetCompressionSnapshotForCurrentSelection() : null;
 			_codeCompressionSnapshot = snapshot;
-			_viewModel.SetCompressionStatus(snapshot, enabled);
 			RelabelIgnoreOptionsWithCurrentCounts();
 		});
 	}
@@ -216,7 +215,7 @@ public partial class MainWindow
 		{
 			// A newer selection or the real Preview owns the next scan.
 		}
-		catch (Exception exception)
+		catch (Exception)
 		{
 			if (refreshVersion != Volatile.Read(ref _secretRedactionCountRefreshVersion) ||
 			    _windowLifetimeCts is not { IsCancellationRequested: false })
@@ -224,7 +223,6 @@ public partial class MainWindow
 				return;
 			}
 
-			var message = ResolveUserFacingOutputErrorMessage(exception);
 			await Dispatcher.UIThread.InvokeAsync(() =>
 			{
 				_secretRedactionScanState = SecretScanState.Failed;
@@ -234,7 +232,6 @@ public partial class MainWindow
 					secretRedactionsCount: null,
 					_secretRedactionScanState,
 					secretMatchesCount: null);
-				return ShowErrorAsync(message);
 			});
 		}
 		finally

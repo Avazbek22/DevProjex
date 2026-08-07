@@ -1812,7 +1812,6 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var processingContent = Assert.IsType<Grid>(processingBorder.Child);
 			var helpIndicator = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingHelpIndicator");
 			var questionIcon = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingQuestionIcon");
-			var warningIcon = UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingWarningIcon");
             var ignoreList = UiTestDriver.GetRequiredControl<ListBox>(window, "IgnoreOptionsList");
 			Assert.Equal("Content processing:", UiTestDriver.GetRequiredControl<TextBlock>(window, "ContentProcessingHeaderText").Text);
 			Assert.Contains(processingList, processingContent.Children);
@@ -1834,7 +1833,6 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal("Found: 3. Hidden: 2.", helpText.Text);
 			Assert.Equal(PlacementMode.Left, ToolTip.GetPlacement(helpIndicator));
 			Assert.True(questionIcon.IsVisible);
-			Assert.False(warningIcon.IsVisible);
 			Assert.Equal(VerticalAlignment.Top, helpIndicator.VerticalAlignment);
 			var checkBoxPosition = Assert.IsType<Point>(checkBox.TranslatePoint(default, processingBorder));
 			var indicatorPosition = Assert.IsType<Point>(helpIndicator.TranslatePoint(default, processingBorder));
@@ -1845,8 +1843,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			viewModel.SetContentProcessingStatus(SecretScanState.Failed);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Equal("The analysis could not be completed.", helpText.Text);
-			Assert.False(questionIcon.IsVisible);
-			Assert.True(warningIcon.IsVisible);
+			Assert.False(helpIndicator.IsVisible);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 0, hiddenCount: 0);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
@@ -1887,7 +1884,126 @@ public sealed class MainWindowIgnoreOptionsUiTests
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
-    }
+	}
+
+	[AvaloniaFact]
+	public async Task CompressionWithoutSecretFindings_DoesNotExposeTheSecretsIndicator()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"DevProjex found no secrets",
+					StringComparison.Ordinal),
+				"the automatic scan to complete without findings");
+
+			var option = Assert.Single(viewModel.ContentProcessingOptions);
+			Assert.Equal(IgnoreOptionId.CompressCode, option.Id);
+			option.IsChecked = true;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+			Assert.True(option.IsChecked);
+			Assert.False(UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingHelpIndicator").IsVisible);
+			Assert.Equal("DevProjex found no secrets", viewModel.SettingsSecretsNotice);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task AutomaticSecretDiscoveryFailure_DoesNotOpenModalOrAttachStatusToCompression()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = new FailingSecretScanContentAnalyzer(services.FileContentAnalyzer)
+			});
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"The analysis could not be completed.",
+					StringComparison.Ordinal),
+				"the failed background secret discovery to settle");
+
+			var option = Assert.Single(viewModel.ContentProcessingOptions);
+			Assert.Equal(IgnoreOptionId.CompressCode, option.Id);
+			Assert.False(UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingHelpIndicator").IsVisible);
+			Assert.Empty(window.OwnedWindows);
+
+			option.IsChecked = true;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.True(option.IsChecked);
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	private sealed class FailingSecretScanContentAnalyzer(IFileContentAnalyzer inner) : IFileContentAnalyzer
+	{
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			inner.ClassifyWithoutReading(path);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			maxSizeForFullRead == SecretRedactionOutputPreparer.MaximumScannableFileBytes
+				? ValueTask.FromException<FileContentReadResult>(new IOException("Injected background scan failure."))
+				: inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetClassifiedMetricsAsync(path, cancellationToken);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.OpenCompleteSnapshotAsync(path, cancellationToken);
+
+		public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default) =>
+			maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes
+				? ValueTask.FromException<ICompleteTextFileBuffer>(new IOException("Injected background scan failure."))
+				: inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+	}
 
     private static async Task SetIgnoreAllCheckedAsync(MainWindow window, bool isChecked)
     {
