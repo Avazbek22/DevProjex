@@ -35,6 +35,17 @@ public sealed class ProjectCopyExportService(
 			await using var prepared = request.RedactSecrets || request.CompressCode
 				? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
 				: null;
+			// A copy reproduces the project byte for byte. A file the scanner could not read has no
+			// redacted stand-in to copy, and copying the original would hand over text Hide Secrets
+			// never inspected - so this surface still fails closed, before anything is written.
+			if (request.RedactSecrets && prepared?.FirstUnscannablePath is { } unscannablePath)
+			{
+				throw new SecretScanLimitExceededException(
+					unscannablePath,
+					new FileInfo(unscannablePath).Length,
+					SecretRedactionOutputPreparer.MaximumScannableFileBytes);
+			}
+
 			return request.Format switch
 			{
 				ProjectCopyExportFormat.Folder => await ExportFolderAsync(

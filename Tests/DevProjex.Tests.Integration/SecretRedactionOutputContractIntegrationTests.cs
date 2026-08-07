@@ -322,20 +322,25 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertSourceBytesUnchanged(sourceBefore, sourceRoot);
 	}
 
+	/// <summary>
+	/// The scan limit is per file, so it costs the user that file - never the rest of the project.
+	/// A document omits text this large whether Hide Secrets is on or off, so there is nothing to
+	/// protect by refusing: the guarantee is that unscanned text never ships, and omitting it keeps
+	/// that promise while still producing the output the user asked for.
+	/// </summary>
 	[Fact]
-	public async Task OversizedSelectedText_FailsClosedBeforeWritingAnyOutput()
+	public async Task OversizedSelectedText_IsOmittedWhileTheRestOfTheSelectionIsStillRedacted()
 	{
 		using var temporary = new TemporaryDirectory();
 		var sourceRoot = temporary.CreateDirectory("oversized-project");
 		var exportRoot = temporary.CreateDirectory("oversized-exports");
-		var oversizedPath = Path.Combine(sourceRoot, "oversized.txt");
-		await File.WriteAllTextAsync(
-			oversizedPath,
-			new string('a', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1)),
-			TestContext.Current.CancellationToken);
-		var binaryPath = Path.Combine(sourceRoot, "blob.bin");
-		File.WriteAllBytes(binaryPath, [0, 1, 0]);
-		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, binaryPath, ownsTemporary: false);
+		await WriteOversizedProjectAsync(sourceRoot);
+		using var workspace = new Workspace(
+			temporary,
+			sourceRoot,
+			exportRoot,
+			Path.Combine(sourceRoot, "blob.bin"),
+			ownsTemporary: false);
 		var analyzer = new FileContentAnalyzer();
 		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
@@ -345,17 +350,45 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			secretRedactionSession: session);
 		using var contextDestination = new MemoryStream();
 
-		await Assert.ThrowsAsync<SecretScanLimitExceededException>(() =>
-			contextService.WriteCompleteAsync(
-				plan,
-				ProjectContextView.Content,
-				ProjectContextDocumentFormat.Text,
-				contextDestination,
-				TestContext.Current.CancellationToken,
-				plain: true));
-		Assert.Equal(0, contextDestination.Length);
+		await contextService.WriteCompleteAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			contextDestination,
+			TestContext.Current.CancellationToken,
+			plain: true);
 
+		var document = Encoding.UTF8.GetString(contextDestination.ToArray());
+		Assert.NotEqual(0, contextDestination.Length);
+		Assert.DoesNotContain(GithubToken, document, StringComparison.Ordinal);
+		Assert.Contains("settings.txt", document, StringComparison.Ordinal);
+		// The oversized file keeps its place in the document; only its text is absent.
+		Assert.Contains("oversized.txt", document, StringComparison.Ordinal);
+		Assert.DoesNotContain(new string('a', 4096), document, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// The one surface that reproduces bytes rather than rendering them. It has no redacted
+	/// stand-in to copy for a file the scanner never read, so it still refuses - before writing.
+	/// </summary>
+	[Fact]
+	public async Task OversizedSelectedText_StillFailsTheProjectCopyBeforeWritingAnyOutput()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("oversized-copy-project");
+		var exportRoot = temporary.CreateDirectory("oversized-copy-exports");
+		await WriteOversizedProjectAsync(sourceRoot);
+		using var workspace = new Workspace(
+			temporary,
+			sourceRoot,
+			exportRoot,
+			Path.Combine(sourceRoot, "blob.bin"),
+			ownsTemporary: false);
+		var analyzer = new FileContentAnalyzer();
+		var session = new SecretRedactionSession(CreateDetector());
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
 		var copyDestination = Path.Combine(exportRoot, "copy");
+
 		var copyException = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
 			new ProjectCopyExportService(new ProjectCopyExportPlanBuilder(), analyzer, session)
 				.ExportAsync(
@@ -369,8 +402,54 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 						ProjectCopyDestinationMode.Exact,
 						RedactSecrets: true),
 					cancellationToken: TestContext.Current.CancellationToken));
+
 		Assert.Equal(ProjectCopyExportError.SecretScanLimitExceeded, copyException.Error);
 		Assert.False(Path.Exists(copyDestination));
+	}
+
+	/// <summary>
+	/// The count behind the checkbox is advisory. A file it may not read is one file missing from
+	/// the count, never a modal error and never a project the user cannot measure at all.
+	/// </summary>
+	[Fact]
+	public async Task OversizedSelectedText_LeavesTheSecretCountScanAbleToFinish()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("oversized-count-project");
+		await WriteOversizedProjectAsync(sourceRoot);
+		var session = new SecretRedactionSession(CreateDetector());
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		var snapshot = await preparer.AnalyzeAsync(
+			new SecretRedactionContext(sourceRoot, session),
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+		// The second pass is served from the scan cache. It must still know the file was never read,
+		// or a repeated project-copy dry run would report readiness for a copy that then refuses.
+		var cached = await preparer.AnalyzeAsync(
+			new SecretRedactionContext(sourceRoot, session),
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(
+			snapshot.DetectedCount > 0,
+			"the readable files must still contribute their findings to the count");
+		Assert.EndsWith("oversized.txt", snapshot.UnscannablePath);
+		Assert.Equal(snapshot.UnscannablePath, cached.UnscannablePath);
+	}
+
+	private static async Task WriteOversizedProjectAsync(string sourceRoot)
+	{
+		await File.WriteAllTextAsync(
+			Path.Combine(sourceRoot, "oversized.txt"),
+			new string('a', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1)),
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			Path.Combine(sourceRoot, "settings.txt"),
+			$"token = {GithubToken}\n",
+			TestContext.Current.CancellationToken);
+		File.WriteAllBytes(Path.Combine(sourceRoot, "blob.bin"), [0, 1, 0]);
 	}
 
 	[Fact]

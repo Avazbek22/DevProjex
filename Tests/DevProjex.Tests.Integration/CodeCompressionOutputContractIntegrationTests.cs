@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using DevProjex.Application.Compression;
+using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Compression;
 
 namespace DevProjex.Tests.Integration;
@@ -31,6 +32,177 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			}
 		}
 		""";
+
+	private const string MarkedConstantValue = "SessionMarkedConstantValue";
+	private const string MarkedBodyValue = "SessionMarkedBodyValue";
+
+	// The constant sits AFTER the body compression removes, so its line number genuinely moves.
+	// A fixture with the constant first would pass without any translation at all.
+	private const string MarkableSource = """
+		namespace Sample;
+
+		public sealed class Widget
+		{
+			public int Compute(int left, int right)
+			{
+				var embedded = "SessionMarkedBodyValue";
+				var total = left + right;
+				for (var index = 0; index < 8; index++)
+					total += index * left - right;
+				return total + embedded.Length;
+			}
+
+			public const string ApiKey = "SessionMarkedConstantValue";
+		}
+		""";
+
+	/// <summary>
+	/// A mark made while looking at the uncompressed file has to keep working once compression is
+	/// switched on. Its coordinates describe the source, the text being scanned is the compressed
+	/// output, and the transform map is what carries the anchor from one to the other.
+	///
+	/// The two values are deliberately on opposite sides of that map: one lives in a constant that
+	/// survives compression and must stay hidden, the other lives in a method body that compression
+	/// removes and must leave with it rather than land on whatever now sits at those coordinates.
+	/// </summary>
+	[Fact]
+	public async Task SessionMarkMadeBeforeCompression_StillHidesTheValueThatSurvivesIt()
+	{
+		using var workspace = CompressionWorkspace.Create(MarkableSource);
+		using var secrets = new SecretRedactionSession(new NoFindingsDetector());
+		MarkInSource(secrets, MarkableSource, MarkedConstantValue);
+		MarkInSource(secrets, MarkableSource, MarkedBodyValue);
+
+		var compressed = await workspace.BuildContentAsync(secrets, compress: true);
+
+		Assert.Contains("public int Compute(int left, int right)", compressed.Text);
+		// Guards the fixture itself: the constant has to be further from the signature in the source
+		// than in the output, otherwise nothing moved and translating the anchor is not what makes
+		// this pass. Measured as a distance so the document's own header lines cannot flatter it.
+		Assert.True(
+			LinesBetweenSignatureAndConstant(MarkableSource) >
+			LinesBetweenSignatureAndConstant(compressed.Text),
+			"compression did not move the marked constant, so this test proves nothing");
+		Assert.DoesNotContain(MarkedConstantValue, compressed.Text);
+		Assert.DoesNotContain(MarkedBodyValue, compressed.Text);
+		// One span, not two: the body value was never in the scanned text to redact.
+		Assert.Equal(1, compressed.RedactionCount);
+	}
+
+	/// <summary>
+	/// Compression leaves plenty of files whole - unsupported languages, and supported ones with no
+	/// executable body. Their map is the identity, so a mark keeps applying exactly as captured. The
+	/// mark here is stamped with no transform while the run has one, which is the combination a user
+	/// produces by marking a value and then ticking the checkbox.
+	/// </summary>
+	[Fact]
+	public async Task SessionMarkOnAFileCompressionLeavesWhole_StillApplies()
+	{
+		// Deliberately not one of the values in the C# fixture, so a hit here can only come from
+		// the file compression left whole.
+		const string notesValue = "SessionMarkedNotesValue";
+		const string plainText = $"api_token = {notesValue}\n";
+		using var workspace = CompressionWorkspace.Create(MarkableSource);
+		var notesPath = workspace.CreateExtraFile("notes.txt", plainText);
+		using var secrets = new SecretRedactionSession(new NoFindingsDetector());
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(notesValue, out var marked, out _));
+		Assert.True(secrets.AddSessionMarkedSecret(
+			"notes.txt",
+			0,
+			plainText.IndexOf(notesValue, StringComparison.Ordinal),
+			marked));
+
+		var compressed = await workspace.BuildContentAsync(secrets, compress: true, extraFile: notesPath);
+
+		Assert.Contains("api_token = ", compressed.Text);
+		Assert.DoesNotContain(notesValue, compressed.Text);
+	}
+
+	/// <summary>
+	/// The clipboard and the text-file export are the surfaces the desktop app drives through
+	/// <see cref="SelectedContentExportService"/>, not through the preview document. They have to
+	/// carry the same bytes as everything else: the transformed text, with redaction applied at the
+	/// offsets that describe it.
+	/// </summary>
+	[Fact]
+	public async Task ClipboardExport_CarriesCompressedTextAndRedactsAtItsOffsets()
+	{
+		using var workspace = CompressionWorkspace.Create(MarkableSource);
+		using var secrets = new SecretRedactionSession(new NoFindingsDetector());
+		MarkInSource(secrets, MarkableSource, MarkedConstantValue);
+
+		var clipboard = await workspace.BuildClipboardAsync(secrets, compress: true);
+
+		Assert.Contains("public int Compute(int left, int right)", clipboard);
+		Assert.DoesNotContain("total += index * left - right", clipboard);
+		// The mark sits after the removed body, so a plan applied to the untransformed text would
+		// redact the wrong characters and leave this value visible.
+		Assert.DoesNotContain(MarkedConstantValue, clipboard);
+		Assert.Contains("public const string ApiKey", clipboard);
+	}
+
+	[Fact]
+	public async Task ClipboardExport_WithoutCompression_KeepsTheOriginalText()
+	{
+		using var workspace = CompressionWorkspace.Create(MarkableSource);
+		using var secrets = new SecretRedactionSession(new NoFindingsDetector());
+
+		var clipboard = await workspace.BuildClipboardAsync(secrets, compress: false);
+
+		Assert.Contains("total += index * left - right", clipboard);
+	}
+
+	[Fact]
+	public async Task SessionMarkMadeBeforeCompression_HidesBothValuesWhileCompressionIsOff()
+	{
+		using var workspace = CompressionWorkspace.Create(MarkableSource);
+		using var secrets = new SecretRedactionSession(new NoFindingsDetector());
+		MarkInSource(secrets, MarkableSource, MarkedConstantValue);
+		MarkInSource(secrets, MarkableSource, MarkedBodyValue);
+
+		var plain = await workspace.BuildContentAsync(secrets, compress: false);
+
+		Assert.DoesNotContain(MarkedConstantValue, plain.Text);
+		Assert.DoesNotContain(MarkedBodyValue, plain.Text);
+		Assert.Equal(2, plain.RedactionCount);
+	}
+
+	private static int LinesBetweenSignatureAndConstant(string text)
+	{
+		var lines = text.Replace("\r\n", "\n").Split('\n');
+		var signature = Array.FindIndex(
+			lines,
+			line => line.Contains("public int Compute", StringComparison.Ordinal));
+		var constant = Array.FindIndex(
+			lines,
+			line => line.Contains("public const string ApiKey", StringComparison.Ordinal));
+		Assert.True(signature >= 0 && constant > signature, "the fixture landmarks are missing");
+		return constant - signature;
+	}
+
+	/// <summary>Marks the value where it sits in the file, exactly as a click on the preview would.</summary>
+	private static void MarkInSource(SecretRedactionSession session, string source, string value)
+	{
+		var lines = source.Replace("\r\n", "\n").Split('\n');
+		var lineIndex = Array.FindIndex(lines, line => line.Contains(value, StringComparison.Ordinal));
+		Assert.True(lineIndex >= 0, $"'{value}' is not in the fixture source");
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(value, out var marked, out _));
+		Assert.True(session.AddSessionMarkedSecret(
+			"Widget.cs",
+			lineIndex,
+			lines[lineIndex].IndexOf(value, StringComparison.Ordinal),
+			marked));
+	}
+
+	private sealed class NoFindingsDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+	}
+
+	private readonly record struct TransformedContent(string Text, int RedactionCount);
 
 	[Fact]
 	public async Task ContextDocument_WithCompression_ShrinksBodiesAndKeepsSignatures()
@@ -169,6 +341,48 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			Assert.NotNull(document);
 			using (document)
 				return document.GetFullText();
+		}
+
+		/// <summary>The clipboard and text-file export path, which does not use the preview document.</summary>
+		public async Task<string> BuildClipboardAsync(SecretRedactionSession secrets, bool compress)
+		{
+			using var session = CodeCompressionFactory.CreateSession();
+			return await new SelectedContentExportService(new FileContentAnalyzer()).BuildAsync(
+				[SourceFile],
+				TestContext.Current.CancellationToken,
+				displayPathMapper: null,
+				new ContentTransformationContext(
+					compress ? new CodeCompressionContext(SourceRoot, session) : null,
+					new SecretRedactionContext(SourceRoot, secrets)));
+		}
+
+		public string CreateExtraFile(string name, string content)
+		{
+			var path = Path.Combine(SourceRoot, name);
+			File.WriteAllText(path, content);
+			return path;
+		}
+
+		/// <summary>Builds the preview document - the single source of truth for every export.</summary>
+		public async Task<TransformedContent> BuildContentAsync(
+			SecretRedactionSession secrets,
+			bool compress,
+			string? extraFile = null)
+		{
+			using var session = CodeCompressionFactory.CreateSession();
+			var context = new ContentTransformationContext(
+				compress ? new CodeCompressionContext(SourceRoot, session) : null,
+				new SecretRedactionContext(SourceRoot, secrets));
+			var document = await new PreviewDocumentBuilder(new FileContentAnalyzer())
+				.BuildContentDocumentAsync(
+					extraFile is null ? [SourceFile] : [SourceFile, extraFile],
+					TestContext.Current.CancellationToken,
+					displayPathMapper: null,
+					includeOmissionMarkers: false,
+					transformationContext: context);
+			Assert.NotNull(document);
+			using (document)
+				return new TransformedContent(document.GetFullText(), document.Redactions.Count);
 		}
 
 		public Task<ProjectCopyExportResult> ExportFolderAsync(bool compress) =>

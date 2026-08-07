@@ -207,8 +207,12 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Contains("Binary files remain unchanged", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	/// <summary>
+	/// A document omits text past the read limit whether Hide Secrets is on or off, so one oversized
+	/// file costs the user that file - not the export. Nothing unscanned reaches the output either way.
+	/// </summary>
 	[Fact]
-	public async Task ExportContext_OversizedSelectedTextFailsClosedWithoutCreatingOutput()
+	public async Task ExportContext_OversizedSelectedTextIsOmittedAndTheDocumentIsStillWritten()
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);
 		var environment = new TestTerminalEnvironment();
@@ -231,12 +235,21 @@ public sealed class SecretRedactionCommandContractTests
 				"-o", destination
 			]);
 
-		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
-		Assert.Empty(environment.StandardOutput);
-		Assert.Contains("DPX-SECRET-SCAN-LIMIT-EXCEEDED", environment.StandardError, StringComparison.Ordinal);
-		Assert.False(File.Exists(destination));
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(
+			"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
+			environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.True(File.Exists(destination));
+		var document = await File.ReadAllTextAsync(destination, TestContext.Current.CancellationToken);
+		Assert.Contains("oversized.txt", document, StringComparison.Ordinal);
+		Assert.DoesNotContain(new string('a', 4096), document, StringComparison.Ordinal);
 	}
 
+	/// <summary>
+	/// A dry run has to predict the real run, and the two commands now differ: a context document
+	/// omits an unreadable file and still ships, a project copy refuses because it reproduces bytes.
+	/// </summary>
 	[Theory]
 	[InlineData("context")]
 	[InlineData("project")]
@@ -274,10 +287,25 @@ public sealed class SecretRedactionCommandContractTests
 
 		var exitCode = await RunAsync(workspace, environment, arguments);
 
-		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
-		Assert.Empty(environment.StandardOutput);
-		Assert.Contains("DPX-SECRET-SCAN-LIMIT-EXCEEDED", environment.StandardError, StringComparison.Ordinal);
-		Assert.DoesNotContain("Dry run:", environment.StandardError, StringComparison.OrdinalIgnoreCase);
+		if (command == "project")
+		{
+			Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+			Assert.Empty(environment.StandardOutput);
+			Assert.Contains(
+				"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
+				environment.StandardError,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain("Dry run:", environment.StandardError, StringComparison.OrdinalIgnoreCase);
+		}
+		else
+		{
+			Assert.Equal(CommandLineExitCodes.Success, exitCode);
+			Assert.DoesNotContain(
+				"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
+				environment.StandardError,
+				StringComparison.Ordinal);
+		}
+
 		Assert.False(Path.Exists(destination));
 	}
 

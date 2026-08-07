@@ -23,11 +23,17 @@ public sealed record SecretTextRedactionResult(
 	int DetectedCount,
 	int RedactedCount);
 
+/// <param name="UnscannablePath">
+/// One selected text file the scanner was not allowed to read, or null. Documents omit such a file
+/// and report a count for everything else; a project copy reproduces bytes and refuses instead, so
+/// it is the surface that has to look at this.
+/// </param>
 public sealed record SecretRedactionSnapshot(
 	string SelectionKey,
 	int DetectedCount,
 	int RedactedCount,
-	IReadOnlyDictionary<string, int>? MarkedSecretCounts = null);
+	IReadOnlyDictionary<string, int>? MarkedSecretCounts = null,
+	string? UnscannablePath = null);
 
 public readonly record struct ManualSecretMarkRemovalResult(
 	bool PersistentMarkRemoved,

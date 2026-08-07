@@ -132,10 +132,10 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 					case FileContentClassification.Binary:
 						continue;
 					case FileContentClassification.TooLarge:
-						throw new SecretScanLimitExceededException(
-							file,
-							content?.SizeBytes ?? new FileInfo(file).Length,
-							scanLimit);
+						// Estimated content carries no text, so this file contributes the same empty
+						// section it would with Hide Secrets off. One file the scanner may not read
+						// does not cost the user the rest of the selection.
+						break;
 					case FileContentClassification.Text when content is not null:
 						break;
 					default:
@@ -147,26 +147,28 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			// Skip binary files (null result)
 			if (content is null)
 				continue;
-			if (redactionScope is not null && content.IsEstimated)
-			{
-				throw new SecretScanLimitExceededException(
-					file,
-					content.SizeBytes,
-					maxFileSizeForFullRead ?? SecretRedactionOutputPreparer.MaximumScannableFileBytes);
-			}
 
 			using var contentLease = redactionScope?.TrackFullContentBuffer();
 			// Compression first, then secrets: the clipboard must carry exactly what the preview
 			// showed, and the secret counter must describe the text that actually leaves.
-			var transformedText = transformationScope?.Compress(
-				file,
-				MapDisplayPath(file, displayPathMapper),
-				content.Content,
-				cancellationToken).Text ?? content.Content;
-			var redactionPlan = redactionScope?.CreatePlan(
-				file,
-				transformedText,
-				cancellationToken);
+			// Estimated content is an empty string standing in for text nobody read - transforming
+			// it would record a clean scan of a file that was never opened.
+			var compression = content.IsEstimated
+				? null
+				: transformationScope?.Compress(
+					file,
+					MapDisplayPath(file, displayPathMapper),
+					content.Content,
+					cancellationToken);
+			var transformedText = compression?.Text ?? content.Content;
+			var redactionPlan = content.IsEstimated
+				? null
+				: redactionScope?.CreatePlan(
+					file,
+					transformedText,
+					content.Content,
+					compression?.Map,
+					cancellationToken);
 
 			processedFileCount++;
 			if (anyWritten)
@@ -191,19 +193,21 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			}
 			else
 			{
+				// Written from the transformed text, never from the file on disk: the plan's offsets
+				// describe that text, and this surface has to carry the same bytes the preview showed.
 				// Trim trailing newlines for clipboard-friendly output without allocating a
 				// second whole-file string when redaction is enabled.
-				var sourceLength = content.Content.Length;
-				while (sourceLength > 0 && content.Content[sourceLength - 1] is '\r' or '\n')
+				var sourceLength = transformedText.Length;
+				while (sourceLength > 0 && transformedText[sourceLength - 1] is '\r' or '\n')
 					sourceLength--;
 				if (redactionPlan is null)
 				{
-					sb.Append(content.Content.AsSpan(0, sourceLength));
+					sb.Append(transformedText.AsSpan(0, sourceLength));
 					sb.AppendLine();
 				}
 				else
 				{
-					redactionPlan.AppendTo(sb, content.Content, sourceLength);
+					redactionPlan.AppendTo(sb, transformedText, sourceLength);
 					sb.AppendLine();
 				}
 			}

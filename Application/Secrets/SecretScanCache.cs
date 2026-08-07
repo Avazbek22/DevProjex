@@ -49,7 +49,15 @@ internal sealed record SecretScanCacheEntry(
 	int MarkedSecretsRevision,
 	bool IsBinary,
 	IReadOnlyList<SecretFindingMetadata> Findings,
-	long ApproximateRetainedBytes);
+	long ApproximateRetainedBytes)
+{
+	/// <summary>
+	/// Text the scanner was not allowed to read. Every entry produced from real text carries a
+	/// fingerprint of that text, so an empty one on a non-binary entry is what distinguishes
+	/// "never looked" from "looked and found nothing" - the two must not read alike.
+	/// </summary>
+	public bool IsUnscannable => !IsBinary && ContentFingerprint.Length == 0;
+}
 
 internal sealed class SecretScanCache
 {

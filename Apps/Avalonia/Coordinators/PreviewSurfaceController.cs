@@ -142,7 +142,10 @@ internal sealed class PreviewSurfaceController : IDisposable
 				location.RelativePath,
 				location.LineIndex,
 				location.Column,
-				e.Value);
+				e.Value,
+				// The line the user clicked belongs to the text on screen. Recording which transform
+				// produced it is what lets the mark survive that setting being toggled afterwards.
+				_transformationContextProvider()?.Compression?.Session.TransformIdentity ?? string.Empty);
 		if (!changed && !e.Persistent)
 			return;
 

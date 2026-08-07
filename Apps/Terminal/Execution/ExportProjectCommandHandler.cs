@@ -51,12 +51,21 @@ public sealed class ExportProjectCommandHandler(
 			var redactSecrets = plan.Selection.HideSecrets == true;
 			if (redactSecrets)
 			{
-				await services.SecretRedactionOutputPreparer
+				var preflight = await services.SecretRedactionOutputPreparer
 					.AnalyzeAsync(
 						new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession),
 						plan.IncludedFiles,
 						cancellationToken)
 					.ConfigureAwait(false);
+				// A dry run has to predict the real run. The copy refuses a file the scanner may not
+				// read, so the preflight has to refuse it too rather than report readiness.
+				if (preflight.UnscannablePath is { } unscannablePath)
+				{
+					throw new SecretScanLimitExceededException(
+						unscannablePath,
+						new FileInfo(unscannablePath).Length,
+						SecretRedactionOutputPreparer.MaximumScannableFileBytes);
+				}
 			}
 			DryRunRenderer.WritePlan(
 				environment,

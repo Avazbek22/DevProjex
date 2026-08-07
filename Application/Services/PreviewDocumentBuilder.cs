@@ -246,12 +246,9 @@ public sealed class PreviewDocumentBuilder(
 
             if (content.IsEstimated)
             {
-				if (redactionScope is not null)
-					throw new SecretScanLimitExceededException(
-						file,
-						content.SizeBytes,
-						maximumFileBytes);
-
+				// Past the read limit the text is not in the document either way, so Hide Secrets
+				// has nothing to hide here and no reason to abandon the rest of the selection. The
+				// file is marked exactly as it would be with the setting off.
                 if (includeOmissionMarkers)
                 {
                     builder.AppendLine(GetOmissionMarker(FileContentClassification.TooLarge));
@@ -275,12 +272,18 @@ public sealed class PreviewDocumentBuilder(
 			using var contentLease = redactionScope?.TrackFullContentBuffer();
 			// Compression first: secrets must be detected in the text that actually ships, so a
 			// value inside a removed body is neither redacted nor counted.
-			var compressed = transformationScope?.Compress(
+			var compression = transformationScope?.Compress(
 				file,
 				displayPath,
 				content.Content,
-				cancellationToken).Text ?? content.Content;
-			var transformed = redactionScope?.Redact(file, compressed, cancellationToken);
+				cancellationToken);
+			var compressed = compression?.Text ?? content.Content;
+			var transformed = redactionScope?.Redact(
+				file,
+				compressed,
+				content.Content,
+				compression?.Map,
+				cancellationToken);
 			var text = transformed?.Text ?? compressed;
 			if (transformed is { Spans.Count: > 0 })
 			{

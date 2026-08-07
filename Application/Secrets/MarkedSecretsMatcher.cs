@@ -1,14 +1,24 @@
+using DevProjex.Application.Compression;
+
 namespace DevProjex.Application.Secrets;
 
+/// <summary>
+/// A value the user marked by hand during this session, anchored where they clicked.
+///
+/// <see cref="TransformIdentity"/> records which text those coordinates describe: empty for the
+/// file as it sits on disk, otherwise the transform that produced the text on screen. Without it a
+/// line number is meaningless the moment compression is toggled, because both texts have line 40.
+/// </summary>
 internal sealed record SessionMarkedSecret(
 	string RelativePath,
 	int LineIndex,
 	int Column,
 	int Length,
-	string Hash)
+	string Hash,
+	string TransformIdentity = "")
 {
 	public string Id { get; } = SecretRedactionSession.HashValue(
-		$"{NormalizePath(RelativePath)}\n{LineIndex}\n{Column}\n{Length}\n{Hash}".AsSpan());
+		$"{NormalizePath(RelativePath)}\n{LineIndex}\n{Column}\n{Length}\n{Hash}\n{TransformIdentity}".AsSpan());
 
 	private static string NormalizePath(string path) => path.Replace('\\', '/');
 }
@@ -53,6 +63,22 @@ internal sealed class MarkedSecretsMatcher
 	public IReadOnlyList<DetectedSecret> Match(
 		string relativePath,
 		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken) =>
+		Match(relativePath, content, default, null, string.Empty, cancellationToken);
+
+	/// <param name="content">The text being scanned, after every enabled transformation.</param>
+	/// <param name="sourceContent">
+	/// The file as it sits on disk, needed only to place a mark whose coordinates were captured
+	/// before the transformation existed. Empty when nothing was transformed.
+	/// </param>
+	/// <param name="transformMap">Translation between the two, or null when they are the same text.</param>
+	/// <param name="transformIdentity">Identity of the transform that produced <paramref name="content"/>.</param>
+	public IReadOnlyList<DetectedSecret> Match(
+		string relativePath,
+		ReadOnlySpan<char> content,
+		ReadOnlySpan<char> sourceContent,
+		ContentTransformMap? transformMap,
+		string transformIdentity,
 		CancellationToken cancellationToken)
 	{
 		if (_persistentHashGroups.Length == 0 && _sessionMarksByPath.Count == 0)
@@ -61,7 +87,15 @@ internal sealed class MarkedSecretsMatcher
 		var positions = TextPositionIndex.Create(content, cancellationToken);
 		var findings = new List<DetectedSecret>();
 		MatchPersistent(content, positions, findings, cancellationToken);
-		MatchSession(relativePath, content, positions, findings);
+		MatchSession(
+			relativePath,
+			content,
+			positions,
+			sourceContent,
+			transformMap,
+			transformIdentity,
+			findings,
+			cancellationToken);
 		return findings;
 	}
 
@@ -111,17 +145,36 @@ internal sealed class MarkedSecretsMatcher
 		string relativePath,
 		ReadOnlySpan<char> content,
 		TextPositionIndex positions,
-		ICollection<DetectedSecret> findings)
+		ReadOnlySpan<char> sourceContent,
+		ContentTransformMap? transformMap,
+		string transformIdentity,
+		ICollection<DetectedSecret> findings,
+		CancellationToken cancellationToken)
 	{
 		if (!_sessionMarksByPath.TryGetValue(NormalizePath(relativePath), out var marks))
 			return;
 
+		// Built at most once per file, and only when a mark actually needs translating.
+		TextPositionIndex? sourcePositions = null;
 		Span<byte> candidateHash = stackalloc byte[MarkedSecretValueNormalizer.PersistedHashByteLength];
 		foreach (var preparedMark in marks)
 		{
 			var mark = preparedMark.Mark;
-			var start = positions.ResolveOffset(content, mark.LineIndex, mark.Column);
-			if (start < 0 || start > content.Length - mark.Length ||
+			if (!TryResolveAnchor(
+				    mark,
+				    content,
+				    positions,
+				    sourceContent,
+				    transformMap,
+				    transformIdentity,
+				    ref sourcePositions,
+				    cancellationToken,
+				    out var start))
+			{
+				continue;
+			}
+
+			if (start > content.Length - mark.Length ||
 			    !positions.IsBoundary(start) ||
 			    !positions.IsBoundary(start + mark.Length))
 			{
@@ -130,11 +183,10 @@ internal sealed class MarkedSecretsMatcher
 
 			var value = content.Slice(start, mark.Length);
 			MarkedSecretValueNormalizer.ComputeHash(value, candidateHash);
-			// The hash is what makes a session mark safe across content transformations. A mark is
-			// anchored in the text that was on screen when it was made, so enabling or disabling code
-			// compression moves every line after the first removed body. Verifying the value here
-			// means a moved anchor simply stops matching and the mark is skipped - it can never
-			// redact whatever happens to sit at those coordinates now.
+			// The hash is the last gate, not the only one. Translating the anchor puts the mark on
+			// the right characters when compression shifts them; verifying the value here means a
+			// mark that still cannot be placed is skipped rather than applied to whatever now sits
+			// at those coordinates.
 			if (!candidateHash.SequenceEqual(preparedMark.HashBytes))
 				continue;
 
@@ -146,6 +198,49 @@ internal sealed class MarkedSecretsMatcher
 				SecretFindingSource.SessionMark,
 				mark.Id));
 		}
+	}
+
+	/// <summary>
+	/// Places a mark in the text being scanned.
+	///
+	/// A mark captured against this same transform needs no translation. A mark captured against the
+	/// untransformed file is resolved in the source text and carried across the map: that is how a
+	/// value in a constant or an attribute stays hidden after compression is switched on. A mark
+	/// that sat inside a body compression removed has no counterpart, and the map says so - it
+	/// disappears with the body rather than drifting onto the code that took its place.
+	/// </summary>
+	private static bool TryResolveAnchor(
+		SessionMarkedSecret mark,
+		ReadOnlySpan<char> content,
+		TextPositionIndex positions,
+		ReadOnlySpan<char> sourceContent,
+		ContentTransformMap? transformMap,
+		string transformIdentity,
+		ref TextPositionIndex? sourcePositions,
+		CancellationToken cancellationToken,
+		out int start)
+	{
+		start = -1;
+		// Nothing moved in this file, so every anchor still means what it meant when it was made.
+		// This is the common case even with compression on: an interface, a record or a file in an
+		// unsupported language is left whole, and its map is the identity.
+		if (transformMap is null or { IsIdentity: true } ||
+		    string.Equals(mark.TransformIdentity, transformIdentity, StringComparison.Ordinal))
+		{
+			start = positions.ResolveOffset(content, mark.LineIndex, mark.Column);
+			return start >= 0;
+		}
+
+		if (mark.TransformIdentity.Length != 0 ||
+		    transformMap is not { IsIdentity: false } map ||
+		    sourceContent.IsEmpty)
+		{
+			return false;
+		}
+
+		sourcePositions ??= TextPositionIndex.Create(sourceContent, cancellationToken);
+		var sourceOffset = sourcePositions.ResolveOffset(sourceContent, mark.LineIndex, mark.Column);
+		return sourceOffset >= 0 && map.TryToTransformed(sourceOffset, out start);
 	}
 
 	private static DetectedSecret CreateFinding(

@@ -181,10 +181,13 @@ context documents, folder copies, and ZIP copies. Placeholders use the stable fo
 within a produced output. Preview keep-as-is overrides apply to every later output in the current
 application session and deliberately do not persist in profiles.
 
-Detection failure, regex timeout, or a selected text file above the 16 MiB scan
-limit fails closed. Direct commands report `DPX-SECRET-DETECTION-FAILED` or
-`DPX-SECRET-SCAN-LIMIT-EXCEEDED` and exit `1`; no complete artifact is published.
-No result describes zero matches as safe or clean.
+Detection failure and regex timeout fail closed on every command, reporting
+`DPX-SECRET-DETECTION-FAILED` and exit `1`; no complete artifact is published. A
+selected text file above the 16 MiB scan limit is not inspected: `export project`
+reports `DPX-SECRET-SCAN-LIMIT-EXCEEDED` and exits `1` because a copy reproduces its
+bytes, while `export context` omits that file's text and completes, exactly as it does
+for a file that large without `--hide-secrets`. Uninspected text is never emitted, and
+no result describes zero matches as safe or clean.
 
 For v5 compatibility, `--exclude hide-secrets` remains parseable but is omitted
 from current help and completion choices. Resolution migrates it to the separate

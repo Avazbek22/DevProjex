@@ -161,11 +161,12 @@ prints raw `Exception.Message`, an inner exception, or a platform-localized I/O
 message. Diagnostic verbosity may report an exception type, safe path context,
 stack trace, and request identifier, but never file content or secrets.
 
-Secret inspection is fail-closed. `DPX-SECRET-SCAN-LIMIT-EXCEEDED` identifies a
-selected text file above the supported 16 MiB limit;
-`DPX-SECRET-DETECTION-FAILED` identifies rule loading, matching, timeout, or
-classified-read failure. Both are runtime failures (exit `1`) and never fall back to an
-unredacted artifact.
+Secret inspection never emits uninspected text. `DPX-SECRET-SCAN-LIMIT-EXCEEDED`
+identifies a selected text file above the supported 16 MiB limit and is raised by
+`export project`, which reproduces bytes and therefore fails closed; `export context`
+omits that file's text and completes. `DPX-SECRET-DETECTION-FAILED` identifies rule
+loading, matching, timeout, or classified-read failure on any command. Both are runtime
+failures (exit `1`) and never fall back to an unredacted artifact.
 
 ## Exit Codes
 
