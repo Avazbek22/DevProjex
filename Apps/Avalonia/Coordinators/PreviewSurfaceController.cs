@@ -40,7 +40,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly Func<bool> _ensureClipboardOutputReady;
     private readonly Func<string, Task> _setClipboardTextAsync;
     private readonly Func<string, Task> _showErrorAsync;
-	private readonly Func<SecretRedactionContext?> _redactionContextProvider;
+	private readonly Func<ContentTransformationContext?> _transformationContextProvider;
 	private readonly Action _requestRedactionRefresh;
 	private readonly Func<bool> _ensureHideSecretsEnabled;
 	private readonly Action _persistProjectProfile;
@@ -73,7 +73,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         Func<bool> ensureClipboardOutputReady,
         Func<string, Task> setClipboardTextAsync,
         Func<string, Task> showErrorAsync,
-		Func<SecretRedactionContext?> redactionContextProvider,
+		Func<ContentTransformationContext?> transformationContextProvider,
 		Action requestRedactionRefresh,
 		Func<bool> ensureHideSecretsEnabled,
 		Action persistProjectProfile)
@@ -94,7 +94,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         _ensureClipboardOutputReady = ensureClipboardOutputReady;
         _setClipboardTextAsync = setClipboardTextAsync;
         _showErrorAsync = showErrorAsync;
-		_redactionContextProvider = redactionContextProvider;
+		_transformationContextProvider = transformationContextProvider;
 		_requestRedactionRefresh = requestRedactionRefresh;
 		_ensureHideSecretsEnabled = ensureHideSecretsEnabled;
 		_persistProjectProfile = persistProjectProfile;
@@ -118,7 +118,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		object? sender,
 		PreviewRedactionToggleRequestedEventArgs e)
 	{
-		var context = _redactionContextProvider();
+		var context = _transformationContextProvider()?.Redaction;
 		if (context is null)
 			return;
 
@@ -448,7 +448,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     {
 		// A partial warmup cannot assign the same deterministic secret indexes as the full
 		// selection. Skip it instead of briefly presenting an unredacted or inconsistent preview.
-		if (_redactionContextProvider() is not null)
+		if (_transformationContextProvider() is not null)
 			return null;
 
         if (!PreviewWarmupPolicy.ShouldBuildPreviewWarmup(
@@ -577,7 +577,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         if (selectedMode == PreviewContentMode.Tree)
         {
-			var redactionContext = _redactionContextProvider();
+			var redactionContext = _transformationContextProvider()?.Redaction;
 			if (redactionContext is not null && currentTreeRoot is not null)
 			{
 				var selectedFiles = ResolvePreviewFiles(
@@ -636,7 +636,7 @@ internal sealed class PreviewSurfaceController : IDisposable
                         files,
                         cancellationToken,
 						pathPresentation?.MapFilePath,
-						transformationContext: _redactionContextProvider())
+						transformationContext: _transformationContextProvider())
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -700,7 +700,7 @@ internal sealed class PreviewSurfaceController : IDisposable
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
 							currentPath),
-					transformationContext: _redactionContextProvider())
+					transformationContext: _transformationContextProvider())
                 .GetAwaiter()
                 .GetResult();
         return new PreviewBuildResult(document);

@@ -143,7 +143,7 @@ public partial class MainWindow
             _currentTree.OrderedFilePaths,
             GetCurrentTreeTextFormat(),
 			CreateExportPathPresentation(),
-			CreateSecretRedactionContext());
+			CreateContentTransformationContext());
 
     private bool EnsureTrackedGitOutputReady()
     {

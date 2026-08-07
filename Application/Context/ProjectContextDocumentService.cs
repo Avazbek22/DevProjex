@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Unicode;
 using System.Runtime.InteropServices;
 using System.Xml;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Application.Context;
@@ -33,7 +34,8 @@ public sealed class ProjectContextDocumentService(
 	TreeExportService treeExportService,
 	IFileContentAnalyzer contentAnalyzer,
 	Func<FileContentClassification, string>? omissionMessageProvider = null,
-	SecretRedactionSession? secretRedactionSession = null)
+	SecretRedactionSession? secretRedactionSession = null,
+	CodeCompressionSession? codeCompressionSession = null)
 {
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
@@ -159,10 +161,19 @@ public sealed class ProjectContextDocumentService(
 		}
 	}
 
+	// One gate for both transformations: whichever is enabled, the document is built from prepared
+	// text rather than from the files on disk, so every format sees the same bytes.
 	private bool ShouldRedact(ProjectContextPlan plan, ProjectContextView view) =>
-		secretRedactionSession is not null &&
-		IncludesContent(view) &&
-		plan.Selection.HideSecrets == true;
+		IncludesContent(view) && CreateTransformationContext(plan) is not null;
+
+	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan) =>
+		ContentTransformationContext.For(
+			codeCompressionSession is not null && plan.Selection.CompressCode == true
+				? new CodeCompressionContext(plan.SourceRoot, codeCompressionSession)
+				: null,
+			secretRedactionSession is not null && plan.Selection.HideSecrets == true
+				? new SecretRedactionContext(plan.SourceRoot, secretRedactionSession)
+				: null);
 
 	private async Task<string> BuildRedactedAsync(
 		ProjectContextPlan plan,
@@ -171,7 +182,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextDocumentLimits limits,
 		CancellationToken cancellationToken)
 	{
-		var context = new SecretRedactionContext(plan.SourceRoot, secretRedactionSession!);
+		var context = CreateTransformationContext(plan)!;
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
 		await using var prepared = await preparer
 			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
@@ -181,7 +192,8 @@ public sealed class ProjectContextDocumentService(
 			treeExportService,
 			analyzer,
 			omissionMessageProvider,
-			secretRedactionSession: null);
+			secretRedactionSession: null,
+			codeCompressionSession: null);
 		return await service.BuildBoundedAsync(
 				plan,
 				view,
@@ -200,7 +212,7 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken,
 		bool plain)
 	{
-		var context = new SecretRedactionContext(plan.SourceRoot, secretRedactionSession!);
+		var context = CreateTransformationContext(plan)!;
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
 		await using var prepared = await preparer
 			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
@@ -210,7 +222,8 @@ public sealed class ProjectContextDocumentService(
 			treeExportService,
 			analyzer,
 			omissionMessageProvider,
-			secretRedactionSession: null);
+			secretRedactionSession: null,
+			codeCompressionSession: null);
 		await service.WriteCompleteAsync(
 				plan,
 				view,

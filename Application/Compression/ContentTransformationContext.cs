@@ -33,7 +33,9 @@ public sealed record ContentTransformationContext(
 	public ContentTransformationScope BeginOutput(IReadOnlyList<string> orderedFilePaths) =>
 		new(
 			Compression?.BeginOutput(orderedFilePaths),
-			Redaction?.BeginOutput(orderedFilePaths));
+			// The redaction cache is keyed on the text that was scanned, and compression decides what
+			// that text is. Without this, toggling the checkbox would reuse offsets from the other one.
+			Redaction?.BeginOutput(orderedFilePaths, Compression?.Session.TransformIdentity ?? string.Empty));
 }
 
 /// <summary>

@@ -12,6 +12,8 @@ using DevProjex.Infrastructure.Updates;
 using DevProjex.Infrastructure.Secrets;
 using DevProjex.Application.Secrets;
 
+using DevProjex.Infrastructure.Compression;
+
 namespace DevProjex.Avalonia.Services;
 
 public static class AvaloniaCompositionRoot
@@ -67,12 +69,14 @@ public static class AvaloniaCompositionRoot
         var fileContentAnalyzer = new FileContentAnalyzer();
 		var secretRedactionSession = new SecretRedactionSession(
 			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService));
+		var codeCompressionSession = CodeCompressionFactory.CreateSession();
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
         var projectCopyExportService = new ProjectCopyExportService(
 			new ProjectCopyExportPlanBuilder(),
 			fileContentAnalyzer,
-			secretRedactionSession);
+			secretRedactionSession,
+			codeCompressionSession);
         var projectAnalysisService = new ProjectAnalysisService(
             scanOptionsUseCase,
             buildTreeUseCase,
@@ -146,6 +150,7 @@ public static class AvaloniaCompositionRoot
             TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService,
             SessionMetricsRecorder: sessionMetricsRecorder,
-			SecretRedactionSession: secretRedactionSession);
+			SecretRedactionSession: secretRedactionSession,
+			CodeCompressionSession: codeCompressionSession);
     }
 }

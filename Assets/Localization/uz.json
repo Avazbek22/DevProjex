@@ -384,6 +384,7 @@
   "Terminal.Option.GitMode": "Git filtrlash rejimi: none, gitignore yoki tracked.",
   "Terminal.Option.Exclude": "Oddiy istisnoni o'rnatadi.",
   "Terminal.Option.HideSecrets": "Tanlangan matn fayllaridagi aniqlangan qiymatlarni yashiradi. Binar fayllar tekshirilmaydi; moslik topilmagani xavfsizlik kafolati emas.",
+  "Terminal.Option.CompressCode": "Qo'llab-quvvatlanadigan manba fayllarni imzolargacha siqish. Funksiya va metodlarning tanasi to'ldiruvchi bilan almashtiriladi; qo'llab-quvvatlanmaydiganlar to'liq qoladi.",
   "Terminal.Option.Progress": "Jarayonni ko'rsatish rejimi.",
   "Terminal.Option.Verbosity": "Diagnostika tafsilotlari darajasi.",
   "Terminal.Validation.Choice": "{0} quyidagi qiymatlardan biri bo'lishi kerak: {1}.",

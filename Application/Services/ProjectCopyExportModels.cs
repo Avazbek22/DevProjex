@@ -44,7 +44,8 @@ public sealed record ProjectCopyExportRequest(
 	ProjectCopyExportFormat Format,
 	ProjectCopyDestinationMode DestinationMode = ProjectCopyDestinationMode.AutomaticName,
 	ProjectCopyConflictPolicy ConflictPolicy = ProjectCopyConflictPolicy.Fail,
-	bool RedactSecrets = false);
+	bool RedactSecrets = false,
+	bool CompressCode = false);
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,

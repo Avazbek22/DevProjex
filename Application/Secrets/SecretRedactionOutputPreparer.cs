@@ -11,18 +11,28 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	private const long MaximumParallelScanFileBytes = 1024 * 1024;
 	private const int MaximumParallelScans = 8;
 
+	/// <summary>
+	/// Materializes the transformed text every non-preview output reads: context documents in every
+	/// format, and the folder and ZIP project copies.
+	///
+	/// There is deliberately no per-caller opt-out. What the preview shows is what every copy and
+	/// export contains - one resolved state, no surface that quietly disagrees with another. The
+	/// project copy carries a notice saying so, exactly as it already does for Hide Secrets.
+	/// </summary>
 	public async Task<PreparedSecretRedactionOutput> PrepareAsync(
-		SecretRedactionContext context,
+		ContentTransformationContext context,
 		IReadOnlyList<string> orderedFilePaths,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
-		await context.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+		if (context.Redaction is { } redactionContext)
+			await redactionContext.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 
 		var workingDirectory = CreateWorkingDirectory();
 		var preparedFiles = new Dictionary<string, PreparedSecretFile>(PathComparer.Default);
-		var scope = context.BeginOutput(orderedFilePaths);
+		using var transformationScope = context.BeginOutput(orderedFilePaths);
+		var scope = transformationScope.Redaction;
 		try
 		{
 			for (var index = 0; index < orderedFilePaths.Count; index++)
@@ -39,14 +49,23 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				switch (result.Classification)
 				{
 					case FileContentClassification.Binary:
-						scope.AnalyzeBinary(sourcePath, metadataAfterRead);
+						scope?.AnalyzeBinary(sourcePath, metadataAfterRead);
 						preparedFiles[sourcePath] = PreparedSecretFile.Binary(sourcePath);
 						continue;
 					case FileContentClassification.TooLarge:
-						throw new SecretScanLimitExceededException(
-							sourcePath,
-							result.Content?.SizeBytes ?? new FileInfo(sourcePath).Length,
-							MaximumScannableFileBytes);
+						// Redaction cannot promise anything about text it never read, so it still
+						// fails loudly. Compression alone has no such promise to break - the file is
+						// far past the parse limit anyway - so it ships unchanged from its original.
+						if (scope is not null)
+						{
+							throw new SecretScanLimitExceededException(
+								sourcePath,
+								result.Content?.SizeBytes ?? new FileInfo(sourcePath).Length,
+								MaximumScannableFileBytes);
+						}
+
+						preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
+						continue;
 					case FileContentClassification.Text:
 						break;
 					default:
@@ -57,13 +76,20 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				var content = result.Content ??
 				              throw new SecretDetectionException(
 					              $"Hide Secrets received no text for '{sourcePath}'.");
-				using var contentLease = context.Session.TrackFullContentBuffer();
-				var plan = scope.CreatePlan(sourcePath, content.Content, cancellationToken);
+				using var contentLease = context.Redaction?.Session.TrackFullContentBuffer();
+				// Compression first: the redaction plan, its spans and its counts all describe the
+				// text that actually leaves, not the text on disk.
+				var transformedText = transformationScope.Compress(
+					sourcePath,
+					NormalizeRelativePath(context, sourcePath),
+					content.Content,
+					cancellationToken).Text;
+				var plan = scope?.CreatePlan(sourcePath, transformedText, cancellationToken);
 				var encoding = result.Encoding ?? TextFileEncoding.Utf8;
 				var preparedPath = Path.Combine(workingDirectory, $"{index:D8}.redacted.txt");
 				await WritePreparedTextAsync(
 						preparedPath,
-						content.Content,
+						transformedText,
 						plan,
 						ResolveEncoding(encoding),
 						cancellationToken)
@@ -73,17 +99,19 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					preparedPath,
 					FileContentClassification.Text,
 					encoding,
-					plan.Spans
+					plan?.Spans
 						.Where(static span => span.State == SecretPreviewSpanState.Redacted)
 						.Select(static span => new PreparedSecretSpan(span.Start, span.Length))
-						.ToArray());
+						.ToArray() ?? []);
 			}
 
-			var snapshot = scope.Complete();
+			var snapshot = scope?.Complete();
+			var compression = transformationScope.Compression?.Complete();
 			return new PreparedSecretRedactionOutput(
 				workingDirectory,
 				preparedFiles,
-				snapshot);
+				snapshot,
+				compression);
 		}
 		catch
 		{
@@ -226,10 +254,29 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		// A predictable shared temp parent would expose prepared output to symlink and permission races.
 		Directory.CreateTempSubdirectory("DevProjex-SecretRedaction-").FullName;
 
+	/// <summary>
+	/// Relative path for the compressor's language lookup. It only needs the extension and a stable
+	/// identity, so a failure to relativize falls back to the full path rather than throwing.
+	/// </summary>
+	private static string NormalizeRelativePath(ContentTransformationContext context, string fullPath)
+	{
+		var root = context.Compression?.ProjectRoot ?? context.Redaction?.ProjectRoot;
+		if (string.IsNullOrEmpty(root))
+			return fullPath;
+		try
+		{
+			return Path.GetRelativePath(root, fullPath);
+		}
+		catch (ArgumentException)
+		{
+			return fullPath;
+		}
+	}
+
 	private static async Task WritePreparedTextAsync(
 		string path,
 		string content,
-		SecretFileRedactionPlan plan,
+		SecretFileRedactionPlan? plan,
 		Encoding encoding,
 		CancellationToken cancellationToken)
 	{
@@ -245,6 +292,12 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 
 		await using var stream = new FileStream(path, options);
 		await using var writer = new StreamWriter(stream, encoding);
+		if (plan is null)
+		{
+			await writer.WriteAsync(content.AsMemory(), cancellationToken).ConfigureAwait(false);
+			return;
+		}
+
 		await plan.WriteToAsync(writer, content, cancellationToken).ConfigureAwait(false);
 	}
 
@@ -310,6 +363,10 @@ public sealed record PreparedSecretFile(
 
 	public static PreparedSecretFile Binary(string sourcePath) =>
 		new(sourcePath, sourcePath, FileContentClassification.Binary, null, []);
+
+	/// <summary>Text served straight from the original file, with no transformation applied.</summary>
+	public static PreparedSecretFile Unchanged(string sourcePath) =>
+		new(sourcePath, sourcePath, FileContentClassification.Text, null, []);
 }
 
 public sealed record PreparedSecretSpan(int Start, int Length)
@@ -326,14 +383,19 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 	internal PreparedSecretRedactionOutput(
 		string workingDirectory,
 		IReadOnlyDictionary<string, PreparedSecretFile> files,
-		SecretRedactionSnapshot snapshot)
+		SecretRedactionSnapshot? snapshot,
+		Compression.CodeCompressionSnapshot? compressionSnapshot = null)
 	{
 		_workingDirectory = workingDirectory;
 		_files = files;
 		Snapshot = snapshot;
+		CompressionSnapshot = compressionSnapshot;
 	}
 
-	public SecretRedactionSnapshot Snapshot { get; }
+	/// <summary>Null when redaction was not part of this run - compression can be enabled alone.</summary>
+	public SecretRedactionSnapshot? Snapshot { get; }
+
+	public Compression.CodeCompressionSnapshot? CompressionSnapshot { get; }
 
 	public PreparedSecretFile GetFile(string sourcePath)
 	{

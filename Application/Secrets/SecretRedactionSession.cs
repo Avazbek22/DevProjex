@@ -66,7 +66,8 @@ public sealed class SecretRedactionSession : IDisposable
 
 	public SecretRedactionScope BeginOutput(
 		string projectRoot,
-		IReadOnlyList<string> orderedFilePaths)
+		IReadOnlyList<string> orderedFilePaths,
+		string transformIdentity = "")
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
@@ -94,7 +95,8 @@ public sealed class SecretRedactionSession : IDisposable
 			keptOccurrences,
 			overrideRevision,
 			markedSecretsMatcher,
-			markedSecretsRevision);
+			markedSecretsRevision,
+			transformIdentity);
 	}
 
 	public IReadOnlyCollection<MarkedSecretProfileEntry> GetMarkedSecrets()
@@ -303,15 +305,26 @@ public sealed class SecretRedactionSession : IDisposable
 		SecretFileMetadata metadata,
 		ISecretDetectionScope detectorScope,
 		int markedSecretsRevision,
+		string transformIdentity,
 		out SecretScanCacheEntry entry) =>
 		_scanCache.TryGetByMetadata(
 			filePath,
 			metadata,
-			detectorScope.GetRulesIdentity(
-				filePath,
-				NormalizeRelativePath(projectRoot, filePath)),
+			ComposeRulesIdentity(
+				detectorScope.GetRulesIdentity(
+					filePath,
+					NormalizeRelativePath(projectRoot, filePath)),
+				transformIdentity),
 			markedSecretsRevision,
 			out entry);
+
+	/// <summary>
+	/// Findings describe positions in the text that was scanned. A metadata-only cache hit would
+	/// otherwise serve offsets taken from the uncompressed file after compression is switched on,
+	/// so the transformation that produced the text is part of the cache identity.
+	/// </summary>
+	private static string ComposeRulesIdentity(string rulesIdentity, string transformIdentity) =>
+		transformIdentity.Length == 0 ? rulesIdentity : $"{rulesIdentity}|{transformIdentity}";
 
 	internal SecretScanCacheEntry GetOrDetectFindings(
 		string projectRoot,
@@ -321,6 +334,7 @@ public sealed class SecretRedactionSession : IDisposable
 		ISecretDetectionScope detectorScope,
 		MarkedSecretsMatcher markedSecretsMatcher,
 		int markedSecretsRevision,
+		string transformIdentity,
 		CancellationToken cancellationToken) =>
 		GetOrDetectFindings(
 			projectRoot,
@@ -330,6 +344,7 @@ public sealed class SecretRedactionSession : IDisposable
 			detectorScope,
 			markedSecretsMatcher,
 			markedSecretsRevision,
+			transformIdentity,
 			cancellationToken);
 
 	internal SecretScanCacheEntry GetOrDetectFindings(
@@ -340,10 +355,13 @@ public sealed class SecretRedactionSession : IDisposable
 		ISecretDetectionScope detectorScope,
 		MarkedSecretsMatcher markedSecretsMatcher,
 		int markedSecretsRevision,
+		string transformIdentity,
 		CancellationToken cancellationToken)
 	{
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
-		var rulesIdentity = detectorScope.GetRulesIdentity(filePath, relativePath);
+		var rulesIdentity = ComposeRulesIdentity(
+			detectorScope.GetRulesIdentity(filePath, relativePath),
+			transformIdentity);
 		var contentFingerprint = HashText(content);
 		if (_scanCache.TryGetByContent(
 			    filePath,
@@ -533,6 +551,7 @@ public sealed class SecretRedactionScope
 	private readonly long _overrideRevision;
 	private readonly MarkedSecretsMatcher _markedSecretsMatcher;
 	private readonly int _markedSecretsRevision;
+	private readonly string _transformIdentity;
 	private readonly ISecretDetectionScope _detectorScope;
 	private readonly Dictionary<string, int> _identityIndexes = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, int> _ruleIdentityCounts = new(StringComparer.Ordinal);
@@ -548,9 +567,11 @@ public sealed class SecretRedactionScope
 		IReadOnlySet<string> keptOccurrenceIds,
 		long overrideRevision,
 		MarkedSecretsMatcher markedSecretsMatcher,
-		int markedSecretsRevision)
+		int markedSecretsRevision,
+		string transformIdentity = "")
 	{
 		_session = session;
+		_transformIdentity = transformIdentity;
 		_projectRoot = Path.GetFullPath(projectRoot);
 		_keptOccurrenceIds = keptOccurrenceIds;
 		_overrideRevision = overrideRevision;
@@ -585,6 +606,7 @@ public sealed class SecretRedactionScope
 			metadata,
 			_detectorScope,
 			_markedSecretsRevision,
+			_transformIdentity,
 			out entry);
 	}
 
@@ -624,6 +646,7 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			_markedSecretsMatcher,
 			_markedSecretsRevision,
+			_transformIdentity,
 			cancellationToken);
 	}
 
@@ -686,6 +709,7 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			_markedSecretsMatcher,
 			_markedSecretsRevision,
+			_transformIdentity,
 			cancellationToken);
 		return ProcessFindings(filePath, entry.Findings);
 	}

@@ -8,6 +8,8 @@ public sealed record SecretRedactionContext(
 	string ProjectRoot,
 	SecretRedactionSession Session)
 {
-	public SecretRedactionScope BeginOutput(IReadOnlyList<string> orderedFilePaths) =>
-		Session.BeginOutput(ProjectRoot, orderedFilePaths);
+	public SecretRedactionScope BeginOutput(
+		IReadOnlyList<string> orderedFilePaths,
+		string transformIdentity = "") =>
+		Session.BeginOutput(ProjectRoot, orderedFilePaths, transformIdentity);
 }

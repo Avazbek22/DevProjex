@@ -378,6 +378,7 @@
     "Terminal.Option.GitMode": "Modo de filtragem Git: none, gitignore ou tracked.",
     "Terminal.Option.Exclude": "Define uma exclusão comum.",
     "Terminal.Option.HideSecrets": "Oculta valores detetados nos ficheiros de texto selecionados. Os ficheiros binários não são inspecionados; a ausência de resultados não garante segurança.",
+    "Terminal.Option.CompressCode": "Comprime os ficheiros de código suportados em assinaturas. Os corpos de funções e métodos são substituídos por um marcador; o que não é suportado permanece completo.",
     "Terminal.Option.Progress": "Modo de progresso.",
     "Terminal.Option.Verbosity": "Nível de detalhe dos diagnósticos.",
     "Terminal.Validation.Choice": "{0} tem de ser um dos seguintes valores: {1}.",

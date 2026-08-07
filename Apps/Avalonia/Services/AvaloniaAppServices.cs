@@ -40,4 +40,5 @@ public sealed record AvaloniaAppServices(
     ITerminalCommandSetupService TerminalCommandSetupService,
     ITaskbarProgressService TaskbarProgressService,
     SessionMetricsRecorder SessionMetricsRecorder,
-	SecretRedactionSession SecretRedactionSession);
+	SecretRedactionSession SecretRedactionSession,
+	CodeCompressionSession CodeCompressionSession);

@@ -266,6 +266,23 @@ public static class GrammarPlatform
 		return name;
 	}
 
+	/// <summary>
+	/// Version of the tree-sitter binding, read from the assembly rather than duplicated as a
+	/// constant: the grammar cache directory is keyed on it, so the two must never drift.
+	/// </summary>
+	public static string BindingVersion
+	{
+		get
+		{
+			var informational = typeof(TreeSitter.Language).Assembly
+				.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+			if (string.IsNullOrWhiteSpace(informational))
+				return typeof(TreeSitter.Language).Assembly.GetName().Version?.ToString() ?? "unknown";
+			var plus = informational.IndexOf('+');
+			return plus < 0 ? informational : informational[..plus];
+		}
+	}
+
 	public static string RuntimeIdentifier
 	{
 		get

@@ -15,7 +15,8 @@ internal sealed class MetricsPipeline(
     Func<TreeTextFormat> treeFormatProvider,
     Func<ExportPathPresentation?> exportPathPresentationProvider,
     Func<double> boundsWidthProvider,
-    Action<MemoryCleanupReason>? scheduleMemoryCleanup = null) : IDisposable
+    Action<MemoryCleanupReason>? scheduleMemoryCleanup = null,
+    Func<ContentTransformationContext?>? transformationContextProvider = null) : IDisposable
 {
     private readonly record struct TreeMetricsCacheKey(
         int TreeIdentity,
@@ -29,7 +30,8 @@ internal sealed class MetricsPipeline(
         int SelectedCount,
         int SelectedHash,
         int ContentPathPresentationIdentity,
-        int TreeAndContentRootPathIdentity);
+        int TreeAndContentRootPathIdentity,
+        string TransformIdentity);
 
     private readonly record struct ContentMetricsPair(
         ExportOutputMetrics ContentOnly,
@@ -269,6 +271,70 @@ internal sealed class MetricsPipeline(
         CancelBackgroundCalculation();
         UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
         viewModel.StatusMetricsVisible = viewModel.IsProjectLoaded;
+    }
+
+    private string _appliedTransformIdentity = string.Empty;
+
+    private string ResolveTransformIdentity()
+    {
+        var context = transformationContextProvider?.Invoke();
+        return context?.Compression is { } compression ? compression.Session.TransformIdentity : string.Empty;
+    }
+
+    /// <summary>
+    /// Drops per-file metrics when the active transformation changes. The cache is keyed on path
+    /// alone, so without this a compressed measurement would survive unchecking the option.
+    /// </summary>
+    public void SynchronizeTransformIdentity()
+    {
+        var identity = ResolveTransformIdentity();
+        if (string.Equals(_appliedTransformIdentity, identity, StringComparison.Ordinal))
+            return;
+
+        _appliedTransformIdentity = identity;
+        ClearFileMetricsCache(trimCapacity: false);
+    }
+
+    /// <summary>
+    /// Re-measures one file through the enabled transformations. A file the compressor leaves alone
+    /// keeps its original metrics, so unsupported languages cost only the supported-extension check.
+    /// </summary>
+    private async Task<TextFileMetrics?> MeasureTransformedAsync(
+        string filePath,
+        TextFileMetrics metrics,
+        CancellationToken cancellationToken)
+    {
+        var context = transformationContextProvider?.Invoke();
+        if (context?.Compression is not { } compression || !compression.Session.IsSupported(filePath))
+            return metrics;
+
+        var content = await fileContentAnalyzer
+            .TryReadAsTextAsync(filePath, cancellationToken)
+            .ConfigureAwait(false);
+        if (content is null || content.IsEstimated || content.Content.Length == 0)
+            return metrics;
+
+        using var scope = compression.BeginOutput([filePath]);
+        var relativePath = BuildRelativePath(compression.ProjectRoot, filePath);
+        var transformed = scope.Transform(filePath, relativePath, content.Content, cancellationToken).Text;
+        if (ReferenceEquals(transformed, content.Content))
+            return metrics;
+
+        return FileContentAnalyzer.ComputeMetrics(
+            transformed,
+            Encoding.UTF8.GetByteCount(transformed));
+    }
+
+    private static string BuildRelativePath(string projectRoot, string fullPath)
+    {
+        try
+        {
+            return Path.GetRelativePath(projectRoot, fullPath);
+        }
+        catch (ArgumentException)
+        {
+            return fullPath;
+        }
     }
 
     public void ClearFileMetricsCache(bool trimCapacity)
@@ -562,6 +628,11 @@ internal sealed class MetricsPipeline(
                 var result = await fileContentAnalyzer.GetClassifiedMetricsAsync(filePath, ct)
                     .ConfigureAwait(false);
                 var metrics = result.IsText ? result.Metrics : null;
+                // The status bar counts what the user would actually copy. When a transformation is
+                // on, that is the transformed text, so the file is measured after compression rather
+                // than as it sits on disk.
+                if (metrics is { IsEstimated: false })
+                    metrics = await MeasureTransformedAsync(filePath, metrics, ct).ConfigureAwait(false);
 
                 if (metrics is not null)
                 {
@@ -1031,12 +1102,16 @@ internal sealed class MetricsPipeline(
         var effectiveHasSelection = hasSelection && !isFullTreeSelection;
         var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
         var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
+        // Checked before the key is built: the per-file cache is keyed on path alone, so a change of
+        // transformation has to invalidate it here rather than being caught by the key comparison.
+        SynchronizeTransformIdentity();
         var cacheKey = new ContentMetricsCacheKey(
             TreeIdentity: RuntimeHelpers.GetHashCode(currentTree.Root),
             SelectedCount: selectedCount,
             SelectedHash: selectedHash,
             ContentPathPresentationIdentity: BuildPathPresentationIdentity(pathPresentation),
-            TreeAndContentRootPathIdentity: BuildRootPathIdentity(currentPath));
+            TreeAndContentRootPathIdentity: BuildRootPathIdentity(currentPath),
+            TransformIdentity: ResolveTransformIdentity());
 
         lock (_computationCacheLock)
         {

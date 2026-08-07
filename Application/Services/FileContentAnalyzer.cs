@@ -723,15 +723,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			: null;
 		try
 		{
-			int lineCount = 1; // Start with 1 (file with no newlines = 1 line)
-			int charCount = 0;
-			bool hasNonWhitespace = false;
-			int crLfPairCount = 0;
-			int trailingNewlineChars = 0;
-			int trailingNewlineLineBreaks = 0;
-			bool previousWasCarriageReturn = false;
-			int currentBacktickRun = 0;
-			int longestBacktickRun = 0;
+			var counter = new TextMetricsCounter();
 
 			stream.Position = 0;
 			using var reader = new StreamReader(
@@ -750,78 +742,116 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				// Use Span for faster iteration without bounds checking
 				var span = buffer.AsSpan(0, charsRead);
 				fingerprint?.AppendData(MemoryMarshal.AsBytes(span));
-				for (int i = 0; i < span.Length; i++)
-				{
-					char c = span[i];
-
-					// Null byte in content = binary file (edge case after first 512 bytes)
-					if (c == '\0')
-						return null;
-
-					charCount++;
-
-					if (c == '\r')
-					{
-						lineCount++;
-						trailingNewlineChars++;
-						trailingNewlineLineBreaks++;
-						previousWasCarriageReturn = true;
-					}
-					else if (c == '\n')
-					{
-						trailingNewlineChars++;
-						if (previousWasCarriageReturn)
-						{
-							// CRLF is one logical line break even when the pair crosses a read-buffer boundary.
-							crLfPairCount++;
-						}
-						else
-						{
-							lineCount++;
-							trailingNewlineLineBreaks++;
-						}
-
-						previousWasCarriageReturn = false;
-					}
-					else
-					{
-						previousWasCarriageReturn = false;
-						trailingNewlineChars = 0;
-						trailingNewlineLineBreaks = 0;
-					}
-
-					if (!hasNonWhitespace && !char.IsWhiteSpace(c))
-						hasNonWhitespace = true;
-
-					if (c == '`')
-						longestBacktickRun = Math.Max(longestBacktickRun, ++currentBacktickRun);
-					else
-						currentBacktickRun = 0;
-				}
+				// A null byte after the first 512 bytes still means binary.
+				if (!counter.Append(span))
+					return null;
 			}
 
-			// Adjust line count: if file is empty, 0 lines
-			if (charCount == 0)
-				lineCount = 0;
 			contentFingerprint = fingerprint?.GetHashAndReset();
-
-			return new TextFileMetrics(
-				SizeBytes: sizeBytes,
-				LineCount: lineCount,
-				CharCount: charCount,
-				IsEmpty: charCount == 0,
-				IsWhitespaceOnly: charCount > 0 && !hasNonWhitespace,
-				IsEstimated: false,
-				CrLfPairCount: crLfPairCount,
-				TrailingNewlineChars: trailingNewlineChars,
-				TrailingNewlineLineBreaks: trailingNewlineLineBreaks,
-				LongestBacktickRun: longestBacktickRun);
+			return counter.Build(sizeBytes);
 		}
 		finally
 		{
 			// Always return buffer to pool
 			ArrayPool<char>.Shared.Return(buffer);
 		}
+	}
+
+
+	/// <summary>
+	/// Metrics for text that is already in memory - the compressed form of a file, which never
+	/// exists on disk. It runs the same counter as the streaming path so a transformed file and an
+	/// untransformed one are measured identically.
+	/// </summary>
+	public static TextFileMetrics ComputeMetrics(ReadOnlySpan<char> text, long sizeBytes)
+	{
+		var counter = new TextMetricsCounter();
+		counter.Append(text);
+		return counter.Build(sizeBytes);
+	}
+
+	/// <summary>
+	/// The single per-character pass behind every text metric. Carrying its state across calls is
+	/// what lets a CRLF pair split by a read-buffer boundary still count as one line break.
+	/// </summary>
+	private struct TextMetricsCounter()
+	{
+		private int _lineCount = 1; // A file with no newlines is one line.
+		private int _charCount;
+		private bool _hasNonWhitespace;
+		private int _crLfPairCount;
+		private int _trailingNewlineChars;
+		private int _trailingNewlineLineBreaks;
+		private bool _previousWasCarriageReturn;
+		private int _currentBacktickRun;
+		private int _longestBacktickRun;
+
+		/// <summary>Returns false when a null byte proves the content is binary.</summary>
+		public bool Append(ReadOnlySpan<char> span)
+		{
+			for (int i = 0; i < span.Length; i++)
+			{
+				char c = span[i];
+
+				if (c == '\0')
+					return false;
+
+				_charCount++;
+
+				if (c == '\n')
+				{
+					_lineCount++;
+					_trailingNewlineChars++;
+					_trailingNewlineLineBreaks++;
+					_previousWasCarriageReturn = true;
+				}
+				else if (c == '\n')
+				{
+					_trailingNewlineChars++;
+					if (_previousWasCarriageReturn)
+					{
+						// CRLF is one logical line break even when the pair crosses a read-buffer boundary.
+						_crLfPairCount++;
+					}
+					else
+					{
+						_lineCount++;
+						_trailingNewlineLineBreaks++;
+					}
+
+					_previousWasCarriageReturn = false;
+				}
+				else
+				{
+					_previousWasCarriageReturn = false;
+					_trailingNewlineChars = 0;
+					_trailingNewlineLineBreaks = 0;
+				}
+
+				if (!_hasNonWhitespace && !char.IsWhiteSpace(c))
+					_hasNonWhitespace = true;
+
+				if (c == '`')
+					_longestBacktickRun = Math.Max(_longestBacktickRun, ++_currentBacktickRun);
+				else
+					_currentBacktickRun = 0;
+			}
+
+			return true;
+		}
+
+		public TextFileMetrics Build(long sizeBytes) =>
+			new(
+				SizeBytes: sizeBytes,
+				LineCount: _charCount == 0 ? 0 : _lineCount,
+				CharCount: _charCount,
+				IsEmpty: _charCount == 0,
+				IsWhitespaceOnly: _charCount > 0 && !_hasNonWhitespace,
+				IsEstimated: false,
+				CrLfPairCount: _crLfPairCount,
+				TrailingNewlineChars: _trailingNewlineChars,
+				TrailingNewlineLineBreaks: _trailingNewlineLineBreaks,
+				LongestBacktickRun: _longestBacktickRun);
 	}
 
 	private static TextFileContent ReadFullContentStrict(

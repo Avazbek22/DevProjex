@@ -7,7 +7,8 @@ namespace DevProjex.Application.Services;
 public sealed class ProjectCopyExportService(
 	ProjectCopyExportPlanBuilder planBuilder,
 	IFileContentAnalyzer? contentAnalyzer = null,
-	SecretRedactionSession? secretRedactionSession = null)
+	SecretRedactionSession? secretRedactionSession = null,
+	CodeCompressionSession? codeCompressionSession = null)
 {
 	private const int CopyBufferSize = 128 * 1024;
 	private const int CleanupAttemptCount = 6;
@@ -25,8 +26,8 @@ public sealed class ProjectCopyExportService(
 			ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
 
 			ValidateSources(plan, cancellationToken);
-			await using var prepared = request.RedactSecrets
-				? await PrepareRedactedOutputAsync(plan, cancellationToken).ConfigureAwait(false)
+			await using var prepared = request.RedactSecrets || request.CompressCode
+				? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
 				: null;
 			return request.Format switch
 			{
@@ -72,15 +73,18 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private async Task<PreparedSecretRedactionOutput> PrepareRedactedOutputAsync(
+	private async Task<PreparedSecretRedactionOutput?> PrepareRedactedOutputAsync(
 		ProjectCopyExportPlan plan,
+		ProjectCopyExportRequest request,
 		CancellationToken cancellationToken)
 	{
-		if (contentAnalyzer is null || secretRedactionSession is null)
+		if (contentAnalyzer is null ||
+		    (request.RedactSecrets && secretRedactionSession is null) ||
+		    (request.CompressCode && codeCompressionSession is null))
 		{
 			throw new ProjectCopyExportException(
 				ProjectCopyExportError.InvalidRequest,
-				"Hide Secrets is unavailable because the redaction services were not configured.");
+				"A content transformation was requested but its services were not configured.");
 		}
 
 		var files = plan.Entries
@@ -88,11 +92,16 @@ public sealed class ProjectCopyExportService(
 			.Select(static entry => entry.SourcePath)
 			.ToArray();
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
-		return await preparer.PrepareAsync(
-				new SecretRedactionContext(plan.ProjectRootPath, secretRedactionSession),
-				files,
-				cancellationToken)
-			.ConfigureAwait(false);
+		var context = ContentTransformationContext.For(
+			request.CompressCode && codeCompressionSession is not null
+				? new CodeCompressionContext(plan.ProjectRootPath, codeCompressionSession)
+				: null,
+			request.RedactSecrets && secretRedactionSession is not null
+				? new SecretRedactionContext(plan.ProjectRootPath, secretRedactionSession)
+				: null);
+		return context is null
+			? null
+			: await preparer.PrepareAsync(context, files, cancellationToken).ConfigureAwait(false);
 	}
 
 	public static void EnsureDestinationOutsideProject(string projectRootPath, string destinationPath)

@@ -57,6 +57,24 @@ public partial class MainWindow
 		return _secretRedactionSession.GetSnapshot(_currentPath, files);
 	}
 
+	private CodeCompressionContext? CreateCodeCompressionContext()
+	{
+		if (string.IsNullOrWhiteSpace(_currentPath) ||
+		    !_selectionCoordinator.GetSelectedIgnoreOptionIds().Contains(IgnoreOptionId.CompressCode))
+		{
+			return null;
+		}
+
+		return new CodeCompressionContext(_currentPath, _codeCompressionSession);
+	}
+
+	/// <summary>
+	/// The enabled transformations as one ordered pipeline. Every output surface takes this, so
+	/// preview, clipboard, exports and the project copy cannot disagree about what was applied.
+	/// </summary>
+	private ContentTransformationContext? CreateContentTransformationContext() =>
+		ContentTransformationContext.For(CreateCodeCompressionContext(), CreateSecretRedactionContext());
+
 	private SecretRedactionContext? CreateSecretRedactionContext()
 	{
 		if (string.IsNullOrWhiteSpace(_currentPath) ||
@@ -333,6 +351,7 @@ public partial class MainWindow
     private readonly ITerminalCommandSetupService _terminalCommandSetupService;
     private readonly SessionMetricsRecorder _sessionMetrics;
 	private readonly SecretRedactionSession _secretRedactionSession;
+	private readonly CodeCompressionSession _codeCompressionSession;
 	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
 	private CancellationTokenSource? _secretRedactionCountCts;
 	private long _secretRedactionCountRefreshVersion;
@@ -372,6 +391,7 @@ public partial class MainWindow
         _terminalCommandSetupService = services.TerminalCommandSetupService;
         _sessionMetrics = services.SessionMetricsRecorder;
 		_secretRedactionSession = services.SecretRedactionSession;
+		_codeCompressionSession = services.CodeCompressionSession;
 		_secretRedactionPreparer = new SecretRedactionOutputPreparer(services.FileContentAnalyzer);
 		_secretRedactionSession.SnapshotPublished += OnSecretRedactionSnapshotPublished;
         _recentProjectsStore = services.RecentProjectsStore;
@@ -401,7 +421,8 @@ public partial class MainWindow
             GetCurrentTreeTextFormat,
             CreateExportPathPresentation,
             () => Bounds.Width,
-            ScheduleBackgroundMemoryCleanup);
+            ScheduleBackgroundMemoryCleanup,
+            CreateContentTransformationContext);
         _previewPipeline = new PreviewWorkspacePipeline(
             this,
             // 350ms delay ensures thumb animation (250ms) completes fully before loading.
@@ -599,7 +620,7 @@ public partial class MainWindow
             EnsureTrackedGitOutputReady,
             SetClipboardTextAsync,
 			ShowErrorAsync,
-			CreateSecretRedactionContext,
+			CreateContentTransformationContext,
 			ScheduleContentTransformationRefresh,
 			() => _selectionCoordinator.ApplyHideSecretsOverride(true),
 			() => _projectProfiles.PersistIfNeeded(_currentPath));

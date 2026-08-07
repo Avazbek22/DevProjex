@@ -27,4 +27,5 @@ public sealed record TerminalServices(
 	IGitRepositoryService GitRepositoryService,
 	IRepoCacheService RepoCacheService,
 	SecretRedactionSession SecretRedactionSession,
+	CodeCompressionSession CodeCompressionSession,
 	SecretRedactionOutputPreparer SecretRedactionOutputPreparer);

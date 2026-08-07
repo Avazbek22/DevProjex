@@ -402,6 +402,7 @@
   "Terminal.Option.GitMode": "Git-Filtermodus: none, gitignore oder tracked.",
   "Terminal.Option.Exclude": "Gewöhnlichen Ausschluss festlegen.",
   "Terminal.Option.HideSecrets": "Erkannte Werte in ausgewählten Textdateien schwärzen. Binärdateien werden nicht untersucht; keine Treffer sind keine Sicherheitsgarantie.",
+  "Terminal.Option.CompressCode": "Unterstützte Quelldateien auf Signaturen komprimieren. Rümpfe von Funktionen und Methoden werden durch einen Platzhalter ersetzt; nicht Unterstütztes bleibt vollständig erhalten.",
   "Terminal.Option.Progress": "Fortschrittsmodus.",
   "Terminal.Option.Verbosity": "Diagnosedetailgrad.",
   "Terminal.Validation.Choice": "{0} muss einer dieser Werte sein: {1}.",

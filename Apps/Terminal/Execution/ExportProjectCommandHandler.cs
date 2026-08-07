@@ -67,6 +67,9 @@ public sealed class ExportProjectCommandHandler(
 				environment.Error.WriteLine(
 					services.Localization["Terminal.DryRun.ProjectCopy.RedactionWarning"]);
 			}
+
+			if (plan.Selection.CompressCode == true)
+				environment.Error.WriteLine(services.Localization["Compression.CopyNotice"]);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -82,7 +85,8 @@ public sealed class ExportProjectCommandHandler(
 			ConflictPolicy: request.Force
 				? ProjectCopyConflictPolicy.ReplaceAtomically
 				: ProjectCopyConflictPolicy.Fail,
-			RedactSecrets: plan.Selection.HideSecrets == true);
+			RedactSecrets: plan.Selection.HideSecrets == true,
+			CompressCode: plan.Selection.CompressCode == true);
 		var result = await new ProgressRenderer(environment, request.Output, services.Localization)
 			.RunProjectExportAsync(progress =>
 				services.ProjectCopyExportService.ExportAsync(

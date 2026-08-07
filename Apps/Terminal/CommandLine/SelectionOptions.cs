@@ -12,6 +12,7 @@ internal sealed class SelectionOptions
 	public Option<GitFilteringMode?> GitMode { get; }
 	public Option<CliExclusionValue[]> Exclusions { get; }
 	public Option<bool> HideSecrets { get; }
+	public Option<bool> CompressCode { get; }
 
 	public SelectionOptions(
 		LocalizationService localization,
@@ -46,6 +47,10 @@ internal sealed class SelectionOptions
 		{
 			Description = localization["Terminal.Option.HideSecrets"]
 		};
+		CompressCode = new Option<bool>("--compress")
+		{
+			Description = localization["Terminal.Option.CompressCode"]
+		};
 	}
 
 	public void AddTo(Command command)
@@ -57,6 +62,7 @@ internal sealed class SelectionOptions
 		command.Options.Add(GitMode);
 		command.Options.Add(Exclusions);
 		command.Options.Add(HideSecrets);
+		command.Options.Add(CompressCode);
 	}
 
 	public async Task<ProjectSelectionSpec> ResolveAsync(
@@ -76,6 +82,9 @@ internal sealed class SelectionOptions
 		bool? hideSecrets = parseResult.GetResult(HideSecrets) is { Implicit: false }
 			? parseResult.GetValue(HideSecrets)
 			: null;
+		bool? compressCode = parseResult.GetResult(CompressCode) is { Implicit: false }
+			? parseResult.GetValue(CompressCode)
+			: null;
 		var overrides = new ProjectSelectionSpec(
 			Roots: GetExplicitValues(parseResult, Roots),
 			Extensions: GetExplicitValues(parseResult, Extensions),
@@ -83,6 +92,7 @@ internal sealed class SelectionOptions
 			GitMode: gitMode,
 			Exclusions: exclusions,
 			HideSecrets: hideSecrets,
+			CompressCode: compressCode,
 			ProfileSource: profile);
 
 		return await services.SelectionResolver

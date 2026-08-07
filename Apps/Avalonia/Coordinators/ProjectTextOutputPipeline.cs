@@ -148,7 +148,7 @@ internal sealed record ProjectTextOutputSnapshot(
     IReadOnlyList<string>? OrderedFilePaths,
     TreeTextFormat TreeFormat,
     ExportPathPresentation? PathPresentation,
-	SecretRedactionContext? RedactionContext = null);
+	ContentTransformationContext? RedactionContext = null);
 
 internal sealed record ProjectTextOutputResult(
     string Content,
