@@ -273,7 +273,24 @@ internal sealed class TreeSitterCompressionScope(
 		}
 
 		var trailingNewline = end > 0 && end <= source.Length && source[end - 1] == '\n' ? "\n" : string.Empty;
-		return $"\n{indentation}{pack.BlockPlaceholder}{trailingNewline}";
+
+		// What the retained text already ends with decides what the placeholder has to supply. A
+		// tree-sitter block starts at its first statement, so the newline and indentation before it
+		// are kept - emitting them again would leave a blank, whitespace-only line above the "...".
+		// After the edit was extended back over leading comments the start sits at column zero, and
+		// only the indentation is missing.
+		var retainedEndsAtLineStart = start > 0 && source[start - 1] == '\n';
+		var retainedEndsWithIndentation =
+			!retainedEndsAtLineStart &&
+			lineStart >= 0 &&
+			start > lineStart + 1 &&
+			source.AsSpan((lineStart + 1)..start).IsWhiteSpace();
+		var leading = retainedEndsWithIndentation
+			? string.Empty
+			: retainedEndsAtLineStart
+				? indentation
+				: $"\n{indentation}";
+		return $"{leading}{pack.BlockPlaceholder}{trailingNewline}";
 	}
 
 	private static List<CodeDeclaration> ReadDeclarations(LoadedLanguage language, Node root, ContentTransformMap map)
