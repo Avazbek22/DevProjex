@@ -111,7 +111,8 @@ public partial class MainWindow
             destinationPath,
 			format,
 			RedactSecrets: CreateSecretRedactionContext() is not null,
-			CompressCode: CreateCodeCompressionContext() is not null);
+			CompressCode: CreateCodeCompressionContext() is not null,
+			NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(_localization));
         var cancellation = new CancellationTokenSource();
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _projectCopyExportCts = cancellation;

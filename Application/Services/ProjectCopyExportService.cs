@@ -11,6 +11,12 @@ public sealed class ProjectCopyExportService(
 	CodeCompressionSession? codeCompressionSession = null)
 {
 	private const int CopyBufferSize = 128 * 1024;
+
+	/// <summary>
+	/// Named so it sorts to the top of a listing and cannot collide with a source file. It is never
+	/// written for an untransformed copy.
+	/// </summary>
+	public const string TransformationNoticeFileName = "DEVPROJEX-NOTICE.txt";
 	private const int CleanupAttemptCount = 6;
 	private const int CleanupInitialDelayMilliseconds = 25;
 
@@ -37,6 +43,7 @@ public sealed class ProjectCopyExportService(
 					request.DestinationMode,
 					request.ConflictPolicy,
 					prepared,
+					request.NoticeText,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				ProjectCopyExportFormat.Zip => await ExportZipAsync(
@@ -45,6 +52,7 @@ public sealed class ProjectCopyExportService(
 					request.DestinationMode,
 					request.ConflictPolicy,
 					prepared,
+					request.NoticeText,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				_ => throw new ProjectCopyExportException(
@@ -71,6 +79,30 @@ public sealed class ProjectCopyExportService(
 				_ => ExportFailure(ProjectCopyExportError.UnexpectedFailure, exception)
 			};
 		}
+	}
+
+	/// <summary>
+	/// The notice a transformed copy carries in its own root. A folder or ZIP that is not a
+	/// byte-for-byte copy of the project has to say so where it will be read - the confirmation the
+	/// user clicked is gone by the time someone else opens the archive.
+	///
+	/// Returns null when nothing was transformed, so an untouched copy stays untouched.
+	/// </summary>
+	private static string? BuildTransformationNotice(
+		PreparedSecretRedactionOutput? prepared,
+		ProjectCopyNoticeText? noticeText)
+	{
+		if (prepared is null || noticeText is null)
+			return null;
+
+		var lines = new List<string>(2);
+		if (prepared.Snapshot is { } redaction && redaction.RedactedCount > 0)
+			lines.Add(noticeText.Redaction);
+		if (prepared.CompressionSnapshot is { CompressedFiles: > 0 })
+			lines.Add(noticeText.Compression);
+		return lines.Count == 0
+			? null
+			: string.Join(Environment.NewLine + Environment.NewLine, lines) + Environment.NewLine;
 	}
 
 	private async Task<PreparedSecretRedactionOutput?> PrepareRedactedOutputAsync(
@@ -104,6 +136,16 @@ public sealed class ProjectCopyExportService(
 			: await preparer.PrepareAsync(context, files, cancellationToken).ConfigureAwait(false);
 	}
 
+	/// <summary>
+	/// The two notice lines a transformed project copy can carry, in the user's language. Reuses the
+	/// wording the dry-run and the confirmation dialog already show, so the copy says the same thing
+	/// the user was told before agreeing to it.
+	/// </summary>
+	public static ProjectCopyNoticeText BuildProjectCopyNoticeText(LocalizationService localization) =>
+		new(
+			localization["Terminal.DryRun.ProjectCopy.RedactionWarning"],
+			localization["Compression.CopyNotice"]);
+
 	public static void EnsureDestinationOutsideProject(string projectRootPath, string destinationPath)
 	{
 		try
@@ -132,6 +174,7 @@ public sealed class ProjectCopyExportService(
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
 		PreparedSecretRedactionOutput? prepared,
+		ProjectCopyNoticeText? noticeText,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -202,6 +245,16 @@ public sealed class ProjectCopyExportService(
 				ReportProgress(progress, 0, 0, 0);
 
 			cancellationToken.ThrowIfCancellationRequested();
+			if (BuildTransformationNotice(prepared, noticeText) is { } notice)
+			{
+				await File.WriteAllTextAsync(
+						Path.Combine(stagingPath, TransformationNoticeFileName),
+						notice,
+						new UTF8Encoding(false),
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
+
 			var finalPath = destinationMode == ProjectCopyDestinationMode.Exact
 				? MoveStagingDirectoryToExactPath(
 					stagingPath,
@@ -254,6 +307,7 @@ public sealed class ProjectCopyExportService(
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
 		PreparedSecretRedactionOutput? prepared,
+		ProjectCopyNoticeText? noticeText,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -329,6 +383,16 @@ public sealed class ProjectCopyExportService(
 
 				if (totalEntries == 0)
 					ReportProgress(progress, 0, 0, 0);
+
+				if (BuildTransformationNotice(prepared, noticeText) is { } notice)
+				{
+					var noticeEntry = archive.CreateEntry(
+						BuildZipEntryName(plan.ProjectName, TransformationNoticeFileName, isDirectory: false),
+						CompressionLevel.Optimal);
+					await using var noticeStream = noticeEntry.Open();
+					await using var noticeWriter = new StreamWriter(noticeStream, new UTF8Encoding(false));
+					await noticeWriter.WriteAsync(notice.AsMemory(), cancellationToken).ConfigureAwait(false);
+				}
 			}
 
 			cancellationToken.ThrowIfCancellationRequested();

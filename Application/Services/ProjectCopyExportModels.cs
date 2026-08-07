@@ -45,7 +45,14 @@ public sealed record ProjectCopyExportRequest(
 	ProjectCopyDestinationMode DestinationMode = ProjectCopyDestinationMode.AutomaticName,
 	ProjectCopyConflictPolicy ConflictPolicy = ProjectCopyConflictPolicy.Fail,
 	bool RedactSecrets = false,
-	bool CompressCode = false);
+	bool CompressCode = false,
+	ProjectCopyNoticeText? NoticeText = null);
+
+/// <summary>
+/// Localized text for the notice a transformed copy carries in its root. Passed in rather than
+/// resolved here so the Application layer keeps no opinion about the user's language.
+/// </summary>
+public sealed record ProjectCopyNoticeText(string Redaction, string Compression);
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,

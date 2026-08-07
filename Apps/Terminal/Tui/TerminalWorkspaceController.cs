@@ -397,7 +397,8 @@ public sealed class TerminalWorkspaceController(
 					DestinationMode: ProjectCopyDestinationMode.Exact,
 					ConflictPolicy: ProjectCopyConflictPolicy.Fail,
 					RedactSecrets: plan.Selection.HideSecrets == true,
-					CompressCode: plan.Selection.CompressCode == true),
+					CompressCode: plan.Selection.CompressCode == true,
+					NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(services.Localization)),
 				progress,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
