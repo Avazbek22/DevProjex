@@ -798,7 +798,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 				_charCount++;
 
-				if (c == '\n')
+				if (c == '\r')
 				{
 					_lineCount++;
 					_trailingNewlineChars++;
