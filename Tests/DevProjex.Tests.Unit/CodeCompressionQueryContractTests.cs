@@ -19,6 +19,17 @@ namespace DevProjex.Tests.Unit;
 /// </summary>
 public sealed class CodeCompressionQueryContractTests
 {
+	private static readonly string[] ExpectedLanguageIds =
+	[
+		"c", "cpp", "csharp", "go", "java", "javascript", "python", "rust", "tsx", "typescript"
+	];
+
+	[Fact]
+	public void ShippedLanguageSetMatchesTheProductContract()
+	{
+		Assert.Equal(ExpectedLanguageIds, CodeCompressionTestHarness.LanguageIds);
+	}
+
 	public static TheoryData<string> LanguageIds()
 	{
 		var data = new TheoryData<string>();
@@ -81,6 +92,21 @@ public sealed class CodeCompressionQueryContractTests
 			using var harness = CodeCompressionTestHarness.For(languageId);
 			Assert.NotEqual("…", harness.Pack.BlockPlaceholder.Trim());
 			Assert.NotEmpty(harness.Pack.BlockPlaceholder);
+		}
+	}
+
+	[Theory]
+	[MemberData(nameof(LanguageIds))]
+	public void ShippedPlaceholdersDoNotExposeCommentSyntax(string languageId)
+	{
+		using var harness = CodeCompressionTestHarness.For(languageId);
+
+		Assert.DoesNotContain("/*", harness.Pack.BlockPlaceholder, StringComparison.Ordinal);
+		Assert.DoesNotContain("*/", harness.Pack.BlockPlaceholder, StringComparison.Ordinal);
+		if (harness.Pack.ExpressionPlaceholder is { } expressionPlaceholder)
+		{
+			Assert.DoesNotContain("/*", expressionPlaceholder, StringComparison.Ordinal);
+			Assert.DoesNotContain("*/", expressionPlaceholder, StringComparison.Ordinal);
 		}
 	}
 }

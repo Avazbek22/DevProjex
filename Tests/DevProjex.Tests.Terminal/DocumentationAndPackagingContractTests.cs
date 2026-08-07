@@ -39,6 +39,29 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void EveryCuratedGrammarIsNamedInThirdPartyNotices()
+	{
+		var rootPath = FindRepositoryRoot();
+		var infrastructureProject = XDocument.Load(
+			Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var grammarNames = infrastructureProject
+			.Descendants("DevProjexGrammar")
+			.Select(element => element.Attribute("Include")?.Value)
+			.Where(static value => value is not null)
+			.Cast<string>()
+			.ToArray();
+		var notices = File.ReadAllText(Path.Combine(rootPath, "THIRD-PARTY-NOTICES.md"));
+
+		Assert.Equal(10, grammarNames.Length);
+		foreach (var grammarName in grammarNames)
+		{
+			Assert.Matches(
+				$@"(?<![a-z0-9-]){Regex.Escape(grammarName)}(?![a-z0-9-])",
+				notices);
+		}
+	}
+
+	[Fact]
 	public void ReadmeCommandExamplesParseAgainstTheProductionCommandTree()
 	{
 		var rootPath = FindRepositoryRoot();

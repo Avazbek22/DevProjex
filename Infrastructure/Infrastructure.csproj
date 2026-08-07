@@ -26,8 +26,16 @@
     cannot find them. Everything is loaded by absolute path instead.
   -->
   <ItemGroup>
+    <DevProjexGrammar Include="tree-sitter-c" />
     <DevProjexGrammar Include="tree-sitter-c-sharp" />
+    <DevProjexGrammar Include="tree-sitter-cpp" />
+    <DevProjexGrammar Include="tree-sitter-go" />
+    <DevProjexGrammar Include="tree-sitter-java" />
+    <DevProjexGrammar Include="tree-sitter-javascript" />
     <DevProjexGrammar Include="tree-sitter-python" />
+    <DevProjexGrammar Include="tree-sitter-rust" />
+    <DevProjexGrammar Include="tree-sitter-tsx" />
+    <DevProjexGrammar Include="tree-sitter-typescript" />
   </ItemGroup>
 
   <PropertyGroup>

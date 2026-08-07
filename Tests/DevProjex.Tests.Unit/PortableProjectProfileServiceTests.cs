@@ -110,6 +110,64 @@ public sealed class PortableProjectProfileServiceTests
 	}
 
 	[Fact]
+	public async Task CompressCodeRoundTripsAsAnIndependentContentTransformation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var destination = Path.Combine(workspace.Path, "portable.json");
+		var service = new PortableProjectProfileService();
+
+		await service.SaveAsync(
+			sourceRoot,
+			destination,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				CompressCode: true),
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		using (var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+			       destination,
+			       TestContext.Current.CancellationToken)))
+		{
+			Assert.True(document.RootElement
+				.GetProperty("selection")
+				.GetProperty("compressCode")
+				.GetBoolean());
+		}
+
+		var loaded = await service.LoadAsync(destination, TestContext.Current.CancellationToken);
+		Assert.True(loaded.CompressCode);
+	}
+
+	[Fact]
+	public async Task ProfileWithoutCompressCodeLoadsWithCompressionDisabled()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = Path.Combine(workspace.Path, "profile.json");
+		await File.WriteAllTextAsync(
+			path,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""",
+			TestContext.Current.CancellationToken);
+
+		var selection = await new PortableProjectProfileService().LoadAsync(
+			path,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(selection.CompressCode);
+	}
+
+	[Fact]
 	public async Task LoadAsyncMigratesLegacyHideSecretsExclusion()
 	{
 		using var workspace = new TemporaryDirectory();

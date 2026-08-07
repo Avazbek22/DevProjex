@@ -298,10 +298,10 @@ internal sealed class MetricsPipeline(
     /// <summary>
     /// One compression scope for a whole metrics pass, or null when compression is off.
     ///
-    /// Never one per file: constructing a tree-sitter Language performs a fresh native load and the
-    /// binding never releases the module handle, so a scope per file would leak one load per file.
-    /// The scope it returns is never Completed - metrics must not publish a snapshot, because the
-    /// files it measured are not the ordered selection an output would have produced.
+    /// Never one per file: a scope carries the coherent operation key and aggregate counters while
+    /// borrowing bounded process-lifetime parser workers. It is never Completed here - metrics must
+    /// not publish a snapshot, because the files it measured are not necessarily the ordered
+    /// selection an output would have produced.
     /// </summary>
     private CodeCompressionScope? BeginTransformationScope(IReadOnlyList<string> filePaths) =>
         transformationContextProvider?.Invoke()?.Compression?.BeginOutput(filePaths);

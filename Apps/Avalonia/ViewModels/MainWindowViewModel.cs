@@ -194,8 +194,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		}
 	}
 	public bool HasHideSecretsOption => HideSecretsOption is not null;
-	public bool HasContentProcessingOptions =>
-		ContentProcessingOptions.Count > 0 && _contentProcessingHasFindings is not false;
+	public bool HasContentProcessingOptions => ContentProcessingOptions.Count > 0;
     public ObservableCollection<FontFamily> FontFamilies { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentFolders { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentRepositories { get; } = [];
@@ -1435,7 +1434,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	public string SettingsSecretsNotice { get; private set; } = string.Empty;
 	public bool HasContentProcessingStatus =>
 		_contentProcessingScanState == SecretScanState.Failed ||
-		(_contentProcessingScanState == SecretScanState.Completed &&
+		(_contentProcessingHasFindings is true &&
+		 _contentProcessingScanState == SecretScanState.Completed &&
 		 _contentProcessingDetectedCount.HasValue &&
 		 _contentProcessingHiddenCount.HasValue) ||
 		_compressionNotice.Length > 0;
@@ -1885,11 +1885,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			.ToHashSet();
 		((ResettableObservableCollection<IgnoreOptionViewModel>)PathIgnoreOptions).ReplaceAll(
 			IgnoreOptions.Where(option => !contentTransformationIds.Contains(option.Id)));
-		((ResettableObservableCollection<IgnoreOptionViewModel>)ContentProcessingOptions).ReplaceAll(
-			IgnoreOptions.Where(option => contentTransformationIds.Contains(option.Id)));
 		HideSecretsOption = IgnoreOptions.FirstOrDefault(
 			static option => option.Id == IgnoreOptionId.HideSecrets);
+		SynchronizeContentProcessingOptions(contentTransformationIds);
 		RaisePropertyChanged(nameof(HasContentProcessingOptions));
+	}
+
+	private void SynchronizeContentProcessingOptions(IReadOnlySet<IgnoreOptionId>? transformationIds = null)
+	{
+		transformationIds ??= ProjectPresentationCatalog.ContentTransformationOptionIds;
+		((ResettableObservableCollection<IgnoreOptionViewModel>)ContentProcessingOptions).ReplaceAll(
+			IgnoreOptions.Where(option =>
+				transformationIds.Contains(option.Id) &&
+				(option.Id != IgnoreOptionId.HideSecrets || _contentProcessingHasFindings is true)));
 	}
 
 	internal void SetContentProcessingStatus(
@@ -1912,6 +1920,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		_contentProcessingDetectedCount = detectedCount;
 		_contentProcessingHiddenCount = hiddenCount;
 		_contentProcessingHasFindings = hasFindings;
+		SynchronizeContentProcessingOptions();
 		UpdateSettingsSecretsNotice();
 		RaisePropertyChanged(nameof(HasContentProcessingStatus));
 		RaisePropertyChanged(nameof(IsContentProcessingAnalysisFailed));

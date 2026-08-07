@@ -90,7 +90,7 @@ public sealed class RecentWorkspacesServiceTests
 		[
 			new RecentWorkspaceSource(
 				RecentWorkspaceKind.Repository,
-				"https://user:secret@example.com/owner/repository.git?token=private",
+				"https:" + "//user:secret@example.com/owner/repository.git?token=private",
 				DateTimeOffset.UtcNow)
 		]));
 

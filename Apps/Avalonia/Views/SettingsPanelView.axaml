@@ -194,8 +194,8 @@
 					Width="16"
 					Height="16"
 					Background="Transparent"
-					RenderTransform="translate(0px, 4px)"
-					VerticalAlignment="Center"
+					Margin="0,15,0,0"
+					VerticalAlignment="Top"
 					IsVisible="{Binding HasContentProcessingStatus}"
 					AutomationProperties.HelpText="{Binding SettingsSecretsNotice}"
 					PointerPressed="OnContentProcessingHelpIndicatorPointerPressed"
@@ -220,7 +220,6 @@
 						BorderThickness="1"
 						BorderBrush="{DynamicResource AppMutedTextBrush}"
 						Background="{DynamicResource MenuPressedBrush}"
-						RenderTransform="translate(0px, -1px)"
 						IsVisible="{Binding !IsContentProcessingAnalysisFailed}">
 				  <TextBlock Text="?"
 							 FontSize="10"

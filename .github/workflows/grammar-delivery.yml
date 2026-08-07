@@ -17,6 +17,8 @@ on:
       - 'Packaging/GrammarDeliveryProbe/**'
       - 'Application/Compression/**'
       - 'Infrastructure/Compression/**'
+      - 'Infrastructure/Infrastructure.csproj'
+      - 'Directory.Build.targets'
       - 'Directory.Packages.props'
       - '.github/workflows/grammar-delivery.yml'
   pull_request:
@@ -24,6 +26,8 @@ on:
       - 'Packaging/GrammarDeliveryProbe/**'
       - 'Application/Compression/**'
       - 'Infrastructure/Compression/**'
+      - 'Infrastructure/Infrastructure.csproj'
+      - 'Directory.Build.targets'
       - 'Directory.Packages.props'
       - '.github/workflows/grammar-delivery.yml'
 
@@ -196,9 +200,8 @@ jobs:
           # The MSIX build must never write executable code at runtime: grammars ship as ordinary
           # package files so they inherit the package signature. Extracted DLLs would not, and are
           # blocked by Smart App Control and S mode.
-          # The count is not hard-coded: it must match what Infrastructure actually embeds, or the
-          # check silently stops covering a language that was added.
-          expected=$(grep -c '<DevProjexGrammar Include=' Infrastructure/Infrastructure.csproj)
+          # Ten is the product contract, not a value derived from the implementation under test.
+          expected=10
           grammars=$(find artifacts/grammar-delivery/content/grammars -type f | wc -l)
           if [ "$grammars" -ne "$expected" ]; then
             echo "::error::Expected $expected packaged grammars, found $grammars"

@@ -1,7 +1,9 @@
 using System.IO.Compression;
 using DevProjex.Application.Compression;
+using DevProjex.Application.Context;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Compression;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Integration;
 
@@ -35,6 +37,96 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 
 	private const string MarkedConstantValue = "SessionMarkedConstantValue";
 	private const string MarkedBodyValue = "SessionMarkedBodyValue";
+
+	[Fact]
+	public async Task CompressionOnlyPreparationPreservesSelectionOrderAndSkipsUnchangedTempCopies()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("project");
+		var paths = Enumerable.Range(0, 32)
+			.Select(index =>
+			{
+				var path = Path.Combine(projectRoot, $"notes-{index:D2}.txt");
+				File.WriteAllText(path, $"unchanged-{index}");
+				return path;
+			})
+			.Reverse()
+			.ToArray();
+		using var session = CodeCompressionFactory.CreateSession();
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(new CodeCompressionContext(projectRoot, session), null),
+			paths,
+			TestContext.Current.CancellationToken);
+
+		var snapshot = Assert.IsType<CodeCompressionSnapshot>(prepared.CompressionSnapshot);
+		Assert.Equal(0, snapshot.CompressedFiles);
+		Assert.Equal(paths.Length, snapshot.UnchangedFiles);
+		Assert.Equal(
+			paths.Select(path => Path.GetRelativePath(projectRoot, path)),
+			snapshot.Unchanged.Select(static outcome => outcome.RelativePath));
+		foreach (var path in paths)
+			Assert.Equal(path, prepared.GetFile(path).ContentPath);
+	}
+
+	[Fact]
+	public async Task CompressionOnlyPreparationTransformsEverySupportedFileInTheParallelBatch()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("project");
+		var paths = Enumerable.Range(0, 24)
+			.Select(index =>
+			{
+				var path = Path.Combine(projectRoot, $"Widget{index:D2}.cs");
+				File.WriteAllText(path, CompressibleSource.Replace("Widget", $"Widget{index}", StringComparison.Ordinal));
+				return path;
+			})
+			.ToArray();
+		using var session = CodeCompressionFactory.CreateSession();
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(new CodeCompressionContext(projectRoot, session), null),
+			paths,
+			TestContext.Current.CancellationToken);
+
+		var snapshot = Assert.IsType<CodeCompressionSnapshot>(prepared.CompressionSnapshot);
+		Assert.Equal(paths.Length, snapshot.CompressedFiles);
+		Assert.Equal(0, snapshot.UnchangedFiles);
+		foreach (var path in paths)
+		{
+			var transformed = await File.ReadAllTextAsync(
+				prepared.GetFile(path).ContentPath,
+				TestContext.Current.CancellationToken);
+			Assert.DoesNotContain("var total", transformed, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void LocalProfileRoundTripsCompressionAsAnOptInTransformation()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("profile-project");
+		var store = new ProjectProfileStore(() => temporary.CreateDirectory("profile-data"));
+		var profile = new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: [IgnoreOptionId.CompressCode],
+			IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.CompressCode] = true,
+				[IgnoreOptionId.SmartIgnore] = false
+			});
+
+		Assert.True(store.TrySaveProfile(projectRoot, profile));
+		Assert.True(store.TryLoadProfile(projectRoot, out var loaded));
+		Assert.Contains(IgnoreOptionId.CompressCode, loaded.SelectedIgnoreOptions);
+		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.CompressCode]);
+		Assert.True(ProjectSelectionAdapter
+			.FromLegacyProfile(loaded, ProjectProfileReference.Local)
+			.CompressCode);
+	}
 
 	// The constant sits AFTER the body compression removes, so its line number genuinely moves.
 	// A fixture with the constant first would pass without any translation at all.

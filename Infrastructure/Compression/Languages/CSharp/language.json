@@ -7,9 +7,9 @@
   ],
   "library": "tree-sitter-c-sharp",
   "export": "tree_sitter_c_sharp",
-  "queryVersion": 1,
-  "blockPlaceholder": "{ /* … */ }",
-  "expressionPlaceholder": "=> /* … */ default",
+  "queryVersion": 2,
+  "blockPlaceholder": "{ }",
+  "expressionPlaceholder": "=> default",
   "containerNodeTypes": [
     "compilation_unit",
     "declaration_list",

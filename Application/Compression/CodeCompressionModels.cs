@@ -109,13 +109,27 @@ public sealed record CodeCompressionPlan(
 	/// Applies the plan, returning the transformed text and the map that translates offsets between
 	/// the two texts in both directions.
 	/// </summary>
+	public CodeCompressionResult Apply(string source)
+	{
+		ArgumentNullException.ThrowIfNull(source);
+		if (source.Length != SourceLength)
+			throw new ArgumentException($"The plan was built for {SourceLength} characters but the text has {source.Length}.", nameof(source));
+		return !HasEdits
+			? new CodeCompressionResult(source, ContentTransformMap.Identity)
+			: ApplyCore(source.AsSpan());
+	}
+
 	public CodeCompressionResult Apply(ReadOnlySpan<char> source)
 	{
 		if (source.Length != SourceLength)
 			throw new ArgumentException($"The plan was built for {SourceLength} characters but the text has {source.Length}.", nameof(source));
 		if (!HasEdits)
 			return new CodeCompressionResult(source.ToString(), ContentTransformMap.Identity);
+		return ApplyCore(source);
+	}
 
+	private CodeCompressionResult ApplyCore(ReadOnlySpan<char> source)
+	{
 		var builder = new StringBuilder(TransformedLength);
 		var cursor = 0;
 		foreach (var edit in Edits)
@@ -131,3 +145,7 @@ public sealed record CodeCompressionPlan(
 }
 
 public sealed record CodeCompressionResult(string Text, ContentTransformMap Map);
+
+internal sealed record CodeCompressionExecution(
+	CodeCompressionPlan Plan,
+	CodeCompressionResult Output);

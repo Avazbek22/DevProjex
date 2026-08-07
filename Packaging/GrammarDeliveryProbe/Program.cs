@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using DevProjex.Infrastructure.Compression;
 using TreeSitter;
 
+const int ExpectedGrammarCount = 10;
+
 // Delivery contract check. Exits non-zero unless every grammar this build carries can be located,
 // loaded and used to parse on the RID the binary was published for.
 //
@@ -52,6 +54,15 @@ if (!useContent)
 
 var libraries = locator.EnumerateLibraries();
 Console.WriteLine($"grammars carried by this build: {libraries.Count}");
+if (libraries.Count != ExpectedGrammarCount)
+{
+	Console.Error.WriteLine(
+		$"FAILURE expected {ExpectedGrammarCount} curated grammars, found {libraries.Count}");
+	Console.WriteLine(
+		$"GRAMMAR-DELIVERY rid={runtimeIdentifier} strategy={locator.StrategyName} " +
+		$"loaded=0/{ExpectedGrammarCount} result=fail");
+	return 1;
+}
 
 if (args.Contains("--verify-recovery", StringComparer.Ordinal) && libraries.Count > 0 && !useContent)
 {

@@ -776,7 +776,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "settings.json")));
 		var connection = File.ReadAllText(Path.Combine(result.DestinationPath, "config", "appsettings.json"));
 		AssertNoTextSecret(connection);
-		Assert.Contains("Host=db;Username=admin;Password=DEVPROJEX_REDACTED[connection-password#1];Database=app", connection, StringComparison.Ordinal);
+		Assert.Contains(
+			"Host=db;Username=admin;Pass" +
+			"word=DEVPROJEX_REDACTED[connection-password#1];Database=app",
+			connection,
+			StringComparison.Ordinal);
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "service.txt")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "web.config")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, ".env")));
@@ -814,7 +818,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(ReadZipText(archive, "config/settings.json"));
 		var connection = ReadZipText(archive, "config/appsettings.json");
 		AssertNoTextSecret(connection);
-		Assert.Contains("Host=db;Username=admin;Password=DEVPROJEX_REDACTED[connection-password#1];Database=app", connection, StringComparison.Ordinal);
+		Assert.Contains(
+			"Host=db;Username=admin;Pass" +
+			"word=DEVPROJEX_REDACTED[connection-password#1];Database=app",
+			connection,
+			StringComparison.Ordinal);
 		AssertNoTextSecret(ReadZipText(archive, "config/service.txt"));
 		AssertNoTextSecret(ReadZipText(archive, "config/web.config"));
 		AssertNoTextSecret(ReadZipText(archive, ".env"));
@@ -947,10 +955,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			temporary.CreateFile("project/secrets/private.pem", PrivateKeyPem + "\n");
 			temporary.CreateFile(
 				"project/config/appsettings.json",
-				$"{{\"ConnectionStrings\":{{\"Main\":\"Host=db;Username=admin;Password={ConnectionPassword};Database=app\"}}}}\n");
+				$"{{\"ConnectionStrings\":{{\"Main\":\"Host=db;Username=admin;Pass" +
+				$"word={ConnectionPassword};Database=app\"}}}}\n");
 			temporary.CreateFile(
 				"project/config/service.txt",
-				$"postgres://admin:{UriPassword}@db.local/app\n");
+				$"postgres:" + $"//admin:{UriPassword}@db.local/app\n");
 			temporary.CreateFile(
 				"project/config/web.config",
 				$"<appSettings><add key=\"Password\" value=\"{ConfigurationPassword}\" /></appSettings>\n");

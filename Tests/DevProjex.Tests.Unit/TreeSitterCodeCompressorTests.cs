@@ -5,11 +5,19 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class TreeSitterCodeCompressorTests
 {
+	public static TheoryData<string> ShippedLanguages()
+	{
+		var data = new TheoryData<string>();
+		foreach (var languageId in CodeCompressionTestHarness.LanguageIds)
+			data.Add(languageId);
+		return data;
+	}
+
 	private static (CodeCompressionPlan Plan, string Text) Compress(string relativePath, string source)
 	{
-		var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
 		using var scope = compressor.CreateScope(Path.GetTempPath());
-		var plan = scope.Plan(relativePath, relativePath, source, TestContext.Current.CancellationToken);
+		var plan = scope.Analyze(relativePath, relativePath, source, TestContext.Current.CancellationToken).Plan;
 		return (plan, plan.Apply(source).Text);
 	}
 
@@ -54,6 +62,84 @@ public sealed class TreeSitterCodeCompressorTests
 
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.DoesNotContain("static int Double(int value)", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void CSharp_ConversionOperatorsAndCustomEventAccessors_DoNotRejectTheFile()
+	{
+		const string source = """
+			public sealed class Widget
+			{
+			    private int _value;
+
+			    public static implicit operator int(Widget value)
+			    {
+			        var converted = value._value + 10;
+			        return converted;
+			    }
+
+			    public event System.EventHandler Changed
+			    {
+			        add
+			        {
+			            System.Console.WriteLine("adding handler");
+			        }
+			        remove
+			        {
+			            System.Console.WriteLine("removing handler");
+			        }
+			    }
+
+			    public void Run()
+			    {
+			        System.Console.WriteLine("running");
+			    }
+			}
+			""";
+
+		var (plan, text) = Compress("Widget.cs", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.DoesNotContain("converted =", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("adding handler", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("removing handler", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("running", text, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[MemberData(nameof(ShippedLanguages))]
+	public void EveryShippedLanguage_CompressesItsProductionFixture(string languageId)
+	{
+		using var harness = CodeCompressionTestHarness.For(languageId);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor(harness.Pack);
+		using var scope = compressor.CreateScope(Path.GetTempPath());
+		var path = $"sample{harness.Pack.Extensions[0]}";
+
+		var analysis = scope.Analyze(
+			path,
+			path,
+			harness.Fixture,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
+		Assert.True(analysis.GetResult(harness.Fixture).Text.Length < harness.Fixture.Length);
+	}
+
+	[Theory]
+	[InlineData(
+		"sample.cpp",
+		"auto transform = [](int value) { int doubled = value * 2; int adjusted = doubled + 10; return adjusted; };",
+		"doubled =")]
+	[InlineData(
+		"Sample.java",
+		"class Sample { java.util.function.Function<Integer, Integer> transform = value -> { int doubled = value * 2; int adjusted = doubled + 10; return adjusted; }; }",
+		"doubled =")]
+	public void CommonLambdaBodiesAreCompressed(string path, string source, string removedText)
+	{
+		var (plan, text) = Compress(path, source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.DoesNotContain(removedText, text, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -141,10 +227,10 @@ public sealed class TreeSitterCodeCompressorTests
 		// A query capturing overlapping spans is a pack defect. Plan is contracted never to throw
 		// for a refusal, so it must cost one uncompressed file, not the whole export.
 		var pack = CodeCompressionTestHarness.PackWithOverlappingBodyQuery("csharp");
-		var compressor = CodeCompressionTestHarness.CreateCompressor(pack);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor(pack);
 		using var scope = compressor.CreateScope(Path.GetTempPath());
 
-		var plan = scope.Plan("Widget.cs", "Widget.cs", CodeCompressionFixtures.CSharp, TestContext.Current.CancellationToken);
+		var plan = scope.Analyze("Widget.cs", "Widget.cs", CodeCompressionFixtures.CSharp, TestContext.Current.CancellationToken).Plan;
 
 		Assert.NotEqual(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.Equal(CodeCompressionFixtures.CSharp, plan.Apply(CodeCompressionFixtures.CSharp).Text);
@@ -158,6 +244,27 @@ public sealed class TreeSitterCodeCompressorTests
 
 		Assert.Equal(first.Text, second.Text);
 		Assert.Equal(first.Plan.Edits.Count, second.Plan.Edits.Count);
+	}
+
+	[Fact]
+	public void GrammarResolutionAndCompiledWorkersAreReusedAcrossOutputScopes()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var locator = new CountingGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());
+		using var compressor = new TreeSitterCodeCompressor(locator, [harness.Pack]);
+
+		for (var iteration = 0; iteration < 4; iteration++)
+		{
+			using var scope = compressor.CreateScope(Path.GetTempPath());
+			var analysis = scope.Analyze(
+				"Widget.cs",
+				"Widget.cs",
+				CodeCompressionFixtures.CSharp,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
+		}
+
+		Assert.Equal(1, locator.ResolveCount);
 	}
 
 	[Fact]
@@ -178,10 +285,10 @@ public sealed class TreeSitterCodeCompressorTests
 	[Fact]
 	public void OffsetsOutsideRemovedBodies_StillPointAtTheSameCharacters()
 	{
-		var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
 		using var scope = compressor.CreateScope(Path.GetTempPath());
 		var source = CodeCompressionFixtures.CSharp;
-		var plan = scope.Plan("Widget.cs", "Widget.cs", source, TestContext.Current.CancellationToken);
+		var plan = scope.Analyze("Widget.cs", "Widget.cs", source, TestContext.Current.CancellationToken).Plan;
 		var applied = plan.Apply(source);
 
 		var checkedOffsets = 0;
@@ -195,5 +302,21 @@ public sealed class TreeSitterCodeCompressorTests
 		}
 
 		Assert.True(checkedOffsets > 0);
+	}
+
+	private sealed class CountingGrammarLibraryLocator(IGrammarLibraryLocator inner)
+		: IGrammarLibraryLocator
+	{
+		private int _resolveCount;
+
+		public string StrategyName => inner.StrategyName;
+		public int ResolveCount => Volatile.Read(ref _resolveCount);
+		public IReadOnlyList<string> EnumerateLibraries() => inner.EnumerateLibraries();
+
+		public string Resolve(string libraryBaseName)
+		{
+			Interlocked.Increment(ref _resolveCount);
+			return inner.Resolve(libraryBaseName);
+		}
 	}
 }

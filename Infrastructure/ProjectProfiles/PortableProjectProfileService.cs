@@ -205,6 +205,7 @@ public sealed class PortableProjectProfileService
 			GitMode: gitMode,
 			Exclusions: exclusions.OrderBy(static exclusion => exclusion).ToArray(),
 			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
+			CompressCode: document.Selection.CompressCode ?? false,
 			ProfileSource: new ProjectProfileReference(ProjectProfileSourceKind.Portable, fullPath));
 	}
 
@@ -232,7 +233,8 @@ public sealed class PortableProjectProfileService
 					.Select(ProjectSelectionTokens.ToToken)
 					.OrderBy(static value => value, StringComparer.Ordinal)
 					.ToArray(),
-				HideSecrets = selection.HideSecrets == true
+				HideSecrets = selection.HideSecrets == true,
+				CompressCode = selection.CompressCode == true
 			}
 		};
 	}
@@ -302,6 +304,7 @@ public sealed class PortableProjectProfileService
 		public string? GitMode { get; set; }
 		public IReadOnlyList<string> Exclusions { get; set; } = [];
 		public bool? HideSecrets { get; set; }
+		public bool? CompressCode { get; set; }
 
 		[JsonExtensionData]
 		public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }

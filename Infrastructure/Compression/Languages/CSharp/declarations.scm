@@ -17,6 +17,9 @@
 (constructor_declaration            name: (identifier) @name) @declaration
 (destructor_declaration             name: (identifier) @name) @declaration
 (operator_declaration                         ) @declaration
+(conversion_operator_declaration              ) @declaration
+(accessor_declaration                         ) @declaration
+(event_declaration                            ) @declaration
 (event_field_declaration (variable_declaration (variable_declarator (identifier) @name))) @declaration
 (field_declaration       (variable_declaration (variable_declarator (identifier) @name))) @declaration
 (local_function_statement           name: (identifier) @name) @declaration

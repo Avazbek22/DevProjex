@@ -1,0 +1,12 @@
+{
+  "id": "rust",
+  "displayName": "Rust",
+  "extensions": [".rs"],
+  "library": "tree-sitter-rust",
+  "export": "tree_sitter_rust",
+  "queryVersion": 2,
+  "blockPlaceholder": "{ }",
+  "expressionPlaceholder": null,
+  "containerNodeTypes": ["source_file", "declaration_list"],
+  "executableOwnerKinds": ["function_item", "closure_expression"]
+}

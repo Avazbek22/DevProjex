@@ -21,6 +21,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	public const string ConfigurationSha256 = "0CEEB4F9C567F9F80EE05E8E37EEBA4646DF809F69C736A64D5B8B1398EB3E4C";
 	internal static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(250);
 	private const string ResourceSuffix = ".Secrets.Rules.gitleaks-v8.30.1.toml";
+	private static readonly string EmbeddedConfigurationFileName = $"gitleaks-{RulesVersion}.toml";
 	private const string GitleaksAllowSignature = "gitleaks:allow";
 	private const string GenericApiKeyRuleId = "generic-api-key";
 	private const string TwitterBearerPrefix = "AAAAAAAAAAAAAAAAAAAAAA";
@@ -210,6 +211,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		var configuration = _configuration.Value;
 		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+		if (IsEmbeddedConfigurationPath(normalizedPath))
+			return [];
 		if (configuration.GlobalAllowlists.Any(allowlist => allowlist.AllowsWholeFileByPath(normalizedPath)))
 			return [];
 		Span<ulong> candidateRules = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
@@ -284,6 +287,10 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		return findings;
 	}
+
+	private static bool IsEmbeddedConfigurationPath(string normalizedPath) =>
+		normalizedPath.Equals(EmbeddedConfigurationFileName, StringComparison.OrdinalIgnoreCase) ||
+		normalizedPath.EndsWith('/' + EmbeddedConfigurationFileName, StringComparison.OrdinalIgnoreCase);
 
 	private static bool HasGenericApiKeyEvidence(ReadOnlySpan<char> content)
 	{

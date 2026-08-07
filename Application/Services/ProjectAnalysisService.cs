@@ -13,8 +13,6 @@ public sealed class ProjectAnalysisService(
 	IFileContentAnalyzer fileContentAnalyzer,
 	Func<DateTimeOffset>? utcNowProvider = null)
 {
-	private const int MaximumConcurrentContentMetricReads = 4;
-	private const int ContentMetricBatchSize = 1024;
 	private static readonly IReadOnlySet<string> EmptyRootSelection = new HashSet<string>(PathComparer.Default);
 	private static readonly IReadOnlySet<string> EmptyExtensionSelection =
 		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -470,60 +468,10 @@ public sealed class ProjectAnalysisService(
 
 	private async Task<ExportOutputMetrics> CalculateContentMetricsAsync(
 		IReadOnlyList<string>? orderedFilePaths,
-		CancellationToken cancellationToken)
-	{
-		if (orderedFilePaths is null || orderedFilePaths.Count == 0)
-			return ExportOutputMetrics.Empty;
-
-		var parallelOptions = new ParallelOptions
-		{
-			MaxDegreeOfParallelism = Math.Min(
-				MaximumConcurrentContentMetricReads,
-				ScanParallelismPolicy.MaxDegreeOfParallelism),
-			CancellationToken = cancellationToken
-		};
-		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		var batchMetrics = new FileContentMetricsResult?[Math.Min(ContentMetricBatchSize, orderedFilePaths.Count)];
-		for (var batchStart = 0; batchStart < orderedFilePaths.Count; batchStart += batchMetrics.Length)
-		{
-			var batchCount = Math.Min(batchMetrics.Length, orderedFilePaths.Count - batchStart);
-			await Parallel.ForAsync(
-				0,
-				batchCount,
-				parallelOptions,
-				async (batchIndex, token) =>
-				{
-					batchMetrics[batchIndex] = await fileContentAnalyzer
-						.GetClassifiedMetricsAsync(orderedFilePaths[batchStart + batchIndex], token)
-						.ConfigureAwait(false);
-				}).ConfigureAwait(false);
-
-			for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				var result = batchMetrics[batchIndex];
-				var metrics = result?.IsText == true ? result.Metrics : null;
-				if (metrics is null)
-					continue;
-
-				accumulator.AppendFile(new ContentFileMetrics(
-					Path: orderedFilePaths[batchStart + batchIndex],
-					SizeBytes: metrics.SizeBytes,
-					LineCount: metrics.LineCount,
-					CharCount: metrics.CharCount,
-					IsEmpty: metrics.IsEmpty,
-					IsWhitespaceOnly: metrics.IsWhitespaceOnly,
-					IsEstimated: metrics.IsEstimated,
-					CrLfPairCount: metrics.CrLfPairCount,
-					TrailingNewlineChars: metrics.TrailingNewlineChars,
-					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
-			}
-
-			Array.Clear(batchMetrics, 0, batchCount);
-		}
-
-		return accumulator.ToMetrics();
-	}
+		CancellationToken cancellationToken) =>
+		await ProjectContentMetricsCalculator
+			.CalculateAsync(fileContentAnalyzer, orderedFilePaths, cancellationToken)
+			.ConfigureAwait(false);
 
 	private static ProjectTreeSummaryReport CountTree(TreeNodeDescriptor root)
 	{

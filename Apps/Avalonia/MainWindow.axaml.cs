@@ -394,8 +394,9 @@ public partial class MainWindow : Window
 		var compressionEnabled = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
 			.Contains(IgnoreOptionId.CompressCode);
-		if (!compressionEnabled)
-			_codeCompressionSnapshot = null;
+		_codeCompressionSnapshot = compressionEnabled
+			? GetCompressionSnapshotForCurrentSelection()
+			: null;
 		_viewModel.SetCompressionStatus(
 			compressionEnabled ? _codeCompressionSnapshot : null,
 			compressionEnabled);
@@ -404,15 +405,20 @@ public partial class MainWindow : Window
 			.Contains(IgnoreOptionId.HideSecrets);
 		if (!enabled)
 		{
-			CancelAndDispose(ref _secretRedactionCountCts);
-			_secretRedactionSession.Disable();
-			_secretRedactionMatchedCount = null;
-			_secretRedactionCount = null;
-			_secretRedactionScanState = SecretScanState.Disabled;
-			_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
+			var cachedSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
+			_secretRedactionMatchedCount = cachedSnapshot?.DetectedCount;
+			_secretRedactionCount = cachedSnapshot is null ? null : 0;
+			_secretRedactionScanState = cachedSnapshot is null
+				? SecretScanState.Pending
+				: SecretScanState.Completed;
+			_viewModel.SetContentProcessingStatus(
+				_secretRedactionScanState,
+				_secretRedactionMatchedCount,
+				_secretRedactionCount);
 			RelabelIgnoreOptionsWithCurrentCounts();
 			if (_viewModel.IsAnyPreviewVisible)
 				_previewPipeline.ScheduleRefresh(immediate: true);
+			ScheduleSecretRedactionCountRefresh();
 			return;
 		}
 		// Start detector-only initialization before Preview and count pipelines read any
@@ -439,12 +445,7 @@ public partial class MainWindow : Window
 	private void InvalidateSecretRedactionCount()
 	{
 		_secretRedactionSession.InvalidateSnapshots();
-		var enabled = _selectionCoordinator
-			.GetSelectedIgnoreOptionIds()
-			.Contains(IgnoreOptionId.HideSecrets);
-		_secretRedactionScanState = enabled
-			? SecretScanState.Pending
-			: SecretScanState.Disabled;
+		_secretRedactionScanState = SecretScanState.Pending;
 		_viewModel.SetContentProcessingStatus(_secretRedactionScanState);
 		if (_secretRedactionCount is not null)
 			_secretRedactionCount = null;

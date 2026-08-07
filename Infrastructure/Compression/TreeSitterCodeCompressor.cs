@@ -1,4 +1,5 @@
 using DevProjex.Application.Compression;
+using System.Collections.Concurrent;
 using TreeSitter;
 
 namespace DevProjex.Infrastructure.Compression;
@@ -14,7 +15,7 @@ public sealed record CompressionLanguageInfo(
 /// Builds compression plans with tree-sitter. Everything language-specific is data: the grammar,
 /// the queries and the placeholder come from <see cref="CompressionLanguagePack"/>.
 /// </summary>
-public sealed class TreeSitterCodeCompressor : ICodeCompressor
+public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 {
 	/// <summary>
 	/// Parsing cannot be interrupted. tree-sitter 0.26.3 removed ts_parser_set_timeout_micros and
@@ -28,6 +29,8 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor
 	private readonly IGrammarLibraryLocator _locator;
 	private readonly IReadOnlyList<CompressionLanguagePack> _packs;
 	private readonly Dictionary<string, CompressionLanguagePack> _byExtension;
+	private readonly ConcurrentDictionary<string, Lazy<LanguageWorkerPool>> _languagePools = [];
+	private bool _disposed;
 
 	public TreeSitterCodeCompressor(IGrammarLibraryLocator locator)
 		: this(locator, CompressionLanguagePack.LoadAll())
@@ -63,53 +66,76 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor
 	public bool IsSupported(string relativePath) =>
 		_byExtension.ContainsKey(Path.GetExtension(relativePath));
 
-	public ICodeCompressionScope CreateScope(string projectRoot) =>
-		new TreeSitterCompressionScope(_locator, _byExtension, TransformIdentity);
+	public ICodeCompressionScope CreateScope(string projectRoot)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		return new TreeSitterCompressionScope(_byExtension, TransformIdentity, GetLanguagePool);
+	}
+
+	private LanguageWorkerPool GetLanguagePool(CompressionLanguagePack pack) =>
+		_languagePools.GetOrAdd(
+			pack.Id,
+			_ => new Lazy<LanguageWorkerPool>(
+				() => new LanguageWorkerPool(_locator, pack),
+				LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+
+	public void Dispose()
+	{
+		if (_disposed)
+			return;
+		_disposed = true;
+		foreach (var pool in _languagePools.Values)
+		{
+			if (pool.IsValueCreated)
+				pool.Value.Dispose();
+		}
+		_languagePools.Clear();
+	}
 }
 
 /// <summary>
-/// One output operation. Grammars and compiled queries are loaded lazily, only for languages that
-/// actually appear, and cached for the scope's lifetime: constructing a Language performs a fresh
-/// native load every time and never releases the module handle.
+/// One output operation. It borrows process-lifetime parser workers lazily, only for languages that
+/// actually appear; the scope itself owns no native parser and is safe for parallel file analysis.
 /// </summary>
 internal sealed class TreeSitterCompressionScope(
-	IGrammarLibraryLocator locator,
 	IReadOnlyDictionary<string, CompressionLanguagePack> byExtension,
-	string transformIdentity) : ICodeCompressionScope
+	string transformIdentity,
+	Func<CompressionLanguagePack, LanguageWorkerPool> languagePoolProvider) : ICodeCompressionScope
 {
-	private readonly Dictionary<string, LoadedLanguage> _loaded = new(StringComparer.Ordinal);
 	private bool _disposed;
 
-	public CodeCompressionPlan Plan(
+	public CodeCompressionAnalysis Analyze(
 		string fullPath,
 		string relativePath,
-		ReadOnlySpan<char> content,
+		string content,
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 
 		if (!byExtension.TryGetValue(Path.GetExtension(relativePath), out var pack))
-			return Unchanged(relativePath, "unknown", CodeCompressionOutcome.UnchangedUnsupportedLanguage, content.Length);
+			return Refused(relativePath, "unknown", CodeCompressionOutcome.UnchangedUnsupportedLanguage, content.Length);
 
 		if (content.Length > TreeSitterCodeCompressor.MaximumParsableCharacters)
-			return Unchanged(relativePath, pack.Id, CodeCompressionOutcome.UnchangedTooLarge, content.Length);
+			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedTooLarge, content.Length);
 
 		cancellationToken.ThrowIfCancellationRequested();
 
-		LoadedLanguage language;
+		LanguageWorkerLease lease;
 		try
 		{
-			language = Load(pack);
+			lease = languagePoolProvider(pack).Rent(cancellationToken);
 		}
 		catch (Exception exception) when (exception is DllNotFoundException or InvalidOperationException or IOException)
 		{
-			return Unchanged(relativePath, pack.Id, CodeCompressionOutcome.UnchangedParseFailed, content.Length);
+			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedParseFailed, content.Length);
 		}
 
-		var source = content.ToString();
+		using var languageLease = lease;
+		var language = languageLease.Worker;
+		var source = content;
 		using var original = language.Parser.Parse(source);
 		if (original is null)
-			return Unchanged(relativePath, pack.Id, CodeCompressionOutcome.UnchangedParseFailed, content.Length);
+			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedParseFailed, content.Length);
 
 		var edits = CollectEdits(pack, language, original, source, cancellationToken);
 		CodeCompressionPlan plan;
@@ -122,16 +148,18 @@ internal sealed class TreeSitterCompressionScope(
 			// A query that captures overlapping or out-of-range spans is a defect in the language
 			// pack, but Plan is contracted never to throw for a refusal: a malformed pattern must
 			// leave one file uncompressed, not take down the export.
-			return Unchanged(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
+			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
 		}
 
 		if (plan.Outcome != CodeCompressionOutcome.Compressed)
-			return plan;
+			return new CodeCompressionAnalysis(plan, null);
 
 		var applied = plan.Apply(source);
 		using var compressed = language.Parser.Parse(applied.Text);
 		if (compressed is null)
-			return plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected);
+			return new CodeCompressionAnalysis(
+				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
+				null);
 
 		var verdict = CodeStructureGate.Evaluate(
 			ReadDeclarations(language, original.RootNode, ContentTransformMap.Identity),
@@ -142,12 +170,18 @@ internal sealed class TreeSitterCompressionScope(
 			pack.ExecutableOwnerKinds);
 
 		return verdict == CodeStructureGateVerdict.Accepted
-			? plan
-			: plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected);
+			? new CodeCompressionAnalysis(plan, applied)
+			: new CodeCompressionAnalysis(
+				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
+				null);
 	}
 
-	private CodeCompressionPlan Unchanged(string relativePath, string languageId, CodeCompressionOutcome outcome, int length) =>
-		CodeCompressionPlan.Unchanged(relativePath, languageId, outcome, length, transformIdentity);
+	private CodeCompressionAnalysis Refused(
+		string relativePath,
+		string languageId,
+		CodeCompressionOutcome outcome,
+		int length) =>
+		new(CodeCompressionPlan.Unchanged(relativePath, languageId, outcome, length, transformIdentity), null);
 
 	private static List<CodeCompressionEdit> CollectEdits(
 		CompressionLanguagePack pack,
@@ -242,9 +276,9 @@ internal sealed class TreeSitterCompressionScope(
 	}
 
 	/// <summary>
-	/// A placeholder must be valid syntax, not a bare ellipsis: the reverse-parse gate refuses
-	/// anything that does not parse, and a bare "…" turned a measured 872 of 872 compressible C#
-	/// files into refusals - a feature that compresses nothing while looking conservative.
+	/// A placeholder must be valid syntax: the reverse-parse gate refuses anything that does not
+	/// parse. Empty blocks are deliberately neutral and avoid exposing implementation-style comment
+	/// markers in the generated context. Python uses its valid ellipsis statement instead.
 	/// A body that only kept its docstring already ends where the placeholder would go, so it needs
 	/// nothing appended.
 	/// </summary>
@@ -346,50 +380,170 @@ internal sealed class TreeSitterCompressionScope(
 		return defects;
 	}
 
-	private LoadedLanguage Load(CompressionLanguagePack pack)
-	{
-		if (_loaded.TryGetValue(pack.Id, out var existing))
-			return existing;
+	public void Dispose() => _disposed = true;
+}
 
-		var language = new Language(locator.Resolve(pack.Library), pack.Export);
-		var loaded = new LoadedLanguage(
-			language,
-			new Parser(language),
-			new Query(language, pack.BodiesQuery),
-			new Query(language, pack.DeclarationsQuery),
-			pack.DocstringsQuery is null ? null : new Query(language, pack.DocstringsQuery));
-		_loaded.Add(pack.Id, loaded);
-		return loaded;
+/// <summary>
+/// Bounded process-lifetime parser pool. Grammar verification and materialization happen once;
+/// native parser state is never entered concurrently.
+/// </summary>
+internal sealed class LanguageWorkerPool : IDisposable
+{
+	private const int MaximumWorkers = 8;
+	private readonly CompressionLanguagePack _pack;
+	private readonly Lazy<string> _libraryPath;
+	private readonly ConcurrentBag<LoadedLanguage> _available = [];
+	private readonly SemaphoreSlim _capacity;
+	private readonly object _sync = new();
+	private bool _disposed;
+
+	public LanguageWorkerPool(IGrammarLibraryLocator locator, CompressionLanguagePack pack)
+	{
+		_pack = pack;
+		_libraryPath = new Lazy<string>(
+			() => locator.Resolve(pack.Library),
+			LazyThreadSafetyMode.ExecutionAndPublication);
+		var workerCount = Math.Clamp(Environment.ProcessorCount, 1, MaximumWorkers);
+		_capacity = new SemaphoreSlim(workerCount, workerCount);
+	}
+
+	public LanguageWorkerLease Rent(CancellationToken cancellationToken)
+	{
+		_capacity.Wait(cancellationToken);
+		LoadedLanguage? worker = null;
+		try
+		{
+			lock (_sync)
+			{
+				ObjectDisposedException.ThrowIf(_disposed, this);
+				_available.TryTake(out worker);
+			}
+
+			worker ??= LoadedLanguage.Create(_libraryPath.Value, _pack);
+			lock (_sync)
+				ObjectDisposedException.ThrowIf(_disposed, this);
+			return new LanguageWorkerLease(this, worker);
+		}
+		catch
+		{
+			worker?.Dispose();
+			ReleaseCapacity();
+			throw;
+		}
+	}
+
+	internal void Return(LoadedLanguage worker)
+	{
+		var dispose = false;
+		lock (_sync)
+		{
+			if (_disposed)
+				dispose = true;
+			else
+				_available.Add(worker);
+		}
+
+		if (dispose)
+			worker.Dispose();
+		else
+			ReleaseCapacity();
 	}
 
 	public void Dispose()
 	{
-		if (_disposed)
-			return;
-		_disposed = true;
-		foreach (var loaded in _loaded.Values)
-			loaded.Dispose();
-		_loaded.Clear();
+		lock (_sync)
+		{
+			if (_disposed)
+				return;
+			_disposed = true;
+			while (_available.TryTake(out var worker))
+				worker.Dispose();
+		}
+		_capacity.Dispose();
 	}
 
-	/// <summary>
-	/// Disposal order is deliberate: queries and the parser go before the language they were built
-	/// from, and no tree outlives this call.
-	/// </summary>
-	private sealed record LoadedLanguage(
-		Language Language,
-		Parser Parser,
-		Query Bodies,
-		Query Declarations,
-		Query? Docstrings) : IDisposable
+	private void ReleaseCapacity()
 	{
-		public void Dispose()
+		try
 		{
-			Docstrings?.Dispose();
-			Declarations.Dispose();
-			Bodies.Dispose();
-			Parser.Dispose();
-			Language.Dispose();
+			_capacity.Release();
 		}
+		catch (ObjectDisposedException)
+		{
+			// Disposal stops new rents. A worker already leased is disposed by Return instead.
+		}
+	}
+}
+
+internal sealed class LanguageWorkerLease(
+	LanguageWorkerPool owner,
+	LoadedLanguage worker) : IDisposable
+{
+	private LanguageWorkerPool? _owner = owner;
+
+	public LoadedLanguage Worker { get; } = worker;
+
+	public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Return(Worker);
+}
+
+/// <summary>One non-thread-safe native parser and its compiled queries.</summary>
+internal sealed record LoadedLanguage(
+	Language Language,
+	Parser Parser,
+	Query Bodies,
+	Query Declarations,
+	Query? Docstrings) : IDisposable
+{
+	public static LoadedLanguage Create(string libraryPath, CompressionLanguagePack pack)
+	{
+		var language = new Language(libraryPath, pack.Export);
+		try
+		{
+			var parser = new Parser(language);
+			try
+			{
+				var bodies = new Query(language, pack.BodiesQuery);
+				try
+				{
+					var declarations = new Query(language, pack.DeclarationsQuery);
+					try
+					{
+						var docstrings = pack.DocstringsQuery is null
+							? null
+							: new Query(language, pack.DocstringsQuery);
+						return new LoadedLanguage(language, parser, bodies, declarations, docstrings);
+					}
+					catch
+					{
+						declarations.Dispose();
+						throw;
+					}
+				}
+				catch
+				{
+					bodies.Dispose();
+					throw;
+				}
+			}
+			catch
+			{
+				parser.Dispose();
+				throw;
+			}
+		}
+		catch
+		{
+			language.Dispose();
+			throw;
+		}
+	}
+
+	public void Dispose()
+	{
+		Docstrings?.Dispose();
+		Declarations.Dispose();
+		Bodies.Dispose();
+		Parser.Dispose();
+		Language.Dispose();
 	}
 }

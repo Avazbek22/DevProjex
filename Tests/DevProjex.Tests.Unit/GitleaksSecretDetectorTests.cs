@@ -24,6 +24,30 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void Detect_BundledConfigurationPath_DoesNotReportRuleExamplesAsSecrets()
+	{
+		var ruleExample = "bedrock-api-" + "key-YmVkcm9jay5hbWF6b25hd3MuY29t";
+
+		Assert.Empty(Detector.Detect(
+			"Infrastructure/Secrets/Rules/gitleaks-v8.30.1.toml",
+			ruleExample,
+			TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public void EmbeddedCorpus_StoresPayloadsEncodedAtRest()
+	{
+		var corpus = ReadUpstreamCorpusText();
+
+		Assert.DoesNotContain("\"content\":", corpus, StringComparison.Ordinal);
+		Assert.Contains("\"contentBase64\":", corpus, StringComparison.Ordinal);
+		Assert.Empty(Detector.Detect(
+			"Tests/Fixtures/Secrets/gitleaks-v8.30.1-corpus.jsonl",
+			corpus,
+			TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public void WarmUp_ExercisesEverySelectedColdStartRule()
 	{
 		var detector = new GitleaksSecretDetector();
@@ -233,13 +257,7 @@ public sealed class GitleaksSecretDetectorTests
 
 	private static IReadOnlyList<UpstreamCorpusCase> LoadUpstreamCorpus()
 	{
-		var assembly = typeof(GitleaksSecretDetectorTests).Assembly;
-		var resourceName = Assert.Single(
-			assembly.GetManifestResourceNames(),
-			name => name.EndsWith(CorpusResourceSuffix, StringComparison.Ordinal));
-		using var stream = assembly.GetManifestResourceStream(resourceName) ??
-		                   throw new InvalidOperationException("The embedded Gitleaks corpus is unavailable.");
-		using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+		using var reader = new StringReader(ReadUpstreamCorpusText());
 		var cases = new List<UpstreamCorpusCase>();
 		while (reader.ReadLine() is { } line)
 		{
@@ -249,11 +267,37 @@ public sealed class GitleaksSecretDetectorTests
 		return cases;
 	}
 
+	private static string ReadUpstreamCorpusText()
+	{
+		var assembly = typeof(GitleaksSecretDetectorTests).Assembly;
+		var resourceName = Assert.Single(
+			assembly.GetManifestResourceNames(),
+			name => name.EndsWith(CorpusResourceSuffix, StringComparison.Ordinal));
+		using var stream = assembly.GetManifestResourceStream(resourceName) ??
+		                   throw new InvalidOperationException("The embedded Gitleaks corpus is unavailable.");
+		using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+		return reader.ReadToEnd();
+	}
+
 	private sealed record UpstreamCorpusCase(
 		string RuleId,
 		string Path,
-		string Content,
-		bool ShouldMatch);
+		string? ContentBase64,
+		string[]? ContentBase64Parts,
+		bool ShouldMatch)
+	{
+		public string Content
+		{
+			get
+			{
+				var encoded = ContentBase64 ??
+				              (ContentBase64Parts is { Length: > 0 }
+					              ? string.Concat(ContentBase64Parts)
+					              : throw new InvalidOperationException("The corpus case has no encoded content."));
+				return Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
+			}
+		}
+	}
 }
 
 public sealed class SecretRedactionSessionTests

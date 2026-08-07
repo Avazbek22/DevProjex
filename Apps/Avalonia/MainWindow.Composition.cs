@@ -18,21 +18,26 @@ public partial class MainWindow
 		object? sender,
 		SecretRedactionSnapshotPublishedEventArgs eventArgs)
 	{
-		Dispatcher.UIThread.Post(() =>
-		{
-			var snapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
-			if (snapshot is null || snapshot.SelectionKey != eventArgs.Snapshot.SelectionKey)
-				return;
+		Dispatcher.UIThread.Post(() => TryApplySecretRedactionSnapshot(eventArgs.Snapshot));
+	}
 
-			_secretRedactionMatchedCount = snapshot.DetectedCount;
-			_secretRedactionCount = snapshot.RedactedCount;
-			_secretRedactionScanState = SecretScanState.Completed;
-			_viewModel.SetContentProcessingStatus(
-				SecretScanState.Completed,
-				snapshot.DetectedCount,
-				snapshot.RedactedCount);
-			RelabelIgnoreOptionsWithCurrentCounts();
-		});
+	private void TryApplySecretRedactionSnapshot(SecretRedactionSnapshot publishedSnapshot)
+	{
+		var snapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
+		if (snapshot is null || snapshot.SelectionKey != publishedSnapshot.SelectionKey)
+			return;
+
+		var enabled = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.HideSecrets);
+		_secretRedactionMatchedCount = snapshot.DetectedCount;
+		_secretRedactionCount = enabled ? snapshot.RedactedCount : 0;
+		_secretRedactionScanState = SecretScanState.Completed;
+		_viewModel.SetContentProcessingStatus(
+			SecretScanState.Completed,
+			snapshot.DetectedCount,
+			_secretRedactionCount);
+		RelabelIgnoreOptionsWithCurrentCounts();
 	}
 
 	/// <summary>
@@ -91,8 +96,7 @@ public partial class MainWindow
 	{
 		if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
 		    _currentTree is null ||
-		    string.IsNullOrWhiteSpace(_currentPath) ||
-		    !_selectionCoordinator.GetSelectedIgnoreOptionIds().Contains(IgnoreOptionId.HideSecrets))
+		    string.IsNullOrWhiteSpace(_currentPath))
 		{
 			return null;
 		}
@@ -149,13 +153,15 @@ public partial class MainWindow
 	{
 		var refreshVersion = Interlocked.Increment(ref _secretRedactionCountRefreshVersion);
 		CancelAndDispose(ref _secretRedactionCountCts);
+		var hideSecretsEnabled = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.HideSecrets);
 
 		if (_secretRedactionCount is not null ||
-		    _viewModel.IsAnyPreviewVisible ||
+		    (_viewModel.IsAnyPreviewVisible && hideSecretsEnabled) ||
 		    _windowLifetimeCts is not { IsCancellationRequested: false } ||
 		    _currentTree is null ||
-		    string.IsNullOrWhiteSpace(_currentPath) ||
-		    !_selectionCoordinator.GetSelectedIgnoreOptionIds().Contains(IgnoreOptionId.HideSecrets))
+		    string.IsNullOrWhiteSpace(_currentPath))
 		{
 			return;
 		}
@@ -191,9 +197,20 @@ public partial class MainWindow
 	{
 		try
 		{
-			await _secretRedactionPreparer
+			var snapshot = await _secretRedactionPreparer
 				.AnalyzeAsync(context, files, countCts.Token)
 				.ConfigureAwait(false);
+			if (refreshVersion != Volatile.Read(ref _secretRedactionCountRefreshVersion) ||
+			    _windowLifetimeCts is not { IsCancellationRequested: false })
+			{
+				return;
+			}
+
+			await Dispatcher.UIThread.InvokeAsync(() =>
+			{
+				if (refreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
+					TryApplySecretRedactionSnapshot(snapshot);
+			});
 		}
 		catch (OperationCanceledException) when (countCts.IsCancellationRequested)
 		{
@@ -850,9 +867,12 @@ public partial class MainWindow
                     _viewModel.SelectedPreviewContentMode,
                     _viewModel.IsAnyPreviewVisible);
             }
-            else if (args.PropertyName == nameof(MainWindowViewModel.IsAnyPreviewVisible))
-            {
-				if (_viewModel.IsAnyPreviewVisible)
+			else if (args.PropertyName == nameof(MainWindowViewModel.IsAnyPreviewVisible))
+			{
+				var hideSecretsEnabled = _selectionCoordinator
+					.GetSelectedIgnoreOptionIds()
+					.Contains(IgnoreOptionId.HideSecrets);
+				if (_viewModel.IsAnyPreviewVisible && hideSecretsEnabled)
 					CancelAndDispose(ref _secretRedactionCountCts);
 				else
 					ScheduleSecretRedactionCountRefresh();

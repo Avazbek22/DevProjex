@@ -1,0 +1,12 @@
+{
+  "id": "java",
+  "displayName": "Java",
+  "extensions": [".java"],
+  "library": "tree-sitter-java",
+  "export": "tree_sitter_java",
+  "queryVersion": 2,
+  "blockPlaceholder": "{ }",
+  "expressionPlaceholder": null,
+  "containerNodeTypes": ["program", "class_body", "interface_body", "enum_body", "record_declaration_body"],
+  "executableOwnerKinds": ["method_declaration", "constructor_declaration", "lambda_expression"]
+}

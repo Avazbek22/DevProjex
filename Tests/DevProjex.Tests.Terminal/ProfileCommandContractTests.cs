@@ -24,6 +24,7 @@ public sealed class ProfileCommandContractTests
 			static value => value.GetString() == "smart-ignore");
 		Assert.Equal(JsonValueKind.Null, selection.GetProperty("roots").ValueKind);
 		Assert.Equal(JsonValueKind.Null, selection.GetProperty("extensions").ValueKind);
+		Assert.False(selection.GetProperty("compressCode").GetBoolean());
 	}
 
 	[Fact]
@@ -94,7 +95,8 @@ public sealed class ProfileCommandContractTests
 			    "extensions": [".cs"],
 			    "selectedPaths": ["src"],
 			    "gitMode": "none",
-			    "exclusions": []
+			    "exclusions": [],
+			    "compressCode": true
 			  }
 			}
 			""");
@@ -110,6 +112,7 @@ public sealed class ProfileCommandContractTests
 		var selection = document.RootElement.GetProperty("selection");
 		Assert.Equal("none", selection.GetProperty("gitMode").GetString());
 		Assert.Empty(selection.GetProperty("exclusions").EnumerateArray());
+		Assert.True(selection.GetProperty("compressCode").GetBoolean());
 		Assert.Equal([".cs"], selection.GetProperty("extensions")
 			.EnumerateArray().Select(static value => value.GetString()));
 		Assert.Equal(["src"], selection.GetProperty("selectedPaths")

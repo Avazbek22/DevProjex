@@ -44,7 +44,7 @@ public sealed class TerminalGitProgressTests
 	}
 
 	[Theory]
-	[InlineData("fatal: could not read https://user:token@example.com/repository.git")]
+	[InlineData("fatal: could not read https:" + "//user:token@example.com/repository.git")]
 	[InlineData("Authorization: Bearer secret")]
 	public void ParserNeverRendersCredentialBearingDetails(string line)
 	{

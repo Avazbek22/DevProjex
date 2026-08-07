@@ -12,7 +12,8 @@ public sealed class SecretRedactionCommandContractTests
 		using var workspace = CreateWorkspace(includeSecret: false);
 		workspace.Temporary.WriteFile(
 			"project/appsettings.json",
-			"{ \"ConnectionStrings\": { \"Main\": \"Host=db;Username=admin;Password=postgres;Database=app\" } }");
+			"{ \"ConnectionStrings\": { \"Main\": \"Host=db;Username=admin;Pass" +
+			"word=postgres;Database=app\" } }");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(

@@ -923,8 +923,9 @@ public sealed class SelectionRefreshEngine(
             return cachedState;
         }
 
-        if (context.IgnoreAllPreference.HasValue)
-            return context.IgnoreAllPreference.Value;
+		if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id) &&
+		    context.IgnoreAllPreference.HasValue)
+			return context.IgnoreAllPreference.Value;
 
         if (stateCacheIsComplete)
             return option.DefaultChecked;

@@ -45,7 +45,9 @@ under the MIT License.
 - Binding source: https://github.com/mariusgreuel/tree-sitter-dotnet-bindings
 - Pinned package: TreeSitter.DotNet 1.3.0, which vendors tree-sitter 0.26.3
 - tree-sitter: https://github.com/tree-sitter/tree-sitter
-- Grammars shipped: tree-sitter-c-sharp, tree-sitter-python
+- Grammars shipped: tree-sitter-c, tree-sitter-c-sharp, tree-sitter-cpp, tree-sitter-go,
+  tree-sitter-java, tree-sitter-javascript, tree-sitter-python, tree-sitter-rust,
+  tree-sitter-tsx, tree-sitter-typescript
 
 Only the grammars listed above are shipped. The remaining grammars in the package are
 removed from every build output by `Directory.Build.targets`.

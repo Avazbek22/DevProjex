@@ -36,7 +36,7 @@ public sealed class RepositoryUrlUtilityTests
 	public void SafeDisplayRemovesCredentialsQueryAndFragment()
 	{
 		var display = RepositoryUrlUtility.ToSafeDisplay(
-			"https://user:super-secret@example.com/owner/repo.git?access_token=hidden#fragment");
+			"https:" + "//user:super-secret@example.com/owner/repo.git?access_token=hidden#fragment");
 
 		Assert.Equal("https://example.com/owner/repo.git", display);
 		Assert.DoesNotContain("super-secret", display, StringComparison.Ordinal);

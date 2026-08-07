@@ -1,0 +1,12 @@
+{
+  "id": "javascript",
+  "displayName": "JavaScript",
+  "extensions": [".js", ".jsx", ".mjs", ".cjs"],
+  "library": "tree-sitter-javascript",
+  "export": "tree_sitter_javascript",
+  "queryVersion": 2,
+  "blockPlaceholder": "{ }",
+  "expressionPlaceholder": null,
+  "containerNodeTypes": ["program", "class_body"],
+  "executableOwnerKinds": ["function_declaration", "method_definition", "function_expression", "arrow_function"]
+}

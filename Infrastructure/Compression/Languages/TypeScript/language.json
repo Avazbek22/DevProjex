@@ -1,0 +1,12 @@
+{
+  "id": "typescript",
+  "displayName": "TypeScript",
+  "extensions": [".ts", ".mts", ".cts"],
+  "library": "tree-sitter-typescript",
+  "export": "tree_sitter_typescript",
+  "queryVersion": 2,
+  "blockPlaceholder": "{ }",
+  "expressionPlaceholder": null,
+  "containerNodeTypes": ["program", "class_body", "interface_body"],
+  "executableOwnerKinds": ["function_declaration", "method_definition", "function_expression", "arrow_function"]
+}

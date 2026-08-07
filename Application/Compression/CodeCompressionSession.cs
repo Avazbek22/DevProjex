@@ -1,3 +1,8 @@
+using System.Buffers.Binary;
+using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+
 namespace DevProjex.Application.Compression;
 
 /// <summary>How one file fared, in a shape the UI can explain without leaking internal codes.</summary>
@@ -37,7 +42,10 @@ public sealed record CodeCompressionSnapshot(
 /// </summary>
 public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDisposable
 {
-	private readonly Dictionary<string, CachedPlan> _cache = new(StringComparer.Ordinal);
+	private const int MaximumCachedPlans = 4096;
+	private readonly Dictionary<CodeCompressionCacheKey, LinkedListNode<CachedPlan>> _cache = [];
+	private readonly LinkedList<CachedPlan> _cacheRecency = [];
+	private readonly ConcurrentDictionary<InFlightCompressionKey, Lazy<CodeCompressionAnalysis>> _inFlight = [];
 	private readonly object _sync = new();
 	private CodeCompressionSnapshot _snapshot = CodeCompressionSnapshot.Empty;
 	private bool _disposed;
@@ -60,34 +68,88 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	public CodeCompressionScope BeginOutput(string projectRoot, IReadOnlyList<string> orderedFilePaths)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
-		return new CodeCompressionScope(this, compressor.CreateScope(projectRoot), BuildSelectionKey(projectRoot, orderedFilePaths));
+		return new CodeCompressionScope(
+			this,
+			compressor.CreateScope(projectRoot),
+			BuildSelectionKey(projectRoot, orderedFilePaths),
+			orderedFilePaths);
 	}
 
-	internal CodeCompressionPlan GetOrCreatePlan(
+	internal CodeCompressionExecution Transform(
 		ICodeCompressionScope scope,
 		string fullPath,
 		string relativePath,
 		string content,
 		CancellationToken cancellationToken)
 	{
-		// Keyed on the content itself rather than on file metadata: the same bytes always produce
-		// the same plan, and a stat-based key would serve a stale plan after an in-place edit.
-		var key = $"{relativePath}\0{content.Length}\0{content.GetHashCode(StringComparison.Ordinal)}\0{compressor.TransformIdentity}";
+		cancellationToken.ThrowIfCancellationRequested();
+		var key = CodeCompressionCacheKey.Create(
+			relativePath,
+			content,
+			compressor.TransformIdentity);
+		if (TryGetCachedPlan(key, out var cached))
+			return new CodeCompressionExecution(cached, cached.Apply(content));
+
+		// Sharing is deliberately scoped to one output operation. Different operations own different
+		// cancellation tokens; allowing one canceled preview to fail a simultaneous export would make
+		// the cache an observable source of cross-surface coupling.
+		var inFlightKey = new InFlightCompressionKey(key, scope);
+		var candidate = new Lazy<CodeCompressionAnalysis>(
+			() => scope.Analyze(fullPath, relativePath, content, cancellationToken),
+			LazyThreadSafetyMode.ExecutionAndPublication);
+		var pending = _inFlight.GetOrAdd(inFlightKey, candidate);
+		try
+		{
+			var analysis = pending.Value;
+			cancellationToken.ThrowIfCancellationRequested();
+			CachePlan(key, analysis.Plan);
+			return new CodeCompressionExecution(analysis.Plan, analysis.GetResult(content));
+		}
+		finally
+		{
+			if (_inFlight.TryGetValue(inFlightKey, out var current) && ReferenceEquals(current, pending))
+				_inFlight.TryRemove(inFlightKey, out _);
+		}
+	}
+
+	private bool TryGetCachedPlan(CodeCompressionCacheKey key, out CodeCompressionPlan plan)
+	{
 		lock (_sync)
 		{
-			if (_cache.TryGetValue(key, out var cached) && cached.Length == content.Length)
-				return cached.Plan;
-		}
+			if (!_cache.TryGetValue(key, out var node))
+			{
+				plan = null!;
+				return false;
+			}
 
-		var plan = scope.Plan(fullPath, relativePath, content, cancellationToken);
+			_cacheRecency.Remove(node);
+			_cacheRecency.AddFirst(node);
+			plan = node.Value.Plan;
+			return true;
+		}
+	}
+
+	private void CachePlan(CodeCompressionCacheKey key, CodeCompressionPlan plan)
+	{
 		lock (_sync)
 		{
-			if (_cache.Count > 4096)
-				_cache.Clear();
-			_cache[key] = new CachedPlan(plan, content.Length);
-		}
+			if (_cache.TryGetValue(key, out var existing))
+			{
+				_cacheRecency.Remove(existing);
+				existing.Value = new CachedPlan(key, plan);
+				_cacheRecency.AddFirst(existing);
+				return;
+			}
 
-		return plan;
+			var node = _cacheRecency.AddFirst(new CachedPlan(key, plan));
+			_cache.Add(key, node);
+			while (_cache.Count > MaximumCachedPlans)
+			{
+				var leastRecent = _cacheRecency.Last!;
+				_cacheRecency.RemoveLast();
+				_cache.Remove(leastRecent.Value.Key);
+			}
+		}
 	}
 
 	internal void Publish(CodeCompressionSnapshot snapshot)
@@ -103,8 +165,10 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		lock (_sync)
 		{
 			_cache.Clear();
+			_cacheRecency.Clear();
 			_snapshot = CodeCompressionSnapshot.Empty;
 		}
+		_inFlight.Clear();
 	}
 
 	public void Dispose()
@@ -113,12 +177,55 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			return;
 		_disposed = true;
 		Reset();
+		if (compressor is IDisposable disposable)
+			disposable.Dispose();
 	}
 
-	public static string BuildSelectionKey(string projectRoot, IReadOnlyList<string> orderedFilePaths) =>
-		$"{projectRoot}\0{orderedFilePaths.Count}\0{string.Join("\0", orderedFilePaths).GetHashCode(StringComparison.Ordinal)}";
+	public static string BuildSelectionKey(string projectRoot, IReadOnlyList<string> orderedFilePaths)
+	{
+		var builder = new StringBuilder(projectRoot.Length + orderedFilePaths.Sum(static path => path.Length + 12));
+		AppendLengthPrefixed(builder, projectRoot);
+		builder.Append(orderedFilePaths.Count).Append(':');
+		foreach (var path in orderedFilePaths)
+			AppendLengthPrefixed(builder, path);
 
-	private sealed record CachedPlan(CodeCompressionPlan Plan, int Length);
+		return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
+	}
+
+	private static void AppendLengthPrefixed(StringBuilder builder, string value) =>
+		builder.Append(value.Length).Append(':').Append(value);
+
+	private sealed record CachedPlan(CodeCompressionCacheKey Key, CodeCompressionPlan Plan);
+	private readonly record struct InFlightCompressionKey(
+		CodeCompressionCacheKey CacheKey,
+		ICodeCompressionScope Scope);
+
+	private readonly record struct CodeCompressionCacheKey(
+		string RelativePath,
+		int ContentLength,
+		ulong Hash0,
+		ulong Hash1,
+		ulong Hash2,
+		ulong Hash3,
+		string TransformIdentity)
+	{
+		public static CodeCompressionCacheKey Create(
+			string relativePath,
+			string content,
+			string transformIdentity)
+		{
+			Span<byte> hash = stackalloc byte[32];
+			SHA256.HashData(MemoryMarshal.AsBytes(content.AsSpan()), hash);
+			return new CodeCompressionCacheKey(
+				relativePath,
+				content.Length,
+				BinaryPrimitives.ReadUInt64LittleEndian(hash),
+				BinaryPrimitives.ReadUInt64LittleEndian(hash[8..]),
+				BinaryPrimitives.ReadUInt64LittleEndian(hash[16..]),
+				BinaryPrimitives.ReadUInt64LittleEndian(hash[24..]),
+				transformIdentity);
+		}
+	}
 }
 
 /// <summary>
@@ -128,16 +235,17 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 public sealed class CodeCompressionScope(
 	CodeCompressionSession session,
 	ICodeCompressionScope inner,
-	string selectionKey) : IDisposable
+	string selectionKey,
+	IReadOnlyList<string> orderedFilePaths) : IDisposable
 {
-	private readonly List<CodeCompressionFileOutcome> _unchanged = [];
-	// One scope is shared by the parallel metrics scan, and the underlying parser is native state
-	// that cannot be entered twice. Serializing here rather than at each call site also keeps the
-	// accumulated counts from tearing.
-	private readonly Lock _sync = new();
+	private readonly ConcurrentQueue<OrderedCompressionOutcome> _unchanged = [];
+	private readonly IReadOnlyDictionary<string, int> _fileOrder = orderedFilePaths
+		.Select(static (path, index) => (path, index))
+		.ToDictionary(static item => item.path, static item => item.index, PathComparer.Default);
 	private int _compressed;
 	private long _sourceCharacters;
 	private long _transformedCharacters;
+	private int _completed;
 
 	public CodeCompressionResult Transform(
 		string fullPath,
@@ -145,55 +253,54 @@ public sealed class CodeCompressionScope(
 		string content,
 		CancellationToken cancellationToken)
 	{
-		lock (_sync)
-			return TransformCore(fullPath, relativePath, content, cancellationToken);
-	}
-
-	private CodeCompressionResult TransformCore(
-		string fullPath,
-		string relativePath,
-		string content,
-		CancellationToken cancellationToken)
-	{
-		var plan = session.GetOrCreatePlan(inner, fullPath, relativePath, content, cancellationToken);
-		_sourceCharacters += plan.SourceLength;
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var execution = session.Transform(inner, fullPath, relativePath, content, cancellationToken);
+		var plan = execution.Plan;
+		Interlocked.Add(ref _sourceCharacters, plan.SourceLength);
 		if (plan.Outcome == CodeCompressionOutcome.Compressed)
 		{
-			_compressed++;
-			_transformedCharacters += plan.TransformedLength;
-			return plan.Apply(content);
+			Interlocked.Increment(ref _compressed);
+			Interlocked.Add(ref _transformedCharacters, plan.TransformedLength);
+			return execution.Output;
 		}
 
-		_transformedCharacters += plan.SourceLength;
-		_unchanged.Add(new CodeCompressionFileOutcome(
-			relativePath,
-			plan.LanguageId,
-			plan.Outcome,
-			plan.SourceLength,
-			plan.SourceLength));
+		Interlocked.Add(ref _transformedCharacters, plan.SourceLength);
+		_unchanged.Enqueue(new OrderedCompressionOutcome(
+			fullPath,
+			new CodeCompressionFileOutcome(
+				relativePath,
+				plan.LanguageId,
+				plan.Outcome,
+				plan.SourceLength,
+				plan.SourceLength)));
 		return new CodeCompressionResult(content, ContentTransformMap.Identity);
 	}
 
 	public CodeCompressionSnapshot Complete()
 	{
-		lock (_sync)
-			return CompleteCore();
-	}
-
-	private CodeCompressionSnapshot CompleteCore()
-	{
+		if (Interlocked.Exchange(ref _completed, 1) != 0)
+			throw new InvalidOperationException("The compression scope has already completed.");
+		var unchanged = _unchanged
+			.OrderBy(outcome => _fileOrder.GetValueOrDefault(outcome.FullPath, int.MaxValue))
+			.ThenBy(static outcome => outcome.Outcome.RelativePath, PathComparer.Default)
+			.Select(static outcome => outcome.Outcome)
+			.ToArray();
 		var snapshot = new CodeCompressionSnapshot(
 			selectionKey,
-			_compressed,
-			_unchanged.Count,
-			_sourceCharacters,
-			_transformedCharacters,
-			_unchanged.ToArray());
+			Volatile.Read(ref _compressed),
+			unchanged.Length,
+			Interlocked.Read(ref _sourceCharacters),
+			Interlocked.Read(ref _transformedCharacters),
+			unchanged);
 		session.Publish(snapshot);
 		return snapshot;
 	}
 
 	public void Dispose() => inner.Dispose();
+
+	private sealed record OrderedCompressionOutcome(
+		string FullPath,
+		CodeCompressionFileOutcome Outcome);
 }
 
 /// <summary>

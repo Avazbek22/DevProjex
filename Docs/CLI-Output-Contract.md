@@ -56,6 +56,12 @@ When Hide Secrets is enabled, analysis adds a top-level `redaction` object with
 `matchedCount`, `redactedCount`, and a non-safety `notice`. Zero means the pinned
 rules matched nothing; it never means that the project is safe.
 
+When code compression is enabled, analysis content metrics are calculated from
+the transformed text and the document adds a top-level `compression` object with
+`compressedFiles`, `unchangedFiles`, `sourceCharacters`, and
+`transformedCharacters`. Inventory and source byte size still describe the selected
+project files, not a materialized export container.
+
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
 
@@ -143,6 +149,10 @@ The readiness line is the requested dry-run result and remains visible at
 A project-copy dry run with Hide Secrets enabled also states that detected text
 will be changed, binary files will remain unchanged, and the result may not build
 or run. This warning does not create or scan an output artifact.
+
+With code compression enabled, context, folder, and ZIP exports all consume the
+same validated transformed snapshot. Unsupported or rejected source files remain
+complete; project source files are never modified.
 
 ## Errors
 

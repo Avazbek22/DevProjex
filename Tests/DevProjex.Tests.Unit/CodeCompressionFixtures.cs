@@ -103,4 +103,83 @@ internal static class CodeCompressionFixtures
 
 	/// <summary>Python source with the escaped triple quotes turned back into real ones.</summary>
 	public static string PythonSource => Python.Replace("\\\"\\\"\\\"", "\"\"\"", StringComparison.Ordinal);
+
+	public const string C = """
+		int add(int left, int right) {
+		    int total = left + right;
+		    return total;
+		}
+		""";
+
+	public const string Cpp = """
+		class Calculator {
+		public:
+		    int add(int left, int right) {
+		        int total = left + right;
+		        return total;
+		    }
+		};
+		""";
+
+	public const string Java = """
+		class Calculator {
+		    Calculator() {
+		        System.out.println("created");
+		    }
+
+		    int add(int left, int right) {
+		        int total = left + right;
+		        return total;
+		    }
+		}
+		""";
+
+	public const string JavaScript = """
+		function add(left, right) {
+		    const total = left + right;
+		    return total;
+		}
+
+		class Calculator {
+		    multiply(left, right) {
+		        return left * right;
+		    }
+		}
+		""";
+
+	public const string TypeScript = """
+		export function add(left: number, right: number): number {
+		    const total = left + right;
+		    return total;
+		}
+
+		class Calculator {
+		    multiply(left: number, right: number): number {
+		        return left * right;
+		    }
+		}
+		""";
+
+	public const string Tsx = """
+		export function Widget({ name }: { name: string }) {
+		    const label = name.toUpperCase();
+		    return <section>{label}</section>;
+		}
+		""";
+
+	public const string Go = """
+		package sample
+
+		func add(left int, right int) int {
+			total := left + right
+			return total
+		}
+		""";
+
+	public const string Rust = """
+		pub fn add(left: i32, right: i32) -> i32 {
+		    let total = left + right;
+		    total
+		}
+		""";
 }

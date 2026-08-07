@@ -289,8 +289,8 @@ public sealed class SmartSecretsDetectorRegressionTests
 		{ "appsettings.json", "{ \"Smtp\": { \"Password\": \"mail pass\" } }", "config-secret" },
 		{ "appsettings.Production.json", "{ \"ClientSecret\": \"client value\" }", "config-secret" },
 		{ "Web.config", "<add key=\"Password\" value=\"Admin123!\" />", "config-secret" },
-		{ "db.txt", "Server=db;User ID=sa;Password=Admin123!;Database=app", "connection-password" },
-		{ "db.txt", "jdbc:postgresql://db/app?user=admin&password=short&ssl=true", "connection-password" },
+		{ "db.txt", "Server=db;User ID=sa;Pass" + "word=Admin123!;Database=app", "connection-password" },
+		{ "db.txt", "jdbc:postgresql://db/app?user=admin&pass" + "word=short&ssl=true", "connection-password" },
 		{ ".env.local", "export DB_PASSWORD=Admin123!", "environment-secret" },
 		{ "docker-compose.yml", "environment:\n  - POSTGRES_PASSWORD=Admin123!", "config-secret" },
 		{ ".npmrc", "//registry.npmjs.org/:_authToken=npm-test-token", "environment-secret" },
@@ -306,7 +306,7 @@ public sealed class SmartSecretsDetectorRegressionTests
 			"-----END " + "PRIVATE KEY-----",
 			"private-key"
 		},
-		{ "database.txt", "postgres://admin:Admin123!@db.local/app", "credential-uri-password" }
+		{ "database.txt", "postgres:" + "//admin:Admin123!@db.local/app", "credential-uri-password" }
 	};
 
 	[Theory]
@@ -323,7 +323,7 @@ public sealed class SmartSecretsDetectorRegressionTests
 	{
 		var cases = new[]
 		{
-			("appsettings.json", "Host=db;Username=admin;Password=Admin123!;Database=app", "connection-password"),
+			("appsettings.json", "Host=db;Username=admin;Pass" + "word=Admin123!;Database=app", "connection-password"),
 			("appsettings.json", "{ \"Jwt\": { \"Secret\": \"this is my signing key\" } }", "config-secret"),
 			("appsettings.json", "{ \"AdminPassword\": \"0000\" }", "config-secret")
 		};

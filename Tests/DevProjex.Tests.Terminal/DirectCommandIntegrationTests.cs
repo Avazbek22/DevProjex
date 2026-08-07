@@ -2,6 +2,21 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class DirectCommandIntegrationTests
 {
+	private const string CompressibleSource = """
+		namespace Sample;
+
+		public sealed class Widget
+		{
+			public int Compute(int left, int right)
+			{
+				var valueThatMustDisappear = left + right;
+				for (var index = 0; index < 8; index++)
+					valueThatMustDisappear += index * left - right;
+				return valueThatMustDisappear;
+			}
+		}
+		""";
+
 	[Fact]
 	public async Task AnalyzeJsonWritesStableMachineDocumentOnlyToStdout()
 	{
@@ -43,6 +58,111 @@ public sealed class DirectCommandIntegrationTests
 			json.RootElement.GetProperty("metrics").GetProperty("bytes").GetInt64());
 		Assert.Empty(environment.StandardError);
 		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task AnalyzeWithCompressionReportsMetricsForTheTransformedContent()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/Widget.cs", CompressibleSource);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+			[
+				"analyze", workspace.Path,
+				"--format", "json",
+				"--compress",
+				"--git-mode", "none",
+				"--exclude", "none"
+			],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var root = document.RootElement;
+		Assert.True(root.GetProperty("selection").GetProperty("compressCode").GetBoolean());
+		var compression = root.GetProperty("compression");
+		Assert.Equal(1, compression.GetProperty("compressedFiles").GetInt32());
+		Assert.True(
+			compression.GetProperty("transformedCharacters").GetInt64() <
+			compression.GetProperty("sourceCharacters").GetInt64());
+		Assert.True(
+			root.GetProperty("metrics").GetProperty("content").GetProperty("chars").GetInt64() <
+			CompressibleSource.Length);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task ContextExportWithCompressionWritesSignaturesInsteadOfMethodBodies()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/Widget.cs", CompressibleSource);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+			[
+				"export", "context", workspace.Path,
+				"--view", "content",
+				"--format", "markdown",
+				"--compress",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", "-"
+			],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("public int Compute(int left, int right)", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("valueThatMustDisappear", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	public async Task ProjectExportWithCompressionWritesTransformedSource(string kind)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Widget.cs", CompressibleSource);
+		var destination = kind == "zip"
+			? Path.Combine(workspace.Path, "compressed.zip")
+			: Path.Combine(workspace.Path, "compressed");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunProjectExportAsync(
+			project,
+			destination,
+			kind,
+			environment,
+			compress: true);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		string exported;
+		if (kind == "zip")
+		{
+			using var archive = System.IO.Compression.ZipFile.OpenRead(destination);
+			var entry = Assert.Single(archive.Entries, static candidate =>
+				candidate.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+			using var reader = new StreamReader(entry.Open());
+			exported = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+		}
+		else
+		{
+			exported = await File.ReadAllTextAsync(
+				Path.Combine(destination, "src", "Widget.cs"),
+				TestContext.Current.CancellationToken);
+		}
+
+		Assert.Contains("public int Compute(int left, int right)", exported, StringComparison.Ordinal);
+		Assert.DoesNotContain("valueThatMustDisappear", exported, StringComparison.Ordinal);
+		Assert.Equal(Path.GetFullPath(destination) + Environment.NewLine, environment.StandardOutput);
 	}
 
 	[Fact]
@@ -361,16 +481,21 @@ public sealed class DirectCommandIntegrationTests
 		string project,
 		string output,
 		string kind,
-		TestTerminalEnvironment environment) =>
-		new TerminalApplication(environment, new TerminalServiceFactory())
-			.RunAsync(
-			[
+		TestTerminalEnvironment environment,
+		bool compress = false)
+	{
+		var arguments = new List<string>
+		{
 				"export", "project", project,
 				"--as", kind,
 				"-o", output,
 				"--git-mode", "none",
 				"--exclude", "none",
 				"--progress", "never"
-			],
-				TestContext.Current.CancellationToken);
+		};
+		if (compress)
+			arguments.Add("--compress");
+		return new TerminalApplication(environment, new TerminalServiceFactory())
+			.RunAsync(arguments, TestContext.Current.CancellationToken);
+	}
 }

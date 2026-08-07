@@ -30,9 +30,8 @@ public interface ICodeCompressor
 }
 
 /// <summary>
-/// A single output operation. Scopes are not thread-safe by themselves: parsers are pooled per
-/// language inside, and callers must follow the same discipline the redaction scope uses — parallel
-/// analysis, serial accumulation.
+/// A single output operation. Implementations must support concurrent analysis: metrics and export
+/// pipelines process independent files in parallel while the scope keeps one coherent operation.
 /// </summary>
 public interface ICodeCompressionScope : IDisposable
 {
@@ -41,9 +40,21 @@ public interface ICodeCompressionScope : IDisposable
 	/// language, a failed parse, a rejected gate or a result that did not shrink all come back as
 	/// an unchanged plan carrying the reason.
 	/// </summary>
-	CodeCompressionPlan Plan(
+	CodeCompressionAnalysis Analyze(
 		string fullPath,
 		string relativePath,
-		ReadOnlySpan<char> content,
+		string content,
 		CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// A validated plan and, on a cache miss, the already materialized text used by the reverse-parse
+/// gate. Reusing that text avoids applying every new plan twice.
+/// </summary>
+public sealed record CodeCompressionAnalysis(
+	CodeCompressionPlan Plan,
+	CodeCompressionResult? ValidatedResult)
+{
+	public CodeCompressionResult GetResult(string source) =>
+		ValidatedResult ?? Plan.Apply(source);
 }

@@ -65,15 +65,19 @@ public static class CodeStructureGate
 		IReadOnlyList<CodeCompressionEdit> edits,
 		IReadOnlySet<string> executableOwnerKinds)
 	{
+		var orderedEdits = edits.Count <= 1
+			? edits
+			: edits.OrderBy(static edit => edit.SourceStart).ToArray();
+
 		// An edit that only partially overlaps a declaration means the query captured something
 		// that is not a leaf body. Splicing it would cut a declaration in half.
 		foreach (var declaration in originalDeclarations)
 		{
-			foreach (var edit in edits)
+			for (var editIndex = FindFirstEditEndingAfter(orderedEdits, declaration.Start);
+			     editIndex < orderedEdits.Count && orderedEdits[editIndex].SourceStart < declaration.End;
+			     editIndex++)
 			{
-				var overlaps = declaration.Start < edit.SourceEnd && edit.SourceStart < declaration.End;
-				if (!overlaps)
-					continue;
+				var edit = orderedEdits[editIndex];
 				var containedInEdit = declaration.Start >= edit.SourceStart && declaration.End <= edit.SourceEnd;
 				var containsEdit = edit.SourceStart >= declaration.Start && edit.SourceEnd <= declaration.End;
 				if (!containedInEdit && !containsEdit)
@@ -86,11 +90,12 @@ public static class CodeStructureGate
 		// expects them gone and the gate accepts wholesale deletion. Requiring the innermost
 		// declaration around an edit to be one that legitimately OWNS an executable body is what
 		// keeps "leaf bodies only" a property of the gate rather than a property of the query.
-		foreach (var edit in edits)
+		var owners = ResolveInnermostOwners(originalDeclarations, orderedEdits);
+		for (var editIndex = 0; editIndex < orderedEdits.Count; editIndex++)
 		{
 			// No owner at all means the edit is not inside any declaration - a whole-file splice
 			// passes every other check, because "everything was excised" is trivially consistent.
-			var owner = FindInnermostOwner(originalDeclarations, edit);
+			var owner = owners[editIndex];
 			if (owner is null || !executableOwnerKinds.Contains(owner.Kind))
 				return CodeStructureGateVerdict.RejectedEditOutsideAnExecutableBody;
 		}
@@ -107,7 +112,7 @@ public static class CodeStructureGate
 		}
 
 		var expected = originalDeclarations
-			.Where(declaration => !IsExcised(declaration, edits))
+			.Where(declaration => !IsExcisedSorted(declaration, orderedEdits))
 			.Select(static declaration => (declaration.Kind, declaration.Name, declaration.Start))
 			.ToList();
 		var actual = compressedDeclarations
@@ -133,39 +138,106 @@ public static class CodeStructureGate
 	}
 
 	/// <summary>
+	/// Resolves owners in ranges instead of scanning every declaration for every edit. The work is
+	/// proportional to actual declaration nesting around edits, not to all unrelated declarations.
+	/// </summary>
+	private static CodeDeclaration?[] ResolveInnermostOwners(
+		IReadOnlyList<CodeDeclaration> declarations,
+		IReadOnlyList<CodeCompressionEdit> orderedEdits)
+	{
+		var owners = new CodeDeclaration?[orderedEdits.Count];
+		foreach (var declaration in declarations)
+		{
+			for (var editIndex = FindFirstEditStartingAtOrAfter(orderedEdits, declaration.Start);
+			     editIndex < orderedEdits.Count && orderedEdits[editIndex].SourceStart < declaration.End;
+			     editIndex++)
+			{
+				var edit = orderedEdits[editIndex];
+				if (edit.SourceEnd > declaration.End ||
+				    declaration.Start == edit.SourceStart && declaration.End == edit.SourceEnd)
+				{
+					continue;
+				}
+
+				if (owners[editIndex] is null || declaration.Length < owners[editIndex]!.Length)
+					owners[editIndex] = declaration;
+			}
+		}
+
+		return owners;
+	}
+
+	/// <summary>
 	/// A declaration is excised when it lies wholly inside a removed range. A declaration that
 	/// merely CONTAINS a removed range — every method whose body was cut — is not excised.
 	/// </summary>
-	/// <summary>
-	/// The smallest declaration that strictly contains the edit, or null when the edit is not
-	/// inside any declaration at all (top-level code, which no language pack should be producing).
-	/// </summary>
-	private static CodeDeclaration? FindInnermostOwner(
-		IReadOnlyList<CodeDeclaration> declarations,
-		CodeCompressionEdit edit)
-	{
-		CodeDeclaration? owner = null;
-		foreach (var declaration in declarations)
-		{
-			if (declaration.Start > edit.SourceStart || declaration.End < edit.SourceEnd)
-				continue;
-			if (declaration.Start == edit.SourceStart && declaration.End == edit.SourceEnd)
-				continue;
-			if (owner is null || declaration.Length < owner.Length)
-				owner = declaration;
-		}
-
-		return owner;
-	}
-
 	public static bool IsExcised(CodeDeclaration declaration, IReadOnlyList<CodeCompressionEdit> edits)
 	{
-		foreach (var edit in edits)
+		var orderedEdits = edits.Count <= 1
+			? edits
+			: edits.OrderBy(static edit => edit.SourceStart).ToArray();
+		return IsExcisedSorted(declaration, orderedEdits);
+	}
+
+	private static bool IsExcisedSorted(
+		CodeDeclaration declaration,
+		IReadOnlyList<CodeCompressionEdit> orderedEdits)
+	{
+		var candidate = FindLastEditStartingAtOrBefore(orderedEdits, declaration.Start);
+		return candidate >= 0 && declaration.End <= orderedEdits[candidate].SourceEnd;
+	}
+
+	private static int FindFirstEditEndingAfter(
+		IReadOnlyList<CodeCompressionEdit> orderedEdits,
+		int position)
+	{
+		var lower = 0;
+		var upper = orderedEdits.Count;
+		while (lower < upper)
 		{
-			if (declaration.Start >= edit.SourceStart && declaration.End <= edit.SourceEnd)
-				return true;
+			var middle = lower + ((upper - lower) / 2);
+			if (orderedEdits[middle].SourceEnd <= position)
+				lower = middle + 1;
+			else
+				upper = middle;
 		}
 
-		return false;
+		return lower;
+	}
+
+	private static int FindFirstEditStartingAtOrAfter(
+		IReadOnlyList<CodeCompressionEdit> orderedEdits,
+		int position)
+	{
+		var lower = 0;
+		var upper = orderedEdits.Count;
+		while (lower < upper)
+		{
+			var middle = lower + ((upper - lower) / 2);
+			if (orderedEdits[middle].SourceStart < position)
+				lower = middle + 1;
+			else
+				upper = middle;
+		}
+
+		return lower;
+	}
+
+	private static int FindLastEditStartingAtOrBefore(
+		IReadOnlyList<CodeCompressionEdit> orderedEdits,
+		int position)
+	{
+		var lower = 0;
+		var upper = orderedEdits.Count;
+		while (lower < upper)
+		{
+			var middle = lower + ((upper - lower) / 2);
+			if (orderedEdits[middle].SourceStart <= position)
+				lower = middle + 1;
+			else
+				upper = middle;
+		}
+
+		return lower - 1;
 	}
 }

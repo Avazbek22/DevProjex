@@ -168,13 +168,27 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 	private static string Materialize(Stream source, string directory, string fileName)
 	{
 		var target = Path.Combine(directory, fileName);
-		var staging = Path.Combine(directory, $"{fileName}.{Environment.ProcessId}.tmp");
-		using (var output = File.Create(staging))
-			source.CopyTo(output);
-		if (!OperatingSystem.IsWindows())
-			File.SetUnixFileMode(staging, UnixExecutableMode);
-		File.Move(staging, target, overwrite: true);
-		return target;
+		var staging = Path.Combine(directory, $"{fileName}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
+		try
+		{
+			using (var output = File.Create(staging))
+				source.CopyTo(output);
+			if (!OperatingSystem.IsWindows())
+				File.SetUnixFileMode(staging, UnixExecutableMode);
+			File.Move(staging, target, overwrite: true);
+			return target;
+		}
+		finally
+		{
+			try
+			{
+				File.Delete(staging);
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+				// A failed cleanup must not hide the original materialization failure.
+			}
+		}
 	}
 
 	private static IEnumerable<string> SafeEnumerate(string? directory)

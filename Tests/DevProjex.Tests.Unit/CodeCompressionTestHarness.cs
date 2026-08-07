@@ -41,9 +41,9 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 
 	public string Fixture { get; }
 
-	public static ICodeCompressor CreateCompressor() => new TreeSitterCodeCompressor(CreateLocator());
+	public static TreeSitterCodeCompressor CreateCompressor() => new(CreateLocator());
 
-	public static ICodeCompressor CreateCompressor(CompressionLanguagePack pack) =>
+	public static TreeSitterCodeCompressor CreateCompressor(CompressionLanguagePack pack) =>
 		new TreeSitterCodeCompressor(CreateLocator(), [pack]);
 
 	/// <summary>
@@ -89,8 +89,16 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 
 	public static string FixtureFor(string languageId) => languageId switch
 	{
+		"c" => CodeCompressionFixtures.C,
 		"csharp" => CodeCompressionFixtures.CSharp,
+		"cpp" => CodeCompressionFixtures.Cpp,
+		"go" => CodeCompressionFixtures.Go,
+		"java" => CodeCompressionFixtures.Java,
+		"javascript" => CodeCompressionFixtures.JavaScript,
 		"python" => CodeCompressionFixtures.PythonSource,
+		"rust" => CodeCompressionFixtures.Rust,
+		"tsx" => CodeCompressionFixtures.Tsx,
+		"typescript" => CodeCompressionFixtures.TypeScript,
 		_ => throw new ArgumentOutOfRangeException(nameof(languageId), languageId, "No fixture for this language.")
 	};
 

@@ -83,6 +83,7 @@ selection. `open` additionally accepts `auto`:
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>             repeatable
 --hide-secrets [<true|false>]
+--compress [<true|false>]
 ```
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
@@ -131,6 +132,13 @@ selected text files and keeps their surrounding context. It is off in the
 `standard` profile. Binary
 files are not inspected, and no findings is not a security guarantee. See
 [HideSecrets.md](HideSecrets.md).
+
+`--compress` is also independent from path selection and is off in the
+`standard` profile. It replaces executable bodies with syntax-valid placeholders
+while preserving declarations in supported C, C++, C#, Go, Java, JavaScript,
+Python, Rust, TSX, and TypeScript files. Unsupported or conservatively rejected
+files remain complete. The same transformed content is used by analysis metrics,
+context documents, folder exports, and ZIP exports.
 
 Modern local profiles retain checked and unchecked states across roots, extensions,
 and Exclusions. Newly discovered rows use current defaults in Desktop, CLI, and TUI;
@@ -241,6 +249,7 @@ devprojex analyze .
 devprojex analyze . --format json -o -
 devprojex analyze ./app --format json -o report.json --strict
 devprojex analyze . --git-mode tracked --exclude smart-ignore
+devprojex analyze . --compress --format json
 ```
 
 ## Export Context
@@ -294,6 +303,7 @@ devprojex export context . --view tree --format json -o -
 devprojex export context . --view content --format xml -o ../devprojex-context.xml
 devprojex export context . --format markdown -o ../devprojex-context.md --force
 devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
+devprojex export context . --compress --format markdown -o ../devprojex-compact.md
 ```
 
 ## Export Project
@@ -307,6 +317,7 @@ The destination is exact:
 ```shell
 devprojex export project . --as folder -o ../devprojex-submission
 devprojex export project . --as zip -o ../devprojex-submission.zip
+devprojex export project . --compress --as zip -o ../devprojex-compact.zip
 ```
 
 The first command creates exactly `../devprojex-submission`; it does not create an
