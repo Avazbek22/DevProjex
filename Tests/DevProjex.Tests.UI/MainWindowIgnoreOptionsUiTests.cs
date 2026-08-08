@@ -2053,7 +2053,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var compressionIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.CompressCode);
 			Assert.True(compressionIndicator.IsVisible);
 			Assert.Equal(
-				"Compressed 98 of 123 files. Tokens ≈100 → ≈25.",
+				$"Compressed 98 of 123 files.{Environment.NewLine}Tokens ≈100 → ≈25.",
 				option.StatusText);
 			var processingBorder = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
 			var compressionCheckBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.CompressCode);
@@ -2062,8 +2062,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.InRange(
 				indicatorPosition.Y + (compressionIndicator.Bounds.Height / 2) -
 				checkBoxPosition.Y - (compressionCheckBox.Bounds.Height / 2),
-				1,
-				3);
+				0,
+				2);
 			await UiTestDriver.ClickAsync(window, compressionIndicator);
 			await UiTestDriver.WaitForConditionAsync(
 				window,

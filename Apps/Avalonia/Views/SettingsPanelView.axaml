@@ -201,7 +201,7 @@
 							ToolTip.ShowDelay="450"
 							ToolTip.Placement="Left">
 					  <Border.RenderTransform>
-						<TranslateTransform Y="4" />
+						<TranslateTransform Y="3" />
 					  </Border.RenderTransform>
 					  <ToolTip.Tip>
 						<ToolTip Loaded="OnContentProcessingToolTipLoaded"

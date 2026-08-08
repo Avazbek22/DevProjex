@@ -2002,7 +2002,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 					compressed,
 					total,
 					CodeCompressionSnapshot.EstimateTokens(sourceCharacters),
-					CodeCompressionSnapshot.EstimateTokens(transformedCharacters)),
+					CodeCompressionSnapshot.EstimateTokens(transformedCharacters))
+				.Replace(
+					". ",
+					$".{Environment.NewLine}",
+					StringComparison.Ordinal),
 			_ => string.Empty
 		};
 		if (string.Equals(SettingsCompressionNotice, notice, StringComparison.Ordinal))

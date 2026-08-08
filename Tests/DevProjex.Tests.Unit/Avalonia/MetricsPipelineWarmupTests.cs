@@ -131,7 +131,7 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Contains(observedProgressValues, static value => value == 100);
 		var tokens = CodeCompressionSnapshot.EstimateTokens(source.Length);
 		Assert.Equal(
-			$"Compressed 0 of 1 files. Tokens ≈{tokens} → ≈{tokens}.",
+			$"Compressed 0 of 1 files.{Environment.NewLine}Tokens ≈{tokens} → ≈{tokens}.",
 			viewModel.SettingsCompressionNotice);
 		Assert.False(viewModel.StatusBusy);
 		Assert.False(delayedMetrics.IsCompleted);
@@ -213,7 +213,7 @@ public sealed class MetricsPipelineWarmupTests
 		var tokens = CodeCompressionSnapshot.EstimateTokens(
 			firstSource.Length + secondSource.Length);
 		Assert.Equal(
-			$"Compressed 0 of 2 files. Tokens ≈{tokens} → ≈{tokens}.",
+			$"Compressed 0 of 2 files.{Environment.NewLine}Tokens ≈{tokens} → ≈{tokens}.",
 			viewModel.SettingsCompressionNotice);
 	}
 
