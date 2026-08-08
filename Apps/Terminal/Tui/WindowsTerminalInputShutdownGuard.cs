@@ -9,7 +9,7 @@ internal sealed class WindowsTerminalInputShutdownGuard : IDisposable
 	private static readonly nint InvalidHandle = new(-1);
 	private static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromMilliseconds(10);
 
-	private readonly Func<Action?> createCancellation;
+	private readonly Action cancelPendingRead;
 	private readonly TimeSpan retryInterval;
 	private readonly bool enabled;
 	private CancellationTokenSource? cancellationSource;
@@ -17,7 +17,7 @@ internal sealed class WindowsTerminalInputShutdownGuard : IDisposable
 	private int armed;
 
 	public WindowsTerminalInputShutdownGuard()
-		: this(CreateNativeCancellation, DefaultRetryInterval, OperatingSystem.IsWindows())
+		: this(CancelPendingRead, DefaultRetryInterval, OperatingSystem.IsWindows())
 	{
 	}
 
@@ -25,17 +25,9 @@ internal sealed class WindowsTerminalInputShutdownGuard : IDisposable
 		Action cancelPendingRead,
 		TimeSpan retryInterval,
 		bool enabled = true)
-		: this(() => cancelPendingRead, retryInterval, enabled)
 	{
-		ArgumentNullException.ThrowIfNull(cancelPendingRead);
-	}
-
-	private WindowsTerminalInputShutdownGuard(
-		Func<Action?> createCancellation,
-		TimeSpan retryInterval,
-		bool enabled)
-	{
-		this.createCancellation = createCancellation;
+		this.cancelPendingRead = cancelPendingRead ??
+			throw new ArgumentNullException(nameof(cancelPendingRead));
 		if (retryInterval <= TimeSpan.Zero)
 			throw new ArgumentOutOfRangeException(nameof(retryInterval));
 		this.retryInterval = retryInterval;
@@ -45,9 +37,6 @@ internal sealed class WindowsTerminalInputShutdownGuard : IDisposable
 	public void Arm()
 	{
 		if (!enabled || Interlocked.Exchange(ref armed, 1) != 0)
-			return;
-		var cancelPendingRead = createCancellation();
-		if (cancelPendingRead is null)
 			return;
 
 		var source = new CancellationTokenSource();
@@ -94,15 +83,15 @@ internal sealed class WindowsTerminalInputShutdownGuard : IDisposable
 		while (!cancellationToken.WaitHandle.WaitOne(retryInterval));
 	}
 
-	private static Action? CreateNativeCancellation()
+	private static void CancelPendingRead()
 	{
 		var inputHandle = ResolveTerminalGuiInputHandle();
 		if (inputHandle == nint.Zero || inputHandle == InvalidHandle)
 			inputHandle = GetStdHandle(StandardInputHandle);
 		if (inputHandle == nint.Zero || inputHandle == InvalidHandle)
-			return null;
+			return;
 
-		return () => _ = CancelIoEx(inputHandle, nint.Zero);
+		_ = CancelIoEx(inputHandle, nint.Zero);
 	}
 
 	private static nint ResolveTerminalGuiInputHandle()

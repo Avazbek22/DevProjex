@@ -74,6 +74,7 @@ public sealed class TerminalWorkspace
 		using var postApplicationCursorRestoration =
 			new TerminalCursorRestoration(environment.Output);
 		using var inputShutdownGuard = new WindowsTerminalInputShutdownGuard();
+		using var inputShutdownRegistration = cancellationToken.Register(inputShutdownGuard.Arm);
 		using IApplication application = global::Terminal.Gui.App.Application.Create();
 		using var preDisposeCursorRestoration = new TerminalCursorRestoration(environment.Output);
 		application.Mouse.IsMouseDisabled = !mouseEnabled;
@@ -127,7 +128,8 @@ public sealed class TerminalWorkspace
 				options,
 				this,
 				operationObserver,
-				cancellationToken);
+				cancellationToken,
+				inputShutdownGuard.Arm);
 			session.Start();
 			try
 			{
