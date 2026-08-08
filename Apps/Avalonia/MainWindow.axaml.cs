@@ -1282,6 +1282,9 @@ public partial class MainWindow : Window
 
     private void StartPostLoadBackgroundWork(BuildTreeResult currentTree, CancellationToken cancellationToken)
     {
+        // Preserve the initial-load choreography defined by PostLoadBackgroundWorkSequencer:
+        // tree first, settings reveal second, background content work only after visual settle.
+        // Do not move any phase above this reveal or detach individual phases from the sequencer.
         var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(
             _projectLoadFinalizationTask,
             cancellationToken);
