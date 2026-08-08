@@ -1,10 +1,111 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class SecretRedactionCommandContractTests
 {
 	private const string GithubToken = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+	private const string ManuallyMarkedValue = "manualprojectvalue";
+
+	[Fact]
+	public async Task ExportContext_LocalProfileAppliesPersistentManualSecretMarks()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		AddPersistentManualSecret(workspace);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", "local",
+				"--view", "content",
+				"--format", "text",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(ManuallyMarkedValue, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains(
+			"DEVPROJEX_REDACTED[manual-secret#1]",
+			environment.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task AnalyzeJson_LocalProfileCountsPersistentManualSecretMarks()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		AddPersistentManualSecret(workspace);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--profile", "local",
+				"--format", "json",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var redaction = document.RootElement.GetProperty("redaction");
+		Assert.Equal(1, redaction.GetProperty("matchedCount").GetInt32());
+		Assert.Equal(1, redaction.GetProperty("redactedCount").GetInt32());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	public async Task ExportProject_LocalProfileAppliesPersistentManualSecretMarks(string kind)
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		AddPersistentManualSecret(workspace);
+		var environment = new TestTerminalEnvironment();
+		var destination = kind == "folder"
+			? Path.Combine(workspace.OutputRoot, "manual-redacted")
+			: Path.Combine(workspace.OutputRoot, "manual-redacted.zip");
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "project", workspace.ProjectRoot,
+				"--profile", "local",
+				"--as", kind,
+				"-o", destination
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		string content;
+		if (kind == "folder")
+		{
+			content = File.ReadAllText(Path.Combine(destination, "src", "manual.txt"));
+		}
+		else
+		{
+			using var archive = System.IO.Compression.ZipFile.OpenRead(destination);
+			var entry = Assert.Single(
+				archive.Entries,
+				static candidate => candidate.FullName.EndsWith(
+					"src/manual.txt",
+					StringComparison.Ordinal));
+			using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+			content = reader.ReadToEnd();
+		}
+
+		Assert.DoesNotContain(ManuallyMarkedValue, content, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[manual-secret#1]", content, StringComparison.Ordinal);
+	}
 
 	[Fact]
 	public async Task ExportContext_AdditiveOptionWorksWithNoPathExclusions()
@@ -420,6 +521,30 @@ public sealed class SecretRedactionCommandContractTests
 				environment,
 				new TerminalServiceFactory(() => workspace.AppDataRoot))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
+
+	private static void AddPersistentManualSecret(Workspace workspace)
+	{
+		workspace.Temporary.WriteFile(
+			"project/src/manual.txt",
+			$"setting={ManuallyMarkedValue}\n");
+		new ProjectProfileStore(() => workspace.AppDataRoot).SaveProfile(
+			workspace.ProjectRoot,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions: [IgnoreOptionId.HideSecrets],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.HideSecrets] = true
+				},
+				MarkedSecrets:
+				[
+					new MarkedSecretProfileEntry(
+						MarkedSecretValueNormalizer.ComputeHash(ManuallyMarkedValue),
+						"setting",
+						ManuallyMarkedValue.Length)
+				]));
+	}
 
 	private static Workspace CreateWorkspace(bool includeSecret = true)
 	{

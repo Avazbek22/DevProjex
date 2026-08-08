@@ -480,8 +480,15 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			var metadata = SecretFileMetadata.Capture(sourcePath);
 			if (scope.TryGetCachedEntry(sourcePath, metadata, out var cached))
 			{
-				entries[index] = cached;
-				continue;
+				// Findings and binary classification both depend on content, so equal filesystem
+				// metadata is only a candidate. Re-reading once lets Detect compare the cached
+				// fingerprint without rerunning detector rules or reading a changed file twice.
+				// A file above the hard scan limit remains unscannable while its length is unchanged.
+				if (cached.IsUnscannable)
+				{
+					entries[index] = cached;
+					continue;
+				}
 			}
 
 			var workItem = new SecretScanWorkItem(index, sourcePath, metadata);

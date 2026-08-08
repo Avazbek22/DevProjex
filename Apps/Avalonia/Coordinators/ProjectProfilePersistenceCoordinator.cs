@@ -5,13 +5,10 @@ namespace DevProjex.Avalonia.Coordinators;
 public sealed class ProjectProfilePersistenceCoordinator(
     MainWindowViewModel viewModel,
     SelectionSyncCoordinator selectionCoordinator,
-	IProjectProfileStore profileStore,
-	SecretRedactionSession secretRedactionSession)
+    IProjectProfileStore profileStore,
+    SecretRedactionSession secretRedactionSession)
 {
-    private string? _lastPersistedPath;
-    private ProjectSelectionProfile? _lastPersistedProfile;
-    private DateTimeOffset _lastPersistedUpdatedUtc;
-    private bool _persistencePending;
+    private readonly PendingProjectProfileWriteQueue _pendingWrites = new(profileStore);
 
     public bool EnsureStorageExists() => profileStore.EnsureStorageExists();
 
@@ -23,11 +20,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
             return;
 
         var profile = CaptureCurrentProfile();
-        var persistedAtUtc = DateTimeOffset.UtcNow;
-        _lastPersistedPath = currentPath;
-        _lastPersistedProfile = ProjectSelectionProfileBuilder.Clone(profile);
-        _lastPersistedUpdatedUtc = persistedAtUtc;
-        _persistencePending = !profileStore.TrySaveProfile(currentPath!, profile, persistedAtUtc);
+        _pendingWrites.Persist(currentPath!, profile, DateTimeOffset.UtcNow);
     }
 
     public ProjectProfileLoadSnapshot LoadSnapshot(string? currentPath)
@@ -38,23 +31,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
         return new ProjectProfileLoadSnapshot(true, profile);
     }
 
-    public void FlushPending()
-    {
-        if (!_persistencePending ||
-            string.IsNullOrWhiteSpace(_lastPersistedPath) ||
-            _lastPersistedProfile is null)
-        {
-            return;
-        }
-
-        if (profileStore.TrySaveProfile(
-                _lastPersistedPath,
-                ProjectSelectionProfileBuilder.Clone(_lastPersistedProfile),
-                _lastPersistedUpdatedUtc))
-        {
-            _persistencePending = false;
-        }
-    }
+    public void FlushPending() => _pendingWrites.Flush();
 
     private bool TryLoadProfile(string? currentPath, out ProjectSelectionProfile profile)
     {
@@ -71,7 +48,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
 
     private bool IsApplicable(string? currentPath)
     {
-		return !string.IsNullOrWhiteSpace(currentPath);
+        return !string.IsNullOrWhiteSpace(currentPath);
     }
 
     private ProjectSelectionProfile CaptureCurrentProfile()
@@ -82,7 +59,53 @@ public sealed class ProjectProfilePersistenceCoordinator(
             cachedExtensionStates: selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
             cachedIgnoreOptionStates: selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
             selectedIgnoreOptions: selectionCoordinator.GetSelectedIgnoreOptionIds(),
-			extensionComparer: StringComparer.OrdinalIgnoreCase,
-			markedSecrets: secretRedactionSession.GetMarkedSecrets());
+            extensionComparer: StringComparer.OrdinalIgnoreCase,
+            markedSecrets: secretRedactionSession.GetMarkedSecrets());
     }
+}
+
+internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profileStore)
+{
+    private readonly Dictionary<string, PendingProfileWrite> _pending =
+        new(PathComparer.Default);
+
+    internal int Count => _pending.Count;
+
+    public void Persist(
+        string projectPath,
+        ProjectSelectionProfile profile,
+        DateTimeOffset updatedUtc)
+    {
+        Flush();
+        var normalizedPath = Path.GetFullPath(projectPath);
+        if (profileStore.TrySaveProfile(normalizedPath, profile, updatedUtc))
+        {
+            _pending.Remove(normalizedPath);
+            return;
+        }
+
+        _pending[normalizedPath] = new PendingProfileWrite(
+            ProjectSelectionProfileBuilder.Clone(profile),
+            updatedUtc);
+    }
+
+    public void Flush()
+    {
+        foreach (var (path, pending) in _pending.ToArray())
+        {
+            if (!profileStore.TrySaveProfile(
+                    path,
+                    ProjectSelectionProfileBuilder.Clone(pending.Profile),
+                    pending.UpdatedUtc))
+            {
+                continue;
+            }
+
+            _pending.Remove(path);
+        }
+    }
+
+    private sealed record PendingProfileWrite(
+        ProjectSelectionProfile Profile,
+        DateTimeOffset UpdatedUtc);
 }

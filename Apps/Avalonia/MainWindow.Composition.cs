@@ -96,6 +96,35 @@ public partial class MainWindow
 			_codeCompressionSnapshot?.TransformedCharacters);
 	}
 
+	private void ScheduleCompressionRefreshForSelectionChange()
+	{
+		var version = Interlocked.Increment(ref _compressionSelectionRefreshVersion);
+		_metrics.CancelCompressionPrewarm();
+		_codeCompressionSnapshot = null;
+		RelabelIgnoreOptionsWithCurrentCounts();
+		if (CreateCodeCompressionContext() is null || _currentTree is null)
+			return;
+
+		ObserveDetachedTask(
+			PrewarmCompressionForSelectionChangeAsync(version, _currentTree),
+			"PrewarmCodeCompressionAfterSelectionChange");
+	}
+
+	private async Task PrewarmCompressionForSelectionChangeAsync(
+		long version,
+		BuildTreeResult currentTree)
+	{
+		// Parent checkbox updates arrive as a burst of child events. Yield once so only the
+		// final selection starts native compression work instead of repeatedly canceling it.
+		await Task.Yield();
+		if (version != Volatile.Read(ref _compressionSelectionRefreshVersion))
+			return;
+
+		await _metrics
+			.PrewarmCompressionAsync(currentTree, CancellationToken.None)
+			.ConfigureAwait(false);
+	}
+
 	private SecretRedactionSnapshot? GetCachedSecretRedactionSnapshotForCurrentSelection()
 	{
 		if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
@@ -425,6 +454,7 @@ public partial class MainWindow
 	private readonly SecretRedactionSession _secretRedactionSession;
 	private readonly CodeCompressionSession _codeCompressionSession;
 	private CodeCompressionSnapshot? _codeCompressionSnapshot;
+	private long _compressionSelectionRefreshVersion;
 	private ContentTransformationContext? _publishedTransformationContext;
 	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
 	private CancellationTokenSource? _secretRedactionCountCts;

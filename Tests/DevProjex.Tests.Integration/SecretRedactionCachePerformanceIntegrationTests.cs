@@ -63,14 +63,25 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 		var readsAfterFirst = analyzer.FullContentReadCount;
 		var bytesAfterFirst = analyzer.FullContentBytesRead;
 		var detectionsAfterFirst = detector.CallCount;
+		var warmStopwatch = Stopwatch.StartNew();
 		var second = await preparer.AnalyzeAsync(
 			context,
 			paths,
 			TestContext.Current.CancellationToken);
+		warmStopwatch.Stop();
 		Assert.Equal(first.RedactedCount, second.RedactedCount);
-		Assert.Equal(readsAfterFirst, analyzer.FullContentReadCount);
-		Assert.Equal(bytesAfterFirst, analyzer.FullContentBytesRead);
+		Assert.Equal(readsAfterFirst + FileCount, analyzer.FullContentReadCount);
+		Assert.Equal(
+			bytesAfterFirst + FileCount * (long)CharactersPerFile,
+			analyzer.FullContentBytesRead);
 		Assert.Equal(detectionsAfterFirst, detector.CallCount);
+		Assert.True(
+			warmStopwatch.Elapsed <= stopwatch.Elapsed * 2 + TimeSpan.FromSeconds(1),
+			$"Fingerprint-only refresh took {warmStopwatch.Elapsed.TotalSeconds:F3}s after a " +
+			$"{stopwatch.Elapsed.TotalSeconds:F3}s cold scan.");
+
+		var readsAfterSecond = analyzer.FullContentReadCount;
+		var bytesAfterSecond = analyzer.FullContentBytesRead;
 
 		File.WriteAllText(paths[0], payload[..^1] + "y");
 		File.SetLastWriteTimeUtc(paths[0], DateTime.UtcNow.AddSeconds(2));
@@ -79,8 +90,10 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 			paths,
 			TestContext.Current.CancellationToken);
 		Assert.Equal(first.RedactedCount, third.RedactedCount);
-		Assert.Equal(readsAfterFirst + 1, analyzer.FullContentReadCount);
-		Assert.Equal(bytesAfterFirst + CharactersPerFile, analyzer.FullContentBytesRead);
+		Assert.Equal(readsAfterSecond + FileCount, analyzer.FullContentReadCount);
+		Assert.Equal(
+			bytesAfterSecond + FileCount * (long)CharactersPerFile,
+			analyzer.FullContentBytesRead);
 		Assert.Equal(detectionsAfterFirst + 1, detector.CallCount);
 
 		session.Disable();
@@ -107,7 +120,8 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 		var retainedGrowth = Math.Max(0, GC.GetTotalMemory(forceFullCollection: true) - retainedBefore);
 		TestContext.Current.TestOutputHelper?.WriteLine(
 			$"Hide Secrets hardened scan: files={FileCount}, sourceChars={FileCount * (long)CharactersPerFile:N0}, " +
-			$"elapsed={stopwatch.Elapsed.TotalSeconds:F3}s, allocated={firstAllocated:N0}, " +
+			$"cold={stopwatch.Elapsed.TotalSeconds:F3}s, warm={warmStopwatch.Elapsed.TotalSeconds:F3}s, " +
+			$"allocated={firstAllocated:N0}, " +
 			$"cacheBytes={firstDiagnostics.RetainedBytes:N0}, retainedAfterCycles={retainedGrowth:N0}.");
 		Assert.True(
 			retainedGrowth < 64L * 1024 * 1024,

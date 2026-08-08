@@ -78,7 +78,10 @@ public sealed class TerminalServiceFactory(
 		var gitRepository = new GitRepositoryService();
 		var sourceIdentityResolver = new ProjectSourceIdentityResolver(gitRepository, repoCache);
 		var repositoryCacheCatalog = new RepositoryCacheCatalog(gitRepository, repoCache);
-		var contextFactory = new TerminalProjectContextFactory(contextPlanner, sourceIdentityResolver);
+		var contextFactory = new TerminalProjectContextFactory(
+			contextPlanner,
+			sourceIdentityResolver,
+			secretRedactionSession);
 
 		return new TerminalServices(
 			Localization: localization,

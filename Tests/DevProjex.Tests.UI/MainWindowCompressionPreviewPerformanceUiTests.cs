@@ -22,6 +22,9 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
                 viewModel.ContentProcessingOptions,
                 static candidate => candidate.Id == IgnoreOptionId.CompressCode);
             Assert.False(option.IsChecked);
+			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+			Assert.True(
+				UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var uncompressedMetrics));
 
             await UiTestDriver.OpenPreviewAsync(window);
             await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
@@ -39,7 +42,12 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
                 () => option.IsChecked &&
                       !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
                           "return \"app-value-1\";",
-                          StringComparison.Ordinal),
+                          StringComparison.Ordinal) &&
+				      UiTestDriver.TryGetCurrentStatusMetrics(
+					      window,
+					      out _,
+					      out var compressedMetrics) &&
+				      compressedMetrics.Chars < uncompressedMetrics.Chars,
                 "compression to remove implementation bodies from the visible Preview");
             var compressedPreview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
             Assert.Contains("BuildAppValue1()", compressedPreview, StringComparison.Ordinal);
@@ -51,7 +59,12 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
                 () => !option.IsChecked &&
                       UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
                           "return \"app-value-1\";",
-                          StringComparison.Ordinal),
+                          StringComparison.Ordinal) &&
+				      UiTestDriver.TryGetCurrentStatusMetrics(
+					      window,
+					      out _,
+					      out var restoredMetrics) &&
+				      restoredMetrics == uncompressedMetrics,
                 "disabling compression to restore full source in the visible Preview");
 
             Assert.Equal(
@@ -65,6 +78,69 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	[AvaloniaFact]
+	public async Task TreeSelectionChange_ReplacesCompressionSnapshotWithoutOpeningPreview()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var compressionOption = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static candidate => candidate.Id == IgnoreOptionId.CompressCode);
+			compressionOption.IsChecked = true;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			CodeCompressionSnapshot? fullSelectionSnapshot = null;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					fullSelectionSnapshot = GetCompressionSnapshot(window);
+					return compressionOption.IsChecked &&
+					       fullSelectionSnapshot is { SelectionKey.Length: > 0 } &&
+					       viewModel.SettingsCompressionNotice.StartsWith(
+						       "Compressed ",
+						       StringComparison.Ordinal);
+				},
+				"compression counts for the complete project selection");
+
+			var rootNode = Assert.Single(viewModel.TreeNodes);
+			rootNode.IsExpanded = true;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			var srcCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
+			var previousNotice = viewModel.SettingsCompressionNotice;
+			await UiTestDriver.ClickAsync(window, srcCheckBox);
+
+			CodeCompressionSnapshot? srcSelectionSnapshot = null;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					srcSelectionSnapshot = GetCompressionSnapshot(window);
+					return srcSelectionSnapshot is { SelectionKey.Length: > 0 } &&
+					       !string.Equals(
+						       srcSelectionSnapshot.SelectionKey,
+						       fullSelectionSnapshot!.SelectionKey,
+						       StringComparison.Ordinal) &&
+					       !string.Equals(
+						       viewModel.SettingsCompressionNotice,
+						       previousNotice,
+						       StringComparison.Ordinal);
+				},
+				"compression counts for the newly selected src subtree");
+
+			Assert.True(srcCheckBox.IsChecked);
+			Assert.NotEqual(fullSelectionSnapshot!.TotalFiles, srcSelectionSnapshot!.TotalFiles);
+			Assert.False(viewModel.IsPreviewMode);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
 
     [AvaloniaFact]
     public async Task PersistedCompression_PrewarmsBeforeTreeToBothPreviewTransition()
@@ -118,4 +194,12 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	private static CodeCompressionSnapshot? GetCompressionSnapshot(MainWindow window)
+	{
+		var field = typeof(MainWindow).GetField(
+			"_codeCompressionSnapshot",
+			System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+		return field?.GetValue(window) as CodeCompressionSnapshot;
+	}
 }

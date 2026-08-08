@@ -11,6 +11,7 @@ public partial class MainWindow
     {
         _treeSelectionSnapshotCache.Invalidate();
 		InvalidateSecretRedactionCount();
+		ScheduleCompressionRefreshForSelectionChange();
         _metrics.ScheduleRecalculate();
         SchedulePreviewRefresh();
     }

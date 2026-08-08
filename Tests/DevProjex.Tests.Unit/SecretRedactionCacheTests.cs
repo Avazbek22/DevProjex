@@ -5,6 +5,74 @@ namespace DevProjex.Tests.Unit;
 public sealed class SecretRedactionCacheTests
 {
 	private const string Secret = "cache-secret-value-0123456789";
+	private const string SameLengthPublicValue = "cache-public-value-0123456789";
+
+	[Fact]
+	public async Task OutputPreparer_RevalidatesContentWhenLengthAndTimestampAreUnchanged()
+	{
+		Assert.Equal(Secret.Length, SameLengthPublicValue.Length);
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/config.env", $"token={Secret}\n");
+		var timestamp = File.GetLastWriteTimeUtc(path);
+		var detector = new CountingDetector();
+		using var session = new SecretRedactionSession(detector);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		var context = new SecretRedactionContext(workspace.Path, session);
+
+		var first = await preparer.AnalyzeAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		Assert.Equal(1, first.RedactedCount);
+		Assert.Equal(1, detector.CallCount);
+
+		File.WriteAllText(path, $"token={SameLengthPublicValue}\n");
+		File.SetLastWriteTimeUtc(path, timestamp);
+		Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
+
+		var second = await preparer.AnalyzeAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, second.RedactedCount);
+		Assert.Equal(2, detector.CallCount);
+	}
+
+	[Fact]
+	public async Task OutputPreparer_ReclassifiesCachedBinaryWhenMetadataAreUnchanged()
+	{
+		using var workspace = new TemporaryDirectory();
+		var secretText = $"token={Secret}\n";
+		var binary = new byte[secretText.Length];
+		binary[0] = 0;
+		var path = workspace.CreateBinaryFile("src/config.txt", binary);
+		var timestamp = File.GetLastWriteTimeUtc(path);
+		var detector = new CountingDetector();
+		using var session = new SecretRedactionSession(detector);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		var context = new SecretRedactionContext(workspace.Path, session);
+
+		var first = await preparer.AnalyzeAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, first.RedactedCount);
+		Assert.Equal(0, detector.CallCount);
+
+		File.WriteAllText(path, secretText);
+		File.SetLastWriteTimeUtc(path, timestamp);
+		Assert.Equal(binary.Length, new FileInfo(path).Length);
+		Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
+
+		var second = await preparer.AnalyzeAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, second.RedactedCount);
+		Assert.Equal(1, detector.CallCount);
+	}
 
 	[Fact]
 	public void CompactCache_ReusesUnchangedFilesAndInvalidatesOnlyChangedSelectionEntries()

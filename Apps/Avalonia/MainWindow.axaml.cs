@@ -384,6 +384,11 @@ public partial class MainWindow : Window
 		// invalidating every preview refresh would rescan all selected text unnecessarily.
 		InvalidatePreviewCache();
 		PublishTransformationContext();
+		// A complete baseline only describes one transformation identity. Mark it incomplete so
+		// MetricsPipeline fills the missing raw/compressed variants instead of republishing the
+		// previous identity; already measured variants remain cached and are reused on later toggles.
+		_metrics.HasCompleteBaseline = false;
+		_metrics.ScheduleRecalculate();
 		// Compression publishes its counts only once an output has been produced, so switching the
 		// option off has to clear them here. Leaving them would attach the last run's numbers to a
 		// row that is no longer doing anything.
