@@ -12,6 +12,19 @@ namespace DevProjex.Avalonia.Coordinators;
 // dropped animation frames. This sequencer is the single release point for initial post-load work.
 internal static class PostLoadBackgroundWorkSequencer
 {
+    // A project lifecycle command is already visible to the user, so its dependent phases must
+    // not disappear behind a fresh delay. Unscoped and option-driven work stays delayed to keep
+    // short interactive recalculations from flashing in the status bar.
+    public static StatusOperationPresentation ResolveStatusPresentation(
+        StatusOperationType sourceOperation) =>
+        sourceOperation is
+            StatusOperationType.LoadProject or
+            StatusOperationType.RefreshProject or
+            StatusOperationType.GitPullUpdates or
+            StatusOperationType.GitSwitchBranch
+            ? StatusOperationPresentation.Immediate
+            : StatusOperationPresentation.ExtendedDelay;
+
     public static async Task RunAsync(
         Task visualReadyTask,
         Func<CancellationToken, Task> prepareCompressionAsync,

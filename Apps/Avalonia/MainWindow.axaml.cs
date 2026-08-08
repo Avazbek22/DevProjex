@@ -1285,6 +1285,9 @@ public partial class MainWindow : Window
         // Preserve the initial-load choreography defined by PostLoadBackgroundWorkSequencer:
         // tree first, settings reveal second, background content work only after visual settle.
         // Do not move any phase above this reveal or detach individual phases from the sequencer.
+        var statusPresentation =
+            PostLoadBackgroundWorkSequencer.ResolveStatusPresentation(
+                _statusOperations.GetActiveSnapshot().OperationType);
         var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(
             _projectLoadFinalizationTask,
             cancellationToken);
@@ -1311,19 +1314,27 @@ public partial class MainWindow : Window
                 _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
                     currentTree,
                     Task.CompletedTask,
-                    token),
+                    token,
+                    statusPresentation),
                 timing);
 #else
         Func<CancellationToken, Task> initializeMetricsAsync = token =>
             _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
                 currentTree,
                 Task.CompletedTask,
-                token);
+                token,
+                statusPresentation);
 #endif
+        // Project lifecycle operations already committed to visible progress. Their compression
+        // and metrics phases must continue that feedback immediately once the reveal gate opens.
+        // Interactive option changes keep the delayed presentation to avoid flashing on fast work.
         ObserveDetachedTask(
             PostLoadBackgroundWorkSequencer.RunAsync(
                 postLoadVisualReadyTask,
-                token => _metrics.PrewarmCompressionAsync(currentTree, token),
+                token => _metrics.PrewarmCompressionAsync(
+                    currentTree,
+                    token,
+                    statusPresentation),
                 initializeMetricsAsync,
                 ScheduleSecretRedactionCountRefresh,
                 cancellationToken),

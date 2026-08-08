@@ -4,6 +4,32 @@ namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class PostLoadBackgroundWorkSequencerTests
 {
+    [Theory]
+    [InlineData(StatusOperationType.LoadProject)]
+    [InlineData(StatusOperationType.RefreshProject)]
+    [InlineData(StatusOperationType.GitPullUpdates)]
+    [InlineData(StatusOperationType.GitSwitchBranch)]
+    public void ResolveStatusPresentation_ProjectLifecycleOperation_IsImmediate(
+        StatusOperationType sourceOperation)
+    {
+        Assert.Equal(
+            StatusOperationPresentation.Immediate,
+            PostLoadBackgroundWorkSequencer.ResolveStatusPresentation(sourceOperation));
+    }
+
+    [Theory]
+    [InlineData(StatusOperationType.None)]
+    [InlineData(StatusOperationType.SelectionRefresh)]
+    [InlineData(StatusOperationType.ApplySettings)]
+    [InlineData(StatusOperationType.CompressionPreparation)]
+    public void ResolveStatusPresentation_InteractiveOrUnscopedWork_KeepsDelay(
+        StatusOperationType sourceOperation)
+    {
+        Assert.Equal(
+            StatusOperationPresentation.ExtendedDelay,
+            PostLoadBackgroundWorkSequencer.ResolveStatusPresentation(sourceOperation));
+    }
+
     [Fact]
     public async Task RunAsync_WaitsForVisualReadinessAndRunsPhasesInOrder()
     {

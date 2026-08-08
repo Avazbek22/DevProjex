@@ -133,7 +133,9 @@ internal sealed class MetricsPipeline(
 
     public Task PrewarmCompressionAsync(
         BuildTreeResult currentTree,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StatusOperationPresentation presentation =
+            StatusOperationPresentation.ExtendedDelay)
     {
         var compression = transformationContextProvider?.Invoke()?.Compression;
         if (compression is null)
@@ -153,7 +155,7 @@ internal sealed class MetricsPipeline(
             indeterminate: false,
             operationType: StatusOperationType.CompressionPreparation,
             cancelAction: CancelCompressionPrewarm,
-            presentation: StatusOperationPresentation.ExtendedDelay);
+            presentation: presentation);
         var lastReportedPercent = -1;
         var progress = new Progress<CodeCompressionWarmupProgress>(value =>
         {
@@ -256,18 +258,23 @@ internal sealed class MetricsPipeline(
 
     public async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
         BuildTreeResult currentTree,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StatusOperationPresentation presentation =
+            StatusOperationPresentation.ExtendedDelay)
     {
         await InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
             currentTree,
             Task.CompletedTask,
-            cancellationToken);
+            cancellationToken,
+            presentation);
     }
 
     public async Task InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
         BuildTreeResult currentTree,
         Task initialVisualReadyTask,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StatusOperationPresentation presentation =
+            StatusOperationPresentation.ExtendedDelay)
     {
         var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
         await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
@@ -282,14 +289,17 @@ internal sealed class MetricsPipeline(
         await InitializeFileMetricsCacheAsync(
             currentTree,
             cacheGeneration,
-            cancellationToken);
+            cancellationToken,
+            presentation);
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
     public async Task<TimeSpan> InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
         BuildTreeResult currentTree,
         Task initialVisualReadyTask,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StatusOperationPresentation presentation =
+            StatusOperationPresentation.ExtendedDelay)
     {
         var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
         await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
@@ -304,7 +314,8 @@ internal sealed class MetricsPipeline(
         await InitializeFileMetricsCacheAsync(
             currentTree,
             cacheGeneration,
-            cancellationToken);
+            cancellationToken,
+            presentation);
         stopwatch.Stop();
         return stopwatch.Elapsed;
     }
@@ -615,7 +626,8 @@ internal sealed class MetricsPipeline(
     private async Task InitializeFileMetricsCacheAsync(
         BuildTreeResult currentTree,
         int cacheGeneration,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StatusOperationPresentation presentation)
     {
         using var _ = PerformanceMetrics.Measure("InitializeFileMetricsCacheAsync");
 
@@ -630,7 +642,7 @@ internal sealed class MetricsPipeline(
             indeterminate: false,
             operationType: StatusOperationType.MetricsCalculation,
             cancelAction: CancelBackgroundCalculation,
-            presentation: StatusOperationPresentation.ExtendedDelay);
+            presentation: presentation);
         IReadOnlyList<string> stagedFilePaths = Array.Empty<string>();
         FileMetricsScanResult[] stagedResults = [];
         try
