@@ -351,28 +351,54 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		var dataRoot = workspace.CreateDirectory("compression/data");
 		var extractionRoot = workspace.CreateDirectory("compression/extraction");
 		var project = workspace.CreateDirectory("compression/source");
-		var sourcePath = workspace.WriteFile(
-			"compression/source/Widget.cs",
-			"""
-			public sealed class Widget
-			{
-			    private readonly System.Func<int> _factory = Create;
+		var sources = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["pipeline.c"] =
+				"typedef int (*transform_fn)(int);\nint apply(transform_fn fn, int value) { int published_c_marker = fn(value); published_c_marker += 10; return published_c_marker; }\n",
+			["box.cpp"] =
+				"template <typename T> class Box { public: T map(T value) { T published_cpp_marker = value; published_cpp_marker += value; return published_cpp_marker; } };\n",
+			["Widget.cs"] =
+				"""
+				public sealed class Widget
+				{
+				    private readonly System.Func<int> _factory = Create;
 
-			    public int Compute(int left, int right)
-			    {
-			        var published_implementation_marker = left + right;
-			        published_implementation_marker += 10;
-			        return published_implementation_marker;
-			    }
+				    public int Compute(int left, int right)
+				    {
+				        var published_csharp_marker = left + right;
+				        published_csharp_marker += 10;
+				        return published_csharp_marker;
+				    }
 
-			    private static int Create()
-			    {
-			        var published_factory_marker = 40;
-			        return published_factory_marker + 2;
-			    }
-			}
-			""");
-		var sourceBytes = File.ReadAllBytes(sourcePath);
+				    private static int Create()
+				    {
+				        var published_csharp_factory_marker = 40;
+				        return published_csharp_factory_marker + 2;
+				    }
+				}
+				""",
+			["store.go"] =
+				"package sample\ntype Store[T any] struct { value T }\nfunc (store *Store[T]) Map(transform func(T) T) T { published_go_marker := transform(store.value); published_go_marker = transform(published_go_marker); return published_go_marker }\n",
+			["Range.java"] =
+				"record Range(int start, int end) { Range { int published_java_compact_marker = end - start; if (published_java_compact_marker < 0) throw new IllegalArgumentException(); } }\n",
+			["stream.mjs"] =
+				"export async function* stream(values) { const published_js_generator_marker = values.length; yield published_js_generator_marker; yield values.length; }\n",
+			["service.py"] =
+				"async def create(values):\n    published_python_marker = sum(values)\n    published_python_marker += 10\n    return published_python_marker\n",
+			["repository.rs"] =
+				"pub fn map<T: Clone>(value: T) -> T { let published_rust_marker = value.clone(); let _copy = published_rust_marker.clone(); published_rust_marker }\n",
+			["repository.ts"] =
+				"export async function* streamTs(values: readonly number[]) { const published_typescript_marker = values.length; yield published_typescript_marker; yield values.length; }\n",
+			["Widget.tsx"] =
+				"export function Widget({ value }: { value: number }) { const published_tsx_marker = value + 1; const label = published_tsx_marker.toString(); return <section>{label}</section>; }\n"
+		};
+		foreach (var source in sources)
+		{
+			workspace.WriteFile(
+				Path.Combine("compression", "source", source.Key),
+				source.Value);
+		}
+		var sourceSnapshot = CaptureSourceTree(project);
 		var environment = CreateEnvironment(home, temporary, dataRoot, extractionRoot);
 		var common = new[]
 		{
@@ -395,7 +421,8 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		using (var document = JsonDocument.Parse(analysis.StandardOutput))
 		{
 			Assert.True(document.RootElement.GetProperty("selection").GetProperty("compressCode").GetBoolean());
-			Assert.Equal(1, document.RootElement.GetProperty("compression").GetProperty("compressedFiles").GetInt32());
+			Assert.Equal(10, document.RootElement.GetProperty("compression").GetProperty("compressedFiles").GetInt32());
+			Assert.Equal(0, document.RootElement.GetProperty("compression").GetProperty("unchangedFiles").GetInt32());
 		}
 
 		var context = await RunAsync(
@@ -414,8 +441,9 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		Assert.Empty(context.StandardError);
 		Assert.Contains("Compute(int left, int right)", context.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("_factory = Create;", context.StandardOutput, StringComparison.Ordinal);
-		Assert.DoesNotContain("published_implementation_marker", context.StandardOutput, StringComparison.Ordinal);
-		Assert.DoesNotContain("published_factory_marker", context.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("async function* stream(values)", context.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("async function* streamTs(values", context.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("published_", context.StandardOutput, StringComparison.OrdinalIgnoreCase);
 
 		var folderDestination = Path.Combine(workspace.Path, "compression", "folder-output");
 		var folder = await RunAsync(
@@ -434,8 +462,13 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		Assert.Equal(Path.GetFullPath(folderDestination), folder.StandardOutput.Trim());
 		var folderSource = File.ReadAllText(Path.Combine(folderDestination, "Widget.cs"));
 		Assert.Contains("_factory = Create;", folderSource, StringComparison.Ordinal);
-		Assert.DoesNotContain("published_implementation_marker", folderSource, StringComparison.Ordinal);
-		Assert.DoesNotContain("published_factory_marker", folderSource, StringComparison.Ordinal);
+		foreach (var relativePath in sources.Keys)
+		{
+			Assert.DoesNotContain(
+				"published_",
+				File.ReadAllText(Path.Combine(folderDestination, relativePath)),
+				StringComparison.OrdinalIgnoreCase);
+		}
 		Assert.True(File.Exists(Path.Combine(
 			folderDestination,
 			ProjectCopyExportService.TransformationNoticeFileName)));
@@ -457,17 +490,23 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		Assert.Equal(Path.GetFullPath(zipDestination), zip.StandardOutput.Trim());
 		using (var archive = ZipFile.OpenRead(zipDestination))
 		{
-			var sourceEntry = Assert.Single(archive.Entries, static entry =>
-				entry.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
-			using var reader = new StreamReader(sourceEntry.Open(), Encoding.UTF8);
-			Assert.Equal(folderSource, await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+			foreach (var relativePath in sources.Keys)
+			{
+				var normalizedPath = relativePath.Replace('\\', '/');
+				var sourceEntry = Assert.Single(archive.Entries, entry =>
+					entry.FullName.EndsWith(normalizedPath, StringComparison.Ordinal));
+				using var reader = new StreamReader(sourceEntry.Open(), Encoding.UTF8);
+				Assert.Equal(
+					File.ReadAllText(Path.Combine(folderDestination, relativePath)),
+					await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+			}
 			Assert.Contains(archive.Entries, static entry =>
 				entry.FullName.EndsWith(
 					ProjectCopyExportService.TransformationNoticeFileName,
 					StringComparison.Ordinal));
 		}
 
-		Assert.Equal(sourceBytes, File.ReadAllBytes(sourcePath));
+		Assert.Equal(sourceSnapshot, CaptureSourceTree(project));
 	}
 
 	private static IReadOnlyList<string> CaptureSourceTree(string rootPath)

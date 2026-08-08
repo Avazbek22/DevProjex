@@ -40,8 +40,10 @@
 
   <PropertyGroup>
     <!-- A RID-less build (dotnet build, and therefore every test run) still needs grammars, so it
-         embeds the host's. A RID-specific publish embeds that RID's. -->
-    <_GrammarRid Condition="'$(RuntimeIdentifier)'!=''">$(RuntimeIdentifier)</_GrammarRid>
+         embeds the host's. Executable projects pass their publish RID explicitly because the .NET
+         SDK deliberately builds class-library project references without RuntimeIdentifier. -->
+    <_GrammarRid Condition="'$(DevProjexGrammarRuntimeIdentifier)'!=''">$(DevProjexGrammarRuntimeIdentifier)</_GrammarRid>
+    <_GrammarRid Condition="'$(_GrammarRid)'=='' and '$(RuntimeIdentifier)'!=''">$(RuntimeIdentifier)</_GrammarRid>
     <_GrammarRid Condition="'$(_GrammarRid)'==''">$(NETCoreSdkPortableRuntimeIdentifier)</_GrammarRid>
     <_GrammarSourceDir>$(NuGetPackageRoot)treesitter.dotnet/$(TreeSitterDotNetVersion)/runtimes/$(_GrammarRid)/native/</_GrammarSourceDir>
     <_GrammarPrefix Condition="!$(_GrammarRid.StartsWith('win'))">lib</_GrammarPrefix>
@@ -89,9 +91,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Application\Application.csproj" />
-    <ProjectReference Include="..\Kernel\Kernel.csproj" />
-    <ProjectReference Include="..\Assets\Assets.csproj" />
+    <ProjectReference
+      Include="..\Application\Application.csproj"
+      GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
+    <ProjectReference
+      Include="..\Kernel\Kernel.csproj"
+      GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
+    <ProjectReference
+      Include="..\Assets\Assets.csproj"
+      GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
   </ItemGroup>
 
   <ItemGroup>

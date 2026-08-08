@@ -23,9 +23,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Application\Application.csproj" />
-    <ProjectReference Include="..\..\Assets\Assets.csproj" />
-    <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Kernel\Kernel.csproj" />
+    <ProjectReference
+      Include="..\..\Application\Application.csproj"
+      GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
+    <ProjectReference
+      Include="..\..\Assets\Assets.csproj"
+      GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
+    <ProjectReference
+      Include="..\..\Infrastructure\Infrastructure.csproj">
+      <AdditionalProperties Condition="'$(DevProjexGrammarRuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
+    <ProjectReference
+      Include="..\..\Kernel\Kernel.csproj"
+      GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
   </ItemGroup>
 </Project>

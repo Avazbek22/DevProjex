@@ -80,28 +80,45 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
-	public void CSharpFieldDeclarationCapturesOnlyTheDeclaratorName()
+	public void CSharpFieldAndEventDeclarationsCaptureOnlyDeclaratorNames()
 	{
 		const string source = """
 			internal sealed class Coordinator
 			{
-			    private readonly System.Func<int> _factory = Create;
+			    private readonly System.Func<int> _factory = Create, _fallback = () => Fallback();
+			    private event System.Action? Changed = Handle;
 			    private static int Create() => 42;
+			    private static int Fallback() => 0;
+			    private static void Handle() { }
 			}
 			""";
 		using var harness = CodeCompressionTestHarness.For("csharp");
 		using var tree = harness.Parser.Parse(source)!;
 		using var cursor = harness.Declarations.Execute(tree.RootNode);
-		var fieldNames = cursor.Matches
-			.Where(static match => match.Captures.Any(static capture =>
-				capture.Name.Equals("declaration", StringComparison.Ordinal) &&
-				capture.Node.Type.Equals("field_declaration", StringComparison.Ordinal)))
-			.SelectMany(static match => match.Captures)
-			.Where(static capture => capture.Name.Equals("name", StringComparison.Ordinal))
-			.Select(static capture => capture.Node.Text)
+		var declarationNames = cursor.Matches
+			.Select(match => new
+			{
+				Kind = match.Captures
+					.Single(static capture => capture.Name.Equals("declaration", StringComparison.Ordinal))
+					.Node.Type,
+				Names = match.Captures
+					.Where(static capture => capture.Name.Equals("name", StringComparison.Ordinal))
+					.Select(static capture => capture.Node.Text)
+					.ToArray()
+			})
+			.Where(static capture => capture.Kind is "field_declaration" or "event_field_declaration")
+			.SelectMany(static capture => capture.Names.Select(name => (capture.Kind, Name: name)))
+			.OrderBy(static capture => capture.Kind, StringComparer.Ordinal)
+			.ThenBy(static capture => capture.Name, StringComparer.Ordinal)
 			.ToArray();
 
-		Assert.Equal(["_factory"], fieldNames);
+		Assert.Equal(
+			[
+				("event_field_declaration", "Changed"),
+				("field_declaration", "_factory"),
+				("field_declaration", "_fallback")
+			],
+			declarationNames);
 	}
 
 	[Fact]

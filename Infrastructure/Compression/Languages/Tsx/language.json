@@ -4,9 +4,9 @@
   "extensions": [".tsx"],
   "library": "tree-sitter-tsx",
   "export": "tree_sitter_tsx",
-  "queryVersion": 2,
+  "queryVersion": 3,
   "blockPlaceholder": "{ }",
   "expressionPlaceholder": null,
   "containerNodeTypes": ["program", "class_body", "interface_body"],
-  "executableOwnerKinds": ["function_declaration", "method_definition", "function_expression", "arrow_function"]
+  "executableOwnerKinds": ["function_declaration", "generator_function_declaration", "method_definition", "function_expression", "generator_function", "arrow_function"]
 }

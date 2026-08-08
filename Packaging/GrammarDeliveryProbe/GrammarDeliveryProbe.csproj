@@ -26,7 +26,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj" />
+    <ProjectReference
+      Include="..\..\Infrastructure\Infrastructure.csproj">
+      <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>

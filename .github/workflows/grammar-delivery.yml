@@ -135,7 +135,15 @@ jobs:
         shell: bash
         run: |
           chmod +x "artifacts/grammar-delivery/embedded/${{ matrix.binary }}" 2>/dev/null || true
-          "artifacts/grammar-delivery/embedded/${{ matrix.binary }}"
+          if [[ "${{ matrix.rid }}" == linux-* ]]; then
+            grammar_home="${RUNNER_TEMP}/grammar-delivery-home-${{ matrix.rid }}"
+            rm -rf -- "$grammar_home"
+            mkdir -p -- "$grammar_home"
+            env -u XDG_DATA_HOME HOME="$grammar_home" \
+              "artifacts/grammar-delivery/embedded/${{ matrix.binary }}"
+          else
+            "artifacts/grammar-delivery/embedded/${{ matrix.binary }}"
+          fi
 
       - name: Re-run and verify repair of a damaged grammar
         shell: bash
@@ -144,7 +152,13 @@ jobs:
           # that a damaged copy is repaired before it is ever loaded. Damage between sessions is
           # the realistic case - a truncated write, an antivirus quarantine, a bad sector - and
           # loading damaged native code instead of repairing it is the failure worth gating on.
-          "artifacts/grammar-delivery/embedded/${{ matrix.binary }}" --verify-recovery
+          if [[ "${{ matrix.rid }}" == linux-* ]]; then
+            grammar_home="${RUNNER_TEMP}/grammar-delivery-home-${{ matrix.rid }}"
+            env -u XDG_DATA_HOME HOME="$grammar_home" \
+              "artifacts/grammar-delivery/embedded/${{ matrix.binary }}" --verify-recovery
+          else
+            "artifacts/grammar-delivery/embedded/${{ matrix.binary }}" --verify-recovery
+          fi
 
       - name: Report binary growth
         shell: bash

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.Compression;
 
@@ -67,7 +68,7 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 
 	public static string DefaultRootDirectory(string bindingVersion) =>
 		Path.Combine(
-			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+			UserDataPathResolver.GetLocalDataRoot(),
 			"DevProjex",
 			"grammars",
 			$"tree-sitter-{bindingVersion}",
