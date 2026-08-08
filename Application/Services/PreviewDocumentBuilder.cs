@@ -282,17 +282,18 @@ public sealed class PreviewDocumentBuilder(
 			// value inside a removed body is neither redacted nor counted.
 			var compression = prepared.Compression;
 			var compressed = compression?.Text ?? content.Content;
-			var coordinateMap = includeSourceCoordinateMaps
-				? PreviewContentCoordinateMap.Create(
-					compressed.AsSpan(),
-					compression?.Map ?? ContentTransformMap.Identity)
-				: null;
 			var transformed = redactionScope?.Redact(
 				file,
 				compressed,
 				compression?.Map,
 				cancellationToken);
 			var text = transformed?.Text ?? compressed;
+			var coordinateMap = includeSourceCoordinateMaps
+				? PreviewContentCoordinateMap.Create(
+					text.AsSpan(),
+					compression?.Map ?? ContentTransformMap.Identity,
+					transformed?.CoordinateMap)
+				: null;
 			if (transformed is { Spans.Count: > 0 })
 			{
 				AppendPreviewRedactionSpans(

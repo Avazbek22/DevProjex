@@ -43,7 +43,11 @@ public sealed record CodeCompressionDiagnosticsSnapshot(
 	long PrewarmCacheHits,
 	long PrewarmAnalyses,
 	long PrewarmReuses,
-	long UnsupportedFastPaths);
+	long UnsupportedFastPaths,
+	int CacheEntries,
+	long RetainedCacheBytes,
+	int MaximumCacheEntries,
+	long MaximumRetainedCacheBytes);
 
 /// <summary>
 /// Window-lifetime state for code compression: the compressor, a plan cache and the last published
@@ -53,12 +57,15 @@ public sealed record CodeCompressionDiagnosticsSnapshot(
 /// </summary>
 public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDisposable
 {
-	internal const int PlanCacheCapacity = 4096;
+	internal const int PlanCacheCapacity = 16_384;
+	internal const long MaximumRetainedPlanCacheBytes = 64L * 1024 * 1024;
 	private readonly Dictionary<CodeCompressionCacheKey, LinkedListNode<CachedPlan>> _cache = [];
 	private readonly LinkedList<CachedPlan> _cacheRecency = [];
 	private readonly ConcurrentDictionary<InFlightCompressionKey, Lazy<CodeCompressionAnalysis>> _inFlight = [];
 	private readonly ConcurrentDictionary<CodeCompressionCacheKey, Lazy<CodeCompressionAnalysis>> _prewarmInFlight = [];
 	private readonly object _sync = new();
+	private readonly int _maximumCacheEntries = PlanCacheCapacity;
+	private readonly long _maximumRetainedCacheBytes = MaximumRetainedPlanCacheBytes;
 	private CodeCompressionSnapshot _snapshot = CodeCompressionSnapshot.Empty;
 	private CancellationTokenSource _generationCts = new();
 	private long _generation;
@@ -71,7 +78,20 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	private long _prewarmAnalyses;
 	private long _prewarmReuses;
 	private long _unsupportedFastPaths;
+	private long _retainedCacheBytes;
 	private bool _disposed;
+
+	internal CodeCompressionSession(
+		ICodeCompressor compressor,
+		int maximumCacheEntries,
+		long maximumRetainedCacheBytes)
+		: this(compressor)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCacheEntries);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumRetainedCacheBytes);
+		_maximumCacheEntries = maximumCacheEntries;
+		_maximumRetainedCacheBytes = maximumRetainedCacheBytes;
+	}
 
 	public event EventHandler? SnapshotPublished;
 
@@ -79,16 +99,33 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 	public bool IsSupported(string relativePath) => compressor.IsSupported(relativePath);
 
-	public CodeCompressionDiagnosticsSnapshot Diagnostics => new(
-		Interlocked.Read(ref _hashComputations),
-		Interlocked.Read(ref _cacheHits),
-		Interlocked.Read(ref _cacheMisses),
-		Interlocked.Read(ref _analysisExecutions),
-		Interlocked.Read(ref _prewarmRequests),
-		Interlocked.Read(ref _prewarmCacheHits),
-		Interlocked.Read(ref _prewarmAnalyses),
-		Interlocked.Read(ref _prewarmReuses),
-		Interlocked.Read(ref _unsupportedFastPaths));
+	public CodeCompressionDiagnosticsSnapshot Diagnostics
+	{
+		get
+		{
+			int cacheEntries;
+			long retainedCacheBytes;
+			lock (_sync)
+			{
+				cacheEntries = _cache.Count;
+				retainedCacheBytes = _retainedCacheBytes;
+			}
+			return new CodeCompressionDiagnosticsSnapshot(
+				Interlocked.Read(ref _hashComputations),
+				Interlocked.Read(ref _cacheHits),
+				Interlocked.Read(ref _cacheMisses),
+				Interlocked.Read(ref _analysisExecutions),
+				Interlocked.Read(ref _prewarmRequests),
+				Interlocked.Read(ref _prewarmCacheHits),
+				Interlocked.Read(ref _prewarmAnalyses),
+				Interlocked.Read(ref _prewarmReuses),
+				Interlocked.Read(ref _unsupportedFastPaths),
+				cacheEntries,
+				retainedCacheBytes,
+				_maximumCacheEntries,
+				_maximumRetainedCacheBytes);
+		}
+	}
 
 	public CodeCompressionSnapshot Snapshot
 	{
@@ -331,14 +368,19 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			}
 
 			cachedPlan = CreateUncachedPlan(key, analysis);
+			if (cachedPlan.ApproximateRetainedBytes > _maximumRetainedCacheBytes)
+				return false;
 
 			var node = _cacheRecency.AddFirst(cachedPlan);
 			_cache.Add(key, node);
-			while (_cache.Count > PlanCacheCapacity)
+			_retainedCacheBytes += cachedPlan.ApproximateRetainedBytes;
+			while (_cache.Count > _maximumCacheEntries ||
+			       _retainedCacheBytes > _maximumRetainedCacheBytes)
 			{
 				var leastRecent = _cacheRecency.Last!;
 				_cacheRecency.RemoveLast();
 				_cache.Remove(leastRecent.Value.Key);
+				_retainedCacheBytes -= leastRecent.Value.ApproximateRetainedBytes;
 			}
 
 			cachedPlan = node.Value;
@@ -351,13 +393,30 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		CodeCompressionAnalysis analysis)
 	{
 		var plan = analysis.Plan;
+		var map = analysis.ValidatedResult?.Map ??
+		          (plan.HasEdits
+			          ? ContentTransformMap.Create(plan.Edits, plan.SourceLength)
+			          : ContentTransformMap.Identity);
 		return new CachedPlan(
 			key,
 			plan,
-			analysis.ValidatedResult?.Map ??
-			(plan.HasEdits
-				? ContentTransformMap.Create(plan.Edits, plan.SourceLength)
-				: ContentTransformMap.Identity));
+			map,
+			EstimateRetainedBytes(key, plan));
+	}
+
+	private static long EstimateRetainedBytes(
+		CodeCompressionCacheKey key,
+		CodeCompressionPlan plan)
+	{
+		var bytes = 256L +
+		            (key.FullPath.Length + key.TransformIdentity.Length +
+		             plan.RelativePath.Length + plan.LanguageId.Length +
+		             plan.TransformIdentity.Length) * sizeof(char);
+		foreach (var edit in plan.Edits)
+			bytes += 80L + edit.Replacement.Length * sizeof(char);
+		// Four integer arrays in ContentTransformMap, plus the edit collection references.
+		bytes += plan.Edits.Count * (4L * sizeof(int) + IntPtr.Size);
+		return bytes;
 	}
 
 	private static CodeCompressionExecution CreateExecution(
@@ -396,6 +455,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			_generation++;
 			_cache.Clear();
 			_cacheRecency.Clear();
+			_retainedCacheBytes = 0;
 			_snapshot = CodeCompressionSnapshot.Empty;
 		}
 		previousGeneration.Cancel();
@@ -407,10 +467,22 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 	public void Dispose()
 	{
-		if (_disposed)
-			return;
-		_disposed = true;
-		Reset();
+		CancellationTokenSource generation;
+		lock (_sync)
+		{
+			if (_disposed)
+				return;
+			_disposed = true;
+			generation = _generationCts;
+			_cache.Clear();
+			_cacheRecency.Clear();
+			_retainedCacheBytes = 0;
+			_snapshot = CodeCompressionSnapshot.Empty;
+		}
+		generation.Cancel();
+		generation.Dispose();
+		_inFlight.Clear();
+		_prewarmInFlight.Clear();
 		if (compressor is IDisposable disposable)
 			disposable.Dispose();
 	}
@@ -454,7 +526,8 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	private sealed record CachedPlan(
 		CodeCompressionCacheKey Key,
 		CodeCompressionPlan Plan,
-		ContentTransformMap Map);
+		ContentTransformMap Map,
+		long ApproximateRetainedBytes);
 	private readonly record struct GenerationSnapshot(long Version, CancellationToken Token);
 	private readonly record struct InFlightCompressionKey(
 		CodeCompressionCacheKey CacheKey,

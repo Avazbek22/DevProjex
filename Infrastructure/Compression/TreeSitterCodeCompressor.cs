@@ -1,5 +1,7 @@
 using DevProjex.Application.Compression;
+using System.Buffers;
 using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using TreeSitter;
 
 namespace DevProjex.Infrastructure.Compression;
@@ -26,12 +28,23 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 	/// as UnchangedTooLarge so the user sees a reason rather than an unexplained refusal.
 	/// </summary>
 	public const int MaximumParsableCharacters = 2 * 1024 * 1024;
+	internal const uint MaximumQueryMatchLimit = 4096;
+	internal const int MaximumBodyCapturesPerFile = 20_000;
+	internal const int MaximumEditsPerFile = 10_000;
+	internal const int MaximumDeclarationsPerFile = 25_000;
+	internal const int MaximumDefectsPerFile = 4_096;
+	internal const int MaximumVisitedSyntaxNodesPerFile = 500_000;
 
 	private readonly IGrammarLibraryLocator _locator;
 	private readonly IReadOnlyList<CompressionLanguagePack> _packs;
 	private readonly Dictionary<string, IReadOnlyList<CompressionLanguagePack>> _byExtension;
-	private readonly ConcurrentDictionary<string, Lazy<LanguageWorkerPool>> _languagePools = [];
-	private bool _disposed;
+	private readonly Dictionary<string, LanguageWorkerPool> _languagePools = [];
+	private readonly LanguageWorkerBudget _workerBudget;
+	private readonly object _lifetimeSync = new();
+	private long _nextScopeId;
+	private int _activeScopes;
+	private bool _disposeRequested;
+	private bool _resourcesDisposed;
 
 	public TreeSitterCodeCompressor(IGrammarLibraryLocator locator)
 		: this(locator, CompressionLanguagePack.LoadAll())
@@ -42,6 +55,8 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 	{
 		_locator = locator;
 		_packs = packs;
+		_workerBudget = new LanguageWorkerBudget(
+			packs.Select(static pack => pack.Id).Distinct(StringComparer.Ordinal).Count());
 		_byExtension = packs
 			.SelectMany(pack => pack.Extensions.Select(extension => (extension, pack)))
 			.GroupBy(static pair => pair.extension, StringComparer.OrdinalIgnoreCase)
@@ -63,15 +78,24 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 	{
 		get
 		{
-			var diagnostics = _languagePools.Values
-				.Where(static pool => pool.IsValueCreated)
-				.Select(static pool => pool.Value.Diagnostics)
-				.ToArray();
+			LanguagePoolDiagnostics[] diagnostics;
+			lock (_lifetimeSync)
+			{
+				diagnostics = _languagePools.Values
+					.Select(static pool => pool.Diagnostics)
+					.ToArray();
+			}
+			var budget = _workerBudget.Diagnostics;
 			return new CodeCompressionRuntimeDiagnostics(
 				diagnostics.Sum(static value => value.CompiledQuerySets),
 				diagnostics.Sum(static value => value.MaterializedWorkers),
 				diagnostics.Sum(static value => value.AvailableWorkers),
-				diagnostics.Sum(static value => value.LeasedWorkers));
+				diagnostics.Sum(static value => value.LeasedWorkers),
+				budget.Capacity,
+				budget.Active,
+				budget.PeakActive,
+				budget.Retained,
+				budget.RetainedCapacity);
 		}
 	}
 
@@ -93,28 +117,66 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 
 	public ICodeCompressionScope CreateScope(string projectRoot)
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
-		return new TreeSitterCompressionScope(_byExtension, TransformIdentity, GetLanguagePool);
+		lock (_lifetimeSync)
+		{
+			ObjectDisposedException.ThrowIf(_disposeRequested, this);
+			_activeScopes++;
+			return new TreeSitterCompressionScope(
+				_byExtension,
+				TransformIdentity,
+				Interlocked.Increment(ref _nextScopeId),
+				GetLanguagePool,
+				ReleaseScope);
+		}
 	}
 
-	private LanguageWorkerPool GetLanguagePool(CompressionLanguagePack pack) =>
-		_languagePools.GetOrAdd(
-			pack.Id,
-			_ => new Lazy<LanguageWorkerPool>(
-				() => new LanguageWorkerPool(_locator, pack),
-				LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+	private LanguageWorkerPool GetLanguagePool(CompressionLanguagePack pack)
+	{
+		lock (_lifetimeSync)
+		{
+			ObjectDisposedException.ThrowIf(_resourcesDisposed, this);
+			if (_languagePools.TryGetValue(pack.Id, out var existing))
+				return existing;
+
+			var created = new LanguageWorkerPool(_locator, pack, _workerBudget);
+			_languagePools.Add(pack.Id, created);
+			return created;
+		}
+	}
 
 	public void Dispose()
 	{
-		if (_disposed)
-			return;
-		_disposed = true;
-		foreach (var pool in _languagePools.Values)
+		lock (_lifetimeSync)
 		{
-			if (pool.IsValueCreated)
-				pool.Value.Dispose();
+			if (_disposeRequested)
+				return;
+			_disposeRequested = true;
+			if (_activeScopes != 0)
+				return;
+			DisposeResourcesLocked();
 		}
+	}
+
+	private void ReleaseScope()
+	{
+		lock (_lifetimeSync)
+		{
+			if (_activeScopes > 0)
+				_activeScopes--;
+			if (_disposeRequested && _activeScopes == 0)
+				DisposeResourcesLocked();
+		}
+	}
+
+	private void DisposeResourcesLocked()
+	{
+		if (_resourcesDisposed)
+			return;
+		_resourcesDisposed = true;
+		foreach (var pool in _languagePools.Values)
+			pool.Dispose();
 		_languagePools.Clear();
+		_workerBudget.Dispose();
 	}
 }
 
@@ -125,9 +187,11 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 internal sealed class TreeSitterCompressionScope(
 	IReadOnlyDictionary<string, IReadOnlyList<CompressionLanguagePack>> byExtension,
 	string transformIdentity,
-	Func<CompressionLanguagePack, LanguageWorkerPool> languagePoolProvider) : ICodeCompressionScope
+	long operationId,
+	Func<CompressionLanguagePack, LanguageWorkerPool> languagePoolProvider,
+	Action releaseScope) : ICodeCompressionScope
 {
-	private bool _disposed;
+	private int _disposed;
 
 	public CodeCompressionAnalysis Analyze(
 		string fullPath,
@@ -135,7 +199,7 @@ internal sealed class TreeSitterCompressionScope(
 		string content,
 		CancellationToken cancellationToken)
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
 		if (!byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates))
 			return Refused(relativePath, "unknown", CodeCompressionOutcome.UnchangedUnsupportedLanguage, content.Length);
@@ -149,9 +213,9 @@ internal sealed class TreeSitterCompressionScope(
 		LanguageWorkerLease lease;
 		try
 		{
-			lease = languagePoolProvider(pack).Rent(cancellationToken);
+			lease = languagePoolProvider(pack).Rent(operationId, cancellationToken);
 		}
-		catch (Exception exception) when (exception is DllNotFoundException or InvalidOperationException or IOException)
+		catch (Exception exception) when (IsLanguageRuntimeFailure(exception))
 		{
 			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedParseFailed, content.Length);
 		}
@@ -164,6 +228,8 @@ internal sealed class TreeSitterCompressionScope(
 			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedParseFailed, content.Length);
 
 		var edits = CollectEdits(pack, language, original, source, cancellationToken);
+		if (edits is null)
+			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
 		CodeCompressionPlan plan;
 		try
 		{
@@ -187,11 +253,25 @@ internal sealed class TreeSitterCompressionScope(
 				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
 				null);
 
+		var originalDeclarations = ReadDeclarations(language, original.RootNode, ContentTransformMap.Identity);
+		var compressedDeclarations = ReadDeclarations(language, compressed.RootNode, applied.Map);
+		var originalDefects = ReadDefects(original.RootNode, ContentTransformMap.Identity);
+		var compressedDefects = ReadDefects(compressed.RootNode, applied.Map);
+		if (originalDeclarations is null ||
+		    compressedDeclarations is null ||
+		    originalDefects is null ||
+		    compressedDefects is null)
+		{
+			return new CodeCompressionAnalysis(
+				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
+				null);
+		}
+
 		var verdict = CodeStructureGate.Evaluate(
-			ReadDeclarations(language, original.RootNode, ContentTransformMap.Identity),
-			ReadDeclarations(language, compressed.RootNode, applied.Map),
-			ReadDefects(original.RootNode, ContentTransformMap.Identity),
-			ReadDefects(compressed.RootNode, applied.Map),
+			originalDeclarations,
+			compressedDeclarations,
+			originalDefects,
+			compressedDefects,
 			plan.Edits,
 			pack.ExecutableOwnerKinds);
 
@@ -231,23 +311,224 @@ internal sealed class TreeSitterCompressionScope(
 
 	private static bool ContainsCppHeaderEvidence(string source)
 	{
-		// A .h file is ambiguous by design. Keep ordinary C headers on the stricter C grammar, but
-		// never let that grammar reinterpret an explicit C++ class or template as a function body.
-		ReadOnlySpan<string> evidence =
-		[
-			"namespace ", "template<", "template <", "class ", "public:", "private:",
-			"protected:", "std::", "constexpr ", "typename ", "using namespace "
-		];
-		foreach (var marker in evidence)
+		var buffer = ArrayPool<char>.Shared.Rent(Math.Max(1, source.Length));
+		try
 		{
-			if (source.Contains(marker, StringComparison.Ordinal))
-				return true;
+			var code = buffer.AsSpan(0, source.Length);
+			StripCommentsStringsAndPreprocessor(source.AsSpan(), code);
+			return ContainsWord(code, "namespace") ||
+			       ContainsWord(code, "template") ||
+			       ContainsWord(code, "class") ||
+			       ContainsWord(code, "constexpr") ||
+			       ContainsWord(code, "typename") ||
+			       code.Contains("::", StringComparison.Ordinal) ||
+			       ContainsAccessLabel(code, "public") ||
+			       ContainsAccessLabel(code, "private") ||
+			       ContainsAccessLabel(code, "protected") ||
+			       ContainsInlineStructMethod(code);
 		}
+		finally
+		{
+			ArrayPool<char>.Shared.Return(buffer);
+		}
+	}
 
+	private static void StripCommentsStringsAndPreprocessor(
+		ReadOnlySpan<char> source,
+		Span<char> destination)
+	{
+		destination.Fill(' ');
+		var state = HeaderLexicalState.Code;
+		var lineHasCode = false;
+		var escaped = false;
+		var lastNonWhitespace = '\0';
+		for (var index = 0; index < source.Length; index++)
+		{
+			var current = source[index];
+			var next = index + 1 < source.Length ? source[index + 1] : '\0';
+			if (current == '\n')
+			{
+				destination[index] = current;
+				var continuesLogicalLine =
+					state is HeaderLexicalState.LineComment or HeaderLexicalState.Preprocessor &&
+					lastNonWhitespace == '\\';
+				if (!continuesLogicalLine &&
+				    state is HeaderLexicalState.LineComment or HeaderLexicalState.Preprocessor)
+				{
+					state = HeaderLexicalState.Code;
+				}
+				lineHasCode = false;
+				escaped = false;
+				lastNonWhitespace = '\0';
+				continue;
+			}
+
+			switch (state)
+			{
+				case HeaderLexicalState.LineComment:
+				case HeaderLexicalState.Preprocessor:
+					if (!char.IsWhiteSpace(current))
+						lastNonWhitespace = current;
+					continue;
+				case HeaderLexicalState.BlockComment:
+					if (current == '*' && next == '/')
+					{
+						state = HeaderLexicalState.Code;
+						index++;
+					}
+					continue;
+				case HeaderLexicalState.String:
+					if (!escaped && current == '"')
+						state = HeaderLexicalState.Code;
+					escaped = !escaped && current == '\\';
+					continue;
+				case HeaderLexicalState.Character:
+					if (!escaped && current == '\'')
+						state = HeaderLexicalState.Code;
+					escaped = !escaped && current == '\\';
+					continue;
+			}
+
+			if (!lineHasCode && current == '#')
+			{
+				state = HeaderLexicalState.Preprocessor;
+				continue;
+			}
+			if (current == '/' && next == '/')
+			{
+				state = HeaderLexicalState.LineComment;
+				index++;
+				continue;
+			}
+			if (current == '/' && next == '*')
+			{
+				state = HeaderLexicalState.BlockComment;
+				index++;
+				continue;
+			}
+			if (current == '"')
+			{
+				state = HeaderLexicalState.String;
+				escaped = false;
+				continue;
+			}
+			if (current == '\'')
+			{
+				state = HeaderLexicalState.Character;
+				escaped = false;
+				continue;
+			}
+
+			destination[index] = current;
+			if (!char.IsWhiteSpace(current))
+				lineHasCode = true;
+		}
+	}
+
+	private static bool ContainsWord(ReadOnlySpan<char> code, ReadOnlySpan<char> word)
+	{
+		var offset = 0;
+		while (offset <= code.Length - word.Length)
+		{
+			var relative = code[offset..].IndexOf(word, StringComparison.Ordinal);
+			if (relative < 0)
+				return false;
+			var start = offset + relative;
+			var end = start + word.Length;
+			if ((start == 0 || !IsIdentifierCharacter(code[start - 1])) &&
+			    (end == code.Length || !IsIdentifierCharacter(code[end])))
+			{
+				return true;
+			}
+			offset = start + 1;
+		}
 		return false;
 	}
 
-	private static List<CodeCompressionEdit> CollectEdits(
+	private static bool ContainsAccessLabel(ReadOnlySpan<char> code, ReadOnlySpan<char> label)
+	{
+		var offset = 0;
+		while (offset <= code.Length - label.Length)
+		{
+			var relative = code[offset..].IndexOf(label, StringComparison.Ordinal);
+			if (relative < 0)
+				return false;
+			var start = offset + relative;
+			var end = start + label.Length;
+			if ((start == 0 || !IsIdentifierCharacter(code[start - 1])) &&
+			    (end == code.Length || !IsIdentifierCharacter(code[end])))
+			{
+				while (end < code.Length && char.IsWhiteSpace(code[end]))
+					end++;
+				if (end < code.Length && code[end] == ':')
+					return true;
+			}
+			offset = start + 1;
+		}
+		return false;
+	}
+
+	private static bool ContainsInlineStructMethod(ReadOnlySpan<char> code)
+	{
+		var searchOffset = 0;
+		while (searchOffset < code.Length)
+		{
+			var relative = code[searchOffset..].IndexOf("struct", StringComparison.Ordinal);
+			if (relative < 0)
+				return false;
+			var start = searchOffset + relative;
+			var wordEnd = start + "struct".Length;
+			searchOffset = start + 1;
+			if ((start > 0 && IsIdentifierCharacter(code[start - 1])) ||
+			    (wordEnd < code.Length && IsIdentifierCharacter(code[wordEnd])))
+			{
+				continue;
+			}
+
+			var open = code[wordEnd..].IndexOf('{');
+			var terminator = code[wordEnd..].IndexOf(';');
+			if (open < 0 || (terminator >= 0 && terminator < open))
+				continue;
+			open += wordEnd;
+			var depth = 1;
+			for (var index = open + 1; index < code.Length && depth > 0; index++)
+			{
+				if (code[index] == '{')
+				{
+					depth++;
+					continue;
+				}
+				if (code[index] == '}')
+				{
+					depth--;
+					continue;
+				}
+				if (depth != 1 || code[index] != ')')
+					continue;
+				var next = index + 1;
+				while (next < code.Length && char.IsWhiteSpace(code[next]))
+					next++;
+				if (next < code.Length && code[next] == '{')
+					return true;
+			}
+		}
+		return false;
+	}
+
+	private static bool IsIdentifierCharacter(char value) =>
+		char.IsAsciiLetterOrDigit(value) || value == '_';
+
+	private enum HeaderLexicalState
+	{
+		Code,
+		LineComment,
+		BlockComment,
+		String,
+		Character,
+		Preprocessor
+	}
+
+	private static List<CodeCompressionEdit>? CollectEdits(
 		CompressionLanguagePack pack,
 		LoadedLanguage language,
 		Tree tree,
@@ -260,8 +541,13 @@ internal sealed class TreeSitterCompressionScope(
 		if (language.Runtime.Docstrings is not null && language.DocstringsCursor is not null)
 		{
 			language.DocstringsCursor.Execute(language.Runtime.Docstrings, tree.RootNode);
+			if (language.DocstringsCursor.IsMatchLimitExceeded)
+				return null;
+			var docstringCount = 0;
 			foreach (var capture in language.DocstringsCursor.Captures)
 			{
+				if (++docstringCount > TreeSitterCodeCompressor.MaximumBodyCapturesPerFile)
+					return null;
 				var block = capture.Node.Parent;
 				if (block is not null)
 					docstringEnds[block.StartIndex] = capture.Node.EndIndex;
@@ -270,9 +556,13 @@ internal sealed class TreeSitterCompressionScope(
 
 		var raw = new List<(int Start, int End, string Type)>();
 		language.BodiesCursor.Execute(language.Runtime.Bodies, tree.RootNode);
+		if (language.BodiesCursor.IsMatchLimitExceeded)
+			return null;
 		foreach (var capture in language.BodiesCursor.Captures)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			if (raw.Count >= TreeSitterCodeCompressor.MaximumBodyCapturesPerFile)
+				return null;
 			var node = capture.Node;
 
 			// Defence in depth. The queries are anchored on the parent declaration's body: field, so
@@ -312,6 +602,8 @@ internal sealed class TreeSitterCompressionScope(
 			if (start < reach)
 				continue;
 			reach = end;
+			if (edits.Count >= TreeSitterCodeCompressor.MaximumEditsPerFile)
+				return null;
 			edits.Add(new CodeCompressionEdit(start, end - start, PlaceholderFor(pack, source, start, end, type)));
 		}
 
@@ -426,7 +718,10 @@ internal sealed class TreeSitterCompressionScope(
 				indentation = source[(lineStart + 1)..scan];
 		}
 
-		var trailingNewline = end > 0 && end <= source.Length && source[end - 1] == '\n' ? "\n" : string.Empty;
+		var lineEnding = ResolveLineEnding(source, lineStart);
+		var trailingNewline = end > 0 && end <= source.Length && source[end - 1] == '\n'
+			? end > 1 && source[end - 2] == '\r' ? "\r\n" : "\n"
+			: string.Empty;
 
 		// What the retained text already ends with decides what the placeholder has to supply. A
 		// tree-sitter block starts at its first statement, so the newline and indentation before it
@@ -443,14 +738,25 @@ internal sealed class TreeSitterCompressionScope(
 			? string.Empty
 			: retainedEndsAtLineStart
 				? indentation
-				: $"\n{indentation}";
+				: $"{lineEnding}{indentation}";
 		return $"{leading}{pack.BlockPlaceholder}{trailingNewline}";
 	}
 
-	private static List<CodeDeclaration> ReadDeclarations(LoadedLanguage language, Node root, ContentTransformMap map)
+	private static string ResolveLineEnding(string source, int precedingLineFeed)
+	{
+		if (precedingLineFeed >= 0)
+			return precedingLineFeed > 0 && source[precedingLineFeed - 1] == '\r' ? "\r\n" : "\n";
+
+		var nextLineFeed = source.IndexOf('\n');
+		return nextLineFeed > 0 && source[nextLineFeed - 1] == '\r' ? "\r\n" : "\n";
+	}
+
+	private static List<CodeDeclaration>? ReadDeclarations(LoadedLanguage language, Node root, ContentTransformMap map)
 	{
 		var declarations = new List<CodeDeclaration>();
 		language.DeclarationsCursor.Execute(language.Runtime.Declarations, root);
+		if (language.DeclarationsCursor.IsMatchLimitExceeded)
+			return null;
 		foreach (var match in language.DeclarationsCursor.Matches)
 		{
 			Node? declaration = null;
@@ -465,6 +771,8 @@ internal sealed class TreeSitterCompressionScope(
 
 			if (declaration is null)
 				continue;
+			if (declarations.Count >= TreeSitterCodeCompressor.MaximumDeclarationsPerFile)
+				return null;
 			if (!map.TryToSource(declaration.StartIndex, out var start))
 				continue;
 			if (!map.TryToSource(declaration.EndIndex, out var end))
@@ -484,19 +792,24 @@ internal sealed class TreeSitterCompressionScope(
 		return declarations;
 	}
 
-	private static List<CodeParseDefect> ReadDefects(Node root, ContentTransformMap map)
+	private static List<CodeParseDefect>? ReadDefects(Node root, ContentTransformMap map)
 	{
 		var defects = new List<CodeParseDefect>();
 		var stack = new Stack<Node>();
 		stack.Push(root);
+		var visitedNodes = 0;
 		while (stack.Count > 0)
 		{
+			if (++visitedNodes > TreeSitterCodeCompressor.MaximumVisitedSyntaxNodesPerFile)
+				return null;
 			var node = stack.Pop();
 			// See CodeParseDefect: HasError lies in both directions against the shipped grammars,
 			// and a MISSING node surfaces here only as a named node of zero width.
 			var isDefect = node.IsError || node.IsMissing || (node.IsNamed && node.StartIndex == node.EndIndex);
 			if (isDefect)
 			{
+				if (defects.Count >= TreeSitterCodeCompressor.MaximumDefectsPerFile)
+					return null;
 				var kind = node.IsError ? "ERROR" : "MISSING";
 				defects.Add(new CodeParseDefect(kind, map.TryToSource(node.StartIndex, out var source) ? source : -1));
 			}
@@ -508,14 +821,31 @@ internal sealed class TreeSitterCompressionScope(
 		return defects;
 	}
 
-	public void Dispose() => _disposed = true;
+	private static bool IsLanguageRuntimeFailure(Exception exception) =>
+		exception is DllNotFoundException or
+			InvalidOperationException or
+			IOException or
+			UnauthorizedAccessException or
+			BadImageFormatException or
+			EntryPointNotFoundException;
+
+	public void Dispose()
+	{
+		if (Interlocked.Exchange(ref _disposed, 1) == 0)
+			releaseScope();
+	}
 }
 
 internal readonly record struct CodeCompressionRuntimeDiagnostics(
 	int CompiledQuerySets,
 	int MaterializedWorkers,
 	int AvailableWorkers,
-	int LeasedWorkers);
+	int LeasedWorkers,
+	int GlobalWorkerCapacity,
+	int GlobalActiveWorkers,
+	int GlobalPeakActiveWorkers,
+	int GlobalRetainedWorkers,
+	int GlobalRetainedWorkerCapacity);
 
 /// <summary>
 /// Bounded process-lifetime parser pool. Grammar verification and materialization happen once;
@@ -523,23 +853,36 @@ internal readonly record struct CodeCompressionRuntimeDiagnostics(
 /// </summary>
 internal sealed class LanguageWorkerPool : IDisposable
 {
-	private const int MaximumWorkers = 16;
-	private readonly Lazy<LanguageRuntime> _runtime;
+	private const int MaximumRetainedWorkers = 2;
+	private readonly IGrammarLibraryLocator _locator;
+	private readonly CompressionLanguagePack _pack;
+	private readonly LanguageWorkerBudget _workerBudget;
+	private readonly bool _ownsWorkerBudget;
 	private readonly ConcurrentBag<LoadedLanguage> _available = [];
-	private readonly SemaphoreSlim _capacity;
 	private readonly object _sync = new();
+	private LanguageRuntime? _runtime;
+	private ExceptionDispatchInfo? _permanentRuntimeFailure;
+	private ExceptionDispatchInfo? _transientRuntimeFailure;
+	private long _transientFailureOperationId = -1;
 	private int _leasedWorkers;
 	private int _materializedWorkers;
-	private bool _runtimeDisposed;
 	private bool _disposed;
 
 	public LanguageWorkerPool(IGrammarLibraryLocator locator, CompressionLanguagePack pack)
+		: this(locator, pack, new LanguageWorkerBudget(), ownsWorkerBudget: true)
 	{
-		_runtime = new Lazy<LanguageRuntime>(
-			() => LanguageRuntime.Create(locator.Resolve(pack.Library), pack),
-			LazyThreadSafetyMode.ExecutionAndPublication);
-		var workerCount = Math.Clamp(Environment.ProcessorCount, 1, MaximumWorkers);
-		_capacity = new SemaphoreSlim(workerCount, workerCount);
+	}
+
+	internal LanguageWorkerPool(
+		IGrammarLibraryLocator locator,
+		CompressionLanguagePack pack,
+		LanguageWorkerBudget workerBudget,
+		bool ownsWorkerBudget = false)
+	{
+		_locator = locator;
+		_pack = pack;
+		_workerBudget = workerBudget;
+		_ownsWorkerBudget = ownsWorkerBudget;
 	}
 
 	internal LanguagePoolDiagnostics Diagnostics
@@ -549,7 +892,7 @@ internal sealed class LanguageWorkerPool : IDisposable
 			lock (_sync)
 			{
 				return new LanguagePoolDiagnostics(
-					_runtime.IsValueCreated && !_runtimeDisposed ? 1 : 0,
+					_runtime is not null ? 1 : 0,
 					_materializedWorkers,
 					_available.Count,
 					_leasedWorkers);
@@ -557,9 +900,12 @@ internal sealed class LanguageWorkerPool : IDisposable
 		}
 	}
 
-	public LanguageWorkerLease Rent(CancellationToken cancellationToken)
+	public LanguageWorkerLease Rent(CancellationToken cancellationToken) =>
+		Rent(operationId: 0, cancellationToken);
+
+	internal LanguageWorkerLease Rent(long operationId, CancellationToken cancellationToken)
 	{
-		_capacity.Wait(cancellationToken);
+		var budgetLease = _workerBudget.Rent(cancellationToken);
 		LoadedLanguage? worker = null;
 		var leaseRegistered = false;
 		try
@@ -569,21 +915,28 @@ internal sealed class LanguageWorkerPool : IDisposable
 				ObjectDisposedException.ThrowIf(_disposed, this);
 				_leasedWorkers++;
 				leaseRegistered = true;
-				_available.TryTake(out worker);
+				if (_available.TryTake(out worker))
+					_workerBudget.ReleaseRetained();
 			}
 
 			if (worker is null)
 			{
-				worker = LoadedLanguage.Create(_runtime.Value);
-				Interlocked.Increment(ref _materializedWorkers);
+				worker = LoadedLanguage.Create(GetOrCreateRuntime(operationId));
+				lock (_sync)
+					_materializedWorkers++;
 			}
 			lock (_sync)
 				ObjectDisposedException.ThrowIf(_disposed, this);
-			return new LanguageWorkerLease(this, worker);
+			return new LanguageWorkerLease(this, worker, budgetLease);
 		}
 		catch
 		{
-			worker?.Dispose();
+			if (worker is not null)
+			{
+				worker.Dispose();
+				lock (_sync)
+					_materializedWorkers--;
+			}
 			LanguageRuntime? runtimeToDispose;
 			lock (_sync)
 			{
@@ -592,12 +945,12 @@ internal sealed class LanguageWorkerPool : IDisposable
 				runtimeToDispose = TakeRuntimeForDisposalLocked();
 			}
 			runtimeToDispose?.Dispose();
-			ReleaseCapacity();
+			budgetLease.Dispose();
 			throw;
 		}
 	}
 
-	internal void Return(LoadedLanguage worker)
+	internal void Return(LoadedLanguage worker, IDisposable budgetLease)
 	{
 		var reusable = true;
 		try
@@ -610,26 +963,30 @@ internal sealed class LanguageWorkerPool : IDisposable
 		}
 
 		var disposeWorker = !reusable;
-		var releaseCapacity = false;
 		LanguageRuntime? runtimeToDispose;
 		lock (_sync)
 		{
 			_leasedWorkers--;
 			if (_disposed)
 				disposeWorker = true;
-			else if (reusable)
+			else if (reusable &&
+			         _available.Count < MaximumRetainedWorkers &&
+			         _workerBudget.TryRetain())
 			{
 				_available.Add(worker);
 			}
-			if (!_disposed)
-				releaseCapacity = true;
+			else
+			{
+				disposeWorker = true;
+			}
+			if (disposeWorker)
+				_materializedWorkers--;
 			runtimeToDispose = TakeRuntimeForDisposalLocked();
 		}
 
 		if (disposeWorker)
 			worker.Dispose();
-		if (releaseCapacity)
-			ReleaseCapacity();
+		budgetLease.Dispose();
 		runtimeToDispose?.Dispose();
 	}
 
@@ -645,39 +1002,67 @@ internal sealed class LanguageWorkerPool : IDisposable
 			workers = new List<LoadedLanguage>(_available.Count);
 			while (_available.TryTake(out var worker))
 				workers.Add(worker);
+			_materializedWorkers -= workers.Count;
 			runtimeToDispose = TakeRuntimeForDisposalLocked();
 		}
 
 		foreach (var worker in workers)
 			worker.Dispose();
-		_capacity.Dispose();
+		_workerBudget.ReleaseRetained(workers.Count);
+		if (_ownsWorkerBudget)
+			_workerBudget.Dispose();
 		runtimeToDispose?.Dispose();
 	}
+
+	private LanguageRuntime GetOrCreateRuntime(long operationId)
+	{
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (_runtime is not null)
+				return _runtime;
+			_permanentRuntimeFailure?.Throw();
+			if (_transientFailureOperationId == operationId)
+				_transientRuntimeFailure?.Throw();
+
+			try
+			{
+				_runtime = LanguageRuntime.Create(
+					_locator.Resolve(_pack.Library),
+					_pack);
+				_transientRuntimeFailure = null;
+				_transientFailureOperationId = -1;
+				return _runtime;
+			}
+			catch (Exception exception) when (IsTransientInitializationFailure(exception))
+			{
+				_transientRuntimeFailure = ExceptionDispatchInfo.Capture(exception);
+				_transientFailureOperationId = operationId;
+				throw;
+			}
+			catch (Exception exception)
+			{
+				_permanentRuntimeFailure = ExceptionDispatchInfo.Capture(exception);
+				throw;
+			}
+		}
+	}
+
+	private static bool IsTransientInitializationFailure(Exception exception) =>
+		exception is IOException or UnauthorizedAccessException or DllNotFoundException;
 
 	private LanguageRuntime? TakeRuntimeForDisposalLocked()
 	{
 		if (!_disposed ||
 		    _leasedWorkers != 0 ||
-		    _runtimeDisposed ||
-		    !_runtime.IsValueCreated)
+		    _runtime is null)
 		{
 			return null;
 		}
 
-		_runtimeDisposed = true;
-		return _runtime.Value;
-	}
-
-	private void ReleaseCapacity()
-	{
-		try
-		{
-			_capacity.Release();
-		}
-		catch (ObjectDisposedException)
-		{
-			// Disposal stops new rents. A worker already leased is disposed by Return instead.
-		}
+		var runtime = _runtime;
+		_runtime = null;
+		return runtime;
 	}
 }
 
@@ -689,14 +1074,131 @@ internal readonly record struct LanguagePoolDiagnostics(
 
 internal sealed class LanguageWorkerLease(
 	LanguageWorkerPool owner,
-	LoadedLanguage worker) : IDisposable
+	LoadedLanguage worker,
+	IDisposable budgetLease) : IDisposable
 {
 	private LanguageWorkerPool? _owner = owner;
 
 	public LoadedLanguage Worker { get; } = worker;
 
-	public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Return(Worker);
+	public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Return(Worker, budgetLease);
 }
+
+internal sealed class LanguageWorkerBudget : IDisposable
+{
+	private const int MaximumActiveWorkers = 8;
+	private readonly SemaphoreSlim _capacity;
+	private readonly CancellationTokenSource _shutdown = new();
+	private int _active;
+	private int _peakActive;
+	private int _retained;
+	private int _disposed;
+
+	public LanguageWorkerBudget(int minimumRetainedWorkers = 1)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minimumRetainedWorkers);
+		Capacity = Math.Clamp(Environment.ProcessorCount, 1, MaximumActiveWorkers);
+		RetainedCapacity = Math.Max(minimumRetainedWorkers, Capacity * 2);
+		_capacity = new SemaphoreSlim(Capacity, Capacity);
+	}
+
+	public int Capacity { get; }
+	public int RetainedCapacity { get; }
+
+	internal LanguageWorkerBudgetDiagnostics Diagnostics => new(
+		Capacity,
+		Volatile.Read(ref _active),
+		Volatile.Read(ref _peakActive),
+		Volatile.Read(ref _retained),
+		RetainedCapacity);
+
+	public bool TryRetain()
+	{
+		while (true)
+		{
+			var retained = Volatile.Read(ref _retained);
+			if (retained >= RetainedCapacity)
+				return false;
+			if (Interlocked.CompareExchange(ref _retained, retained + 1, retained) == retained)
+				return true;
+		}
+	}
+
+	public void ReleaseRetained(int count = 1)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(count);
+		if (count == 0)
+			return;
+		var retained = Interlocked.Add(ref _retained, -count);
+		if (retained < 0)
+			throw new InvalidOperationException("The retained worker budget was released more than it was acquired.");
+	}
+
+	public IDisposable Rent(CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+			cancellationToken,
+			_shutdown.Token);
+		try
+		{
+			_capacity.Wait(linked.Token);
+		}
+		catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+		{
+			throw new ObjectDisposedException(nameof(LanguageWorkerBudget));
+		}
+
+		if (Volatile.Read(ref _disposed) != 0)
+		{
+			_capacity.Release();
+			throw new ObjectDisposedException(nameof(LanguageWorkerBudget));
+		}
+
+		var active = Interlocked.Increment(ref _active);
+		UpdatePeak(active);
+		return new BudgetLease(this);
+	}
+
+	public void Dispose()
+	{
+		if (Interlocked.Exchange(ref _disposed, 1) == 0)
+			_shutdown.Cancel();
+	}
+
+	private void Return()
+	{
+		Interlocked.Decrement(ref _active);
+		_capacity.Release();
+	}
+
+	private void UpdatePeak(int active)
+	{
+		while (true)
+		{
+			var current = Volatile.Read(ref _peakActive);
+			if (current >= active ||
+			    Interlocked.CompareExchange(ref _peakActive, active, current) == current)
+			{
+				return;
+			}
+		}
+	}
+
+	private sealed class BudgetLease(LanguageWorkerBudget owner) : IDisposable
+	{
+		private LanguageWorkerBudget? _owner = owner;
+
+		public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Return();
+	}
+}
+
+internal readonly record struct LanguageWorkerBudgetDiagnostics(
+	int Capacity,
+	int Active,
+	int PeakActive,
+	int Retained,
+	int RetainedCapacity);
 
 /// <summary>
 /// One immutable language/query set shared by every parser worker. Tree-sitter explicitly permits
@@ -770,13 +1272,13 @@ internal sealed record LoadedLanguage(
 			               throw new InvalidOperationException("Tree-sitter could not create an idle tree.");
 			try
 			{
-				var bodiesCursor = new QueryCursor();
+				var bodiesCursor = CreateBoundedCursor();
 				try
 				{
-					var declarationsCursor = new QueryCursor();
+					var declarationsCursor = CreateBoundedCursor();
 					try
 					{
-						var docstringsCursor = runtime.Docstrings is null ? null : new QueryCursor();
+						var docstringsCursor = runtime.Docstrings is null ? null : CreateBoundedCursor();
 						return new LoadedLanguage(
 							runtime,
 							parser,
@@ -809,6 +1311,9 @@ internal sealed record LoadedLanguage(
 			throw;
 		}
 	}
+
+	private static QueryCursor CreateBoundedCursor() =>
+		new() { MatchLimit = TreeSitterCodeCompressor.MaximumQueryMatchLimit };
 
 	/// <summary>
 	/// QueryCursor retains its last Tree and Tree retains the parsed string. Rebinding to a tiny

@@ -190,17 +190,6 @@ internal sealed class PreviewSurfaceController : IDisposable
 		if (section is null || selection.StartLine < section.ContentStartLine)
 			return false;
 
-		var sourceColumn = selection.StartColumn + request.Value.LeadingCharactersRemoved;
-		foreach (var redaction in document.Redactions)
-		{
-			if (redaction.LineNumber != selection.StartLine ||
-			    redaction.StartColumn + redaction.Length > selection.StartColumn)
-			{
-				continue;
-			}
-			sourceColumn += redaction.SourceLength - redaction.Length;
-		}
-
 		var previewLine = document.GetLineText(selection.StartLine);
 		var key = MarkedSecretValueNormalizer.ExtractKey(
 			previewLine,
@@ -208,7 +197,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		if (section.CoordinateMap is null ||
 		    !section.CoordinateMap.TryToSourceOffset(
 			    selection.StartLine - section.ContentStartLine,
-			    sourceColumn,
+			    selection.StartColumn + request.Value.LeadingCharactersRemoved,
 			    out var sourceOffset))
 		{
 			return false;

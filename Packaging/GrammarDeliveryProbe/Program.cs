@@ -11,11 +11,14 @@ using TreeSitter;
 // actually embedded, so a language added to the product is covered here without touching this file.
 //
 // Usage: GrammarDeliveryProbe [--baseline] [--content] [--verify-recovery]
+//        GrammarDeliveryProbe --materialize-only --root <directory>
 
 var isBaseline = args.Contains("--baseline", StringComparer.Ordinal);
 var useContent = args.Contains("--content", StringComparer.Ordinal);
+var materializeOnly = args.Contains("--materialize-only", StringComparer.Ordinal);
 var bindingVersion = ResolveBindingVersion();
 var runtimeIdentifier = GrammarPlatform.RuntimeIdentifier;
+var explicitRoot = ReadOption(args, "--root");
 
 #pragma warning disable IL3000 // An empty Location is precisely the signal being probed for here.
 var isSingleFile = string.IsNullOrEmpty(Assembly.GetExecutingAssembly().Location);
@@ -24,7 +27,9 @@ var isSingleFile = string.IsNullOrEmpty(Assembly.GetExecutingAssembly().Location
 var embedded = new EmbeddedGrammarLibraryLocator(
 	typeof(GrammarPlatform).Assembly,
 	"DevProjex.Grammars/",
-	EmbeddedGrammarLibraryLocator.DefaultRootDirectory(bindingVersion));
+	explicitRoot is null
+		? EmbeddedGrammarLibraryLocator.DefaultRootDirectory(bindingVersion)
+		: Path.GetFullPath(explicitRoot));
 IGrammarLibraryLocator locator = useContent ? new ContentGrammarLibraryLocator() : embedded;
 using var catalog = new TreeSitterCodeCompressor(locator);
 var expectedGrammars = catalog.Languages
@@ -47,7 +52,7 @@ if (isBaseline)
 	return 0;
 }
 
-if (!useContent)
+if (!useContent && !materializeOnly && explicitRoot is null)
 {
 	var pruned = embedded.PruneAbandonedDirectories();
 	Console.WriteLine($"pruned abandoned grammar directories: {pruned.Count}");
@@ -69,6 +74,30 @@ if (missing.Length > 0 || unexpected.Length > 0)
 		$"GRAMMAR-DELIVERY rid={runtimeIdentifier} strategy={locator.StrategyName} " +
 		$"loaded=0/{expectedGrammars.Count} result=fail");
 	return 1;
+}
+
+if (materializeOnly)
+{
+	if (useContent)
+	{
+		Console.Error.WriteLine("FAILURE --materialize-only is only valid for embedded delivery");
+		return 2;
+	}
+
+	foreach (var library in libraries)
+	{
+		var path = locator.Resolve(library);
+		if (!File.Exists(path))
+		{
+			Console.Error.WriteLine($"FAILURE materialized grammar is missing: {path}");
+			return 1;
+		}
+	}
+
+	Console.WriteLine(
+		$"GRAMMAR-DELIVERY rid={runtimeIdentifier} strategy={locator.StrategyName} " +
+		$"materialized={libraries.Count}/{libraries.Count} result=pass");
+	return 0;
 }
 
 if (args.Contains("--verify-recovery", StringComparer.Ordinal) && libraries.Count > 0 && !useContent)
@@ -154,4 +183,17 @@ static string ResolveBindingVersion()
 		return typeof(Language).Assembly.GetName().Version?.ToString() ?? "unknown";
 	var plus = informational.IndexOf('+');
 	return plus < 0 ? informational : informational[..plus];
+}
+
+static string? ReadOption(string[] arguments, string option)
+{
+	for (var index = 0; index < arguments.Length; index++)
+	{
+		if (!arguments[index].Equals(option, StringComparison.Ordinal))
+			continue;
+		if (index + 1 >= arguments.Length || string.IsNullOrWhiteSpace(arguments[index + 1]))
+			throw new ArgumentException($"Missing value for {option}.");
+		return arguments[index + 1];
+	}
+	return null;
 }

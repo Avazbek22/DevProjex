@@ -1,3 +1,5 @@
+using DevProjex.Application.Compression;
+
 namespace DevProjex.Application.Secrets;
 
 public enum SecretPreviewSpanState
@@ -21,7 +23,8 @@ public sealed record SecretTextRedactionResult(
 	string Text,
 	IReadOnlyList<SecretPreviewSpan> Spans,
 	int DetectedCount,
-	int RedactedCount);
+	int RedactedCount,
+	ContentTransformMap CoordinateMap);
 
 /// <param name="UnscannablePath">
 /// One selected text file the scanner was not allowed to read, or null. Documents omit such a file

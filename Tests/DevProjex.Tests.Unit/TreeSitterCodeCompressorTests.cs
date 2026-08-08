@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Infrastructure.Compression;
 
@@ -19,6 +20,14 @@ public sealed class TreeSitterCodeCompressorTests
 		using var scope = compressor.CreateScope(Path.GetTempPath());
 		var plan = scope.Analyze(relativePath, relativePath, source, TestContext.Current.CancellationToken).Plan;
 		return (plan, plan.Apply(source).Text);
+	}
+
+	[Fact]
+	public void ShippedLanguageCatalog_MatchesTheTenLanguageProductContract()
+	{
+		Assert.Equal(
+			["c", "cpp", "csharp", "go", "java", "javascript", "python", "rust", "tsx", "typescript"],
+			CodeCompressionTestHarness.LanguageIds.Order(StringComparer.Ordinal));
 	}
 
 	[Fact]
@@ -325,6 +334,67 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
+	public void CHeader_ClassWordOnlyInCommentStillUsesTheCGrammar()
+	{
+		const string source = """
+			/* This class of counters is shared with the C runtime. */
+			struct counter { int value; };
+			static inline int counter_read(const struct counter* counter)
+			{
+			    return counter->value;
+			}
+			""";
+
+		var (plan, text) = Compress("counter.h", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.Equal("c", plan.LanguageId);
+		Assert.DoesNotContain("return counter->value", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void CHeader_CppWordInContinuedPreprocessorDirectiveStillUsesTheCGrammar()
+	{
+		const string source = """
+			#define COUNTER_DESCRIPTION \
+			    "This class of counters belongs to the C API"
+			struct counter { int value; };
+			static inline int counter_read(const struct counter* counter)
+			{
+			    return counter->value;
+			}
+			""";
+
+		var (plan, text) = Compress("counter.h", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.Equal("c", plan.LanguageId);
+		Assert.DoesNotContain("return counter->value", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void CppStructOnlyHeader_WithInlineMethodUsesTheCppGrammar()
+	{
+		const string source = """
+			struct counter
+			{
+			    int value;
+			    int read()
+			    {
+			        return value;
+			    }
+			};
+			""";
+
+		var (plan, text) = Compress("counter.h", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.Equal("cpp", plan.LanguageId);
+		Assert.Contains("int read()", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("return value", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void CSharp_FieldInitializerWithACollectionExpression_Survives()
 	{
 		// The shipped grammar does not understand C# 12 collection expressions and parses this with
@@ -358,6 +428,19 @@ public sealed class TreeSitterCodeCompressorTests
 
 		Assert.DoesNotContain("implementation comment, not a docstring", text, StringComparison.Ordinal);
 		Assert.Contains("def run(self, data):", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void PythonCompression_PreservesCrlfWithoutIntroducingBareLineFeeds()
+	{
+		const string lfSource = "def run(value):\n    first = value + 1\n    second = first * 2\n    return second\n";
+		var source = lfSource.Replace("\n", "\r\n", StringComparison.Ordinal);
+
+		var (plan, text) = Compress("model.py", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.DoesNotContain("\n", text.Replace("\r\n", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+		Assert.Contains("\r\n    ...\r\n", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -416,6 +499,32 @@ public sealed class TreeSitterCodeCompressorTests
 
 		Assert.NotEqual(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.Equal(CodeCompressionFixtures.CSharp, plan.Apply(CodeCompressionFixtures.CSharp).Text);
+	}
+
+	[Fact]
+	public void GeneratedFileBeyondEditBudget_IsReturnedUnchangedWithinBoundedTime()
+	{
+		var source = new StringBuilder("class Generated {\n");
+		for (var index = 0; index <= TreeSitterCodeCompressor.MaximumEditsPerFile; index++)
+			source.Append("void M").Append(index).Append("(){Run();}\n");
+		source.Append('}');
+		Assert.True(source.Length < TreeSitterCodeCompressor.MaximumParsableCharacters);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath());
+		var stopwatch = Stopwatch.StartNew();
+
+		var analysis = scope.Analyze(
+			"Generated.cs",
+			"Generated.cs",
+			source.ToString(),
+			TestContext.Current.CancellationToken);
+		stopwatch.Stop();
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedGateRejected, analysis.Plan.Outcome);
+		Assert.Empty(analysis.Plan.Edits);
+		Assert.True(
+			stopwatch.Elapsed < TimeSpan.FromSeconds(20),
+			$"Complexity gate took {stopwatch.Elapsed.TotalMilliseconds:F0} ms.");
 	}
 
 	[Fact]
@@ -484,6 +593,46 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
+	public async Task MixedLanguageStress_HasGlobalActiveAndPerLanguageRetainedWorkerBounds()
+	{
+		var locator = new CountingGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());
+		using var compressor = new TreeSitterCodeCompressor(locator);
+		using var scope = compressor.CreateScope(Path.GetTempPath());
+		var tasks = CodeCompressionTestHarness.LanguagePacks
+			.SelectMany(pack => Enumerable.Range(0, 12).Select(index => (pack, index)))
+			.Select(item => Task.Run(() => scope.Analyze(
+				$"{item.pack.Id}-{item.index}{item.pack.Extensions[0]}",
+				$"{item.pack.Id}-{item.index}{item.pack.Extensions[0]}",
+				CodeCompressionTestHarness.FixtureFor(item.pack.Id),
+				TestContext.Current.CancellationToken)))
+			.ToArray();
+
+		var analyses = await Task.WhenAll(tasks);
+
+		Assert.All(analyses, analysis =>
+			Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome));
+		var diagnostics = compressor.RuntimeDiagnostics;
+		Assert.Equal(CodeCompressionTestHarness.LanguagePacks.Count, locator.ResolveCount);
+		Assert.Equal(CodeCompressionTestHarness.LanguagePacks.Count, diagnostics.CompiledQuerySets);
+		Assert.Equal(0, diagnostics.LeasedWorkers);
+		Assert.Equal(0, diagnostics.GlobalActiveWorkers);
+		Assert.InRange(
+			diagnostics.GlobalPeakActiveWorkers,
+			1,
+			diagnostics.GlobalWorkerCapacity);
+		Assert.InRange(
+			diagnostics.AvailableWorkers,
+			CodeCompressionTestHarness.LanguagePacks.Count,
+			CodeCompressionTestHarness.LanguagePacks.Count * 2);
+		Assert.Equal(diagnostics.AvailableWorkers, diagnostics.MaterializedWorkers);
+		Assert.Equal(diagnostics.AvailableWorkers, diagnostics.GlobalRetainedWorkers);
+		Assert.InRange(
+			diagnostics.GlobalRetainedWorkers,
+			1,
+			diagnostics.GlobalRetainedWorkerCapacity);
+	}
+
+	[Fact]
 	public void DisposingPoolWithAnActiveLease_DefersSharedRuntimeDisposalUntilReturn()
 	{
 		using var harness = CodeCompressionTestHarness.For("csharp");
@@ -502,6 +651,135 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.Equal(0, pool.Diagnostics.CompiledQuerySets);
 		Assert.Equal(0, pool.Diagnostics.LeasedWorkers);
 		Assert.Throws<ObjectDisposedException>(() => pool.Rent(CancellationToken.None));
+	}
+
+	[Fact]
+	public void TransientRuntimeFailure_IsRetriedByTheNextOutputScope()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var locator = new FailOnceGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());
+		using var compressor = new TreeSitterCodeCompressor(locator, [harness.Pack]);
+
+		using (var firstScope = compressor.CreateScope(Path.GetTempPath()))
+		{
+			var first = firstScope.Analyze(
+				"Widget.cs",
+				"Widget.cs",
+				CodeCompressionFixtures.CSharp,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(CodeCompressionOutcome.UnchangedParseFailed, first.Plan.Outcome);
+		}
+
+		using var secondScope = compressor.CreateScope(Path.GetTempPath());
+		var second = secondScope.Analyze(
+			"Widget.cs",
+			"Widget.cs",
+			CodeCompressionFixtures.CSharp,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, second.Plan.Outcome);
+		Assert.Equal(2, locator.ResolveCount);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.CompiledQuerySets);
+	}
+
+	[Fact]
+	public async Task ConcurrentRetryAfterTransientFailure_CreatesOneRuntime()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var locator = new FailOnceGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());
+		using var compressor = new TreeSitterCodeCompressor(locator, [harness.Pack]);
+		using (var failedScope = compressor.CreateScope(Path.GetTempPath()))
+		{
+			var failed = failedScope.Analyze(
+				"failed.cs",
+				"failed.cs",
+				CodeCompressionFixtures.CSharp,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(CodeCompressionOutcome.UnchangedParseFailed, failed.Plan.Outcome);
+		}
+
+		using var retryScope = compressor.CreateScope(Path.GetTempPath());
+		var tasks = Enumerable.Range(0, 24)
+			.Select(index => Task.Run(() => retryScope.Analyze(
+				$"Widget{index}.cs",
+				$"Widget{index}.cs",
+				CodeCompressionFixtures.CSharp,
+				TestContext.Current.CancellationToken)))
+			.ToArray();
+
+		var analyses = await Task.WhenAll(tasks);
+
+		Assert.All(analyses, analysis =>
+			Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome));
+		Assert.Equal(2, locator.ResolveCount);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.InRange(
+			compressor.RuntimeDiagnostics.GlobalPeakActiveWorkers,
+			1,
+			compressor.RuntimeDiagnostics.GlobalWorkerCapacity);
+	}
+
+	[Fact]
+	public void PermanentQueryCompilationFailure_IsNotRetriedAcrossScopes()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var locator = new CountingGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());
+		var invalidPack = harness.Pack with { BodiesQuery = "(" };
+		using var compressor = new TreeSitterCodeCompressor(locator, [invalidPack]);
+
+		for (var iteration = 0; iteration < 3; iteration++)
+		{
+			using var scope = compressor.CreateScope(Path.GetTempPath());
+			var analysis = scope.Analyze(
+				$"Widget{iteration}.cs",
+				$"Widget{iteration}.cs",
+				CodeCompressionFixtures.CSharp,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(CodeCompressionOutcome.UnchangedParseFailed, analysis.Plan.Outcome);
+		}
+
+		Assert.Equal(1, locator.ResolveCount);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.CompiledQuerySets);
+	}
+
+	[Fact]
+	public void ExistingScopeCompletesAfterCompressorDispose_AndNewScopeIsRejected()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var compressor = new TreeSitterCodeCompressor(
+			CodeCompressionTestHarness.CreateLocator(),
+			[harness.Pack]);
+		using var scope = compressor.CreateScope(Path.GetTempPath());
+
+		compressor.Dispose();
+
+		var analysis = scope.Analyze(
+			"Widget.cs",
+			"Widget.cs",
+			CodeCompressionFixtures.CSharp,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
+		Assert.Throws<ObjectDisposedException>(() => compressor.CreateScope(Path.GetTempPath()));
+	}
+
+	[Fact]
+	public async Task DisposingPool_UnblocksAWaitingRentWithoutLeakingWorkers()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var pool = new LanguageWorkerPool(CodeCompressionTestHarness.CreateLocator(), harness.Pack);
+		var leases = Enumerable.Range(0, Math.Clamp(Environment.ProcessorCount, 1, 8))
+			.Select(_ => pool.Rent(TestContext.Current.CancellationToken))
+			.ToArray();
+		var waiting = Task.Run(() => pool.Rent(CancellationToken.None));
+		await Task.Delay(50, TestContext.Current.CancellationToken);
+
+		pool.Dispose();
+
+		await Assert.ThrowsAsync<ObjectDisposedException>(async () => await waiting);
+		foreach (var lease in leases)
+			lease.Dispose();
+		Assert.Equal(0, pool.Diagnostics.MaterializedWorkers);
+		Assert.Equal(0, pool.Diagnostics.LeasedWorkers);
 	}
 
 	[Fact]
@@ -553,6 +831,23 @@ public sealed class TreeSitterCodeCompressorTests
 		public string Resolve(string libraryBaseName)
 		{
 			Interlocked.Increment(ref _resolveCount);
+			return inner.Resolve(libraryBaseName);
+		}
+	}
+
+	private sealed class FailOnceGrammarLibraryLocator(IGrammarLibraryLocator inner)
+		: IGrammarLibraryLocator
+	{
+		private int _resolveCount;
+
+		public string StrategyName => inner.StrategyName;
+		public int ResolveCount => Volatile.Read(ref _resolveCount);
+		public IReadOnlyList<string> EnumerateLibraries() => inner.EnumerateLibraries();
+
+		public string Resolve(string libraryBaseName)
+		{
+			if (Interlocked.Increment(ref _resolveCount) == 1)
+				throw new IOException("Injected transient grammar access failure.");
 			return inner.Resolve(libraryBaseName);
 		}
 	}

@@ -27,6 +27,9 @@ internal sealed class MarkedSecretsMatcher
 
 	private readonly PersistentHashGroup[] _persistentHashGroups;
 	private readonly IReadOnlyDictionary<string, PreparedSessionMark[]> _sessionMarksByPath;
+	private int _persistentIndexBuildCount;
+
+	internal int PersistentIndexBuildCount => Volatile.Read(ref _persistentIndexBuildCount);
 
 	public MarkedSecretsMatcher(
 		IEnumerable<MarkedSecretProfileEntry> persistentMarks,
@@ -70,16 +73,22 @@ internal sealed class MarkedSecretsMatcher
 		ContentTransformMap? transformMap,
 		CancellationToken cancellationToken)
 	{
-		if (_persistentHashGroups.Length == 0 && _sessionMarksByPath.Count == 0)
+		_sessionMarksByPath.TryGetValue(
+			NormalizePath(relativePath),
+			out var sessionMarks);
+		if (_persistentHashGroups.Length == 0 && sessionMarks is null)
 			return [];
 
-		var positions = TextPositionIndex.Create(content, cancellationToken);
 		var findings = new List<DetectedSecret>();
-		MatchPersistent(content, positions, findings, cancellationToken);
+		if (_persistentHashGroups.Length > 0)
+		{
+			var positions = TextPositionIndex.Create(content, cancellationToken);
+			Interlocked.Increment(ref _persistentIndexBuildCount);
+			MatchPersistent(content, positions, findings, cancellationToken);
+		}
 		MatchSession(
-			relativePath,
+			sessionMarks,
 			content,
-			positions,
 			transformMap,
 			findings,
 			cancellationToken);
@@ -97,17 +106,29 @@ internal sealed class MarkedSecretsMatcher
 
 		Span<byte> candidateHash = stackalloc byte[MarkedSecretValueNormalizer.PersistedHashByteLength];
 		var candidateIndex = 0;
-		foreach (var start in positions.BoundaryPositions)
+		var lineBreakIndex = 0;
+		for (var start = 0; start <= content.Length; start++)
 		{
+			if (!positions.IsBoundary(start))
+				continue;
+
 			if ((candidateIndex++ & CancellationCheckMask) == 0)
 				cancellationToken.ThrowIfCancellationRequested();
+			while (lineBreakIndex < positions.LineBreakPositions.Length &&
+			       positions.LineBreakPositions[lineBreakIndex] < start)
+			{
+				lineBreakIndex++;
+			}
+			var nextLineBreak = lineBreakIndex < positions.LineBreakPositions.Length
+				? positions.LineBreakPositions[lineBreakIndex]
+				: int.MaxValue;
 
 			foreach (var group in _persistentHashGroups)
 			{
 				var end = start + group.Length;
 				if (end > content.Length ||
 				    !positions.IsBoundary(end) ||
-				    positions.ContainsLineBreak(start, end))
+				    nextLineBreak < end)
 				{
 					continue;
 				}
@@ -129,19 +150,21 @@ internal sealed class MarkedSecretsMatcher
 	}
 
 	private void MatchSession(
-		string relativePath,
+		IReadOnlyList<PreparedSessionMark>? marks,
 		ReadOnlySpan<char> content,
-		TextPositionIndex positions,
 		ContentTransformMap? transformMap,
 		ICollection<DetectedSecret> findings,
 		CancellationToken cancellationToken)
 	{
-		if (!_sessionMarksByPath.TryGetValue(NormalizePath(relativePath), out var marks))
+		if (marks is null)
 			return;
 
 		Span<byte> candidateHash = stackalloc byte[MarkedSecretValueNormalizer.PersistedHashByteLength];
-		foreach (var preparedMark in marks)
+		for (var index = 0; index < marks.Count; index++)
 		{
+			if ((index & 0xFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			var preparedMark = marks[index];
 			var mark = preparedMark.Mark;
 			if (!TryResolveAnchor(
 				    mark,
@@ -152,13 +175,15 @@ internal sealed class MarkedSecretsMatcher
 			}
 
 			if (start > content.Length - mark.Length ||
-			    !positions.IsBoundary(start) ||
-			    !positions.IsBoundary(start + mark.Length))
+			    !SecretTokenBoundary.IsBoundary(content, start) ||
+			    !SecretTokenBoundary.IsBoundary(content, start + mark.Length))
 			{
 				continue;
 			}
 
 			var value = content.Slice(start, mark.Length);
+			if (value.IndexOfAny('\r', '\n') >= 0)
+				continue;
 			MarkedSecretValueNormalizer.ComputeHash(value, candidateHash);
 			// The hash is the last gate, not the only one. Translating the anchor puts the mark on
 			// the right characters when compression shifts them; verifying the value here means a
@@ -255,19 +280,17 @@ internal sealed class MarkedSecretsMatcher
 	private sealed record PreparedSessionMark(SessionMarkedSecret Mark, byte[] HashBytes);
 
 	private sealed class TextPositionIndex(
-		bool[] boundaries,
-		int[] boundaryPositions,
-		int[] lineBreakPrefixCounts)
+		ulong[] boundaryBits,
+		int[] lineBreakPositions)
 	{
-		public IReadOnlyList<int> BoundaryPositions { get; } = boundaryPositions;
+		public int[] LineBreakPositions { get; } = lineBreakPositions;
 
 		public static TextPositionIndex Create(
 			ReadOnlySpan<char> content,
 			CancellationToken cancellationToken)
 		{
-			var boundaries = new bool[content.Length + 1];
-			var boundaryPositions = new List<int>();
-			var lineBreakPrefixCounts = new int[content.Length + 1];
+			var boundaryBits = new ulong[((content.Length + 1) + 63) >> 6];
+			var lineBreakPositions = new List<int>();
 
 			for (var position = 0; position <= content.Length; position++)
 			{
@@ -275,29 +298,23 @@ internal sealed class MarkedSecretsMatcher
 					cancellationToken.ThrowIfCancellationRequested();
 
 				if (SecretTokenBoundary.IsBoundary(content, position))
-				{
-					boundaries[position] = true;
-					boundaryPositions.Add(position);
-				}
+					boundaryBits[position >> 6] |= 1UL << (position & 63);
 
 				if (position == content.Length)
 					continue;
 
-				var character = content[position];
-				lineBreakPrefixCounts[position + 1] =
-					lineBreakPrefixCounts[position] + (character is '\r' or '\n' ? 1 : 0);
+				if (content[position] is '\r' or '\n')
+					lineBreakPositions.Add(position);
 			}
 
 			return new TextPositionIndex(
-				boundaries,
-				boundaryPositions.ToArray(),
-				lineBreakPrefixCounts);
+				boundaryBits,
+				lineBreakPositions.ToArray());
 		}
 
 		public bool IsBoundary(int position) =>
-			(uint)position < (uint)boundaries.Length && boundaries[position];
-
-		public bool ContainsLineBreak(int start, int end) =>
-			lineBreakPrefixCounts[end] != lineBreakPrefixCounts[start];
+			position >= 0 &&
+			(uint)(position >> 6) < (uint)boundaryBits.Length &&
+			(boundaryBits[position >> 6] & (1UL << (position & 63))) != 0;
 	}
 }

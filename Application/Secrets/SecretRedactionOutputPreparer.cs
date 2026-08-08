@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace DevProjex.Application.Secrets;
 
 /// <summary>
@@ -48,16 +50,16 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		var scope = transformationScope.Redaction;
 		try
 		{
-			for (var index = 0; index < orderedFilePaths.Count; index++)
+			await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
+			                   context,
+			                   transformationScope,
+			                   orderedFilePaths,
+			                   cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var sourcePath = orderedFilePaths[index];
-				var metadataBeforeRead = SecretFileMetadata.Capture(sourcePath);
-				var result = await contentAnalyzer
-					.ReadClassifiedAsync(sourcePath, MaximumScannableFileBytes, cancellationToken)
-					.ConfigureAwait(false);
-				var metadataAfterRead = SecretFileMetadata.Capture(sourcePath);
-				EnsureStableRead(sourcePath, metadataBeforeRead, metadataAfterRead, result.Content);
+				var sourcePath = prepared.SourcePath;
+				var result = prepared.ReadResult;
+				var metadataAfterRead = prepared.Metadata;
 
 				switch (result.Classification)
 				{
@@ -95,14 +97,9 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				var content = result.Content ??
 				              throw new SecretDetectionException(
 					              $"Hide Secrets received no text for '{sourcePath}'.");
-				using var contentLease = context.Redaction?.Session.TrackFullContentBuffer();
 				// Compression first: the redaction plan, its spans and its counts all describe the
 				// text that actually leaves, not the text on disk.
-				var compressed = transformationScope.Compress(
-					sourcePath,
-					NormalizeRelativePath(context, sourcePath),
-					content.Content,
-					cancellationToken);
+				var compressed = prepared.Compression;
 				var transformedText = compressed.Text;
 				var plan = scope?.CreatePlan(
 					sourcePath,
@@ -121,7 +118,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 
 				var encoding = result.Encoding ?? TextFileEncoding.Utf8;
 				workingDirectory ??= CreateWorkingDirectory();
-				var preparedPath = Path.Combine(workingDirectory, $"{index:D8}.redacted.txt");
+				var preparedPath = Path.Combine(workingDirectory, $"{prepared.Index:D8}.redacted.txt");
 				await WritePreparedTextAsync(
 						preparedPath,
 						transformedText,
@@ -150,6 +147,156 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		{
 			if (workingDirectory is not null)
 				DeleteWorkingDirectory(workingDirectory);
+			throw;
+		}
+	}
+
+	private async IAsyncEnumerable<PreparedTransformationEntry> PrepareOrderedTransformationEntriesAsync(
+		ContentTransformationContext context,
+		ContentTransformationScope transformationScope,
+		IReadOnlyList<string> orderedFilePaths,
+		[EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		var batch = new List<CompressionWorkItem>(MaximumParallelScans);
+		for (var index = 0; index < orderedFilePaths.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var item = new CompressionWorkItem(index, orderedFilePaths[index]);
+			if (SecretFileMetadata.Capture(item.SourcePath).Length > MaximumParallelScanFileBytes)
+			{
+				await foreach (var prepared in PrepareTransformationBatchAsync(
+				                   context,
+				                   transformationScope,
+				                   batch,
+				                   cancellationToken).ConfigureAwait(false))
+				{
+					yield return prepared;
+				}
+				batch.Clear();
+				yield return await PrepareTransformationEntryAsync(
+					context,
+					transformationScope,
+					item,
+					cancellationToken).ConfigureAwait(false);
+				continue;
+			}
+
+			batch.Add(item);
+			if (batch.Count < MaximumParallelScans)
+				continue;
+			await foreach (var prepared in PrepareTransformationBatchAsync(
+			                   context,
+			                   transformationScope,
+			                   batch,
+			                   cancellationToken).ConfigureAwait(false))
+			{
+				yield return prepared;
+			}
+			batch.Clear();
+		}
+
+		await foreach (var prepared in PrepareTransformationBatchAsync(
+		                   context,
+		                   transformationScope,
+		                   batch,
+		                   cancellationToken).ConfigureAwait(false))
+		{
+			yield return prepared;
+		}
+	}
+
+	private async IAsyncEnumerable<PreparedTransformationEntry> PrepareTransformationBatchAsync(
+		ContentTransformationContext context,
+		ContentTransformationScope transformationScope,
+		IReadOnlyList<CompressionWorkItem> items,
+		[EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		if (items.Count == 0)
+			yield break;
+
+		var tasks = items
+			.Select(item => Task.Run(
+				() => PrepareTransformationEntryAsync(
+					context,
+					transformationScope,
+					item,
+					cancellationToken),
+				cancellationToken))
+			.ToArray();
+		PreparedTransformationEntry[] entries;
+		try
+		{
+			entries = await Task.WhenAll(tasks).ConfigureAwait(false);
+		}
+		catch
+		{
+			foreach (var task in tasks)
+			{
+				if (task.IsCompletedSuccessfully)
+					task.Result.Dispose();
+			}
+			throw;
+		}
+
+		var next = 0;
+		try
+		{
+			for (; next < entries.Length; next++)
+			{
+				yield return entries[next];
+				entries[next].Dispose();
+			}
+		}
+		finally
+		{
+			for (; next < entries.Length; next++)
+				entries[next].Dispose();
+		}
+	}
+
+	private async Task<PreparedTransformationEntry> PrepareTransformationEntryAsync(
+		ContentTransformationContext context,
+		ContentTransformationScope transformationScope,
+		CompressionWorkItem item,
+		CancellationToken cancellationToken)
+	{
+		var metadataBeforeRead = SecretFileMetadata.Capture(item.SourcePath);
+		var result = await contentAnalyzer
+			.ReadClassifiedAsync(item.SourcePath, MaximumScannableFileBytes, cancellationToken)
+			.ConfigureAwait(false);
+		var metadataAfterRead = SecretFileMetadata.Capture(item.SourcePath);
+		EnsureStableRead(item.SourcePath, metadataBeforeRead, metadataAfterRead, result.Content);
+		IDisposable? contentLease = null;
+		try
+		{
+			CodeCompressionResult compression;
+			if (result.Classification == FileContentClassification.Text && result.Content is not null)
+			{
+				contentLease = context.Redaction?.Session.TrackFullContentBuffer();
+				compression = transformationScope.Compress(
+					item.SourcePath,
+					NormalizeRelativePath(context, item.SourcePath),
+					result.Content.Content,
+					cancellationToken);
+			}
+			else
+			{
+				compression = new CodeCompressionResult(
+					result.Content?.Content ?? string.Empty,
+					ContentTransformMap.Identity);
+			}
+
+			return new PreparedTransformationEntry(
+				item.Index,
+				item.SourcePath,
+				metadataAfterRead,
+				result,
+				compression,
+				contentLease);
+		}
+		catch
+		{
+			contentLease?.Dispose();
 			throw;
 		}
 	}
@@ -294,6 +441,25 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	}
 
 	private readonly record struct CompressionWorkItem(int Index, string SourcePath);
+
+	private sealed class PreparedTransformationEntry(
+		int index,
+		string sourcePath,
+		SecretFileMetadata metadata,
+		FileContentReadResult readResult,
+		CodeCompressionResult compression,
+		IDisposable? contentLease) : IDisposable
+	{
+		private IDisposable? _contentLease = contentLease;
+
+		public int Index { get; } = index;
+		public string SourcePath { get; } = sourcePath;
+		public SecretFileMetadata Metadata { get; } = metadata;
+		public FileContentReadResult ReadResult { get; } = readResult;
+		public CodeCompressionResult Compression { get; } = compression;
+
+		public void Dispose() => Interlocked.Exchange(ref _contentLease, null)?.Dispose();
+	}
 
 	public async Task<SecretRedactionSnapshot> AnalyzeAsync(
 		SecretRedactionContext context,

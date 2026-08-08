@@ -1004,14 +1004,36 @@ internal sealed class SecretFileRedactionPlan(
 	public SecretTextRedactionResult BuildResult(string content)
 	{
 		if (Replacements.Count == 0)
-			return new SecretTextRedactionResult(content, Spans, 0, 0);
+		{
+			return new SecretTextRedactionResult(
+				content,
+				Spans,
+				0,
+				0,
+				ContentTransformMap.Identity);
+		}
 
 		var estimatedLength = content.Length;
+		var transformedRanges = new List<ContentTransformRange>(Replacements.Count);
 		foreach (var replacement in Replacements)
+		{
 			estimatedLength = checked(estimatedLength + (replacement.Replacement?.Length ?? replacement.SourceLength) - replacement.SourceLength);
+			if (replacement.Replacement is not null)
+			{
+				transformedRanges.Add(new ContentTransformRange(
+					replacement.SourceStart,
+					replacement.SourceLength,
+					replacement.Replacement.Length));
+			}
+		}
 		var builder = new StringBuilder(estimatedLength);
 		AppendTo(builder, content, content.Length);
-		return new SecretTextRedactionResult(builder.ToString(), Spans, DetectedCount, RedactedCount);
+		return new SecretTextRedactionResult(
+			builder.ToString(),
+			Spans,
+			DetectedCount,
+			RedactedCount,
+			ContentTransformMap.Create(transformedRanges, content.Length));
 	}
 
 	public void AppendTo(StringBuilder destination, string content, int sourceLength)

@@ -48,16 +48,39 @@ internal sealed class MetricsPipeline(
         int TrailingNewlineChars,
         int TrailingNewlineLineBreaks);
 
-    private readonly record struct FileMetricsScanResult(
-        FileMetricsData Metrics,
-        bool HasMetrics,
-        bool WasInspected);
-
-    private readonly record struct FileMetricsCacheEntry(
+    private readonly record struct FileMetricsVariant(
         FileMetricsData Metrics,
         bool HasMetrics);
 
+    private readonly record struct FileMetricsScanResult(
+        FileMetricsVariant Raw,
+        FileMetricsVariant Effective,
+        string TransformIdentity,
+        bool WasInspected);
+
+    private sealed class FileMetricsCacheEntry(FileMetricsVariant raw)
+    {
+        private readonly Dictionary<string, FileMetricsVariant> _transformed = new(StringComparer.Ordinal);
+
+        public FileMetricsVariant Raw { get; set; } = raw;
+
+        public void SetTransformed(string identity, FileMetricsVariant metrics) =>
+            _transformed[identity] = metrics;
+
+        public bool TryGet(string identity, out FileMetricsVariant metrics)
+        {
+            if (identity.Length == 0)
+            {
+                metrics = Raw;
+                return true;
+            }
+
+            return _transformed.TryGetValue(identity, out metrics);
+        }
+    }
+
     private const double CompactStatusMetricsThresholdWidth = 1050;
+    private const long MaximumMetricsMaterializationBytes = 10L * 1024 * 1024;
 
     private static async Task YieldUiAsync(DispatcherPriority priority)
         => await DispatcherTaskSchedulerProvider.YieldAsync(priority);
@@ -307,10 +330,7 @@ internal sealed class MetricsPipeline(
         return context?.Compression is { } compression ? compression.Session.TransformIdentity : string.Empty;
     }
 
-    /// <summary>
-    /// Drops per-file metrics when the active transformation changes. The cache is keyed on path
-    /// alone, so without this a compressed measurement would survive unchecking the option.
-    /// </summary>
+    /// <summary>Switches the effective variant while retaining already measured raw/compressed data.</summary>
     public void SynchronizeTransformIdentity()
     {
         var identity = ResolveTransformIdentity();
@@ -318,7 +338,7 @@ internal sealed class MetricsPipeline(
             return;
 
         _appliedTransformIdentity = identity;
-        ClearFileMetricsCache(trimCapacity: false);
+        InvalidateComputedCaches();
     }
 
     /// <summary>
@@ -336,31 +356,57 @@ internal sealed class MetricsPipeline(
     /// Re-measures one file through the enabled transformations. A file the compressor leaves alone
     /// keeps its original metrics, so unsupported languages cost only the supported-extension check.
     /// </summary>
-    private async Task<TextFileMetrics?> MeasureTransformedAsync(
+    private TextFileMetrics MeasureTransformed(
         CodeCompressionScope? scope,
         string projectRoot,
         string filePath,
-        TextFileMetrics metrics,
+        string content,
+        TextFileMetrics rawMetrics,
         CancellationToken cancellationToken)
     {
         if (scope is null || !IsCompressible(filePath))
-            return metrics;
-
-        var content = await fileContentAnalyzer
-            .TryReadAsTextAsync(filePath, cancellationToken)
-            .ConfigureAwait(false);
-        if (content is null || content.IsEstimated || content.Content.Length == 0)
-            return metrics;
+            return rawMetrics;
+        if (content.Length == 0)
+            return rawMetrics;
 
         var relativePath = BuildRelativePath(projectRoot, filePath);
-        var transformed = scope.Transform(filePath, relativePath, content.Content, cancellationToken).Text;
-        if (ReferenceEquals(transformed, content.Content))
-            return metrics;
+        var transformed = scope.Transform(filePath, relativePath, content, cancellationToken).Text;
+        if (ReferenceEquals(transformed, content))
+            return rawMetrics;
 
         return FileContentAnalyzer.ComputeMetrics(
-            transformed,
+            transformed.AsSpan(),
             Encoding.UTF8.GetByteCount(transformed));
     }
+
+    private static TextFileMetrics ToMetrics(TextFileContent content) =>
+        content.IsEstimated
+            ? new TextFileMetrics(
+                content.SizeBytes,
+                content.LineCount,
+                content.CharCount,
+                content.IsEmpty,
+                content.IsWhitespaceOnly,
+                IsEstimated: true,
+                TrailingNewlineChars: content.TrailingNewlineChars,
+                TrailingNewlineLineBreaks: content.TrailingNewlineLineBreaks)
+            : FileContentAnalyzer.ComputeMetrics(content.Content, content.SizeBytes);
+
+    private static FileMetricsVariant ToVariant(TextFileMetrics? metrics) =>
+        metrics is null
+            ? new FileMetricsVariant(default, HasMetrics: false)
+            : new FileMetricsVariant(
+                new FileMetricsData(
+                    metrics.SizeBytes,
+                    metrics.LineCount,
+                    metrics.CharCount,
+                    metrics.IsEmpty,
+                    metrics.IsWhitespaceOnly,
+                    metrics.IsEstimated,
+                    metrics.CrLfPairCount,
+                    metrics.TrailingNewlineChars,
+                    metrics.TrailingNewlineLineBreaks),
+                HasMetrics: true);
 
     private bool IsCompressible(string filePath) =>
         transformationContextProvider?.Invoke()?.Compression?.Session.IsSupported(filePath) == true;
@@ -606,7 +652,8 @@ internal sealed class MetricsPipeline(
                 hasCachedMetrics = false;
                 foreach (var entry in _fileMetricsCache.Values)
                 {
-                    if (!entry.HasMetrics)
+                    if (!entry.TryGet(_appliedTransformIdentity, out var variant) ||
+                        !variant.HasMetrics)
                         continue;
 
                     hasCachedMetrics = true;
@@ -656,9 +703,18 @@ internal sealed class MetricsPipeline(
                     continue;
 
                 var filePath = filePaths[index];
-                _fileMetricsCache[filePath] = new FileMetricsCacheEntry(
-                    result.Metrics,
-                    result.HasMetrics);
+                if (!_fileMetricsCache.TryGetValue(filePath, out var entry))
+                {
+                    entry = new FileMetricsCacheEntry(result.Raw);
+                    _fileMetricsCache.Add(filePath, entry);
+                }
+                else
+                {
+                    entry.Raw = result.Raw;
+                }
+
+                if (result.TransformIdentity.Length > 0)
+                    entry.SetTransformed(result.TransformIdentity, result.Effective);
             }
         }
     }
@@ -682,6 +738,9 @@ internal sealed class MetricsPipeline(
         };
         using var transformationScope = BeginTransformationScope(filePaths);
         var transformationProjectRoot = ResolveTransformationProjectRoot();
+        var transformIdentity = transformationScope is null
+            ? string.Empty
+            : _appliedTransformIdentity;
 
         await Parallel.ForAsync(0, filePaths.Count, parallelOptions, async (index, ct) =>
         {
@@ -692,53 +751,47 @@ internal sealed class MetricsPipeline(
                     FileContentClassification.Binary)
                 {
                     stagedResults[index] = new FileMetricsScanResult(
-                        Metrics: default,
-                        HasMetrics: false,
+                        Raw: new FileMetricsVariant(default, HasMetrics: false),
+                        Effective: new FileMetricsVariant(default, HasMetrics: false),
+                        TransformIdentity: transformIdentity,
                         WasInspected: true);
                     return;
                 }
 
-                var result = await fileContentAnalyzer.GetClassifiedMetricsAsync(filePath, ct)
-                    .ConfigureAwait(false);
-                var metrics = result.IsText ? result.Metrics : null;
-                // The status bar counts what the user would actually copy. When a transformation is
-                // on, that is the transformed text, so the file is measured after compression rather
-                // than as it sits on disk.
-                if (metrics is { IsEstimated: false })
+                TextFileMetrics? rawMetrics;
+                TextFileMetrics? effectiveMetrics;
+                if (transformationScope is not null && IsCompressible(filePath))
                 {
-                    metrics = await MeasureTransformedAsync(
+                    var result = await fileContentAnalyzer
+                        .ReadClassifiedAsync(filePath, MaximumMetricsMaterializationBytes, ct)
+                        .ConfigureAwait(false);
+                    rawMetrics = result.IsText && result.Content is not null
+                        ? ToMetrics(result.Content)
+                        : null;
+                    effectiveMetrics = rawMetrics is { IsEstimated: false } &&
+                                       result.Content is { IsEstimated: false } content
+                        ? MeasureTransformed(
                             transformationScope,
                             transformationProjectRoot,
                             filePath,
-                            metrics,
+                            content.Content,
+                            rawMetrics,
                             ct)
-                        .ConfigureAwait(false);
+                        : rawMetrics;
                 }
-
-                if (metrics is not null)
+                else
                 {
-                    stagedResults[index] = new FileMetricsScanResult(
-                        new FileMetricsData(
-                            metrics.SizeBytes,
-                            metrics.LineCount,
-                            metrics.CharCount,
-                            metrics.IsEmpty,
-                            metrics.IsWhitespaceOnly,
-                            metrics.IsEstimated,
-                            metrics.CrLfPairCount,
-                            metrics.TrailingNewlineChars,
-                            metrics.TrailingNewlineLineBreaks),
-                        HasMetrics: true,
-                        WasInspected: true);
-                    return;
+                    var result = await fileContentAnalyzer
+                        .GetClassifiedMetricsAsync(filePath, ct)
+                        .ConfigureAwait(false);
+                    rawMetrics = result.IsText ? result.Metrics : null;
+                    effectiveMetrics = rawMetrics;
                 }
 
-                // Null means "not exportable as text", not "still missing". Remembering the
-                // completed probe prevents binary files from keeping selected content metrics
-                // stuck behind a permanent "missing metrics" gate.
                 stagedResults[index] = new FileMetricsScanResult(
-                    Metrics: default,
-                    HasMetrics: false,
+                    Raw: ToVariant(rawMetrics),
+                    Effective: ToVariant(effectiveMetrics),
+                    TransformIdentity: transformIdentity,
                     WasInspected: true);
             }
             catch (OperationCanceledException)
@@ -748,8 +801,9 @@ internal sealed class MetricsPipeline(
             catch
             {
                 stagedResults[index] = new FileMetricsScanResult(
-                    Metrics: default,
-                    HasMetrics: false,
+                    Raw: new FileMetricsVariant(default, HasMetrics: false),
+                    Effective: new FileMetricsVariant(default, HasMetrics: false),
+                    TransformIdentity: transformIdentity,
                     WasInspected: true);
             }
             finally
@@ -1018,7 +1072,8 @@ internal sealed class MetricsPipeline(
             for (var index = 0; index < orderedPaths.Count; index++)
             {
                 var path = orderedPaths[index];
-                if (!_fileMetricsCache.ContainsKey(path))
+                if (!_fileMetricsCache.TryGetValue(path, out var entry) ||
+                    !entry.TryGet(_appliedTransformIdentity, out _))
                     missingPaths.Add(path);
             }
         }
@@ -1219,12 +1274,13 @@ internal sealed class MetricsPipeline(
             foreach (var path in orderedPaths)
             {
                 if (!_fileMetricsCache.TryGetValue(path, out var cacheEntry) ||
-                    !cacheEntry.HasMetrics)
+                    !cacheEntry.TryGet(_appliedTransformIdentity, out var variant) ||
+                    !variant.HasMetrics)
                 {
                     continue;
                 }
 
-                var metrics = cacheEntry.Metrics;
+                var metrics = variant.Metrics;
                 var contentOnlyPath = MapExportDisplayPath(path, contentOnlyPathMapper);
                 var treeAndContentPath = MapExportDisplayPath(path, treeAndContentPathMapper);
                 var fileMetrics = new ContentFileMetrics(

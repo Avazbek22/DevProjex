@@ -53,23 +53,57 @@ public sealed class ContentTransformMap
 	/// </summary>
 	internal static ContentTransformMap Create(IReadOnlyList<CodeCompressionEdit> edits, int sourceLength)
 	{
-		if (edits.Count == 0)
-			return Identity;
-
-		var sourceStarts = new int[edits.Count];
-		var sourceLengths = new int[edits.Count];
-		var transformedStarts = new int[edits.Count];
-		var transformedLengths = new int[edits.Count];
-
-		var delta = 0;
+		var ranges = new ContentTransformRange[edits.Count];
 		for (var index = 0; index < edits.Count; index++)
 		{
 			var edit = edits[index];
-			sourceStarts[index] = edit.SourceStart;
-			sourceLengths[index] = edit.SourceLength;
-			transformedStarts[index] = edit.SourceStart + delta;
-			transformedLengths[index] = edit.Replacement.Length;
-			delta += edit.Replacement.Length - edit.SourceLength;
+			ranges[index] = new ContentTransformRange(
+				edit.SourceStart,
+				edit.SourceLength,
+				edit.Replacement.Length);
+		}
+
+		return Create(ranges, sourceLength);
+	}
+
+	/// <summary>
+	/// Builds a map for any ordered set of text replacements. The ranges contain only lengths so
+	/// callers do not need to retain either source text or replacement values.
+	/// </summary>
+	internal static ContentTransformMap Create(
+		IReadOnlyList<ContentTransformRange> ranges,
+		int sourceLength)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(sourceLength);
+		if (ranges.Count == 0)
+			return Identity;
+
+		var sourceStarts = new int[ranges.Count];
+		var sourceLengths = new int[ranges.Count];
+		var transformedStarts = new int[ranges.Count];
+		var transformedLengths = new int[ranges.Count];
+
+		var delta = 0;
+		var previousEnd = 0;
+		for (var index = 0; index < ranges.Count; index++)
+		{
+			var range = ranges[index];
+			if (range.SourceStart < previousEnd ||
+			    range.SourceLength < 0 ||
+			    range.TransformedLength < 0 ||
+			    range.SourceStart > sourceLength - range.SourceLength)
+			{
+				throw new ArgumentException(
+					"Transform ranges must be ordered, non-overlapping, and inside the source text.",
+					nameof(ranges));
+			}
+
+			sourceStarts[index] = range.SourceStart;
+			sourceLengths[index] = range.SourceLength;
+			transformedStarts[index] = checked(range.SourceStart + delta);
+			transformedLengths[index] = range.TransformedLength;
+			delta = checked(delta + range.TransformedLength - range.SourceLength);
+			previousEnd = checked(range.SourceStart + range.SourceLength);
 		}
 
 		return new ContentTransformMap(
@@ -159,3 +193,8 @@ public sealed class ContentTransformMap
 		return found;
 	}
 }
+
+internal readonly record struct ContentTransformRange(
+	int SourceStart,
+	int SourceLength,
+	int TransformedLength);

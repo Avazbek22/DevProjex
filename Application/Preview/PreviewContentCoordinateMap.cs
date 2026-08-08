@@ -8,25 +8,30 @@ namespace DevProjex.Application.Preview;
 /// </summary>
 public sealed class PreviewContentCoordinateMap
 {
-	private readonly ContentTransformMap _transformMap;
+	private readonly ContentTransformMap _sourceTransformMap;
+	private readonly ContentTransformMap _redactionTransformMap;
 	private readonly int[] _transformedLineStarts;
 	private readonly int[] _transformedLineEnds;
 
 	private PreviewContentCoordinateMap(
-		ContentTransformMap transformMap,
+		ContentTransformMap sourceTransformMap,
+		ContentTransformMap redactionTransformMap,
 		int[] transformedLineStarts,
 		int[] transformedLineEnds)
 	{
-		_transformMap = transformMap;
+		_sourceTransformMap = sourceTransformMap;
+		_redactionTransformMap = redactionTransformMap;
 		_transformedLineStarts = transformedLineStarts;
 		_transformedLineEnds = transformedLineEnds;
 	}
 
 	public static PreviewContentCoordinateMap Create(
 		ReadOnlySpan<char> transformedContent,
-		ContentTransformMap transformMap)
+		ContentTransformMap sourceTransformMap,
+		ContentTransformMap? redactionTransformMap = null)
 	{
-		ArgumentNullException.ThrowIfNull(transformMap);
+		ArgumentNullException.ThrowIfNull(sourceTransformMap);
+		redactionTransformMap ??= ContentTransformMap.Identity;
 		var lineCount = 1;
 		foreach (var character in transformedContent)
 		{
@@ -56,7 +61,8 @@ public sealed class PreviewContentCoordinateMap
 			: transformedContent.Length;
 
 		return new PreviewContentCoordinateMap(
-			transformMap,
+			sourceTransformMap,
+			redactionTransformMap,
 			lineStarts,
 			lineEnds);
 	}
@@ -72,6 +78,13 @@ public sealed class PreviewContentCoordinateMap
 		if (column > lineEnd - lineStart)
 			return false;
 
-		return _transformMap.TryToSource(lineStart + column, out sourceOffset);
+		if (!_redactionTransformMap.TryToSource(
+			    lineStart + column,
+			    out var preRedactionOffset))
+		{
+			return false;
+		}
+
+		return _sourceTransformMap.TryToSource(preRedactionOffset, out sourceOffset);
 	}
 }

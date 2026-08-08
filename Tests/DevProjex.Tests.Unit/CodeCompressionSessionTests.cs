@@ -236,6 +236,69 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public void FiveThousandSequentialFiles_AreWarmOnTheSecondFullPass()
+	{
+		const int fileCount = 5_000;
+		var paths = Enumerable.Range(0, fileCount)
+			.Select(index => $"src/sample-{index:D5}.cs")
+			.ToArray();
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+
+		for (var pass = 0; pass < 2; pass++)
+		{
+			using var scope = session.BeginOutput("project", paths);
+			foreach (var path in paths)
+				_ = scope.Transform(path, path, $"content:{path}", CancellationToken.None);
+		}
+
+		var diagnostics = session.Diagnostics;
+		Assert.Equal(fileCount, compressor.AnalysisCount);
+		Assert.Equal(fileCount, diagnostics.CacheHits);
+		Assert.Equal(fileCount, diagnostics.CacheEntries);
+		Assert.InRange(
+			diagnostics.RetainedCacheBytes,
+			1,
+			diagnostics.MaximumRetainedCacheBytes);
+	}
+
+	[Fact]
+	public void PlanCache_EvictsByRetainedBytesAndDoesNotRetainOversizedEntry()
+	{
+		using var compressor = new RecordingCompressor();
+		using var bounded = new CodeCompressionSession(
+			compressor,
+			maximumCacheEntries: 100,
+			maximumRetainedCacheBytes: 1_500);
+		using (var scope = bounded.BeginOutput("project", []))
+		{
+			for (var index = 0; index < 20; index++)
+			{
+				var path = $"src/long-file-name-{index:D4}.cs";
+				_ = scope.Transform(path, path, $"content-{index:D4}", CancellationToken.None);
+			}
+		}
+		var boundedDiagnostics = bounded.Diagnostics;
+		Assert.InRange(boundedDiagnostics.RetainedCacheBytes, 1, 1_500);
+		Assert.InRange(boundedDiagnostics.CacheEntries, 1, 19);
+
+		using var oversizedCompressor = new RecordingCompressor();
+		using var oversized = new CodeCompressionSession(
+			oversizedCompressor,
+			maximumCacheEntries: 100,
+			maximumRetainedCacheBytes: 128);
+		for (var pass = 0; pass < 2; pass++)
+		{
+			using var scope = oversized.BeginOutput("project", ["sample.cs"]);
+			_ = scope.Transform("sample.cs", "sample.cs", "same-content", CancellationToken.None);
+		}
+
+		Assert.Equal(2, oversizedCompressor.AnalysisCount);
+		Assert.Equal(0, oversized.Diagnostics.CacheEntries);
+		Assert.Equal(0, oversized.Diagnostics.RetainedCacheBytes);
+	}
+
+	[Fact]
 	public async Task ResetWhileAnalysisIsActive_CannotRestoreAnObsoletePlanOrSnapshot()
 	{
 		using var compressor = new BlockingCompressor();

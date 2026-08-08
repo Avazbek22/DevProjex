@@ -138,21 +138,21 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 		// Layout is grammars/tree-sitter-<version>/<rid>/, so there are two levels to sweep: whole
 		// binding versions left by an upgrade, and stale architectures under the current one.
 		var currentRid = Path.TrimEndingDirectorySeparator(RootDirectory);
-		var currentVersion = Path.GetDirectoryName(currentRid);
-		var grammarsRoot = currentVersion is null ? null : Path.GetDirectoryName(currentVersion);
-
-		foreach (var candidate in SafeEnumerate(grammarsRoot))
+		if (TryResolveManagedLayout(currentRid, out var currentVersion, out var grammarsRoot))
 		{
-			if (PathComparer.Equals(candidate, currentVersion))
-				continue;
-			TryRemove(candidate, removed);
-		}
+			foreach (var candidate in SafeEnumerate(grammarsRoot))
+			{
+				if (PathComparer.Equals(candidate, currentVersion))
+					continue;
+				TryRemove(candidate, removed);
+			}
 
-		foreach (var candidate in SafeEnumerate(currentVersion))
-		{
-			if (PathComparer.Equals(candidate, currentRid))
-				continue;
-			TryRemove(candidate, removed);
+			foreach (var candidate in SafeEnumerate(currentVersion))
+			{
+				if (PathComparer.Equals(candidate, currentRid))
+					continue;
+				TryRemove(candidate, removed);
+			}
 		}
 
 		foreach (var candidate in SafeEnumerate(RootDirectory))
@@ -165,6 +165,27 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 		}
 
 		return removed;
+	}
+
+	private static bool TryResolveManagedLayout(
+		string currentRid,
+		out string currentVersion,
+		out string grammarsRoot)
+	{
+		currentVersion = Path.GetDirectoryName(currentRid) ?? string.Empty;
+		grammarsRoot = currentVersion.Length == 0
+			? string.Empty
+			: Path.GetDirectoryName(currentVersion) ?? string.Empty;
+		var productRoot = grammarsRoot.Length == 0
+			? string.Empty
+			: Path.GetDirectoryName(grammarsRoot) ?? string.Empty;
+		return currentVersion.Length > 0 &&
+		       grammarsRoot.Length > 0 &&
+		       productRoot.Length > 0 &&
+		       PathComparer.Equals(Path.GetFileName(currentRid), GrammarPlatform.RuntimeIdentifier) &&
+		       Path.GetFileName(currentVersion).StartsWith("tree-sitter-", StringComparison.Ordinal) &&
+		       PathComparer.Equals(Path.GetFileName(grammarsRoot), "grammars") &&
+		       PathComparer.Equals(Path.GetFileName(productRoot), "DevProjex");
 	}
 
 	private void MarkInUse(string directory)

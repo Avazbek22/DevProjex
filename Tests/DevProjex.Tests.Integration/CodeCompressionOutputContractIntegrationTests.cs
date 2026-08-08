@@ -151,6 +151,47 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task CompressionWithHideSecrets_PreparesSmallFilesConcurrentlyAndCommitsInSelectionOrder()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("parallel-project");
+		var paths = Enumerable.Range(0, 4)
+			.Select(index =>
+			{
+				var path = Path.Combine(projectRoot, $"Widget{index:D2}.cs");
+				File.WriteAllText(
+					path,
+					CompressibleSource.Replace("Widget", $"Widget{index}", StringComparison.Ordinal));
+				return path;
+			})
+			.ToArray();
+		var analyzer = new ConcurrentReadGateAnalyzer(new FileContentAnalyzer(), requiredConcurrency: 2);
+		using var compression = CodeCompressionFactory.CreateSession();
+		using var secrets = new SecretRedactionSession(new NoFindingsDetector());
+
+		await using var prepared = await new SecretRedactionOutputPreparer(analyzer).PrepareAsync(
+			new ContentTransformationContext(
+				new CodeCompressionContext(projectRoot, compression),
+				new SecretRedactionContext(projectRoot, secrets)),
+			paths,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(
+			analyzer.PeakConcurrentReads >= 2,
+			$"Expected bounded parallel preparation, observed {analyzer.PeakConcurrentReads} concurrent read(s).");
+		var compressionSnapshot = Assert.IsType<CodeCompressionSnapshot>(prepared.CompressionSnapshot);
+		Assert.Equal(paths.Length, compressionSnapshot.CompressedFiles);
+		Assert.Equal(0, Assert.IsType<SecretRedactionSnapshot>(prepared.Snapshot).RedactedCount);
+		foreach (var path in paths)
+		{
+			var transformed = await File.ReadAllTextAsync(
+				prepared.GetFile(path).ContentPath,
+				TestContext.Current.CancellationToken);
+			Assert.DoesNotContain("var total", transformed, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public void LocalProfileRoundTripsCompressionAsAnOptInTransformation()
 	{
 		using var temporary = new TemporaryDirectory();
@@ -326,6 +367,55 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		Assert.DoesNotContain(MarkedConstantValue, plain.Text);
 		Assert.Equal(1, compressed.RedactionCount);
 		Assert.Equal(1, plain.RedactionCount);
+	}
+
+	[Fact]
+	public async Task ManualMarkAfterMultilineRedaction_MapsThroughFinalPreviewAcrossCompressionStates()
+	{
+		const string privateKey = "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----";
+		const string laterSecret = "late-secret-value-123";
+		var source =
+			"public sealed class Secrets\n{\n" +
+			"    public const string Pem = \"\"\"\n" + privateKey + "\n\"\"\";\n" +
+			$"    public const string Later = \"{laterSecret}\";\n" +
+			"    public void Run()\n    {\n        Console.WriteLine(Later);\n    }\n}\n";
+		using var workspace = CompressionWorkspace.Create(source);
+		using var secrets = new SecretRedactionSession(new ExactValueDetector(privateKey));
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var context = new ContentTransformationContext(
+			new CodeCompressionContext(workspace.SourceRoot, compressionSession),
+			new SecretRedactionContext(workspace.SourceRoot, secrets));
+		using var preview = await new PreviewDocumentBuilder(new FileContentAnalyzer())
+			.BuildContentDocumentAsync(
+				[workspace.SourceFile],
+				TestContext.Current.CancellationToken,
+				displayPathMapper: null,
+				includeOmissionMarkers: false,
+				transformationContext: context,
+				includeSourceCoordinateMaps: true);
+		Assert.NotNull(preview);
+		var section = Assert.Single(preview.Sections);
+		var finalText = preview.GetFullText();
+		Assert.DoesNotContain(privateKey, finalText, StringComparison.Ordinal);
+		var finalOffset = finalText.IndexOf(laterSecret, StringComparison.Ordinal);
+		Assert.True(finalOffset >= 0);
+		var (line, column) = ResolveLineAndColumn(finalText, finalOffset);
+		Assert.NotNull(section.CoordinateMap);
+		Assert.True(section.CoordinateMap.TryToSourceOffset(
+			line + 1 - section.ContentStartLine,
+			column,
+			out var sourceOffset));
+		Assert.Equal(source.IndexOf(laterSecret, StringComparison.Ordinal), sourceOffset);
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(laterSecret, out var marked, out _));
+		Assert.True(secrets.AddSessionMarkedSecret("Widget.cs", sourceOffset, marked));
+
+		var compressed = await workspace.BuildContentAsync(secrets, compress: true);
+		var plain = await workspace.BuildContentAsync(secrets, compress: false);
+		var compressedAgain = await workspace.BuildContentAsync(secrets, compress: true);
+
+		Assert.DoesNotContain(laterSecret, compressed.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(laterSecret, plain.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(laterSecret, compressedAgain.Text, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -532,6 +622,85 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 				TestContext.Current.CancellationToken));
 	}
 
+	public static TheoryData<string, bool> CompressionEncodingAndNewlineCases => new()
+	{
+		{ "utf8-bom", false },
+		{ "utf8-bom", true },
+		{ "utf16-le", false },
+		{ "utf16-le", true },
+		{ "utf16-be", false },
+		{ "utf16-be", true },
+		{ "utf32-le", false },
+		{ "utf32-le", true },
+		{ "utf32-be", false },
+		{ "utf32-be", true }
+	};
+
+	[Theory]
+	[MemberData(nameof(CompressionEncodingAndNewlineCases))]
+	public async Task FolderAndZipCompression_PreserveEncodingBomAndLineEndings(
+		string encodingName,
+		bool useCrlf)
+	{
+		var encoding = CreateEncoding(encodingName);
+		var normalizedSource = CompressibleSource.Replace("\r\n", "\n", StringComparison.Ordinal);
+		var source = useCrlf
+			? normalizedSource.Replace("\n", "\r\n", StringComparison.Ordinal)
+			: normalizedSource;
+		using var workspace = CompressionWorkspace.Create(source);
+		await File.WriteAllTextAsync(
+			workspace.SourceFile,
+			source,
+			encoding,
+			TestContext.Current.CancellationToken);
+
+		var folder = await workspace.ExportFolderAsync(compress: true);
+		var folderBytes = await File.ReadAllBytesAsync(
+			Path.Combine(folder.DestinationPath, "Widget.cs"),
+			TestContext.Current.CancellationToken);
+		var zip = await workspace.ExportZipAsync(
+			Path.Combine(workspace.DestinationParent, "compressed.zip"),
+			compress: true);
+		byte[] zipBytes;
+		using (var archive = ZipFile.OpenRead(zip.DestinationPath))
+		{
+			var entry = Assert.Single(archive.Entries, candidate =>
+				candidate.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+			await using var entryStream = entry.Open();
+			await using var buffer = new MemoryStream();
+			await entryStream.CopyToAsync(buffer, TestContext.Current.CancellationToken);
+			zipBytes = buffer.ToArray();
+		}
+
+		foreach (var outputBytes in new[] { folderBytes, zipBytes })
+		{
+			Assert.True(outputBytes.AsSpan().StartsWith(encoding.GetPreamble()));
+			var text = encoding.GetString(outputBytes.AsSpan(encoding.GetPreamble().Length));
+			Assert.DoesNotContain("total += index * left - right", text, StringComparison.Ordinal);
+			if (useCrlf)
+			{
+				Assert.DoesNotContain(
+					"\n",
+					text.Replace("\r\n", string.Empty, StringComparison.Ordinal),
+					StringComparison.Ordinal);
+			}
+			else
+			{
+				Assert.DoesNotContain("\r", text, StringComparison.Ordinal);
+			}
+		}
+	}
+
+	private static Encoding CreateEncoding(string name) => name switch
+	{
+		"utf8-bom" => new UTF8Encoding(encoderShouldEmitUTF8Identifier: true, throwOnInvalidBytes: true),
+		"utf16-le" => new UnicodeEncoding(bigEndian: false, byteOrderMark: true, throwOnInvalidBytes: true),
+		"utf16-be" => new UnicodeEncoding(bigEndian: true, byteOrderMark: true, throwOnInvalidBytes: true),
+		"utf32-le" => new UTF32Encoding(bigEndian: false, byteOrderMark: true, throwOnInvalidCharacters: true),
+		"utf32-be" => new UTF32Encoding(bigEndian: true, byteOrderMark: true, throwOnInvalidCharacters: true),
+		_ => throw new ArgumentOutOfRangeException(nameof(name), name, null)
+	};
+
 	private sealed class ExactValueDetector(params string[] values) : ISecretDetector
 	{
 		public IReadOnlyList<DetectedSecret> Detect(
@@ -557,6 +726,79 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			}
 
 			return findings;
+		}
+	}
+
+	private sealed class ConcurrentReadGateAnalyzer(
+		IFileContentAnalyzer inner,
+		int requiredConcurrency) : IFileContentAnalyzer
+	{
+		private readonly TaskCompletionSource _gate = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private int _enteredReads;
+		private int _activeReads;
+		private int _peakConcurrentReads;
+
+		public int PeakConcurrentReads => Volatile.Read(ref _peakConcurrentReads);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			inner.ClassifyWithoutReading(path);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public async ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			var active = Interlocked.Increment(ref _activeReads);
+			UpdateMaximum(ref _peakConcurrentReads, active);
+			if (Interlocked.Increment(ref _enteredReads) >= requiredConcurrency)
+				_gate.TrySetResult();
+			try
+			{
+				await _gate.Task
+					.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken)
+					.ConfigureAwait(false);
+				return await inner
+					.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken)
+					.ConfigureAwait(false);
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _activeReads);
+			}
+		}
+
+		private static void UpdateMaximum(ref int target, int candidate)
+		{
+			var observed = Volatile.Read(ref target);
+			while (candidate > observed)
+			{
+				var exchanged = Interlocked.CompareExchange(ref target, candidate, observed);
+				if (exchanged == observed)
+					return;
+				observed = exchanged;
+			}
 		}
 	}
 

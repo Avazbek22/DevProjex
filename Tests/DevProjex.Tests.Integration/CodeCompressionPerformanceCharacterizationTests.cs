@@ -219,7 +219,10 @@ public sealed class CodeCompressionPerformanceCharacterizationTests
 			$"warmPreview={repeatedPreview.Elapsed.TotalMilliseconds:F2} ms, " +
 			$"chars={firstPreview.CharacterCount:N0}, lines={firstPreview.LineCount:N0}, " +
 			$"hashes={diagnostics.HashComputations:N0}, analyses={diagnostics.AnalysisExecutions:N0}, " +
-			$"cacheHits={diagnostics.CacheHits:N0}, prewarmReuses={diagnostics.PrewarmReuses:N0}.");
+			$"cacheHits={diagnostics.CacheHits:N0}, prewarmReuses={diagnostics.PrewarmReuses:N0}, " +
+			$"cacheEntries={diagnostics.CacheEntries:N0}, " +
+			$"retainedCache={diagnostics.RetainedCacheBytes / 1024d / 1024d:F2} MiB/" +
+			$"{diagnostics.MaximumRetainedCacheBytes / 1024d / 1024d:F0} MiB.");
 
 	private readonly record struct PreviewMeasurement(
 		TimeSpan Elapsed,
