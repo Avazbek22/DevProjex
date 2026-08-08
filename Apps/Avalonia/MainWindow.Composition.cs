@@ -89,6 +89,11 @@ public partial class MainWindow
 			_secretRedactionMatchedCount,
 			_codeCompressionSnapshot?.CompressedFiles,
 			_codeCompressionSnapshot?.UnchangedFiles);
+		_viewModel.SetCompressionStatus(
+			_codeCompressionSnapshot?.CompressedFiles,
+			_codeCompressionSnapshot?.TotalFiles,
+			_codeCompressionSnapshot?.SourceCharacters,
+			_codeCompressionSnapshot?.TransformedCharacters);
 	}
 
 	private SecretRedactionSnapshot? GetCachedSecretRedactionSnapshotForCurrentSelection()
@@ -167,11 +172,7 @@ public partial class MainWindow
 
 		_secretRedactionScanState = SecretScanState.Scanning;
 		_viewModel.SetContentProcessingStatus(SecretScanState.Scanning);
-		_selectionCoordinator.RelabelIgnoreOptions(
-			AdvancedIgnoreCountsAlwaysEnabled,
-			secretRedactionsCount: null,
-			_secretRedactionScanState,
-			secretMatchesCount: null);
+		RelabelIgnoreOptionsWithCurrentCounts();
 
 		var selectedPaths = GetCheckedPaths();
 		var files = selectedPaths.Count > 0
@@ -227,11 +228,7 @@ public partial class MainWindow
 			{
 				_secretRedactionScanState = SecretScanState.Failed;
 				_viewModel.SetContentProcessingStatus(SecretScanState.Failed);
-				_selectionCoordinator.RelabelIgnoreOptions(
-					AdvancedIgnoreCountsAlwaysEnabled,
-					secretRedactionsCount: null,
-					_secretRedactionScanState,
-					secretMatchesCount: null);
+				RelabelIgnoreOptionsWithCurrentCounts();
 			});
 		}
 		finally

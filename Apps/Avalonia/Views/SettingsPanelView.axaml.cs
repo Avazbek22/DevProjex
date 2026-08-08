@@ -54,7 +54,6 @@ public partial class SettingsPanelView : UserControl
 		if (sender is not ToolTip toolTip || DataContext is not MainWindowViewModel viewModel)
 			return;
 
-		toolTip.DataContext = viewModel;
 		PopupBackdropConfigurator.TryApply(
 			toolTip,
 			TopLevel.GetTopLevel(this),
@@ -62,14 +61,14 @@ public partial class SettingsPanelView : UserControl
 			PopupBackdropTransparencyFallback.Transparent);
 	}
 
-	private void OnContentProcessingHelpIndicatorPointerPressed(
+	private void OnContentProcessingStatusIndicatorPointerPressed(
 		object? sender,
 		PointerPressedEventArgs e)
 	{
 		e.Handled = true;
 	}
 
-	private void OnContentProcessingHelpIndicatorPointerReleased(
+	private void OnContentProcessingStatusIndicatorPointerReleased(
 		object? sender,
 		PointerReleasedEventArgs e)
 	{

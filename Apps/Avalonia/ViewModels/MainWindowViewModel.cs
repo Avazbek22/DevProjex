@@ -71,6 +71,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private SecretScanState _contentProcessingScanState;
 	private int? _contentProcessingDetectedCount;
 	private int? _contentProcessingHiddenCount;
+	private int? _compressedFilesCount;
+	private int? _compressionTotalFilesCount;
+	private long? _compressionSourceCharacters;
+	private long? _compressionTransformedCharacters;
     private bool _isDarkTheme = true;
     private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
@@ -1431,6 +1435,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsNotice { get; private set; } = string.Empty;
+	public string SettingsCompressionNotice { get; private set; } = string.Empty;
 	public bool HasSecretsStatus =>
 		_contentProcessingHasFindings is true &&
 		_contentProcessingScanState == SecretScanState.Completed &&
@@ -1594,6 +1599,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
 		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
 		UpdateSettingsSecretsNotice();
+		UpdateSettingsCompressionNotice();
 		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
 		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
 		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Always"];
@@ -1893,6 +1899,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			IgnoreOptions.Where(option =>
 				transformationIds.Contains(option.Id) &&
 				(option.Id != IgnoreOptionId.HideSecrets || _contentProcessingHasFindings is true)));
+		UpdateContentProcessingOptionStatuses();
 	}
 
 	internal void SetContentProcessingStatus(
@@ -1921,6 +1928,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		RaisePropertyChanged(nameof(HasContentProcessingOptions));
 	}
 
+	internal void SetCompressionStatus(
+		int? compressedFiles,
+		int? totalFiles,
+		long? sourceCharacters,
+		long? transformedCharacters)
+	{
+		if (_compressedFilesCount == compressedFiles &&
+		    _compressionTotalFilesCount == totalFiles &&
+		    _compressionSourceCharacters == sourceCharacters &&
+		    _compressionTransformedCharacters == transformedCharacters)
+		{
+			return;
+		}
+
+		_compressedFilesCount = compressedFiles;
+		_compressionTotalFilesCount = totalFiles;
+		_compressionSourceCharacters = sourceCharacters;
+		_compressionTransformedCharacters = transformedCharacters;
+		UpdateSettingsCompressionNotice();
+	}
+
 	private void UpdateSettingsSecretsNotice()
 	{
 		var secrets = _contentProcessingScanState switch
@@ -1936,10 +1964,54 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			_ => string.Empty
 		};
 		if (string.Equals(SettingsSecretsNotice, secrets, StringComparison.Ordinal))
+		{
+			UpdateContentProcessingOptionStatuses();
 			return;
+		}
 
 		SettingsSecretsNotice = secrets;
 		RaisePropertyChanged(nameof(SettingsSecretsNotice));
+		UpdateContentProcessingOptionStatuses();
+	}
+
+	private void UpdateSettingsCompressionNotice()
+	{
+		var notice = (_compressedFilesCount, _compressionTotalFilesCount) switch
+		{
+			(0, 0) => _localization["Settings.Compression.Status.NothingToCompress"],
+			({ } compressed, { } total) when
+				_compressionSourceCharacters is { } sourceCharacters &&
+				_compressionTransformedCharacters is { } transformedCharacters =>
+				_localization.Format(
+					"Settings.Compression.Status.Applied",
+					compressed,
+					total,
+					CodeCompressionSnapshot.EstimateTokens(sourceCharacters),
+					CodeCompressionSnapshot.EstimateTokens(transformedCharacters)),
+			_ => string.Empty
+		};
+		if (string.Equals(SettingsCompressionNotice, notice, StringComparison.Ordinal))
+		{
+			UpdateContentProcessingOptionStatuses();
+			return;
+		}
+
+		SettingsCompressionNotice = notice;
+		RaisePropertyChanged(nameof(SettingsCompressionNotice));
+		UpdateContentProcessingOptionStatuses();
+	}
+
+	private void UpdateContentProcessingOptionStatuses()
+	{
+		foreach (var option in IgnoreOptions)
+		{
+			option.StatusText = option.Id switch
+			{
+				IgnoreOptionId.HideSecrets when HasSecretsStatus => SettingsSecretsNotice,
+				IgnoreOptionId.CompressCode when option.IsChecked => SettingsCompressionNotice,
+				_ => string.Empty
+			};
+		}
 	}
 
     /// <summary>

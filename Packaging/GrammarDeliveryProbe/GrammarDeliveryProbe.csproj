@@ -5,8 +5,8 @@
     ships. It drives the PRODUCTION delivery code in Infrastructure rather than a copy, so what CI
     proves on six RIDs is what users run.
 
-    Deliberately NOT part of DevProjex.sln: it is built only by
-    .github/workflows/grammar-delivery.yml.
+    Loaded by DevProjex.sln for IDE analysis, but excluded from normal solution build
+    configurations. The grammar-delivery workflow publishes it explicitly.
 
     Two facts it guards, both measured rather than assumed:
       * A RID-specific publish bundles ALL 30 grammars of that architecture (+68 MB) unless the

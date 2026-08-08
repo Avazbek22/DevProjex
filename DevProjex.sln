@@ -24,6 +24,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DevProjex.Tests.Terminal", 
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DevProjex.Tests.Terminal.ProgressHost", "Tests\DevProjex.Tests.Terminal.ProgressHost\DevProjex.Tests.Terminal.ProgressHost.csproj", "{1BDA3A54-4F2B-4725-8F81-CA31EA689A21}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GrammarDeliveryProbe", "Packaging\GrammarDeliveryProbe\GrammarDeliveryProbe.csproj", "{45E6CF00-3F51-4E16-A65C-0F53C60A2DAA}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{53BA40F3-20C3-4DC9-893C-054C9F282693}"
 EndProject
 Global
@@ -76,6 +78,8 @@ Global
 		{1BDA3A54-4F2B-4725-8F81-CA31EA689A21}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1BDA3A54-4F2B-4725-8F81-CA31EA689A21}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1BDA3A54-4F2B-4725-8F81-CA31EA689A21}.Release|Any CPU.Build.0 = Release|Any CPU
+		{45E6CF00-3F51-4E16-A65C-0F53C60A2DAA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{45E6CF00-3F51-4E16-A65C-0F53C60A2DAA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

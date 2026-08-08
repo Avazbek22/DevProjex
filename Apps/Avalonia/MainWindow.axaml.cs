@@ -251,11 +251,7 @@ public partial class MainWindow : Window
         UpdateTitle();
         UpdateToastHostLayout();
 
-		_selectionCoordinator.RelabelIgnoreOptions(
-			AdvancedIgnoreCountsAlwaysEnabled,
-			_secretRedactionCount,
-			_secretRedactionScanState,
-			_secretRedactionMatchedCount);
+		RelabelIgnoreOptionsWithCurrentCounts();
     }
 
     private async Task ShowErrorAsync(string message)

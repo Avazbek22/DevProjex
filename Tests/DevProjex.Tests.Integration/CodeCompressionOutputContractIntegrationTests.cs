@@ -104,6 +104,50 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task CompressionOnlyPreparationTransformsAllTenLanguagesInOneMixedWorkspace()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("mixed-project");
+		var sources = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["sample.c"] = "int add(int a, int b) { int implementation_marker = a + b; implementation_marker += 10; return implementation_marker; }",
+			["sample.cpp"] = "int add(int a, int b) { int implementation_marker = a + b; implementation_marker += 10; return implementation_marker; }",
+			["Sample.cs"] = "sealed class Sample { int Add(int a, int b) { var implementation_marker = a + b; implementation_marker += 10; return implementation_marker; } }",
+			["sample.go"] = "package sample\nfunc add(a int, b int) int { implementation_marker := a + b; implementation_marker += 10; return implementation_marker }",
+			["Sample.java"] = "final class Sample { int add(int a, int b) { int implementation_marker = a + b; implementation_marker += 10; return implementation_marker; } }",
+			["sample.js"] = "export function add(a, b) { let implementation_marker = a + b; implementation_marker += 10; return implementation_marker; }",
+			["sample.py"] = "def add(a, b):\n    implementation_marker = a + b\n    implementation_marker += 10\n    return implementation_marker\n",
+			["sample.rs"] = "fn add(a: i32, b: i32) -> i32 { let mut implementation_marker = a + b; implementation_marker += 10; implementation_marker }",
+			["sample.ts"] = "export function add(a: number, b: number): number { let implementation_marker = a + b; implementation_marker += 10; return implementation_marker; }",
+			["sample.tsx"] = "export function Sample() { const implementation_marker = 42; return <section>{implementation_marker + 10}</section>; }"
+		};
+		var paths = sources.Select(pair =>
+		{
+			var path = Path.Combine(projectRoot, pair.Key);
+			File.WriteAllText(path, pair.Value);
+			return path;
+		}).ToArray();
+		using var session = CodeCompressionFactory.CreateSession();
+
+		await using var prepared = await new SecretRedactionOutputPreparer(new FileContentAnalyzer())
+			.PrepareAsync(
+				new ContentTransformationContext(new CodeCompressionContext(projectRoot, session), null),
+				paths,
+				TestContext.Current.CancellationToken);
+
+		var snapshot = Assert.IsType<CodeCompressionSnapshot>(prepared.CompressionSnapshot);
+		Assert.Equal(10, snapshot.CompressedFiles);
+		Assert.Equal(0, snapshot.UnchangedFiles);
+		foreach (var path in paths)
+		{
+			var transformed = await File.ReadAllTextAsync(
+				prepared.GetFile(path).ContentPath,
+				TestContext.Current.CancellationToken);
+			Assert.DoesNotContain("implementation_marker", transformed, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public void LocalProfileRoundTripsCompressionAsAnOptInTransformation()
 	{
 		using var temporary = new TemporaryDirectory();

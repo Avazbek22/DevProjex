@@ -1783,6 +1783,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
             isChecked: isChecked);
     }
 
+	private static Border GetContentProcessingStatusIndicator(
+		MainWindow window,
+		IgnoreOptionId optionId) =>
+		window.GetVisualDescendants()
+			.OfType<Border>()
+			.Single(control =>
+				string.Equals(control.Name, "ContentProcessingStatusIndicator", StringComparison.Ordinal) &&
+				control.DataContext is IgnoreOptionViewModel { Id: var id } &&
+				id == optionId);
+
     [AvaloniaFact]
     public async Task HideSecrets_IsRenderedInItsOwnSectionAndIsIndependentFromIgnoreAll()
     {
@@ -1810,17 +1820,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var processingList = UiTestDriver.GetRequiredControl<ListBox>(window, "ContentProcessingOptionsList");
 			var processingBorder = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
 			var processingContent = Assert.IsType<Grid>(processingBorder.Child);
-			var helpIndicator = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingHelpIndicator");
-			var questionIcon = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingQuestionIcon");
+			var helpIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HideSecrets);
             var ignoreList = UiTestDriver.GetRequiredControl<ListBox>(window, "IgnoreOptionsList");
 			Assert.Equal("Content processing:", UiTestDriver.GetRequiredControl<TextBlock>(window, "ContentProcessingHeaderText").Text);
 			Assert.Contains(processingList, processingContent.Children);
-			Assert.Contains(helpIndicator, processingContent.Children);
 			Assert.Null(helpIndicator.Cursor);
 			Assert.True(helpIndicator.IsVisible);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 3, hiddenCount: 2);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			helpIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HideSecrets);
 			Assert.True(helpIndicator.IsVisible);
 			checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets);
 			await UiTestDriver.ClickAsync(window, helpIndicator);
@@ -1832,8 +1841,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var helpText = Assert.IsType<TextBlock>(helpToolTip.Content);
 			Assert.Equal("Found: 3. Hidden: 2.", helpText.Text);
 			Assert.Equal(PlacementMode.Left, ToolTip.GetPlacement(helpIndicator));
-			Assert.True(questionIcon.IsVisible);
-			Assert.Equal(VerticalAlignment.Top, helpIndicator.VerticalAlignment);
+			Assert.Equal(VerticalAlignment.Center, helpIndicator.VerticalAlignment);
 			var checkBoxPosition = Assert.IsType<Point>(checkBox.TranslatePoint(default, processingBorder));
 			var indicatorPosition = Assert.IsType<Point>(helpIndicator.TranslatePoint(default, processingBorder));
 			var checkBoxCenter = checkBoxPosition.Y + (checkBox.Bounds.Height / 2);
@@ -1842,8 +1850,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Failed);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
-			Assert.Equal("The analysis could not be completed.", helpText.Text);
-			Assert.False(helpIndicator.IsVisible);
+			Assert.Equal(string.Empty, hideSecrets.StatusText);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 0, hiddenCount: 0);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
@@ -1851,10 +1858,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.True(UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible);
 			var remainingOption = Assert.Single(viewModel.ContentProcessingOptions);
 			Assert.Equal(IgnoreOptionId.CompressCode, remainingOption.Id);
-			Assert.False(helpIndicator.IsVisible);
+			Assert.Equal(string.Empty, hideSecrets.StatusText);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 3, hiddenCount: 2);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			helpIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HideSecrets);
 			Assert.True(helpIndicator.IsVisible);
 			Assert.Same(viewModel.ContentProcessingOptions, processingList.ItemsSource);
 			Assert.Equal(
@@ -1905,10 +1913,43 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var option = Assert.Single(viewModel.ContentProcessingOptions);
 			Assert.Equal(IgnoreOptionId.CompressCode, option.Id);
 			option.IsChecked = true;
+			viewModel.SetCompressionStatus(
+				compressedFiles: 98,
+				totalFiles: 123,
+				sourceCharacters: 400,
+				transformedCharacters: 100);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 
 			Assert.True(option.IsChecked);
-			Assert.False(UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingHelpIndicator").IsVisible);
+			var compressionIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.CompressCode);
+			Assert.True(compressionIndicator.IsVisible);
+			Assert.Equal(
+				"Compressed 98 of 123 files. Tokens ≈100 → ≈25.",
+				option.StatusText);
+			var processingBorder = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
+			var compressionCheckBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.CompressCode);
+			var checkBoxPosition = Assert.IsType<Point>(compressionCheckBox.TranslatePoint(default, processingBorder));
+			var indicatorPosition = Assert.IsType<Point>(compressionIndicator.TranslatePoint(default, processingBorder));
+			Assert.InRange(
+				Math.Abs(
+					checkBoxPosition.Y + (compressionCheckBox.Bounds.Height / 2) -
+					indicatorPosition.Y - (compressionIndicator.Bounds.Height / 2)),
+				0,
+				2);
+			await UiTestDriver.ClickAsync(window, compressionIndicator);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => ToolTip.GetIsOpen(compressionIndicator),
+				"the compression status tooltip to open on click");
+			var compressionToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(compressionIndicator));
+			Assert.Equal(
+				option.StatusText,
+				Assert.IsType<TextBlock>(compressionToolTip.Content).Text);
+			Assert.DoesNotContain(
+				window.GetVisualDescendants().OfType<Border>(),
+				control =>
+					string.Equals(control.Name, "ContentProcessingStatusIndicator", StringComparison.Ordinal) &&
+					control.DataContext is IgnoreOptionViewModel { Id: IgnoreOptionId.HideSecrets });
 			Assert.Equal("DevProjex found no secrets", viewModel.SettingsSecretsNotice);
 		}
 		finally
@@ -1940,7 +1981,12 @@ public sealed class MainWindowIgnoreOptionsUiTests
 
 			var option = Assert.Single(viewModel.ContentProcessingOptions);
 			Assert.Equal(IgnoreOptionId.CompressCode, option.Id);
-			Assert.False(UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingHelpIndicator").IsVisible);
+			Assert.False(option.HasStatus);
+			Assert.DoesNotContain(
+				window.GetVisualDescendants().OfType<Border>(),
+				control =>
+					string.Equals(control.Name, "ContentProcessingStatusIndicator", StringComparison.Ordinal) &&
+					control.IsVisible);
 			Assert.Empty(window.OwnedWindows);
 
 			option.IsChecked = true;

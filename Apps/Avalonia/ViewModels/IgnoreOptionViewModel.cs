@@ -8,6 +8,7 @@ public sealed class IgnoreOptionViewModel(
 {
     private bool _isChecked = isChecked;
     private string _label = label;
+    private string _statusText = string.Empty;
 
     public IgnoreOptionId Id { get; } = id;
 
@@ -37,6 +38,20 @@ public sealed class IgnoreOptionViewModel(
             CheckedChanged?.Invoke(this, EventArgs.Empty);
         }
     }
+
+    public string StatusText
+    {
+        get => _statusText;
+        internal set
+        {
+            if (_statusText == value) return;
+            _statusText = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(HasStatus));
+        }
+    }
+
+    public bool HasStatus => !string.IsNullOrWhiteSpace(StatusText);
 
     public event EventHandler? CheckedChanged;
 }
