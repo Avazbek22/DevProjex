@@ -9,6 +9,8 @@ namespace DevProjex.Tests.Terminal;
 
 internal sealed class TerminalPtyHarness : IAsyncDisposable
 {
+	private const string SkipInteractiveTuiTestsVariable =
+		"DEVPROJEX_SKIP_TUI_PTY_TESTS";
 	internal const string DataRootDirectoryName = "dpx-pty";
 	public const string ShellCompletionMarker = "__DEVPROJEX_SHELL_RESTORED__";
 	public const string ShellTerminalStateRestoredMarker =
@@ -109,6 +111,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		bool useProgressCheckpointHost = false,
 		bool verifyExecutableRelaunch = false)
 	{
+		if (string.Equals(
+			    Environment.GetEnvironmentVariable(SkipInteractiveTuiTestsVariable),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			Assert.Skip(
+				"Interactive TUI PTY journeys are disabled in CI while the TUI is pending removal.");
+		}
+
 		var binary = useProgressCheckpointHost
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
 			: PublishedApplicationLocator.FindExecutable();
