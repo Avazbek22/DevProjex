@@ -2053,7 +2053,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var compressionIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.CompressCode);
 			Assert.True(compressionIndicator.IsVisible);
 			Assert.Equal(
-				$"Compressed 98 of 123 files.{Environment.NewLine}Tokens ≈100 → ≈25.",
+				$"Compressed 98 of 123 files.{Environment.NewLine}≈Tokens: 100 → 25.",
 				option.StatusText);
 			var processingBorder = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
 			var compressionCheckBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.CompressCode);

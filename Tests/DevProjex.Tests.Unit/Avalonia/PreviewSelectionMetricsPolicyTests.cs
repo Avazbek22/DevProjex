@@ -71,7 +71,7 @@ public sealed class PreviewSelectionMetricsPolicyTests
     {
         var text = PreviewSelectionMetricsPolicy.FormatStatusMetricsText(
             new ExportOutputMetrics(12345, 67890, 1200),
-            new StatusMetricLabels("Lines:", "Chars:", "~Tokens:"),
+            new StatusMetricLabels("Lines:", "Chars:", "≈Tokens:"),
             useCompactMode: true);
 
         var expectedValue = (12345 / 1_000.0).ToString("F1") + "K";

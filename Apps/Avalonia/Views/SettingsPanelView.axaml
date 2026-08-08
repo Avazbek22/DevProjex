@@ -199,7 +199,8 @@
 							PointerPressed="OnContentProcessingStatusIndicatorPointerPressed"
 							PointerReleased="OnContentProcessingStatusIndicatorPointerReleased"
 							ToolTip.ShowDelay="450"
-							ToolTip.Placement="Left">
+							ToolTip.Placement="Left"
+							ToolTip.VerticalOffset="5">
 					  <Border.RenderTransform>
 						<TranslateTransform Y="3" />
 					  </Border.RenderTransform>
