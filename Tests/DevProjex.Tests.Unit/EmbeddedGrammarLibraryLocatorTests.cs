@@ -5,6 +5,37 @@ namespace DevProjex.Tests.Unit;
 public sealed class EmbeddedGrammarLibraryLocatorTests
 {
 	[Fact]
+	public void Resolve_LockedSharedLibrary_UsesVerifiedProcessRepairOnWindows()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temporary = new TemporaryDirectory();
+		var locator = CreateLocator(temporary.Path);
+		var library = locator.EnumerateLibraries()[0];
+		var sharedPath = locator.Resolve(library);
+
+		using var sharedLock = new FileStream(
+			sharedPath,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.None);
+
+		var resolvedPath = CreateLocator(temporary.Path).Resolve(library);
+
+		Assert.False(PathComparer.Default.Equals(sharedPath, resolvedPath));
+		Assert.StartsWith(
+			Path.Combine(temporary.Path, $"repair-{Environment.ProcessId}") +
+			Path.DirectorySeparatorChar,
+			resolvedPath,
+			StringComparison.OrdinalIgnoreCase);
+		Assert.Equal(
+			locator.GetEmbeddedHash(library),
+			System.Security.Cryptography.SHA256.HashData(
+				File.ReadAllBytes(resolvedPath)));
+	}
+
+	[Fact]
 	public void PruneAbandonedDirectories_CustomRootNeverDeletesAncestorSiblings()
 	{
 		using var temporary = new TemporaryDirectory();

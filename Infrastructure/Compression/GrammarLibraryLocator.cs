@@ -98,24 +98,23 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 		var expected = SHA256.HashData(source);
 		source.Position = 0;
 
-		// The hash is checked BEFORE loading, not only after writing: a copy can be truncated by a
-		// crash mid-write, quarantined by antivirus, or damaged on disk long after it was created.
-		// Nothing is ever patched in place either - macOS library validation requires the bytes to
-		// stay bit-identical to the signed original.
-		if (HasExpectedHash(target, expected))
-			return target;
-
 		try
 		{
+			// The hash is checked BEFORE loading, not only after writing: a copy can be truncated by a
+			// crash mid-write, quarantined by antivirus, or damaged on disk long after it was created.
+			// Nothing is ever patched in place either - macOS library validation requires the bytes to
+			// stay bit-identical to the signed original.
+			if (HasExpectedHash(target, expected))
+				return target;
+
 			MarkInUse(Path.TrimEndingDirectorySeparator(RootDirectory));
 			return Materialize(source, RootDirectory, fileName, expected);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
-			// The damaged copy is already mapped into this process - the binding loads grammars and
-			// never releases the module handle, so Windows refuses to replace the file. Repair into
-			// a fresh directory; the stale copy is never loaded again because the hash check above
-			// rejects it.
+			// A damaged or valid shared copy can be unavailable while another process publishes,
+			// scans, or maps it. Never trust unreadable bytes; materialize the verified embedded copy
+			// into a process-local directory instead.
 			source.Position = 0;
 			var repairDirectory = Path.Combine(RootDirectory, $"repair-{Environment.ProcessId}");
 			Directory.CreateDirectory(repairDirectory);
