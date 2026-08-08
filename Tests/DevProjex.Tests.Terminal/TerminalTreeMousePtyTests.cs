@@ -70,13 +70,11 @@ public sealed class TerminalTreeMousePtyTests
 			column: 1,
 			row: rootRow,
 			cancellationToken: TestContext.Current.CancellationToken);
-		var collapsed = await terminal.WaitForScreenAsync(
-			$"> [x] {projectName}",
+		var collapsed = await terminal.WaitForStableScreenAsync(
+			$"[x] {projectName}",
+			forbidden: "│  > [x] src",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains($"[x] {projectName}", collapsed, StringComparison.Ordinal);
-		Assert.DoesNotContain(
-			collapsed.Split('\n'),
-			static line => line.StartsWith("│  > [x] src", StringComparison.Ordinal));
 		await terminal.SendMouseClickAsync(
 			column: 12,
 			row: rootRow,
