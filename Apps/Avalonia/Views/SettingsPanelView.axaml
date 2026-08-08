@@ -181,7 +181,7 @@
 			  </ListBox.ItemsPanel>
 			  <ListBox.ItemTemplate>
 				<DataTemplate x:DataType="vm:IgnoreOptionViewModel">
-				  <Grid ColumnDefinitions="*,6,16">
+				  <Grid ColumnDefinitions="Auto,6,16,*">
 					<CheckBox Grid.Column="0"
 							  Classes="list-item settings-list-entry"
 							  Content="{Binding Label}"
@@ -200,6 +200,9 @@
 							PointerReleased="OnContentProcessingStatusIndicatorPointerReleased"
 							ToolTip.ShowDelay="450"
 							ToolTip.Placement="Left">
+					  <Border.RenderTransform>
+						<TranslateTransform Y="4" />
+					  </Border.RenderTransform>
 					  <ToolTip.Tip>
 						<ToolTip Loaded="OnContentProcessingToolTipLoaded"
 								 MaxWidth="280">

@@ -78,7 +78,8 @@ public sealed class MetricsPipelineWarmupTests
 	public async Task CompressionPrewarm_DoesNotWaitForTheMetricsVisualGate()
 	{
 		using var temp = new TemporaryDirectory();
-		var textFile = temp.CreateFile("Program.cs", "internal class Program { void Run() { } }");
+		const string source = "internal class Program { void Run() { } }";
+		var textFile = temp.CreateFile("Program.cs", source);
 		var treeRoot = new TreeNodeDescriptor(
 			"root",
 			temp.Path,
@@ -90,6 +91,12 @@ public sealed class MetricsPipelineWarmupTests
 		var viewModel = CreateViewModel();
 		viewModel.IsProjectLoaded = true;
 		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var observedProgressValues = new List<double>();
+		viewModel.PropertyChanged += (_, args) =>
+		{
+			if (args.PropertyName == nameof(MainWindowViewModel.StatusProgressValue))
+				observedProgressValues.Add(viewModel.StatusProgressValue);
+		};
 		var status = new StatusOperationCoordinator(
 			viewModel,
 			isBackgroundMetricsActive: () => false,
@@ -121,6 +128,12 @@ public sealed class MetricsPipelineWarmupTests
 		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.Contains(observedProgressValues, static value => value == 100);
+		var tokens = CodeCompressionSnapshot.EstimateTokens(source.Length);
+		Assert.Equal(
+			$"Compressed 0 of 1 files. Tokens ≈{tokens} → ≈{tokens}.",
+			viewModel.SettingsCompressionNotice);
+		Assert.False(viewModel.StatusBusy);
 		Assert.False(delayedMetrics.IsCompleted);
 		Assert.False(pipeline.HasCompleteBaseline);
 
@@ -130,6 +143,78 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Equal(1, compressor.AnalysisCount);
 		Assert.True(compressionSession.Diagnostics.CacheHits > 0);
 		Assert.True(pipeline.HasCompleteBaseline);
+	}
+
+	[AvaloniaFact]
+	public async Task CompressionPrewarm_LongOperationPublishesMeasuredProgressAndCompletion()
+	{
+		using var temp = new TemporaryDirectory();
+		const string firstSource = "internal class First { void Run() { } }";
+		const string secondSource = "internal class Second { void Run() { } }";
+		var firstFile = temp.CreateFile("First.cs", firstSource);
+		var secondFile = temp.CreateFile("Second.cs", secondSource);
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[
+				new TreeNodeDescriptor("First.cs", firstFile, false, false, "csharp", []),
+				new TreeNodeDescriptor("Second.cs", secondFile, false, false, "csharp", [])
+			]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [firstFile, secondFile]);
+		var viewModel = CreateViewModel();
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData,
+			extendedDelayedPresentationThreshold: TimeSpan.Zero);
+		using var compressor = new GateSecondAnalysisCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			new FileContentAnalyzer(),
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => ContentTransformationContext.For(
+				new CodeCompressionContext(temp.Path, compressionSession),
+				redaction: null));
+
+		var warmupTask = pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+		await compressor.SecondAnalysisStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+		await WaitUntilAsync(
+			() => viewModel.StatusProgressValue == 50,
+			TimeSpan.FromSeconds(5));
+
+		Assert.True(viewModel.StatusOperationVisible);
+		Assert.Equal("Compressing code…", viewModel.StatusOperationText);
+		Assert.False(viewModel.StatusProgressIsIndeterminate);
+		Assert.Equal(50, viewModel.StatusProgressValue);
+		Assert.Equal("Compressing code…", viewModel.SettingsCompressionNotice);
+
+		compressor.ReleaseSecondAnalysis();
+		await warmupTask.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(viewModel.StatusBusy);
+		var tokens = CodeCompressionSnapshot.EstimateTokens(
+			firstSource.Length + secondSource.Length);
+		Assert.Equal(
+			$"Compressed 0 of 2 files. Tokens ≈{tokens} → ≈{tokens}.",
+			viewModel.SettingsCompressionNotice);
 	}
 
 	[AvaloniaFact]
@@ -598,6 +683,11 @@ public sealed class MetricsPipelineWarmupTests
         IReadOnlyDictionary<string, string> english = new Dictionary<string, string>
         {
             ["Status.Operation.CalculatingData"] = "Calculating data",
+            ["Settings.Compression.Status.Scanning"] = "Compressing code…",
+            ["Settings.Compression.Status.Applied"] =
+                "Compressed {0} of {1} files. Tokens ≈{2} → ≈{3}.",
+            ["Settings.Compression.Status.NothingToCompress"] =
+                "Nothing to compress in this selection.",
             ["Status.Metric.Lines"] = "{0} lines",
             ["Status.Metric.Chars"] = "{0} chars",
             ["Status.Metric.Tokens"] = "{0} tokens"
@@ -806,6 +896,54 @@ public sealed class MetricsPipelineWarmupTests
 				CancellationToken cancellationToken)
 			{
 				Interlocked.Increment(ref owner._analysisCount);
+				return new CodeCompressionAnalysis(
+					CodeCompressionPlan.Unchanged(
+						relativePath,
+						"csharp",
+						CodeCompressionOutcome.UnchangedNoBenefit,
+						content.Length,
+						owner.TransformIdentity),
+					null);
+			}
+
+			public void Dispose()
+			{
+			}
+		}
+	}
+
+	private sealed class GateSecondAnalysisCompressor : ICodeCompressor, IDisposable
+	{
+		private readonly ManualResetEventSlim _secondAnalysisRelease = new(false);
+		private int _analysisCount;
+
+		public string TransformIdentity => "metrics-prewarm-gated:v1";
+		public TaskCompletionSource SecondAnalysisStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public bool IsSupported(string relativePath) =>
+			Path.GetExtension(relativePath).Equals(".cs", StringComparison.OrdinalIgnoreCase);
+
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
+
+		public void ReleaseSecondAnalysis() => _secondAnalysisRelease.Set();
+
+		public void Dispose() => _secondAnalysisRelease.Dispose();
+
+		private sealed class Scope(GateSecondAnalysisCompressor owner) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken)
+			{
+				if (Interlocked.Increment(ref owner._analysisCount) == 2)
+				{
+					owner.SecondAnalysisStarted.TrySetResult();
+					owner._secondAnalysisRelease.Wait(cancellationToken);
+				}
+
 				return new CodeCompressionAnalysis(
 					CodeCompressionPlan.Unchanged(
 						relativePath,

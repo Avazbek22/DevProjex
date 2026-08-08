@@ -75,6 +75,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private int? _compressionTotalFilesCount;
 	private long? _compressionSourceCharacters;
 	private long? _compressionTransformedCharacters;
+	private bool _compressionPreparationActive;
     private bool _isDarkTheme = true;
     private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
@@ -1907,9 +1908,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		int? detectedCount = null,
 		int? hiddenCount = null)
 	{
-		bool? hasFindings = scanState == SecretScanState.Completed
-			? detectedCount > 0
-			: null;
+		var hasFindings = scanState switch
+		{
+			SecretScanState.Completed => detectedCount > 0,
+			SecretScanState.Disabled => null,
+			_ => _contentProcessingHasFindings
+		};
 		if (_contentProcessingScanState == scanState &&
 		    _contentProcessingDetectedCount == detectedCount &&
 		    _contentProcessingHiddenCount == hiddenCount &&
@@ -1949,6 +1953,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		UpdateSettingsCompressionNotice();
 	}
 
+	internal void SetCompressionPreparationStatus(bool isActive)
+	{
+		if (_compressionPreparationActive == isActive)
+			return;
+
+		_compressionPreparationActive = isActive;
+		UpdateSettingsCompressionNotice();
+	}
+
 	private void UpdateSettingsSecretsNotice()
 	{
 		var secrets = _contentProcessingScanState switch
@@ -1976,7 +1989,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
 	private void UpdateSettingsCompressionNotice()
 	{
-		var notice = (_compressedFilesCount, _compressionTotalFilesCount) switch
+		var notice = _compressionPreparationActive
+			? _localization["Settings.Compression.Status.Scanning"]
+			: (_compressedFilesCount, _compressionTotalFilesCount) switch
 		{
 			(0, 0) => _localization["Settings.Compression.Status.NothingToCompress"],
 			({ } compressed, { } total) when

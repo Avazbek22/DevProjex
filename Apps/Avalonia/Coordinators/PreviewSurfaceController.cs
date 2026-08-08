@@ -577,8 +577,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         if (selectedMode == PreviewContentMode.Tree)
         {
-			var redactionContext = _transformationContextProvider()?.Redaction;
-			if (redactionContext is not null && currentTreeRoot is not null)
+			var transformationContext = _transformationContextProvider();
+			if (transformationContext?.Redaction is not null && currentTreeRoot is not null)
 			{
 				var selectedFiles = ResolvePreviewFiles(
 					selectedPaths,
@@ -586,7 +586,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 					currentTreeRoot,
 					currentTreeOrderedFilePaths);
 				_secretRedactionPreparer
-					.AnalyzeAsync(redactionContext, selectedFiles, cancellationToken)
+					.AnalyzeAsync(transformationContext, selectedFiles, cancellationToken)
 					.GetAwaiter()
 					.GetResult();
 			}

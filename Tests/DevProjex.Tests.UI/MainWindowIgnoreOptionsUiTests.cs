@@ -3,7 +3,9 @@ using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Kernel.Abstractions;
+using DevProjex.Kernel.Models;
 using DevProjex.Avalonia.Views;
 using Avalonia;
 using Avalonia.Input;
@@ -78,6 +80,21 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					StringComparison.Ordinal),
 				"the content-processing tooltip to publish detected and hidden counts");
 
+			foreach (var mode in new[]
+			         {
+				         PreviewContentMode.TreeAndContent,
+				         PreviewContentMode.Tree,
+				         PreviewContentMode.Content
+			         })
+			{
+				await UiTestDriver.SwitchPreviewModeAsync(window, mode);
+				await UiTestDriver.WaitForIgnoreOptionStateAsync(
+					window,
+					IgnoreOptionId.HideSecrets,
+					visible: true,
+					isChecked: true);
+			}
+
 			var previewControl = UiTestDriver
 				.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
 					window,
@@ -142,6 +159,93 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	{
 		using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
 		await AssertHideSecretsIsolatedFromPathSelectionAsync(project, expectedCount: 0);
+	}
+
+	[AvaloniaFact]
+	public async Task PersistedCompression_DoesNotExposeSecretsRemovedFromEveryOutputMode()
+	{
+		const string removedSecret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$$"""
+			  internal sealed class Secrets
+			  {
+			      public string Read()
+			      {
+			          return "{{removedSecret}}";
+			      }
+			  }
+			  """,
+			TestContext.Current.CancellationToken);
+		var appDataPath = Path.Combine(project.AppDataPath, "compression-and-secrets-profile");
+		Directory.CreateDirectory(appDataPath);
+		new ProjectProfileStore(() => appDataPath).SaveProfile(
+			project.RootPath,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions:
+				[
+					IgnoreOptionId.CompressCode,
+					IgnoreOptionId.HideSecrets
+				],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.CompressCode] = true,
+					[IgnoreOptionId.HideSecrets] = true
+				}));
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"DevProjex found no secrets",
+					StringComparison.Ordinal) &&
+				      viewModel.ContentProcessingOptions.All(
+					      static option => option.Id != IgnoreOptionId.HideSecrets) &&
+				      viewModel.ContentProcessingOptions.Any(
+					      static option =>
+						      option.Id == IgnoreOptionId.CompressCode &&
+						      option.Label == "Compress code"),
+				"compressed secret discovery to ignore a removed method body");
+			Assert.Equal(string.Empty, viewModel.SettingsCompressionNotice);
+			Assert.True(viewModel.HideSecretsOption?.IsChecked);
+			Assert.Contains(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.CompressCode && option.IsChecked);
+
+			await UiTestDriver.OpenPreviewAsync(window);
+			foreach (var mode in new[]
+			         {
+				         PreviewContentMode.Tree,
+				         PreviewContentMode.TreeAndContent,
+				         PreviewContentMode.Content,
+				         PreviewContentMode.Tree
+			         })
+			{
+				await UiTestDriver.SwitchPreviewModeAsync(window, mode);
+				await UiTestDriver.WaitForConditionAsync(
+					window,
+					() => viewModel.ContentProcessingOptions.All(
+						      static option => option.Id != IgnoreOptionId.HideSecrets) &&
+					      viewModel.ContentProcessingOptions.Any(
+						      static option =>
+							      option.Id == IgnoreOptionId.CompressCode &&
+							      option.Label == "Compress code"),
+					$"content-processing state to remain stable in {mode}");
+			}
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
 	}
 
 	[AvaloniaFact]
@@ -1846,10 +1950,27 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var indicatorPosition = Assert.IsType<Point>(helpIndicator.TranslatePoint(default, processingBorder));
 			var checkBoxCenter = checkBoxPosition.Y + (checkBox.Bounds.Height / 2);
 			var indicatorCenter = indicatorPosition.Y + (helpIndicator.Bounds.Height / 2);
-			Assert.InRange(Math.Abs(checkBoxCenter - indicatorCenter), 0, 2);
+			Assert.InRange(indicatorCenter - checkBoxCenter, -1, 1);
+			var indicatorGap = indicatorPosition.X - (checkBoxPosition.X + checkBox.Bounds.Width);
+			Assert.InRange(indicatorGap, 4, 8);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Pending);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Contains(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HideSecrets);
+
+			viewModel.SetContentProcessingStatus(SecretScanState.Scanning);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Contains(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HideSecrets);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Failed);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Contains(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HideSecrets);
 			Assert.Equal(string.Empty, hideSecrets.StatusText);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 0, hiddenCount: 0);
@@ -1913,14 +2034,22 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var option = Assert.Single(viewModel.ContentProcessingOptions);
 			Assert.Equal(IgnoreOptionId.CompressCode, option.Id);
 			option.IsChecked = true;
+			viewModel.SetCompressionPreparationStatus(isActive: true);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal("Compressing code…", option.StatusText);
+			Assert.True(GetContentProcessingStatusIndicator(window, IgnoreOptionId.CompressCode).IsVisible);
+
 			viewModel.SetCompressionStatus(
 				compressedFiles: 98,
 				totalFiles: 123,
 				sourceCharacters: 400,
 				transformedCharacters: 100);
+			Assert.Equal("Compressing code…", option.StatusText);
+			viewModel.SetCompressionPreparationStatus(isActive: false);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 
 			Assert.True(option.IsChecked);
+			Assert.Equal("Compress code", option.Label);
 			var compressionIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.CompressCode);
 			Assert.True(compressionIndicator.IsVisible);
 			Assert.Equal(
@@ -1931,11 +2060,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var checkBoxPosition = Assert.IsType<Point>(compressionCheckBox.TranslatePoint(default, processingBorder));
 			var indicatorPosition = Assert.IsType<Point>(compressionIndicator.TranslatePoint(default, processingBorder));
 			Assert.InRange(
-				Math.Abs(
-					checkBoxPosition.Y + (compressionCheckBox.Bounds.Height / 2) -
-					indicatorPosition.Y - (compressionIndicator.Bounds.Height / 2)),
-				0,
-				2);
+				indicatorPosition.Y + (compressionIndicator.Bounds.Height / 2) -
+				checkBoxPosition.Y - (compressionCheckBox.Bounds.Height / 2),
+				1,
+				3);
 			await UiTestDriver.ClickAsync(window, compressionIndicator);
 			await UiTestDriver.WaitForConditionAsync(
 				window,

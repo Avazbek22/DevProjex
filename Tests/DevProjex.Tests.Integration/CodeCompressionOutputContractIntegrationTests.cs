@@ -448,6 +448,47 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		Assert.Equal(1, snapshot.RedactedCount);
 	}
 
+	[Fact]
+	public async Task TransformationAnalysis_UsesTheSameCompressedInputAsPreview()
+	{
+		const string source = $$"""
+			public sealed class Secrets
+			{
+			    public const string Retained = "{{AutomaticRetainedSecret}}";
+
+			    public string Build()
+			    {
+			        const string removed = "{{AutomaticRemovedSecret}}";
+			        return removed + Retained;
+			    }
+			}
+			""";
+		using var workspace = CompressionWorkspace.Create(source);
+		using var secrets = new SecretRedactionSession(
+			new ExactValueDetector(AutomaticRetainedSecret, AutomaticRemovedSecret));
+		using var compression = CodeCompressionFactory.CreateSession();
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		var compressionSnapshotsPublished = 0;
+		compression.SnapshotPublished += (_, _) => compressionSnapshotsPublished++;
+
+		var transformed = await preparer.AnalyzeAsync(
+			new ContentTransformationContext(
+				new CodeCompressionContext(workspace.SourceRoot, compression),
+				new SecretRedactionContext(workspace.SourceRoot, secrets)),
+			[workspace.SourceFile],
+			TestContext.Current.CancellationToken);
+		var raw = await preparer.AnalyzeAsync(
+			new SecretRedactionContext(workspace.SourceRoot, secrets),
+			[workspace.SourceFile],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, transformed.DetectedCount);
+		Assert.Equal(1, transformed.RedactedCount);
+		Assert.Equal(2, raw.DetectedCount);
+		Assert.Equal(2, raw.RedactedCount);
+		Assert.Equal(0, compressionSnapshotsPublished);
+	}
+
 	private static int LinesBetweenSignatureAndConstant(string text)
 	{
 		var lines = text.Replace("\r\n", "\n").Split('\n');

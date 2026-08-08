@@ -9,9 +9,14 @@ public sealed record CodeCompressionWarmupResult(
 	int FailedFiles,
 	TimeSpan Elapsed);
 
+public readonly record struct CodeCompressionWarmupProgress(
+	int ProcessedFiles,
+	int TotalFiles);
+
 /// <summary>
-/// Populates file-local compression plans without producing output or publishing user-facing counts.
-/// This is intentionally separate from metrics so visual-stability pacing cannot delay readiness.
+/// Builds file-local compression plans and publishes their exact aggregate without materializing
+/// transformed output. This is intentionally separate from metrics so visual-stability pacing
+/// cannot delay readiness.
 /// </summary>
 public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyzer)
 {
@@ -21,15 +26,21 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 	public async Task<CodeCompressionWarmupResult> WarmAsync(
 		CodeCompressionContext context,
 		IReadOnlyList<string> orderedFilePaths,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		IProgress<CodeCompressionWarmupProgress>? progress = null)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 
 		var stopwatch = Stopwatch.StartNew();
-		var candidates = BuildCandidates(context, orderedFilePaths);
+		var selectionPaths = BuildSelectionPaths(orderedFilePaths);
+		var candidates = BuildCandidates(selectionPaths);
+		using var scope = context.BeginOutput(selectionPaths);
 		if (candidates.Count == 0)
+		{
+			scope.Complete();
 			return new CodeCompressionWarmupResult(0, 0, 0, 0, stopwatch.Elapsed);
+		}
 
 		var parallel = new List<string>(candidates.Count);
 		var serial = new List<string>();
@@ -44,7 +55,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		var warmed = 0;
 		var skipped = 0;
 		var failed = 0;
-		using var scope = context.BeginOutput(candidates);
+		var processed = 0;
 		if (parallel.Count > 0)
 		{
 			await Parallel.ForEachAsync(
@@ -58,6 +69,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 				{
 					var outcome = await WarmFileAsync(context, scope, path, token).ConfigureAwait(false);
 					Increment(outcome, ref warmed, ref skipped, ref failed);
+					ReportProgress(progress, ref processed, candidates.Count);
 				}).ConfigureAwait(false);
 		}
 
@@ -66,8 +78,10 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 			cancellationToken.ThrowIfCancellationRequested();
 			var outcome = await WarmFileAsync(context, scope, path, cancellationToken).ConfigureAwait(false);
 			Increment(outcome, ref warmed, ref skipped, ref failed);
+			ReportProgress(progress, ref processed, candidates.Count);
 		}
 
+		scope.Complete();
 		stopwatch.Stop();
 		return new CodeCompressionWarmupResult(
 			candidates.Count,
@@ -85,18 +99,13 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 	}
 
 	private static List<string> BuildCandidates(
-		CodeCompressionContext context,
 		IReadOnlyList<string> orderedFilePaths)
 	{
 		var unique = new HashSet<string>(PathComparer.Default);
 		var candidates = new List<string>(orderedFilePaths.Count);
 		foreach (var path in orderedFilePaths)
 		{
-			if (candidates.Count == CodeCompressionSession.PlanCacheCapacity)
-				break;
-			if (string.IsNullOrWhiteSpace(path) ||
-			    !unique.Add(path) ||
-			    !context.Session.IsSupported(path))
+			if (string.IsNullOrWhiteSpace(path) || !unique.Add(path))
 			{
 				continue;
 			}
@@ -105,6 +114,20 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		}
 
 		return candidates;
+	}
+
+	private static List<string> BuildSelectionPaths(
+		IReadOnlyList<string> orderedFilePaths)
+	{
+		var unique = new HashSet<string>(PathComparer.Default);
+		var paths = new List<string>(orderedFilePaths.Count);
+		foreach (var path in orderedFilePaths)
+		{
+			if (!string.IsNullOrWhiteSpace(path) && unique.Add(path))
+				paths.Add(path);
+		}
+
+		return paths;
 	}
 
 	private async ValueTask<WarmFileOutcome> WarmFileAsync(
@@ -119,15 +142,15 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 				return WarmFileOutcome.Skipped;
 
 			var content = await contentAnalyzer.TryReadAsTextAsync(path, cancellationToken).ConfigureAwait(false);
-			if (content is null || content.IsEstimated || content.Content.Length == 0)
+			if (content is null || content.IsEstimated)
 				return WarmFileOutcome.Skipped;
 
-			scope.Warm(
+			var recorded = scope.Warm(
 				path,
 				BuildRelativePath(context.ProjectRoot, path),
 				content.Content,
 				cancellationToken);
-			return WarmFileOutcome.Warmed;
+			return recorded ? WarmFileOutcome.Warmed : WarmFileOutcome.Skipped;
 		}
 		catch (OperationCanceledException)
 		{
@@ -183,6 +206,19 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 				Interlocked.Increment(ref failed);
 				break;
 		}
+	}
+
+	private static void ReportProgress(
+		IProgress<CodeCompressionWarmupProgress>? progress,
+		ref int processed,
+		int total)
+	{
+		if (progress is null)
+			return;
+
+		progress.Report(new CodeCompressionWarmupProgress(
+			Interlocked.Increment(ref processed),
+			total));
 	}
 
 	private enum WarmFileOutcome

@@ -14,8 +14,9 @@ public sealed record CodeCompressionFileOutcome(
 	int TransformedCharacters);
 
 /// <summary>
-/// What the user is told after a run. Counts are facts, not claims: the UI must never say the
-/// project "is compressed", only how many files were and how many were not.
+/// What the user is told after a complete selection evaluation. Counts come from validated plans,
+/// not capability guesses: the UI must never say the project "is compressed", only how many text
+/// files in the selected output will be transformed and how many will remain unchanged.
 /// </summary>
 public sealed record CodeCompressionSnapshot(
 	string SelectionKey,
@@ -157,6 +158,19 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		if (content.Length == 0)
+		{
+			var empty = CodeCompressionPlan.Unchanged(
+				relativePath,
+				"unknown",
+				CodeCompressionOutcome.UnchangedNoBenefit,
+				0,
+				compressor.TransformIdentity);
+			return new CodeCompressionExecution(
+				empty,
+				new CodeCompressionResult(content, ContentTransformMap.Identity));
+		}
+
 		if (!compressor.IsSupported(relativePath))
 		{
 			Interlocked.Increment(ref _unsupportedFastPaths);
@@ -237,7 +251,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		}
 	}
 
-	internal void Warm(
+	internal CodeCompressionPlan? Warm(
 		ICodeCompressionScope scope,
 		string fullPath,
 		string relativePath,
@@ -246,20 +260,38 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		if (content.Length == 0)
+		{
+			return CodeCompressionPlan.Unchanged(
+				relativePath,
+				"unknown",
+				CodeCompressionOutcome.UnchangedNoBenefit,
+				0,
+				compressor.TransformIdentity);
+		}
+
 		if (!compressor.IsSupported(relativePath))
-			return;
+		{
+			Interlocked.Increment(ref _unsupportedFastPaths);
+			return CodeCompressionPlan.Unchanged(
+				relativePath,
+				"unknown",
+				CodeCompressionOutcome.UnchangedUnsupportedLanguage,
+				content.Length,
+				compressor.TransformIdentity);
+		}
 
 		var generation = CaptureGeneration();
 		if (generation.Version != scopeGeneration)
-			return;
+			return null;
 
 		Interlocked.Increment(ref _prewarmRequests);
 		var key = CodeCompressionCacheKey.Create(fullPath, content, compressor.TransformIdentity);
 		Interlocked.Increment(ref _hashComputations);
-		if (TryGetCachedPlan(key, out _))
+		if (TryGetCachedPlan(key, out var cached))
 		{
 			Interlocked.Increment(ref _prewarmCacheHits);
-			return;
+			return WithRelativePath(cached.Prepared.Plan, relativePath);
 		}
 
 		if (TryGetActiveOutputAnalysis(key, out var activeOutput))
@@ -268,9 +300,12 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			try
 			{
 				var analysis = activeOutput.Value;
-				TryCacheAnalysis(key, analysis, generation.Version, out _);
+				var prepared = CacheAnalysisOrCreatePrepared(
+					key,
+					analysis,
+					generation.Version);
 				cancellationToken.ThrowIfCancellationRequested();
-				return;
+				return WithRelativePath(prepared.Plan, relativePath);
 			}
 			catch (OperationCanceledException) when (
 				!generation.Token.IsCancellationRequested &&
@@ -293,8 +328,12 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		try
 		{
 			var analysis = pending.Value;
-			TryCacheAnalysis(key, analysis, generation.Version, out _);
+			var prepared = CacheAnalysisOrCreatePrepared(
+				key,
+				analysis,
+				generation.Version);
 			cancellationToken.ThrowIfCancellationRequested();
+			return WithRelativePath(prepared.Plan, relativePath);
 		}
 		finally
 		{
@@ -423,13 +462,18 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		string content,
 		CodeCompressionResult? validatedResult = null)
 	{
-		var outputPlan = string.Equals(prepared.Plan.RelativePath, relativePath, StringComparison.Ordinal)
-			? prepared.Plan
-			: prepared.Plan with { RelativePath = relativePath };
+		var outputPlan = WithRelativePath(prepared.Plan, relativePath);
 		return new CodeCompressionExecution(
 			outputPlan,
 			validatedResult ?? prepared.Plan.Apply(content, prepared.Map));
 	}
+
+	private static CodeCompressionPlan WithRelativePath(
+		CodeCompressionPlan plan,
+		string relativePath) =>
+		string.Equals(plan.RelativePath, relativePath, StringComparison.Ordinal)
+			? plan
+			: plan with { RelativePath = relativePath };
 
 	internal void Publish(CodeCompressionSnapshot snapshot, long generation)
 	{
@@ -487,10 +531,13 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 	public static string BuildSelectionKey(string projectRoot, IReadOnlyList<string> orderedFilePaths)
 	{
-		var builder = new StringBuilder(projectRoot.Length + orderedFilePaths.Sum(static path => path.Length + 12));
+		var canonicalPaths = orderedFilePaths
+			.OrderBy(static path => path, PathComparer.Default)
+			.ToArray();
+		var builder = new StringBuilder(projectRoot.Length + canonicalPaths.Sum(static path => path.Length + 12));
 		AppendLengthPrefixed(builder, projectRoot);
-		builder.Append(orderedFilePaths.Count).Append(':');
-		foreach (var path in orderedFilePaths)
+		builder.Append(canonicalPaths.Length).Append(':');
+		foreach (var path in canonicalPaths)
 			AppendLengthPrefixed(builder, path);
 
 		return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
@@ -562,8 +609,9 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 }
 
 /// <summary>
-/// One output operation. Accumulates per-file outcomes so the summary counts what actually left the
-/// application rather than what the engine could theoretically do.
+/// One complete selection evaluation. Both prewarm and output use it, so the background pass can
+/// publish exact facts without materializing transformed strings and every output later reports the
+/// same plans after applying them.
 /// </summary>
 public sealed class CodeCompressionScope(
 	CodeCompressionSession session,
@@ -590,34 +638,53 @@ public sealed class CodeCompressionScope(
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
 		var execution = session.Transform(inner, fullPath, relativePath, content, generation, cancellationToken);
 		var plan = execution.Plan;
-		Interlocked.Add(ref _sourceCharacters, plan.SourceLength);
+		RecordPlan(fullPath, plan);
 		if (plan.Outcome == CodeCompressionOutcome.Compressed)
-		{
-			Interlocked.Increment(ref _compressed);
-			Interlocked.Add(ref _transformedCharacters, plan.TransformedLength);
 			return execution.Output;
-		}
 
-		Interlocked.Add(ref _transformedCharacters, plan.SourceLength);
-		_unchanged.Enqueue(new OrderedCompressionOutcome(
-			fullPath,
-			new CodeCompressionFileOutcome(
-				relativePath,
-				plan.LanguageId,
-				plan.Outcome,
-				plan.SourceLength,
-				plan.SourceLength)));
 		return new CodeCompressionResult(content, ContentTransformMap.Identity);
 	}
 
-	internal void Warm(
+	internal bool Warm(
 		string fullPath,
 		string relativePath,
 		string content,
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
-		session.Warm(inner, fullPath, relativePath, content, generation, cancellationToken);
+		var plan = session.Warm(
+			inner,
+			fullPath,
+			relativePath,
+			content,
+			generation,
+			cancellationToken);
+		if (plan is null)
+			return false;
+
+		RecordPlan(fullPath, plan);
+		return true;
+	}
+
+	private void RecordPlan(string fullPath, CodeCompressionPlan plan)
+	{
+		Interlocked.Add(ref _sourceCharacters, plan.SourceLength);
+		if (plan.Outcome == CodeCompressionOutcome.Compressed)
+		{
+			Interlocked.Increment(ref _compressed);
+			Interlocked.Add(ref _transformedCharacters, plan.TransformedLength);
+			return;
+		}
+
+		Interlocked.Add(ref _transformedCharacters, plan.SourceLength);
+		_unchanged.Enqueue(new OrderedCompressionOutcome(
+			fullPath,
+			new CodeCompressionFileOutcome(
+				plan.RelativePath,
+				plan.LanguageId,
+				plan.Outcome,
+				plan.SourceLength,
+				plan.SourceLength)));
 	}
 
 	public CodeCompressionSnapshot Complete()

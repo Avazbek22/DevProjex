@@ -179,18 +179,20 @@ public partial class MainWindow
 			? BuildOrderedSelectedFilePaths(_currentTree.Root, selectedPaths)
 			: _currentTree.OrderedFilePaths ??
 			  PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(_currentTree.Root);
-		var projectPath = _currentPath;
+		var transformationContext = new ContentTransformationContext(
+			CreateCodeCompressionContext(),
+			new SecretRedactionContext(_currentPath, _secretRedactionSession));
 		var countCts = new CancellationTokenSource();
 		_secretRedactionCountCts = countCts;
 		_ = RefreshSecretRedactionCountAsync(
-			new SecretRedactionContext(projectPath, _secretRedactionSession),
+			transformationContext,
 			files,
 			refreshVersion,
 			countCts);
 	}
 
 	private async Task RefreshSecretRedactionCountAsync(
-		SecretRedactionContext context,
+		ContentTransformationContext context,
 		IReadOnlyList<string> files,
 		long refreshVersion,
 		CancellationTokenSource countCts)

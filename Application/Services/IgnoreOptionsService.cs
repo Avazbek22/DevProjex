@@ -111,12 +111,7 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	}
 
 	public string FormatCompressCodeLabel(int? compressedFiles, int? uncompressedFiles)
-	{
-		var label = localization["Settings.Ignore.CompressCode"];
-		return compressedFiles is { } compressed && uncompressedFiles is { } uncompressed
-			? $"{label} ({compressed}/{compressed + uncompressed})"
-			: label;
-	}
+		=> localization["Settings.Ignore.CompressCode"];
 
 	private void AppendContentTransformationOptions(
 		List<IgnoreOptionDescriptor> options,

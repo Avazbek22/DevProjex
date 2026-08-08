@@ -1,9 +1,27 @@
+using System.Collections.Concurrent;
 using DevProjex.Application.Compression;
 
 namespace DevProjex.Tests.Unit;
 
 public sealed class CodeCompressionSessionTests
 {
+	[Fact]
+	public void SelectionKey_UsesTheFileSetRatherThanCallerEnumerationOrder()
+	{
+		var treeOrder = CodeCompressionSession.BuildSelectionKey(
+			"project",
+			["src/z.cs", "README.md", "src/a.cs"]);
+		var previewOrder = CodeCompressionSession.BuildSelectionKey(
+			"project",
+			["README.md", "src/a.cs", "src/z.cs"]);
+		var differentSelection = CodeCompressionSession.BuildSelectionKey(
+			"project",
+			["README.md", "src/a.cs"]);
+
+		Assert.Equal(treeOrder, previewOrder);
+		Assert.NotEqual(treeOrder, differentSelection);
+	}
+
 	[Fact]
 	public void SamePathAndLengthWithDifferentContent_NeverReusesAPlan()
 	{
@@ -97,6 +115,8 @@ public sealed class CodeCompressionSessionTests
 		Assert.Equal(1, compressor.AnalysisCount);
 		Assert.Equal(1, session.Diagnostics.PrewarmAnalyses);
 		Assert.Equal(1, session.Diagnostics.CacheHits);
+		Assert.Equal(1, session.Snapshot.TotalFiles);
+		Assert.Equal(0, session.Snapshot.CompressedFiles);
 	}
 
 	[Fact]
@@ -110,18 +130,102 @@ public sealed class CodeCompressionSessionTests
 			isSupportedPath: static path =>
 				Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase));
 		using var session = new CodeCompressionSession(compressor);
+		var progressValues = new ConcurrentQueue<CodeCompressionWarmupProgress>();
+		string[] orderedPaths = [supported, supported, empty, unsupported, string.Empty];
 
 		var result = await new CodeCompressionPrewarmer(new FileContentAnalyzer()).WarmAsync(
 			new CodeCompressionContext(temp.Path, session),
-			[supported, supported, empty, unsupported, string.Empty],
-			TestContext.Current.CancellationToken);
+			orderedPaths,
+			TestContext.Current.CancellationToken,
+			new InlineProgress<CodeCompressionWarmupProgress>(progressValues.Enqueue));
 
-		Assert.Equal(2, result.CandidateFiles);
-		Assert.Equal(1, result.WarmedFiles);
-		Assert.Equal(1, result.SkippedFiles);
+		Assert.Equal(3, result.CandidateFiles);
+		Assert.Equal(3, result.WarmedFiles);
+		Assert.Equal(0, result.SkippedFiles);
 		Assert.Equal(0, result.FailedFiles);
 		Assert.Equal(1, compressor.AnalysisCount);
 		Assert.Equal(1, session.Diagnostics.PrewarmAnalyses);
+		Assert.Equal([1, 2, 3], progressValues.Select(static value => value.ProcessedFiles).Order());
+		Assert.All(progressValues, static value => Assert.Equal(3, value.TotalFiles));
+		Assert.Equal(3, session.Snapshot.TotalFiles);
+		Assert.Equal(
+			Path.Combine("src", "Supported.cs"),
+			session.Snapshot.Unchanged[0].RelativePath);
+		Assert.Equal(
+			CodeCompressionSession.BuildSelectionKey(
+				temp.Path,
+				orderedPaths
+					.Where(static path => !string.IsNullOrWhiteSpace(path))
+					.Distinct(PathComparer.Default)
+					.ToArray()),
+			session.Snapshot.SelectionKey);
+
+		var prewarmedSnapshot = session.Snapshot;
+		var selectionPaths = orderedPaths
+			.Where(static path => !string.IsNullOrWhiteSpace(path))
+			.Distinct(PathComparer.Default)
+			.ToArray();
+		using var output = new CodeCompressionContext(temp.Path, session).BeginOutput(selectionPaths);
+		_ = output.Transform(
+			supported,
+			Path.Combine("src", "Supported.cs"),
+			"same-content",
+			TestContext.Current.CancellationToken);
+		_ = output.Transform(
+			empty,
+			Path.Combine("src", "Empty.cs"),
+			string.Empty,
+			TestContext.Current.CancellationToken);
+		_ = output.Transform(
+			unsupported,
+			Path.Combine("notes", "readme.txt"),
+			"plain text",
+			TestContext.Current.CancellationToken);
+		var outputSnapshot = output.Complete();
+
+		Assert.Equal(prewarmedSnapshot.SelectionKey, outputSnapshot.SelectionKey);
+		Assert.Equal(prewarmedSnapshot.CompressedFiles, outputSnapshot.CompressedFiles);
+		Assert.Equal(prewarmedSnapshot.UnchangedFiles, outputSnapshot.UnchangedFiles);
+		Assert.Equal(prewarmedSnapshot.SourceCharacters, outputSnapshot.SourceCharacters);
+		Assert.Equal(prewarmedSnapshot.TransformedCharacters, outputSnapshot.TransformedCharacters);
+	}
+
+	[Fact]
+	public async Task Prewarm_PublishesExactCompressionFactsBeforeAnyOutputIsBuilt()
+	{
+		const string source = "prefix-1234567890-suffix";
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("sample.cs", source);
+		using var compressor = new FixedPlanCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		var publishedSnapshots = 0;
+		session.SnapshotPublished += (_, _) => publishedSnapshots++;
+
+		await new CodeCompressionPrewarmer(new FileContentAnalyzer()).WarmAsync(
+			new CodeCompressionContext(temp.Path, session),
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, publishedSnapshots);
+		Assert.Equal(1, session.Snapshot.CompressedFiles);
+		Assert.Equal(0, session.Snapshot.UnchangedFiles);
+		Assert.Equal(source.Length, session.Snapshot.SourceCharacters);
+		Assert.Equal(source.Length - 7, session.Snapshot.TransformedCharacters);
+
+		var prewarmedSnapshot = session.Snapshot;
+		using var output = session.BeginOutput(temp.Path, [path]);
+		_ = output.Transform(
+			path,
+			"sample.cs",
+			source,
+			TestContext.Current.CancellationToken);
+		var outputSnapshot = output.Complete();
+
+		Assert.Equal(prewarmedSnapshot.SelectionKey, outputSnapshot.SelectionKey);
+		Assert.Equal(prewarmedSnapshot.CompressedFiles, outputSnapshot.CompressedFiles);
+		Assert.Equal(prewarmedSnapshot.UnchangedFiles, outputSnapshot.UnchangedFiles);
+		Assert.Equal(prewarmedSnapshot.SourceCharacters, outputSnapshot.SourceCharacters);
+		Assert.Equal(prewarmedSnapshot.TransformedCharacters, outputSnapshot.TransformedCharacters);
 	}
 
 	[Fact]
@@ -217,7 +321,7 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
-	public async Task Prewarm_LargerThanPlanCache_LeavesOverflowForDemandProcessing()
+	public async Task Prewarm_LargerThanPlanCache_EvaluatesTheWholeSelectionAndKeepsCacheBounded()
 	{
 		var paths = Enumerable.Range(0, CodeCompressionSession.PlanCacheCapacity + 1)
 			.Select(index => $"sample-{index:D5}.cs")
@@ -231,8 +335,10 @@ public sealed class CodeCompressionSessionTests
 				paths,
 				TestContext.Current.CancellationToken);
 
-		Assert.Equal(CodeCompressionSession.PlanCacheCapacity, result.CandidateFiles);
-		Assert.Equal(CodeCompressionSession.PlanCacheCapacity, compressor.AnalysisCount);
+		Assert.Equal(paths.Length, result.CandidateFiles);
+		Assert.Equal(paths.Length, compressor.AnalysisCount);
+		Assert.Equal(paths.Length, session.Snapshot.TotalFiles);
+		Assert.Equal(CodeCompressionSession.PlanCacheCapacity, session.Diagnostics.CacheEntries);
 	}
 
 	[Fact]
@@ -581,6 +687,40 @@ public sealed class CodeCompressionSessionTests
 		}
 	}
 
+	private sealed class FixedPlanCompressor : ICodeCompressor, IDisposable
+	{
+		public string TransformIdentity => "fixed-plan:v1";
+
+		public bool IsSupported(string relativePath) => true;
+
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
+
+		public void Dispose()
+		{
+		}
+
+		private sealed class Scope(FixedPlanCompressor owner) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken) =>
+				new(
+					CodeCompressionPlan.Create(
+						relativePath,
+						"csharp",
+						[new CodeCompressionEdit(7, 10, "...")],
+						content.Length,
+						owner.TransformIdentity),
+					null);
+
+			public void Dispose()
+			{
+			}
+		}
+	}
+
 	private sealed class CancelFirstAnalysisCompressor : ICodeCompressor, IDisposable
 	{
 		private int _analysisCount;
@@ -621,6 +761,11 @@ public sealed class CodeCompressionSessionTests
 
 			public void Dispose() { }
 		}
+	}
+
+	private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+	{
+		public void Report(T value) => report(value);
 	}
 
 	private sealed class ConstantFileContentAnalyzer : IFileContentAnalyzer

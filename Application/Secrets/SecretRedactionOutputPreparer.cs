@@ -528,6 +528,63 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		return scope.Complete();
 	}
 
+	public async Task<SecretRedactionSnapshot> AnalyzeAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(orderedFilePaths);
+		var redactionContext = context.Redaction ??
+		                       throw new ArgumentException(
+			                       "The transformation context must include secret redaction.",
+			                       nameof(context));
+		if (context.Compression is null)
+		{
+			return await AnalyzeAsync(redactionContext, orderedFilePaths, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		await redactionContext.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+		using var transformationScope = context.BeginOutput(orderedFilePaths);
+		var redactionScope = transformationScope.Redaction ??
+		                     throw new InvalidOperationException(
+			                     "The transformation scope did not create secret redaction state.");
+
+		await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
+		                   context,
+		                   transformationScope,
+		                   orderedFilePaths,
+		                   cancellationToken).ConfigureAwait(false))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			switch (prepared.ReadResult.Classification)
+			{
+				case FileContentClassification.Binary:
+					redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
+					break;
+				case FileContentClassification.TooLarge:
+					redactionScope.AnalyzeUnscannable(prepared.SourcePath, prepared.Metadata);
+					break;
+				case FileContentClassification.Text:
+					redactionScope.CreatePlan(
+						prepared.SourcePath,
+						prepared.Compression.Text,
+						prepared.Compression.Map,
+						cancellationToken);
+					break;
+				default:
+					throw new SecretDetectionException(
+						$"Hide Secrets could not inspect '{prepared.SourcePath}' " +
+						$"({prepared.ReadResult.Classification}).");
+			}
+		}
+
+		// Discovery borrows the compression pipeline but is not an output surface. Publishing its
+		// auxiliary snapshot would make compression statistics appear before Preview or export ran.
+		return redactionScope.Complete();
+	}
+
 	private async Task<SecretScanCacheEntry> AnalyzeFileAsync(
 		SecretRedactionScope scope,
 		SecretScanWorkItem workItem,

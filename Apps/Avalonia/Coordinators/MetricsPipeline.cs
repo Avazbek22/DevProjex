@@ -137,18 +137,43 @@ internal sealed class MetricsPipeline(
     {
         var compression = transformationContextProvider?.Invoke()?.Compression;
         if (compression is null)
+        {
+            viewModel.SetCompressionPreparationStatus(isActive: false);
             return Task.CompletedTask;
+        }
 
         var selectedPaths = selectedPathsProvider();
         var filePaths = selectedPaths.Count > 0
             ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
             : GetOrBuildAllOrderedFilePaths(currentTree);
         var prewarmCts = ReplaceCancellationSource(ref _compressionPrewarmCts);
+        viewModel.SetCompressionPreparationStatus(isActive: true);
+        var statusOperationId = statusOperations.Begin(
+            localization["Settings.Compression.Status.Scanning"],
+            indeterminate: false,
+            operationType: StatusOperationType.CompressionPreparation,
+            cancelAction: CancelCompressionPrewarm,
+            presentation: StatusOperationPresentation.ExtendedDelay);
+        var lastReportedPercent = -1;
+        var progress = new Progress<CodeCompressionWarmupProgress>(value =>
+        {
+            if (!statusOperations.IsActive(statusOperationId) || value.TotalFiles <= 0)
+                return;
+
+            var percent = (int)(value.ProcessedFiles * 100.0 / value.TotalFiles);
+            if (percent <= lastReportedPercent)
+                return;
+
+            lastReportedPercent = percent;
+            statusOperations.UpdateProgress(percent, operationId: statusOperationId);
+        });
         return PrewarmCompressionCoreAsync(
             compression,
             filePaths,
             prewarmCts,
-            cancellationToken);
+            cancellationToken,
+            statusOperationId,
+            progress);
     }
 
     public void ScheduleRecalculate()
@@ -526,7 +551,9 @@ internal sealed class MetricsPipeline(
         CodeCompressionContext compression,
         IReadOnlyList<string> filePaths,
         CancellationTokenSource prewarmCts,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long statusOperationId,
+        IProgress<CodeCompressionWarmupProgress> progress)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             prewarmCts.Token,
@@ -534,7 +561,7 @@ internal sealed class MetricsPipeline(
         try
         {
             await _compressionPrewarmer
-                .WarmAsync(compression, filePaths, linkedCts.Token)
+                .WarmAsync(compression, filePaths, linkedCts.Token, progress)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
@@ -542,6 +569,31 @@ internal sealed class MetricsPipeline(
         }
         finally
         {
+            if (ReferenceEquals(
+                    Volatile.Read(ref _compressionPrewarmCts),
+                    prewarmCts))
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    var snapshot = compression.Session.Snapshot;
+                    var expectedSelectionKey = CodeCompressionSession.BuildSelectionKey(
+                        compression.ProjectRoot,
+                        filePaths);
+                    if (string.Equals(
+                            snapshot.SelectionKey,
+                            expectedSelectionKey,
+                            StringComparison.Ordinal))
+                    {
+                        viewModel.SetCompressionStatus(
+                            snapshot.CompressedFiles,
+                            snapshot.TotalFiles,
+                            snapshot.SourceCharacters,
+                            snapshot.TransformedCharacters);
+                    }
+                    viewModel.SetCompressionPreparationStatus(isActive: false);
+                    statusOperations.Complete(statusOperationId);
+                });
+            }
             DisposeIfCurrent(ref _compressionPrewarmCts, prewarmCts);
         }
     }
