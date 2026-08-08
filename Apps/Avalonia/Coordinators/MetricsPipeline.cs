@@ -560,8 +560,16 @@ internal sealed class MetricsPipeline(
             cancellationToken);
         try
         {
-            await _compressionPrewarmer
-                .WarmAsync(compression, filePaths, linkedCts.Token, progress)
+            // WarmAsync performs candidate indexing and file-length probes before its first
+            // asynchronous parser lease. Run the whole bootstrap on a worker so large or remote
+            // projects cannot stall the UI immediately after the settings reveal.
+            await Task.Run(
+                    () => _compressionPrewarmer.WarmAsync(
+                        compression,
+                        filePaths,
+                        linkedCts.Token,
+                        progress),
+                    linkedCts.Token)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)

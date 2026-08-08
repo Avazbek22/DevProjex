@@ -518,7 +518,7 @@ public partial class MainWindow
             () => _currentPath,
             _statusOperations,
             ScheduleContentTransformationRefresh,
-            InvalidateSecretRedactionCount);
+            () => InvalidateSecretRedactionCount());
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(

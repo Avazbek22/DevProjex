@@ -107,7 +107,9 @@ public partial class MainWindow : IRefreshTreePipelineHost
         _viewModel.TreeNodes.Clear();
 
         _currentTree = result.Tree;
-		InvalidateSecretRedactionCount();
+		// Initial/full refresh work is released by StartPostLoadBackgroundWork after the settings
+		// reveal. An interactive name filter has no reveal boundary and stays immediate.
+		InvalidateSecretRedactionCount(scheduleRefreshImmediately: interactiveFilter);
         if (interactiveFilter)
             _lastInteractiveFilterUsedInMemory = usedInMemoryFilter;
         UpdateCurrentTreeInventory(input, result, interactiveFilter, usedInMemoryFilter);

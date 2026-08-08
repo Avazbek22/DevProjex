@@ -15,8 +15,8 @@ public readonly record struct CodeCompressionWarmupProgress(
 
 /// <summary>
 /// Builds file-local compression plans and publishes their exact aggregate without materializing
-/// transformed output. This is intentionally separate from metrics so visual-stability pacing
-/// cannot delay readiness.
+/// transformed output. The caller owns visual pacing so initial load and interactive changes can
+/// use the same implementation without duplicating compression logic.
 /// </summary>
 public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyzer)
 {
@@ -34,7 +34,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 
 		var stopwatch = Stopwatch.StartNew();
 		var selectionPaths = BuildSelectionPaths(orderedFilePaths);
-		var candidates = BuildCandidates(selectionPaths);
+		var candidates = selectionPaths;
 		using var scope = context.BeginOutput(selectionPaths);
 		if (candidates.Count == 0)
 		{
@@ -96,24 +96,6 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		var processorCount = Math.Max(1, Environment.ProcessorCount);
 		var availableWorkers = processorCount > 1 ? processorCount - 1 : 1;
 		return Math.Min(MaximumParallelism, availableWorkers);
-	}
-
-	private static List<string> BuildCandidates(
-		IReadOnlyList<string> orderedFilePaths)
-	{
-		var unique = new HashSet<string>(PathComparer.Default);
-		var candidates = new List<string>(orderedFilePaths.Count);
-		foreach (var path in orderedFilePaths)
-		{
-			if (string.IsNullOrWhiteSpace(path) || !unique.Add(path))
-			{
-				continue;
-			}
-
-			candidates.Add(path);
-		}
-
-		return candidates;
 	}
 
 	private static List<string> BuildSelectionPaths(

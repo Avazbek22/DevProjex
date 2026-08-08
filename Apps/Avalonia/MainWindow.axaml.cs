@@ -442,7 +442,7 @@ public partial class MainWindow : Window
 		ScheduleSecretRedactionCountRefresh();
 	}
 
-	private void InvalidateSecretRedactionCount()
+	private void InvalidateSecretRedactionCount(bool scheduleRefreshImmediately = true)
 	{
 		_secretRedactionSession.InvalidateSnapshots();
 		_secretRedactionScanState = SecretScanState.Pending;
@@ -452,7 +452,8 @@ public partial class MainWindow : Window
 		_secretRedactionMatchedCount = null;
 		RelabelIgnoreOptionsWithCurrentCounts();
 
-		ScheduleSecretRedactionCountRefresh();
+		if (scheduleRefreshImmediately)
+			ScheduleSecretRedactionCountRefresh();
 	}
 
     private void CancelPreviewRefresh()
@@ -1281,11 +1282,6 @@ public partial class MainWindow : Window
 
     private void StartPostLoadBackgroundWork(BuildTreeResult currentTree, CancellationToken cancellationToken)
     {
-        // The tree is already visible at this point. Keep any non-critical post-load work detached
-        // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
-        ObserveDetachedTask(
-            _metrics.PrewarmCompressionAsync(currentTree, cancellationToken),
-            "PrewarmCodeCompression");
         var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(
             _projectLoadFinalizationTask,
             cancellationToken);
@@ -1307,22 +1303,28 @@ public partial class MainWindow : Window
             timing.HasLoadingElapsed = true;
         }
 
-        ObserveDetachedTask(
+        Func<CancellationToken, Task> initializeMetricsAsync = token =>
             TrackProjectAnalysisTimingAsync(
                 _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
                     currentTree,
-                    postLoadVisualReadyTask,
-                    cancellationToken),
-                timing),
-            "InitializeFileMetricsCache");
+                    Task.CompletedTask,
+                    token),
+                timing);
 #else
-        ObserveDetachedTask(
+        Func<CancellationToken, Task> initializeMetricsAsync = token =>
             _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
                 currentTree,
-                postLoadVisualReadyTask,
-                cancellationToken),
-            "InitializeFileMetricsCache");
+                Task.CompletedTask,
+                token);
 #endif
+        ObserveDetachedTask(
+            PostLoadBackgroundWorkSequencer.RunAsync(
+                postLoadVisualReadyTask,
+                token => _metrics.PrewarmCompressionAsync(currentTree, token),
+                initializeMetricsAsync,
+                ScheduleSecretRedactionCountRefresh,
+                cancellationToken),
+            "RunPostLoadBackgroundWork");
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
