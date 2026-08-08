@@ -195,7 +195,8 @@ public sealed class MetricsPipelineWarmupTests
 			TimeSpan.FromSeconds(5),
 			TestContext.Current.CancellationToken);
 		await WaitUntilAsync(
-			() => viewModel.StatusProgressValue == 50,
+			() => viewModel.StatusProgressValue == 50 &&
+			      viewModel.StatusOperationVisible,
 			TimeSpan.FromSeconds(5));
 
 		Assert.True(viewModel.StatusOperationVisible);

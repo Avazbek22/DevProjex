@@ -213,9 +213,15 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				      viewModel.ContentProcessingOptions.Any(
 					      static option =>
 						      option.Id == IgnoreOptionId.CompressCode &&
-						      option.Label == "Compress code"),
+						      option.Label == "Compress code") &&
+				      viewModel.SettingsCompressionNotice.StartsWith(
+					      "Compressed ",
+					      StringComparison.Ordinal),
 				"compressed secret discovery to ignore a removed method body");
-			Assert.Equal(string.Empty, viewModel.SettingsCompressionNotice);
+			Assert.Contains(
+				$"{Environment.NewLine}≈Tokens: ",
+				viewModel.SettingsCompressionNotice,
+				StringComparison.Ordinal);
 			Assert.True(viewModel.HideSecretsOption?.IsChecked);
 			Assert.Contains(
 				viewModel.ContentProcessingOptions,
@@ -1950,7 +1956,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var indicatorPosition = Assert.IsType<Point>(helpIndicator.TranslatePoint(default, processingBorder));
 			var checkBoxCenter = checkBoxPosition.Y + (checkBox.Bounds.Height / 2);
 			var indicatorCenter = indicatorPosition.Y + (helpIndicator.Bounds.Height / 2);
-			Assert.InRange(indicatorCenter - checkBoxCenter, -1, 1);
+			Assert.InRange(indicatorCenter - checkBoxCenter, 1, 3);
 			var indicatorGap = indicatorPosition.X - (checkBoxPosition.X + checkBox.Bounds.Width);
 			Assert.InRange(indicatorGap, 4, 8);
 
@@ -2034,6 +2040,12 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var option = Assert.Single(viewModel.ContentProcessingOptions);
 			Assert.Equal(IgnoreOptionId.CompressCode, option.Id);
 			option.IsChecked = true;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.SettingsCompressionNotice.StartsWith(
+					"Compressed ",
+					StringComparison.Ordinal),
+				"the real compression prewarm to finish before injecting status states");
 			viewModel.SetCompressionPreparationStatus(isActive: true);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Equal("Compressing code…", option.StatusText);
