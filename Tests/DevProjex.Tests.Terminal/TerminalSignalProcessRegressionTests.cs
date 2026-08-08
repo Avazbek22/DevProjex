@@ -48,12 +48,13 @@ public sealed class TerminalSignalProcessRegressionTests
 				$"The streaming command exited before {signalName} could be delivered.");
 			Assert.Equal(0, SendSignal(process.Id, signal));
 
-			var standardOutputTask = ReadRemainingOutputAsync(
+			// Preserve pipe backpressure until the process exits. Draining stdout here lets a
+			// fast export finish before the asynchronously dispatched POSIX callback runs.
+			await process.WaitForExitAsync(timeout.Token);
+			var standardOutput = await ReadRemainingOutputAsync(
 				process,
 				standardOutputPrefix,
 				timeout.Token);
-			await process.WaitForExitAsync(timeout.Token);
-			var standardOutput = await standardOutputTask;
 			var standardError = await standardErrorTask;
 
 			Assert.Equal(CommandLineExitCodes.Canceled, process.ExitCode);
