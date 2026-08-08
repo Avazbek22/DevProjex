@@ -38,6 +38,8 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 
 	private const string MarkedConstantValue = "SessionMarkedConstantValue";
 	private const string MarkedBodyValue = "SessionMarkedBodyValue";
+	private const string AutomaticRetainedSecret = "AutomaticRetainedSecret123";
+	private const string AutomaticRemovedSecret = "AutomaticRemovedSecret123";
 
 	[Fact]
 	public async Task CompressionOnlyPreparationPreservesSelectionOrderAndSkipsUnchangedTempCopies()
@@ -326,6 +328,36 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		Assert.Equal(1, plain.RedactionCount);
 	}
 
+	[Fact]
+	public async Task AutomaticDetection_SeesTheCompressedOutputRatherThanRemovedImplementation()
+	{
+		const string source = $$"""
+			public sealed class Secrets
+			{
+			    public const string Retained = "{{AutomaticRetainedSecret}}";
+
+			    public string Build()
+			    {
+			        const string removed = "{{AutomaticRemovedSecret}}";
+			        return removed + Retained;
+			    }
+			}
+			""";
+		using var workspace = CompressionWorkspace.Create(source);
+		using var secrets = new SecretRedactionSession(
+			new ExactValueDetector(AutomaticRetainedSecret, AutomaticRemovedSecret));
+
+		var result = await workspace.BuildContentAsync(secrets, compress: true);
+
+		Assert.DoesNotContain(AutomaticRetainedSecret, result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(AutomaticRemovedSecret, result.Text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[exact-value#1]", result.Text, StringComparison.Ordinal);
+		Assert.Equal(1, result.RedactionCount);
+		var snapshot = Assert.IsType<SecretRedactionSnapshot>(workspace.GetSnapshot(secrets));
+		Assert.Equal(1, snapshot.DetectedCount);
+		Assert.Equal(1, snapshot.RedactedCount);
+	}
+
 	private static int LinesBetweenSignatureAndConstant(string text)
 	{
 		var lines = text.Replace("\r\n", "\n").Split('\n');
@@ -466,6 +498,68 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 				StringComparison.Ordinal));
 	}
 
+	[Fact]
+	public async Task FolderCopy_WithCompression_PreservesUtf16BigEndianEncodingAndBom()
+	{
+		using var workspace = CompressionWorkspace.Create(CompressibleSource);
+		var encoding = new UnicodeEncoding(bigEndian: true, byteOrderMark: true, throwOnInvalidBytes: true);
+		await File.WriteAllTextAsync(
+			workspace.SourceFile,
+			CompressibleSource,
+			encoding,
+			TestContext.Current.CancellationToken);
+		var sourceBytes = await File.ReadAllBytesAsync(
+			workspace.SourceFile,
+			TestContext.Current.CancellationToken);
+
+		var result = await workspace.ExportFolderAsync(compress: true);
+		var exportedPath = Path.Combine(result.DestinationPath, "Widget.cs");
+		var exportedBytes = await File.ReadAllBytesAsync(
+			exportedPath,
+			TestContext.Current.CancellationToken);
+		var exportedText = await File.ReadAllTextAsync(
+			exportedPath,
+			encoding,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(exportedBytes.AsSpan().StartsWith(encoding.GetPreamble()));
+		Assert.Contains("public int Compute(int left, int right)", exportedText, StringComparison.Ordinal);
+		Assert.DoesNotContain("total += index * left - right", exportedText, StringComparison.Ordinal);
+		Assert.Equal(
+			sourceBytes,
+			await File.ReadAllBytesAsync(
+				workspace.SourceFile,
+				TestContext.Current.CancellationToken));
+	}
+
+	private sealed class ExactValueDetector(params string[] values) : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default)
+		{
+			var findings = new List<DetectedSecret>();
+			foreach (var value in values)
+			{
+				for (var offset = 0;
+				     (offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0;
+				     offset += value.Length)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					findings.Add(new DetectedSecret(
+						"exact-value",
+						offset,
+						value.Length,
+						value,
+						0));
+				}
+			}
+
+			return findings;
+		}
+	}
+
 	private sealed class CompressionWorkspace : IDisposable
 	{
 		private CompressionWorkspace(string root, string sourceRoot, string destinationParent, string sourceFile)
@@ -547,6 +641,9 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			scope.Complete();
 			return result;
 		}
+
+		public SecretRedactionSnapshot? GetSnapshot(SecretRedactionSession secrets) =>
+			secrets.GetSnapshot(SourceRoot, [SourceFile]);
 
 		/// <summary>Builds the preview document - the single source of truth for every export.</summary>
 		public async Task<TransformedContent> BuildContentAsync(

@@ -102,11 +102,13 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	public CodeCompressionScope BeginOutput(string projectRoot, IReadOnlyList<string> orderedFilePaths)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
+		var generation = CaptureGeneration();
 		return new CodeCompressionScope(
 			this,
 			compressor.CreateScope(projectRoot),
 			BuildSelectionKey(projectRoot, orderedFilePaths),
-			orderedFilePaths);
+			orderedFilePaths,
+			generation.Version);
 	}
 
 	internal CodeCompressionExecution Transform(
@@ -114,6 +116,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		string fullPath,
 		string relativePath,
 		string content,
+		long generation,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -129,6 +132,15 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			return new CodeCompressionExecution(
 				unsupported,
 				new CodeCompressionResult(content, ContentTransformMap.Identity));
+		}
+		if (!IsCurrentGeneration(generation))
+		{
+			var staleAnalysis = scope.Analyze(fullPath, relativePath, content, cancellationToken);
+			return CreateExecution(
+				CreateUncachedPlan(default, staleAnalysis),
+				relativePath,
+				content,
+				staleAnalysis.ValidatedResult);
 		}
 
 		var key = CodeCompressionCacheKey.Create(
@@ -147,7 +159,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			Interlocked.Increment(ref _prewarmReuses);
 			var analysis = warming.Value;
 			cancellationToken.ThrowIfCancellationRequested();
-			var warmed = CacheAnalysis(key, analysis);
+			var warmed = CacheAnalysisOrCreateUncached(key, analysis, generation);
 			return CreateExecution(warmed, relativePath, content, analysis.ValidatedResult);
 		}
 
@@ -178,7 +190,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		{
 			var analysis = pending.Value;
 			cancellationToken.ThrowIfCancellationRequested();
-			var cachedAnalysis = CacheAnalysis(key, analysis);
+			var cachedAnalysis = CacheAnalysisOrCreateUncached(key, analysis, generation);
 			return CreateExecution(cachedAnalysis, relativePath, content, analysis.ValidatedResult);
 		}
 		finally
@@ -193,10 +205,15 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		string fullPath,
 		string relativePath,
 		string content,
+		long scopeGeneration,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		if (!compressor.IsSupported(relativePath))
+			return;
+
+		var generation = CaptureGeneration();
+		if (generation.Version != scopeGeneration)
 			return;
 
 		Interlocked.Increment(ref _prewarmRequests);
@@ -208,15 +225,13 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			return;
 		}
 
-		var generation = CaptureGeneration();
 		if (TryGetActiveOutputAnalysis(key, out var activeOutput))
 		{
 			Interlocked.Increment(ref _prewarmReuses);
 			try
 			{
 				var analysis = activeOutput.Value;
-				if (generation.Version == Volatile.Read(ref _generation))
-					CacheAnalysis(key, analysis);
+				TryCacheAnalysis(key, analysis, generation.Version, out _);
 				cancellationToken.ThrowIfCancellationRequested();
 				return;
 			}
@@ -241,8 +256,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		try
 		{
 			var analysis = pending.Value;
-			if (generation.Version == Volatile.Read(ref _generation))
-				CacheAnalysis(key, analysis);
+			TryCacheAnalysis(key, analysis, generation.Version, out _);
 			cancellationToken.ThrowIfCancellationRequested();
 		}
 		finally
@@ -286,25 +300,37 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		}
 	}
 
-	private CachedPlan CacheAnalysis(CodeCompressionCacheKey key, CodeCompressionAnalysis analysis)
+	private CachedPlan CacheAnalysisOrCreateUncached(
+		CodeCompressionCacheKey key,
+		CodeCompressionAnalysis analysis,
+		long generation) =>
+		TryCacheAnalysis(key, analysis, generation, out var cached)
+			? cached
+			: CreateUncachedPlan(key, analysis);
+
+	private bool TryCacheAnalysis(
+		CodeCompressionCacheKey key,
+		CodeCompressionAnalysis analysis,
+		long generation,
+		out CachedPlan cachedPlan)
 	{
 		lock (_sync)
 		{
+			if (_disposed || generation != _generation)
+			{
+				cachedPlan = null!;
+				return false;
+			}
+
 			if (_cache.TryGetValue(key, out var existing))
 			{
 				_cacheRecency.Remove(existing);
 				_cacheRecency.AddFirst(existing);
-				return existing.Value;
+				cachedPlan = existing.Value;
+				return true;
 			}
 
-			var plan = analysis.Plan;
-			var cachedPlan = new CachedPlan(
-				key,
-				plan,
-				analysis.ValidatedResult?.Map ??
-				(plan.HasEdits
-					? ContentTransformMap.Create(plan.Edits, plan.SourceLength)
-					: ContentTransformMap.Identity));
+			cachedPlan = CreateUncachedPlan(key, analysis);
 
 			var node = _cacheRecency.AddFirst(cachedPlan);
 			_cache.Add(key, node);
@@ -315,8 +341,23 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				_cache.Remove(leastRecent.Value.Key);
 			}
 
-			return node.Value;
+			cachedPlan = node.Value;
+			return true;
 		}
+	}
+
+	private static CachedPlan CreateUncachedPlan(
+		CodeCompressionCacheKey key,
+		CodeCompressionAnalysis analysis)
+	{
+		var plan = analysis.Plan;
+		return new CachedPlan(
+			key,
+			plan,
+			analysis.ValidatedResult?.Map ??
+			(plan.HasEdits
+				? ContentTransformMap.Create(plan.Edits, plan.SourceLength)
+				: ContentTransformMap.Identity));
 	}
 
 	private static CodeCompressionExecution CreateExecution(
@@ -333,10 +374,14 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			validatedResult ?? cached.Plan.Apply(content, cached.Map));
 	}
 
-	internal void Publish(CodeCompressionSnapshot snapshot)
+	internal void Publish(CodeCompressionSnapshot snapshot, long generation)
 	{
 		lock (_sync)
+		{
+			if (_disposed || generation != _generation)
+				return;
 			_snapshot = snapshot;
+		}
 		SnapshotPublished?.Invoke(this, EventArgs.Empty);
 	}
 
@@ -389,6 +434,9 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		lock (_sync)
 			return new GenerationSnapshot(_generation, _generationCts.Token);
 	}
+
+	private bool IsCurrentGeneration(long generation) =>
+		generation == Volatile.Read(ref _generation) && !_disposed;
 
 	private void ResetDiagnostics()
 	{
@@ -448,7 +496,8 @@ public sealed class CodeCompressionScope(
 	CodeCompressionSession session,
 	ICodeCompressionScope inner,
 	string selectionKey,
-	IReadOnlyList<string> orderedFilePaths) : IDisposable
+	IReadOnlyList<string> orderedFilePaths,
+	long generation) : IDisposable
 {
 	private readonly ConcurrentQueue<OrderedCompressionOutcome> _unchanged = [];
 	private readonly IReadOnlyDictionary<string, int> _fileOrder = orderedFilePaths
@@ -466,7 +515,7 @@ public sealed class CodeCompressionScope(
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
-		var execution = session.Transform(inner, fullPath, relativePath, content, cancellationToken);
+		var execution = session.Transform(inner, fullPath, relativePath, content, generation, cancellationToken);
 		var plan = execution.Plan;
 		Interlocked.Add(ref _sourceCharacters, plan.SourceLength);
 		if (plan.Outcome == CodeCompressionOutcome.Compressed)
@@ -495,7 +544,7 @@ public sealed class CodeCompressionScope(
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
-		session.Warm(inner, fullPath, relativePath, content, cancellationToken);
+		session.Warm(inner, fullPath, relativePath, content, generation, cancellationToken);
 	}
 
 	public CodeCompressionSnapshot Complete()
@@ -514,7 +563,7 @@ public sealed class CodeCompressionScope(
 			Interlocked.Read(ref _sourceCharacters),
 			Interlocked.Read(ref _transformedCharacters),
 			unchanged);
-		session.Publish(snapshot);
+		session.Publish(snapshot, generation);
 		return snapshot;
 	}
 

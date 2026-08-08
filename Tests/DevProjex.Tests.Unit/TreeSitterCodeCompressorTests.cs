@@ -141,6 +141,51 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.DoesNotContain("conditional implementation", text, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void CSharp_MethodGroupFieldInitializerDoesNotDestabilizeTheDeclarationFingerprint()
+	{
+		const string source = """
+			internal sealed class MemoryCoordinator(
+			    System.Func<bool> uiReady,
+			    System.TimeSpan animationDuration) : System.IDisposable
+			{
+			    private readonly System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task>
+			        _waitForRenderPasses = WaitForRenderPassesAsync;
+
+			    public void Schedule()
+			    {
+			        _ = System.Threading.Tasks.Task.Run(async () =>
+			        {
+			            await _waitForRenderPasses(System.Threading.CancellationToken.None);
+			            if (uiReady())
+			                System.Console.WriteLine(animationDuration);
+			        });
+			    }
+
+			    private static async System.Threading.Tasks.Task WaitForRenderPassesAsync(
+			        System.Threading.CancellationToken cancellationToken)
+			    {
+			        await System.Threading.Tasks.Task.Yield();
+			        cancellationToken.ThrowIfCancellationRequested();
+			    }
+
+			    public void Dispose()
+			    {
+			        System.Console.WriteLine("disposed");
+			    }
+			}
+			""";
+
+		var (plan, text) = Compress("MemoryCoordinator.cs", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.Contains("_waitForRenderPasses = WaitForRenderPassesAsync;", text, StringComparison.Ordinal);
+		Assert.Contains("public void Schedule()", text, StringComparison.Ordinal);
+		Assert.Contains("WaitForRenderPassesAsync(", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("System.Console.WriteLine(animationDuration)", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("cancellationToken.ThrowIfCancellationRequested", text, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[MemberData(nameof(ShippedLanguages))]
 	public void EveryShippedLanguage_CompressesItsProductionFixture(string languageId)

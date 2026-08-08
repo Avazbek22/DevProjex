@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Xml.Linq;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Secrets;
@@ -586,7 +587,9 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: true);
 		var prepared = await new SecretRedactionOutputPreparer(analyzer).PrepareAsync(
-			new SecretRedactionContext(workspace.SourceRoot, session),
+			new ContentTransformationContext(
+				Compression: null,
+				Redaction: new SecretRedactionContext(workspace.SourceRoot, session)),
 			plan.IncludedFiles,
 			TestContext.Current.CancellationToken);
 		var sourcePath = Path.Combine(workspace.SourceRoot, "src", "app.cs");

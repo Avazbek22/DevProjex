@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 
 namespace DevProjex.Tests.Terminal;
@@ -338,6 +339,135 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		Assert.Equal("class App {}\n", File.ReadAllText(sourcePath));
 		Assert.Equal("unreadable index fixture\n", File.ReadAllText(indexPath));
 		Assert.Equal(sourceSnapshot, CaptureSourceTree(project));
+	}
+
+	[Fact]
+	public async Task CompressionFlowsThroughEveryPublishedDirectOutputWithoutChangingSource()
+	{
+		var application = GetPublishedSingleFileOrSkip();
+		using var workspace = new TemporaryDirectory();
+		var home = workspace.CreateDirectory("compression/home");
+		var temporary = workspace.CreateDirectory("compression/temp");
+		var dataRoot = workspace.CreateDirectory("compression/data");
+		var extractionRoot = workspace.CreateDirectory("compression/extraction");
+		var project = workspace.CreateDirectory("compression/source");
+		var sourcePath = workspace.WriteFile(
+			"compression/source/Widget.cs",
+			"""
+			public sealed class Widget
+			{
+			    private readonly System.Func<int> _factory = Create;
+
+			    public int Compute(int left, int right)
+			    {
+			        var published_implementation_marker = left + right;
+			        published_implementation_marker += 10;
+			        return published_implementation_marker;
+			    }
+
+			    private static int Create()
+			    {
+			        var published_factory_marker = 40;
+			        return published_factory_marker + 2;
+			    }
+			}
+			""");
+		var sourceBytes = File.ReadAllBytes(sourcePath);
+		var environment = CreateEnvironment(home, temporary, dataRoot, extractionRoot);
+		var common = new[]
+		{
+			"--compress",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--plain",
+			"--language", "en"
+		};
+
+		var analysis = await RunAsync(
+			application,
+			["analyze", project, "--format", "json", .. common],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, analysis.ExitCode);
+		Assert.Empty(analysis.StandardError);
+		using (var document = JsonDocument.Parse(analysis.StandardOutput))
+		{
+			Assert.True(document.RootElement.GetProperty("selection").GetProperty("compressCode").GetBoolean());
+			Assert.Equal(1, document.RootElement.GetProperty("compression").GetProperty("compressedFiles").GetInt32());
+		}
+
+		var context = await RunAsync(
+			application,
+			[
+				"export", "context", project,
+				"--view", "content",
+				"--format", "markdown",
+				"-o", "-",
+				.. common
+			],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
+		Assert.Empty(context.StandardError);
+		Assert.Contains("Compute(int left, int right)", context.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("_factory = Create;", context.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("published_implementation_marker", context.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("published_factory_marker", context.StandardOutput, StringComparison.Ordinal);
+
+		var folderDestination = Path.Combine(workspace.Path, "compression", "folder-output");
+		var folder = await RunAsync(
+			application,
+			[
+				"export", "project", project,
+				"--as", "folder",
+				"-o", folderDestination,
+				.. common
+			],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, folder.ExitCode);
+		Assert.Empty(folder.StandardError);
+		Assert.Equal(Path.GetFullPath(folderDestination), folder.StandardOutput.Trim());
+		var folderSource = File.ReadAllText(Path.Combine(folderDestination, "Widget.cs"));
+		Assert.Contains("_factory = Create;", folderSource, StringComparison.Ordinal);
+		Assert.DoesNotContain("published_implementation_marker", folderSource, StringComparison.Ordinal);
+		Assert.DoesNotContain("published_factory_marker", folderSource, StringComparison.Ordinal);
+		Assert.True(File.Exists(Path.Combine(
+			folderDestination,
+			ProjectCopyExportService.TransformationNoticeFileName)));
+
+		var zipDestination = Path.Combine(workspace.Path, "compression", "project-output.zip");
+		var zip = await RunAsync(
+			application,
+			[
+				"export", "project", project,
+				"--as", "zip",
+				"-o", zipDestination,
+				.. common
+			],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, zip.ExitCode);
+		Assert.Empty(zip.StandardError);
+		Assert.Equal(Path.GetFullPath(zipDestination), zip.StandardOutput.Trim());
+		using (var archive = ZipFile.OpenRead(zipDestination))
+		{
+			var sourceEntry = Assert.Single(archive.Entries, static entry =>
+				entry.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+			using var reader = new StreamReader(sourceEntry.Open(), Encoding.UTF8);
+			Assert.Equal(folderSource, await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+			Assert.Contains(archive.Entries, static entry =>
+				entry.FullName.EndsWith(
+					ProjectCopyExportService.TransformationNoticeFileName,
+					StringComparison.Ordinal));
+		}
+
+		Assert.Equal(sourceBytes, File.ReadAllBytes(sourcePath));
 	}
 
 	private static IReadOnlyList<string> CaptureSourceTree(string rootPath)

@@ -127,15 +127,37 @@ public static class CodeStructureGate
 		if (actual.Count > expected.Count)
 			return CodeStructureGateVerdict.RejectedDeclarationsAdded;
 
+		var sameOrder = true;
 		for (var index = 0; index < expected.Count; index++)
 		{
-			if (expected[index] != actual[index])
-			{
-				return expected.Contains(actual[index])
-					? CodeStructureGateVerdict.RejectedDeclarationsLost
-					: CodeStructureGateVerdict.RejectedDeclarationsAdded;
-			}
+			if (expected[index] == actual[index])
+				continue;
+
+			sameOrder = false;
+			break;
 		}
+
+		if (sameOrder)
+			return CodeStructureGateVerdict.Accepted;
+
+		// Query captures at the same source range have no stable traversal order after a splice.
+		// Fall back to a multiset only on the uncommon reordered path so missing, invented and
+		// duplicate declarations remain observable without taxing ordinary files.
+		var remainingDeclarations = expected
+			.GroupBy(static declaration => declaration)
+			.ToDictionary(static group => group.Key, static group => group.Count());
+		foreach (var declaration in actual)
+		{
+			if (!remainingDeclarations.TryGetValue(declaration, out var count) || count == 0)
+			{
+				return CodeStructureGateVerdict.RejectedDeclarationsAdded;
+			}
+
+			remainingDeclarations[declaration] = count - 1;
+		}
+
+		if (remainingDeclarations.Values.Any(static count => count != 0))
+			return CodeStructureGateVerdict.RejectedDeclarationsLost;
 
 		return CodeStructureGateVerdict.Accepted;
 	}

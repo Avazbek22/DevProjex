@@ -78,6 +78,32 @@ public sealed class CodeStructureGateTests
 	}
 
 	[Fact]
+	public void SameDeclarationMultisetInDifferentParserOrder_IsAccepted()
+	{
+		var field = new CodeDeclaration("field", "_waitForRenderPasses", 120, 40);
+		var initializerMethodGroup = new CodeDeclaration("field", "WaitForRenderPassesAsync", 120, 40);
+
+		var verdict = Evaluate(
+			[Method, field, initializerMethodGroup],
+			[Method, initializerMethodGroup, field]);
+
+		Assert.Equal(CodeStructureGateVerdict.Accepted, verdict);
+	}
+
+	[Fact]
+	public void ReorderedDeclarationComparisonStillCountsDuplicates()
+	{
+		var field = new CodeDeclaration("field", "_waitForRenderPasses", 120, 40);
+
+		Assert.Equal(
+			CodeStructureGateVerdict.RejectedDeclarationsAdded,
+			Evaluate([Method, field], [Method, field, field]));
+		Assert.Equal(
+			CodeStructureGateVerdict.RejectedDeclarationsLost,
+			Evaluate([Method, field, field], [Method, field]));
+	}
+
+	[Fact]
 	public void DefectInsideAReplacement_IsAlwaysNew()
 	{
 		// Unmappable: the node sits in text the splice invented, so it cannot have existed before.

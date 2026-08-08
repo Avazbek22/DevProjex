@@ -178,6 +178,13 @@ function Add-PathToCiPlan {
 		return
 	}
 
+	if (Test-PathEquals $normalized 'Tests/DevProjex.Tests.Terminal/PublishedSingleFileExtractionProcessTests.cs') {
+		# These tests skip without the RID-specific single-file artifact produced by Release Validation.
+		# Routing them only to the ordinary Terminal suite would report green without executing them.
+		Enable-CiTargets -Plan $Plan -Targets @('Terminal', 'Release') -Reason "Published process tests: $normalized"
+		return
+	}
+
 	if (Test-PathStartsWith $normalized 'Tests/DevProjex.Tests.Terminal/') {
 		Enable-CiTargets -Plan $Plan -Targets @('Terminal') -Reason "Terminal tests: $normalized"
 		return

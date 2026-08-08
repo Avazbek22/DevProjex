@@ -80,6 +80,31 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
+	public void CSharpFieldDeclarationCapturesOnlyTheDeclaratorName()
+	{
+		const string source = """
+			internal sealed class Coordinator
+			{
+			    private readonly System.Func<int> _factory = Create;
+			    private static int Create() => 42;
+			}
+			""";
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		using var tree = harness.Parser.Parse(source)!;
+		using var cursor = harness.Declarations.Execute(tree.RootNode);
+		var fieldNames = cursor.Matches
+			.Where(static match => match.Captures.Any(static capture =>
+				capture.Name.Equals("declaration", StringComparison.Ordinal) &&
+				capture.Node.Type.Equals("field_declaration", StringComparison.Ordinal)))
+			.SelectMany(static match => match.Captures)
+			.Where(static capture => capture.Name.Equals("name", StringComparison.Ordinal))
+			.Select(static capture => capture.Node.Text)
+			.ToArray();
+
+		Assert.Equal(["_factory"], fieldNames);
+	}
+
+	[Fact]
 	public void NoQueryCapturesAContainerBody()
 	{
 		// The safety list is defence in depth, but if a pattern ever does reach a container the

@@ -100,6 +100,31 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public async Task Prewarm_DeduplicatesSelectionAndSkipsUnsupportedAndEmptyFiles()
+	{
+		using var temp = new TemporaryDirectory();
+		var supported = temp.CreateFile("src/Supported.cs", "same-content");
+		var empty = temp.CreateFile("src/Empty.cs", string.Empty);
+		var unsupported = temp.CreateFile("notes/readme.txt", "plain text");
+		using var compressor = new RecordingCompressor(
+			isSupportedPath: static path =>
+				Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase));
+		using var session = new CodeCompressionSession(compressor);
+
+		var result = await new CodeCompressionPrewarmer(new FileContentAnalyzer()).WarmAsync(
+			new CodeCompressionContext(temp.Path, session),
+			[supported, supported, empty, unsupported, string.Empty],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, result.CandidateFiles);
+		Assert.Equal(1, result.WarmedFiles);
+		Assert.Equal(1, result.SkippedFiles);
+		Assert.Equal(0, result.FailedFiles);
+		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.Equal(1, session.Diagnostics.PrewarmAnalyses);
+	}
+
+	[Fact]
 	public void PrewarmAndOutputDisplayPathVariants_ShareAnalysisBySourceFile()
 	{
 		using var compressor = new RecordingCompressor();
@@ -210,10 +235,111 @@ public sealed class CodeCompressionSessionTests
 		Assert.Equal(CodeCompressionSession.PlanCacheCapacity, compressor.AnalysisCount);
 	}
 
+	[Fact]
+	public async Task ResetWhileAnalysisIsActive_CannotRestoreAnObsoletePlanOrSnapshot()
+	{
+		using var compressor = new BlockingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		using var obsoleteScope = session.BeginOutput("old-project", ["sample.cs"]);
+		var cancellationToken = TestContext.Current.CancellationToken;
+
+		var obsoleteTransform = Task.Run(
+			() => obsoleteScope.Transform("sample.cs", "sample.cs", "same-content", cancellationToken),
+			cancellationToken);
+		await compressor.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+
+		session.Reset();
+		compressor.Release();
+		await obsoleteTransform;
+		_ = obsoleteScope.Complete();
+
+		Assert.Equal(CodeCompressionSnapshot.Empty, session.Snapshot);
+		using var currentScope = session.BeginOutput("new-project", ["sample.cs"]);
+		_ = currentScope.Transform("sample.cs", "sample.cs", "same-content", cancellationToken);
+		var currentSnapshot = currentScope.Complete();
+
+		Assert.Equal(2, compressor.AnalysisCount);
+		Assert.Same(currentSnapshot, session.Snapshot);
+		Assert.Equal(1, session.Diagnostics.AnalysisExecutions);
+	}
+
+	[Fact]
+	public void ResetBeforeQueuedPrewarmBegins_CannotPopulateTheCurrentGenerationCache()
+	{
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		using var obsoleteWarmup = session.BeginOutput("old-project", ["sample.cs"]);
+
+		session.Reset();
+		obsoleteWarmup.Warm(
+			"sample.cs",
+			"sample.cs",
+			"same-content",
+			CancellationToken.None);
+
+		Assert.Equal(0, compressor.AnalysisCount);
+		Assert.Equal(0, session.Diagnostics.PrewarmRequests);
+		using var current = session.BeginOutput("new-project", ["sample.cs"]);
+		_ = current.Transform(
+			"sample.cs",
+			"sample.cs",
+			"same-content",
+			CancellationToken.None);
+		_ = current.Complete();
+
+		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.Equal(0, session.Diagnostics.CacheHits);
+		Assert.Equal(1, session.Diagnostics.CacheMisses);
+	}
+
+	[Fact]
+	public async Task CanceledForegroundAnalysis_DoesNotPoisonIndependentWarmup()
+	{
+		using var compressor = new CancelFirstAnalysisCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		using var outputScope = session.BeginOutput("project", ["sample.cs"]);
+		using var warmScope = session.BeginOutput("project", ["sample.cs"]);
+		using var outputCancellation = new CancellationTokenSource();
+		var cancellationToken = TestContext.Current.CancellationToken;
+
+		var output = Task.Run(
+			() => outputScope.Transform(
+				"sample.cs",
+				"sample.cs",
+				"same-content",
+				outputCancellation.Token),
+			cancellationToken);
+		await compressor.FirstAnalysisStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+		var warmup = Task.Run(
+			() => warmScope.Warm("sample.cs", "sample.cs", "same-content", cancellationToken),
+			cancellationToken);
+		Assert.True(
+			SpinWait.SpinUntil(
+				() => session.Diagnostics.PrewarmReuses == 1,
+				TimeSpan.FromSeconds(5)),
+			"Warmup did not join the active foreground analysis.");
+
+		outputCancellation.Cancel();
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => output);
+		await warmup;
+
+		using var verificationScope = session.BeginOutput("project", ["sample.cs"]);
+		_ = verificationScope.Transform(
+			"sample.cs",
+			"sample.cs",
+			"same-content",
+			cancellationToken);
+		_ = verificationScope.Complete();
+
+		Assert.Equal(2, compressor.AnalysisCount);
+		Assert.Equal(1, session.Diagnostics.CacheHits);
+	}
+
 	private sealed class RecordingCompressor(
 		int delayMilliseconds = 0,
 		bool isSupported = true,
-		bool coordinateFirstPair = false) : ICodeCompressor, IDisposable
+		bool coordinateFirstPair = false,
+		Func<string, bool>? isSupportedPath = null) : ICodeCompressor, IDisposable
 	{
 		private readonly ManualResetEventSlim _firstPairReady = new(false);
 		private readonly int _delayMilliseconds = delayMilliseconds;
@@ -225,7 +351,8 @@ public sealed class CodeCompressionSessionTests
 		public string TransformIdentity => "recording:v1";
 		public int AnalysisCount => Volatile.Read(ref _analysisCount);
 		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
-		public bool IsSupported(string relativePath) => isSupported;
+		public bool IsSupported(string relativePath) =>
+			isSupportedPath?.Invoke(relativePath) ?? isSupported;
 		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
 		public void Dispose() => _firstPairReady.Dispose();
 
@@ -326,6 +453,48 @@ public sealed class CodeCompressionSessionTests
 			public void Dispose()
 			{
 			}
+		}
+	}
+
+	private sealed class CancelFirstAnalysisCompressor : ICodeCompressor, IDisposable
+	{
+		private int _analysisCount;
+
+		public string TransformIdentity => "cancel-first:v1";
+		public int AnalysisCount => Volatile.Read(ref _analysisCount);
+		public TaskCompletionSource FirstAnalysisStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public bool IsSupported(string relativePath) => true;
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
+		public void Dispose() { }
+
+		private sealed class Scope(CancelFirstAnalysisCompressor owner) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken)
+			{
+				var call = Interlocked.Increment(ref owner._analysisCount);
+				if (call == 1)
+				{
+					owner.FirstAnalysisStarted.TrySetResult();
+					cancellationToken.WaitHandle.WaitOne();
+					cancellationToken.ThrowIfCancellationRequested();
+				}
+
+				return new CodeCompressionAnalysis(
+					CodeCompressionPlan.Unchanged(
+						relativePath,
+						"test",
+						CodeCompressionOutcome.UnchangedNoBenefit,
+						content.Length,
+						owner.TransformIdentity),
+					null);
+			}
+
+			public void Dispose() { }
 		}
 	}
 

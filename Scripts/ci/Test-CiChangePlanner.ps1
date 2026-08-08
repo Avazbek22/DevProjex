@@ -89,6 +89,11 @@ Assert-Plan -Name 'Windows path normalization' -Path 'Tests\DevProjex.Tests.UI\M
 	-Enabled UI `
 	-Disabled @('Unit', 'Integration', 'Terminal', 'Release', 'Store', 'Full')
 
+Assert-Plan -Name 'Published single-file process test' `
+	-Path 'Tests/DevProjex.Tests.Terminal/PublishedSingleFileExtractionProcessTests.cs' `
+	-Enabled @('Terminal', 'Release') `
+	-Disabled @('Unit', 'Integration', 'UI', 'TerminalCommand', 'IgnoreScanner', 'Documentation', 'Store', 'Full')
+
 Assert-Plan -Name 'Mixed changes union their targets' -Path @('README.md', 'Tests/DevProjex.Tests.Unit/FooTests.cs') `
 	-Enabled @('Documentation', 'Unit') `
 	-Disabled @('Integration', 'Terminal', 'UI', 'Release', 'Store', 'Full')

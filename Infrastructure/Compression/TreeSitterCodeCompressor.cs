@@ -473,7 +473,14 @@ internal sealed class TreeSitterCompressionScope(
 		}
 
 		declarations.Sort(static (left, right) =>
-			left.Start != right.Start ? left.Start.CompareTo(right.Start) : string.CompareOrdinal(left.Kind, right.Kind));
+		{
+			var result = left.Start.CompareTo(right.Start);
+			if (result != 0)
+				return result;
+
+			result = string.CompareOrdinal(left.Kind, right.Kind);
+			return result != 0 ? result : string.CompareOrdinal(left.Name, right.Name);
+		});
 		return declarations;
 	}
 
