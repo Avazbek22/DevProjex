@@ -65,8 +65,10 @@ internal sealed class MetricsPipeline(
     private readonly object _metricsLock = new();
     private readonly object _computationCacheLock = new();
     private readonly Dictionary<string, FileMetricsCacheEntry> _fileMetricsCache = new(PathComparer.Default);
+    private readonly CodeCompressionPrewarmer _compressionPrewarmer = new(fileContentAnalyzer);
 
     private CancellationTokenSource? _metricsCalculationCts;
+    private CancellationTokenSource? _compressionPrewarmCts;
     private DispatcherTimer? _metricsDebounceTimer;
     private CancellationTokenSource? _recalculateMetricsCts;
     private volatile bool _isBackgroundMetricsActive;
@@ -102,6 +104,29 @@ internal sealed class MetricsPipeline(
     }
 
     public bool HasStatusMetricsSnapshot => _hasStatusMetricsSnapshot;
+
+    public void CancelCompressionPrewarm() =>
+        _compressionPrewarmCts?.Cancel();
+
+    public Task PrewarmCompressionAsync(
+        BuildTreeResult currentTree,
+        CancellationToken cancellationToken)
+    {
+        var compression = transformationContextProvider?.Invoke()?.Compression;
+        if (compression is null)
+            return Task.CompletedTask;
+
+        var selectedPaths = selectedPathsProvider();
+        var filePaths = selectedPaths.Count > 0
+            ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
+            : GetOrBuildAllOrderedFilePaths(currentTree);
+        var prewarmCts = ReplaceCancellationSource(ref _compressionPrewarmCts);
+        return PrewarmCompressionCoreAsync(
+            compression,
+            filePaths,
+            prewarmCts,
+            cancellationToken);
+    }
 
     public void ScheduleRecalculate()
     {
@@ -254,6 +279,7 @@ internal sealed class MetricsPipeline(
         _isBackgroundMetricsActive = false;
         _metricsCalculationCts?.Cancel();
         _recalculateMetricsCts?.Cancel();
+        _compressionPrewarmCts?.Cancel();
     }
 
     public void CancelAndDiscardBackgroundCalculation()
@@ -440,12 +466,37 @@ internal sealed class MetricsPipeline(
     {
         CancelAndDispose(ref _metricsCalculationCts);
         CancelAndDispose(ref _recalculateMetricsCts);
+        CancelAndDispose(ref _compressionPrewarmCts);
 
         if (_metricsDebounceTimer is not null)
         {
             _metricsDebounceTimer.Stop();
             _metricsDebounceTimer.Tick -= OnMetricsDebounceTimerTick;
             _metricsDebounceTimer = null;
+        }
+    }
+
+    private async Task PrewarmCompressionCoreAsync(
+        CodeCompressionContext compression,
+        IReadOnlyList<string> filePaths,
+        CancellationTokenSource prewarmCts,
+        CancellationToken cancellationToken)
+    {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            prewarmCts.Token,
+            cancellationToken);
+        try
+        {
+            await _compressionPrewarmer
+                .WarmAsync(compression, filePaths, linkedCts.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            DisposeIfCurrent(ref _compressionPrewarmCts, prewarmCts);
         }
     }
 

@@ -116,7 +116,18 @@ public sealed record CodeCompressionPlan(
 			throw new ArgumentException($"The plan was built for {SourceLength} characters but the text has {source.Length}.", nameof(source));
 		return !HasEdits
 			? new CodeCompressionResult(source, ContentTransformMap.Identity)
-			: ApplyCore(source.AsSpan());
+			: ApplyCore(source, ContentTransformMap.Create(Edits, SourceLength));
+	}
+
+	internal CodeCompressionResult Apply(string source, ContentTransformMap map)
+	{
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentNullException.ThrowIfNull(map);
+		if (source.Length != SourceLength)
+			throw new ArgumentException($"The plan was built for {SourceLength} characters but the text has {source.Length}.", nameof(source));
+		return !HasEdits
+			? new CodeCompressionResult(source, ContentTransformMap.Identity)
+			: ApplyCore(source, map);
 	}
 
 	public CodeCompressionResult Apply(ReadOnlySpan<char> source)
@@ -126,6 +137,30 @@ public sealed record CodeCompressionPlan(
 		if (!HasEdits)
 			return new CodeCompressionResult(source.ToString(), ContentTransformMap.Identity);
 		return ApplyCore(source);
+	}
+
+	private CodeCompressionResult ApplyCore(string source, ContentTransformMap map)
+	{
+		var text = string.Create(
+			TransformedLength,
+			(Source: source, Edits),
+			static (destination, state) =>
+			{
+				var sourceCursor = 0;
+				var destinationCursor = 0;
+				foreach (var edit in state.Edits)
+				{
+					var retained = state.Source.AsSpan(sourceCursor, edit.SourceStart - sourceCursor);
+					retained.CopyTo(destination[destinationCursor..]);
+					destinationCursor += retained.Length;
+					edit.Replacement.AsSpan().CopyTo(destination[destinationCursor..]);
+					destinationCursor += edit.Replacement.Length;
+					sourceCursor = edit.SourceEnd;
+				}
+
+				state.Source.AsSpan(sourceCursor).CopyTo(destination[destinationCursor..]);
+			});
+		return new CodeCompressionResult(text, map);
 	}
 
 	private CodeCompressionResult ApplyCore(ReadOnlySpan<char> source)

@@ -207,6 +207,9 @@ internal sealed class PreviewWorkspaceController : IDisposable
         var openCanceled = false;
         var openAnimationStarted = false;
         var openAnimationInterrupted = false;
+        var publicationReady = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        PreviewRefreshOperation? previewRefreshOperation = null;
         var animationCts = ReplacePaneAnimationCancellation();
         var cancellationToken = animationCts.Token;
         _isOpeningPreview = true;
@@ -215,6 +218,9 @@ internal sealed class PreviewWorkspaceController : IDisposable
             try
             {
                 _viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+                previewRefreshOperation = _previewPipeline.RefreshNowAsync(
+                    publicationReady: publicationReady.Task,
+                    deferPresentationUntilPublication: true);
                 cancellationToken.ThrowIfCancellationRequested();
                 PreparePreviewPaneOpenLayout(initialTreeWidth, targetTreeWidth);
                 UpdatePreviewSegmentThumbPosition(animate: false);
@@ -246,10 +252,11 @@ internal sealed class PreviewWorkspaceController : IDisposable
 
             if (!openAnimationInterrupted && !_closeRequestedDuringOpen)
             {
-                var previewRefreshOperation = _previewPipeline.RefreshNowAsync();
+                publicationReady.TrySetResult();
                 try
                 {
-                    await previewRefreshOperation.FirstContentReady;
+                    if (previewRefreshOperation is { } refreshOperation)
+                        await refreshOperation.FirstContentReady;
                 }
                 catch (OperationCanceledException)
                 {
@@ -259,6 +266,7 @@ internal sealed class PreviewWorkspaceController : IDisposable
         }
         finally
         {
+            publicationReady.TrySetResult();
             CompletePaneAnimationCancellation(animationCts);
             _isOpeningPreview = false;
         }

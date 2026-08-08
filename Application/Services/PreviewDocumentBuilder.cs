@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Application.Services;
@@ -23,6 +24,8 @@ public sealed class PreviewDocumentBuilder(
     private const string WhitespaceMarkerPrefix = "[Whitespace, ";
     private const string WhitespaceMarkerSuffix = " bytes]";
     private const int InMemoryDocumentThresholdChars = 500_000;
+    private const long MaximumParallelPreparationFileBytes = 1024 * 1024;
+    private const int MaximumParallelPreparations = 8;
 
     public IPreviewTextDocument CreateInMemory(string? text, IReadOnlyList<PreviewDocumentSection>? sections = null)
         => new InMemoryPreviewTextDocument(text, sections);
@@ -163,16 +166,16 @@ public sealed class PreviewDocumentBuilder(
         var anyWritten = false;
         var trimTrailingEstimatedLine = false;
 
-        foreach (var file in orderedFiles)
+        await foreach (var prepared in PrepareContentEntriesAsync(
+                           orderedFiles,
+                           displayPathMapper,
+                           redactionScope,
+                           transformationScope,
+                           cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            var maximumFileBytes = redactionScope is null
-                ? MaximumInteractiveFileBytes
-                : SecretRedactionOutputPreparer.MaximumScannableFileBytes;
-            var readResult = await contentAnalyzer
-                .ReadClassifiedAsync(file, maximumFileBytes, cancellationToken)
-                .ConfigureAwait(false);
+            var file = prepared.FilePath;
+            var readResult = prepared.ReadResult;
             var content = readResult.Content;
 			if (redactionScope is not null &&
 			    readResult.Classification is not (
@@ -203,7 +206,7 @@ public sealed class PreviewDocumentBuilder(
             anyWritten = true;
             trimTrailingEstimatedLine = false;
 
-            var displayPath = MapDisplayPath(file, displayPathMapper);
+            var displayPath = prepared.DisplayPath;
             var sectionStartLine = builder.LineCount + 1;
             builder.AppendLine($"{displayPath}:");
             builder.AppendLine(ClipboardBlankLine);
@@ -272,11 +275,7 @@ public sealed class PreviewDocumentBuilder(
 			using var contentLease = redactionScope?.TrackFullContentBuffer();
 			// Compression first: secrets must be detected in the text that actually ships, so a
 			// value inside a removed body is neither redacted nor counted.
-			var compression = transformationScope?.Compress(
-				file,
-				displayPath,
-				content.Content,
-				cancellationToken);
+			var compression = prepared.Compression;
 			var compressed = compression?.Text ?? content.Content;
 			var transformed = redactionScope?.Redact(
 				file,
@@ -306,6 +305,157 @@ public sealed class PreviewDocumentBuilder(
 
         return anyWritten;
     }
+
+    private async IAsyncEnumerable<PreparedContentEntry> PrepareContentEntriesAsync(
+        IReadOnlyList<string> orderedFiles,
+        Func<string, string>? displayPathMapper,
+        SecretRedactionScope? redactionScope,
+        ContentTransformationScope? transformationScope,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (transformationScope?.Compression is null)
+        {
+            foreach (var file in orderedFiles)
+            {
+                yield return await PrepareContentEntryAsync(
+                        file,
+                        displayPathMapper,
+                        redactionScope,
+                        transformationScope,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            yield break;
+        }
+
+        var batch = new List<string>(MaximumParallelPreparations);
+        foreach (var file in orderedFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsSmallFile(file))
+            {
+                await foreach (var entry in PrepareParallelBatchAsync(
+                                   batch,
+                                   displayPathMapper,
+                                   redactionScope,
+                                   transformationScope,
+                                   cancellationToken).ConfigureAwait(false))
+                {
+                    yield return entry;
+                }
+
+                batch.Clear();
+                yield return await PrepareContentEntryAsync(
+                        file,
+                        displayPathMapper,
+                        redactionScope,
+                        transformationScope,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                continue;
+            }
+
+            batch.Add(file);
+            if (batch.Count < MaximumParallelPreparations)
+                continue;
+
+            await foreach (var entry in PrepareParallelBatchAsync(
+                               batch,
+                               displayPathMapper,
+                               redactionScope,
+                               transformationScope,
+                               cancellationToken).ConfigureAwait(false))
+            {
+                yield return entry;
+            }
+
+            batch.Clear();
+        }
+
+        await foreach (var entry in PrepareParallelBatchAsync(
+                           batch,
+                           displayPathMapper,
+                           redactionScope,
+                           transformationScope,
+                           cancellationToken).ConfigureAwait(false))
+        {
+            yield return entry;
+        }
+    }
+
+    private async IAsyncEnumerable<PreparedContentEntry> PrepareParallelBatchAsync(
+        IReadOnlyList<string> files,
+        Func<string, string>? displayPathMapper,
+        SecretRedactionScope? redactionScope,
+        ContentTransformationScope transformationScope,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (files.Count == 0)
+            yield break;
+
+        var tasks = new Task<PreparedContentEntry>[files.Count];
+        for (var index = 0; index < files.Count; index++)
+        {
+            var file = files[index];
+            tasks[index] = Task.Run(
+                () => PrepareContentEntryAsync(
+                    file,
+                    displayPathMapper,
+                    redactionScope,
+                    transformationScope,
+                    cancellationToken).AsTask(),
+                cancellationToken);
+        }
+
+        var entries = await Task.WhenAll(tasks).ConfigureAwait(false);
+        foreach (var entry in entries)
+            yield return entry;
+    }
+
+    private async ValueTask<PreparedContentEntry> PrepareContentEntryAsync(
+        string file,
+        Func<string, string>? displayPathMapper,
+        SecretRedactionScope? redactionScope,
+        ContentTransformationScope? transformationScope,
+        CancellationToken cancellationToken)
+    {
+        var maximumFileBytes = redactionScope is null
+            ? MaximumInteractiveFileBytes
+            : SecretRedactionOutputPreparer.MaximumScannableFileBytes;
+        var readResult = await contentAnalyzer
+            .ReadClassifiedAsync(file, maximumFileBytes, cancellationToken)
+            .ConfigureAwait(false);
+        var displayPath = MapDisplayPath(file, displayPathMapper);
+        var content = readResult.Content;
+        var compression = readResult.IsText &&
+                          content is { IsEstimated: false, IsEmpty: false, IsWhitespaceOnly: false }
+            ? transformationScope?.Compress(
+                file,
+                displayPath,
+                content.Content,
+                cancellationToken)
+            : null;
+        return new PreparedContentEntry(file, displayPath, readResult, compression);
+    }
+
+    private static bool IsSmallFile(string path)
+    {
+        try
+        {
+            return new FileInfo(path).Length <= MaximumParallelPreparationFileBytes;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private sealed record PreparedContentEntry(
+        string FilePath,
+        string DisplayPath,
+        FileContentReadResult ReadResult,
+        CodeCompressionResult? Compression);
 
 	private static void AppendPreviewRedactionSpans(
 		ICollection<PreviewRedactionSpan> destination,

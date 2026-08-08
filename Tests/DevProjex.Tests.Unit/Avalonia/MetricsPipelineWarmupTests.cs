@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Avalonia.Threading;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Preview;
 using DevProjex.Avalonia.Services;
 
@@ -72,6 +73,112 @@ public sealed class MetricsPipelineWarmupTests
         Assert.True(pipeline.HasCompleteBaseline);
         Assert.Contains(100, observedProgressValues);
     }
+
+	[AvaloniaFact]
+	public async Task CompressionPrewarm_DoesNotWaitForTheMetricsVisualGate()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile("Program.cs", "internal class Program { void Run() { } }");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var transformationContext = ContentTransformationContext.For(
+			new CodeCompressionContext(temp.Path, compressionSession),
+			redaction: null);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			new FileContentAnalyzer(),
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => transformationContext);
+		var visualReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		var delayedMetrics = pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			visualReady.Task,
+			TestContext.Current.CancellationToken);
+		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.False(delayedMetrics.IsCompleted);
+		Assert.False(pipeline.HasCompleteBaseline);
+
+		visualReady.SetResult();
+		await delayedMetrics.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.True(compressionSession.Diagnostics.CacheHits > 0);
+		Assert.True(pipeline.HasCompleteBaseline);
+	}
+
+	[AvaloniaFact]
+	public async Task CompressionPrewarm_AnalyzesOnlyTheEffectiveSelection()
+	{
+		using var temp = new TemporaryDirectory();
+		var selectedFile = temp.CreateFile("Selected.cs", "internal class Selected { }");
+		var otherFile = temp.CreateFile("Other.cs", "internal class Other { }");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[
+				new TreeNodeDescriptor("Other.cs", otherFile, false, false, "csharp", []),
+				new TreeNodeDescriptor("Selected.cs", selectedFile, false, false, "csharp", [])
+			]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [otherFile, selectedFile]);
+		var viewModel = CreateViewModel();
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			new FileContentAnalyzer(),
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>([selectedFile], PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => ContentTransformationContext.For(
+				new CodeCompressionContext(temp.Path, compressionSession),
+				redaction: null));
+
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.Equal(1, compressionSession.Diagnostics.PrewarmRequests);
+	}
 
     [AvaloniaFact]
     public async Task InitializeFileMetricsCacheAsync_InvalidatedWhileWaitingNeverReadsObsoleteTree()
@@ -580,4 +687,42 @@ public sealed class MetricsPipelineWarmupTests
                 maxSizeForFullRead,
                 cancellationToken);
     }
+
+	private sealed class CountingCodeCompressor : ICodeCompressor, IDisposable
+	{
+		private int _analysisCount;
+
+		public string TransformIdentity => "metrics-prewarm:v1";
+		public int AnalysisCount => Volatile.Read(ref _analysisCount);
+		public bool IsSupported(string relativePath) =>
+			Path.GetExtension(relativePath).Equals(".cs", StringComparison.OrdinalIgnoreCase);
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
+		public void Dispose()
+		{
+		}
+
+		private sealed class Scope(CountingCodeCompressor owner) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken)
+			{
+				Interlocked.Increment(ref owner._analysisCount);
+				return new CodeCompressionAnalysis(
+					CodeCompressionPlan.Unchanged(
+						relativePath,
+						"csharp",
+						CodeCompressionOutcome.UnchangedNoBenefit,
+						content.Length,
+						owner.TransformIdentity),
+					null);
+			}
+
+			public void Dispose()
+			{
+			}
+		}
+	}
 }

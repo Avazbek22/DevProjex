@@ -390,6 +390,13 @@ public partial class MainWindow : Window
 		var compressionEnabled = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
 			.Contains(IgnoreOptionId.CompressCode);
+		_metrics.CancelCompressionPrewarm();
+		if (compressionEnabled && _currentTree is not null)
+		{
+			ObserveDetachedTask(
+				_metrics.PrewarmCompressionAsync(_currentTree, CancellationToken.None),
+				"PrewarmCodeCompression");
+		}
 		_codeCompressionSnapshot = compressionEnabled
 			? GetCompressionSnapshotForCurrentSelection()
 			: null;
@@ -1276,6 +1283,9 @@ public partial class MainWindow : Window
     {
         // The tree is already visible at this point. Keep any non-critical post-load work detached
         // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
+        ObserveDetachedTask(
+            _metrics.PrewarmCompressionAsync(currentTree, cancellationToken),
+            "PrewarmCodeCompression");
         var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(
             _projectLoadFinalizationTask,
             cancellationToken);

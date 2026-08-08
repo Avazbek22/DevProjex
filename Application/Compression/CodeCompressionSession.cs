@@ -34,6 +34,17 @@ public sealed record CodeCompressionSnapshot(
 		characters <= 0 ? 0 : (characters / 4) + (characters % 4 == 0 ? 0 : 1);
 }
 
+public sealed record CodeCompressionDiagnosticsSnapshot(
+	long HashComputations,
+	long CacheHits,
+	long CacheMisses,
+	long AnalysisExecutions,
+	long PrewarmRequests,
+	long PrewarmCacheHits,
+	long PrewarmAnalyses,
+	long PrewarmReuses,
+	long UnsupportedFastPaths);
+
 /// <summary>
 /// Window-lifetime state for code compression: the compressor, a plan cache and the last published
 /// snapshot. Deliberately shaped like <see cref="Secrets.SecretRedactionSession"/> - same
@@ -42,12 +53,24 @@ public sealed record CodeCompressionSnapshot(
 /// </summary>
 public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDisposable
 {
-	private const int MaximumCachedPlans = 4096;
+	internal const int PlanCacheCapacity = 4096;
 	private readonly Dictionary<CodeCompressionCacheKey, LinkedListNode<CachedPlan>> _cache = [];
 	private readonly LinkedList<CachedPlan> _cacheRecency = [];
 	private readonly ConcurrentDictionary<InFlightCompressionKey, Lazy<CodeCompressionAnalysis>> _inFlight = [];
+	private readonly ConcurrentDictionary<CodeCompressionCacheKey, Lazy<CodeCompressionAnalysis>> _prewarmInFlight = [];
 	private readonly object _sync = new();
 	private CodeCompressionSnapshot _snapshot = CodeCompressionSnapshot.Empty;
+	private CancellationTokenSource _generationCts = new();
+	private long _generation;
+	private long _hashComputations;
+	private long _cacheHits;
+	private long _cacheMisses;
+	private long _analysisExecutions;
+	private long _prewarmRequests;
+	private long _prewarmCacheHits;
+	private long _prewarmAnalyses;
+	private long _prewarmReuses;
+	private long _unsupportedFastPaths;
 	private bool _disposed;
 
 	public event EventHandler? SnapshotPublished;
@@ -55,6 +78,17 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	public string TransformIdentity => compressor.TransformIdentity;
 
 	public bool IsSupported(string relativePath) => compressor.IsSupported(relativePath);
+
+	public CodeCompressionDiagnosticsSnapshot Diagnostics => new(
+		Interlocked.Read(ref _hashComputations),
+		Interlocked.Read(ref _cacheHits),
+		Interlocked.Read(ref _cacheMisses),
+		Interlocked.Read(ref _analysisExecutions),
+		Interlocked.Read(ref _prewarmRequests),
+		Interlocked.Read(ref _prewarmCacheHits),
+		Interlocked.Read(ref _prewarmAnalyses),
+		Interlocked.Read(ref _prewarmReuses),
+		Interlocked.Read(ref _unsupportedFastPaths));
 
 	public CodeCompressionSnapshot Snapshot
 	{
@@ -83,27 +117,73 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		if (!compressor.IsSupported(relativePath))
+		{
+			Interlocked.Increment(ref _unsupportedFastPaths);
+			var unsupported = CodeCompressionPlan.Unchanged(
+				relativePath,
+				"unknown",
+				CodeCompressionOutcome.UnchangedUnsupportedLanguage,
+				content.Length,
+				compressor.TransformIdentity);
+			return new CodeCompressionExecution(
+				unsupported,
+				new CodeCompressionResult(content, ContentTransformMap.Identity));
+		}
+
 		var key = CodeCompressionCacheKey.Create(
 			relativePath,
 			content,
 			compressor.TransformIdentity);
+		Interlocked.Increment(ref _hashComputations);
 		if (TryGetCachedPlan(key, out var cached))
-			return new CodeCompressionExecution(cached, cached.Apply(content));
+		{
+			Interlocked.Increment(ref _cacheHits);
+			return new CodeCompressionExecution(cached.Plan, cached.Plan.Apply(content, cached.Map));
+		}
+
+		if (_prewarmInFlight.TryGetValue(key, out var warming))
+		{
+			Interlocked.Increment(ref _prewarmReuses);
+			var analysis = warming.Value;
+			cancellationToken.ThrowIfCancellationRequested();
+			var warmed = CacheAnalysis(key, analysis);
+			return new CodeCompressionExecution(
+				warmed.Plan,
+				analysis.ValidatedResult ?? warmed.Plan.Apply(content, warmed.Map));
+		}
+
+		// Warmup publishes into the cache before removing its in-flight entry. If it completed
+		// between the first cache lookup and the in-flight lookup, observe that result instead of
+		// starting the same native parse again.
+		if (TryGetCachedPlan(key, out cached))
+		{
+			Interlocked.Increment(ref _cacheHits);
+			return new CodeCompressionExecution(cached.Plan, cached.Plan.Apply(content, cached.Map));
+		}
+
+		Interlocked.Increment(ref _cacheMisses);
 
 		// Sharing is deliberately scoped to one output operation. Different operations own different
 		// cancellation tokens; allowing one canceled preview to fail a simultaneous export would make
 		// the cache an observable source of cross-surface coupling.
 		var inFlightKey = new InFlightCompressionKey(key, scope);
 		var candidate = new Lazy<CodeCompressionAnalysis>(
-			() => scope.Analyze(fullPath, relativePath, content, cancellationToken),
+			() =>
+			{
+				Interlocked.Increment(ref _analysisExecutions);
+				return scope.Analyze(fullPath, relativePath, content, cancellationToken);
+			},
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var pending = _inFlight.GetOrAdd(inFlightKey, candidate);
 		try
 		{
 			var analysis = pending.Value;
 			cancellationToken.ThrowIfCancellationRequested();
-			CachePlan(key, analysis.Plan);
-			return new CodeCompressionExecution(analysis.Plan, analysis.GetResult(content));
+			var cachedAnalysis = CacheAnalysis(key, analysis);
+			return new CodeCompressionExecution(
+				cachedAnalysis.Plan,
+				analysis.ValidatedResult ?? cachedAnalysis.Plan.Apply(content, cachedAnalysis.Map));
 		}
 		finally
 		{
@@ -112,7 +192,88 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		}
 	}
 
-	private bool TryGetCachedPlan(CodeCompressionCacheKey key, out CodeCompressionPlan plan)
+	internal void Warm(
+		ICodeCompressionScope scope,
+		string fullPath,
+		string relativePath,
+		string content,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		if (!compressor.IsSupported(relativePath))
+			return;
+
+		Interlocked.Increment(ref _prewarmRequests);
+		var key = CodeCompressionCacheKey.Create(relativePath, content, compressor.TransformIdentity);
+		Interlocked.Increment(ref _hashComputations);
+		if (TryGetCachedPlan(key, out _))
+		{
+			Interlocked.Increment(ref _prewarmCacheHits);
+			return;
+		}
+
+		var generation = CaptureGeneration();
+		if (TryGetActiveOutputAnalysis(key, out var activeOutput))
+		{
+			Interlocked.Increment(ref _prewarmReuses);
+			try
+			{
+				var analysis = activeOutput.Value;
+				if (generation.Version == Volatile.Read(ref _generation))
+					CacheAnalysis(key, analysis);
+				cancellationToken.ThrowIfCancellationRequested();
+				return;
+			}
+			catch (OperationCanceledException) when (
+				!generation.Token.IsCancellationRequested &&
+				!cancellationToken.IsCancellationRequested)
+			{
+				// The foreground owner was canceled. Warmup owns an independent generation token,
+				// so it can retry without allowing that cancellation to poison the shared cache.
+			}
+		}
+
+		var candidate = new Lazy<CodeCompressionAnalysis>(
+			() =>
+			{
+				Interlocked.Increment(ref _analysisExecutions);
+				Interlocked.Increment(ref _prewarmAnalyses);
+				return scope.Analyze(fullPath, relativePath, content, generation.Token);
+			},
+			LazyThreadSafetyMode.ExecutionAndPublication);
+		var pending = _prewarmInFlight.GetOrAdd(key, candidate);
+		try
+		{
+			var analysis = pending.Value;
+			if (generation.Version == Volatile.Read(ref _generation))
+				CacheAnalysis(key, analysis);
+			cancellationToken.ThrowIfCancellationRequested();
+		}
+		finally
+		{
+			if (_prewarmInFlight.TryGetValue(key, out var current) && ReferenceEquals(current, pending))
+				_prewarmInFlight.TryRemove(key, out _);
+		}
+	}
+
+	private bool TryGetActiveOutputAnalysis(
+		CodeCompressionCacheKey key,
+		out Lazy<CodeCompressionAnalysis> analysis)
+	{
+		foreach (var pair in _inFlight)
+		{
+			if (pair.Key.CacheKey.Equals(key))
+			{
+				analysis = pair.Value;
+				return true;
+			}
+		}
+
+		analysis = null!;
+		return false;
+	}
+
+	private bool TryGetCachedPlan(CodeCompressionCacheKey key, out CachedPlan plan)
 	{
 		lock (_sync)
 		{
@@ -124,31 +285,41 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 			_cacheRecency.Remove(node);
 			_cacheRecency.AddFirst(node);
-			plan = node.Value.Plan;
+			plan = node.Value;
 			return true;
 		}
 	}
 
-	private void CachePlan(CodeCompressionCacheKey key, CodeCompressionPlan plan)
+	private CachedPlan CacheAnalysis(CodeCompressionCacheKey key, CodeCompressionAnalysis analysis)
 	{
 		lock (_sync)
 		{
 			if (_cache.TryGetValue(key, out var existing))
 			{
 				_cacheRecency.Remove(existing);
-				existing.Value = new CachedPlan(key, plan);
 				_cacheRecency.AddFirst(existing);
-				return;
+				return existing.Value;
 			}
 
-			var node = _cacheRecency.AddFirst(new CachedPlan(key, plan));
+			var plan = analysis.Plan;
+			var cachedPlan = new CachedPlan(
+				key,
+				plan,
+				analysis.ValidatedResult?.Map ??
+				(plan.HasEdits
+					? ContentTransformMap.Create(plan.Edits, plan.SourceLength)
+					: ContentTransformMap.Identity));
+
+			var node = _cacheRecency.AddFirst(cachedPlan);
 			_cache.Add(key, node);
-			while (_cache.Count > MaximumCachedPlans)
+			while (_cache.Count > PlanCacheCapacity)
 			{
 				var leastRecent = _cacheRecency.Last!;
 				_cacheRecency.RemoveLast();
 				_cache.Remove(leastRecent.Value.Key);
 			}
+
+			return node.Value;
 		}
 	}
 
@@ -162,13 +333,21 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	/// <summary>Drops cached plans and the published snapshot; used when the project changes.</summary>
 	public void Reset()
 	{
+		CancellationTokenSource previousGeneration;
 		lock (_sync)
 		{
+			previousGeneration = _generationCts;
+			_generationCts = new CancellationTokenSource();
+			_generation++;
 			_cache.Clear();
 			_cacheRecency.Clear();
 			_snapshot = CodeCompressionSnapshot.Empty;
 		}
+		previousGeneration.Cancel();
+		previousGeneration.Dispose();
 		_inFlight.Clear();
+		_prewarmInFlight.Clear();
+		ResetDiagnostics();
 	}
 
 	public void Dispose()
@@ -195,7 +374,30 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	private static void AppendLengthPrefixed(StringBuilder builder, string value) =>
 		builder.Append(value.Length).Append(':').Append(value);
 
-	private sealed record CachedPlan(CodeCompressionCacheKey Key, CodeCompressionPlan Plan);
+	private GenerationSnapshot CaptureGeneration()
+	{
+		lock (_sync)
+			return new GenerationSnapshot(_generation, _generationCts.Token);
+	}
+
+	private void ResetDiagnostics()
+	{
+		Interlocked.Exchange(ref _hashComputations, 0);
+		Interlocked.Exchange(ref _cacheHits, 0);
+		Interlocked.Exchange(ref _cacheMisses, 0);
+		Interlocked.Exchange(ref _analysisExecutions, 0);
+		Interlocked.Exchange(ref _prewarmRequests, 0);
+		Interlocked.Exchange(ref _prewarmCacheHits, 0);
+		Interlocked.Exchange(ref _prewarmAnalyses, 0);
+		Interlocked.Exchange(ref _prewarmReuses, 0);
+		Interlocked.Exchange(ref _unsupportedFastPaths, 0);
+	}
+
+	private sealed record CachedPlan(
+		CodeCompressionCacheKey Key,
+		CodeCompressionPlan Plan,
+		ContentTransformMap Map);
+	private readonly record struct GenerationSnapshot(long Version, CancellationToken Token);
 	private readonly record struct InFlightCompressionKey(
 		CodeCompressionCacheKey CacheKey,
 		ICodeCompressionScope Scope);
@@ -274,6 +476,16 @@ public sealed class CodeCompressionScope(
 				plan.SourceLength,
 				plan.SourceLength)));
 		return new CodeCompressionResult(content, ContentTransformMap.Identity);
+	}
+
+	internal void Warm(
+		string fullPath,
+		string relativePath,
+		string content,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		session.Warm(inner, fullPath, relativePath, content, cancellationToken);
 	}
 
 	public CodeCompressionSnapshot Complete()

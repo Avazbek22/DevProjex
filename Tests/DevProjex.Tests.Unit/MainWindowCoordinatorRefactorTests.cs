@@ -657,6 +657,55 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public async Task PreviewWorkspacePipeline_DeferredPresentationBuildsBeforeGateWithoutChangingUi()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+        var buildStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBuild = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var publicationReady = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingPreviewWorkspaceHost(viewModel)
+        {
+            AllowCacheHit = false,
+            BuildDocumentHandler = cancellationToken =>
+            {
+                buildStarted.TrySetResult();
+                releaseBuild.Task.Wait(cancellationToken);
+                return new PreviewBuildResult(
+                    new InMemoryPreviewTextDocument("prepared"));
+            }
+        };
+        using var pipeline = new PreviewWorkspacePipeline(
+            host,
+            TimeSpan.FromMilliseconds(1));
+
+        var refreshOperation = pipeline.RefreshNowAsync(
+            publicationReady: publicationReady.Task,
+            deferPresentationUntilPublication: true);
+        await buildStarted.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(viewModel.IsPreviewLoading);
+        Assert.Null(viewModel.PreviewDocument);
+        Assert.Equal(0, host.ApplyDocumentCount);
+
+        releaseBuild.TrySetResult();
+        publicationReady.TrySetResult();
+        await refreshOperation.Completion;
+
+        Assert.False(viewModel.IsPreviewLoading);
+        Assert.NotNull(viewModel.PreviewDocument);
+        Assert.Equal("prepared", viewModel.PreviewDocument.GetLineText(1));
+        viewModel.PreviewDocument.Dispose();
+        viewModel.PreviewDocument = null;
+    }
+
+    [Fact]
     public async Task PreviewWorkspacePipeline_StaleBuildDoesNotApplyResult()
     {
         var viewModel = CreateViewModel();
