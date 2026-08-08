@@ -40,6 +40,7 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 	private readonly Dictionary<string, IReadOnlyList<CompressionLanguagePack>> _byExtension;
 	private readonly Dictionary<string, LanguageWorkerPool> _languagePools = [];
 	private readonly LanguageWorkerBudget _workerBudget;
+	private readonly uint _queryMatchLimit;
 	private readonly object _lifetimeSync = new();
 	private long _nextScopeId;
 	private int _activeScopes;
@@ -51,10 +52,15 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 	{
 	}
 
-	internal TreeSitterCodeCompressor(IGrammarLibraryLocator locator, IReadOnlyList<CompressionLanguagePack> packs)
+	internal TreeSitterCodeCompressor(
+		IGrammarLibraryLocator locator,
+		IReadOnlyList<CompressionLanguagePack> packs,
+		uint queryMatchLimit = MaximumQueryMatchLimit)
 	{
+		ArgumentOutOfRangeException.ThrowIfZero(queryMatchLimit);
 		_locator = locator;
 		_packs = packs;
+		_queryMatchLimit = queryMatchLimit;
 		_workerBudget = new LanguageWorkerBudget(
 			packs.Select(static pack => pack.Id).Distinct(StringComparer.Ordinal).Count());
 		_byExtension = packs
@@ -138,7 +144,11 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 			if (_languagePools.TryGetValue(pack.Id, out var existing))
 				return existing;
 
-			var created = new LanguageWorkerPool(_locator, pack, _workerBudget);
+			var created = new LanguageWorkerPool(
+				_locator,
+				pack,
+				_workerBudget,
+				queryMatchLimit: _queryMatchLimit);
 			_languagePools.Add(pack.Id, created);
 			return created;
 		}
@@ -505,13 +515,23 @@ internal sealed class TreeSitterCompressionScope(
 				}
 				if (depth != 1 || code[index] != ')')
 					continue;
-				var next = index + 1;
-				while (next < code.Length && char.IsWhiteSpace(code[next]))
-					next++;
-				if (next < code.Length && code[next] == '{')
+				if (HasInlineDefinitionAfter(code, index + 1))
 					return true;
 			}
 		}
+		return false;
+	}
+
+	private static bool HasInlineDefinitionAfter(ReadOnlySpan<char> code, int offset)
+	{
+		for (var index = offset; index < code.Length; index++)
+		{
+			if (code[index] == '{')
+				return true;
+			if (code[index] is ';' or '}')
+				return false;
+		}
+
 		return false;
 	}
 
@@ -541,8 +561,6 @@ internal sealed class TreeSitterCompressionScope(
 		if (language.Runtime.Docstrings is not null && language.DocstringsCursor is not null)
 		{
 			language.DocstringsCursor.Execute(language.Runtime.Docstrings, tree.RootNode);
-			if (language.DocstringsCursor.IsMatchLimitExceeded)
-				return null;
 			var docstringCount = 0;
 			foreach (var capture in language.DocstringsCursor.Captures)
 			{
@@ -552,12 +570,12 @@ internal sealed class TreeSitterCompressionScope(
 				if (block is not null)
 					docstringEnds[block.StartIndex] = capture.Node.EndIndex;
 			}
+			if (language.DocstringsCursor.IsMatchLimitExceeded)
+				return null;
 		}
 
 		var raw = new List<(int Start, int End, string Type)>();
 		language.BodiesCursor.Execute(language.Runtime.Bodies, tree.RootNode);
-		if (language.BodiesCursor.IsMatchLimitExceeded)
-			return null;
 		foreach (var capture in language.BodiesCursor.Captures)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -592,6 +610,8 @@ internal sealed class TreeSitterCompressionScope(
 				continue;
 			raw.Add((start, node.EndIndex, node.Type));
 		}
+		if (language.BodiesCursor.IsMatchLimitExceeded)
+			return null;
 
 		// Outermost wins: a lambda body inside a method body must not be spliced twice.
 		raw.Sort((left, right) => left.Start != right.Start ? left.Start.CompareTo(right.Start) : right.End.CompareTo(left.End));
@@ -755,8 +775,6 @@ internal sealed class TreeSitterCompressionScope(
 	{
 		var declarations = new List<CodeDeclaration>();
 		language.DeclarationsCursor.Execute(language.Runtime.Declarations, root);
-		if (language.DeclarationsCursor.IsMatchLimitExceeded)
-			return null;
 		foreach (var match in language.DeclarationsCursor.Matches)
 		{
 			Node? declaration = null;
@@ -779,6 +797,8 @@ internal sealed class TreeSitterCompressionScope(
 				end = start;
 			declarations.Add(new CodeDeclaration(declaration.Type, name ?? string.Empty, start, Math.Max(0, end - start)));
 		}
+		if (language.DeclarationsCursor.IsMatchLimitExceeded)
+			return null;
 
 		declarations.Sort(static (left, right) =>
 		{
@@ -858,6 +878,7 @@ internal sealed class LanguageWorkerPool : IDisposable
 	private readonly CompressionLanguagePack _pack;
 	private readonly LanguageWorkerBudget _workerBudget;
 	private readonly bool _ownsWorkerBudget;
+	private readonly uint _queryMatchLimit;
 	private readonly ConcurrentBag<LoadedLanguage> _available = [];
 	private readonly object _sync = new();
 	private LanguageRuntime? _runtime;
@@ -877,12 +898,15 @@ internal sealed class LanguageWorkerPool : IDisposable
 		IGrammarLibraryLocator locator,
 		CompressionLanguagePack pack,
 		LanguageWorkerBudget workerBudget,
-		bool ownsWorkerBudget = false)
+		bool ownsWorkerBudget = false,
+		uint queryMatchLimit = TreeSitterCodeCompressor.MaximumQueryMatchLimit)
 	{
+		ArgumentOutOfRangeException.ThrowIfZero(queryMatchLimit);
 		_locator = locator;
 		_pack = pack;
 		_workerBudget = workerBudget;
 		_ownsWorkerBudget = ownsWorkerBudget;
+		_queryMatchLimit = queryMatchLimit;
 	}
 
 	internal LanguagePoolDiagnostics Diagnostics
@@ -921,7 +945,9 @@ internal sealed class LanguageWorkerPool : IDisposable
 
 			if (worker is null)
 			{
-				worker = LoadedLanguage.Create(GetOrCreateRuntime(operationId));
+				worker = LoadedLanguage.Create(
+					GetOrCreateRuntime(operationId),
+					_queryMatchLimit);
 				lock (_sync)
 					_materializedWorkers++;
 			}
@@ -1263,7 +1289,7 @@ internal sealed record LoadedLanguage(
 	QueryCursor DeclarationsCursor,
 	QueryCursor? DocstringsCursor) : IDisposable
 {
-	public static LoadedLanguage Create(LanguageRuntime runtime)
+	public static LoadedLanguage Create(LanguageRuntime runtime, uint queryMatchLimit)
 	{
 		var parser = new Parser(runtime.Language);
 		try
@@ -1272,13 +1298,15 @@ internal sealed record LoadedLanguage(
 			               throw new InvalidOperationException("Tree-sitter could not create an idle tree.");
 			try
 			{
-				var bodiesCursor = CreateBoundedCursor();
+				var bodiesCursor = CreateBoundedCursor(queryMatchLimit);
 				try
 				{
-					var declarationsCursor = CreateBoundedCursor();
+					var declarationsCursor = CreateBoundedCursor(queryMatchLimit);
 					try
 					{
-						var docstringsCursor = runtime.Docstrings is null ? null : CreateBoundedCursor();
+						var docstringsCursor = runtime.Docstrings is null
+							? null
+							: CreateBoundedCursor(queryMatchLimit);
 						return new LoadedLanguage(
 							runtime,
 							parser,
@@ -1312,8 +1340,8 @@ internal sealed record LoadedLanguage(
 		}
 	}
 
-	private static QueryCursor CreateBoundedCursor() =>
-		new() { MatchLimit = TreeSitterCodeCompressor.MaximumQueryMatchLimit };
+	private static QueryCursor CreateBoundedCursor(uint queryMatchLimit) =>
+		new() { MatchLimit = queryMatchLimit };
 
 	/// <summary>
 	/// QueryCursor retains its last Tree and Tree retains the parsed string. Rebinding to a tiny

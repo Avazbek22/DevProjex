@@ -174,7 +174,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		{
 			var staleAnalysis = scope.Analyze(fullPath, relativePath, content, cancellationToken);
 			return CreateExecution(
-				CreateUncachedPlan(default, staleAnalysis),
+				CreatePreparedPlan(staleAnalysis),
 				relativePath,
 				content,
 				staleAnalysis.ValidatedResult);
@@ -188,7 +188,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		if (TryGetCachedPlan(key, out var cached))
 		{
 			Interlocked.Increment(ref _cacheHits);
-			return CreateExecution(cached, relativePath, content);
+			return CreateExecution(cached.Prepared, relativePath, content);
 		}
 
 		if (_prewarmInFlight.TryGetValue(key, out var warming))
@@ -196,7 +196,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			Interlocked.Increment(ref _prewarmReuses);
 			var analysis = warming.Value;
 			cancellationToken.ThrowIfCancellationRequested();
-			var warmed = CacheAnalysisOrCreateUncached(key, analysis, generation);
+			var warmed = CacheAnalysisOrCreatePrepared(key, analysis, generation);
 			return CreateExecution(warmed, relativePath, content, analysis.ValidatedResult);
 		}
 
@@ -206,7 +206,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		if (TryGetCachedPlan(key, out cached))
 		{
 			Interlocked.Increment(ref _cacheHits);
-			return CreateExecution(cached, relativePath, content);
+			return CreateExecution(cached.Prepared, relativePath, content);
 		}
 
 		Interlocked.Increment(ref _cacheMisses);
@@ -227,7 +227,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		{
 			var analysis = pending.Value;
 			cancellationToken.ThrowIfCancellationRequested();
-			var cachedAnalysis = CacheAnalysisOrCreateUncached(key, analysis, generation);
+			var cachedAnalysis = CacheAnalysisOrCreatePrepared(key, analysis, generation);
 			return CreateExecution(cachedAnalysis, relativePath, content, analysis.ValidatedResult);
 		}
 		finally
@@ -337,13 +337,13 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		}
 	}
 
-	private CachedPlan CacheAnalysisOrCreateUncached(
+	private PreparedPlan CacheAnalysisOrCreatePrepared(
 		CodeCompressionCacheKey key,
 		CodeCompressionAnalysis analysis,
 		long generation) =>
 		TryCacheAnalysis(key, analysis, generation, out var cached)
-			? cached
-			: CreateUncachedPlan(key, analysis);
+			? cached.Prepared
+			: CreatePreparedPlan(analysis);
 
 	private bool TryCacheAnalysis(
 		CodeCompressionCacheKey key,
@@ -367,7 +367,11 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				return true;
 			}
 
-			cachedPlan = CreateUncachedPlan(key, analysis);
+			var prepared = CreatePreparedPlan(analysis);
+			cachedPlan = new CachedPlan(
+				key,
+				prepared,
+				EstimateRetainedBytes(key, prepared.Plan));
 			if (cachedPlan.ApproximateRetainedBytes > _maximumRetainedCacheBytes)
 				return false;
 
@@ -388,20 +392,14 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		}
 	}
 
-	private static CachedPlan CreateUncachedPlan(
-		CodeCompressionCacheKey key,
-		CodeCompressionAnalysis analysis)
+	private static PreparedPlan CreatePreparedPlan(CodeCompressionAnalysis analysis)
 	{
 		var plan = analysis.Plan;
 		var map = analysis.ValidatedResult?.Map ??
 		          (plan.HasEdits
 			          ? ContentTransformMap.Create(plan.Edits, plan.SourceLength)
 			          : ContentTransformMap.Identity);
-		return new CachedPlan(
-			key,
-			plan,
-			map,
-			EstimateRetainedBytes(key, plan));
+		return new PreparedPlan(plan, map);
 	}
 
 	private static long EstimateRetainedBytes(
@@ -420,17 +418,17 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	}
 
 	private static CodeCompressionExecution CreateExecution(
-		CachedPlan cached,
+		PreparedPlan prepared,
 		string relativePath,
 		string content,
 		CodeCompressionResult? validatedResult = null)
 	{
-		var outputPlan = string.Equals(cached.Plan.RelativePath, relativePath, StringComparison.Ordinal)
-			? cached.Plan
-			: cached.Plan with { RelativePath = relativePath };
+		var outputPlan = string.Equals(prepared.Plan.RelativePath, relativePath, StringComparison.Ordinal)
+			? prepared.Plan
+			: prepared.Plan with { RelativePath = relativePath };
 		return new CodeCompressionExecution(
 			outputPlan,
-			validatedResult ?? cached.Plan.Apply(content, cached.Map));
+			validatedResult ?? prepared.Plan.Apply(content, prepared.Map));
 	}
 
 	internal void Publish(CodeCompressionSnapshot snapshot, long generation)
@@ -525,9 +523,11 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 	private sealed record CachedPlan(
 		CodeCompressionCacheKey Key,
-		CodeCompressionPlan Plan,
-		ContentTransformMap Map,
+		PreparedPlan Prepared,
 		long ApproximateRetainedBytes);
+	private sealed record PreparedPlan(
+		CodeCompressionPlan Plan,
+		ContentTransformMap Map);
 	private readonly record struct GenerationSnapshot(long Version, CancellationToken Token);
 	private readonly record struct InFlightCompressionKey(
 		CodeCompressionCacheKey CacheKey,

@@ -145,7 +145,7 @@ jobs:
             "artifacts/grammar-delivery/embedded/${{ matrix.binary }}"
           fi
 
-      - name: Materialize one cold cache from four processes
+      - name: Materialize, load and parse from one cold cache in four processes
         shell: bash
         run: |
           cold_root="${RUNNER_TEMP}/grammar-delivery-cold-${{ matrix.rid }}"
@@ -155,7 +155,7 @@ jobs:
           pids=()
           for index in 1 2 3 4; do
             "artifacts/grammar-delivery/embedded/${{ matrix.binary }}" \
-              --materialize-only --root "$cold_root" \
+              --root "$cold_root" \
               >"$logs/process-$index.log" 2>&1 &
             pids+=("$!")
           done
@@ -165,7 +165,7 @@ jobs:
           done
           cat "$logs"/*.log
           if [ "$failed" -ne 0 ]; then
-            echo "::error::Concurrent grammar materialization failed."
+            echo "::error::Concurrent grammar materialization, native loading or parsing failed."
             exit 1
           fi
           staging=$(find "$cold_root" -type f -name '*.tmp' | wc -l)

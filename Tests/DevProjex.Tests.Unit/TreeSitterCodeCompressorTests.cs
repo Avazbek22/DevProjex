@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Infrastructure.Compression;
+using TreeSitter;
 
 namespace DevProjex.Tests.Unit;
 
@@ -394,6 +395,28 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.DoesNotContain("return value", text, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("int read() const { return value; }")]
+	[InlineData("int read() const noexcept { return value; }")]
+	[InlineData("int read() const & { return value; }")]
+	[InlineData("auto read() -> int { return value; }")]
+	public void CppStructOnlyHeader_WithQualifiedInlineMethodUsesTheCppGrammar(string member)
+	{
+		var source = $$"""
+			struct counter
+			{
+			    int value;
+			    {{member}}
+			};
+			""";
+
+		var (plan, text) = Compress("counter.h", source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
+		Assert.Equal("cpp", plan.LanguageId);
+		Assert.DoesNotContain("return value", text, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public void CSharp_FieldInitializerWithACollectionExpression_Survives()
 	{
@@ -525,6 +548,61 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.True(
 			stopwatch.Elapsed < TimeSpan.FromSeconds(20),
 			$"Complexity gate took {stopwatch.Elapsed.TotalMilliseconds:F0} ms.");
+	}
+
+	[Fact]
+	public void QueryMatchLimitExceededDuringLazyEnumeration_RejectsAndCachesOnlyTheSafePlan()
+	{
+		using var harness = CodeCompressionTestHarness.For("javascript");
+		var boundedPack = harness.Pack with
+		{
+			DeclarationsQuery = harness.Pack.DeclarationsQuery + """
+
+			(array
+			  (identifier) @limit_pre
+			  (identifier) @limit_post)
+			"""
+		};
+		const uint matchLimit = 32;
+		var compressor = new TreeSitterCodeCompressor(
+			CodeCompressionTestHarness.CreateLocator(),
+			[boundedPack],
+			matchLimit);
+		using var session = new CodeCompressionSession(compressor);
+		var identifiers = string.Join(", ", Enumerable.Range(0, 64).Select(index => $"value{index}"));
+		var source = $$"""
+			const values = [{{identifiers}}];
+			function work() {
+			    return 42;
+			}
+			""";
+		using (var query = new Query(harness.Language, boundedPack.DeclarationsQuery))
+		using (var tree = harness.Parser.Parse(source)!)
+		using (var cursor = new QueryCursor { MatchLimit = matchLimit })
+		{
+			cursor.Execute(query, tree.RootNode);
+			Assert.False(cursor.IsMatchLimitExceeded);
+			_ = cursor.Matches.Count();
+			Assert.True(cursor.IsMatchLimitExceeded);
+		}
+
+		for (var pass = 0; pass < 2; pass++)
+		{
+			using var scope = session.BeginOutput("project", ["sample.js"]);
+			var result = scope.Transform(
+				"sample.js",
+				"sample.js",
+				source,
+				TestContext.Current.CancellationToken);
+			var snapshot = scope.Complete();
+
+			Assert.Equal(source, result.Text);
+			var unchanged = Assert.Single(snapshot.Unchanged);
+			Assert.Equal(CodeCompressionOutcome.UnchangedGateRejected, unchanged.Outcome);
+		}
+
+		Assert.Equal(1, session.Diagnostics.CacheEntries);
+		Assert.Equal(1, session.Diagnostics.CacheHits);
 	}
 
 	[Fact]
@@ -760,6 +838,32 @@ public sealed class TreeSitterCodeCompressorTests
 			TestContext.Current.CancellationToken);
 		Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
 		Assert.Throws<ObjectDisposedException>(() => compressor.CreateScope(Path.GetTempPath()));
+	}
+
+	[Fact]
+	public void SessionDispose_AllowsExistingTreeSitterOutputScopeToFinishWithoutPublishing()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var compressor = new TreeSitterCodeCompressor(
+			CodeCompressionTestHarness.CreateLocator(),
+			[harness.Pack]);
+		var session = new CodeCompressionSession(compressor);
+		using var scope = session.BeginOutput("project", ["Widget.cs"]);
+		var publishedSnapshots = 0;
+		session.SnapshotPublished += (_, _) => publishedSnapshots++;
+
+		session.Dispose();
+		var result = scope.Transform(
+			"Widget.cs",
+			"Widget.cs",
+			CodeCompressionFixtures.CSharp,
+			TestContext.Current.CancellationToken);
+		var localSnapshot = scope.Complete();
+
+		Assert.DoesNotContain("Console.WriteLine", result.Text, StringComparison.Ordinal);
+		Assert.Equal(1, localSnapshot.CompressedFiles);
+		Assert.Equal(CodeCompressionSnapshot.Empty, session.Snapshot);
+		Assert.Equal(0, publishedSnapshots);
 	}
 
 	[Fact]

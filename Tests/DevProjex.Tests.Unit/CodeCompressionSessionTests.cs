@@ -327,6 +327,68 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public void ResetBeforeObsoleteScopeTransforms_AllowsCompletionWithoutCachingOrPublishing()
+	{
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		using var obsoleteScope = session.BeginOutput("old-project", ["sample.cs"]);
+		var publishedSnapshots = 0;
+		session.SnapshotPublished += (_, _) => publishedSnapshots++;
+
+		session.Reset();
+		var obsoleteResult = obsoleteScope.Transform(
+			"sample.cs",
+			"sample.cs",
+			"same-content",
+			CancellationToken.None);
+		var obsoleteSnapshot = obsoleteScope.Complete();
+
+		Assert.Equal("same-content", obsoleteResult.Text);
+		Assert.Single(obsoleteSnapshot.Unchanged);
+		Assert.Equal(CodeCompressionSnapshot.Empty, session.Snapshot);
+		Assert.Equal(0, publishedSnapshots);
+		Assert.Equal(0, session.Diagnostics.CacheEntries);
+		Assert.Equal(0, session.Diagnostics.RetainedCacheBytes);
+		Assert.Equal(0, session.Diagnostics.HashComputations);
+
+		using var currentScope = session.BeginOutput("new-project", ["sample.cs"]);
+		_ = currentScope.Transform(
+			"sample.cs",
+			"sample.cs",
+			"same-content",
+			CancellationToken.None);
+		var currentSnapshot = currentScope.Complete();
+
+		Assert.Equal(2, compressor.AnalysisCount);
+		Assert.Same(currentSnapshot, session.Snapshot);
+		Assert.Equal(1, publishedSnapshots);
+		Assert.Equal(1, session.Diagnostics.CacheEntries);
+	}
+
+	[Fact]
+	public void DisposeBeforeExistingScopeTransforms_AllowsSafeLocalCompletionWithoutPublishing()
+	{
+		using var compressor = new RecordingCompressor();
+		var session = new CodeCompressionSession(compressor);
+		using var existingScope = session.BeginOutput("project", ["sample.cs"]);
+		var publishedSnapshots = 0;
+		session.SnapshotPublished += (_, _) => publishedSnapshots++;
+
+		session.Dispose();
+		var result = existingScope.Transform(
+			"sample.cs",
+			"sample.cs",
+			"same-content",
+			CancellationToken.None);
+		var localSnapshot = existingScope.Complete();
+
+		Assert.Equal("same-content", result.Text);
+		Assert.Single(localSnapshot.Unchanged);
+		Assert.Equal(CodeCompressionSnapshot.Empty, session.Snapshot);
+		Assert.Equal(0, publishedSnapshots);
+	}
+
+	[Fact]
 	public void ResetBeforeQueuedPrewarmBegins_CannotPopulateTheCurrentGenerationCache()
 	{
 		using var compressor = new RecordingCompressor();

@@ -102,19 +102,15 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 		// crash mid-write, quarantined by antivirus, or damaged on disk long after it was created.
 		// Nothing is ever patched in place either - macOS library validation requires the bytes to
 		// stay bit-identical to the signed original.
-		if (File.Exists(target))
-		{
-			using var existing = File.OpenRead(target);
-			if (SHA256.HashData(existing).AsSpan().SequenceEqual(expected))
-				return target;
-		}
+		if (HasExpectedHash(target, expected))
+			return target;
 
 		try
 		{
 			MarkInUse(Path.TrimEndingDirectorySeparator(RootDirectory));
-			return Materialize(source, RootDirectory, fileName);
+			return Materialize(source, RootDirectory, fileName, expected);
 		}
-		catch (IOException)
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
 			// The damaged copy is already mapped into this process - the binding loads grammars and
 			// never releases the module handle, so Windows refuses to replace the file. Repair into
@@ -124,7 +120,7 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 			var repairDirectory = Path.Combine(RootDirectory, $"repair-{Environment.ProcessId}");
 			Directory.CreateDirectory(repairDirectory);
 			MarkInUse(repairDirectory);
-			return Materialize(source, repairDirectory, fileName);
+			return Materialize(source, repairDirectory, fileName, expected);
 		}
 	}
 
@@ -200,7 +196,11 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 			return _inUse.Contains(directory);
 	}
 
-	private static string Materialize(Stream source, string directory, string fileName)
+	private static string Materialize(
+		Stream source,
+		string directory,
+		string fileName,
+		ReadOnlySpan<byte> expectedHash)
 	{
 		var target = Path.Combine(directory, fileName);
 		var staging = Path.Combine(directory, $"{fileName}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
@@ -210,7 +210,17 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 				source.CopyTo(output);
 			if (!OperatingSystem.IsWindows())
 				File.SetUnixFileMode(staging, UnixExecutableMode);
-			File.Move(staging, target, overwrite: true);
+			try
+			{
+				// Never replace a library another process may already have mapped. Exactly one writer
+				// publishes the cold copy; losing writers accept it only after verifying its bytes.
+				File.Move(staging, target, overwrite: false);
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+				if (!HasExpectedHash(target, expectedHash))
+					throw;
+			}
 			return target;
 		}
 		finally
@@ -224,6 +234,15 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 				// A failed cleanup must not hide the original materialization failure.
 			}
 		}
+	}
+
+	private static bool HasExpectedHash(string path, ReadOnlySpan<byte> expectedHash)
+	{
+		if (!File.Exists(path))
+			return false;
+
+		using var existing = File.OpenRead(path);
+		return SHA256.HashData(existing).AsSpan().SequenceEqual(expectedHash);
 	}
 
 	private static IEnumerable<string> SafeEnumerate(string? directory)
