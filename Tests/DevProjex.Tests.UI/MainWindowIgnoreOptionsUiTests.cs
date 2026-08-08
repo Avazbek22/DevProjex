@@ -1926,7 +1926,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				static option => option.Id == IgnoreOptionId.CompressCode);
 			Assert.False(compressCode.IsChecked);
 			Assert.DoesNotContain(viewModel.PathIgnoreOptions, static option => option.Id == IgnoreOptionId.HideSecrets);
-            var checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			var checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets);
 			var processingList = UiTestDriver.GetRequiredControl<ListBox>(window, "ContentProcessingOptionsList");
 			var processingBorder = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
 			var processingContent = Assert.IsType<Grid>(processingBorder.Child);

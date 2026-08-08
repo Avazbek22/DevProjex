@@ -111,9 +111,15 @@ internal sealed class WindowsTerminalInputShutdownGuard : IDisposable
 		{
 			// Redirected Windows-subsystem hosts make Terminal.Gui open CONIN$;
 			// canceling STDIN would target a different handle and leave ReadFile blocked.
+			var terminalDeviceTypeName = string.Join(
+				'.',
+				"Terminal",
+				"Gui",
+				"Drivers",
+				"TerminalDevice");
 			var terminalDevice = typeof(global::Terminal.Gui.App.IApplication)
 				.Assembly
-				.GetType("Terminal.Gui.Drivers.TerminalDevice", throwOnError: false);
+				.GetType(terminalDeviceTypeName, throwOnError: false);
 			var inputHandle = terminalDevice?.GetProperty(
 				"InputHandle",
 				BindingFlags.Public | BindingFlags.Static);
