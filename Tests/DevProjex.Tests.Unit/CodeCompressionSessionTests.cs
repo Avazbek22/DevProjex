@@ -42,16 +42,23 @@ public sealed class CodeCompressionSessionTests
 	[Fact]
 	public async Task IndependentFilesCanBeAnalyzedConcurrently()
 	{
-		using var compressor = new RecordingCompressor(delayMilliseconds: 40);
+		using var compressor = new RecordingCompressor(coordinateFirstPair: true);
 		using var session = new CodeCompressionSession(compressor);
-		var paths = Enumerable.Range(0, 16).Select(index => $"{index}.cs").ToArray();
+		string[] paths = ["first.cs", "second.cs"];
 		using var scope = session.BeginOutput("project", paths);
+		var cancellationToken = TestContext.Current.CancellationToken;
 
-		await Task.WhenAll(paths.Select((path, index) => Task.Run(() =>
-			scope.Transform(path, path, $"content-{index}", CancellationToken.None))));
+		// Dedicated workers make the concurrency contract independent from ThreadPool load on CI.
+		var transforms = paths.Select((path, index) => Task.Factory.StartNew(
+			() => scope.Transform(path, path, $"content-{index}", cancellationToken),
+			cancellationToken,
+			TaskCreationOptions.LongRunning,
+			TaskScheduler.Default));
+		await Task.WhenAll(transforms);
 		_ = scope.Complete();
 
-		Assert.True(compressor.MaximumConcurrency > 1);
+		Assert.Equal(2, compressor.MaximumConcurrency);
+		Assert.Equal(2, compressor.AnalysisCount);
 	}
 
 	[Fact]
@@ -205,11 +212,14 @@ public sealed class CodeCompressionSessionTests
 
 	private sealed class RecordingCompressor(
 		int delayMilliseconds = 0,
-		bool isSupported = true) : ICodeCompressor, IDisposable
+		bool isSupported = true,
+		bool coordinateFirstPair = false) : ICodeCompressor, IDisposable
 	{
+		private readonly ManualResetEventSlim _firstPairReady = new(false);
 		private readonly int _delayMilliseconds = delayMilliseconds;
 		private int _analysisCount;
 		private int _active;
+		private int _firstPairArrivals;
 		private int _maximumConcurrency;
 
 		public string TransformIdentity => "recording:v1";
@@ -217,7 +227,19 @@ public sealed class CodeCompressionSessionTests
 		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
 		public bool IsSupported(string relativePath) => isSupported;
 		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
-		public void Dispose() { }
+		public void Dispose() => _firstPairReady.Dispose();
+
+		private void CoordinateFirstPair(CancellationToken cancellationToken)
+		{
+			if (!coordinateFirstPair || Volatile.Read(ref _firstPairArrivals) >= 2)
+				return;
+
+			if (Interlocked.Increment(ref _firstPairArrivals) >= 2)
+				_firstPairReady.Set();
+
+			if (!_firstPairReady.Wait(TimeSpan.FromSeconds(5), cancellationToken))
+				throw new TimeoutException("Independent compression analyses were serialized.");
+		}
 
 		private sealed class Scope(RecordingCompressor owner) : ICodeCompressionScope
 		{
@@ -232,6 +254,7 @@ public sealed class CodeCompressionSessionTests
 				UpdateMaximum(ref owner._maximumConcurrency, active);
 				try
 				{
+					owner.CoordinateFirstPair(cancellationToken);
 					if (owner._delayMilliseconds > 0)
 						Thread.Sleep(owner._delayMilliseconds);
 					return new CodeCompressionAnalysis(
