@@ -1,9 +1,33 @@
 using DevProjex.Avalonia.Services;
+using DevProjex.Application.Compression;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowPreviewWarmupTests
 {
+    [Fact]
+    public void SupportsTransformationContext_CompressionOnlyAllowsWarmup()
+    {
+        using var compressionSession = new CodeCompressionSession(new NoOpCodeCompressor());
+        var context = ContentTransformationContext.For(
+            new CodeCompressionContext("project", compressionSession),
+            redaction: null);
+
+        Assert.True(PreviewWarmupPolicy.SupportsTransformationContext(context));
+    }
+
+    [Fact]
+    public void SupportsTransformationContext_SecretRedactionSuppressesWarmup()
+    {
+        using var redactionSession = new SecretRedactionSession(new EmptySecretDetector());
+        var context = ContentTransformationContext.For(
+            compression: null,
+            new SecretRedactionContext("project", redactionSession));
+
+        Assert.False(PreviewWarmupPolicy.SupportsTransformationContext(context));
+    }
+
     [Fact]
     public void CreateSelectionPlan_CheckedRootUsesImplicitFullTreePlan()
     {
@@ -19,6 +43,37 @@ public sealed class MainWindowPreviewWarmupTests
         Assert.False(plan.HasExplicitSelection);
         Assert.NotNull(plan.SelectedRoot);
         Assert.True(plan.SelectedRoot.IncludesWholeSubtree);
+    }
+
+    private sealed class NoOpCodeCompressor : ICodeCompressor
+    {
+        public string TransformIdentity => "no-op:v1";
+
+        public bool IsSupported(string relativePath) => false;
+
+        public ICodeCompressionScope CreateScope(string projectRoot) => new Scope();
+
+        private sealed class Scope : ICodeCompressionScope
+        {
+            public CodeCompressionAnalysis Analyze(
+                string fullPath,
+                string relativePath,
+                string content,
+                CancellationToken cancellationToken) =>
+                throw new InvalidOperationException("No file should be analyzed by this policy test.");
+
+            public void Dispose()
+            {
+            }
+        }
+    }
+
+    private sealed class EmptySecretDetector : ISecretDetector
+    {
+        public IReadOnlyList<DetectedSecret> Detect(
+            string repositoryRelativePath,
+            string content,
+            CancellationToken cancellationToken = default) => [];
     }
 
     [Fact]

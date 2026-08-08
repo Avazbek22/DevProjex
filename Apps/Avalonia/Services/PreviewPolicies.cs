@@ -42,6 +42,9 @@ internal static class PreviewWarmupPolicy
     private const int SmallChildListLinearLookupThreshold = 32;
     private const int MaxCaseEquivalentNameProbes = 32;
 
+    public static bool SupportsTransformationContext(ContentTransformationContext? context) =>
+        context?.Redaction is null;
+
     public static bool ShouldBuildPreviewWarmup(
         PreviewContentMode mode,
         bool hasSelection,

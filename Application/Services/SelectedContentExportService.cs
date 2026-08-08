@@ -38,7 +38,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount: null,
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
-			transformationContext).ConfigureAwait(false)).Text;
+			transformationContext,
+			publishCompressionSnapshot: true).ConfigureAwait(false)).Text;
 
 	public Task<SelectedContentExportResult> BuildResultAsync(
 		IEnumerable<string> filePaths,
@@ -52,7 +53,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount: null,
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
-			transformationContext);
+			transformationContext,
+			publishCompressionSnapshot: true);
 
 	public async Task<string> BuildBoundedPreviewAsync(
 		IEnumerable<string> filePaths,
@@ -60,7 +62,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		long maxFileSizeForFullRead,
 		int maxOutputCharacters,
 		CancellationToken cancellationToken,
-		Func<string, string>? displayPathMapper)
+		Func<string, string>? displayPathMapper,
+		CodeCompressionContext? compressionContext = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileCount);
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileSizeForFullRead);
@@ -73,7 +76,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount,
 			maxFileSizeForFullRead,
 			maxOutputCharacters,
-			transformationContext: null).ConfigureAwait(false)).Text;
+			ContentTransformationContext.For(compressionContext, redaction: null),
+			publishCompressionSnapshot: false).ConfigureAwait(false)).Text;
 	}
 
 	private async Task<SelectedContentExportResult> BuildCoreAsync(
@@ -83,7 +87,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		int? maxFileCount,
 		long? maxFileSizeForFullRead,
 		int? maxOutputCharacters,
-		ContentTransformationContext? transformationContext)
+		ContentTransformationContext? transformationContext,
+		bool publishCompressionSnapshot)
 	{
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
@@ -220,7 +225,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		}
 
 		var snapshot = redactionScope?.Complete();
-		transformationScope?.Compression?.Complete();
+		if (publishCompressionSnapshot)
+			transformationScope?.Compression?.Complete();
 		var textOutput = anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
 
 		return new SelectedContentExportResult(textOutput, snapshot);

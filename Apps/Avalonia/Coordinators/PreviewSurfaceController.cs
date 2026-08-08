@@ -449,10 +449,12 @@ internal sealed class PreviewSurfaceController : IDisposable
             string noCheckedFilesText,
             CancellationToken cancellationToken)
     {
-		// A partial warmup cannot assign the same deterministic secret indexes as the full
-		// selection. Skip it instead of briefly presenting an unredacted or inconsistent preview.
-		if (_transformationContextProvider() is not null)
-			return null;
+        var transformationContext = _transformationContextProvider();
+        // A partial warmup cannot assign the same deterministic secret indexes as the full
+        // selection. Compression is safe here: its plans are file-local and reused by the full build.
+        if (!PreviewWarmupPolicy.SupportsTransformationContext(transformationContext))
+            return null;
+        var compressionContext = transformationContext?.Compression;
 
         if (!PreviewWarmupPolicy.ShouldBuildPreviewWarmup(
                 mode,
@@ -493,7 +495,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                         PreviewWarmupMaxFileBytes,
                         PreviewWarmupMaxCharacters,
                         cancellationToken,
-                        pathPresentation?.MapFilePath)
+                        pathPresentation?.MapFilePath,
+                        compressionContext)
                     .GetAwaiter()
                     .GetResult();
                 if (string.IsNullOrWhiteSpace(contentText))
@@ -543,7 +546,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     cancellationToken,
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
-                            currentPath))
+                            currentPath),
+                    compressionContext)
                 .GetAwaiter()
                 .GetResult();
             if (string.IsNullOrWhiteSpace(combinedContent))
