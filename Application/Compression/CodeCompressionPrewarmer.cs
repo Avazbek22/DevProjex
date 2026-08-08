@@ -16,7 +16,7 @@ public sealed record CodeCompressionWarmupResult(
 public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyzer)
 {
 	private const long MaximumParallelFileBytes = 1024 * 1024;
-	private const int MaximumParallelism = 8;
+	private const int MaximumParallelism = 16;
 
 	public async Task<CodeCompressionWarmupResult> WarmAsync(
 		CodeCompressionContext context,

@@ -102,6 +102,11 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             return;
         }
 
+        // Project profiles are applied with option notifications suppressed. Publish the resolved
+        // transformation state before post-load work starts, otherwise a persisted compression
+        // selection is visible in the UI while background prewarm still observes the previous project.
+        PublishTransformationContext();
+
         ((IRefreshTreePipelineHost)this).ApplyTreeRefreshResult(
             snapshot.TreeInput,
             new BuildTreeSnapshotResult(snapshot.TreeResult, snapshot.TreeInventory),

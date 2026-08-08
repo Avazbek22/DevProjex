@@ -489,7 +489,7 @@ internal sealed class TreeSitterCompressionScope(
 /// </summary>
 internal sealed class LanguageWorkerPool : IDisposable
 {
-	private const int MaximumWorkers = 8;
+	private const int MaximumWorkers = 16;
 	private readonly CompressionLanguagePack _pack;
 	private readonly Lazy<string> _libraryPath;
 	private readonly ConcurrentBag<LoadedLanguage> _available = [];

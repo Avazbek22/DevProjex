@@ -93,6 +93,25 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public void PrewarmAndOutputDisplayPathVariants_ShareAnalysisBySourceFile()
+	{
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		const string fullPath = "C:/project/src/sample.cs";
+		const string content = "same-content";
+
+		using (var warmup = session.BeginOutput("C:/project", [fullPath]))
+			warmup.Warm(fullPath, @"src\sample.cs", content, CancellationToken.None);
+		using var output = session.BeginOutput("C:/project", [fullPath]);
+		_ = output.Transform(fullPath, "src/sample.cs", content, CancellationToken.None);
+		var snapshot = output.Complete();
+
+		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.Equal(1, session.Diagnostics.CacheHits);
+		Assert.Equal("src/sample.cs", Assert.Single(snapshot.Unchanged).RelativePath);
+	}
+
+	[Fact]
 	public async Task TransformDuringPrewarm_SharesTheInFlightAnalysis()
 	{
 		using var compressor = new BlockingCompressor();

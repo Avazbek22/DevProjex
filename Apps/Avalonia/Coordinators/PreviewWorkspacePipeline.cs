@@ -242,10 +242,11 @@ internal sealed class PreviewWorkspacePipeline(
                 return;
             }
 
-            var warmupSnapshot = await host.TryBuildPreviewWarmupSnapshotAsync(input, cancellationToken);
+            var warmupTask = host.TryBuildPreviewWarmupSnapshotAsync(input, cancellationToken);
             previewBuildTask = Task.Run(
                 () => host.BuildPreviewDocument(input, cancellationToken),
                 cancellationToken);
+            var warmupSnapshot = await warmupTask;
 
             if (publicationReady is null &&
                 warmupSnapshot is { } immediateWarmup &&

@@ -132,14 +132,14 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		}
 
 		var key = CodeCompressionCacheKey.Create(
-			relativePath,
+			fullPath,
 			content,
 			compressor.TransformIdentity);
 		Interlocked.Increment(ref _hashComputations);
 		if (TryGetCachedPlan(key, out var cached))
 		{
 			Interlocked.Increment(ref _cacheHits);
-			return new CodeCompressionExecution(cached.Plan, cached.Plan.Apply(content, cached.Map));
+			return CreateExecution(cached, relativePath, content);
 		}
 
 		if (_prewarmInFlight.TryGetValue(key, out var warming))
@@ -148,9 +148,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			var analysis = warming.Value;
 			cancellationToken.ThrowIfCancellationRequested();
 			var warmed = CacheAnalysis(key, analysis);
-			return new CodeCompressionExecution(
-				warmed.Plan,
-				analysis.ValidatedResult ?? warmed.Plan.Apply(content, warmed.Map));
+			return CreateExecution(warmed, relativePath, content, analysis.ValidatedResult);
 		}
 
 		// Warmup publishes into the cache before removing its in-flight entry. If it completed
@@ -159,7 +157,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		if (TryGetCachedPlan(key, out cached))
 		{
 			Interlocked.Increment(ref _cacheHits);
-			return new CodeCompressionExecution(cached.Plan, cached.Plan.Apply(content, cached.Map));
+			return CreateExecution(cached, relativePath, content);
 		}
 
 		Interlocked.Increment(ref _cacheMisses);
@@ -181,9 +179,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			var analysis = pending.Value;
 			cancellationToken.ThrowIfCancellationRequested();
 			var cachedAnalysis = CacheAnalysis(key, analysis);
-			return new CodeCompressionExecution(
-				cachedAnalysis.Plan,
-				analysis.ValidatedResult ?? cachedAnalysis.Plan.Apply(content, cachedAnalysis.Map));
+			return CreateExecution(cachedAnalysis, relativePath, content, analysis.ValidatedResult);
 		}
 		finally
 		{
@@ -204,7 +200,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			return;
 
 		Interlocked.Increment(ref _prewarmRequests);
-		var key = CodeCompressionCacheKey.Create(relativePath, content, compressor.TransformIdentity);
+		var key = CodeCompressionCacheKey.Create(fullPath, content, compressor.TransformIdentity);
 		Interlocked.Increment(ref _hashComputations);
 		if (TryGetCachedPlan(key, out _))
 		{
@@ -323,6 +319,20 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		}
 	}
 
+	private static CodeCompressionExecution CreateExecution(
+		CachedPlan cached,
+		string relativePath,
+		string content,
+		CodeCompressionResult? validatedResult = null)
+	{
+		var outputPlan = string.Equals(cached.Plan.RelativePath, relativePath, StringComparison.Ordinal)
+			? cached.Plan
+			: cached.Plan with { RelativePath = relativePath };
+		return new CodeCompressionExecution(
+			outputPlan,
+			validatedResult ?? cached.Plan.Apply(content, cached.Map));
+	}
+
 	internal void Publish(CodeCompressionSnapshot snapshot)
 	{
 		lock (_sync)
@@ -403,7 +413,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		ICodeCompressionScope Scope);
 
 	private readonly record struct CodeCompressionCacheKey(
-		string RelativePath,
+		string FullPath,
 		int ContentLength,
 		ulong Hash0,
 		ulong Hash1,
@@ -412,14 +422,14 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		string TransformIdentity)
 	{
 		public static CodeCompressionCacheKey Create(
-			string relativePath,
+			string fullPath,
 			string content,
 			string transformIdentity)
 		{
 			Span<byte> hash = stackalloc byte[32];
 			SHA256.HashData(MemoryMarshal.AsBytes(content.AsSpan()), hash);
 			return new CodeCompressionCacheKey(
-				relativePath,
+				fullPath,
 				content.Length,
 				BinaryPrimitives.ReadUInt64LittleEndian(hash),
 				BinaryPrimitives.ReadUInt64LittleEndian(hash[8..]),

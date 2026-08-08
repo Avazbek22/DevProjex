@@ -71,9 +71,13 @@ public sealed class CodeCompressionPerformanceCharacterizationTests
 			TestContext.Current.CancellationToken);
 		var firstPreview = await MeasurePreviewAsync(root, paths, session);
 		var repeatedPreview = await MeasurePreviewAsync(root, paths, session);
+		var beforeTreeAndContent = session.Diagnostics;
+		var allProjectFiles = EnumerateProjectFiles(root);
+		var treeAndContent = await MeasureTreeAndContentPreviewAsync(root, allProjectFiles, session);
 		var diagnostics = session.Diagnostics;
 
 		Assert.Equal(warmup.WarmedFiles, diagnostics.AnalysisExecutions);
+		Assert.Equal(beforeTreeAndContent.AnalysisExecutions, diagnostics.AnalysisExecutions);
 		Assert.Equal(coldPreview.CharacterCount, firstPreview.CharacterCount);
 		Assert.Equal(firstPreview.CharacterCount, repeatedPreview.CharacterCount);
 		WriteMeasurements(
@@ -84,6 +88,11 @@ public sealed class CodeCompressionPerformanceCharacterizationTests
 			firstPreview,
 			repeatedPreview,
 			diagnostics);
+		TestContext.Current.TestOutputHelper?.WriteLine(
+			$"Tree -> Both {Path.GetFileName(root)}: files={allProjectFiles.Count:N0}, " +
+			$"elapsed={treeAndContent.Elapsed.TotalMilliseconds:F2} ms, " +
+			$"chars={treeAndContent.CharacterCount:N0}, lines={treeAndContent.LineCount:N0}, " +
+			$"additionalAnalyses={diagnostics.AnalysisExecutions - beforeTreeAndContent.AnalysisExecutions:N0}.");
 	}
 
 	private static async Task<PreviewMeasurement> MeasurePreviewAsync(
@@ -96,12 +105,31 @@ public sealed class CodeCompressionPerformanceCharacterizationTests
 			.BuildContentDocumentAsync(
 				paths,
 				TestContext.Current.CancellationToken,
-				path => Path.GetRelativePath(root, path),
+				path => Path.GetRelativePath(root, path).Replace('\\', '/'),
 				transformationContext: ContentTransformationContext.For(
 					new CodeCompressionContext(root, session),
 					redaction: null));
 		stopwatch.Stop();
 		Assert.NotNull(document);
+		return new PreviewMeasurement(stopwatch.Elapsed, document.CharacterCount, document.LineCount);
+	}
+
+	private static async Task<PreviewMeasurement> MeasureTreeAndContentPreviewAsync(
+		string root,
+		IReadOnlyList<string> paths,
+		CodeCompressionSession session)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		using var document = await new PreviewDocumentBuilder(new FileContentAnalyzer())
+			.BuildTreeAndContentDocumentAsync(
+				Path.GetFileName(root),
+				paths,
+				TestContext.Current.CancellationToken,
+				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(root),
+				transformationContext: ContentTransformationContext.For(
+					new CodeCompressionContext(root, session),
+					redaction: null));
+		stopwatch.Stop();
 		return new PreviewMeasurement(stopwatch.Elapsed, document.CharacterCount, document.LineCount);
 	}
 
@@ -113,6 +141,12 @@ public sealed class CodeCompressionPerformanceCharacterizationTests
 			.Where(path => session.IsSupported(path))
 			.Where(path => TryGetLength(path, out var length) &&
 			               length <= TreeSitterCodeCompressor.MaximumParsableCharacters)
+			.Order(PathComparer.Default)
+			.ToArray();
+
+	private static IReadOnlyList<string> EnumerateProjectFiles(string root) =>
+		Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+			.Where(path => !ContainsExcludedDirectory(root, path))
 			.Order(PathComparer.Default)
 			.ToArray();
 
