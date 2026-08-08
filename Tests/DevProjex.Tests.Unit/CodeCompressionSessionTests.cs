@@ -256,12 +256,12 @@ public sealed class CodeCompressionSessionTests
 		using var outputScope = session.BeginOutput("project", ["sample.cs"]);
 		var cancellationToken = TestContext.Current.CancellationToken;
 
-		var warmup = Task.Run(() =>
-			warmScope.Warm("sample.cs", "sample.cs", "same-content", cancellationToken),
+		var warmup = StartBlockingOperation(
+			() => warmScope.Warm("sample.cs", "sample.cs", "same-content", cancellationToken),
 			cancellationToken);
 		await compressor.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
-		var output = Task.Run(() =>
-			outputScope.Transform("sample.cs", "sample.cs", "same-content", cancellationToken),
+		var output = StartBlockingOperation(
+			() => outputScope.Transform("sample.cs", "sample.cs", "same-content", cancellationToken),
 			cancellationToken);
 
 		try
@@ -292,12 +292,12 @@ public sealed class CodeCompressionSessionTests
 		using var warmScope = session.BeginOutput("project", ["sample.cs"]);
 		var cancellationToken = TestContext.Current.CancellationToken;
 
-		var output = Task.Run(() =>
-			outputScope.Transform("sample.cs", "sample.cs", "same-content", cancellationToken),
+		var output = StartBlockingOperation(
+			() => outputScope.Transform("sample.cs", "sample.cs", "same-content", cancellationToken),
 			cancellationToken);
 		await compressor.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
-		var warmup = Task.Run(() =>
-			warmScope.Warm("sample.cs", "sample.cs", "same-content", cancellationToken),
+		var warmup = StartBlockingOperation(
+			() => warmScope.Warm("sample.cs", "sample.cs", "same-content", cancellationToken),
 			cancellationToken);
 
 		try
@@ -533,7 +533,7 @@ public sealed class CodeCompressionSessionTests
 		using var outputCancellation = new CancellationTokenSource();
 		var cancellationToken = TestContext.Current.CancellationToken;
 
-		var output = Task.Run(
+		var output = StartBlockingOperation(
 			() => outputScope.Transform(
 				"sample.cs",
 				"sample.cs",
@@ -541,7 +541,7 @@ public sealed class CodeCompressionSessionTests
 				outputCancellation.Token),
 			cancellationToken);
 		await compressor.FirstAnalysisStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
-		var warmup = Task.Run(
+		var warmup = StartBlockingOperation(
 			() => warmScope.Warm("sample.cs", "sample.cs", "same-content", cancellationToken),
 			cancellationToken);
 		Assert.True(
@@ -565,6 +565,15 @@ public sealed class CodeCompressionSessionTests
 		Assert.Equal(2, compressor.AnalysisCount);
 		Assert.Equal(1, session.Diagnostics.CacheHits);
 	}
+
+	private static Task<TResult> StartBlockingOperation<TResult>(
+		Func<TResult> operation,
+		CancellationToken cancellationToken) =>
+		Task.Factory.StartNew(
+			operation,
+			cancellationToken,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+			TaskScheduler.Default);
 
 	private sealed class RecordingCompressor(
 		int delayMilliseconds = 0,
