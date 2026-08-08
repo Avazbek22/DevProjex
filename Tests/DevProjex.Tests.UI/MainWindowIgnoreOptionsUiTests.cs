@@ -1950,7 +1950,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var helpToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(helpIndicator));
 			var helpText = Assert.IsType<TextBlock>(helpToolTip.Content);
 			Assert.Equal("Found: 3. Hidden: 2.", helpText.Text);
-			Assert.Equal(PlacementMode.Left, ToolTip.GetPlacement(helpIndicator));
+			Assert.Equal(PlacementMode.Bottom, ToolTip.GetPlacement(helpIndicator));
+			Assert.Equal(5, ToolTip.GetVerticalOffset(helpIndicator));
 			Assert.Equal(VerticalAlignment.Center, helpIndicator.VerticalAlignment);
 			var checkBoxPosition = Assert.IsType<Point>(checkBox.TranslatePoint(default, processingBorder));
 			var indicatorPosition = Assert.IsType<Point>(helpIndicator.TranslatePoint(default, processingBorder));
@@ -2082,6 +2083,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				() => ToolTip.GetIsOpen(compressionIndicator),
 				"the compression status tooltip to open on click");
 			var compressionToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(compressionIndicator));
+			Assert.Equal(PlacementMode.Bottom, ToolTip.GetPlacement(compressionIndicator));
+			Assert.Equal(5, ToolTip.GetVerticalOffset(compressionIndicator));
 			Assert.Equal(
 				option.StatusText,
 				Assert.IsType<TextBlock>(compressionToolTip.Content).Text);
