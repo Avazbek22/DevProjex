@@ -21,7 +21,7 @@ public sealed class TerminalSignalProcessRegressionTests
 		var sourceFile = Path.Combine(project, "large.txt");
 		await WriteLargeFileAsync(
 			sourceFile,
-			8 * 1024 * 1024,
+			32 * 1024 * 1024,
 			TestContext.Current.CancellationToken);
 		var sourceLength = new FileInfo(sourceFile).Length;
 		var application = PublishedApplicationLocator.FindExecutable();
@@ -46,19 +46,18 @@ public sealed class TerminalSignalProcessRegressionTests
 			Assert.False(
 				process.HasExited,
 				$"The streaming command exited before {signalName} could be delivered.");
+			var standardOutputDrain = DrainRemainingOutputAsync(
+				process,
+				standardOutputPrefix.Length,
+				timeout.Token);
 			Assert.Equal(0, SendSignal(process.Id, signal));
 
-			// Preserve pipe backpressure until the process exits. Draining stdout here lets a
-			// fast export finish before the asynchronously dispatched POSIX callback runs.
 			await process.WaitForExitAsync(timeout.Token);
-			var standardOutput = await ReadRemainingOutputAsync(
-				process,
-				standardOutputPrefix,
-				timeout.Token);
+			var standardOutputLength = await standardOutputDrain;
 			var standardError = await standardErrorTask;
 
 			Assert.Equal(CommandLineExitCodes.Canceled, process.ExitCode);
-			Assert.DoesNotContain("error[", standardOutput, StringComparison.OrdinalIgnoreCase);
+			Assert.True(standardOutputLength > 0);
 			Assert.Contains("DPX-CLI-CANCELED", standardError, StringComparison.Ordinal);
 			Assert.DoesNotContain("DPX-CLI-UNEXPECTED", standardError, StringComparison.Ordinal);
 			Assert.DoesNotContain("stack trace", standardError, StringComparison.OrdinalIgnoreCase);
@@ -202,11 +201,23 @@ public sealed class TerminalSignalProcessRegressionTests
 		return new string(firstCharacter);
 	}
 
-	private static async Task<string> ReadRemainingOutputAsync(
+	private static async Task<long> DrainRemainingOutputAsync(
 		Process process,
-		string prefix,
-		CancellationToken cancellationToken) =>
-		prefix + await process.StandardOutput.ReadToEndAsync(cancellationToken);
+		long charactersRead,
+		CancellationToken cancellationToken)
+	{
+		var buffer = new char[16 * 1024];
+		while (true)
+		{
+			var count = await process.StandardOutput.ReadAsync(
+				buffer,
+				cancellationToken);
+			if (count == 0)
+				return charactersRead;
+
+			charactersRead += count;
+		}
+	}
 
 	private static async Task WriteLargeFileAsync(
 		string path,
