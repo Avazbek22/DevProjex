@@ -32,7 +32,7 @@ public sealed class ManualSecretRedactionSessionTests
 		using var workspace = new TemporaryDirectory();
 		var path = workspace.CreateFile("config.env", $"TOKEN={Secret}");
 		using var session = new SecretRedactionSession(new EmptyDetector());
-		Assert.True(session.AddSessionMarkedSecret("config.env", 0, "TOKEN=".Length, CreateValue(Secret)));
+		Assert.True(session.AddSessionMarkedSecret("config.env", "TOKEN=".Length, CreateValue(Secret)));
 		var scope = session.BeginOutput(workspace.Path, [path]);
 		var hidden = scope.Redact(path, File.ReadAllText(path), TestContext.Current.CancellationToken);
 		scope.Complete();
@@ -55,8 +55,14 @@ public sealed class ManualSecretRedactionSessionTests
 		var content = $"FIRST={Secret}\nSECOND={Secret}";
 		var path = workspace.CreateFile("config.env", content);
 		using var session = new SecretRedactionSession(new EmptyDetector());
-		Assert.True(session.AddSessionMarkedSecret("config.env", 0, "FIRST=".Length, CreateValue(Secret)));
-		Assert.True(session.AddSessionMarkedSecret("config.env", 1, "SECOND=".Length, CreateValue(Secret)));
+		Assert.True(session.AddSessionMarkedSecret(
+			"config.env",
+			content.IndexOf(Secret, StringComparison.Ordinal),
+			CreateValue(Secret)));
+		Assert.True(session.AddSessionMarkedSecret(
+			"config.env",
+			content.LastIndexOf(Secret, StringComparison.Ordinal),
+			CreateValue(Secret)));
 
 		var initialScope = session.BeginOutput(workspace.Path, [path]);
 		var initial = initialScope.Redact(path, content, TestContext.Current.CancellationToken);
@@ -109,7 +115,7 @@ public sealed class ManualSecretRedactionSessionTests
 		var value = CreateValue(Secret);
 		var persistentMark = CreateProfileMark(Secret, "TOKEN");
 		session.ReplaceMarkedSecrets([persistentMark]);
-		Assert.True(session.AddSessionMarkedSecret("config.env", 0, "TOKEN=".Length, value));
+		Assert.True(session.AddSessionMarkedSecret("config.env", "TOKEN=".Length, value));
 		var markedScope = session.BeginOutput(workspace.Path, [path]);
 		var marked = markedScope.Redact(path, File.ReadAllText(path), TestContext.Current.CancellationToken);
 		markedScope.Complete();

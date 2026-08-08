@@ -129,6 +129,20 @@ public sealed class CodeStructureGateTests
 	}
 
 	[Fact]
+	public void DuplicateDefectAtTheSamePosition_IsNotHiddenBySetComparison()
+	{
+		var defect = new CodeParseDefect("MISSING", 210);
+
+		var verdict = Evaluate(
+			[Method],
+			[Method],
+			[defect],
+			[defect, defect]);
+
+		Assert.Equal(CodeStructureGateVerdict.RejectedNewDefects, verdict);
+	}
+
+	[Fact]
 	public void FewerDefectsThanBefore_IsAccepted()
 	{
 		var verdict = Evaluate(

@@ -171,7 +171,6 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				: redactionScope?.CreatePlan(
 					file,
 					transformedText,
-					content.Content,
 					compression?.Map,
 					cancellationToken);
 

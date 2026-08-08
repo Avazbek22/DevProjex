@@ -96,15 +96,14 @@ public sealed class MarkedSecretsMatcherOptimizationTests(ITestOutputHelper outp
 	}
 
 	[Fact]
-	public void SessionMark_ResolvesLineStartFromSharedNewlineIndex()
+	public void SessionMark_UsesCanonicalSourceOffsetAcrossMixedNewlines()
 	{
 		const string marked = "secret-value-0001";
 		const string content = "first\r\nsecond\nKEY=secret-value-0001\r\nlast";
 		var value = CreateValue(marked);
 		var sessionMark = new SessionMarkedSecret(
 			"config.env",
-			LineIndex: 2,
-			Column: "KEY=".Length,
+			content.IndexOf(marked, StringComparison.Ordinal),
 			value.Length,
 			value.Hash);
 		var matcher = new MarkedSecretsMatcher([], [sessionMark]);

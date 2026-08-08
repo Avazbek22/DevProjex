@@ -153,28 +153,20 @@ public sealed class SecretRedactionSession : IDisposable
 		return RemoveManualSecret(hash, null).PersistentMarkRemoved;
 	}
 
-	/// <param name="transformIdentity">
-	/// Identity of the transform that produced the text the user was looking at. Empty means the
-	/// file as it sits on disk. Stored with the mark so the anchor can be translated when the
-	/// transformation is later switched on or off.
-	/// </param>
 	public bool AddSessionMarkedSecret(
 		string relativePath,
-		int lineIndex,
-		int column,
-		MarkedSecretValue value,
-		string transformIdentity = "")
+		int sourceOffset,
+		MarkedSecretValue value)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentOutOfRangeException.ThrowIfNegative(sourceOffset);
 		ArgumentNullException.ThrowIfNull(value);
 		var mark = new SessionMarkedSecret(
 			relativePath.Replace('\\', '/'),
-			lineIndex,
-			column,
+			sourceOffset,
 			value.Length,
-			value.Hash,
-			transformIdentity);
+			value.Hash);
 		bool added;
 		lock (_sync)
 		{
@@ -343,7 +335,6 @@ public sealed class SecretRedactionSession : IDisposable
 		int markedSecretsRevision,
 		string transformIdentity,
 		CancellationToken cancellationToken,
-		string? sourceContent = null,
 		ContentTransformMap? transformMap = null) =>
 		GetOrDetectFindings(
 			projectRoot,
@@ -355,7 +346,6 @@ public sealed class SecretRedactionSession : IDisposable
 			markedSecretsRevision,
 			transformIdentity,
 			cancellationToken,
-			sourceContent.AsSpan(),
 			transformMap);
 
 	internal SecretScanCacheEntry GetOrDetectFindings(
@@ -368,7 +358,6 @@ public sealed class SecretRedactionSession : IDisposable
 		int markedSecretsRevision,
 		string transformIdentity,
 		CancellationToken cancellationToken,
-		ReadOnlySpan<char> sourceContent = default,
 		ContentTransformMap? transformMap = null)
 	{
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
@@ -391,9 +380,7 @@ public sealed class SecretRedactionSession : IDisposable
 		var markedFindings = markedSecretsMatcher.Match(
 			relativePath,
 			content,
-			sourceContent,
 			transformMap,
-			transformIdentity,
 			cancellationToken);
 		var detected = SecretRedactionScope.ResolveNonOverlappingMatches(
 			detectorFindings.Count == 0
@@ -775,19 +762,17 @@ public sealed class SecretRedactionScope
 		string filePath,
 		string content,
 		CancellationToken cancellationToken = default) =>
-		Redact(filePath, content, null, null, cancellationToken);
+		Redact(filePath, content, null, cancellationToken);
 
 	/// <param name="content">The text to redact, after compression.</param>
-	/// <param name="sourceContent">The file before compression, so marks made against it still place.</param>
-	/// <param name="transformMap">Translation between the two.</param>
+	/// <param name="transformMap">Translation from canonical source offsets into this text.</param>
 	public SecretTextRedactionResult Redact(
 		string filePath,
 		string content,
-		string? sourceContent,
 		ContentTransformMap? transformMap,
 		CancellationToken cancellationToken = default)
 	{
-		var plan = CreatePlan(filePath, content, sourceContent, transformMap, cancellationToken);
+		var plan = CreatePlan(filePath, content, transformMap, cancellationToken);
 		return plan.BuildResult(content);
 	}
 
@@ -795,12 +780,11 @@ public sealed class SecretRedactionScope
 		string filePath,
 		string content,
 		CancellationToken cancellationToken = default) =>
-		CreatePlan(filePath, content, null, null, cancellationToken);
+		CreatePlan(filePath, content, null, cancellationToken);
 
 	internal SecretFileRedactionPlan CreatePlan(
 		string filePath,
 		string content,
-		string? sourceContent,
 		ContentTransformMap? transformMap,
 		CancellationToken cancellationToken = default)
 	{
@@ -827,7 +811,6 @@ public sealed class SecretRedactionScope
 			_markedSecretsRevision,
 			_transformIdentity,
 			cancellationToken,
-			sourceContent,
 			transformMap);
 		return ProcessFindings(filePath, entry.Findings);
 	}

@@ -192,6 +192,7 @@ public sealed class PreviewDocumentBuilderTests
                 Assert.Equal(4, section.EndLine);
                 Assert.Equal(1, section.HeaderLine);
                 Assert.Equal(3, section.ContentStartLine);
+				Assert.Null(section.CoordinateMap);
             },
             section =>
             {
@@ -200,8 +201,28 @@ public sealed class PreviewDocumentBuilderTests
                 Assert.Equal(9, section.EndLine);
                 Assert.Equal(7, section.HeaderLine);
                 Assert.Equal(9, section.ContentStartLine);
+				Assert.Null(section.CoordinateMap);
             });
     }
+
+	[Fact]
+	public async Task BuildContentDocumentAsync_SourceCoordinateMapsAreOptInForInteractivePreview()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("config.txt", "first\r\nTOKEN=secret-value-42");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[path],
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			includeSourceCoordinateMaps: true);
+
+		var section = Assert.Single(document!.Sections);
+		var map = Assert.IsType<PreviewContentCoordinateMap>(section.CoordinateMap);
+		Assert.True(map.TryToSourceOffset(1, "TOKEN=".Length, out var sourceOffset));
+		Assert.Equal("first\r\nTOKEN=".Length, sourceOffset);
+	}
 
     [Fact]
     public async Task BuildTreeAndContentDocumentAsync_WithoutFiles_ReturnsTrimmedTreeText()

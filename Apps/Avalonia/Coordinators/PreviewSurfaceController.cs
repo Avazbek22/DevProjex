@@ -140,12 +140,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 				new MarkedSecretProfileEntry(e.Value.Hash, location.Key, e.Value.Length))
 			: _secretRedactionSession.AddSessionMarkedSecret(
 				location.RelativePath,
-				location.LineIndex,
-				location.Column,
-				e.Value,
-				// The line the user clicked belongs to the text on screen. Recording which transform
-				// produced it is what lets the mark survive that setting being toggled afterwards.
-				_transformationContextProvider()?.Compression?.Session.TransformIdentity ?? string.Empty);
+				location.SourceOffset,
+				e.Value);
 		if (!changed && !e.Persistent)
 			return;
 
@@ -209,10 +205,18 @@ internal sealed class PreviewSurfaceController : IDisposable
 		var key = MarkedSecretValueNormalizer.ExtractKey(
 			previewLine,
 			selection.StartColumn + request.Value.LeadingCharactersRemoved);
+		if (section.CoordinateMap is null ||
+		    !section.CoordinateMap.TryToSourceOffset(
+			    selection.StartLine - section.ContentStartLine,
+			    sourceColumn,
+			    out var sourceOffset))
+		{
+			return false;
+		}
+
 		location = new ManualSecretLocation(
 			section.DisplayPath,
-			selection.StartLine - section.ContentStartLine,
-			sourceColumn,
+			sourceOffset,
 			key);
 		return true;
 	}
@@ -642,8 +646,9 @@ internal sealed class PreviewSurfaceController : IDisposable
                 _previewDocumentBuilder.BuildContentDocumentAsync(
                         files,
                         cancellationToken,
-						pathPresentation?.MapFilePath,
-						transformationContext: _transformationContextProvider())
+                        pathPresentation?.MapFilePath,
+                        transformationContext: _transformationContextProvider(),
+                        includeSourceCoordinateMaps: true)
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -706,8 +711,9 @@ internal sealed class PreviewSurfaceController : IDisposable
                     cancellationToken,
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
-							currentPath),
-					transformationContext: _transformationContextProvider())
+                            currentPath),
+                    transformationContext: _transformationContextProvider(),
+                    includeSourceCoordinateMaps: true)
                 .GetAwaiter()
                 .GetResult();
         return new PreviewBuildResult(document);
@@ -896,8 +902,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
 	private readonly record struct ManualSecretLocation(
 		string RelativePath,
-		int LineIndex,
-		int Column,
+		int SourceOffset,
 		string? Key);
 
 	private void RestoreViewportAfterRedaction(Vector requestedOffset)

@@ -47,8 +47,9 @@ public enum CodeStructureGateVerdict
 /// Decides whether a compressed rendering may replace the original.
 ///
 /// The rule is that compression may fail, but may not silently remove meaning. Two independent
-/// comparisons enforce it, and both are deliberately set-based rather than count-based: a file
-/// where one defect disappears and another appears has an unchanged count and a real regression.
+/// comparisons enforce it. Defects are compared as a multiset rather than by total count or set:
+/// a file where one defect disappears and another appears has an unchanged count and a real
+/// regression, while two identical defects at one position must not collapse into one.
 ///
 /// Declarations are compared against the declarations that were NOT excised. A method whose body
 /// is removed keeps its own declaration but loses any local function declared inside it, so
@@ -101,14 +102,16 @@ public static class CodeStructureGate
 		}
 
 		var known = originalDefects
-			.Select(static defect => (defect.Kind, defect.Start))
-			.ToHashSet();
+			.GroupBy(static defect => (defect.Kind, defect.Start))
+			.ToDictionary(static group => group.Key, static group => group.Count());
 		foreach (var defect in compressedDefects)
 		{
 			// Unmappable means the defect sits inside text the splice invented, so it cannot
 			// have existed before by construction.
-			if (defect.IsUnmappable || !known.Contains((defect.Kind, defect.Start)))
+			var key = (defect.Kind, defect.Start);
+			if (defect.IsUnmappable || !known.TryGetValue(key, out var remaining) || remaining == 0)
 				return CodeStructureGateVerdict.RejectedNewDefects;
+			known[key] = remaining - 1;
 		}
 
 		var expected = originalDeclarations

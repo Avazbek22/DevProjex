@@ -107,7 +107,6 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				var plan = scope?.CreatePlan(
 					sourcePath,
 					transformedText,
-					content.Content,
 					compressed.Map,
 					cancellationToken);
 				var redactions = plan?.Spans

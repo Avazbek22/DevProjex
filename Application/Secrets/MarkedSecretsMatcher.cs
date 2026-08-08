@@ -3,22 +3,18 @@ using DevProjex.Application.Compression;
 namespace DevProjex.Application.Secrets;
 
 /// <summary>
-/// A value the user marked by hand during this session, anchored where they clicked.
-///
-/// <see cref="TransformIdentity"/> records which text those coordinates describe: empty for the
-/// file as it sits on disk, otherwise the transform that produced the text on screen. Without it a
-/// line number is meaningless the moment compression is toggled, because both texts have line 40.
+/// A value the user marked by hand during this session, anchored in canonical source coordinates.
+/// Every transformed preview maps the click back to this offset before the mark enters the session,
+/// so enabling and disabling transformations are symmetric.
 /// </summary>
 internal sealed record SessionMarkedSecret(
 	string RelativePath,
-	int LineIndex,
-	int Column,
+	int SourceOffset,
 	int Length,
-	string Hash,
-	string TransformIdentity = "")
+	string Hash)
 {
 	public string Id { get; } = SecretRedactionSession.HashValue(
-		$"{NormalizePath(RelativePath)}\n{LineIndex}\n{Column}\n{Length}\n{Hash}\n{TransformIdentity}".AsSpan());
+		$"{NormalizePath(RelativePath)}\n{SourceOffset}\n{Length}\n{Hash}".AsSpan());
 
 	private static string NormalizePath(string path) => path.Replace('\\', '/');
 }
@@ -64,21 +60,14 @@ internal sealed class MarkedSecretsMatcher
 		string relativePath,
 		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken) =>
-		Match(relativePath, content, default, null, string.Empty, cancellationToken);
+		Match(relativePath, content, null, cancellationToken);
 
 	/// <param name="content">The text being scanned, after every enabled transformation.</param>
-	/// <param name="sourceContent">
-	/// The file as it sits on disk, needed only to place a mark whose coordinates were captured
-	/// before the transformation existed. Empty when nothing was transformed.
-	/// </param>
-	/// <param name="transformMap">Translation between the two, or null when they are the same text.</param>
-	/// <param name="transformIdentity">Identity of the transform that produced <paramref name="content"/>.</param>
+	/// <param name="transformMap">Translation from canonical source offsets into this text.</param>
 	public IReadOnlyList<DetectedSecret> Match(
 		string relativePath,
 		ReadOnlySpan<char> content,
-		ReadOnlySpan<char> sourceContent,
 		ContentTransformMap? transformMap,
-		string transformIdentity,
 		CancellationToken cancellationToken)
 	{
 		if (_persistentHashGroups.Length == 0 && _sessionMarksByPath.Count == 0)
@@ -91,9 +80,7 @@ internal sealed class MarkedSecretsMatcher
 			relativePath,
 			content,
 			positions,
-			sourceContent,
 			transformMap,
-			transformIdentity,
 			findings,
 			cancellationToken);
 		return findings;
@@ -145,30 +132,20 @@ internal sealed class MarkedSecretsMatcher
 		string relativePath,
 		ReadOnlySpan<char> content,
 		TextPositionIndex positions,
-		ReadOnlySpan<char> sourceContent,
 		ContentTransformMap? transformMap,
-		string transformIdentity,
 		ICollection<DetectedSecret> findings,
 		CancellationToken cancellationToken)
 	{
 		if (!_sessionMarksByPath.TryGetValue(NormalizePath(relativePath), out var marks))
 			return;
 
-		// Built at most once per file, and only when a mark actually needs translating.
-		TextPositionIndex? sourcePositions = null;
 		Span<byte> candidateHash = stackalloc byte[MarkedSecretValueNormalizer.PersistedHashByteLength];
 		foreach (var preparedMark in marks)
 		{
 			var mark = preparedMark.Mark;
 			if (!TryResolveAnchor(
 				    mark,
-				    content,
-				    positions,
-				    sourceContent,
 				    transformMap,
-				    transformIdentity,
-				    ref sourcePositions,
-				    cancellationToken,
 				    out var start))
 			{
 				continue;
@@ -203,44 +180,22 @@ internal sealed class MarkedSecretsMatcher
 	/// <summary>
 	/// Places a mark in the text being scanned.
 	///
-	/// A mark captured against this same transform needs no translation. A mark captured against the
-	/// untransformed file is resolved in the source text and carried across the map: that is how a
-	/// value in a constant or an attribute stays hidden after compression is switched on. A mark
-	/// that sat inside a body compression removed has no counterpart, and the map says so - it
-	/// disappears with the body rather than drifting onto the code that took its place.
+	/// The source offset is used directly for an identity transform and carried through the current
+	/// map otherwise. A value inside a removed body has no counterpart, and the map says so rather
+	/// than allowing the mark to drift onto replacement text.
 	/// </summary>
 	private static bool TryResolveAnchor(
 		SessionMarkedSecret mark,
-		ReadOnlySpan<char> content,
-		TextPositionIndex positions,
-		ReadOnlySpan<char> sourceContent,
 		ContentTransformMap? transformMap,
-		string transformIdentity,
-		ref TextPositionIndex? sourcePositions,
-		CancellationToken cancellationToken,
 		out int start)
 	{
-		start = -1;
-		// Nothing moved in this file, so every anchor still means what it meant when it was made.
-		// This is the common case even with compression on: an interface, a record or a file in an
-		// unsupported language is left whole, and its map is the identity.
-		if (transformMap is null or { IsIdentity: true } ||
-		    string.Equals(mark.TransformIdentity, transformIdentity, StringComparison.Ordinal))
+		if (transformMap is null or { IsIdentity: true })
 		{
-			start = positions.ResolveOffset(content, mark.LineIndex, mark.Column);
-			return start >= 0;
+			start = mark.SourceOffset;
+			return true;
 		}
 
-		if (mark.TransformIdentity.Length != 0 ||
-		    transformMap is not { IsIdentity: false } map ||
-		    sourceContent.IsEmpty)
-		{
-			return false;
-		}
-
-		sourcePositions ??= TextPositionIndex.Create(sourceContent, cancellationToken);
-		var sourceOffset = sourcePositions.ResolveOffset(sourceContent, mark.LineIndex, mark.Column);
-		return sourceOffset >= 0 && map.TryToTransformed(sourceOffset, out start);
+		return transformMap.TryToTransformed(mark.SourceOffset, out start);
 	}
 
 	private static DetectedSecret CreateFinding(
@@ -302,8 +257,7 @@ internal sealed class MarkedSecretsMatcher
 	private sealed class TextPositionIndex(
 		bool[] boundaries,
 		int[] boundaryPositions,
-		int[] lineBreakPrefixCounts,
-		int[] newlinePositions)
+		int[] lineBreakPrefixCounts)
 	{
 		public IReadOnlyList<int> BoundaryPositions { get; } = boundaryPositions;
 
@@ -314,7 +268,6 @@ internal sealed class MarkedSecretsMatcher
 			var boundaries = new bool[content.Length + 1];
 			var boundaryPositions = new List<int>();
 			var lineBreakPrefixCounts = new int[content.Length + 1];
-			var newlinePositions = new List<int>();
 
 			for (var position = 0; position <= content.Length; position++)
 			{
@@ -333,15 +286,12 @@ internal sealed class MarkedSecretsMatcher
 				var character = content[position];
 				lineBreakPrefixCounts[position + 1] =
 					lineBreakPrefixCounts[position] + (character is '\r' or '\n' ? 1 : 0);
-				if (character == '\n')
-					newlinePositions.Add(position);
 			}
 
 			return new TextPositionIndex(
 				boundaries,
 				boundaryPositions.ToArray(),
-				lineBreakPrefixCounts,
-				newlinePositions.ToArray());
+				lineBreakPrefixCounts);
 		}
 
 		public bool IsBoundary(int position) =>
@@ -349,20 +299,5 @@ internal sealed class MarkedSecretsMatcher
 
 		public bool ContainsLineBreak(int start, int end) =>
 			lineBreakPrefixCounts[end] != lineBreakPrefixCounts[start];
-
-		public int ResolveOffset(ReadOnlySpan<char> content, int lineIndex, int column)
-		{
-			if (lineIndex < 0 || column < 0 || lineIndex > newlinePositions.Length)
-				return -1;
-
-			var lineStart = lineIndex == 0 ? 0 : newlinePositions[lineIndex - 1] + 1;
-			var lineEnd = lineIndex < newlinePositions.Length
-				? newlinePositions[lineIndex]
-				: content.Length;
-			if (lineEnd > lineStart && content[lineEnd - 1] == '\r')
-				lineEnd--;
-
-			return column <= lineEnd - lineStart ? lineStart + column : -1;
-		}
 	}
 }

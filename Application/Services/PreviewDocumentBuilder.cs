@@ -74,7 +74,8 @@ public sealed class PreviewDocumentBuilder(
         CancellationToken cancellationToken,
         Func<string, string>? displayPathMapper,
         bool includeOmissionMarkers = false,
-		ContentTransformationContext? transformationContext = null)
+		ContentTransformationContext? transformationContext = null,
+		bool includeSourceCoordinateMaps = false)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
         if (orderedFiles.Count == 0)
@@ -98,6 +99,7 @@ public sealed class PreviewDocumentBuilder(
 			redactionScope,
 			transformationScope,
 			redactions,
+			includeSourceCoordinateMaps,
             cancellationToken).ConfigureAwait(false);
 
 		redactionScope?.Complete();
@@ -114,7 +116,8 @@ public sealed class PreviewDocumentBuilder(
         CancellationToken cancellationToken,
         Func<string, string>? displayPathMapper,
         bool includeOmissionMarkers = false,
-		ContentTransformationContext? transformationContext = null)
+		ContentTransformationContext? transformationContext = null,
+		bool includeSourceCoordinateMaps = false)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
         var normalizedTreeText = treeText.TrimEnd('\r', '\n');
@@ -141,6 +144,7 @@ public sealed class PreviewDocumentBuilder(
 			redactionScope,
 			transformationScope,
 			redactions,
+			includeSourceCoordinateMaps,
             cancellationToken).ConfigureAwait(false);
 		redactionScope?.Complete();
 		transformationScope?.Compression?.Complete();
@@ -161,6 +165,7 @@ public sealed class PreviewDocumentBuilder(
 		SecretRedactionScope? redactionScope,
 		ContentTransformationScope? transformationScope,
 		ICollection<PreviewRedactionSpan> redactions,
+		bool includeSourceCoordinateMaps,
         CancellationToken cancellationToken)
     {
         var anyWritten = false;
@@ -277,10 +282,14 @@ public sealed class PreviewDocumentBuilder(
 			// value inside a removed body is neither redacted nor counted.
 			var compression = prepared.Compression;
 			var compressed = compression?.Text ?? content.Content;
+			var coordinateMap = includeSourceCoordinateMaps
+				? PreviewContentCoordinateMap.Create(
+					compressed.AsSpan(),
+					compression?.Map ?? ContentTransformMap.Identity)
+				: null;
 			var transformed = redactionScope?.Redact(
 				file,
 				compressed,
-				content.Content,
 				compression?.Map,
 				cancellationToken);
 			var text = transformed?.Text ?? compressed;
@@ -297,7 +306,8 @@ public sealed class PreviewDocumentBuilder(
                 sectionStartLine,
                 builder.LineCount,
                 sectionStartLine,
-                sectionStartLine + 2));
+                sectionStartLine + 2,
+				coordinateMap));
         }
 
         if (anyWritten && trimTrailingEstimatedLine)

@@ -402,6 +402,61 @@ public sealed class TreeSitterCodeCompressorTests
 		}
 
 		Assert.Equal(1, locator.ResolveCount);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.MaterializedWorkers);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.AvailableWorkers);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.LeasedWorkers);
+	}
+
+	[Fact]
+	public async Task ConcurrentAnalysis_SharesCompiledQueriesAndBoundsNativeWorkers()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var locator = new CountingGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());
+		using var compressor = new TreeSitterCodeCompressor(locator, [harness.Pack]);
+		using var scope = compressor.CreateScope(Path.GetTempPath());
+		var tasks = Enumerable.Range(0, 64)
+			.Select(index => Task.Run(() => scope.Analyze(
+				$"Widget{index}.cs",
+				$"Widget{index}.cs",
+				CodeCompressionFixtures.CSharp,
+				TestContext.Current.CancellationToken)))
+			.ToArray();
+
+		var analyses = await Task.WhenAll(tasks);
+
+		Assert.All(analyses, analysis =>
+			Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome));
+		var diagnostics = compressor.RuntimeDiagnostics;
+		Assert.Equal(1, locator.ResolveCount);
+		Assert.Equal(1, diagnostics.CompiledQuerySets);
+		Assert.InRange(
+			diagnostics.MaterializedWorkers,
+			1,
+			Math.Min(16, Math.Max(1, Environment.ProcessorCount)));
+		Assert.Equal(diagnostics.MaterializedWorkers, diagnostics.AvailableWorkers);
+		Assert.Equal(0, diagnostics.LeasedWorkers);
+	}
+
+	[Fact]
+	public void DisposingPoolWithAnActiveLease_DefersSharedRuntimeDisposalUntilReturn()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var pool = new LanguageWorkerPool(CodeCompressionTestHarness.CreateLocator(), harness.Pack);
+		var lease = pool.Rent(TestContext.Current.CancellationToken);
+
+		pool.Dispose();
+
+		Assert.Equal(1, pool.Diagnostics.CompiledQuerySets);
+		Assert.Equal(1, pool.Diagnostics.LeasedWorkers);
+		using (var tree = lease.Worker.Parser.Parse(CodeCompressionFixtures.CSharp))
+			Assert.NotNull(tree);
+
+		lease.Dispose();
+
+		Assert.Equal(0, pool.Diagnostics.CompiledQuerySets);
+		Assert.Equal(0, pool.Diagnostics.LeasedWorkers);
+		Assert.Throws<ObjectDisposedException>(() => pool.Rent(CancellationToken.None));
 	}
 
 	[Fact]

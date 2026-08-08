@@ -9,7 +9,8 @@ public sealed record CompressionLanguageInfo(
 	string Id,
 	string DisplayName,
 	IReadOnlyList<string> Extensions,
-	string GrammarLibrary);
+	string GrammarLibrary,
+	string GrammarExport);
 
 /// <summary>
 /// Builds compression plans with tree-sitter. Everything language-specific is data: the grammar,
@@ -58,6 +59,22 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 
 	internal IReadOnlyList<CompressionLanguagePack> Packs => _packs;
 
+	internal CodeCompressionRuntimeDiagnostics RuntimeDiagnostics
+	{
+		get
+		{
+			var diagnostics = _languagePools.Values
+				.Where(static pool => pool.IsValueCreated)
+				.Select(static pool => pool.Value.Diagnostics)
+				.ToArray();
+			return new CodeCompressionRuntimeDiagnostics(
+				diagnostics.Sum(static value => value.CompiledQuerySets),
+				diagnostics.Sum(static value => value.MaterializedWorkers),
+				diagnostics.Sum(static value => value.AvailableWorkers),
+				diagnostics.Sum(static value => value.LeasedWorkers));
+		}
+	}
+
 	/// <summary>
 	/// What this build can actually compress. Shipping a grammar is not the same as supporting a
 	/// language, so this is the list the UI and the delivery check must both read - never a
@@ -68,7 +85,8 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 			pack.Id,
 			pack.DisplayName,
 			pack.Extensions,
-			pack.Library)).ToArray();
+			pack.Library,
+			pack.Export)).ToArray();
 
 	public bool IsSupported(string relativePath) =>
 		_byExtension.ContainsKey(Path.GetExtension(relativePath));
@@ -239,9 +257,10 @@ internal sealed class TreeSitterCompressionScope(
 		// Python keeps documentation inside the body, so the first string of a suite is preserved
 		// and only what follows it is removed. Every other language documents above the declaration.
 		var docstringEnds = new Dictionary<int, int>();
-		if (language.Docstrings is not null)
+		if (language.Runtime.Docstrings is not null && language.DocstringsCursor is not null)
 		{
-			foreach (var capture in language.Docstrings.Execute(tree.RootNode).Captures)
+			language.DocstringsCursor.Execute(language.Runtime.Docstrings, tree.RootNode);
+			foreach (var capture in language.DocstringsCursor.Captures)
 			{
 				var block = capture.Node.Parent;
 				if (block is not null)
@@ -250,7 +269,8 @@ internal sealed class TreeSitterCompressionScope(
 		}
 
 		var raw = new List<(int Start, int End, string Type)>();
-		foreach (var capture in language.Bodies.Execute(tree.RootNode).Captures)
+		language.BodiesCursor.Execute(language.Runtime.Bodies, tree.RootNode);
+		foreach (var capture in language.BodiesCursor.Captures)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var node = capture.Node;
@@ -430,7 +450,8 @@ internal sealed class TreeSitterCompressionScope(
 	private static List<CodeDeclaration> ReadDeclarations(LoadedLanguage language, Node root, ContentTransformMap map)
 	{
 		var declarations = new List<CodeDeclaration>();
-		foreach (var match in language.Declarations.Execute(root).Matches)
+		language.DeclarationsCursor.Execute(language.Runtime.Declarations, root);
+		foreach (var match in language.DeclarationsCursor.Matches)
 		{
 			Node? declaration = null;
 			string? name = null;
@@ -483,6 +504,12 @@ internal sealed class TreeSitterCompressionScope(
 	public void Dispose() => _disposed = true;
 }
 
+internal readonly record struct CodeCompressionRuntimeDiagnostics(
+	int CompiledQuerySets,
+	int MaterializedWorkers,
+	int AvailableWorkers,
+	int LeasedWorkers);
+
 /// <summary>
 /// Bounded process-lifetime parser pool. Grammar verification and materialization happen once;
 /// native parser state is never entered concurrently.
@@ -490,36 +517,59 @@ internal sealed class TreeSitterCompressionScope(
 internal sealed class LanguageWorkerPool : IDisposable
 {
 	private const int MaximumWorkers = 16;
-	private readonly CompressionLanguagePack _pack;
-	private readonly Lazy<string> _libraryPath;
+	private readonly Lazy<LanguageRuntime> _runtime;
 	private readonly ConcurrentBag<LoadedLanguage> _available = [];
 	private readonly SemaphoreSlim _capacity;
 	private readonly object _sync = new();
+	private int _leasedWorkers;
+	private int _materializedWorkers;
+	private bool _runtimeDisposed;
 	private bool _disposed;
 
 	public LanguageWorkerPool(IGrammarLibraryLocator locator, CompressionLanguagePack pack)
 	{
-		_pack = pack;
-		_libraryPath = new Lazy<string>(
-			() => locator.Resolve(pack.Library),
+		_runtime = new Lazy<LanguageRuntime>(
+			() => LanguageRuntime.Create(locator.Resolve(pack.Library), pack),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var workerCount = Math.Clamp(Environment.ProcessorCount, 1, MaximumWorkers);
 		_capacity = new SemaphoreSlim(workerCount, workerCount);
+	}
+
+	internal LanguagePoolDiagnostics Diagnostics
+	{
+		get
+		{
+			lock (_sync)
+			{
+				return new LanguagePoolDiagnostics(
+					_runtime.IsValueCreated && !_runtimeDisposed ? 1 : 0,
+					_materializedWorkers,
+					_available.Count,
+					_leasedWorkers);
+			}
+		}
 	}
 
 	public LanguageWorkerLease Rent(CancellationToken cancellationToken)
 	{
 		_capacity.Wait(cancellationToken);
 		LoadedLanguage? worker = null;
+		var leaseRegistered = false;
 		try
 		{
 			lock (_sync)
 			{
 				ObjectDisposedException.ThrowIf(_disposed, this);
+				_leasedWorkers++;
+				leaseRegistered = true;
 				_available.TryTake(out worker);
 			}
 
-			worker ??= LoadedLanguage.Create(_libraryPath.Value, _pack);
+			if (worker is null)
+			{
+				worker = LoadedLanguage.Create(_runtime.Value);
+				Interlocked.Increment(ref _materializedWorkers);
+			}
 			lock (_sync)
 				ObjectDisposedException.ThrowIf(_disposed, this);
 			return new LanguageWorkerLease(this, worker);
@@ -527,6 +577,14 @@ internal sealed class LanguageWorkerPool : IDisposable
 		catch
 		{
 			worker?.Dispose();
+			LanguageRuntime? runtimeToDispose;
+			lock (_sync)
+			{
+				if (leaseRegistered)
+					_leasedWorkers--;
+				runtimeToDispose = TakeRuntimeForDisposalLocked();
+			}
+			runtimeToDispose?.Dispose();
 			ReleaseCapacity();
 			throw;
 		}
@@ -534,32 +592,73 @@ internal sealed class LanguageWorkerPool : IDisposable
 
 	internal void Return(LoadedLanguage worker)
 	{
-		var dispose = false;
-		lock (_sync)
+		var reusable = true;
+		try
 		{
-			if (_disposed)
-				dispose = true;
-			else
-				_available.Add(worker);
+			worker.PrepareForReturn();
+		}
+		catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException)
+		{
+			reusable = false;
 		}
 
-		if (dispose)
+		var disposeWorker = !reusable;
+		var releaseCapacity = false;
+		LanguageRuntime? runtimeToDispose;
+		lock (_sync)
+		{
+			_leasedWorkers--;
+			if (_disposed)
+				disposeWorker = true;
+			else if (reusable)
+			{
+				_available.Add(worker);
+			}
+			if (!_disposed)
+				releaseCapacity = true;
+			runtimeToDispose = TakeRuntimeForDisposalLocked();
+		}
+
+		if (disposeWorker)
 			worker.Dispose();
-		else
+		if (releaseCapacity)
 			ReleaseCapacity();
+		runtimeToDispose?.Dispose();
 	}
 
 	public void Dispose()
 	{
+		List<LoadedLanguage> workers;
+		LanguageRuntime? runtimeToDispose;
 		lock (_sync)
 		{
 			if (_disposed)
 				return;
 			_disposed = true;
+			workers = new List<LoadedLanguage>(_available.Count);
 			while (_available.TryTake(out var worker))
-				worker.Dispose();
+				workers.Add(worker);
+			runtimeToDispose = TakeRuntimeForDisposalLocked();
 		}
+
+		foreach (var worker in workers)
+			worker.Dispose();
 		_capacity.Dispose();
+		runtimeToDispose?.Dispose();
+	}
+
+	private LanguageRuntime? TakeRuntimeForDisposalLocked()
+	{
+		if (!_disposed ||
+		    _leasedWorkers != 0 ||
+		    _runtimeDisposed ||
+		    !_runtime.IsValueCreated)
+		{
+			return null;
+		}
+
+		_runtimeDisposed = true;
+		return _runtime.Value;
 	}
 
 	private void ReleaseCapacity()
@@ -575,6 +674,12 @@ internal sealed class LanguageWorkerPool : IDisposable
 	}
 }
 
+internal readonly record struct LanguagePoolDiagnostics(
+	int CompiledQuerySets,
+	int MaterializedWorkers,
+	int AvailableWorkers,
+	int LeasedWorkers);
+
 internal sealed class LanguageWorkerLease(
 	LanguageWorkerPool owner,
 	LoadedLanguage worker) : IDisposable
@@ -586,48 +691,41 @@ internal sealed class LanguageWorkerLease(
 	public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Return(Worker);
 }
 
-/// <summary>One non-thread-safe native parser and its compiled queries.</summary>
-internal sealed record LoadedLanguage(
+/// <summary>
+/// One immutable language/query set shared by every parser worker. Tree-sitter explicitly permits
+/// sharing TSQuery between threads; execution state remains isolated in each worker's cursors.
+/// </summary>
+internal sealed record LanguageRuntime(
 	Language Language,
-	Parser Parser,
 	Query Bodies,
 	Query Declarations,
 	Query? Docstrings) : IDisposable
 {
-	public static LoadedLanguage Create(string libraryPath, CompressionLanguagePack pack)
+	public static LanguageRuntime Create(string libraryPath, CompressionLanguagePack pack)
 	{
 		var language = new Language(libraryPath, pack.Export);
 		try
 		{
-			var parser = new Parser(language);
+			var bodies = new Query(language, pack.BodiesQuery);
 			try
 			{
-				var bodies = new Query(language, pack.BodiesQuery);
+				var declarations = new Query(language, pack.DeclarationsQuery);
 				try
 				{
-					var declarations = new Query(language, pack.DeclarationsQuery);
-					try
-					{
-						var docstrings = pack.DocstringsQuery is null
-							? null
-							: new Query(language, pack.DocstringsQuery);
-						return new LoadedLanguage(language, parser, bodies, declarations, docstrings);
-					}
-					catch
-					{
-						declarations.Dispose();
-						throw;
-					}
+					var docstrings = pack.DocstringsQuery is null
+						? null
+						: new Query(language, pack.DocstringsQuery);
+					return new LanguageRuntime(language, bodies, declarations, docstrings);
 				}
 				catch
 				{
-					bodies.Dispose();
+					declarations.Dispose();
 					throw;
 				}
 			}
 			catch
 			{
-				parser.Dispose();
+				bodies.Dispose();
 				throw;
 			}
 		}
@@ -643,7 +741,87 @@ internal sealed record LoadedLanguage(
 		Docstrings?.Dispose();
 		Declarations.Dispose();
 		Bodies.Dispose();
-		Parser.Dispose();
 		Language.Dispose();
+	}
+}
+
+/// <summary>One non-thread-safe parser and one reusable cursor per query.</summary>
+internal sealed record LoadedLanguage(
+	LanguageRuntime Runtime,
+	Parser Parser,
+	Tree IdleTree,
+	QueryCursor BodiesCursor,
+	QueryCursor DeclarationsCursor,
+	QueryCursor? DocstringsCursor) : IDisposable
+{
+	public static LoadedLanguage Create(LanguageRuntime runtime)
+	{
+		var parser = new Parser(runtime.Language);
+		try
+		{
+			var idleTree = parser.Parse(string.Empty) ??
+			               throw new InvalidOperationException("Tree-sitter could not create an idle tree.");
+			try
+			{
+				var bodiesCursor = new QueryCursor();
+				try
+				{
+					var declarationsCursor = new QueryCursor();
+					try
+					{
+						var docstringsCursor = runtime.Docstrings is null ? null : new QueryCursor();
+						return new LoadedLanguage(
+							runtime,
+							parser,
+							idleTree,
+							bodiesCursor,
+							declarationsCursor,
+							docstringsCursor);
+					}
+					catch
+					{
+						declarationsCursor.Dispose();
+						throw;
+					}
+				}
+				catch
+				{
+					bodiesCursor.Dispose();
+					throw;
+				}
+			}
+			catch
+			{
+				idleTree.Dispose();
+				throw;
+			}
+		}
+		catch
+		{
+			parser.Dispose();
+			throw;
+		}
+	}
+
+	/// <summary>
+	/// QueryCursor retains its last Tree and Tree retains the parsed string. Rebinding to a tiny
+	/// process-lifetime tree prevents an idle pool from retaining the last large files it parsed.
+	/// </summary>
+	public void PrepareForReturn()
+	{
+		var root = IdleTree.RootNode;
+		BodiesCursor.Execute(Runtime.Bodies, root);
+		DeclarationsCursor.Execute(Runtime.Declarations, root);
+		if (DocstringsCursor is not null && Runtime.Docstrings is not null)
+			DocstringsCursor.Execute(Runtime.Docstrings, root);
+	}
+
+	public void Dispose()
+	{
+		DocstringsCursor?.Dispose();
+		DeclarationsCursor.Dispose();
+		BodiesCursor.Dispose();
+		IdleTree.Dispose();
+		Parser.Dispose();
 	}
 }

@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
+using DevProjex.Application.Preview;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.ProjectProfiles;
@@ -244,7 +245,6 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		Assert.True(MarkedSecretValueNormalizer.TryCreate(notesValue, out var marked, out _));
 		Assert.True(secrets.AddSessionMarkedSecret(
 			"notes.txt",
-			0,
 			plainText.IndexOf(notesValue, StringComparison.Ordinal),
 			marked));
 
@@ -303,6 +303,29 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		Assert.Equal(2, plain.RedactionCount);
 	}
 
+	[Fact]
+	public async Task SessionMarkMadeOnCompressedPreview_RemainsHiddenWhenCompressionIsDisabled()
+	{
+		using var workspace = CompressionWorkspace.Create(MarkableSource);
+		var compressedSource = workspace.CompressSource();
+		var transformedOffset = compressedSource.Text.IndexOf(MarkedConstantValue, StringComparison.Ordinal);
+		Assert.True(transformedOffset >= 0);
+		var coordinates = PreviewContentCoordinateMap.Create(compressedSource.Text, compressedSource.Map);
+		var (line, column) = ResolveLineAndColumn(compressedSource.Text, transformedOffset);
+		Assert.True(coordinates.TryToSourceOffset(line, column, out var sourceOffset));
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(MarkedConstantValue, out var marked, out _));
+		using var secrets = new SecretRedactionSession(new NoFindingsDetector());
+		Assert.True(secrets.AddSessionMarkedSecret("Widget.cs", sourceOffset, marked));
+
+		var compressed = await workspace.BuildContentAsync(secrets, compress: true);
+		var plain = await workspace.BuildContentAsync(secrets, compress: false);
+
+		Assert.DoesNotContain(MarkedConstantValue, compressed.Text);
+		Assert.DoesNotContain(MarkedConstantValue, plain.Text);
+		Assert.Equal(1, compressed.RedactionCount);
+		Assert.Equal(1, plain.RedactionCount);
+	}
+
 	private static int LinesBetweenSignatureAndConstant(string text)
 	{
 		var lines = text.Replace("\r\n", "\n").Split('\n');
@@ -316,17 +339,30 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		return constant - signature;
 	}
 
+	private static (int Line, int Column) ResolveLineAndColumn(string text, int offset)
+	{
+		var line = 0;
+		var lineStart = 0;
+		for (var index = 0; index < offset; index++)
+		{
+			if (text[index] != '\n')
+				continue;
+			line++;
+			lineStart = index + 1;
+		}
+
+		return (line, offset - lineStart);
+	}
+
 	/// <summary>Marks the value where it sits in the file, exactly as a click on the preview would.</summary>
 	private static void MarkInSource(SecretRedactionSession session, string source, string value)
 	{
-		var lines = source.Replace("\r\n", "\n").Split('\n');
-		var lineIndex = Array.FindIndex(lines, line => line.Contains(value, StringComparison.Ordinal));
-		Assert.True(lineIndex >= 0, $"'{value}' is not in the fixture source");
+		var sourceOffset = source.IndexOf(value, StringComparison.Ordinal);
+		Assert.True(sourceOffset >= 0, $"'{value}' is not in the fixture source");
 		Assert.True(MarkedSecretValueNormalizer.TryCreate(value, out var marked, out _));
 		Assert.True(session.AddSessionMarkedSecret(
 			"Widget.cs",
-			lineIndex,
-			lines[lineIndex].IndexOf(value, StringComparison.Ordinal),
+			sourceOffset,
 			marked));
 	}
 
@@ -497,6 +533,19 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			var path = Path.Combine(SourceRoot, name);
 			File.WriteAllText(path, content);
 			return path;
+		}
+
+		public CodeCompressionResult CompressSource()
+		{
+			using var session = CodeCompressionFactory.CreateSession();
+			using var scope = session.BeginOutput(SourceRoot, [SourceFile]);
+			var result = scope.Transform(
+				SourceFile,
+				"Widget.cs",
+				File.ReadAllText(SourceFile),
+				TestContext.Current.CancellationToken);
+			scope.Complete();
+			return result;
 		}
 
 		/// <summary>Builds the preview document - the single source of truth for every export.</summary>

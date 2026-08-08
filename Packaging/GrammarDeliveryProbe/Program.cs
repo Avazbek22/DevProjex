@@ -4,8 +4,6 @@ using System.Security.Cryptography;
 using DevProjex.Infrastructure.Compression;
 using TreeSitter;
 
-const int ExpectedGrammarCount = 10;
-
 // Delivery contract check. Exits non-zero unless every grammar this build carries can be located,
 // loaded and used to parse on the RID the binary was published for.
 //
@@ -28,6 +26,12 @@ var embedded = new EmbeddedGrammarLibraryLocator(
 	"DevProjex.Grammars/",
 	EmbeddedGrammarLibraryLocator.DefaultRootDirectory(bindingVersion));
 IGrammarLibraryLocator locator = useContent ? new ContentGrammarLibraryLocator() : embedded;
+using var catalog = new TreeSitterCodeCompressor(locator);
+var expectedGrammars = catalog.Languages
+	.ToDictionary(
+		static language => language.GrammarLibrary,
+		static language => language.GrammarExport,
+		StringComparer.Ordinal);
 
 Console.WriteLine($"rid              : {runtimeIdentifier}");
 Console.WriteLine($"binding          : {bindingVersion}");
@@ -54,13 +58,16 @@ if (!useContent)
 
 var libraries = locator.EnumerateLibraries();
 Console.WriteLine($"grammars carried by this build: {libraries.Count}");
-if (libraries.Count != ExpectedGrammarCount)
+var missing = expectedGrammars.Keys.Except(libraries, StringComparer.Ordinal).Order().ToArray();
+var unexpected = libraries.Except(expectedGrammars.Keys, StringComparer.Ordinal).Order().ToArray();
+if (missing.Length > 0 || unexpected.Length > 0)
 {
 	Console.Error.WriteLine(
-		$"FAILURE expected {ExpectedGrammarCount} curated grammars, found {libraries.Count}");
+		$"FAILURE grammar catalog mismatch; missing=[{string.Join(", ", missing)}], " +
+		$"unexpected=[{string.Join(", ", unexpected)}]");
 	Console.WriteLine(
 		$"GRAMMAR-DELIVERY rid={runtimeIdentifier} strategy={locator.StrategyName} " +
-		$"loaded=0/{ExpectedGrammarCount} result=fail");
+		$"loaded=0/{expectedGrammars.Count} result=fail");
 	return 1;
 }
 
@@ -91,7 +98,7 @@ foreach (var library in libraries)
 	var watch = Stopwatch.StartNew();
 	try
 	{
-		using var language = new Language(locator.Resolve(library), ExportFor(library));
+		using var language = new Language(locator.Resolve(library), expectedGrammars[library]);
 		var loadMilliseconds = watch.Elapsed.TotalMilliseconds;
 		using var parser = new Parser(language);
 		using var tree = parser.Parse("x") ?? throw new InvalidOperationException("parser returned no tree");
@@ -116,11 +123,6 @@ Console.WriteLine(
 	$"GRAMMAR-DELIVERY rid={runtimeIdentifier} strategy={locator.StrategyName} " +
 	$"loaded={loaded}/{libraries.Count} result={result}");
 return result == "pass" ? 0 : 1;
-
-// The binding maps ids by lowercasing and swapping '-' for '_', so tree-sitter-c-sharp exports
-// tree_sitter_c_sharp. Deriving it here keeps the probe independent of the language packs.
-static string ExportFor(string libraryBaseName) =>
-	libraryBaseName.Replace('-', '_');
 
 static string? VerifyRecovery(EmbeddedGrammarLibraryLocator locator, string libraryBaseName)
 {

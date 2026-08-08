@@ -78,13 +78,15 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 	public int CountCaptures(Query query)
 	{
 		using var tree = Parser.Parse(Fixture)!;
-		return query.Execute(tree.RootNode).Captures.Count();
+		using var cursor = query.Execute(tree.RootNode);
+		return cursor.Captures.Count();
 	}
 
 	public IReadOnlyCollection<string> CapturedNodeTypes(Query query)
 	{
 		using var tree = Parser.Parse(Fixture)!;
-		return query.Execute(tree.RootNode).Captures
+		using var cursor = query.Execute(tree.RootNode);
+		return cursor.Captures
 			.Select(static capture => capture.Node.Type)
 			.ToHashSet(StringComparer.Ordinal);
 	}

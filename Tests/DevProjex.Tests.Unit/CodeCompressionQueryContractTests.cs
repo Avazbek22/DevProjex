@@ -69,6 +69,17 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
+	public void CSharpExecutableOwnersNameActualBodiesRatherThanTheirContainingFields()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+
+		Assert.Contains("lambda_expression", harness.Pack.ExecutableOwnerKinds);
+		Assert.Contains("anonymous_method_expression", harness.Pack.ExecutableOwnerKinds);
+		Assert.DoesNotContain("field_declaration", harness.Pack.ExecutableOwnerKinds);
+		Assert.DoesNotContain("event_field_declaration", harness.Pack.ExecutableOwnerKinds);
+	}
+
+	[Fact]
 	public void NoQueryCapturesAContainerBody()
 	{
 		// The safety list is defence in depth, but if a pattern ever does reach a container the
