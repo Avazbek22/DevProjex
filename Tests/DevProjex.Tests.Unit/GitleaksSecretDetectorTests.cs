@@ -90,6 +90,40 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void Detect_PemMarkerMentionsSeparatedByCode_DoNotSpanIntoOnePrivateKeyFinding()
+	{
+		// A test or documentation file may mention PEM markers several times without containing a
+		// key. The unbounded upstream pattern bridges such mentions across the source code between
+		// them and reports everything as one giant secret; the bounded override must not.
+		const string content =
+			"const string fixture = \"-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\";\n" +
+			"var start = text.IndexOf(\"-----BEGIN PRIVATE KEY-----\", StringComparison.Ordinal);\n" +
+			"var length = \"-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\".Length;\n";
+
+		Assert.DoesNotContain(
+			Detector.Detect("src/PemFixtureTests.cs", content, TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "private-key");
+	}
+
+	[Fact]
+	public void Detect_PrivateKeyEmbeddedAsEscapedStringLiteral_IsStillDetected()
+	{
+		const string escapedKey =
+			"-----BEGIN " + "PRIVATE KEY-----\\n" +
+			"MIIEvQIBADANBgkq" + "hkiG9w0BAQEFAASC" +
+			"BKcwggSjAgEAAoIB" + "AQDAC4AWkdwKYSd8\\n" +
+			"Ks14IReLcYgA" + "DhoXk56ZzXI=\\n" +
+			"-----END " + "PRIVATE KEY-----";
+		var content = $"const string Key = \"{escapedKey}\";";
+
+		var finding = Assert.Single(
+			Detector.Detect("src/Keys.cs", content, TestContext.Current.CancellationToken),
+			static match => match.RuleId == "private-key");
+
+		Assert.Equal(escapedKey, finding.Value);
+	}
+
+	[Fact]
 	public void Detect_ContentRulesWithoutUpstreamGeneratedCases_AreCoveredExplicitly()
 	{
 		var longLivedToken = "abcdefghijk" + "AAAAAAAAAA" + new string('b', 43);

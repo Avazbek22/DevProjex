@@ -395,9 +395,7 @@ public partial class MainWindow : Window
 			_metrics.ScheduleRecalculate();
 			// Redaction consumes compressed text but does not change the compression plan. Restarting
 			// Tree-sitter for a Hide Secrets toggle stalls the checkbox without changing its result.
-			var compressionEnabled = _selectionCoordinator
-				.GetSelectedIgnoreOptionIds()
-				.Contains(IgnoreOptionId.CompressCode);
+			var compressionEnabled = CreateCodeCompressionContext() is not null;
 			_metrics.CancelCompressionPrewarm();
 			if (compressionEnabled && _currentTree is not null)
 			{
@@ -1194,6 +1192,7 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterBaseTree = null;
         _currentTreeInventory = null;
+        _appliedCompressCodeEnabled = false;
         _metrics.HasCompleteBaseline = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;

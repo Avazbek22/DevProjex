@@ -2108,6 +2108,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				viewModel.ContentProcessingOptions,
 				static candidate => candidate.Id == IgnoreOptionId.CompressCode);
 			option.IsChecked = true;
+			// The checkbox is a draft; compression starts only after «Apply settings» commits it.
+			await UiTestDriver.ClickApplySettingsAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => viewModel.SettingsCompressionNotice.StartsWith(

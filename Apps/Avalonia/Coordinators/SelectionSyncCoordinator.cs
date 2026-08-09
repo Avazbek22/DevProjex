@@ -1263,9 +1263,12 @@ public sealed partial class SelectionSyncCoordinator(
         var currentPath = currentPathProvider();
 		if (changedTransformation)
 		{
-			// A content transformation changes produced content, never filesystem visibility.
-			// Rebuild the preview from the current selection without an unrelated tree scan.
-			contentTransformationChanged?.Invoke(changedOption!.Id);
+			// Hide Secrets is an immediate scan request: toggling it starts or stops the scan and
+			// touches no tree state, so it notifies the output pipeline right away. Compress Code
+			// rewrites produced content and every counter reading it, so it stays a draft that
+			// «Apply settings» commits together with the other filter checkboxes.
+			if (changedOption!.Id == IgnoreOptionId.HideSecrets)
+				contentTransformationChanged?.Invoke(changedOption.Id);
 			return;
 		}
 		selectionContentChanged?.Invoke();

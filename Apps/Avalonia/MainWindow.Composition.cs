@@ -149,11 +149,11 @@ public partial class MainWindow
 
 	private CodeCompressionContext? CreateCodeCompressionContext()
 	{
-		if (string.IsNullOrWhiteSpace(_currentPath) ||
-		    !_selectionCoordinator.GetSelectedIgnoreOptionIds().Contains(IgnoreOptionId.CompressCode))
-		{
+		// The Compress Code checkbox is a draft until «Apply settings» publishes a tree; only the
+		// state captured at that point drives compression, so the preview, the status bar and the
+		// produced output never change from an uncommitted checkbox.
+		if (string.IsNullOrWhiteSpace(_currentPath) || !_appliedCompressCodeEnabled)
 			return null;
-		}
 
 		return new CodeCompressionContext(_currentPath, _codeCompressionSession);
 	}
@@ -724,6 +724,7 @@ public partial class MainWindow
 	private int? _secretRedactionCount;
 	private int? _secretRedactionMatchedCount;
 	private SecretScanState _secretRedactionScanState = SecretScanState.Disabled;
+	private bool _appliedCompressCodeEnabled;
 
     public MainWindow(
         DesktopStartupOptions startupOptions,
