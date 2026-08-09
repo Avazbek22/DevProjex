@@ -181,6 +181,7 @@
     "Compression.CopyNotice": "A compressão de código substituiu os corpos das funções nos arquivos fonte suportados. Esta cópia não é intencionalmente uma cópia byte a byte do projeto e pode não compilar nem executar.",
   "Settings.Secrets.Title": "Processamento de conteúdo:",
   "Settings.Secrets.Status.Failed": "Não foi possível concluir a análise.",
+  "Settings.Secrets.Status.SizeLimit": "Arquivos com mais de {1} MB não verificados: {0}.",
   "Settings.Secrets.Status.Applied": "Encontrados: {0}. Ocultos: {1}.",
   "Preview.Secret.Redacted.Tooltip": "Detectado: {0}.\nClique para manter o valor original.\nAlt+↑ / Alt+↓ — navegar.",
   "Preview.Secret.Kept.Tooltip": "Detectado: {0}.\nO valor original foi mantido.\nClique para ocultá-lo novamente.\nAlt+↑ / Alt+↓ — navegar.",

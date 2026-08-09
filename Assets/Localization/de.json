@@ -181,6 +181,7 @@
   "Compression.CopyNotice": "Die Code-Komprimierung hat Funktionsrümpfe in unterstützten Quelldateien ersetzt. Diese Kopie ist absichtlich keine bytegenaue Kopie des Projekts und lässt sich möglicherweise nicht bauen oder ausführen.",
   "Settings.Secrets.Title": "Inhaltsverarbeitung:",
   "Settings.Secrets.Status.Failed": "Die Analyse konnte nicht abgeschlossen werden.",
+  "Settings.Secrets.Status.SizeLimit": "Dateien über {1} MB wurden nicht geprüft: {0}.",
   "Settings.Secrets.Status.Applied": "Gefunden: {0}. Ausgeblendet: {1}.",
   "Preview.Secret.Redacted.Tooltip": "Erkannt: {0}.\nKlicken, um den Originalwert beizubehalten.\nAlt+↑ / Alt+↓ — navigieren.",
   "Preview.Secret.Kept.Tooltip": "Erkannt: {0}.\nDer Originalwert bleibt erhalten.\nKlicken, um ihn wieder auszublenden.\nAlt+↑ / Alt+↓ — navigieren.",

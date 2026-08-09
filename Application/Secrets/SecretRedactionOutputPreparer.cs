@@ -134,7 +134,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					redactions);
 			}
 
-			var snapshot = scope?.Complete();
+			var snapshot = scope?.Complete(unscannablePaths.Count, failedFileCount: 0);
 			var compression = transformationScope.Compression?.Complete();
 			return new PreparedSecretRedactionOutput(
 				workingDirectory,
@@ -524,21 +524,26 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				.ConfigureAwait(false);
 		}
 
+		var skippedFileCount = 0;
 		for (var index = 0; index < entries.Length; index++)
 		{
 			var entry = entries[index] ??
 			            throw new SecretDetectionException(
 				            $"Hide Secrets produced no scan result for '{orderedFilePaths[index]}'.");
 			scope.ProcessEntry(orderedFilePaths[index], entry);
+			if (entry.IsUnscannable)
+				skippedFileCount++;
 		}
 
-		return scope.Complete();
+		return scope.Complete(skippedFileCount, failedFileCount: 0);
 	}
 
 	/// <summary>
 	/// Discovers whether the current selection contains secrets without weakening output safety.
-	/// Files that disappear, change, or cannot be read are counted as incomplete while the remaining
-	/// files are still inspected. Preview and export callers intentionally continue to use the strict
+	/// Files that disappear, change, or cannot be read are counted as failures while the remaining
+	/// files are still inspected. Text beyond the interactive scan limit is reported separately as
+	/// skipped, because a deliberate resource bound is not an engine failure. Preview and export
+	/// callers intentionally continue to use the strict
 	/// <see cref="AnalyzeAsync(SecretRedactionContext,IReadOnlyList{string},CancellationToken)"/> path.
 	/// </summary>
 	public Task<SecretRedactionSnapshot> DiscoverAsync(
@@ -562,7 +567,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		await context.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		var scope = context.BeginOutput(orderedFilePaths);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
-		var incomplete = new bool[orderedFilePaths.Count];
+		var outcomes = new SecretDiscoveryFileOutcome[orderedFilePaths.Count];
 		var parallelWork = new List<SecretScanWorkItem>();
 		var serialWork = new List<SecretScanWorkItem>();
 
@@ -577,7 +582,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			}
 			catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
 			{
-				incomplete[index] = true;
+				outcomes[index] = SecretDiscoveryFileOutcome.Failed;
 				continue;
 			}
 
@@ -585,7 +590,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			    (cacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent || cached.IsUnscannable))
 			{
 				entries[index] = cached;
-				incomplete[index] = cached.IsUnscannable;
+				if (cached.IsUnscannable)
+					outcomes[index] = SecretDiscoveryFileOutcome.SkippedByLimit;
 				continue;
 			}
 
@@ -616,7 +622,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					}
 					catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
 					{
-						incomplete[workItem.Index] = true;
+						outcomes[workItem.Index] = SecretDiscoveryFileOutcome.Failed;
 					}
 				}).ConfigureAwait(false);
 		}
@@ -630,11 +636,12 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			}
 			catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
 			{
-				incomplete[workItem.Index] = true;
+				outcomes[workItem.Index] = SecretDiscoveryFileOutcome.Failed;
 			}
 		}
 
-		var incompleteFileCount = 0;
+		var skippedFileCount = 0;
+		var failedFileCount = 0;
 		for (var index = 0; index < entries.Length; index++)
 		{
 			var entry = entries[index];
@@ -642,14 +649,21 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			{
 				scope.ProcessEntry(orderedFilePaths[index], entry);
 				if (entry.IsUnscannable)
-					incomplete[index] = true;
+					outcomes[index] = SecretDiscoveryFileOutcome.SkippedByLimit;
 			}
 
-			if (incomplete[index])
-				incompleteFileCount++;
+			switch (outcomes[index])
+			{
+				case SecretDiscoveryFileOutcome.SkippedByLimit:
+					skippedFileCount++;
+					break;
+				case SecretDiscoveryFileOutcome.Failed:
+					failedFileCount++;
+					break;
+			}
 		}
 
-		return scope.Complete(incompleteFileCount);
+		return scope.Complete(skippedFileCount, failedFileCount);
 	}
 
 	public async Task<SecretRedactionSnapshot> AnalyzeAsync(
@@ -674,6 +688,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		var redactionScope = transformationScope.Redaction ??
 		                     throw new InvalidOperationException(
 			                     "The transformation scope did not create secret redaction state.");
+		var skippedFileCount = 0;
 
 		await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
 		                   context,
@@ -689,6 +704,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					break;
 				case FileContentClassification.TooLarge:
 					redactionScope.AnalyzeUnscannable(prepared.SourcePath, prepared.Metadata);
+					skippedFileCount++;
 					break;
 				case FileContentClassification.Text:
 					redactionScope.CreatePlan(
@@ -704,9 +720,9 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			}
 		}
 
-		// Discovery borrows the compression pipeline but is not an output surface. Publishing its
-		// auxiliary snapshot would make compression statistics appear before Preview or export ran.
-		return redactionScope.Complete();
+		// Analysis borrows the compression pipeline but is not itself a transformed output. Publishing
+		// its auxiliary snapshot would make compression statistics appear before Preview or export ran.
+		return redactionScope.Complete(skippedFileCount, failedFileCount: 0);
 	}
 
 	public Task<SecretRedactionSnapshot> DiscoverAsync(
@@ -742,7 +758,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		var redactionScope = transformationScope.Redaction ??
 		                     throw new InvalidOperationException(
 			                     "The transformation scope did not create secret redaction state.");
-		var incompleteFileCount = 0;
+		var skippedFileCount = 0;
+		var failedFileCount = 0;
 
 		await foreach (var attempt in PrepareOrderedDiscoveryEntriesAsync(
 		                   context,
@@ -757,13 +774,13 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			{
 				redactionScope.ProcessEntry(attempt.SourcePath!, attempt.CachedEntry);
 				if (attempt.CachedEntry.IsUnscannable)
-					incompleteFileCount++;
+					skippedFileCount++;
 				continue;
 			}
 
 			if (attempt.Entry is null)
 			{
-				incompleteFileCount++;
+				failedFileCount++;
 				continue;
 			}
 
@@ -775,7 +792,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					break;
 				case FileContentClassification.TooLarge:
 					redactionScope.AnalyzeUnscannable(prepared.SourcePath, prepared.Metadata);
-					incompleteFileCount++;
+					skippedFileCount++;
 					break;
 				case FileContentClassification.Text:
 					redactionScope.CreatePlan(
@@ -785,12 +802,12 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 						cancellationToken);
 					break;
 				default:
-					incompleteFileCount++;
+					failedFileCount++;
 					break;
 			}
 		}
 
-		return redactionScope.Complete(incompleteFileCount);
+		return redactionScope.Complete(skippedFileCount, failedFileCount);
 	}
 
 	private async IAsyncEnumerable<DiscoveryTransformationAttempt> PrepareOrderedDiscoveryEntriesAsync(
@@ -1028,6 +1045,13 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		int Index,
 		string SourcePath,
 		SecretFileMetadata Metadata);
+
+	private enum SecretDiscoveryFileOutcome : byte
+	{
+		None = 0,
+		SkippedByLimit = 1,
+		Failed = 2
+	}
 
 	private static Encoding ResolveEncoding(TextFileEncoding encoding) => encoding switch
 	{

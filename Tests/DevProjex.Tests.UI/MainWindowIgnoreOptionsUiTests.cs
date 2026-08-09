@@ -1966,6 +1966,36 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			viewModel.ContentProcessingOptions.CollectionChanged += (_, _) =>
 				processingCollectionChanges++;
 
+			viewModel.SetContentProcessingStatus(
+				SecretScanState.Limited,
+				detectedCount: 3,
+				hiddenCount: 2,
+				skippedFileCount: 2);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(
+				$"Found: 3. Hidden: 2.{Environment.NewLine}Files larger than 16 MB were not checked: 2.",
+				hideSecrets.StatusText);
+			Assert.False(hideSecrets.IsWarningStatus);
+			Assert.True(hideSecrets.IsInformationStatus);
+			Assert.Equal(0, processingCollectionChanges);
+
+			viewModel.SetContentProcessingStatus(
+				SecretScanState.Limited,
+				detectedCount: 0,
+				hiddenCount: 0,
+				skippedFileCount: 2);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal("Files larger than 16 MB were not checked: 2.", hideSecrets.StatusText);
+			Assert.DoesNotContain("found no secrets", hideSecrets.StatusText, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HideSecrets);
+			viewModel.SetContentProcessingStatus(
+				SecretScanState.Limited,
+				detectedCount: 3,
+				hiddenCount: 2,
+				skippedFileCount: 2);
+
 			viewModel.SetContentProcessingStatus(SecretScanState.Pending);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Contains(
@@ -2164,6 +2194,50 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			compression.IsChecked = true;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.True(compression.IsChecked);
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task OversizedSecretDiscovery_ShowsLimitedCoverageWithoutEngineFailure()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = new LimitedSecretScanContentAnalyzer(
+					services.FileContentAnalyzer,
+					"README.md")
+			});
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var expectedStatus =
+				$"Found: 1. Hidden: 0.{Environment.NewLine}Files larger than 16 MB were not checked: 1.";
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(viewModel.SettingsSecretsNotice, expectedStatus, StringComparison.Ordinal),
+				"the size-limited discovery to publish its findings and coverage");
+
+			var hideSecrets = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HideSecrets);
+			Assert.Equal(expectedStatus, hideSecrets.StatusText);
+			Assert.False(hideSecrets.IsWarningStatus);
+			Assert.True(hideSecrets.IsInformationStatus);
+			var indicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HideSecrets);
+			Assert.Contains(
+				indicator.GetVisualDescendants().OfType<TextBlock>(),
+				static label => label.IsVisible && label.Text == "?");
+			var warningLabel = Assert.Single(
+				indicator.GetVisualDescendants().OfType<TextBlock>(),
+				static label => label.Text == "!");
+			Assert.False(Assert.IsType<Grid>(warningLabel.GetVisualParent()).IsVisible);
 			Assert.Empty(window.OwnedWindows);
 		}
 		finally
@@ -2397,6 +2471,71 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			long maxSizeForFullRead,
 			CancellationToken cancellationToken = default) =>
 			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+	}
+
+	private sealed class LimitedSecretScanContentAnalyzer(
+		IFileContentAnalyzer inner,
+		string limitedFileName) : IFileContentAnalyzer
+	{
+		private bool ShouldLimit(string path, long maximumBytes) =>
+			maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes &&
+			string.Equals(Path.GetFileName(path), limitedFileName, StringComparison.OrdinalIgnoreCase);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			inner.ClassifyWithoutReading(path);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ShouldLimit(path, maxSizeForFullRead)
+				? ValueTask.FromResult(new FileContentReadResult(FileContentClassification.TooLarge))
+				: inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetClassifiedMetricsAsync(path, cancellationToken);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.OpenCompleteSnapshotAsync(path, cancellationToken);
+
+		public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default) =>
+			ShouldLimit(path, maximumBytes)
+				? ValueTask.FromResult<ICompleteTextFileBuffer>(new LimitedTextFileBuffer())
+				: inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		private sealed class LimitedTextFileBuffer : ICompleteTextFileBuffer
+		{
+			public FileContentClassification Classification => FileContentClassification.TooLarge;
+			public long SizeBytes => 0;
+			public ReadOnlyMemory<char> Content => ReadOnlyMemory<char>.Empty;
+			public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+		}
 	}
 
 	private sealed class BlockingSecretScanContentAnalyzer : IFileContentAnalyzer

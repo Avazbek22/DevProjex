@@ -859,12 +859,13 @@ public sealed class SecretRedactionScope
 	internal IDisposable TrackFullContentBuffer() => _session.TrackFullContentBuffer();
 
 	public SecretRedactionSnapshot Complete()
-		=> Complete(incompleteFileCount: 0);
+		=> Complete(skippedFileCount: 0, failedFileCount: 0);
 
-	internal SecretRedactionSnapshot Complete(int incompleteFileCount)
+	internal SecretRedactionSnapshot Complete(int skippedFileCount, int failedFileCount)
 	{
 		EnsureActive();
-		ArgumentOutOfRangeException.ThrowIfNegative(incompleteFileCount);
+		ArgumentOutOfRangeException.ThrowIfNegative(skippedFileCount);
+		ArgumentOutOfRangeException.ThrowIfNegative(failedFileCount);
 		_completed = true;
 		var snapshot = new SecretRedactionSnapshot(
 			SelectionKey,
@@ -872,7 +873,8 @@ public sealed class SecretRedactionScope
 			_redactedCount,
 			new Dictionary<string, int>(_markedSecretCounts, StringComparer.OrdinalIgnoreCase),
 			Volatile.Read(ref _unscannablePath),
-			incompleteFileCount);
+			skippedFileCount,
+			failedFileCount);
 		_session.Publish(snapshot, _overrideRevision, _snapshotRevision);
 		return snapshot;
 	}

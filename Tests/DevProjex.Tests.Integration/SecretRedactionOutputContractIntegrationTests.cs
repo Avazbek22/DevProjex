@@ -455,8 +455,57 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.True(
 			snapshot.DetectedCount > 0,
 			"the readable files must still contribute their findings to the count");
+		Assert.Equal(1, snapshot.SkippedFileCount);
+		Assert.Equal(0, snapshot.FailedFileCount);
 		Assert.EndsWith("oversized.txt", snapshot.UnscannablePath);
+		Assert.Equal(snapshot.SkippedFileCount, cached.SkippedFileCount);
 		Assert.Equal(snapshot.UnscannablePath, cached.UnscannablePath);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task Discovery_ReportsOversizedTextAsLimitedCoverageInsteadOfFailure(
+		bool compressionEnabled)
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("oversized-discovery-project");
+		await WriteOversizedProjectAsync(sourceRoot);
+		using var redactionSession = new SecretRedactionSession(CreateDetector());
+		using var compressionSession = compressionEnabled
+			? new CodeCompressionSession(new UnsupportedCodeCompressor())
+			: null;
+		var redactionContext = new SecretRedactionContext(sourceRoot, redactionSession);
+		var transformationContext = new ContentTransformationContext(
+			compressionSession is null ? null : new CodeCompressionContext(sourceRoot, compressionSession),
+			redactionContext);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		var discovery = await preparer.DiscoverAsync(
+			transformationContext,
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+		var cached = await preparer.DiscoverAsync(
+			transformationContext,
+			plan.IncludedFiles,
+			SecretDiscoveryCacheMode.ReuseValidatedContent,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(discovery.DetectedCount > 0);
+		Assert.Equal(1, discovery.SkippedFileCount);
+		Assert.Equal(0, discovery.FailedFileCount);
+		Assert.Equal(1, discovery.IncompleteFileCount);
+		Assert.True(discovery.HasLimitedCoverage);
+		Assert.False(discovery.HasFailures);
+		Assert.False(discovery.IsComplete);
+		Assert.EndsWith("oversized.txt", discovery.UnscannablePath);
+		Assert.Equal(discovery.SelectionKey, cached.SelectionKey);
+		Assert.Equal(discovery.DetectedCount, cached.DetectedCount);
+		Assert.Equal(discovery.RedactedCount, cached.RedactedCount);
+		Assert.Equal(discovery.SkippedFileCount, cached.SkippedFileCount);
+		Assert.Equal(discovery.FailedFileCount, cached.FailedFileCount);
+		Assert.Equal(discovery.UnscannablePath, cached.UnscannablePath);
 	}
 
 	[Theory]
@@ -486,7 +535,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.True(discovery.DetectedCount > 0);
+		Assert.Equal(0, discovery.SkippedFileCount);
+		Assert.Equal(1, discovery.FailedFileCount);
 		Assert.Equal(1, discovery.IncompleteFileCount);
+		Assert.True(discovery.HasFailures);
+		Assert.False(discovery.HasLimitedCoverage);
 		Assert.False(discovery.IsComplete);
 		await Assert.ThrowsAnyAsync<IOException>(() => preparer.AnalyzeAsync(
 			redactionContext,

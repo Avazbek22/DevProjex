@@ -10,7 +10,7 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 		int? redactionCount)
 	{
 		var label = localization["Settings.Ignore.HideSecrets"];
-		return state == SecretScanState.Completed &&
+		return state is SecretScanState.Completed or SecretScanState.Limited &&
 		       matchedCount is not null &&
 		       redactionCount is not null
 			? $"{label} ({matchedCount}/{redactionCount})"

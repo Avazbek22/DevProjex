@@ -71,6 +71,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private SecretScanState _contentProcessingScanState;
 	private int? _contentProcessingDetectedCount;
 	private int? _contentProcessingHiddenCount;
+	private int? _contentProcessingSkippedFileCount;
 	private int? _compressedFilesCount;
 	private int? _compressionTotalFilesCount;
 	private long? _compressionSourceCharacters;
@@ -1439,7 +1440,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	public string SettingsCompressionNotice { get; private set; } = string.Empty;
 	public bool HasSecretsStatus =>
 		_contentProcessingHasFindings is true &&
-		_contentProcessingScanState == SecretScanState.Completed &&
+		_contentProcessingScanState is SecretScanState.Completed or SecretScanState.Limited &&
 		_contentProcessingDetectedCount.HasValue &&
 		_contentProcessingHiddenCount.HasValue;
 	public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
@@ -1900,7 +1901,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 				transformationIds.Contains(option.Id) &&
 				(option.Id != IgnoreOptionId.HideSecrets ||
 				 _contentProcessingHasFindings is true ||
-				 _contentProcessingScanState == SecretScanState.Failed))
+				 _contentProcessingScanState is SecretScanState.Failed or SecretScanState.Limited))
 			.ToArray();
 		if (!ContentProcessingOptions.SequenceEqual(desiredOptions, ReferenceEqualityComparer.Instance))
 		{
@@ -1913,17 +1914,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	internal void SetContentProcessingStatus(
 		SecretScanState scanState,
 		int? detectedCount = null,
-		int? hiddenCount = null)
+		int? hiddenCount = null,
+		int? skippedFileCount = null)
 	{
 		var hasFindings = scanState switch
 		{
-			SecretScanState.Completed => detectedCount > 0,
+			SecretScanState.Completed or SecretScanState.Limited => detectedCount > 0,
 			SecretScanState.Disabled => null,
 			_ => _contentProcessingHasFindings
 		};
 		if (_contentProcessingScanState == scanState &&
 		    _contentProcessingDetectedCount == detectedCount &&
 		    _contentProcessingHiddenCount == hiddenCount &&
+		    _contentProcessingSkippedFileCount == skippedFileCount &&
 		    _contentProcessingHasFindings == hasFindings)
 		{
 			return;
@@ -1932,6 +1935,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		_contentProcessingScanState = scanState;
 		_contentProcessingDetectedCount = detectedCount;
 		_contentProcessingHiddenCount = hiddenCount;
+		_contentProcessingSkippedFileCount = skippedFileCount;
 		_contentProcessingHasFindings = hasFindings;
 		SynchronizeContentProcessingOptions();
 		UpdateSettingsSecretsNotice();
@@ -1974,6 +1978,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		var secrets = _contentProcessingScanState switch
 		{
 			SecretScanState.Failed => _localization["Settings.Secrets.Status.Failed"],
+			SecretScanState.Limited => FormatLimitedSecretScanStatus(),
 			SecretScanState.Completed when
 				_contentProcessingDetectedCount is { } detected &&
 				_contentProcessingHiddenCount is { } hidden &&
@@ -1992,6 +1997,28 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		SettingsSecretsNotice = secrets;
 		RaisePropertyChanged(nameof(SettingsSecretsNotice));
 		UpdateContentProcessingOptionStatuses();
+	}
+
+	private string FormatLimitedSecretScanStatus()
+	{
+		var skipped = _contentProcessingSkippedFileCount.GetValueOrDefault();
+		var sizeLimitMegabytes = SecretRedactionOutputPreparer.MaximumScannableFileBytes /
+		                         (1024 * 1024);
+		var coverage = _localization.Format(
+			"Settings.Secrets.Status.SizeLimit",
+			skipped,
+			sizeLimitMegabytes);
+		if (_contentProcessingDetectedCount is not { } detected ||
+		    _contentProcessingHiddenCount is not { } hidden ||
+		    detected <= 0)
+		{
+			return coverage;
+		}
+
+		return string.Concat(
+			_localization.Format("Settings.Secrets.Status.Applied", detected, hidden),
+			Environment.NewLine,
+			coverage);
 	}
 
 	private void UpdateSettingsCompressionNotice()
@@ -2037,7 +2064,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			option.StatusText = option.Id switch
 			{
 				IgnoreOptionId.HideSecrets when HasSecretsStatus => SettingsSecretsNotice,
-				IgnoreOptionId.HideSecrets when _contentProcessingScanState == SecretScanState.Failed =>
+				IgnoreOptionId.HideSecrets when
+					_contentProcessingScanState is SecretScanState.Failed or SecretScanState.Limited =>
 					SettingsSecretsNotice,
 				IgnoreOptionId.CompressCode when option.IsChecked => SettingsCompressionNotice,
 				_ => string.Empty
@@ -2073,6 +2101,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		_contentProcessingScanState = SecretScanState.Disabled;
 		_contentProcessingDetectedCount = null;
 		_contentProcessingHiddenCount = null;
+		_contentProcessingSkippedFileCount = null;
 		HideSecretsOption = null;
         Extensions.Clear();
         FontFamilies.Clear();

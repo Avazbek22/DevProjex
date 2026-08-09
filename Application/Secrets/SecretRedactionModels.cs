@@ -31,15 +31,25 @@ public sealed record SecretTextRedactionResult(
 /// and report a count for everything else; a project copy leaves it out and names it. The dry run
 /// reads this to say the same thing before anything is written.
 /// </param>
+/// <param name="SkippedFileCount">
+/// Selected text files intentionally left uninspected because they exceed the bounded scan limit.
+/// </param>
+/// <param name="FailedFileCount">
+/// Selected files discovery could not inspect because reading, decoding, or detection failed.
+/// </param>
 public sealed record SecretRedactionSnapshot(
 	string SelectionKey,
 	int DetectedCount,
 	int RedactedCount,
 	IReadOnlyDictionary<string, int>? MarkedSecretCounts = null,
 	string? UnscannablePath = null,
-	int IncompleteFileCount = 0)
+	int SkippedFileCount = 0,
+	int FailedFileCount = 0)
 {
+	public int IncompleteFileCount => checked(SkippedFileCount + FailedFileCount);
 	public bool IsComplete => IncompleteFileCount == 0;
+	public bool HasFailures => FailedFileCount > 0;
+	public bool HasLimitedCoverage => SkippedFileCount > 0;
 }
 
 public enum SecretDiscoveryCacheMode

@@ -181,6 +181,7 @@
   "Compression.CopyNotice": "Kodni siqish qo'llab-quvvatlanadigan manba fayllardagi funksiya tanalarini almashtirdi. Bu nusxa ataylab loyihaning bayt-bayt nusxasi emas va qurilmasligi yoki ishlamasligi mumkin.",
   "Settings.Secrets.Title": "Kontentni qayta ishlash:",
   "Settings.Secrets.Status.Failed": "Tahlilni yakunlab bo‘lmadi.",
+  "Settings.Secrets.Status.SizeLimit": "Hajmi {1} MB dan katta tekshirilmagan fayllar: {0}.",
   "Settings.Secrets.Status.Applied": "Topildi: {0}. Yashirildi: {1}.",
   "Preview.Secret.Redacted.Tooltip": "Aniqlandi: {0}.\nAsl qiymatni saqlash uchun bosing.\nAlt+↑ / Alt+↓ — o‘tish.",
   "Preview.Secret.Kept.Tooltip": "Aniqlandi: {0}.\nAsl qiymat saqlandi.\nUni yana yashirish uchun bosing.\nAlt+↑ / Alt+↓ — o‘tish.",

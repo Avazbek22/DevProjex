@@ -425,7 +425,8 @@ public partial class MainWindow : Window
 			_viewModel.SetContentProcessingStatus(
 				_secretRedactionScanState,
 				_secretRedactionMatchedCount,
-				_secretRedactionCount);
+				_secretRedactionCount,
+				cachedSnapshot?.SkippedFileCount);
 			RelabelIgnoreOptionsWithCurrentCounts();
 			if (_viewModel.IsAnyPreviewVisible)
 				_previewPipeline.ScheduleRefresh(immediate: true);
@@ -446,7 +447,8 @@ public partial class MainWindow : Window
 		_viewModel.SetContentProcessingStatus(
 			_secretRedactionScanState,
 			cachedRedactionSnapshot?.DetectedCount,
-			cachedRedactionSnapshot?.RedactedCount);
+			cachedRedactionSnapshot?.RedactedCount,
+			cachedRedactionSnapshot?.SkippedFileCount);
 		RelabelIgnoreOptionsWithCurrentCounts();
 		if (_viewModel.IsAnyPreviewVisible)
 			_previewPipeline.ScheduleRefresh(immediate: true);
@@ -460,6 +462,8 @@ public partial class MainWindow : Window
 		snapshot switch
 		{
 			null => SecretScanState.Pending,
+			{ HasFailures: true } => SecretScanState.Failed,
+			{ HasLimitedCoverage: true } => SecretScanState.Limited,
 			{ IsComplete: true } => SecretScanState.Completed,
 			_ => SecretScanState.Failed
 		};

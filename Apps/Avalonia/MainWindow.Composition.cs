@@ -36,7 +36,8 @@ public partial class MainWindow
 		_viewModel.SetContentProcessingStatus(
 			_secretRedactionScanState,
 			snapshot.DetectedCount,
-			_secretRedactionCount);
+			_secretRedactionCount,
+			snapshot.SkippedFileCount);
 		RelabelIgnoreOptionsWithCurrentCounts();
 	}
 

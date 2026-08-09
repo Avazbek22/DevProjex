@@ -6,7 +6,8 @@ public enum SecretScanState
 	Pending = 1,
 	Scanning = 2,
 	Completed = 3,
-	Failed = 4
+	Failed = 4,
+	Limited = 5
 }
 
 public sealed record SecretScanCacheDiagnostics(

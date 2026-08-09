@@ -215,6 +215,8 @@ public sealed partial class TerminalLocalizationContractTests
 			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.Ignore.HideSecrets.NoMatches"]));
 			Assert.Contains("{0}", catalog["Settings.Secrets.Status.Applied"], StringComparison.Ordinal);
 			Assert.Contains("{1}", catalog["Settings.Secrets.Status.Applied"], StringComparison.Ordinal);
+			Assert.Contains("{0}", catalog["Settings.Secrets.Status.SizeLimit"], StringComparison.Ordinal);
+			Assert.Contains("{1}", catalog["Settings.Secrets.Status.SizeLimit"], StringComparison.Ordinal);
 			Assert.Equal(3, catalog["Preview.Secret.Redacted.Tooltip"].Split('\n').Length);
 			Assert.Equal(4, catalog["Preview.Secret.Kept.Tooltip"].Split('\n').Length);
 		}
@@ -224,6 +226,9 @@ public sealed partial class TerminalLocalizationContractTests
 		Assert.Equal("DevProjex не нашел секреты", catalogs["ru"]["Settings.Ignore.HideSecrets.NoMatches"]);
 		Assert.Equal("Найдено: {0}. Скрыто: {1}.", catalogs["ru"]["Settings.Secrets.Status.Applied"]);
 		Assert.Equal("Не удалось завершить анализ.", catalogs["ru"]["Settings.Secrets.Status.Failed"]);
+		Assert.Equal(
+			"Файлы больше {1} МБ не проверены: {0}.",
+			catalogs["ru"]["Settings.Secrets.Status.SizeLimit"]);
 	}
 
 	private static Dictionary<string, Dictionary<string, string>> ReadCatalogs()

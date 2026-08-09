@@ -181,6 +181,7 @@
   "Compression.CopyNotice": "La compression du code a remplacé le corps des fonctions dans les fichiers source pris en charge. Cette copie n'est volontairement pas une copie octet par octet du projet et peut ne pas se compiler ni s'exécuter.",
   "Settings.Secrets.Title": "Traitement du contenu :",
   "Settings.Secrets.Status.Failed": "L’analyse n’a pas pu être terminée.",
+  "Settings.Secrets.Status.SizeLimit": "Fichiers de plus de {1} Mo non vérifiés : {0}.",
   "Settings.Secrets.Status.Applied": "Trouvés : {0}. Masqués : {1}.",
   "Preview.Secret.Redacted.Tooltip": "Détecté : {0}.\nCliquez pour conserver la valeur d’origine.\nAlt+↑ / Alt+↓ — parcourir.",
   "Preview.Secret.Kept.Tooltip": "Détecté : {0}.\nLa valeur d’origine est conservée.\nCliquez pour la masquer à nouveau.\nAlt+↑ / Alt+↓ — parcourir.",
