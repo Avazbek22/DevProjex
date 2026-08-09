@@ -560,25 +560,6 @@ internal sealed class TreeSitterCompressionScope(
 		if (preservedRanges is null)
 			return null;
 
-		// Python keeps documentation inside the body, so the first string of a suite is preserved
-		// and only what follows it is removed. Every other language documents above the declaration.
-		var docstringEnds = new Dictionary<int, int>();
-		if (language.Runtime.Docstrings is not null && language.DocstringsCursor is not null)
-		{
-			language.DocstringsCursor.Execute(language.Runtime.Docstrings, tree.RootNode);
-			var docstringCount = 0;
-			foreach (var capture in language.DocstringsCursor.Captures)
-			{
-				if (++docstringCount > TreeSitterCodeCompressor.MaximumBodyCapturesPerFile)
-					return null;
-				var block = capture.Node.Parent;
-				if (block is not null)
-					docstringEnds[block.StartIndex] = capture.Node.EndIndex;
-			}
-			if (language.DocstringsCursor.IsMatchLimitExceeded)
-				return null;
-		}
-
 		var raw = new List<(int Start, int End)>();
 		language.BodiesCursor.Execute(language.Runtime.Bodies, tree.RootNode);
 		foreach (var capture in language.BodiesCursor.Captures)
@@ -596,19 +577,17 @@ internal sealed class TreeSitterCompressionScope(
 			if (IsMisparsedCppClassBody(pack, node, source))
 				continue;
 
-			int start;
-			if (docstringEnds.TryGetValue(node.StartIndex, out var docEnd))
+			var start = node.StartIndex;
+			if (pack.PreserveLeadingDocstring)
 			{
-				start = docEnd;
-			}
-			else
-			{
-				// A comment on the first line of a body is lexically inside the function but is an
-				// "extra" node that sits BEFORE the body node, so the query never reaches it.
-				// Leaving it behind would print a comment describing code that is gone.
-				start = pack.Id.Equals("python", StringComparison.Ordinal)
-					? ExtendOverLeadingPythonComments(source, node)
-					: node.StartIndex;
+				if (!TryResolveContentAfterLeadingDocstring(
+						node,
+						source,
+						out start,
+						out var hasLeadingDocstring))
+					continue;
+				if (!hasLeadingDocstring)
+					start = ExtendOverLeadingPythonComments(source, node);
 			}
 
 			if (start < 0 || node.EndIndex > source.Length || node.EndIndex <= start)
@@ -642,6 +621,67 @@ internal sealed class TreeSitterCompressionScope(
 		}
 
 		return edits;
+	}
+
+	private static bool TryResolveContentAfterLeadingDocstring(
+		Node body,
+		string source,
+		out int start,
+		out bool hasLeadingDocstring)
+	{
+		start = body.StartIndex;
+		hasLeadingDocstring = false;
+		Node? firstStatement = null;
+		Node? secondStatement = null;
+		foreach (var child in body.Children)
+		{
+			if (!child.IsNamed)
+				continue;
+			if (firstStatement is null)
+			{
+				firstStatement = child;
+				continue;
+			}
+
+			secondStatement = child;
+			break;
+		}
+
+		if (firstStatement is null || !IsSimpleStringStatement(firstStatement, source))
+			return true;
+		hasLeadingDocstring = true;
+		if (secondStatement is null)
+			return false;
+
+		start = secondStatement.StartIndex;
+		return true;
+	}
+
+	private static bool IsSimpleStringStatement(Node statement, string source)
+	{
+		var stringNode = statement.Type.Equals("string", StringComparison.Ordinal)
+			? statement
+			: statement.Type.Equals("expression_statement", StringComparison.Ordinal)
+				? statement.Children.FirstOrDefault(static child => child.IsNamed)
+				: null;
+		if (stringNode is null || !stringNode.Type.Equals("string", StringComparison.Ordinal))
+			return false;
+		if (stringNode.StartIndex < 0 ||
+		    stringNode.EndIndex > source.Length ||
+		    stringNode.EndIndex <= stringNode.StartIndex)
+		{
+			return false;
+		}
+
+		var text = source.AsSpan(stringNode.StartIndex, stringNode.EndIndex - stringNode.StartIndex).TrimStart();
+		var quoteIndex = text.IndexOfAny('\'', '"');
+		if (quoteIndex < 0)
+			return false;
+		var prefix = text[..quoteIndex];
+		return !prefix.Contains('f') &&
+		       !prefix.Contains('F') &&
+		       !prefix.Contains('b') &&
+		       !prefix.Contains('B');
 	}
 
 	private static IReadOnlyList<SourceRange>? ReadPreservedRanges(
@@ -776,8 +816,8 @@ internal sealed class TreeSitterCompressionScope(
 	/// A placeholder must be valid syntax: the reverse-parse gate refuses anything that does not
 	/// parse. Empty blocks are deliberately neutral and avoid exposing implementation-style comment
 	/// markers in the generated context. Python uses its valid ellipsis statement instead.
-	/// A body that only kept its docstring already ends where the placeholder would go, so it needs
-	/// nothing appended.
+	/// A retained Python docstring moves the edit to the first executable statement, so the same
+	/// indentation logic works for documented and undocumented functions.
 	/// </summary>
 	private static string PlaceholderFor(CompressionLanguagePack pack, string source, int start, int end)
 	{
@@ -1293,7 +1333,6 @@ internal sealed record LanguageRuntime(
 	Language Language,
 	Query Bodies,
 	Query Declarations,
-	Query? Docstrings,
 	Query? Preserves) : IDisposable
 {
 	public static LanguageRuntime Create(string libraryPath, CompressionLanguagePack pack)
@@ -1307,19 +1346,16 @@ internal sealed record LanguageRuntime(
 				var declarations = new Query(language, pack.DeclarationsQuery);
 				try
 				{
-					var docstrings = pack.DocstringsQuery is null
+					var preserves = pack.PreservesQuery is null
 						? null
-						: new Query(language, pack.DocstringsQuery);
+						: new Query(language, pack.PreservesQuery);
 					try
 					{
-						var preserves = pack.PreservesQuery is null
-							? null
-							: new Query(language, pack.PreservesQuery);
-						return new LanguageRuntime(language, bodies, declarations, docstrings, preserves);
+						return new LanguageRuntime(language, bodies, declarations, preserves);
 					}
 					catch
 					{
-						docstrings?.Dispose();
+						preserves?.Dispose();
 						throw;
 					}
 				}
@@ -1345,7 +1381,6 @@ internal sealed record LanguageRuntime(
 	public void Dispose()
 	{
 		Preserves?.Dispose();
-		Docstrings?.Dispose();
 		Declarations.Dispose();
 		Bodies.Dispose();
 		Language.Dispose();
@@ -1359,7 +1394,6 @@ internal sealed record LoadedLanguage(
 	Tree IdleTree,
 	QueryCursor BodiesCursor,
 	QueryCursor DeclarationsCursor,
-	QueryCursor? DocstringsCursor,
 	QueryCursor? PreservesCursor) : IDisposable
 {
 	public static LoadedLanguage Create(LanguageRuntime runtime, uint queryMatchLimit)
@@ -1377,26 +1411,22 @@ internal sealed record LoadedLanguage(
 					var declarationsCursor = CreateBoundedCursor(queryMatchLimit);
 					try
 					{
-						var docstringsCursor = runtime.Docstrings is null
+						var preservesCursor = runtime.Preserves is null
 							? null
 							: CreateBoundedCursor(queryMatchLimit);
 						try
 						{
-							var preservesCursor = runtime.Preserves is null
-								? null
-								: CreateBoundedCursor(queryMatchLimit);
 							return new LoadedLanguage(
 								runtime,
 								parser,
 								idleTree,
 								bodiesCursor,
 								declarationsCursor,
-								docstringsCursor,
 								preservesCursor);
 						}
 						catch
 						{
-							docstringsCursor?.Dispose();
+							preservesCursor?.Dispose();
 							throw;
 						}
 					}
@@ -1437,8 +1467,6 @@ internal sealed record LoadedLanguage(
 		var root = IdleTree.RootNode;
 		BodiesCursor.Execute(Runtime.Bodies, root);
 		DeclarationsCursor.Execute(Runtime.Declarations, root);
-		if (DocstringsCursor is not null && Runtime.Docstrings is not null)
-			DocstringsCursor.Execute(Runtime.Docstrings, root);
 		if (PreservesCursor is not null && Runtime.Preserves is not null)
 			PreservesCursor.Execute(Runtime.Preserves, root);
 	}
@@ -1446,7 +1474,6 @@ internal sealed record LoadedLanguage(
 	public void Dispose()
 	{
 		PreservesCursor?.Dispose();
-		DocstringsCursor?.Dispose();
 		DeclarationsCursor.Dispose();
 		BodiesCursor.Dispose();
 		IdleTree.Dispose();

@@ -4,7 +4,7 @@
   "extensions": [".ts", ".mts", ".cts"],
   "library": "tree-sitter-typescript",
   "export": "tree_sitter_typescript",
-  "queryVersion": 5,
+  "queryVersion": 6,
   "blockPlaceholder": "{ }",
   "containerNodeTypes": ["program", "class_body", "interface_body"],
   "executableOwnerKinds": ["function_declaration", "generator_function_declaration", "method_definition", "function_expression", "generator_function", "arrow_function"]

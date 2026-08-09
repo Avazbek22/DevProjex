@@ -12,10 +12,6 @@ namespace DevProjex.Tests.Unit;
 /// query file down with it, so the language silently stops compressing. DevProjex ships a
 /// self-contained single-file binary per RID with no way to patch a query after release, which
 /// makes such a mistake unfixable until the next version.
-///
-/// It has already happened once here: the canonical-looking Python docstring pattern
-/// "(block . (expression_statement (string) @doc))" is an impossible pattern against the grammar in
-/// TreeSitter.DotNet 1.3.0, which wants a bare "(block . (string) @doc)".
 /// </summary>
 public sealed class CodeCompressionQueryContractTests
 {
@@ -61,12 +57,17 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
-	public void PythonDocstringQueryUsesTheFormTheShippedGrammarAccepts()
+	public void LeadingDocstringPreservationIsEnabledOnlyForPython()
 	{
-		using var harness = CodeCompressionTestHarness.For("python");
+		var python = Assert.Single(
+			CodeCompressionTestHarness.LanguagePacks,
+			static pack => pack.Id.Equals("python", StringComparison.Ordinal));
 
-		Assert.NotNull(harness.Docstrings);
-		Assert.True(harness.CountCaptures(harness.Docstrings!) > 0);
+		Assert.True(python.PreserveLeadingDocstring);
+		Assert.All(
+			CodeCompressionTestHarness.LanguagePacks.Where(
+				static pack => !pack.Id.Equals("python", StringComparison.Ordinal)),
+			static pack => Assert.False(pack.PreserveLeadingDocstring));
 	}
 
 	[Fact]

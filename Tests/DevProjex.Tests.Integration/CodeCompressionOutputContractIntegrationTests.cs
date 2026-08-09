@@ -151,6 +151,70 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task CompressionPreparationCarriesPythonAndTsxBalanceRulesIntoOutputFiles()
+	{
+		const string pythonSource = """"
+			class Session:
+			    def __init__(self, root):
+			        self.root = root
+			        self.items = []
+
+			    def scan(self):
+			        """Scan the configured root."""
+			        python_implementation_marker = list(self.root.walk())
+			        return python_implementation_marker
+			"""";
+		const string tsxSource = """
+			const Panel = memo(forwardRef((props, ref) => {
+			  const wrapped_implementation_marker = props.value;
+			  return <section ref={ref}>{wrapped_implementation_marker}</section>;
+			}));
+			export const options = {
+			  name: "Panel",
+			  methods: {
+			    render: function (value) {
+			      const object_implementation_marker = value + 1;
+			      return object_implementation_marker;
+			    },
+			    normalize: (value) => value + 1,
+			  },
+			};
+			""";
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("balanced-project");
+		var pythonPath = Path.Combine(projectRoot, "session.py");
+		var tsxPath = Path.Combine(projectRoot, "Panel.tsx");
+		File.WriteAllText(pythonPath, pythonSource);
+		File.WriteAllText(tsxPath, tsxSource);
+		using var session = CodeCompressionFactory.CreateSession();
+
+		await using var prepared = await new SecretRedactionOutputPreparer(new FileContentAnalyzer())
+			.PrepareAsync(
+				new ContentTransformationContext(new CodeCompressionContext(projectRoot, session), null),
+				[pythonPath, tsxPath],
+				TestContext.Current.CancellationToken);
+
+		var snapshot = Assert.IsType<CodeCompressionSnapshot>(prepared.CompressionSnapshot);
+		Assert.Equal(2, snapshot.CompressedFiles);
+		var python = await File.ReadAllTextAsync(
+			prepared.GetFile(pythonPath).ContentPath,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("self.root = root", python, StringComparison.Ordinal);
+		Assert.Contains("\"\"\"Scan the configured root.\"\"\"\n        ...", python, StringComparison.Ordinal);
+		Assert.DoesNotContain("python_implementation_marker", python, StringComparison.Ordinal);
+
+		var tsx = await File.ReadAllTextAsync(
+			prepared.GetFile(tsxPath).ContentPath,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("const Panel = memo(forwardRef((props, ref) => { }));", tsx, StringComparison.Ordinal);
+		Assert.Contains("name: \"Panel\"", tsx, StringComparison.Ordinal);
+		Assert.Contains("render: function (value) { }", tsx, StringComparison.Ordinal);
+		Assert.Contains("normalize: (value) => value + 1", tsx, StringComparison.Ordinal);
+		Assert.DoesNotContain("wrapped_implementation_marker", tsx, StringComparison.Ordinal);
+		Assert.DoesNotContain("object_implementation_marker", tsx, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task CompressionWithHideSecrets_PreparesSmallFilesConcurrentlyAndCommitsInSelectionOrder()
 	{
 		using var temporary = new TemporaryDirectory();

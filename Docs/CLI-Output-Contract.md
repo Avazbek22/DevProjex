@@ -154,10 +154,13 @@ With code compression enabled, context, folder, and ZIP exports all consume the
 same validated transformed snapshot. Unsupported or rejected source files remain
 complete. Named block bodies become minimal syntax-valid placeholders (`{ }`, or
 `...` for Python); JavaScript-family block functions with stable assignment or
-export bindings follow the same rule.
+export bindings follow the same rule, including function-valued object properties
+and inline functions wrapped one or two calls deep under a stable binding. Data
+properties and bare callbacks remain unchanged.
 Expression bodies, free lambdas or closures, fields, and language-level properties
 remain byte-for-byte complete, including nested callbacks in initializers and
-property accessors. Project source files are never modified.
+property accessors. Python leading function docstrings and class `__init__` and
+`__post_init__` methods also remain complete. Project source files are never modified.
 
 ## Errors
 

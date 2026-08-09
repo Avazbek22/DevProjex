@@ -432,7 +432,7 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.Contains("Multi-line docstring.", text, StringComparison.Ordinal);
 		Assert.Contains("\"\"\"Doc.\"\"\"", text, StringComparison.Ordinal);
-		Assert.DoesNotContain("self._cache = {}", text, StringComparison.Ordinal);
+		Assert.Contains("self._cache = {}", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("return a + b", text, StringComparison.Ordinal);
 	}
 

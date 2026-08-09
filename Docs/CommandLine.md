@@ -138,14 +138,19 @@ files are not inspected, and no findings is not a security guarantee. See
 constructors with minimal syntax-valid placeholders (`{ }`, or `...` for Python)
 in supported C, C++, C#, Go, Java, JavaScript, Python, Rust, TSX, and TypeScript
 files. JavaScript-family block
-functions assigned or exported under a stable binding are compressed as well.
+functions stored in object properties, assigned or exported under a stable binding,
+or wrapped one or two calls deep under that binding are compressed as well. The
+property or binding name and function parameters remain visible; bare callbacks
+without a binding remain complete.
 Expression bodies and free lambdas or closures remain complete because the
 expression is signature-level context and removing an unbound body would leave no
 useful name. Fields and language-level properties are kept byte-for-byte complete,
 including their initializers and property accessors, because they describe project
-state and public behavior. Unsupported or conservatively rejected files remain
-complete. The same transformed content is used by analysis metrics, context
-documents, folder exports, and ZIP exports.
+state and public behavior. Python also keeps a leading function docstring and the
+complete class `__init__` and `__post_init__` methods, where instance state is
+declared. Unsupported or conservatively rejected files remain complete. The same
+transformed content is used by analysis metrics, context documents, folder exports,
+and ZIP exports.
 
 Modern local profiles retain checked and unchecked states across roots, extensions,
 and Exclusions. Newly discovered rows use current defaults in Desktop, CLI, and TUI;

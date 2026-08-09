@@ -2,9 +2,8 @@ namespace DevProjex.Infrastructure.Compression;
 
 /// <summary>
 /// One language, expressed as data. Adding a language is a manifest, a set of .scm queries and
-/// fixtures — no C# changes for the common case. That is not a promise that it is ALWAYS enough:
-/// Python already needs its own docstring handling, so the pack carries optional queries and the
-/// compressor keeps a small amount of per-language behaviour behind them.
+/// fixtures — no C# changes for the common case. Language-specific syntax exceptions are explicit
+/// manifest capabilities rather than language-name checks in the compressor.
 /// </summary>
 internal sealed record CompressionLanguagePack(
 	string Id,
@@ -14,11 +13,11 @@ internal sealed record CompressionLanguagePack(
 	string Export,
 	int QueryVersion,
 	string BlockPlaceholder,
+	bool PreserveLeadingDocstring,
 	IReadOnlySet<string> ContainerNodeTypes,
 	IReadOnlySet<string> ExecutableOwnerKinds,
 	string BodiesQuery,
 	string DeclarationsQuery,
-	string? DocstringsQuery,
 	string? PreservesQuery)
 {
 	/// <summary>
@@ -35,6 +34,7 @@ internal sealed record CompressionLanguagePack(
 		string Export,
 		int QueryVersion,
 		string BlockPlaceholder,
+		bool PreserveLeadingDocstring,
 		string[] ContainerNodeTypes,
 		string[] ExecutableOwnerKinds);
 
@@ -70,11 +70,11 @@ internal sealed record CompressionLanguagePack(
 				manifest.Export,
 				manifest.QueryVersion,
 				manifest.BlockPlaceholder,
+				manifest.PreserveLeadingDocstring,
 				manifest.ContainerNodeTypes.ToHashSet(StringComparer.Ordinal),
 				manifest.ExecutableOwnerKinds.ToHashSet(StringComparer.Ordinal),
 				ReadText(assembly, directory + "bodies.scm"),
 				ReadText(assembly, directory + "declarations.scm"),
-				TryReadText(assembly, directory + "docstrings.scm"),
 				TryReadText(assembly, directory + "preserve.scm")));
 		}
 
