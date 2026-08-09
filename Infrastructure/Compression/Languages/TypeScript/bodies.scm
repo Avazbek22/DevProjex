@@ -43,3 +43,26 @@
     [(arrow_function body: (statement_block) @body)
      (function_expression body: (statement_block) @body)
      (generator_function body: (statement_block) @body)])))))
+
+; Expression captures deliberately include statement blocks. The engine removes duplicates whose
+; span is already captured as @body, then preserves one-line expressions and compresses multiline
+; expressions without guessing their syntax from source text.
+(variable_declarator value: (arrow_function body: (_) @expression))
+(assignment_expression right: (arrow_function body: (_) @expression))
+(export_statement value: (arrow_function body: (_) @expression))
+(pair value: (arrow_function body: (_) @expression))
+(variable_declarator value: (call_expression arguments: (arguments
+  (arrow_function body: (_) @expression))))
+(variable_declarator value: (call_expression arguments: (arguments
+  (call_expression arguments: (arguments
+    (arrow_function body: (_) @expression))))))
+(assignment_expression right: (call_expression arguments: (arguments
+  (arrow_function body: (_) @expression))))
+(assignment_expression right: (call_expression arguments: (arguments
+  (call_expression arguments: (arguments
+    (arrow_function body: (_) @expression))))))
+(export_statement value: (call_expression arguments: (arguments
+  (arrow_function body: (_) @expression))))
+(export_statement value: (call_expression arguments: (arguments
+  (call_expression arguments: (arguments
+    (arrow_function body: (_) @expression))))))

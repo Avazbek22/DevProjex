@@ -8,8 +8,9 @@
 ; before a constructor, the C# grammar can expose the surrounding preprocessor node through the
 ; generic body field. Capturing (_) then removes the directive and the declaration signature along
 ; with the implementation. The reverse-parse gate catches that corruption, but has to reject the
-; whole file. Only blocks are compressed: expression bodies remain part of the signature-level
-; context, and free lambdas remain intact unless an enclosing named block is removed.
+; whole file. Multiline expression bodies are captured through their expression node so the engine
+; can measure source rows without inspecting source text. Free lambdas remain intact unless an
+; enclosing named block is removed.
 
 (method_declaration              body: (block) @body)
 (local_function_statement        body: (block) @body)
@@ -18,3 +19,10 @@
 (operator_declaration            body: (block) @body)
 (conversion_operator_declaration body: (block) @body)
 (accessor_declaration            body: (block) @body)
+
+(method_declaration              body: (arrow_expression_clause (_) @expression))
+(local_function_statement        body: (arrow_expression_clause (_) @expression))
+(constructor_declaration         body: (arrow_expression_clause (_) @expression))
+(destructor_declaration          body: (arrow_expression_clause (_) @expression))
+(operator_declaration            body: (arrow_expression_clause (_) @expression))
+(conversion_operator_declaration body: (arrow_expression_clause (_) @expression))

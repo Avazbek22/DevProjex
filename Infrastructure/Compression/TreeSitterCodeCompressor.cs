@@ -560,14 +560,33 @@ internal sealed class TreeSitterCompressionScope(
 		if (preservedRanges is null)
 			return null;
 
-		var raw = new List<(int Start, int End)>();
+		var bodyCaptures = new List<Node>();
+		var expressionCaptures = new List<Node>();
+		var captureCount = 0;
 		language.BodiesCursor.Execute(language.Runtime.Bodies, tree.RootNode);
 		foreach (var capture in language.BodiesCursor.Captures)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (raw.Count >= TreeSitterCodeCompressor.MaximumBodyCapturesPerFile)
+			if (capture.Name is not ("body" or "expression"))
+				continue;
+			if (captureCount >= TreeSitterCodeCompressor.MaximumBodyCapturesPerFile)
 				return null;
-			var node = capture.Node;
+			captureCount++;
+			(capture.Name.Equals("body", StringComparison.Ordinal)
+				? bodyCaptures
+				: expressionCaptures).Add(capture.Node);
+		}
+		if (language.BodiesCursor.IsMatchLimitExceeded)
+			return null;
+
+		var raw = new List<RawCompressionEdit>(bodyCaptures.Count + expressionCaptures.Count);
+		var bodyRanges = expressionCaptures.Count == 0
+			? null
+			: bodyCaptures
+				.Select(static node => new SourceRange(node.StartIndex, node.EndIndex))
+				.ToHashSet();
+		foreach (var node in bodyCaptures)
+		{
 
 			// Defence in depth. The queries are anchored on the parent declaration's body: field, so
 			// a container should be unreachable - but a grammar upgrade must fail loudly, not
@@ -592,17 +611,33 @@ internal sealed class TreeSitterCompressionScope(
 
 			if (start < 0 || node.EndIndex > source.Length || node.EndIndex <= start)
 				continue;
-			raw.Add((start, node.EndIndex));
+			raw.Add(new RawCompressionEdit(
+				start,
+				node.EndIndex,
+				PlaceholderFor(pack, source, start, node.EndIndex)));
 		}
-		if (language.BodiesCursor.IsMatchLimitExceeded)
-			return null;
+
+		foreach (var node in expressionCaptures)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (bodyRanges!.Contains(new SourceRange(node.StartIndex, node.EndIndex)))
+				continue;
+			if (node.StartPosition.Row == node.EndPosition.Row)
+				continue;
+			if (!TryResolveExpressionEdit(pack, node, source.Length, out var expressionEdit))
+				return null;
+			raw.Add(expressionEdit);
+		}
 
 		// Outermost wins: a lambda body inside a method body must not be spliced twice.
-		raw.Sort((left, right) => left.Start != right.Start ? left.Start.CompareTo(right.Start) : right.End.CompareTo(left.End));
+		raw.Sort(static (left, right) =>
+			left.Start != right.Start
+				? left.Start.CompareTo(right.Start)
+				: right.End.CompareTo(left.End));
 		var edits = new List<CodeCompressionEdit>(raw.Count);
 		var reach = -1;
 		var preservedIndex = 0;
-		foreach (var (start, end) in raw)
+		foreach (var (start, end, replacement) in raw)
 		{
 			if (start < reach)
 				continue;
@@ -617,10 +652,51 @@ internal sealed class TreeSitterCompressionScope(
 			reach = end;
 			if (edits.Count >= TreeSitterCodeCompressor.MaximumEditsPerFile)
 				return null;
-			edits.Add(new CodeCompressionEdit(start, end - start, PlaceholderFor(pack, source, start, end)));
+			edits.Add(new CodeCompressionEdit(start, end - start, replacement));
 		}
 
 		return edits;
+	}
+
+	private static bool TryResolveExpressionEdit(
+		CompressionLanguagePack pack,
+		Node expression,
+		int sourceLength,
+		out RawCompressionEdit edit)
+	{
+		var start = expression.StartIndex;
+		var end = expression.EndIndex;
+		switch (pack.ExpressionBodyStyle)
+		{
+			case ExpressionBodyStyle.Inline:
+				break;
+			case ExpressionBodyStyle.Declaration:
+				var expressionContainer = expression.Parent;
+				var owner = expressionContainer?.Parent;
+				if (expressionContainer is null ||
+				    owner is null ||
+				    !pack.ExecutableOwnerKinds.Contains(owner.Type))
+				{
+					edit = default;
+					return false;
+				}
+
+				start = expressionContainer.StartIndex;
+				end = owner.EndIndex;
+				break;
+			default:
+				edit = default;
+				return false;
+		}
+
+		if (start < 0 || end > sourceLength || end <= start)
+		{
+			edit = default;
+			return false;
+		}
+
+		edit = new RawCompressionEdit(start, end, pack.BlockPlaceholder);
+		return true;
 	}
 
 	private static bool TryResolveContentAfterLeadingDocstring(
@@ -734,6 +810,8 @@ internal sealed class TreeSitterCompressionScope(
 	}
 
 	private readonly record struct SourceRange(int Start, int End);
+
+	private readonly record struct RawCompressionEdit(int Start, int End, string Replacement);
 
 	private static bool IsMisparsedCppClassBody(
 		CompressionLanguagePack pack,

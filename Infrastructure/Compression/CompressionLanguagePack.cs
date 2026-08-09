@@ -1,5 +1,12 @@
 namespace DevProjex.Infrastructure.Compression;
 
+internal enum ExpressionBodyStyle
+{
+	None,
+	Inline,
+	Declaration
+}
+
 /// <summary>
 /// One language, expressed as data. Adding a language is a manifest, a set of .scm queries and
 /// fixtures — no C# changes for the common case. Language-specific syntax exceptions are explicit
@@ -14,6 +21,7 @@ internal sealed record CompressionLanguagePack(
 	int QueryVersion,
 	string BlockPlaceholder,
 	bool PreserveLeadingDocstring,
+	ExpressionBodyStyle ExpressionBodyStyle,
 	IReadOnlySet<string> ContainerNodeTypes,
 	IReadOnlySet<string> ExecutableOwnerKinds,
 	string BodiesQuery,
@@ -35,6 +43,7 @@ internal sealed record CompressionLanguagePack(
 		int QueryVersion,
 		string BlockPlaceholder,
 		bool PreserveLeadingDocstring,
+		string? ExpressionBodyStyle,
 		string[] ContainerNodeTypes,
 		string[] ExecutableOwnerKinds);
 
@@ -71,6 +80,7 @@ internal sealed record CompressionLanguagePack(
 				manifest.QueryVersion,
 				manifest.BlockPlaceholder,
 				manifest.PreserveLeadingDocstring,
+				ParseExpressionBodyStyle(manifest.ExpressionBodyStyle, resource),
 				manifest.ContainerNodeTypes.ToHashSet(StringComparer.Ordinal),
 				manifest.ExecutableOwnerKinds.ToHashSet(StringComparer.Ordinal),
 				ReadText(assembly, directory + "bodies.scm"),
@@ -80,6 +90,16 @@ internal sealed record CompressionLanguagePack(
 
 		return packs.OrderBy(static pack => pack.Id, StringComparer.Ordinal).ToArray();
 	}
+
+	private static ExpressionBodyStyle ParseExpressionBodyStyle(string? value, string resource) =>
+		value switch
+		{
+			null or "" => ExpressionBodyStyle.None,
+			"inline" => ExpressionBodyStyle.Inline,
+			"declaration" => ExpressionBodyStyle.Declaration,
+			_ => throw new InvalidOperationException(
+				$"Language manifest '{resource}' has unsupported expressionBodyStyle '{value}'.")
+		};
 
 	private static string ReadText(Assembly assembly, string resource) =>
 		TryReadText(assembly, resource)

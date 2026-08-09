@@ -71,6 +71,29 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
+	public void ExpressionBodyStylesMatchTheLanguagePackContract()
+	{
+		var packs = CodeCompressionTestHarness.LanguagePacks.ToDictionary(
+			static pack => pack.Id,
+			StringComparer.Ordinal);
+
+		Assert.Equal(ExpressionBodyStyle.Declaration, packs["csharp"].ExpressionBodyStyle);
+		Assert.Equal(ExpressionBodyStyle.Inline, packs["javascript"].ExpressionBodyStyle);
+		Assert.Equal(ExpressionBodyStyle.Inline, packs["typescript"].ExpressionBodyStyle);
+		Assert.Equal(ExpressionBodyStyle.Inline, packs["tsx"].ExpressionBodyStyle);
+		Assert.All(
+			packs.Values.Where(static pack => pack.ExpressionBodyStyle != ExpressionBodyStyle.None),
+			static pack => Assert.Contains("@expression", pack.BodiesQuery, StringComparison.Ordinal));
+		Assert.All(
+			packs.Values.Where(static pack => pack.Id is not ("csharp" or "javascript" or "typescript" or "tsx")),
+			static pack =>
+			{
+				Assert.Equal(ExpressionBodyStyle.None, pack.ExpressionBodyStyle);
+				Assert.DoesNotContain("@expression", pack.BodiesQuery, StringComparison.Ordinal);
+			});
+	}
+
+	[Fact]
 	public void CSharpExecutableOwnersContainOnlyNamedBlockForms()
 	{
 		using var harness = CodeCompressionTestHarness.For("csharp");

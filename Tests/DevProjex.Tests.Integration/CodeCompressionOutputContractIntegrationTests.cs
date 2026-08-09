@@ -169,6 +169,17 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			  const wrapped_implementation_marker = props.value;
 			  return <section ref={ref}>{wrapped_implementation_marker}</section>;
 			}));
+			const normalize = (value) => value.trim();
+			const Card = (props) => (
+			  <article>
+			    <h2>{props.title}</h2>
+			    <p>{props.multiline_jsx_marker}</p>
+			  </article>
+			);
+			const Pipeline = (items) =>
+			  items
+			    .map((item) => item.value)
+			    .filter((multiline_chain_marker) => multiline_chain_marker);
 			export const options = {
 			  name: "Panel",
 			  methods: {
@@ -207,10 +218,15 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			prepared.GetFile(tsxPath).ContentPath,
 			TestContext.Current.CancellationToken);
 		Assert.Contains("const Panel = memo(forwardRef((props, ref) => { }));", tsx, StringComparison.Ordinal);
+		Assert.Contains("const normalize = (value) => value.trim();", tsx, StringComparison.Ordinal);
+		Assert.Contains("const Card = (props) => { };", tsx, StringComparison.Ordinal);
+		Assert.Contains("const Pipeline = (items) =>\n  { };", tsx, StringComparison.Ordinal);
 		Assert.Contains("name: \"Panel\"", tsx, StringComparison.Ordinal);
 		Assert.Contains("render: function (value) { }", tsx, StringComparison.Ordinal);
 		Assert.Contains("normalize: (value) => value + 1", tsx, StringComparison.Ordinal);
 		Assert.DoesNotContain("wrapped_implementation_marker", tsx, StringComparison.Ordinal);
+		Assert.DoesNotContain("multiline_jsx_marker", tsx, StringComparison.Ordinal);
+		Assert.DoesNotContain("multiline_chain_marker", tsx, StringComparison.Ordinal);
 		Assert.DoesNotContain("object_implementation_marker", tsx, StringComparison.Ordinal);
 	}
 

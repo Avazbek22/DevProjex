@@ -142,11 +142,13 @@ functions stored in object properties, assigned or exported under a stable bindi
 or wrapped one or two calls deep under that binding are compressed as well. The
 property or binding name and function parameters remain visible; bare callbacks
 without a binding remain complete.
-Expression bodies and free lambdas or closures remain complete because the
-expression is signature-level context and removing an unbound body would leave no
-useful name. Fields and language-level properties are kept byte-for-byte complete,
-including their initializers and property accessors, because they describe project
-state and public behavior. Python also keeps a leading function docstring and the
+An expression body whose expression fits on one source line remains byte-for-byte
+complete as signature-level context; a multiline expression is implementation and
+is compressed like a block body. Free lambdas or closures remain complete because
+removing an unbound body would leave no useful name. Fields and language-level
+properties are kept byte-for-byte complete, including their initializers and
+property accessors, because they describe project state and public behavior.
+Python also keeps a leading function docstring and the
 complete class `__init__` and `__post_init__` methods, where instance state is
 declared. Unsupported or conservatively rejected files remain complete. The same
 transformed content is used by analysis metrics, context documents, folder exports,

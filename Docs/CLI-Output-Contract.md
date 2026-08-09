@@ -157,8 +157,10 @@ complete. Named block bodies become minimal syntax-valid placeholders (`{ }`, or
 export bindings follow the same rule, including function-valued object properties
 and inline functions wrapped one or two calls deep under a stable binding. Data
 properties and bare callbacks remain unchanged.
-Expression bodies, free lambdas or closures, fields, and language-level properties
-remain byte-for-byte complete, including nested callbacks in initializers and
+An expression body whose expression fits on one source line remains byte-for-byte
+complete as signature-level context; a multiline expression is implementation and
+is compressed like a block body. Free lambdas or closures, fields, and language-level
+properties remain complete, including nested callbacks in initializers and
 property accessors. Python leading function docstrings and class `__init__` and
 `__post_init__` methods also remain complete. Project source files are never modified.
 

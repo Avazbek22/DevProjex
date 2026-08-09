@@ -66,7 +66,7 @@ public sealed record CodeCompressionPlan(
 	/// Two size rules are applied here, before any text is produced, so a file can never be made
 	/// larger by enabling compression:
 	///  * an individual edit is dropped unless its replacement is shorter than what it replaces —
-	///    an expression body like "=> a" is smaller than any placeholder worth printing;
+	///    a tiny captured body is not worth replacing with a placeholder;
 	///  * a file whose total would not shrink comes back as <see cref="CodeCompressionOutcome.UnchangedNoBenefit"/>.
 	/// </summary>
 	public static CodeCompressionPlan Create(
