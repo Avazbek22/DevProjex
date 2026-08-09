@@ -630,6 +630,59 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task ContextFolderAndZipKeepFieldsAndPropertiesWhileCompressingMethods()
+	{
+		const string source = """
+			public sealed class Settings
+			{
+			    private readonly System.Func<int, int> _normalize = value =>
+			    {
+			        var preserved_field_marker = value + 1;
+			        return preserved_field_marker;
+			    };
+
+			    public int Value
+			    {
+			        get
+			        {
+			            var preserved_property_marker = _normalize(41);
+			            return preserved_property_marker;
+			        }
+			    }
+
+			    public int Calculate(int value)
+			    {
+			        var removed_method_marker = value + 2;
+			        removed_method_marker += 3;
+			        return removed_method_marker;
+			    }
+			}
+			""";
+		using var workspace = CompressionWorkspace.Create(source);
+
+		var context = await workspace.BuildContextAsync(compress: true);
+		var folder = await workspace.ExportFolderAsync(compress: true);
+		var folderText = await File.ReadAllTextAsync(
+			Path.Combine(folder.DestinationPath, "Widget.cs"),
+			TestContext.Current.CancellationToken);
+		var zipPath = Path.Combine(workspace.DestinationParent, "preserved-members.zip");
+		await workspace.ExportZipAsync(zipPath, compress: true);
+		using var archive = ZipFile.OpenRead(zipPath);
+		var sourceEntry = archive.Entries.Single(entry =>
+			entry.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+		using var reader = new StreamReader(sourceEntry.Open());
+		var zipText = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+		foreach (var output in new[] { context, folderText, zipText })
+		{
+			Assert.Contains("preserved_field_marker", output, StringComparison.Ordinal);
+			Assert.Contains("preserved_property_marker", output, StringComparison.Ordinal);
+			Assert.DoesNotContain("removed_method_marker", output, StringComparison.Ordinal);
+		}
+		Assert.Equal(folderText, zipText);
+	}
+
+	[Fact]
 	public async Task FolderCopy_WithCompression_PreservesUtf16BigEndianEncodingAndBom()
 	{
 		using var workspace = CompressionWorkspace.Create(CompressibleSource);

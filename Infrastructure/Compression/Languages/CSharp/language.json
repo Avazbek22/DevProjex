@@ -7,9 +7,8 @@
   ],
   "library": "tree-sitter-c-sharp",
   "export": "tree_sitter_c_sharp",
-  "queryVersion": 5,
+  "queryVersion": 7,
   "blockPlaceholder": "{ }",
-  "expressionPlaceholder": "=> default",
   "containerNodeTypes": [
     "compilation_unit",
     "declaration_list",
@@ -24,10 +23,6 @@
     "operator_declaration",
     "conversion_operator_declaration",
     "accessor_declaration",
-    "property_declaration",
-    "indexer_declaration",
-    "local_function_statement",
-    "lambda_expression",
-    "anonymous_method_expression"
+    "local_function_statement"
   ]
 }

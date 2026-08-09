@@ -14,12 +14,12 @@ internal sealed record CompressionLanguagePack(
 	string Export,
 	int QueryVersion,
 	string BlockPlaceholder,
-	string? ExpressionPlaceholder,
 	IReadOnlySet<string> ContainerNodeTypes,
 	IReadOnlySet<string> ExecutableOwnerKinds,
 	string BodiesQuery,
 	string DeclarationsQuery,
-	string? DocstringsQuery)
+	string? DocstringsQuery,
+	string? PreservesQuery)
 {
 	/// <summary>
 	/// Goes into the cache key. A grammar or query change must change this string, or plans built
@@ -35,7 +35,6 @@ internal sealed record CompressionLanguagePack(
 		string Export,
 		int QueryVersion,
 		string BlockPlaceholder,
-		string? ExpressionPlaceholder,
 		string[] ContainerNodeTypes,
 		string[] ExecutableOwnerKinds);
 
@@ -71,12 +70,12 @@ internal sealed record CompressionLanguagePack(
 				manifest.Export,
 				manifest.QueryVersion,
 				manifest.BlockPlaceholder,
-				manifest.ExpressionPlaceholder,
 				manifest.ContainerNodeTypes.ToHashSet(StringComparer.Ordinal),
 				manifest.ExecutableOwnerKinds.ToHashSet(StringComparer.Ordinal),
 				ReadText(assembly, directory + "bodies.scm"),
 				ReadText(assembly, directory + "declarations.scm"),
-				TryReadText(assembly, directory + "docstrings.scm")));
+				TryReadText(assembly, directory + "docstrings.scm"),
+				TryReadText(assembly, directory + "preserve.scm")));
 		}
 
 		return packs.OrderBy(static pack => pack.Id, StringComparer.Ordinal).ToArray();

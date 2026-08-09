@@ -248,21 +248,16 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.Equal(CodeCompressionTestHarness.LanguagePacks.Count, Directory.GetFiles(locator.RootDirectory).Length);
 	}
 
-	[Theory]
-	[InlineData(
-		"sample.cpp",
-		"auto transform = [](int value) { int doubled = value * 2; int adjusted = doubled + 10; return adjusted; };",
-		"doubled =")]
-	[InlineData(
-		"Sample.java",
-		"class Sample { java.util.function.Function<Integer, Integer> transform = value -> { int doubled = value * 2; int adjusted = doubled + 10; return adjusted; }; }",
-		"doubled =")]
-	public void CommonLambdaBodiesAreCompressed(string path, string source, string removedText)
+	[Fact]
+	public void FreeCppLambdaWithoutNamedExecutableRemainsUnchanged()
 	{
-		var (plan, text) = Compress(path, source);
+		const string source =
+			"auto transform = [](int value) { int doubled = value * 2; int adjusted = doubled + 10; return adjusted; };";
 
-		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
-		Assert.DoesNotContain(removedText, text, StringComparison.Ordinal);
+		var (plan, text) = Compress("sample.cpp", source);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedNoBenefit, plan.Outcome);
+		Assert.Equal(source, text);
 	}
 
 	[Fact]

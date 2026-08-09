@@ -4,9 +4,8 @@
   "extensions": [".h", ".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx"],
   "library": "tree-sitter-cpp",
   "export": "tree_sitter_cpp",
-  "queryVersion": 3,
+  "queryVersion": 5,
   "blockPlaceholder": "{ }",
-  "expressionPlaceholder": null,
   "containerNodeTypes": ["translation_unit", "field_declaration_list"],
-  "executableOwnerKinds": ["function_definition", "lambda_expression"]
+  "executableOwnerKinds": ["function_definition"]
 }

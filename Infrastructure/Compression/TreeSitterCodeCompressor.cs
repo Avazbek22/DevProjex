@@ -30,6 +30,7 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 	public const int MaximumParsableCharacters = 2 * 1024 * 1024;
 	internal const uint MaximumQueryMatchLimit = 4096;
 	internal const int MaximumBodyCapturesPerFile = 20_000;
+	internal const int MaximumPreservedRangesPerFile = 20_000;
 	internal const int MaximumEditsPerFile = 10_000;
 	internal const int MaximumDeclarationsPerFile = 25_000;
 	internal const int MaximumDefectsPerFile = 4_096;
@@ -555,6 +556,10 @@ internal sealed class TreeSitterCompressionScope(
 		string source,
 		CancellationToken cancellationToken)
 	{
+		var preservedRanges = ReadPreservedRanges(language, tree.RootNode, cancellationToken);
+		if (preservedRanges is null)
+			return null;
+
 		// Python keeps documentation inside the body, so the first string of a suite is preserved
 		// and only what follows it is removed. Every other language documents above the declaration.
 		var docstringEnds = new Dictionary<int, int>();
@@ -574,7 +579,7 @@ internal sealed class TreeSitterCompressionScope(
 				return null;
 		}
 
-		var raw = new List<(int Start, int End, string Type)>();
+		var raw = new List<(int Start, int End)>();
 		language.BodiesCursor.Execute(language.Runtime.Bodies, tree.RootNode);
 		foreach (var capture in language.BodiesCursor.Captures)
 		{
@@ -608,7 +613,7 @@ internal sealed class TreeSitterCompressionScope(
 
 			if (start < 0 || node.EndIndex > source.Length || node.EndIndex <= start)
 				continue;
-			raw.Add((start, node.EndIndex, node.Type));
+			raw.Add((start, node.EndIndex));
 		}
 		if (language.BodiesCursor.IsMatchLimitExceeded)
 			return null;
@@ -617,18 +622,78 @@ internal sealed class TreeSitterCompressionScope(
 		raw.Sort((left, right) => left.Start != right.Start ? left.Start.CompareTo(right.Start) : right.End.CompareTo(left.End));
 		var edits = new List<CodeCompressionEdit>(raw.Count);
 		var reach = -1;
-		foreach (var (start, end, type) in raw)
+		var preservedIndex = 0;
+		foreach (var (start, end) in raw)
 		{
 			if (start < reach)
 				continue;
+			while (preservedIndex < preservedRanges.Count && preservedRanges[preservedIndex].End <= start)
+				preservedIndex++;
+			if (preservedIndex < preservedRanges.Count &&
+			    preservedRanges[preservedIndex].Start <= start &&
+			    end <= preservedRanges[preservedIndex].End)
+			{
+				continue;
+			}
 			reach = end;
 			if (edits.Count >= TreeSitterCodeCompressor.MaximumEditsPerFile)
 				return null;
-			edits.Add(new CodeCompressionEdit(start, end - start, PlaceholderFor(pack, source, start, end, type)));
+			edits.Add(new CodeCompressionEdit(start, end - start, PlaceholderFor(pack, source, start, end)));
 		}
 
 		return edits;
 	}
+
+	private static IReadOnlyList<SourceRange>? ReadPreservedRanges(
+		LoadedLanguage language,
+		Node root,
+		CancellationToken cancellationToken)
+	{
+		if (language.Runtime.Preserves is null || language.PreservesCursor is null)
+			return Array.Empty<SourceRange>();
+
+		List<SourceRange>? ranges = null;
+		language.PreservesCursor.Execute(language.Runtime.Preserves, root);
+		foreach (var capture in language.PreservesCursor.Captures)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!capture.Name.Equals("preserve", StringComparison.Ordinal))
+				continue;
+			if (ranges?.Count >= TreeSitterCodeCompressor.MaximumPreservedRangesPerFile)
+				return null;
+			if (capture.Node.StartIndex < 0 || capture.Node.EndIndex <= capture.Node.StartIndex)
+				continue;
+			(ranges ??= []).Add(new SourceRange(capture.Node.StartIndex, capture.Node.EndIndex));
+		}
+		if (language.PreservesCursor.IsMatchLimitExceeded)
+			return null;
+		if (ranges is null)
+			return Array.Empty<SourceRange>();
+		if (ranges.Count < 2)
+			return ranges;
+
+		ranges.Sort(static (left, right) =>
+			left.Start != right.Start
+				? left.Start.CompareTo(right.Start)
+				: right.End.CompareTo(left.End));
+		var writeIndex = 0;
+		for (var readIndex = 1; readIndex < ranges.Count; readIndex++)
+		{
+			var current = ranges[writeIndex];
+			var next = ranges[readIndex];
+			if (next.Start <= current.End)
+			{
+				ranges[writeIndex] = new SourceRange(current.Start, Math.Max(current.End, next.End));
+				continue;
+			}
+
+			ranges[++writeIndex] = next;
+		}
+		ranges.RemoveRange(writeIndex + 1, ranges.Count - writeIndex - 1);
+		return ranges;
+	}
+
+	private readonly record struct SourceRange(int Start, int End);
 
 	private static bool IsMisparsedCppClassBody(
 		CompressionLanguagePack pack,
@@ -714,14 +779,8 @@ internal sealed class TreeSitterCompressionScope(
 	/// A body that only kept its docstring already ends where the placeholder would go, so it needs
 	/// nothing appended.
 	/// </summary>
-	private static string PlaceholderFor(CompressionLanguagePack pack, string source, int start, int end, string nodeType)
+	private static string PlaceholderFor(CompressionLanguagePack pack, string source, int start, int end)
 	{
-		// An expression body is not a block: replacing "=> value" with "{ ... }" leaves the
-		// declaration's trailing semicolon after a block and the file stops parsing. The gate
-		// caught exactly this, which is what it is for.
-		if (nodeType.Equals("arrow_expression_clause", StringComparison.Ordinal))
-			return pack.ExpressionPlaceholder ?? pack.BlockPlaceholder;
-
 		if (!pack.Id.Equals("python", StringComparison.Ordinal))
 			return pack.BlockPlaceholder;
 
@@ -1234,7 +1293,8 @@ internal sealed record LanguageRuntime(
 	Language Language,
 	Query Bodies,
 	Query Declarations,
-	Query? Docstrings) : IDisposable
+	Query? Docstrings,
+	Query? Preserves) : IDisposable
 {
 	public static LanguageRuntime Create(string libraryPath, CompressionLanguagePack pack)
 	{
@@ -1250,7 +1310,18 @@ internal sealed record LanguageRuntime(
 					var docstrings = pack.DocstringsQuery is null
 						? null
 						: new Query(language, pack.DocstringsQuery);
-					return new LanguageRuntime(language, bodies, declarations, docstrings);
+					try
+					{
+						var preserves = pack.PreservesQuery is null
+							? null
+							: new Query(language, pack.PreservesQuery);
+						return new LanguageRuntime(language, bodies, declarations, docstrings, preserves);
+					}
+					catch
+					{
+						docstrings?.Dispose();
+						throw;
+					}
 				}
 				catch
 				{
@@ -1273,6 +1344,7 @@ internal sealed record LanguageRuntime(
 
 	public void Dispose()
 	{
+		Preserves?.Dispose();
 		Docstrings?.Dispose();
 		Declarations.Dispose();
 		Bodies.Dispose();
@@ -1287,7 +1359,8 @@ internal sealed record LoadedLanguage(
 	Tree IdleTree,
 	QueryCursor BodiesCursor,
 	QueryCursor DeclarationsCursor,
-	QueryCursor? DocstringsCursor) : IDisposable
+	QueryCursor? DocstringsCursor,
+	QueryCursor? PreservesCursor) : IDisposable
 {
 	public static LoadedLanguage Create(LanguageRuntime runtime, uint queryMatchLimit)
 	{
@@ -1307,13 +1380,25 @@ internal sealed record LoadedLanguage(
 						var docstringsCursor = runtime.Docstrings is null
 							? null
 							: CreateBoundedCursor(queryMatchLimit);
-						return new LoadedLanguage(
-							runtime,
-							parser,
-							idleTree,
-							bodiesCursor,
-							declarationsCursor,
-							docstringsCursor);
+						try
+						{
+							var preservesCursor = runtime.Preserves is null
+								? null
+								: CreateBoundedCursor(queryMatchLimit);
+							return new LoadedLanguage(
+								runtime,
+								parser,
+								idleTree,
+								bodiesCursor,
+								declarationsCursor,
+								docstringsCursor,
+								preservesCursor);
+						}
+						catch
+						{
+							docstringsCursor?.Dispose();
+							throw;
+						}
 					}
 					catch
 					{
@@ -1354,10 +1439,13 @@ internal sealed record LoadedLanguage(
 		DeclarationsCursor.Execute(Runtime.Declarations, root);
 		if (DocstringsCursor is not null && Runtime.Docstrings is not null)
 			DocstringsCursor.Execute(Runtime.Docstrings, root);
+		if (PreservesCursor is not null && Runtime.Preserves is not null)
+			PreservesCursor.Execute(Runtime.Preserves, root);
 	}
 
 	public void Dispose()
 	{
+		PreservesCursor?.Dispose();
 		DocstringsCursor?.Dispose();
 		DeclarationsCursor.Dispose();
 		BodiesCursor.Dispose();

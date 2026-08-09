@@ -47,6 +47,7 @@ public sealed class CodeCompressionQueryContractTests
 		// Compiling is the assertion: an impossible pattern throws here rather than at run time.
 		Assert.NotNull(harness.Bodies);
 		Assert.NotNull(harness.Declarations);
+		Assert.NotNull(harness.Preserves);
 	}
 
 	[Theory]
@@ -69,12 +70,16 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
-	public void CSharpExecutableOwnersNameActualBodiesRatherThanTheirContainingFields()
+	public void CSharpExecutableOwnersContainOnlyNamedBlockForms()
 	{
 		using var harness = CodeCompressionTestHarness.For("csharp");
 
-		Assert.Contains("lambda_expression", harness.Pack.ExecutableOwnerKinds);
-		Assert.Contains("anonymous_method_expression", harness.Pack.ExecutableOwnerKinds);
+		Assert.Contains("method_declaration", harness.Pack.ExecutableOwnerKinds);
+		Assert.Contains("accessor_declaration", harness.Pack.ExecutableOwnerKinds);
+		Assert.DoesNotContain("lambda_expression", harness.Pack.ExecutableOwnerKinds);
+		Assert.DoesNotContain("anonymous_method_expression", harness.Pack.ExecutableOwnerKinds);
+		Assert.DoesNotContain("property_declaration", harness.Pack.ExecutableOwnerKinds);
+		Assert.DoesNotContain("indexer_declaration", harness.Pack.ExecutableOwnerKinds);
 		Assert.DoesNotContain("field_declaration", harness.Pack.ExecutableOwnerKinds);
 		Assert.DoesNotContain("event_field_declaration", harness.Pack.ExecutableOwnerKinds);
 	}
@@ -156,10 +161,5 @@ public sealed class CodeCompressionQueryContractTests
 
 		Assert.DoesNotContain("/*", harness.Pack.BlockPlaceholder, StringComparison.Ordinal);
 		Assert.DoesNotContain("*/", harness.Pack.BlockPlaceholder, StringComparison.Ordinal);
-		if (harness.Pack.ExpressionPlaceholder is { } expressionPlaceholder)
-		{
-			Assert.DoesNotContain("/*", expressionPlaceholder, StringComparison.Ordinal);
-			Assert.DoesNotContain("*/", expressionPlaceholder, StringComparison.Ordinal);
-		}
 	}
 }

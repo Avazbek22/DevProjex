@@ -152,7 +152,12 @@ or run. This warning does not create or scan an output artifact.
 
 With code compression enabled, context, folder, and ZIP exports all consume the
 same validated transformed snapshot. Unsupported or rejected source files remain
-complete; project source files are never modified.
+complete. Named block bodies become minimal syntax-valid placeholders (`{ }`, or
+`...` for Python); JavaScript-family block functions with stable assignment or
+export bindings follow the same rule.
+Expression bodies, free lambdas or closures, fields, and language-level properties
+remain byte-for-byte complete, including nested callbacks in initializers and
+property accessors. Project source files are never modified.
 
 ## Errors
 
