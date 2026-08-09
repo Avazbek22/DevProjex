@@ -459,6 +459,45 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Equal(snapshot.UnscannablePath, cached.UnscannablePath);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task Discovery_SkipsOneMissingFileButStrictAnalysisStillFails(bool compressionEnabled)
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("partial-discovery-project");
+		var readablePath = temporary.CreateFile(
+			"partial-discovery-project/settings.txt",
+			$"token = {GithubToken}\n");
+		var missingPath = Path.Combine(sourceRoot, "removed-during-scan.txt");
+		using var redactionSession = new SecretRedactionSession(CreateDetector());
+		using var compressionSession = compressionEnabled
+			? new CodeCompressionSession(new UnsupportedCodeCompressor())
+			: null;
+		var redactionContext = new SecretRedactionContext(sourceRoot, redactionSession);
+		var transformationContext = new ContentTransformationContext(
+			compressionSession is null ? null : new CodeCompressionContext(sourceRoot, compressionSession),
+			redactionContext);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		var discovery = await preparer.DiscoverAsync(
+			transformationContext,
+			[readablePath, missingPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.True(discovery.DetectedCount > 0);
+		Assert.Equal(1, discovery.IncompleteFileCount);
+		Assert.False(discovery.IsComplete);
+		await Assert.ThrowsAnyAsync<IOException>(() => preparer.AnalyzeAsync(
+			redactionContext,
+			[readablePath, missingPath],
+			TestContext.Current.CancellationToken));
+		await Assert.ThrowsAnyAsync<IOException>(() => preparer.PrepareAsync(
+			transformationContext,
+			[readablePath, missingPath],
+			TestContext.Current.CancellationToken));
+	}
+
 	private static async Task WriteOversizedProjectAsync(string sourceRoot)
 	{
 		await File.WriteAllTextAsync(
@@ -690,6 +729,29 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			string repositoryRelativePath,
 			string content,
 			CancellationToken cancellationToken = default) => [];
+	}
+
+	private sealed class UnsupportedCodeCompressor : ICodeCompressor
+	{
+		public string TransformIdentity => "unsupported:test:v1";
+
+		public bool IsSupported(string relativePath) => false;
+
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope();
+
+		private sealed class Scope : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken) =>
+				throw new InvalidOperationException("Unsupported files must not reach the compressor.");
+
+			public void Dispose()
+			{
+			}
+		}
 	}
 
 	private static async Task<Dictionary<ProjectContextDocumentFormat, string>> BuildContextDocumentsAsync(

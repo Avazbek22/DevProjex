@@ -9,6 +9,7 @@ public sealed class IgnoreOptionViewModel(
     private bool _isChecked = isChecked;
     private string _label = label;
     private string _statusText = string.Empty;
+	private bool _isWarningStatus;
 
     public IgnoreOptionId Id { get; } = id;
 
@@ -48,10 +49,25 @@ public sealed class IgnoreOptionViewModel(
             _statusText = value;
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(HasStatus));
+			RaisePropertyChanged(nameof(IsInformationStatus));
         }
     }
 
     public bool HasStatus => !string.IsNullOrWhiteSpace(StatusText);
+
+	public bool IsWarningStatus
+	{
+		get => _isWarningStatus;
+		internal set
+		{
+			if (_isWarningStatus == value) return;
+			_isWarningStatus = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(IsInformationStatus));
+		}
+	}
+
+	public bool IsInformationStatus => HasStatus && !IsWarningStatus;
 
     public event EventHandler? CheckedChanged;
 }

@@ -17,7 +17,8 @@ internal sealed class StartupInteractionController(
     Func<TreeNodeDescriptor?> treeRootProvider,
     Func<Task> refreshTreeAsync,
     Func<string, Task<bool>> openProjectAsync,
-    Action closeWindow)
+    Action closeWindow,
+	Action<Action>? applyTreeSelectionBatch = null)
 {
     private const string BenchmarkIdleSecondsEnvironmentVariable =
         "DEVPROJEX_UI_BENCHMARK_IDLE_SECONDS";
@@ -258,9 +259,30 @@ internal sealed class StartupInteractionController(
                     .ToArray();
             });
 
-        for (var index = 0; index < nodes.Count; index++)
-            nodes[index].IsChecked = checkedStates[index];
+		ApplyCheckedStates(nodes, checkedStates, applyTreeSelectionBatch);
     }
+
+	internal static void ApplyCheckedStates(
+		IReadOnlyList<TreeNodeViewModel> nodes,
+		IReadOnlyList<bool> checkedStates,
+		Action<Action>? applyBatch)
+	{
+		ArgumentNullException.ThrowIfNull(nodes);
+		ArgumentNullException.ThrowIfNull(checkedStates);
+		if (nodes.Count != checkedStates.Count)
+			throw new ArgumentException("Node and state counts must match.", nameof(checkedStates));
+
+		void ApplyStates()
+		{
+			for (var index = 0; index < nodes.Count; index++)
+				nodes[index].IsChecked = checkedStates[index];
+		}
+
+		if (applyBatch is null)
+			ApplyStates();
+		else
+			applyBatch(ApplyStates);
+	}
 
     private static string ResolveSelectedPath(string rootPath, string relativePath)
     {

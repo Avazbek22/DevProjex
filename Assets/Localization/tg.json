@@ -166,7 +166,7 @@
   "Settings.Ignore.TrackedGitFilesOnly": "Танҳо файлҳои пайгиришавандаи Git",
   "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HideSecrets": "Пинҳон кардани сирҳо",
-  "Settings.Ignore.HideSecrets.Scanning": "Пинҳон кардани сирҳо — сканеркунӣ…",
+  "Settings.Ignore.HideSecrets.Scanning": "Ҷустуҷӯи сирҳо…",
   "Settings.Ignore.HideSecrets.NoMatches": "DevProjex сирҳоро наёфт",
   "Settings.Ignore.CompressCode": "Фишурдани код",
   "Settings.Compression.Status.Scanning": "Фишурдани код…",

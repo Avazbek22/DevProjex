@@ -166,7 +166,7 @@
   "Settings.Ignore.TrackedGitFilesOnly": "Faqat Git kuzatadigan fayllar",
   "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HideSecrets": "Sirlarni yashirish",
-  "Settings.Ignore.HideSecrets.Scanning": "Sirlarni yashirish — skanlanmoqda…",
+  "Settings.Ignore.HideSecrets.Scanning": "Sirlarni qidirish…",
   "Settings.Ignore.HideSecrets.NoMatches": "DevProjex sirlarni topmadi",
   "Settings.Ignore.CompressCode": "Kodni siqish",
   "Settings.Compression.Status.Scanning": "Kod siqilmoqda…",

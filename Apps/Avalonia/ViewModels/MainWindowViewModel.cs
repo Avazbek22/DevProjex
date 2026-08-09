@@ -1896,10 +1896,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private void SynchronizeContentProcessingOptions(IReadOnlySet<IgnoreOptionId>? transformationIds = null)
 	{
 		transformationIds ??= ProjectPresentationCatalog.ContentTransformationOptionIds;
-		((ResettableObservableCollection<IgnoreOptionViewModel>)ContentProcessingOptions).ReplaceAll(
-			IgnoreOptions.Where(option =>
+		var desiredOptions = IgnoreOptions.Where(option =>
 				transformationIds.Contains(option.Id) &&
-				(option.Id != IgnoreOptionId.HideSecrets || _contentProcessingHasFindings is true)));
+				(option.Id != IgnoreOptionId.HideSecrets ||
+				 _contentProcessingHasFindings is true ||
+				 _contentProcessingScanState == SecretScanState.Failed))
+			.ToArray();
+		if (!ContentProcessingOptions.SequenceEqual(desiredOptions, ReferenceEqualityComparer.Instance))
+		{
+			((ResettableObservableCollection<IgnoreOptionViewModel>)ContentProcessingOptions)
+				.ReplaceAll(desiredOptions);
+		}
 		UpdateContentProcessingOptionStatuses();
 	}
 
@@ -2024,9 +2031,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	{
 		foreach (var option in IgnoreOptions)
 		{
+			option.IsWarningStatus =
+				option.Id == IgnoreOptionId.HideSecrets &&
+				_contentProcessingScanState == SecretScanState.Failed;
 			option.StatusText = option.Id switch
 			{
 				IgnoreOptionId.HideSecrets when HasSecretsStatus => SettingsSecretsNotice,
+				IgnoreOptionId.HideSecrets when _contentProcessingScanState == SecretScanState.Failed =>
+					SettingsSecretsNotice,
 				IgnoreOptionId.CompressCode when option.IsChecked => SettingsCompressionNotice,
 				_ => string.Empty
 			};

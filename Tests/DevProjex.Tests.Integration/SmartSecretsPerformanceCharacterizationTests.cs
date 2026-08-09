@@ -53,7 +53,7 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		analyzer.ResetCounters();
 		var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
 		var firstStopwatch = Stopwatch.StartNew();
-		var first = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
+		var first = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
 		firstStopwatch.Stop();
 		var allocated = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
 		var diagnostics = session.GetCacheDiagnostics();
@@ -74,18 +74,27 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		session.Disable();
 		analyzer.ResetCounters();
 		var steadyStopwatch = Stopwatch.StartNew();
-		_ = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
+		_ = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
 		steadyStopwatch.Stop();
 		Assert.Equal(fileCount, analyzer.ReadCount);
+		var detectionsAfterCacheRepopulation = session.GetCacheDiagnostics().DetectionRuns;
 
-		_ = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
-		Assert.Equal(fileCount, analyzer.ReadCount);
+		_ = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
+		// Equal size and timestamp are not proof that privacy-sensitive content is unchanged. A warm
+		// refresh re-reads each file for its fingerprint, but cached findings avoid every detector run.
+		Assert.Equal(fileCount * 2, analyzer.ReadCount);
+		Assert.Equal(
+			detectionsAfterCacheRepopulation,
+			session.GetCacheDiagnostics().DetectionRuns);
 
 		var changed = await File.ReadAllTextAsync(paths[0], TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(paths[0], changed[..^1] + "y", TestContext.Current.CancellationToken);
 		File.SetLastWriteTimeUtc(paths[0], DateTime.UtcNow.AddSeconds(2));
-		_ = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
-		Assert.Equal(fileCount + 1, analyzer.ReadCount);
+		_ = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
+		Assert.Equal(fileCount * 3, analyzer.ReadCount);
+		Assert.Equal(
+			detectionsAfterCacheRepopulation + 1,
+			session.GetCacheDiagnostics().DetectionRuns);
 
 		session.Disable();
 		diagnostics = session.GetCacheDiagnostics();

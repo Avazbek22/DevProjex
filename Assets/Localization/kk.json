@@ -166,7 +166,7 @@
   "Settings.Ignore.TrackedGitFilesOnly": "Тек Git бақылайтын файлдар",
   "Settings.Ignore.SmartIgnore": "Smart ignore",
   "Settings.Ignore.HideSecrets": "Құпияларды жасыру",
-  "Settings.Ignore.HideSecrets.Scanning": "Құпияларды жасыру — сканерлеу…",
+  "Settings.Ignore.HideSecrets.Scanning": "Құпияларды іздеу…",
   "Settings.Ignore.HideSecrets.NoMatches": "DevProjex құпияларды таппады",
   "Settings.Ignore.CompressCode": "Кодты қысу",
   "Settings.Compression.Status.Scanning": "Код қысылуда…",

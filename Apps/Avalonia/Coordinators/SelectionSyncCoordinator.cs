@@ -16,7 +16,7 @@ public sealed partial class SelectionSyncCoordinator(
     Func<string, bool> tryElevateAndRestart,
     Func<string?> currentPathProvider,
     StatusOperationCoordinator? statusOperations = null,
-    Action? contentTransformationChanged = null,
+    Action<IgnoreOptionId?>? contentTransformationChanged = null,
     Action? selectionContentChanged = null)
     : IDisposable
 {
@@ -928,7 +928,10 @@ public sealed partial class SelectionSyncCoordinator(
 			// Rollback is a real content-state transition. Notify the output pipeline just as
 			// an ordinary checkbox change would, otherwise Preview and the measured count lag
 			// behind the selection visibly restored to the user.
-			contentTransformationChanged?.Invoke();
+			contentTransformationChanged?.Invoke(
+				ResolveChangedTransformation(
+					transformationsWereChecked,
+					transformationsAreChecked));
 		}
         return true;
     }
@@ -1262,7 +1265,7 @@ public sealed partial class SelectionSyncCoordinator(
 		{
 			// A content transformation changes produced content, never filesystem visibility.
 			// Rebuild the preview from the current selection without an unrelated tree scan.
-			contentTransformationChanged?.Invoke();
+			contentTransformationChanged?.Invoke(changedOption!.Id);
 			return;
 		}
 		selectionContentChanged?.Invoke();
@@ -1271,6 +1274,18 @@ public sealed partial class SelectionSyncCoordinator(
             QueueRefreshForIgnoreOptionChange(currentPath, changedOption?.Id);
         }
     }
+
+	private static IgnoreOptionId? ResolveChangedTransformation(
+		IReadOnlySet<IgnoreOptionId> before,
+		IReadOnlySet<IgnoreOptionId> after)
+	{
+		var changed = before
+			.Where(optionId => !after.Contains(optionId))
+			.Concat(after.Where(optionId => !before.Contains(optionId)))
+			.Take(2)
+			.ToArray();
+		return changed.Length == 1 ? changed[0] : null;
+	}
 
     private void QueueRefreshForIgnoreOptionChange(string currentPath, IgnoreOptionId? changedOptionId)
     {

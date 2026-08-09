@@ -458,6 +458,44 @@ public sealed class TreeNodeViewModelTests
         Assert.Contains(secondRoot.FullPath, second);
     }
 
+	[Fact]
+	public void TreeSelectionSnapshotCache_ReusesNormalizedSelectionAndOrderedFilesPerRevision()
+	{
+		using var temporary = new TemporaryDirectory();
+		var rootPath = temporary.CreateFolder("selection-cache");
+		var firstPath = temporary.CreateFile("selection-cache/a.cs", "class A {}");
+		var secondPath = temporary.CreateFile("selection-cache/b.cs", "class B {}");
+		var firstDescriptor = new TreeNodeDescriptor("a.cs", firstPath, false, false, "file", []);
+		var secondDescriptor = new TreeNodeDescriptor("b.cs", secondPath, false, false, "file", []);
+		var rootDescriptor = new TreeNodeDescriptor(
+			"selection-cache",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[firstDescriptor, secondDescriptor]);
+		var root = new TreeNodeViewModel(rootDescriptor, null, null, BuildChildrenFromDescriptor);
+		var roots = new List<TreeNodeViewModel> { root };
+		root.Children[0].IsChecked = true;
+		var cache = new TreeSelectionSnapshotCache();
+
+		var firstNormalized = cache.GetOrCreateNormalized(roots, rootDescriptor);
+		var secondNormalized = cache.GetOrCreateNormalized(roots, rootDescriptor);
+		var firstOrdered = cache.GetOrCreateOrderedFiles(roots, rootDescriptor, [firstPath, secondPath]);
+		var secondOrdered = cache.GetOrCreateOrderedFiles(roots, rootDescriptor, [firstPath, secondPath]);
+
+		Assert.Same(firstNormalized, secondNormalized);
+		Assert.Same(firstOrdered, secondOrdered);
+		Assert.Equal([firstPath], firstOrdered);
+
+		root.Children[1].IsChecked = true;
+		cache.Invalidate();
+		var changedOrdered = cache.GetOrCreateOrderedFiles(roots, rootDescriptor, [firstPath, secondPath]);
+
+		Assert.NotSame(firstOrdered, changedOrdered);
+		Assert.Equal([firstPath, secondPath], changedOrdered);
+	}
+
     [Fact]
     public void Flatten_ReturnsLeafOnlyWhenNoChildren()
     {

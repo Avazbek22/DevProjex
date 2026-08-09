@@ -36,7 +36,11 @@ public sealed record SecretRedactionSnapshot(
 	int DetectedCount,
 	int RedactedCount,
 	IReadOnlyDictionary<string, int>? MarkedSecretCounts = null,
-	string? UnscannablePath = null);
+	string? UnscannablePath = null,
+	int IncompleteFileCount = 0)
+{
+	public bool IsComplete => IncompleteFileCount == 0;
+}
 
 public readonly record struct ManualSecretMarkRemovalResult(
 	bool PersistentMarkRemoved,

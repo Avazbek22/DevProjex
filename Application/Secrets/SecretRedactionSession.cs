@@ -818,15 +818,20 @@ public sealed class SecretRedactionScope
 	internal IDisposable TrackFullContentBuffer() => _session.TrackFullContentBuffer();
 
 	public SecretRedactionSnapshot Complete()
+		=> Complete(incompleteFileCount: 0);
+
+	internal SecretRedactionSnapshot Complete(int incompleteFileCount)
 	{
 		EnsureActive();
+		ArgumentOutOfRangeException.ThrowIfNegative(incompleteFileCount);
 		_completed = true;
 		var snapshot = new SecretRedactionSnapshot(
 			SelectionKey,
 			_detectedCount,
 			_redactedCount,
 			new Dictionary<string, int>(_markedSecretCounts, StringComparer.OrdinalIgnoreCase),
-			Volatile.Read(ref _unscannablePath));
+			Volatile.Read(ref _unscannablePath),
+			incompleteFileCount);
 		_session.Publish(snapshot, _overrideRevision);
 		return snapshot;
 	}

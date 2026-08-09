@@ -166,7 +166,7 @@
     "Settings.Ignore.TrackedGitFilesOnly":  "Somente arquivos rastreados pelo Git",
     "Settings.Ignore.SmartIgnore":  "Smart Ignore",
     "Settings.Ignore.HideSecrets":  "Ocultar segredos",
-    "Settings.Ignore.HideSecrets.Scanning": "Ocultar segredos — verificando…",
+    "Settings.Ignore.HideSecrets.Scanning": "Procurando segredos…",
     "Settings.Ignore.HideSecrets.NoMatches": "DevProjex não encontrou segredos",
     "Settings.Ignore.CompressCode": "Comprimir código",
     "Settings.Compression.Status.Scanning": "Comprimindo código…",
