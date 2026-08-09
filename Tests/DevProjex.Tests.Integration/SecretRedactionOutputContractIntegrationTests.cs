@@ -511,6 +511,104 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
+	public async Task GlobalPathAllowlist_SkipsAutomaticContentIoWithoutReportingLimitedCoverage(
+		bool compressionEnabled)
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("allowlisted-large-project");
+		var svgPath = Path.Combine(sourceRoot, "diagram.svg");
+		await WriteLargeSvgAsync(svgPath);
+		var countingAnalyzer = new CountingSecretContentAnalyzer(new FileContentAnalyzer());
+		using var redactionSession = new SecretRedactionSession(CreateDetector());
+		using var compressionSession = compressionEnabled
+			? new CodeCompressionSession(new UnsupportedCodeCompressor())
+			: null;
+		var transformationContext = new ContentTransformationContext(
+			compressionSession is null ? null : new CodeCompressionContext(sourceRoot, compressionSession),
+			new SecretRedactionContext(sourceRoot, redactionSession));
+		var preparer = new SecretRedactionOutputPreparer(countingAnalyzer);
+
+		var discovery = await preparer.DiscoverAsync(
+			transformationContext,
+			[svgPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, countingAnalyzer.ContentReadCount);
+		Assert.True(discovery.IsComplete);
+		Assert.Equal(0, discovery.IncompleteFileCount);
+		Assert.Null(discovery.UnscannablePath);
+		var analysis = await preparer.AnalyzeAsync(
+			transformationContext,
+			[svgPath],
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, countingAnalyzer.ContentReadCount);
+		Assert.True(analysis.IsComplete);
+		var readsBeforePreparation = countingAnalyzer.ContentReadCount;
+
+		await using var prepared = await preparer.PrepareAsync(
+			transformationContext,
+			[svgPath],
+			TestContext.Current.CancellationToken);
+		var preparedFile = prepared.GetFile(svgPath);
+
+		Assert.True(preparedFile.IsText);
+		Assert.False(preparedFile.IsUnscannable);
+		Assert.Equal(svgPath, preparedFile.ContentPath);
+		Assert.Empty(prepared.UnscannablePaths);
+		Assert.NotNull(prepared.Snapshot);
+		Assert.True(prepared.Snapshot!.IsComplete);
+		if (!compressionEnabled)
+			Assert.Equal(readsBeforePreparation, countingAnalyzer.ContentReadCount);
+	}
+
+	[Fact]
+	public async Task GlobalPathAllowlist_DoesNotOverridePersistentManualSecretMarks()
+	{
+		const string manuallyMarked = "manual-svg-secret-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("allowlisted-manual-project");
+		var svgPath = temporary.CreateFile(
+			"allowlisted-manual-project/diagram.svg",
+			$"<svg><text>{manuallyMarked}</text></svg>");
+		var countingAnalyzer = new CountingSecretContentAnalyzer(new FileContentAnalyzer());
+		using var session = new SecretRedactionSession(CreateDetector());
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(
+			manuallyMarked,
+			out var normalized,
+			out _));
+		session.ReplaceMarkedSecrets([
+			new MarkedSecretProfileEntry(normalized.Hash, null, normalized.Length)
+		]);
+
+		var snapshot = await new SecretRedactionOutputPreparer(countingAnalyzer).DiscoverAsync(
+			new SecretRedactionContext(sourceRoot, session),
+			[svgPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, countingAnalyzer.ContentReadCount);
+		Assert.Equal(1, snapshot.DetectedCount);
+		Assert.Equal(1, snapshot.RedactedCount);
+		Assert.True(snapshot.IsComplete);
+
+		var preparer = new SecretRedactionOutputPreparer(countingAnalyzer);
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(
+				null,
+				new SecretRedactionContext(sourceRoot, session)),
+			[svgPath],
+			TestContext.Current.CancellationToken);
+		var preparedContent = await preparer
+			.CreatePreparedAnalyzer(prepared)
+			.TryReadAsTextAsync(svgPath, TestContext.Current.CancellationToken);
+
+		Assert.NotNull(preparedContent);
+		Assert.DoesNotContain(manuallyMarked, preparedContent!.Content, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED", preparedContent.Content, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
 	public async Task Discovery_SkipsOneMissingFileButStrictAnalysisStillFails(bool compressionEnabled)
 	{
 		using var temporary = new TemporaryDirectory();
@@ -562,6 +660,25 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			$"token = {GithubToken}\n",
 			TestContext.Current.CancellationToken);
 		File.WriteAllBytes(Path.Combine(sourceRoot, "blob.bin"), [0, 1, 0]);
+	}
+
+	private static async Task WriteLargeSvgAsync(string path)
+	{
+		var chunk = "<path d=\"M0 0h1v1z\"/>\n"u8.ToArray();
+		await using var stream = new FileStream(
+			path,
+			FileMode.CreateNew,
+			FileAccess.Write,
+			FileShare.None,
+			bufferSize: 64 * 1024,
+			useAsync: true);
+		var remaining = SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1;
+		while (remaining > 0)
+		{
+			var count = (int)Math.Min(chunk.Length, remaining);
+			await stream.WriteAsync(chunk.AsMemory(0, count), TestContext.Current.CancellationToken);
+			remaining -= count;
+		}
 	}
 
 	[Fact]
@@ -1127,6 +1244,55 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		{
 			CallCount++;
 			throw new InvalidOperationException("The detector must not run while Hide Secrets is disabled.");
+		}
+	}
+
+	private sealed class CountingSecretContentAnalyzer(IFileContentAnalyzer inner) : IFileContentAnalyzer
+	{
+		private int _contentReadCount;
+
+		public int ContentReadCount => Volatile.Read(ref _contentReadCount);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			inner.ClassifyWithoutReading(path);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _contentReadCount);
+			return inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+		}
+
+		public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _contentReadCount);
+			return inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
 		}
 	}
 

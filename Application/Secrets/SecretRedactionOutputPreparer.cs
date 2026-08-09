@@ -51,13 +51,26 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		var unscannablePaths = new List<string>();
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
 		var scope = transformationScope.Redaction;
+		var requiredInspectionScope = context.Compression is null ? scope : null;
+		if (requiredInspectionScope is not null)
+		{
+			foreach (var sourcePath in orderedFilePaths)
+			{
+				if (requiredInspectionScope.GetContentInspectionMode(sourcePath) ==
+				    SecretContentInspectionMode.None)
+				{
+					preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
+				}
+			}
+		}
 		try
 		{
 			await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
 			                   context,
 			                   transformationScope,
 			                   orderedFilePaths,
-			                   cancellationToken).ConfigureAwait(false))
+			                   cancellationToken,
+			                   requiredInspectionScope).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var sourcePath = prepared.SourcePath;
@@ -78,7 +91,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 						// this large anyway, so nothing that used to ship stops shipping. A project
 						// copy leaves it out and names it in the notice, because copying the bytes
 						// would hand over text the scanner never saw.
-						if (scope is not null)
+						if (scope is not null &&
+						    scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None)
 						{
 							scope.AnalyzeUnscannable(sourcePath, metadataAfterRead);
 							preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(sourcePath);
@@ -86,8 +100,9 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 							continue;
 						}
 
-						// Compression alone has no promise to break, and the file is far past the
-						// parse limit anyway, so it ships unchanged from its original.
+						// Compression has no redaction promise to break, and detector policy may
+						// exclude this path before content inspection. In both cases the original
+						// remains the authoritative unchanged output.
 						preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
 						continue;
 					case FileContentClassification.Text:
@@ -158,13 +173,19 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		ContentTransformationContext context,
 		ContentTransformationScope transformationScope,
 		IReadOnlyList<string> orderedFilePaths,
-		[EnumeratorCancellation] CancellationToken cancellationToken)
+		[EnumeratorCancellation] CancellationToken cancellationToken,
+		SecretRedactionScope? requiredInspectionScope = null)
 	{
 		var batch = new List<CompressionWorkItem>(MaximumParallelScans);
 		for (var index = 0; index < orderedFilePaths.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var item = new CompressionWorkItem(index, orderedFilePaths[index]);
+			if (requiredInspectionScope?.GetContentInspectionMode(item.SourcePath) ==
+			    SecretContentInspectionMode.None)
+			{
+				continue;
+			}
 			if (SecretFileMetadata.Capture(item.SourcePath).Length > MaximumParallelScanFileBytes)
 			{
 				await foreach (var prepared in PrepareTransformationBatchAsync(
@@ -480,6 +501,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var sourcePath = orderedFilePaths[index];
+			if (scope.GetContentInspectionMode(sourcePath) == SecretContentInspectionMode.None)
+				continue;
 			var metadata = SecretFileMetadata.Capture(sourcePath);
 			if (scope.TryGetCachedEntry(sourcePath, metadata, out var cached))
 			{
@@ -530,9 +553,17 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		var skippedFileCount = 0;
 		for (var index = 0; index < entries.Length; index++)
 		{
-			var entry = entries[index] ??
-			            throw new SecretDetectionException(
-				            $"Hide Secrets produced no scan result for '{orderedFilePaths[index]}'.");
+			var entry = entries[index];
+			if (entry is null &&
+			    scope.GetContentInspectionMode(orderedFilePaths[index]) == SecretContentInspectionMode.None)
+			{
+				continue;
+			}
+			if (entry is null)
+			{
+				throw new SecretDetectionException(
+					$"Hide Secrets produced no scan result for '{orderedFilePaths[index]}'.");
+			}
 			scope.ProcessEntry(orderedFilePaths[index], entry);
 			if (entry.IsUnscannable)
 				skippedFileCount++;
@@ -578,6 +609,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var sourcePath = orderedFilePaths[index];
+			if (scope.GetContentInspectionMode(sourcePath) == SecretContentInspectionMode.None)
+				continue;
 			SecretFileMetadata metadata;
 			try
 			{
@@ -697,7 +730,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		                   context,
 		                   transformationScope,
 		                   orderedFilePaths,
-		                   cancellationToken).ConfigureAwait(false))
+		                   cancellationToken,
+		                   redactionScope).ConfigureAwait(false))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			switch (prepared.ReadResult.Classification)
@@ -773,6 +807,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		                   cancellationToken).ConfigureAwait(false))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			if (attempt.IsPolicyExcluded)
+				continue;
 			if (attempt.CachedEntry is not null)
 			{
 				redactionScope.ProcessEntry(attempt.SourcePath!, attempt.CachedEntry);
@@ -826,6 +862,21 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var item = new CompressionWorkItem(index, orderedFilePaths[index]);
+			if (redactionScope.GetContentInspectionMode(item.SourcePath) ==
+			    SecretContentInspectionMode.None)
+			{
+				await foreach (var attempt in PrepareDiscoveryBatchAsync(
+				                   context,
+				                   transformationScope,
+				                   batch,
+				                   cancellationToken).ConfigureAwait(false))
+				{
+					yield return attempt;
+				}
+				batch.Clear();
+				yield return DiscoveryTransformationAttempt.PolicyExcluded();
+				continue;
+			}
 			SecretFileMetadata? metadata = null;
 			try
 			{
@@ -983,17 +1034,21 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	private readonly record struct DiscoveryTransformationAttempt(
 		PreparedTransformationEntry? Entry,
 		string? SourcePath,
-		SecretScanCacheEntry? CachedEntry) : IDisposable
+		SecretScanCacheEntry? CachedEntry,
+		bool IsPolicyExcluded) : IDisposable
 	{
 		public static DiscoveryTransformationAttempt Prepared(PreparedTransformationEntry entry) =>
-			new(entry, null, null);
+			new(entry, null, null, false);
 
 		public static DiscoveryTransformationAttempt Cached(
 			string sourcePath,
 			SecretScanCacheEntry entry) =>
-			new(null, sourcePath, entry);
+			new(null, sourcePath, entry, false);
 
-		public static DiscoveryTransformationAttempt Incomplete() => new(null, null, null);
+		public static DiscoveryTransformationAttempt Incomplete() => new(null, null, null, false);
+
+		public static DiscoveryTransformationAttempt PolicyExcluded() =>
+			new(null, null, null, true);
 
 		public void Dispose() => Entry?.Dispose();
 	}

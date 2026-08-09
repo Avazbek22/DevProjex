@@ -119,6 +119,20 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		}
 	}
 
+	public bool ShouldInspectPath(string repositoryRelativePath)
+	{
+		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
+		try
+		{
+			var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+			return ShouldInspectPath(_configuration.Value, normalizedPath);
+		}
+		catch (RegexMatchTimeoutException exception)
+		{
+			throw new SecretDetectionException("Secret path policy evaluation timed out.", exception);
+		}
+	}
+
 	internal GitleaksCandidateStatistics InspectCandidates(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
@@ -230,9 +244,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		var configuration = _configuration.Value;
 		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
-		if (IsEmbeddedConfigurationPath(normalizedPath))
-			return [];
-		if (configuration.GlobalAllowlists.Any(allowlist => allowlist.AllowsWholeFileByPath(normalizedPath)))
+		if (!ShouldInspectPath(configuration, normalizedPath))
 			return [];
 		Span<ulong> candidateRules = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
 		configuration.KeywordPrefilter.FindCandidates(content, candidateRules, cancellationToken);
@@ -306,6 +318,13 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		return findings;
 	}
+
+	private static bool ShouldInspectPath(
+		CompiledConfiguration configuration,
+		string normalizedPath) =>
+		!IsEmbeddedConfigurationPath(normalizedPath) &&
+		!configuration.GlobalAllowlists.Any(
+			allowlist => allowlist.AllowsWholeFileByPath(normalizedPath));
 
 	private static bool IsEmbeddedConfigurationPath(string normalizedPath) =>
 		normalizedPath.Equals(EmbeddedConfigurationFileName, StringComparison.OrdinalIgnoreCase) ||

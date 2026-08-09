@@ -20,6 +20,12 @@ public interface ISecretDetector
 	{
 	}
 
+	/// <summary>
+	/// Returns whether automatic detection needs the file content. Implementations may use only
+	/// path-level policy here; source IO remains owned by the application pipeline.
+	/// </summary>
+	bool ShouldInspectPath(string repositoryRelativePath) => true;
+
 	ISecretDetectionScope CreateScope(string projectRoot) =>
 		new UnscopedSecretDetectionScope(this);
 
@@ -43,6 +49,8 @@ public interface ISecretDetectionScope
 {
 	string GetRulesIdentity(string fullPath, string repositoryRelativePath);
 
+	bool ShouldInspectPath(string fullPath, string repositoryRelativePath) => true;
+
 	IReadOnlyList<DetectedSecret> Detect(
 		string fullPath,
 		string repositoryRelativePath,
@@ -54,6 +62,9 @@ internal sealed class UnscopedSecretDetectionScope(ISecretDetector detector) : I
 {
 	public string GetRulesIdentity(string fullPath, string repositoryRelativePath) =>
 		detector.RulesIdentity;
+
+	public bool ShouldInspectPath(string fullPath, string repositoryRelativePath) =>
+		detector.ShouldInspectPath(repositoryRelativePath);
 
 	public IReadOnlyList<DetectedSecret> Detect(
 		string fullPath,

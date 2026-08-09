@@ -65,6 +65,10 @@ internal sealed class MarkedSecretsMatcher
 		CancellationToken cancellationToken) =>
 		Match(relativePath, content, null, cancellationToken);
 
+	public bool RequiresContentInspection(string relativePath) =>
+		_persistentHashGroups.Length > 0 ||
+		_sessionMarksByPath.ContainsKey(NormalizePath(relativePath));
+
 	/// <param name="content">The text being scanned, after every enabled transformation.</param>
 	/// <param name="transformMap">Translation from canonical source offsets into this text.</param>
 	public IReadOnlyList<DetectedSecret> Match(
