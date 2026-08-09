@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using DevProjex.Application.Presentation;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
@@ -2220,6 +2221,70 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task SecretDiscovery_SelectionChangesReuseValidatedFilesAndScanOnlyNewEntries()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionSelectionWorkspace();
+		var analyzer = new CountingSecretScanContentAnalyzer();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = analyzer.Attach(services.FileContentAnalyzer)
+			});
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 0.",
+					StringComparison.Ordinal),
+				"the initial secret discovery to complete");
+			analyzer.Reset();
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Equal("Found: 1. Hidden: 0.", viewModel.SettingsSecretsNotice);
+			Assert.Equal(0, analyzer.TotalReadCount);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 0.",
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
+				"the expanded selection secret discovery to settle");
+
+			Assert.Equal(0, analyzer.GetReadCount("Secrets.cs"));
+			Assert.Equal(0, analyzer.GetReadCount("README.md"));
+			Assert.Equal(1, analyzer.GetReadCount("empty.txt"));
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Equal(1, analyzer.TotalReadCount);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 0.",
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
+				"the restored selection secret discovery to settle");
+
+			Assert.Equal(1, analyzer.TotalReadCount);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task InitialSecretDiscovery_ShowsImmediateSearchActionAndIndeterminateProgress()
 	{
 		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
@@ -2251,6 +2316,15 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Contains(
 				window.GetVisualDescendants().OfType<ProgressBar>(),
 				static progress => progress.IsVisible && progress.IsIndeterminate);
+			var readAttemptsBeforeToggle = analyzer.ReadAttempts;
+			var cancellationsBeforeToggle = analyzer.CancellationCount;
+
+			var hideSecrets = Assert.IsType<IgnoreOptionViewModel>(viewModel.HideSecretsOption);
+			hideSecrets.IsChecked = true;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Equal(readAttemptsBeforeToggle, analyzer.ReadAttempts);
+			Assert.Equal(cancellationsBeforeToggle, analyzer.CancellationCount);
+			Assert.True(hideSecrets.IsChecked);
 
 			analyzer.Release();
 			await UiTestDriver.WaitForConditionAsync(
@@ -2330,8 +2404,12 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		private IFileContentAnalyzer? _inner;
+		private int _readAttempts;
+		private int _cancellationCount;
 
 		public TaskCompletionSource Started => _started;
+		public int ReadAttempts => Volatile.Read(ref _readAttempts);
+		public int CancellationCount => Volatile.Read(ref _cancellationCount);
 
 		public IFileContentAnalyzer Attach(IFileContentAnalyzer inner)
 		{
@@ -2377,11 +2455,93 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		{
 			if (maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes)
 			{
+				Interlocked.Increment(ref _readAttempts);
 				_started.TrySetResult();
-				await _release.Task.WaitAsync(cancellationToken);
+				try
+				{
+					await _release.Task.WaitAsync(cancellationToken);
+				}
+				catch (OperationCanceledException)
+				{
+					Interlocked.Increment(ref _cancellationCount);
+					throw;
+				}
 			}
 
 			return await Inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+		}
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			Inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		private IFileContentAnalyzer Inner =>
+			_inner ?? throw new InvalidOperationException("The analyzer is not attached.");
+	}
+
+	private sealed class CountingSecretScanContentAnalyzer : IFileContentAnalyzer
+	{
+		private readonly ConcurrentDictionary<string, int> _reads = new(StringComparer.OrdinalIgnoreCase);
+		private IFileContentAnalyzer? _inner;
+
+		public int TotalReadCount => _reads.Values.Sum();
+
+		public IFileContentAnalyzer Attach(IFileContentAnalyzer inner)
+		{
+			_inner = inner;
+			return this;
+		}
+
+		public void Reset() => _reads.Clear();
+
+		public int GetReadCount(string fileName) => _reads.GetValueOrDefault(fileName);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			Inner.ClassifyWithoutReading(path);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			Inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.GetClassifiedMetricsAsync(path, cancellationToken);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.OpenCompleteSnapshotAsync(path, cancellationToken);
+
+		public async ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default)
+		{
+			var buffer = await Inner
+				.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+			if (maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes)
+				_reads.AddOrUpdate(Path.GetFileName(path), 1, static (_, count) => count + 1);
+			return buffer;
 		}
 
 		public ValueTask<TextFileContent?> TryReadAsTextAsync(

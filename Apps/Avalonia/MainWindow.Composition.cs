@@ -131,8 +131,14 @@ public partial class MainWindow
 		}
 
 		var files = GetOrderedSelectedFilePaths();
-		return _secretRedactionSession.GetSnapshot(_currentPath, files);
+		return _secretRedactionSession.GetSnapshot(
+			_currentPath,
+			files,
+			GetCurrentSecretTransformIdentity());
 	}
+
+	private string GetCurrentSecretTransformIdentity() =>
+		CreateCodeCompressionContext()?.Session.TransformIdentity ?? string.Empty;
 
 	private CodeCompressionContext? CreateCodeCompressionContext()
 	{
@@ -177,14 +183,11 @@ public partial class MainWindow
 	private void ScheduleSecretRedactionCountRefresh(
 		StatusOperationPresentation presentation = StatusOperationPresentation.ExtendedDelay)
 	{
-		var refreshVersion = Interlocked.Increment(ref _secretRedactionCountRefreshVersion);
-		CancelAndDispose(ref _secretRedactionCountCts);
 		var hideSecretsEnabled = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
 			.Contains(IgnoreOptionId.HideSecrets);
 
-		if (_secretRedactionCount is not null ||
-		    (_viewModel.IsAnyPreviewVisible && hideSecretsEnabled) ||
+		if ((_viewModel.IsAnyPreviewVisible && hideSecretsEnabled) ||
 		    _windowLifetimeCts is not { IsCancellationRequested: false } ||
 		    _currentTree is null ||
 		    string.IsNullOrWhiteSpace(_currentPath))
@@ -192,41 +195,98 @@ public partial class MainWindow
 			return;
 		}
 
-		_secretRedactionScanState = SecretScanState.Scanning;
-		_viewModel.SetContentProcessingStatus(SecretScanState.Scanning);
-		RelabelIgnoreOptionsWithCurrentCounts();
-
 		var files = GetOrderedSelectedFilePaths();
-		var transformationContext = new ContentTransformationContext(
-			CreateCodeCompressionContext(),
-			new SecretRedactionContext(_currentPath, _secretRedactionSession));
+		var compressionContext = CreateCodeCompressionContext();
+		var request = new SecretDiscoveryRequest(
+			_currentPath,
+			_currentTree,
+			files,
+			compressionContext?.Session.TransformIdentity ?? string.Empty,
+			_secretRedactionSession.OutputRevision,
+			new ContentTransformationContext(
+				compressionContext,
+				new SecretRedactionContext(_currentPath, _secretRedactionSession)),
+			presentation == StatusOperationPresentation.Immediate
+				? SecretDiscoveryCacheMode.RevalidateContent
+				: SecretDiscoveryCacheMode.ReuseValidatedContent,
+			presentation);
+
+		var activeRequest = Volatile.Read(ref _activeSecretDiscoveryRequest);
+		if (_secretRedactionCountCts is { IsCancellationRequested: false } &&
+		    activeRequest is not null &&
+		    activeRequest.HasSameInput(request) &&
+		    SatisfiesCacheMode(activeRequest.CacheMode, request.CacheMode))
+		{
+			return;
+		}
+
+		if (request.CacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent)
+		{
+			var cachedSnapshot = _secretRedactionSession.GetSnapshot(
+				request.ProjectRoot,
+				request.Files,
+				request.TransformIdentity);
+			if (cachedSnapshot is not null)
+			{
+				CancelSecretRedactionDiscovery();
+				TryApplySecretRedactionSnapshot(cachedSnapshot);
+				return;
+			}
+		}
+
+		CancelAndDispose(ref _secretRedactionCountCts);
+		var refreshVersion = Interlocked.Increment(ref _secretRedactionCountRefreshVersion);
 		var countCts = new CancellationTokenSource();
 		_secretRedactionCountCts = countCts;
-		var operationId = _statusOperations.Begin(
-			_localization["Settings.Ignore.HideSecrets.Scanning"],
-			indeterminate: true,
-			operationType: StatusOperationType.SecretAnalysis,
-			cancelAction: () => countCts.Cancel(),
-			presentation: presentation);
-		_ = RefreshSecretRedactionCountAsync(
-			transformationContext,
-			files,
+		Volatile.Write(ref _activeSecretDiscoveryRequest, request);
+		_ = RunSecretRedactionCountRefreshAsync(
+			request,
 			refreshVersion,
-			countCts,
-			operationId);
+			countCts);
 	}
 
-	private async Task RefreshSecretRedactionCountAsync(
-		ContentTransformationContext context,
-		IReadOnlyList<string> files,
+	private async Task RunSecretRedactionCountRefreshAsync(
+		SecretDiscoveryRequest request,
 		long refreshVersion,
-		CancellationTokenSource countCts,
-		long operationId)
+		CancellationTokenSource countCts)
 	{
+		long operationId = 0;
 		try
 		{
+			if (request.Presentation != StatusOperationPresentation.Immediate)
+			{
+				await Task.Delay(SecretDiscoveryInteractiveDebounce, countCts.Token)
+					.ConfigureAwait(false);
+			}
+
+			countCts.Token.ThrowIfCancellationRequested();
+			if (refreshVersion != Volatile.Read(ref _secretRedactionCountRefreshVersion))
+				return;
+
+			operationId = await Dispatcher.UIThread.InvokeAsync(() =>
+			{
+				if (refreshVersion != Volatile.Read(ref _secretRedactionCountRefreshVersion))
+					return 0L;
+
+				_secretRedactionScanState = SecretScanState.Scanning;
+				_viewModel.SetContentProcessingStatus(SecretScanState.Scanning);
+				RelabelIgnoreOptionsWithCurrentCounts();
+				return _statusOperations.Begin(
+					_localization["Settings.Ignore.HideSecrets.Scanning"],
+					indeterminate: true,
+					operationType: StatusOperationType.SecretAnalysis,
+					cancelAction: () => countCts.Cancel(),
+					presentation: request.Presentation);
+			});
+			if (operationId == 0)
+				return;
+
 			var snapshot = await _secretRedactionPreparer
-				.DiscoverAsync(context, files, countCts.Token)
+				.DiscoverAsync(
+					request.Context,
+					request.Files,
+					request.CacheMode,
+					countCts.Token)
 				.ConfigureAwait(false);
 			if (refreshVersion != Volatile.Read(ref _secretRedactionCountRefreshVersion) ||
 			    _windowLifetimeCts is not { IsCancellationRequested: false })
@@ -247,9 +307,12 @@ public partial class MainWindow
 			{
 				await Dispatcher.UIThread.InvokeAsync(() =>
 				{
-					_secretRedactionScanState = SecretScanState.Pending;
-					_viewModel.SetContentProcessingStatus(SecretScanState.Pending);
-					RelabelIgnoreOptionsWithCurrentCounts();
+					if (refreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
+					{
+						_secretRedactionScanState = SecretScanState.Pending;
+						_viewModel.SetContentProcessingStatus(SecretScanState.Pending);
+						RelabelIgnoreOptionsWithCurrentCounts();
+					}
 				});
 			}
 		}
@@ -263,16 +326,82 @@ public partial class MainWindow
 
 			await Dispatcher.UIThread.InvokeAsync(() =>
 			{
-				_secretRedactionScanState = SecretScanState.Failed;
-				_viewModel.SetContentProcessingStatus(SecretScanState.Failed);
-				RelabelIgnoreOptionsWithCurrentCounts();
+				if (refreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
+				{
+					_secretRedactionScanState = SecretScanState.Failed;
+					_viewModel.SetContentProcessingStatus(SecretScanState.Failed);
+					RelabelIgnoreOptionsWithCurrentCounts();
+				}
 			});
 		}
 		finally
 		{
-			await Dispatcher.UIThread.InvokeAsync(() => _statusOperations.Complete(operationId));
+			if (operationId != 0)
+				await Dispatcher.UIThread.InvokeAsync(() => _statusOperations.Complete(operationId));
 			DisposeIfCurrent(ref _secretRedactionCountCts, countCts);
+			if (refreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
+				Interlocked.CompareExchange(ref _activeSecretDiscoveryRequest, null, request);
 		}
+	}
+
+	private void CancelSecretRedactionDiscovery()
+	{
+		Interlocked.Increment(ref _secretRedactionCountRefreshVersion);
+		CancelAndDispose(ref _secretRedactionCountCts);
+		Volatile.Write(ref _activeSecretDiscoveryRequest, null);
+	}
+
+	private bool IsSecretDiscoveryActiveForCurrentSelection()
+	{
+		if (_secretRedactionCountCts is not { IsCancellationRequested: false } ||
+		    _currentTree is null ||
+		    string.IsNullOrWhiteSpace(_currentPath))
+		{
+			return false;
+		}
+
+		var activeRequest = Volatile.Read(ref _activeSecretDiscoveryRequest);
+		return activeRequest is not null && activeRequest.HasSameInput(
+			_currentPath,
+			_currentTree,
+			GetOrderedSelectedFilePaths(),
+			GetCurrentSecretTransformIdentity(),
+			_secretRedactionSession.OutputRevision);
+	}
+
+	private static bool SatisfiesCacheMode(
+		SecretDiscoveryCacheMode active,
+		SecretDiscoveryCacheMode requested) =>
+		active == SecretDiscoveryCacheMode.RevalidateContent || active == requested;
+
+	private sealed record SecretDiscoveryRequest(
+		string ProjectRoot,
+		BuildTreeResult Tree,
+		IReadOnlyList<string> Files,
+		string TransformIdentity,
+		long RedactionRevision,
+		ContentTransformationContext Context,
+		SecretDiscoveryCacheMode CacheMode,
+		StatusOperationPresentation Presentation)
+	{
+		public bool HasSameInput(SecretDiscoveryRequest other) => HasSameInput(
+			other.ProjectRoot,
+			other.Tree,
+			other.Files,
+			other.TransformIdentity,
+			other.RedactionRevision);
+
+		public bool HasSameInput(
+			string projectRoot,
+			BuildTreeResult tree,
+			IReadOnlyList<string> files,
+			string transformIdentity,
+			long redactionRevision) =>
+			PathComparer.Default.Equals(ProjectRoot, projectRoot) &&
+			ReferenceEquals(Tree, tree) &&
+			ReferenceEquals(Files, files) &&
+			TransformIdentity.Equals(transformIdentity, StringComparison.Ordinal) &&
+			RedactionRevision == redactionRevision;
 	}
 
 	private string ResolveUserFacingOutputErrorMessage(Exception exception) => exception switch
@@ -466,7 +595,10 @@ public partial class MainWindow
 	private bool _treeSelectionChangedDuringBatch;
 	private ContentTransformationContext? _publishedTransformationContext;
 	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
+	private static readonly TimeSpan SecretDiscoveryInteractiveDebounce =
+		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(150));
 	private CancellationTokenSource? _secretRedactionCountCts;
+	private SecretDiscoveryRequest? _activeSecretDiscoveryRequest;
 	private long _secretRedactionCountRefreshVersion;
 	private int? _secretRedactionCount;
 	private int? _secretRedactionMatchedCount;
@@ -556,8 +688,10 @@ public partial class MainWindow
             TryElevateAndRestart,
             () => _currentPath,
             _statusOperations,
-            ScheduleContentTransformationRefresh,
-            () => InvalidateSecretRedactionCount());
+            ScheduleContentTransformationRefresh);
+        // Parameter checkboxes edit a draft until Apply publishes a replacement tree. Starting secret
+        // discovery here would repeatedly scan the still-active tree and then discard that work. Tree
+        // publication is the single invalidation boundary for applied parameter changes.
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(
@@ -908,7 +1042,7 @@ public partial class MainWindow
 					.GetSelectedIgnoreOptionIds()
 					.Contains(IgnoreOptionId.HideSecrets);
 				if (_viewModel.IsAnyPreviewVisible && hideSecretsEnabled)
-					CancelAndDispose(ref _secretRedactionCountCts);
+					CancelSecretRedactionDiscovery();
 				else
 					ScheduleSecretRedactionCountRefresh();
                 if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)

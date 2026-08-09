@@ -87,6 +87,21 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 			detectionsAfterCacheRepopulation,
 			session.GetCacheDiagnostics().DetectionRuns);
 
+		var readsBeforeSelectionOnlyRefresh = analyzer.ReadCount;
+		var detectionsBeforeSelectionOnlyRefresh = session.GetCacheDiagnostics().DetectionRuns;
+		var selectionOnlyStopwatch = Stopwatch.StartNew();
+		var selectionOnly = await preparer.DiscoverAsync(
+			context,
+			paths,
+			SecretDiscoveryCacheMode.ReuseValidatedContent,
+			TestContext.Current.CancellationToken);
+		selectionOnlyStopwatch.Stop();
+		Assert.Equal(expectedRedactions, selectionOnly.RedactedCount);
+		Assert.Equal(readsBeforeSelectionOnlyRefresh, analyzer.ReadCount);
+		Assert.Equal(
+			detectionsBeforeSelectionOnlyRefresh,
+			session.GetCacheDiagnostics().DetectionRuns);
+
 		var changed = await File.ReadAllTextAsync(paths[0], TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(paths[0], changed[..^1] + "y", TestContext.Current.CancellationToken);
 		File.SetLastWriteTimeUtc(paths[0], DateTime.UtcNow.AddSeconds(2));
@@ -103,7 +118,9 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		TestContext.Current.TestOutputHelper?.WriteLine(
 			$"Smart Secrets many-small-files baseline: files={fileCount:N0}, bytes={sourceBytes:N0}, " +
 			$"first={firstStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
-			$"steady={steadyStopwatch.Elapsed.TotalMilliseconds:F2} ms, allocated={allocated:N0} B.");
+			$"strict-warm={steadyStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
+			$"selection-only={selectionOnlyStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
+			$"allocated={allocated:N0} B.");
 	}
 
 	[Fact]
@@ -166,8 +183,16 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				orderedPaths,
 				TestContext.Current.CancellationToken);
 			cachedStopwatch.Stop();
+			var selectionOnlyStopwatch = Stopwatch.StartNew();
+			var selectionOnlyResult = await preparer.DiscoverAsync(
+				context,
+				orderedPaths,
+				SecretDiscoveryCacheMode.ReuseValidatedContent,
+				TestContext.Current.CancellationToken);
+			selectionOnlyStopwatch.Stop();
 			Assert.Equal(firstResult.RedactedCount, steadyResult.RedactedCount);
 			Assert.Equal(firstResult.RedactedCount, cachedResult.RedactedCount);
+			Assert.Equal(firstResult.RedactedCount, selectionOnlyResult.RedactedCount);
 
 			var smartScope = smartDetector.CreateScope(root);
 			var actualRuleIds = files
@@ -218,6 +243,7 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				$"first={firstStopwatch.Elapsed.TotalMilliseconds:F2} ms/{firstAllocated:N0} B, " +
 				$"steady={steadyStopwatch.Elapsed.TotalMilliseconds:F2} ms/{steadyAllocated:N0} B, " +
 				$"cached={cachedStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
+				$"selectionOnly={selectionOnlyStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"candidate={candidateMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"detect={detectionMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"smart={smartMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +

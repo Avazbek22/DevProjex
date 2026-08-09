@@ -443,7 +443,7 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		Assert.DoesNotContain(AutomaticRemovedSecret, result.Text, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[exact-value#1]", result.Text, StringComparison.Ordinal);
 		Assert.Equal(1, result.RedactionCount);
-		var snapshot = Assert.IsType<SecretRedactionSnapshot>(workspace.GetSnapshot(secrets));
+		var snapshot = Assert.IsType<SecretRedactionSnapshot>(workspace.GetSnapshot(secrets, compress: true));
 		Assert.Equal(1, snapshot.DetectedCount);
 		Assert.Equal(1, snapshot.RedactedCount);
 	}
@@ -925,8 +925,16 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			return result;
 		}
 
-		public SecretRedactionSnapshot? GetSnapshot(SecretRedactionSession secrets) =>
-			secrets.GetSnapshot(SourceRoot, [SourceFile]);
+		public SecretRedactionSnapshot? GetSnapshot(
+			SecretRedactionSession secrets,
+			bool compress)
+		{
+			using var compression = CodeCompressionFactory.CreateSession();
+			return secrets.GetSnapshot(
+				SourceRoot,
+				[SourceFile],
+				compress ? compression.TransformIdentity : string.Empty);
+		}
 
 		/// <summary>Builds the preview document - the single source of truth for every export.</summary>
 		public async Task<TransformedContent> BuildContentAsync(

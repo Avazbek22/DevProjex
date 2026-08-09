@@ -49,7 +49,7 @@ public partial class MainWindow
         CancelAndDispose(ref _gitCloneCts);
         CancelAndDispose(ref _gitOperationCts);
         CancelAndDispose(ref _projectCopyExportCts);
-		CancelAndDispose(ref _secretRedactionCountCts);
+		CancelSecretRedactionDiscovery();
     }
 
     private static void CancelAndDispose(ref CancellationTokenSource? source)

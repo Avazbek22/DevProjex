@@ -42,6 +42,17 @@ public sealed record SecretRedactionSnapshot(
 	public bool IsComplete => IncompleteFileCount == 0;
 }
 
+public enum SecretDiscoveryCacheMode
+{
+	/// <summary>Reopens selected files and verifies their content fingerprints.</summary>
+	RevalidateContent = 0,
+	/// <summary>
+	/// Reuses previously verified findings while file metadata and all rule identities remain equal.
+	/// Intended for selection-only UI changes; output generation must use content revalidation.
+	/// </summary>
+	ReuseValidatedContent = 1
+}
+
 public readonly record struct ManualSecretMarkRemovalResult(
 	bool PersistentMarkRemoved,
 	bool SessionMarkRemoved)

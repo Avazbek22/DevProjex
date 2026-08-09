@@ -36,6 +36,19 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+	public static UiTestProject CreateWithSecretRedactionSelectionWorkspace()
+	{
+		return Create(static rootPath =>
+		{
+			WriteFile(
+				rootPath,
+				Path.Combine("src", "Secrets.cs"),
+				"const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";\n");
+			WriteFile(rootPath, "README.md", "# Secret redaction selection fixture\n");
+			WriteFile(rootPath, Path.Combine("src", "empty.txt"), string.Empty);
+		});
+	}
+
     public static UiTestProject CreateWithScopedExtensionlessEntries()
     {
         return Create(static rootPath =>

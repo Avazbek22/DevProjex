@@ -413,12 +413,15 @@ public partial class MainWindow : Window
 		var enabled = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
 			.Contains(IgnoreOptionId.HideSecrets);
+		var discoveryActive = IsSecretDiscoveryActiveForCurrentSelection();
 		if (!enabled)
 		{
 			var cachedSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
 			_secretRedactionMatchedCount = cachedSnapshot?.DetectedCount;
 			_secretRedactionCount = cachedSnapshot is null ? null : 0;
-			_secretRedactionScanState = ResolveSecretScanState(cachedSnapshot);
+			_secretRedactionScanState = discoveryActive && cachedSnapshot is null
+				? SecretScanState.Scanning
+				: ResolveSecretScanState(cachedSnapshot);
 			_viewModel.SetContentProcessingStatus(
 				_secretRedactionScanState,
 				_secretRedactionMatchedCount,
@@ -437,7 +440,9 @@ public partial class MainWindow : Window
 		var cachedRedactionSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
 		_secretRedactionMatchedCount = cachedRedactionSnapshot?.DetectedCount;
 		_secretRedactionCount = cachedRedactionSnapshot?.RedactedCount;
-		_secretRedactionScanState = ResolveSecretScanState(cachedRedactionSnapshot);
+		_secretRedactionScanState = discoveryActive && cachedRedactionSnapshot is null
+			? SecretScanState.Scanning
+			: ResolveSecretScanState(cachedRedactionSnapshot);
 		_viewModel.SetContentProcessingStatus(
 			_secretRedactionScanState,
 			cachedRedactionSnapshot?.DetectedCount,
@@ -461,6 +466,7 @@ public partial class MainWindow : Window
 
 	private void InvalidateSecretRedactionCount(bool scheduleRefreshImmediately = true)
 	{
+		CancelSecretRedactionDiscovery();
 		_secretRedactionSession.InvalidateSnapshots();
 		_secretRedactionScanState = SecretScanState.Pending;
 		_viewModel.SetContentProcessingStatus(_secretRedactionScanState);

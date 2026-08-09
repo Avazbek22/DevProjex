@@ -541,9 +541,20 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	/// files are still inspected. Preview and export callers intentionally continue to use the strict
 	/// <see cref="AnalyzeAsync(SecretRedactionContext,IReadOnlyList{string},CancellationToken)"/> path.
 	/// </summary>
+	public Task<SecretRedactionSnapshot> DiscoverAsync(
+		SecretRedactionContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		CancellationToken cancellationToken = default) =>
+		DiscoverAsync(
+			context,
+			orderedFilePaths,
+			SecretDiscoveryCacheMode.RevalidateContent,
+			cancellationToken);
+
 	public async Task<SecretRedactionSnapshot> DiscoverAsync(
 		SecretRedactionContext context,
 		IReadOnlyList<string> orderedFilePaths,
+		SecretDiscoveryCacheMode cacheMode,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(context);
@@ -570,10 +581,11 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				continue;
 			}
 
-			if (scope.TryGetCachedEntry(sourcePath, metadata, out var cached) && cached.IsUnscannable)
+			if (scope.TryGetCachedEntry(sourcePath, metadata, out var cached) &&
+			    (cacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent || cached.IsUnscannable))
 			{
 				entries[index] = cached;
-				incomplete[index] = true;
+				incomplete[index] = cached.IsUnscannable;
 				continue;
 			}
 
@@ -697,9 +709,20 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		return redactionScope.Complete();
 	}
 
+	public Task<SecretRedactionSnapshot> DiscoverAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		CancellationToken cancellationToken = default) =>
+		DiscoverAsync(
+			context,
+			orderedFilePaths,
+			SecretDiscoveryCacheMode.RevalidateContent,
+			cancellationToken);
+
 	public async Task<SecretRedactionSnapshot> DiscoverAsync(
 		ContentTransformationContext context,
 		IReadOnlyList<string> orderedFilePaths,
+		SecretDiscoveryCacheMode cacheMode,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(context);
@@ -710,7 +733,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			                       nameof(context));
 		if (context.Compression is null)
 		{
-			return await DiscoverAsync(redactionContext, orderedFilePaths, cancellationToken)
+			return await DiscoverAsync(redactionContext, orderedFilePaths, cacheMode, cancellationToken)
 				.ConfigureAwait(false);
 		}
 
@@ -724,10 +747,20 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		await foreach (var attempt in PrepareOrderedDiscoveryEntriesAsync(
 		                   context,
 		                   transformationScope,
+		                   redactionScope,
 		                   orderedFilePaths,
+		                   cacheMode,
 		                   cancellationToken).ConfigureAwait(false))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			if (attempt.CachedEntry is not null)
+			{
+				redactionScope.ProcessEntry(attempt.SourcePath!, attempt.CachedEntry);
+				if (attempt.CachedEntry.IsUnscannable)
+					incompleteFileCount++;
+				continue;
+			}
+
 			if (attempt.Entry is null)
 			{
 				incompleteFileCount++;
@@ -763,7 +796,9 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	private async IAsyncEnumerable<DiscoveryTransformationAttempt> PrepareOrderedDiscoveryEntriesAsync(
 		ContentTransformationContext context,
 		ContentTransformationScope transformationScope,
+		SecretRedactionScope redactionScope,
 		IReadOnlyList<string> orderedFilePaths,
+		SecretDiscoveryCacheMode cacheMode,
 		[EnumeratorCancellation] CancellationToken cancellationToken)
 	{
 		var batch = new List<CompressionWorkItem>(MaximumParallelScans);
@@ -771,16 +806,16 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var item = new CompressionWorkItem(index, orderedFilePaths[index]);
-			long? length = null;
+			SecretFileMetadata? metadata = null;
 			try
 			{
-				length = SecretFileMetadata.Capture(item.SourcePath).Length;
+				metadata = SecretFileMetadata.Capture(item.SourcePath);
 			}
 			catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
 			{
 				// Iterator blocks cannot yield from catch clauses. The null value is handled below.
 			}
-			if (length is null)
+			if (metadata is null)
 			{
 				await foreach (var attempt in PrepareDiscoveryBatchAsync(
 				                   context,
@@ -791,11 +826,27 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					yield return attempt;
 				}
 				batch.Clear();
-				yield return new DiscoveryTransformationAttempt(null);
+				yield return DiscoveryTransformationAttempt.Incomplete();
 				continue;
 			}
 
-			if (length.Value > MaximumParallelScanFileBytes)
+			if (redactionScope.TryGetCachedEntry(item.SourcePath, metadata.Value, out var cached) &&
+			    (cacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent || cached.IsUnscannable))
+			{
+				await foreach (var attempt in PrepareDiscoveryBatchAsync(
+				                   context,
+				                   transformationScope,
+				                   batch,
+				                   cancellationToken).ConfigureAwait(false))
+				{
+					yield return attempt;
+				}
+				batch.Clear();
+				yield return DiscoveryTransformationAttempt.Cached(item.SourcePath, cached);
+				continue;
+			}
+
+			if (metadata.Value.Length > MaximumParallelScanFileBytes)
 			{
 				await foreach (var attempt in PrepareDiscoveryBatchAsync(
 				                   context,
@@ -898,11 +949,11 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				transformationScope,
 				item,
 				cancellationToken).ConfigureAwait(false);
-			return new DiscoveryTransformationAttempt(entry);
+			return DiscoveryTransformationAttempt.Prepared(entry);
 		}
 		catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
 		{
-			return new DiscoveryTransformationAttempt(null);
+			return DiscoveryTransformationAttempt.Incomplete();
 		}
 	}
 
@@ -910,8 +961,20 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		exception is IOException or UnauthorizedAccessException or SecretDetectionException or DecoderFallbackException;
 
 	private readonly record struct DiscoveryTransformationAttempt(
-		PreparedTransformationEntry? Entry) : IDisposable
+		PreparedTransformationEntry? Entry,
+		string? SourcePath,
+		SecretScanCacheEntry? CachedEntry) : IDisposable
 	{
+		public static DiscoveryTransformationAttempt Prepared(PreparedTransformationEntry entry) =>
+			new(entry, null, null);
+
+		public static DiscoveryTransformationAttempt Cached(
+			string sourcePath,
+			SecretScanCacheEntry entry) =>
+			new(null, sourcePath, entry);
+
+		public static DiscoveryTransformationAttempt Incomplete() => new(null, null, null);
+
 		public void Dispose() => Entry?.Dispose();
 	}
 
