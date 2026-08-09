@@ -384,13 +384,15 @@ public partial class MainWindow : Window
 		// invalidating every preview refresh would rescan all selected text unnecessarily.
 		InvalidatePreviewCache();
 		PublishTransformationContext();
-		// A complete baseline only describes one transformation identity. Mark it incomplete so
-		// MetricsPipeline fills the missing raw/compressed variants instead of republishing the
-		// previous identity; already measured variants remain cached and are reused on later toggles.
-		_metrics.HasCompleteBaseline = false;
-		_metrics.ScheduleRecalculate();
 		if (RequiresCompressionRefresh(changedOptionId))
 		{
+			// A complete baseline only describes one transformation identity. Mark it incomplete so
+			// MetricsPipeline fills the missing raw/compressed variants instead of republishing the
+			// previous identity; already measured variants remain cached and are reused on later
+			// toggles. The metrics identity contains only compression, so a Hide Secrets toggle
+			// would recompute the exact numbers already on screen - it skips this block entirely.
+			_metrics.HasCompleteBaseline = false;
+			_metrics.ScheduleRecalculate();
 			// Redaction consumes compressed text but does not change the compression plan. Restarting
 			// Tree-sitter for a Hide Secrets toggle stalls the checkbox without changing its result.
 			var compressionEnabled = _selectionCoordinator
@@ -413,24 +415,18 @@ public partial class MainWindow : Window
 		var enabled = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
 			.Contains(IgnoreOptionId.HideSecrets);
-		var discoveryActive = IsSecretDiscoveryActiveForCurrentSelection();
 		if (!enabled)
 		{
-			var cachedSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
-			_secretRedactionMatchedCount = cachedSnapshot?.DetectedCount;
-			_secretRedactionCount = cachedSnapshot is null ? null : 0;
-			_secretRedactionScanState = discoveryActive && cachedSnapshot is null
-				? SecretScanState.Scanning
-				: ResolveSecretScanState(cachedSnapshot);
-			_viewModel.SetContentProcessingStatus(
-				_secretRedactionScanState,
-				_secretRedactionMatchedCount,
-				_secretRedactionCount,
-				cachedSnapshot?.SkippedFileCount);
+			// Secret scanning is strictly opt-in: with the checkbox off no discovery may run, not
+			// even in the background. Cancel anything in flight and return the row to neutral.
+			CancelSecretRedactionDiscovery();
+			_secretRedactionMatchedCount = null;
+			_secretRedactionCount = null;
+			_secretRedactionScanState = SecretScanState.Disabled;
+			_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
 			RelabelIgnoreOptionsWithCurrentCounts();
 			if (_viewModel.IsAnyPreviewVisible)
 				_previewPipeline.ScheduleRefresh(immediate: true);
-			ScheduleSecretRedactionCountRefresh();
 			return;
 		}
 		// Start detector-only initialization before Preview and count pipelines read any
@@ -438,6 +434,7 @@ public partial class MainWindow : Window
 		_ = _secretRedactionSession.BeginWarmUp();
 		// A canceled option refresh may restore the exact selection that was already scanned.
 		// Reuse that snapshot synchronously so rollback also restores the measured label.
+		var discoveryActive = IsSecretDiscoveryActiveForCurrentSelection();
 		var cachedRedactionSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
 		_secretRedactionMatchedCount = cachedRedactionSnapshot?.DetectedCount;
 		_secretRedactionCount = cachedRedactionSnapshot?.RedactedCount;
@@ -448,11 +445,18 @@ public partial class MainWindow : Window
 			_secretRedactionScanState,
 			cachedRedactionSnapshot?.DetectedCount,
 			cachedRedactionSnapshot?.RedactedCount,
-			cachedRedactionSnapshot?.SkippedFileCount);
+			cachedRedactionSnapshot?.SkippedFileCount,
+			cachedRedactionSnapshot?.FailedFileCount);
 		RelabelIgnoreOptionsWithCurrentCounts();
 		if (_viewModel.IsAnyPreviewVisible)
 			_previewPipeline.ScheduleRefresh(immediate: true);
-		ScheduleSecretRedactionCountRefresh();
+		// The enabling click is an explicit request: its scan starts without a debounce and with
+		// visible progress, and it revalidates content because files may have changed while the
+		// option was off. Every other path keeps the delayed anti-flash presentation.
+		ScheduleSecretRedactionCountRefresh(
+			changedOptionId == IgnoreOptionId.HideSecrets
+				? StatusOperationPresentation.Immediate
+				: StatusOperationPresentation.ExtendedDelay);
 	}
 
 	internal static bool RequiresCompressionRefresh(IgnoreOptionId? changedOptionId) =>
@@ -472,7 +476,10 @@ public partial class MainWindow : Window
 	{
 		CancelSecretRedactionDiscovery();
 		_secretRedactionSession.InvalidateSnapshots();
-		_secretRedactionScanState = SecretScanState.Pending;
+		var enabled = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.HideSecrets);
+		_secretRedactionScanState = enabled ? SecretScanState.Pending : SecretScanState.Disabled;
 		_viewModel.SetContentProcessingStatus(_secretRedactionScanState);
 		if (_secretRedactionCount is not null)
 			_secretRedactionCount = null;

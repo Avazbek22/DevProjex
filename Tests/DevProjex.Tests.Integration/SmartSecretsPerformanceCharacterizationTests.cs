@@ -65,7 +65,9 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		Assert.InRange(
 			diagnostics.PeakFullContentBuffers,
 			1,
-			Math.Min(8, Math.Max(1, Environment.ProcessorCount)));
+			Math.Min(
+				SecretRedactionOutputPreparer.MaximumParallelScans,
+				Math.Max(1, Environment.ProcessorCount)));
 		Assert.InRange(diagnostics.RetainedBytes, 1, diagnostics.MaximumRetainedBytes);
 		Assert.True(
 			allocated < sourceBytes * 2,

@@ -15,6 +15,64 @@ internal sealed class TreeSelectionSnapshotCache
 
     public void Invalidate() => _selectionVersion = unchecked(_selectionVersion + 1);
 
+	/// <summary>
+	/// Identifies one published selection state. A projection built in the background carries the
+	/// version it was built from, and <see cref="StoreProjection"/> drops results whose version is
+	/// no longer current instead of caching a stale selection.
+	/// </summary>
+	public long SelectionVersion => _selectionVersion;
+
+	/// <summary>Returns the ordered file list only when it is already cached for this selection.</summary>
+	public IReadOnlyList<string>? TryGetOrderedFiles(TreeNodeDescriptor treeRoot)
+	{
+		ArgumentNullException.ThrowIfNull(treeRoot);
+		return _orderedFiles is not null &&
+		       _orderedFilesVersion == _selectionVersion &&
+		       ReferenceEquals(_orderedFilesTreeRoot, treeRoot)
+			? _orderedFiles
+			: null;
+	}
+
+	/// <summary>
+	/// The pure descriptor-walk part of the projection. It reads no view-model state, so a caller
+	/// may capture the checked-path set on the UI thread and run this on a worker.
+	/// </summary>
+	public static (IReadOnlySet<string> NormalizedPaths, IReadOnlyList<string> OrderedFiles) BuildProjection(
+		TreeNodeDescriptor treeRoot,
+		IReadOnlySet<string> checkedPaths,
+		IReadOnlyList<string>? allOrderedFilePaths)
+	{
+		ArgumentNullException.ThrowIfNull(treeRoot);
+		ArgumentNullException.ThrowIfNull(checkedPaths);
+		var normalizedPaths = ProjectTreeSelectionProjection.NormalizeSelectedPaths(
+			treeRoot,
+			checkedPaths);
+		var orderedFiles = normalizedPaths.Count > 0
+			? PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(normalizedPaths, treeRoot)
+			: allOrderedFilePaths ?? PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(treeRoot);
+		return (normalizedPaths, orderedFiles);
+	}
+
+	public void StoreProjection(
+		long selectionVersion,
+		TreeNodeDescriptor treeRoot,
+		IReadOnlySet<string> normalizedPaths,
+		IReadOnlyList<string> orderedFiles)
+	{
+		ArgumentNullException.ThrowIfNull(treeRoot);
+		ArgumentNullException.ThrowIfNull(normalizedPaths);
+		ArgumentNullException.ThrowIfNull(orderedFiles);
+		if (selectionVersion != _selectionVersion)
+			return;
+
+		_normalizedSnapshot = normalizedPaths;
+		_normalizedTreeRoot = treeRoot;
+		_normalizedVersion = selectionVersion;
+		_orderedFiles = orderedFiles;
+		_orderedFilesTreeRoot = treeRoot;
+		_orderedFilesVersion = selectionVersion;
+	}
+
     public HashSet<string> GetOrCreate(IList<TreeNodeViewModel> roots)
     {
         var root = roots.Count > 0 ? roots[0] : null;

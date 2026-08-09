@@ -23,6 +23,7 @@ public partial class SettingsPanelView : UserControl
     public event EventHandler<RoutedEventArgs>? IgnoreAllChanged;
     public event EventHandler<RoutedEventArgs>? ExtensionsAllChanged;
     public event EventHandler<SettingsPanelMinimumWidthChangedEventArgs>? MinimumWidthChanged;
+	public event EventHandler? SecretScanRetryRequested;
 
     public SettingsPanelView()
     {
@@ -72,6 +73,19 @@ public partial class SettingsPanelView : UserControl
 		object? sender,
 		PointerReleasedEventArgs e)
 	{
+		// The warning triangle on Hide Secrets doubles as the retry control: a failure there is
+		// usually transient, and the status text invites this click. Informational indicators
+		// keep their tooltip-on-click behavior.
+		if (sender is Control
+		    {
+			    DataContext: IgnoreOptionViewModel { Id: IgnoreOptionId.HideSecrets, IsWarningStatus: true }
+		    })
+		{
+			SecretScanRetryRequested?.Invoke(this, EventArgs.Empty);
+			e.Handled = true;
+			return;
+		}
+
 		if (sender is Control indicator)
 			ToolTip.SetIsOpen(indicator, true);
 

@@ -23,21 +23,27 @@ public partial class MainWindow
 
 	private void TryApplySecretRedactionSnapshot(SecretRedactionSnapshot publishedSnapshot)
 	{
+		// Scanning is opt-in: a snapshot finishing after the user switched the option off must
+		// not repopulate counters that the disable path just cleared.
+		var enabled = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.HideSecrets);
+		if (!enabled)
+			return;
+
 		var snapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
 		if (snapshot is null || snapshot.SelectionKey != publishedSnapshot.SelectionKey)
 			return;
 
-		var enabled = _selectionCoordinator
-			.GetSelectedIgnoreOptionIds()
-			.Contains(IgnoreOptionId.HideSecrets);
 		_secretRedactionMatchedCount = snapshot.DetectedCount;
-		_secretRedactionCount = enabled ? snapshot.RedactedCount : 0;
+		_secretRedactionCount = snapshot.RedactedCount;
 		_secretRedactionScanState = ResolveSecretScanState(snapshot);
 		_viewModel.SetContentProcessingStatus(
 			_secretRedactionScanState,
 			snapshot.DetectedCount,
 			_secretRedactionCount,
-			snapshot.SkippedFileCount);
+			snapshot.SkippedFileCount,
+			snapshot.FailedFileCount);
 		RelabelIgnoreOptionsWithCurrentCounts();
 	}
 
@@ -184,11 +190,13 @@ public partial class MainWindow
 	private void ScheduleSecretRedactionCountRefresh(
 		StatusOperationPresentation presentation = StatusOperationPresentation.ExtendedDelay)
 	{
+		// Scanning is opt-in: nothing runs while Hide Secrets is off, and a visible preview owns
+		// the strict analysis for the enabled state, so background discovery stands down there too.
 		var hideSecretsEnabled = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
 			.Contains(IgnoreOptionId.HideSecrets);
-
-		if ((_viewModel.IsAnyPreviewVisible && hideSecretsEnabled) ||
+		if (!hideSecretsEnabled ||
+		    _viewModel.IsAnyPreviewVisible ||
 		    _windowLifetimeCts is not { IsCancellationRequested: false } ||
 		    _currentTree is null ||
 		    string.IsNullOrWhiteSpace(_currentPath))
@@ -196,7 +204,16 @@ public partial class MainWindow
 			return;
 		}
 
-		var files = GetOrderedSelectedFilePaths();
+		// After a selection change this scheduler is the first reader of the ordered file list,
+		// and building it walks every tree descriptor. Only the view-model checkbox walk needs
+		// the UI thread; the descriptor projection runs on a worker and reschedules this refresh.
+		var files = _treeSelectionSnapshotCache.TryGetOrderedFiles(_currentTree.Root);
+		if (files is null)
+		{
+			BeginOrderedSelectionProjectionBuild(presentation);
+			return;
+		}
+
 		var compressionContext = CreateCodeCompressionContext();
 		var request = new SecretDiscoveryRequest(
 			_currentPath,
@@ -227,7 +244,10 @@ public partial class MainWindow
 				request.ProjectRoot,
 				request.Files,
 				request.TransformIdentity);
-			if (cachedSnapshot is not null)
+			// A failure snapshot is shown, never reused: read failures are usually transient (a
+			// file locked by another program), and reusing one would make every later toggle of
+			// the same selection replay the failure without ever reopening the file.
+			if (cachedSnapshot is { HasFailures: false })
 			{
 				CancelSecretRedactionDiscovery();
 				TryApplySecretRedactionSnapshot(cachedSnapshot);
@@ -343,6 +363,104 @@ public partial class MainWindow
 			if (refreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
 				Interlocked.CompareExchange(ref _activeSecretDiscoveryRequest, null, request);
 		}
+	}
+
+	private void BeginOrderedSelectionProjectionBuild(StatusOperationPresentation presentation)
+	{
+		var selectionVersion = _treeSelectionSnapshotCache.SelectionVersion;
+		if (_orderedSelectionProjectionBuildVersion == selectionVersion)
+		{
+			// A build for this selection is already running; keep the strongest presentation so an
+			// explicit request is not downgraded to a silently debounced one.
+			if (presentation == StatusOperationPresentation.Immediate)
+				_orderedSelectionProjectionPresentation = presentation;
+			return;
+		}
+
+		_orderedSelectionProjectionBuildVersion = selectionVersion;
+		_orderedSelectionProjectionPresentation = presentation;
+		var tree = _currentTree!;
+		var checkedPaths = _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
+		ObserveDetachedTask(
+			BuildOrderedSelectionProjectionAsync(tree, checkedPaths, selectionVersion),
+			"BuildOrderedSelectionProjection");
+	}
+
+	private async Task BuildOrderedSelectionProjectionAsync(
+		BuildTreeResult tree,
+		IReadOnlySet<string> checkedPaths,
+		long selectionVersion)
+	{
+		var projection = await Task.Run(() => TreeSelectionSnapshotCache.BuildProjection(
+			tree.Root,
+			checkedPaths,
+			tree.OrderedFilePaths));
+		if (_orderedSelectionProjectionBuildVersion == selectionVersion)
+			_orderedSelectionProjectionBuildVersion = -1;
+		if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
+		    !ReferenceEquals(_currentTree, tree) ||
+		    selectionVersion != _treeSelectionSnapshotCache.SelectionVersion)
+		{
+			// A newer selection or tree superseded this build; its own change already scheduled a
+			// refresh, so this stale projection is simply dropped.
+			return;
+		}
+
+		_treeSelectionSnapshotCache.StoreProjection(
+			selectionVersion,
+			tree.Root,
+			projection.NormalizedPaths,
+			projection.OrderedFiles);
+		ScheduleSecretRedactionCountRefresh(_orderedSelectionProjectionPresentation);
+	}
+
+	/// <summary>
+	/// While a preview is visible with Hide Secrets enabled, the strict analysis inside the preview
+	/// build is the only scan that runs - background discovery deliberately stands down. When that
+	/// build fails on anything the scanner would also have failed on, the Hide Secrets row must say
+	/// so, or it keeps reporting the scan as still running next to a preview showing an error.
+	/// </summary>
+	private void HandlePreviewSecretAnalysisFailure(Exception exception)
+	{
+		if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
+		    CreateSecretRedactionContext() is null)
+		{
+			return;
+		}
+
+		if (exception is not (SecretDetectionException
+		    or IOException
+		    or UnauthorizedAccessException
+		    or DecoderFallbackException))
+		{
+			return;
+		}
+
+		_secretRedactionScanState = SecretScanState.Failed;
+		_viewModel.SetContentProcessingStatus(SecretScanState.Failed);
+		RelabelIgnoreOptionsWithCurrentCounts();
+	}
+
+	/// <summary>
+	/// The warning indicator on the Hide Secrets row requests one more pass. When a visible preview
+	/// owns the scan, rebuilding the preview reruns its strict analysis; otherwise discovery runs
+	/// immediately with full content revalidation, so previously failed files are actually reopened.
+	/// </summary>
+	private void OnSecretScanRetryRequested(object? sender, EventArgs e)
+	{
+		if (_windowLifetimeCts is not { IsCancellationRequested: false })
+			return;
+
+		var hideSecretsEnabled = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.HideSecrets);
+		if (_viewModel.IsAnyPreviewVisible && hideSecretsEnabled)
+		{
+			_previewPipeline.ScheduleRefresh(immediate: true);
+			return;
+		}
+
+		ScheduleSecretRedactionCountRefresh(StatusOperationPresentation.Immediate);
 	}
 
 	private void CancelSecretRedactionDiscovery()
@@ -601,6 +719,8 @@ public partial class MainWindow
 	private CancellationTokenSource? _secretRedactionCountCts;
 	private SecretDiscoveryRequest? _activeSecretDiscoveryRequest;
 	private long _secretRedactionCountRefreshVersion;
+	private long _orderedSelectionProjectionBuildVersion = -1;
+	private StatusOperationPresentation _orderedSelectionProjectionPresentation;
 	private int? _secretRedactionCount;
 	private int? _secretRedactionMatchedCount;
 	private SecretScanState _secretRedactionScanState = SecretScanState.Disabled;

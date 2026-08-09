@@ -313,6 +313,7 @@ internal sealed class PreviewWorkspacePipeline(
             {
                 InvalidateCache();
                 host.ApplyPreviewText(host.ResolvePreviewErrorMessage(ex));
+                host.HandlePreviewBuildFailure(ex);
                 CompleteFirstContentReady(firstContentReady, buildVersion);
                 CompleteRefreshRequest(requestVersion);
                 host.SchedulePreviewMemoryCleanup();

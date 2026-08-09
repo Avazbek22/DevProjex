@@ -929,7 +929,8 @@
               <views:SettingsPanelView Name="SettingsPanel"
                                        ApplySettingsRequested="OnApplySettings"
                                        IgnoreAllChanged="OnIgnoreAllChanged"
-                                       ExtensionsAllChanged="OnExtensionsAllChanged" />
+                                       ExtensionsAllChanged="OnExtensionsAllChanged"
+                                       SecretScanRetryRequested="OnSecretScanRetryRequested" />
             </Border>
           </Grid>
         </Border>

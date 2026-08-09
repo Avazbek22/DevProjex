@@ -103,6 +103,9 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
     string IPreviewWorkspacePipelineHost.ResolvePreviewErrorMessage(Exception exception) =>
         ResolveUserFacingOutputErrorMessage(exception);
 
+	void IPreviewWorkspacePipelineHost.HandlePreviewBuildFailure(Exception exception) =>
+		HandlePreviewSecretAnalysisFailure(exception);
+
     void IPreviewWorkspacePipelineHost.ClearPreviewDocument() =>
         ClearPreviewDocument();
 

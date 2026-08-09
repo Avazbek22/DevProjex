@@ -10,8 +10,10 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 		int? redactionCount)
 	{
 		var label = localization["Settings.Ignore.HideSecrets"];
+		// A clean scan keeps the plain label: the row's status indicator already says "no secrets
+		// found", and "(0/0)" next to it would read as a counter for something that is not there.
 		return state is SecretScanState.Completed or SecretScanState.Limited &&
-		       matchedCount is not null &&
+		       matchedCount is not null and > 0 &&
 		       redactionCount is not null
 			? $"{label} ({matchedCount}/{redactionCount})"
 			: label;

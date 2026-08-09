@@ -5,7 +5,11 @@ namespace DevProjex.Avalonia.Coordinators;
 // 2. Reveal the settings island and let its final layout settle.
 // 3. Prepare enabled code compression.
 // 4. Initialize file metrics.
-// 5. Start secret analysis.
+// 5. Start secret analysis when Hide Secrets is enabled.
+//
+// Steps 3 and 5 are opt-in: with the matching checkbox off their entry points return without
+// doing any work, so a freshly loaded project runs no transformation load the user did not ask
+// for. A persisted profile that restores a checked option is a prior request and does run.
 //
 // Do not start steps 3-5 from tree publication callbacks, and do not parallelize or reorder them.
 // File IO, parser work and competing status updates during steps 1-2 cause visible width jumps and

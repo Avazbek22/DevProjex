@@ -17,6 +17,7 @@ public sealed class SecretRedactionSession : IDisposable
 		new(StringComparer.OrdinalIgnoreCase);
 	private readonly List<SessionMarkedSecret> _sessionMarks = [];
 	private readonly Dictionary<string, SecretRedactionSnapshot> _snapshots = new(StringComparer.Ordinal);
+	private SelectionKeyCacheEntry? _selectionKeyCache;
 	private Task? _detectorWarmUpTask;
 	private long _overrideRevision;
 	private long _snapshotRevision;
@@ -256,10 +257,42 @@ public sealed class SecretRedactionSession : IDisposable
 		IReadOnlyList<string> orderedFilePaths,
 		string transformIdentity = "")
 	{
-		var key = BuildSelectionKey(projectRoot, orderedFilePaths, transformIdentity);
+		var key = GetOrComputeSelectionKey(projectRoot, orderedFilePaths, transformIdentity);
 		lock (_sync)
 			return _snapshots.GetValueOrDefault(key);
 	}
+
+	/// <summary>
+	/// The UI polls the snapshot for the same selection on every relabel and refresh. The ordered
+	/// file list it passes is reference-stable per selection revision, so the hashed key is reused
+	/// until any input actually changes instead of re-sorting and re-hashing every path per call.
+	/// </summary>
+	private string GetOrComputeSelectionKey(
+		string projectRoot,
+		IReadOnlyList<string> orderedFilePaths,
+		string transformIdentity)
+	{
+		var cached = Volatile.Read(ref _selectionKeyCache);
+		if (cached is not null &&
+		    ReferenceEquals(cached.OrderedFilePaths, orderedFilePaths) &&
+		    string.Equals(cached.ProjectRoot, projectRoot, StringComparison.Ordinal) &&
+		    string.Equals(cached.TransformIdentity, transformIdentity, StringComparison.Ordinal))
+		{
+			return cached.SelectionKey;
+		}
+
+		var key = BuildSelectionKey(projectRoot, orderedFilePaths, transformIdentity);
+		Volatile.Write(
+			ref _selectionKeyCache,
+			new SelectionKeyCacheEntry(projectRoot, orderedFilePaths, transformIdentity, key));
+		return key;
+	}
+
+	private sealed record SelectionKeyCacheEntry(
+		string ProjectRoot,
+		IReadOnlyList<string> OrderedFilePaths,
+		string TransformIdentity,
+		string SelectionKey);
 
 	public SecretScanCacheDiagnostics GetCacheDiagnostics()
 	{

@@ -200,13 +200,15 @@ internal sealed partial class TerminalWorkspaceSession
 			return label;
 		}
 
-		var redactionCount = _services.SecretRedactionSession.GetRedactionCount(
+		var snapshot = _services.SecretRedactionSession.GetSnapshot(
 			plan.SourceRoot,
 			plan.IncludedFiles);
-		return redactionCount switch
+		// "No secrets" is a claim about every selected file. A discovery pass that skipped or
+		// failed some files may honestly report a count, but not a clean bill of health.
+		return snapshot switch
 		{
-			> 0 => $"{label} ({redactionCount:N0})",
-			0 => L("Settings.Ignore.HideSecrets.NoMatches"),
+			{ RedactedCount: > 0 } => $"{label} ({snapshot.RedactedCount:N0})",
+			{ RedactedCount: 0, IsComplete: true } => L("Settings.Ignore.HideSecrets.NoMatches"),
 			_ => label
 		};
 	}

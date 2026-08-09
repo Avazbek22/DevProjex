@@ -11,7 +11,10 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 {
 	public const long MaximumScannableFileBytes = 16 * 1024 * 1024;
 	private const long MaximumParallelScanFileBytes = 1024 * 1024;
-	private const int MaximumParallelScans = 8;
+	// Parallel scanning applies only to files at or below the per-file parallel limit, so the
+	// worst-case buffered content is MaximumParallelScans * 1 MiB. Scaling with the machine keeps
+	// wide desktops from idling behind a fixed cap while small machines are not oversubscribed.
+	public static readonly int MaximumParallelScans = Math.Clamp(Environment.ProcessorCount, 4, 16);
 
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared)
 	{
