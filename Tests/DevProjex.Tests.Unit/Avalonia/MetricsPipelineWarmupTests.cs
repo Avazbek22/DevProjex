@@ -219,6 +219,60 @@ public sealed class MetricsPipelineWarmupTests
 	}
 
 	[AvaloniaFact]
+	public async Task PostLoadMetrics_ReusesThePrewarmReadFactWithoutReopeningTheFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile(
+			"Program.cs",
+			"internal class Program { void Run() { Console.WriteLine(1); } }");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(temp.Path, compressionSession),
+			redaction: null);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => transformation);
+
+		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
+
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
+		Assert.True(pipeline.HasCompleteBaseline);
+	}
+
+	[AvaloniaFact]
 	public async Task CompressionPrewarm_AnalyzesOnlyTheEffectiveSelection()
 	{
 		using var temp = new TemporaryDirectory();

@@ -123,6 +123,9 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					sourcePath,
 					transformedText,
 					compressed.Map,
+					compressed.Map.IsIdentity
+						? prepared.SourceFingerprint
+						: null,
 					cancellationToken);
 				var redactions = plan?.Spans
 					.Where(static span => span.State == SecretPreviewSpanState.Redacted)
@@ -285,9 +288,10 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		CancellationToken cancellationToken)
 	{
 		var metadataBeforeRead = SecretFileMetadata.Capture(item.SourcePath);
-		var result = await contentAnalyzer
-			.ReadClassifiedAsync(item.SourcePath, MaximumScannableFileBytes, cancellationToken)
+		var readFact = await contentAnalyzer
+			.ReadFactAsync(item.SourcePath, MaximumScannableFileBytes, cancellationToken)
 			.ConfigureAwait(false);
+		var result = readFact.ToReadResult();
 		var metadataAfterRead = SecretFileMetadata.Capture(item.SourcePath);
 		EnsureStableRead(item.SourcePath, metadataBeforeRead, metadataAfterRead, result.Content);
 		IDisposable? contentLease = null;
@@ -297,11 +301,18 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			if (result.Classification == FileContentClassification.Text && result.Content is not null)
 			{
 				contentLease = context.Redaction?.Session.TrackFullContentBuffer();
-				compression = transformationScope.Compress(
-					item.SourcePath,
-					NormalizeRelativePath(context, item.SourcePath),
-					result.Content.Content,
-					cancellationToken);
+				compression = readFact.Fingerprint is { } fingerprint
+					? transformationScope.Compress(
+						item.SourcePath,
+						NormalizeRelativePath(context, item.SourcePath),
+						result.Content.Content,
+						fingerprint,
+						cancellationToken)
+					: transformationScope.Compress(
+						item.SourcePath,
+						NormalizeRelativePath(context, item.SourcePath),
+						result.Content.Content,
+						cancellationToken);
 			}
 			else
 			{
@@ -316,6 +327,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				metadataAfterRead,
 				result,
 				compression,
+				readFact.Fingerprint,
 				contentLease);
 		}
 		catch
@@ -415,9 +427,10 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	{
 		var sourcePath = workItem.SourcePath;
 		var metadataBeforeRead = SecretFileMetadata.Capture(sourcePath);
-		var result = await contentAnalyzer
-			.ReadClassifiedAsync(sourcePath, MaximumScannableFileBytes, cancellationToken)
+		var readFact = await contentAnalyzer
+			.ReadFactAsync(sourcePath, MaximumScannableFileBytes, cancellationToken)
 			.ConfigureAwait(false);
+		var result = readFact.ToReadResult();
 		var metadataAfterRead = SecretFileMetadata.Capture(sourcePath);
 		EnsureStableRead(sourcePath, metadataBeforeRead, metadataAfterRead, result.Content);
 
@@ -439,11 +452,18 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				$"Code compression could not inspect '{sourcePath}' ({result.Classification}).");
 		}
 
-		var compressed = transformationScope.Compress(
-			sourcePath,
-			NormalizeRelativePath(context, sourcePath),
-			result.Content.Content,
-			cancellationToken);
+		var compressed = readFact.Fingerprint is { } fingerprint
+			? transformationScope.Compress(
+				sourcePath,
+				NormalizeRelativePath(context, sourcePath),
+				result.Content.Content,
+				fingerprint,
+				cancellationToken)
+			: transformationScope.Compress(
+				sourcePath,
+				NormalizeRelativePath(context, sourcePath),
+				result.Content.Content,
+				cancellationToken);
 		if (ReferenceEquals(compressed.Text, result.Content.Content))
 			return PreparedSecretFile.Unchanged(sourcePath);
 
@@ -472,6 +492,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		SecretFileMetadata metadata,
 		FileContentReadResult readResult,
 		CodeCompressionResult compression,
+		ContentFingerprint? sourceFingerprint,
 		IDisposable? contentLease) : IDisposable
 	{
 		private IDisposable? _contentLease = contentLease;
@@ -481,6 +502,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		public SecretFileMetadata Metadata { get; } = metadata;
 		public FileContentReadResult ReadResult { get; } = readResult;
 		public CodeCompressionResult Compression { get; } = compression;
+		public ContentFingerprint? SourceFingerprint { get; } = sourceFingerprint;
 
 		public void Dispose() => Interlocked.Exchange(ref _contentLease, null)?.Dispose();
 	}
@@ -748,6 +770,9 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 						prepared.SourcePath,
 						prepared.Compression.Text,
 						prepared.Compression.Map,
+						prepared.Compression.Map.IsIdentity
+							? prepared.SourceFingerprint
+							: null,
 						cancellationToken);
 					break;
 				default:
@@ -838,6 +863,9 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 						prepared.SourcePath,
 						prepared.Compression.Text,
 						prepared.Compression.Map,
+						prepared.Compression.Map.IsIdentity
+							? prepared.SourceFingerprint
+							: null,
 						cancellationToken);
 					break;
 				default:

@@ -434,19 +434,27 @@ public sealed class PreviewDocumentBuilder(
         var maximumFileBytes = redactionScope is null
             ? MaximumInteractiveFileBytes
             : SecretRedactionOutputPreparer.MaximumScannableFileBytes;
-        var readResult = await contentAnalyzer
-            .ReadClassifiedAsync(file, maximumFileBytes, cancellationToken)
-            .ConfigureAwait(false);
+		var readFact = await contentAnalyzer
+			.ReadFactAsync(file, maximumFileBytes, cancellationToken)
+			.ConfigureAwait(false);
+		var readResult = readFact.ToReadResult();
         var displayPath = MapDisplayPath(file, displayPathMapper);
         var content = readResult.Content;
-        var compression = readResult.IsText &&
-                          content is { IsEstimated: false, IsEmpty: false, IsWhitespaceOnly: false }
-            ? transformationScope?.Compress(
-                file,
-                displayPath,
-                content.Content,
-                cancellationToken)
-            : null;
+		var compression = readResult.IsText &&
+		                  content is { IsEstimated: false, IsEmpty: false, IsWhitespaceOnly: false }
+			? readFact.Fingerprint is { } fingerprint
+				? transformationScope?.Compress(
+					file,
+					displayPath,
+					content.Content,
+					fingerprint,
+					cancellationToken)
+				: transformationScope?.Compress(
+					file,
+					displayPath,
+					content.Content,
+					cancellationToken)
+			: null;
         return new PreparedContentEntry(file, displayPath, readResult, compression);
     }
 

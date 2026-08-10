@@ -30,12 +30,19 @@ public sealed record ContentTransformationContext(
 
 	public bool HasRedaction => Redaction is not null;
 
-	public ContentTransformationScope BeginOutput(IReadOnlyList<string> orderedFilePaths) =>
+	public ContentTransformationScope BeginOutput(IReadOnlyList<string> orderedFilePaths)
+	{
+		var projectRoot = Compression?.ProjectRoot ?? Redaction?.ProjectRoot ??
+			throw new InvalidOperationException("A transformation context has no project root.");
+		return BeginOutput(ContentSelectionSnapshot.Create(projectRoot, orderedFilePaths));
+	}
+
+	public ContentTransformationScope BeginOutput(ContentSelectionSnapshot selection) =>
 		new(
-			Compression?.BeginOutput(orderedFilePaths),
+			Compression?.BeginOutput(selection),
 			// The redaction cache is keyed on the text that was scanned, and compression decides what
 			// that text is. Without this, toggling the checkbox would reuse offsets from the other one.
-			Redaction?.BeginOutput(orderedFilePaths, Compression?.Session.TransformIdentity ?? string.Empty));
+			Redaction?.BeginOutput(selection, Compression?.Session.TransformIdentity ?? string.Empty));
 }
 
 /// <summary>
@@ -63,6 +70,16 @@ public sealed class ContentTransformationScope(
 		compression is null
 			? new CodeCompressionResult(content, ContentTransformMap.Identity)
 			: compression.Transform(fullPath, relativePath, content, cancellationToken);
+
+	public CodeCompressionResult Compress(
+		string fullPath,
+		string relativePath,
+		string content,
+		ContentFingerprint fingerprint,
+		CancellationToken cancellationToken) =>
+		compression is null
+			? new CodeCompressionResult(content, ContentTransformMap.Identity)
+			: compression.Transform(fullPath, relativePath, content, fingerprint, cancellationToken);
 
 	public void Dispose()
 	{

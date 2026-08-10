@@ -92,6 +92,7 @@ internal sealed class MetricsPipeline(
 
     private CancellationTokenSource? _metricsCalculationCts;
     private CancellationTokenSource? _compressionPrewarmCts;
+	private ContentReadFactSnapshot? _postLoadReadFacts;
     private DispatcherTimer? _metricsDebounceTimer;
     private CancellationTokenSource? _recalculateMetricsCts;
     private volatile bool _isBackgroundMetricsActive;
@@ -128,8 +129,11 @@ internal sealed class MetricsPipeline(
 
     public bool HasStatusMetricsSnapshot => _hasStatusMetricsSnapshot;
 
-    public void CancelCompressionPrewarm() =>
+    public void CancelCompressionPrewarm()
+    {
         _compressionPrewarmCts?.Cancel();
+		Volatile.Write(ref _postLoadReadFacts, null);
+    }
 
     public Task PrewarmCompressionAsync(
         BuildTreeResult currentTree,
@@ -385,8 +389,8 @@ internal sealed class MetricsPipeline(
     /// not publish a snapshot, because the files it measured are not necessarily the ordered
     /// selection an output would have produced.
     /// </summary>
-    private CodeCompressionScope? BeginTransformationScope(IReadOnlyList<string> filePaths) =>
-        transformationContextProvider?.Invoke()?.Compression?.BeginOutput(filePaths);
+	private CodeCompressionScope? BeginTransformationScope(IReadOnlyList<string> filePaths) =>
+		transformationContextProvider?.Invoke()?.Compression?.BeginMeasurement();
 
     /// <summary>
     /// Re-measures one file through the enabled transformations. A file the compressor leaves alone
@@ -398,6 +402,7 @@ internal sealed class MetricsPipeline(
         string filePath,
         string content,
         TextFileMetrics rawMetrics,
+		ContentFingerprint? fingerprint,
         CancellationToken cancellationToken)
     {
         if (scope is null || !IsCompressible(filePath))
@@ -406,13 +411,18 @@ internal sealed class MetricsPipeline(
             return rawMetrics;
 
         var relativePath = BuildRelativePath(projectRoot, filePath);
-        var transformed = scope.Transform(filePath, relativePath, content, cancellationToken).Text;
-        if (ReferenceEquals(transformed, content))
-            return rawMetrics;
+		var plan = fingerprint is { } knownFingerprint
+			? scope.ResolvePlan(
+				filePath,
+				relativePath,
+				content,
+				knownFingerprint,
+				cancellationToken)
+			: scope.ResolvePlan(filePath, relativePath, content, cancellationToken);
+		if (!plan.HasEdits)
+			return rawMetrics;
 
-        return FileContentAnalyzer.ComputeMetrics(
-            transformed.AsSpan(),
-            Encoding.UTF8.GetByteCount(transformed));
+		return FileContentAnalyzer.ComputeTransformedMetrics(content, plan);
     }
 
     private static TextFileMetrics ToMetrics(TextFileContent content) =>
@@ -569,12 +579,13 @@ internal sealed class MetricsPipeline(
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             prewarmCts.Token,
             cancellationToken);
+		CodeCompressionWarmupResult? warmupResult = null;
         try
         {
             // WarmAsync performs candidate indexing and file-length probes before its first
             // asynchronous parser lease. Run the whole bootstrap on a worker so large or remote
             // projects cannot stall the UI immediately after the settings reveal.
-            await Task.Run(
+            warmupResult = await Task.Run(
                     () => _compressionPrewarmer.WarmAsync(
                         compression,
                         filePaths,
@@ -592,6 +603,7 @@ internal sealed class MetricsPipeline(
                     Volatile.Read(ref _compressionPrewarmCts),
                     prewarmCts))
             {
+				Volatile.Write(ref _postLoadReadFacts, warmupResult?.ReadFacts);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     var snapshot = compression.Session.Snapshot;
@@ -645,6 +657,7 @@ internal sealed class MetricsPipeline(
             presentation: presentation);
         IReadOnlyList<string> stagedFilePaths = Array.Empty<string>();
         FileMetricsScanResult[] stagedResults = [];
+		ContentReadFactSnapshot? readFacts = null;
         try
         {
             if (statusOperations.IsActive(statusOperationId))
@@ -663,6 +676,20 @@ internal sealed class MetricsPipeline(
 
             stagedFilePaths = filePaths;
             stagedResults = new FileMetricsScanResult[filePaths.Count];
+			var candidateReadFacts = Volatile.Read(ref _postLoadReadFacts);
+			var projectRoot = ResolveTransformationProjectRoot();
+			if (candidateReadFacts is not null && projectRoot.Length > 0)
+			{
+				var selection = ContentSelectionSnapshot.Create(projectRoot, filePaths);
+				if (string.Equals(
+						candidateReadFacts.Selection.SelectionFingerprint,
+						selection.SelectionFingerprint,
+						StringComparison.Ordinal))
+				{
+					readFacts = candidateReadFacts;
+				}
+				Interlocked.CompareExchange(ref _postLoadReadFacts, null, candidateReadFacts);
+			}
 
             // Recorded against the pass that is about to fill the cache, so the reconciliation on
             // the next recalculation sees its own measurements and does not discard them.
@@ -683,6 +710,7 @@ internal sealed class MetricsPipeline(
             await ScanFileMetricsAsync(
                 filePaths,
                 stagedResults,
+				readFacts,
                 linkedCts.Token,
                 statusOperationId,
                 MetricsCalculationPolicy.GetBaselineWarmupParallelism(Environment.ProcessorCount));
@@ -747,6 +775,8 @@ internal sealed class MetricsPipeline(
         }
         finally
         {
+			if (readFacts is not null)
+				Interlocked.CompareExchange(ref _postLoadReadFacts, null, readFacts);
             DisposeIfCurrent(ref _metricsCalculationCts, metricsCts);
         }
     }
@@ -794,6 +824,7 @@ internal sealed class MetricsPipeline(
     private async Task ScanFileMetricsAsync(
         IReadOnlyList<string> filePaths,
         FileMetricsScanResult[] stagedResults,
+		ContentReadFactSnapshot? readFacts,
         CancellationToken cancellationToken,
         long statusOperationId,
         int maxDegreeOfParallelism)
@@ -832,31 +863,39 @@ internal sealed class MetricsPipeline(
 
                 TextFileMetrics? rawMetrics;
                 TextFileMetrics? effectiveMetrics;
+				ContentReadFact? retainedFact = null;
+				if (readFacts is not null && readFacts.TryGet(filePath, out var retained))
+					retainedFact = retained;
                 if (transformationScope is not null && IsCompressible(filePath))
                 {
-                    var result = await fileContentAnalyzer
-                        .ReadClassifiedAsync(filePath, MaximumMetricsMaterializationBytes, ct)
-                        .ConfigureAwait(false);
-                    rawMetrics = result.IsText && result.Content is not null
-                        ? ToMetrics(result.Content)
-                        : null;
-                    effectiveMetrics = rawMetrics is { IsEstimated: false } &&
-                                       result.Content is { IsEstimated: false } content
-                        ? MeasureTransformed(
-                            transformationScope,
-                            transformationProjectRoot,
-                            filePath,
-                            content.Content,
-                            rawMetrics,
-                            ct)
-                        : rawMetrics;
+					var fact = retainedFact ?? await fileContentAnalyzer
+						.ReadFactAsync(filePath, MaximumMetricsMaterializationBytes, ct)
+						.ConfigureAwait(false);
+					rawMetrics = fact.RawMetrics;
+					effectiveMetrics = rawMetrics is { IsEstimated: false } && fact.IsMaterializedText
+						? MeasureTransformed(
+							transformationScope,
+							transformationProjectRoot,
+							filePath,
+							fact.Content!,
+							rawMetrics,
+							fact.Fingerprint,
+							ct)
+						: rawMetrics;
                 }
                 else
                 {
-                    var result = await fileContentAnalyzer
-                        .GetClassifiedMetricsAsync(filePath, ct)
-                        .ConfigureAwait(false);
-                    rawMetrics = result.IsText ? result.Metrics : null;
+					if (retainedFact is not null)
+					{
+						rawMetrics = retainedFact.RawMetrics;
+					}
+					else
+					{
+						var result = await fileContentAnalyzer
+							.GetClassifiedMetricsAsync(filePath, ct)
+							.ConfigureAwait(false);
+						rawMetrics = result.IsText ? result.Metrics : null;
+					}
                     effectiveMetrics = rawMetrics;
                 }
 
@@ -1182,6 +1221,7 @@ internal sealed class MetricsPipeline(
             await ScanFileMetricsAsync(
                 missingPaths,
                 stagedResults,
+				null,
                 linkedCts.Token,
                 statusOperationId,
                 MetricsCalculationPolicy.GetSelectionRecoveryParallelism(Environment.ProcessorCount));

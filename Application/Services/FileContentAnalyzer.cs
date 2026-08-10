@@ -1,8 +1,11 @@
 using System.Buffers;
 using System.Collections.Frozen;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Cryptography;
+using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Compression;
 
 namespace DevProjex.Application.Services;
 
@@ -78,7 +81,13 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		string path,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(ReadClassifiedSync(path, maxSizeForFullRead, cancellationToken));
+		ValueTask.FromResult(ReadFactSync(path, maxSizeForFullRead, cancellationToken).ToReadResult());
+
+	public ValueTask<ContentReadFact> ReadFactAsync(
+		string path,
+		long maxSizeForFullRead,
+		CancellationToken cancellationToken = default) =>
+		ValueTask.FromResult(ReadFactSync(path, maxSizeForFullRead, cancellationToken));
 
 	/// <inheritdoc />
 	public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
@@ -197,6 +206,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 			if (stream.Length != sizeBytes)
 				throw new IOException("The file changed while its text buffer was being read.");
+			ContentPipelineDiagnostics.RecordFullFileRead(sizeBytes);
 			if (buffer.AsSpan(0, written).Contains('\0'))
 				return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary, sizeBytes);
 
@@ -470,11 +480,11 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 
 	private TextFileContent? TryReadAsTextSync(string path, long maxSizeForFullRead, CancellationToken cancellationToken)
 	{
-		var result = ReadClassifiedSync(path, maxSizeForFullRead, cancellationToken);
+		var result = ReadFactSync(path, maxSizeForFullRead, cancellationToken).ToReadResult();
 		return result.IsText ? result.Content : null;
 	}
 
-	private static FileContentReadResult ReadClassifiedSync(
+	private static ContentReadFact ReadFactSync(
 		string path,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken)
@@ -483,7 +493,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		{
 			// Fast path: known binary extensions - no file I/O needed
 			if (HasKnownBinaryExtension(path))
-				return new FileContentReadResult(FileContentClassification.Binary);
+				return new ContentReadFact(null, FileContentClassification.Binary, null, null);
 
 			using var stream = OpenSequentialRead(path, StreamingBufferSize, FileShare.Read);
 			var sizeBytes = stream.Length;
@@ -491,49 +501,42 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			// Empty file
 			if (sizeBytes == 0)
 			{
-				return new FileContentReadResult(
+				ContentPipelineDiagnostics.RecordContentFingerprint();
+				return new ContentReadFact(
+					string.Empty,
 					FileContentClassification.Text,
-					new TextFileContent(
-						Content: string.Empty,
-						SizeBytes: 0,
-						LineCount: 0,
-						CharCount: 0,
-						IsEmpty: true,
-						IsWhitespaceOnly: false,
-						IsEstimated: false),
+					new TextFileMetrics(0, 0, 0, true, false),
+					ContentFingerprint.Compute(ReadOnlySpan<char>.Empty),
 					TextFileEncoding.Utf8);
 			}
 
 			var encoding = DetectBomEncoding(stream, cancellationToken);
 			if (encoding is null && !CheckForNullBytes(stream, cancellationToken))
-				return new FileContentReadResult(FileContentClassification.Binary);
+				return new ContentReadFact(null, FileContentClassification.Binary, null, null);
 
 			// For large files, return estimated metrics without full content
 			if (sizeBytes > maxSizeForFullRead)
 			{
-				return new FileContentReadResult(
+				return new ContentReadFact(
+					null,
 					FileContentClassification.TooLarge,
-					new TextFileContent(
-						Content: string.Empty,
-						SizeBytes: sizeBytes,
-						LineCount: Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
-						CharCount: (int)Math.Min(sizeBytes, int.MaxValue),
-						IsEmpty: false,
-						IsWhitespaceOnly: false,
-						IsEstimated: true,
-						TrailingNewlineChars: 0,
-						TrailingNewlineLineBreaks: 0),
+					new TextFileMetrics(
+						sizeBytes,
+						Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
+						(int)Math.Min(sizeBytes, int.MaxValue),
+						false,
+						false,
+						IsEstimated: true),
+					null,
 					ResolveTextEncoding(encoding));
 			}
 
-			return new FileContentReadResult(
-				FileContentClassification.Text,
-				ReadFullContentStrict(
+			return ReadFullContentStrict(
 					stream,
 					sizeBytes,
 					encoding ?? StrictUtf8,
-					cancellationToken),
-				ResolveTextEncoding(encoding));
+					ResolveTextEncoding(encoding),
+					cancellationToken);
 		}
 		catch (OperationCanceledException)
 		{
@@ -541,31 +544,31 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		}
 		catch (UnauthorizedAccessException)
 		{
-			return new FileContentReadResult(FileContentClassification.AccessDenied);
+			return new ContentReadFact(null, FileContentClassification.AccessDenied, null, null);
 		}
 		catch (FileNotFoundException)
 		{
-			return new FileContentReadResult(FileContentClassification.Missing);
+			return new ContentReadFact(null, FileContentClassification.Missing, null, null);
 		}
 		catch (DirectoryNotFoundException)
 		{
-			return new FileContentReadResult(FileContentClassification.Missing);
+			return new ContentReadFact(null, FileContentClassification.Missing, null, null);
 		}
 		catch (BinaryContentException)
 		{
-			return new FileContentReadResult(FileContentClassification.Binary);
+			return new ContentReadFact(null, FileContentClassification.Binary, null, null);
 		}
 		catch (DecoderFallbackException)
 		{
-			return new FileContentReadResult(FileContentClassification.UnsupportedEncoding);
+			return new ContentReadFact(null, FileContentClassification.UnsupportedEncoding, null, null);
 		}
 		catch (IOException)
 		{
-			return new FileContentReadResult(FileContentClassification.Unreadable);
+			return new ContentReadFact(null, FileContentClassification.Unreadable, null, null);
 		}
 		catch
 		{
-			return new FileContentReadResult(FileContentClassification.Unreadable);
+			return new ContentReadFact(null, FileContentClassification.Unreadable, null, null);
 		}
 	}
 
@@ -714,6 +717,7 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		out byte[]? contentFingerprint)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		ContentPipelineDiagnostics.RecordFullFileRead(sizeBytes);
 		contentFingerprint = null;
 
 		// Rent buffer from pool to avoid allocation per file
@@ -748,6 +752,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			}
 
 			contentFingerprint = fingerprint?.GetHashAndReset();
+			if (calculateFingerprint)
+				ContentPipelineDiagnostics.RecordContentFingerprint();
 			return counter.Build(sizeBytes);
 		}
 		finally
@@ -771,10 +777,96 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 	}
 
 	/// <summary>
+	/// Measures the exact text described by a validated compression plan without allocating that
+	/// text. The encoder and metric counter both retain state across splice boundaries, so CRLF and
+	/// surrogate pairs split by adjacent chunks behave exactly like the materialized output.
+	/// </summary>
+	public static TextFileMetrics ComputeTransformedMetrics(
+		ReadOnlySpan<char> source,
+		CodeCompressionPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		if (source.Length != plan.SourceLength)
+		{
+			throw new ArgumentException(
+				$"The plan was built for {plan.SourceLength} characters but the text has {source.Length}.",
+				nameof(source));
+		}
+
+		var counter = new TextMetricsCounter();
+		var encoder = Encoding.UTF8.GetEncoder();
+		Span<byte> byteBuffer = stackalloc byte[512];
+		long utf8Bytes = 0;
+		var sourceCursor = 0;
+		foreach (var edit in plan.Edits)
+		{
+			AppendTransformedMetricsChunk(
+				ref counter,
+				encoder,
+				source[sourceCursor..edit.SourceStart],
+				byteBuffer,
+				flush: false,
+				ref utf8Bytes);
+			AppendTransformedMetricsChunk(
+				ref counter,
+				encoder,
+				edit.Replacement.AsSpan(),
+				byteBuffer,
+				flush: false,
+				ref utf8Bytes);
+			sourceCursor = edit.SourceEnd;
+		}
+		AppendTransformedMetricsChunk(
+			ref counter,
+			encoder,
+			source[sourceCursor..],
+			byteBuffer,
+			flush: false,
+			ref utf8Bytes);
+		AppendTransformedMetricsChunk(
+			ref counter,
+			encoder,
+			ReadOnlySpan<char>.Empty,
+			byteBuffer,
+			flush: true,
+			ref utf8Bytes);
+		var metrics = counter.Build(utf8Bytes);
+		Debug.Assert(metrics.CharCount == plan.TransformedLength);
+		return metrics;
+	}
+
+	private static void AppendTransformedMetricsChunk(
+		ref TextMetricsCounter counter,
+		Encoder encoder,
+		ReadOnlySpan<char> chunk,
+		Span<byte> byteBuffer,
+		bool flush,
+		ref long utf8Bytes)
+	{
+		counter.Append(chunk);
+		do
+		{
+			encoder.Convert(
+				chunk,
+				byteBuffer,
+				flush,
+				out var charactersUsed,
+				out var bytesUsed,
+				out var completed);
+			utf8Bytes += bytesUsed;
+			chunk = chunk[charactersUsed..];
+			if (completed)
+				return;
+			if (charactersUsed == 0 && bytesUsed == 0)
+				throw new InvalidOperationException("UTF-8 metric encoding made no progress.");
+		} while (true);
+	}
+
+	/// <summary>
 	/// The single per-character pass behind every text metric. Carrying its state across calls is
 	/// what lets a CRLF pair split by a read-buffer boundary still count as one line break.
 	/// </summary>
-	private struct TextMetricsCounter()
+	internal struct TextMetricsCounter()
 	{
 		private int _lineCount = 1; // A file with no newlines is one line.
 		private int _charCount;
@@ -854,19 +946,23 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				LongestBacktickRun: _longestBacktickRun);
 	}
 
-	private static TextFileContent ReadFullContentStrict(
+	private static ContentReadFact ReadFullContentStrict(
 		FileStream stream,
 		long sizeBytes,
 		Encoding encoding,
+		TextFileEncoding textEncoding,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		ContentPipelineDiagnostics.RecordFullFileRead(sizeBytes);
 		stream.Position = 0;
-		var contentBuilder = new StringBuilder(
-			(int)Math.Min(sizeBytes, 1024 * 1024));
-		var buffer = ArrayPool<char>.Shared.Rent(StreamingBufferSize);
+		var maximumCharacters = encoding.GetMaxCharCount(checked((int)sizeBytes));
+		var buffer = ArrayPool<char>.Shared.Rent(Math.Max(1, maximumCharacters));
+		var charactersWritten = 0;
+		var counter = new TextMetricsCounter();
+		using var fingerprint = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		using (var reader = new StreamReader(
-			       stream,
+		       stream,
 			       encoding,
 			       detectEncodingFromByteOrderMarks: true,
 			       bufferSize: StreamingBufferSize,
@@ -874,34 +970,38 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		{
 			try
 			{
-				int charactersRead;
-				while ((charactersRead = reader.Read(buffer, 0, buffer.Length)) > 0)
+				while (true)
 				{
 					cancellationToken.ThrowIfCancellationRequested();
-					if (buffer.AsSpan(0, charactersRead).Contains('\0'))
+					var charactersRead = reader.Read(
+						buffer,
+						charactersWritten,
+						buffer.Length - charactersWritten);
+					if (charactersRead == 0)
+						break;
+					var chunk = buffer.AsSpan(charactersWritten, charactersRead);
+					if (!counter.Append(chunk))
 						throw new BinaryContentException();
-					contentBuilder.Append(buffer, 0, charactersRead);
+					fingerprint.AppendData(MemoryMarshal.AsBytes(chunk));
+					charactersWritten = checked(charactersWritten + charactersRead);
 				}
+
+				var content = new string(buffer, 0, charactersWritten);
+				var rawMetrics = counter.Build(sizeBytes);
+				var contentFingerprint = ContentFingerprint.FromBytes(fingerprint.GetHashAndReset());
+				ContentPipelineDiagnostics.RecordContentFingerprint();
+				return new ContentReadFact(
+					content,
+					FileContentClassification.Text,
+					rawMetrics,
+					contentFingerprint,
+					textEncoding);
 			}
 			finally
 			{
 				ArrayPool<char>.Shared.Return(buffer);
 			}
 		}
-
-		var content = contentBuilder.ToString();
-		var lineCount = content.Length == 0 ? 0 : 1 + CountNormalizedLineBreaks(content);
-		var trailingInfo = GetTrailingNewlineInfo(content);
-		return new TextFileContent(
-			Content: content,
-			SizeBytes: sizeBytes,
-			LineCount: lineCount,
-			CharCount: content.Length,
-			IsEmpty: content.Length == 0,
-			IsWhitespaceOnly: content.Length > 0 && string.IsNullOrWhiteSpace(content),
-			IsEstimated: false,
-			TrailingNewlineChars: trailingInfo.Chars,
-			TrailingNewlineLineBreaks: trailingInfo.LineBreaks);
 	}
 
 	/// <summary>
@@ -1018,6 +1118,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 				             nameof(StreamFileContentSnapshot));
 			if (source.Length != metrics.SizeBytes)
 				throw CreateChangedFileException();
+			ContentPipelineDiagnostics.RecordFullFileRead(metrics.SizeBytes);
+			ContentPipelineDiagnostics.RecordContentFingerprint();
 
 			var buffer = ArrayPool<char>.Shared.Rent(StreamingBufferSize);
 			using var fingerprint = IncrementalHash.CreateHash(

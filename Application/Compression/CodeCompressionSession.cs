@@ -24,7 +24,9 @@ public sealed record CodeCompressionSnapshot(
 	int UnchangedFiles,
 	long SourceCharacters,
 	long TransformedCharacters,
-	IReadOnlyList<CodeCompressionFileOutcome> Unchanged)
+	IReadOnlyList<CodeCompressionFileOutcome> Unchanged,
+	IReadOnlyDictionary<CodeCompressionOutcome, int>? UnchangedOutcomeCounts = null,
+	int AdditionalUnchangedFiles = 0)
 {
 	public static CodeCompressionSnapshot Empty { get; } = new(string.Empty, 0, 0, 0, 0, []);
 
@@ -48,7 +50,15 @@ public sealed record CodeCompressionDiagnosticsSnapshot(
 	int CacheEntries,
 	long RetainedCacheBytes,
 	int MaximumCacheEntries,
-	long MaximumRetainedCacheBytes);
+	long MaximumRetainedCacheBytes,
+	CodeCompressionRuntimeDiagnosticSnapshot Runtime);
+
+internal enum CodeCompressionScopeMode
+{
+	Output,
+	Prewarm,
+	Measurement
+}
 
 /// <summary>
 /// Window-lifetime state for code compression: the compressor, a plan cache and the last published
@@ -100,6 +110,9 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 	public bool IsSupported(string relativePath) => compressor.IsSupported(relativePath);
 
+	public int AnalysisWorkerCapacity =>
+		(compressor as ICodeCompressionRuntimeDiagnosticsProvider)?.AnalysisWorkerCapacity ?? 1;
+
 	public CodeCompressionDiagnosticsSnapshot Diagnostics
 	{
 		get
@@ -124,7 +137,9 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				cacheEntries,
 				retainedCacheBytes,
 				_maximumCacheEntries,
-				_maximumRetainedCacheBytes);
+				_maximumRetainedCacheBytes,
+				(compressor as ICodeCompressionRuntimeDiagnosticsProvider)
+					?.CaptureRuntimeDiagnostics() ?? CodeCompressionRuntimeDiagnosticSnapshot.Empty);
 		}
 	}
 
@@ -138,15 +153,45 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	}
 
 	public CodeCompressionScope BeginOutput(string projectRoot, IReadOnlyList<string> orderedFilePaths)
+		=> BeginOutput(projectRoot, ContentSelectionSnapshot.Create(projectRoot, orderedFilePaths));
+
+	public CodeCompressionScope BeginOutput(
+		string projectRoot,
+		ContentSelectionSnapshot selection) =>
+		BeginScope(projectRoot, selection, CodeCompressionScopeMode.Output);
+
+	internal CodeCompressionScope BeginPrewarm(
+		string projectRoot,
+		IReadOnlyList<string> orderedFilePaths) =>
+		BeginPrewarm(projectRoot, ContentSelectionSnapshot.Create(projectRoot, orderedFilePaths));
+
+	internal CodeCompressionScope BeginPrewarm(
+		string projectRoot,
+		ContentSelectionSnapshot selection) =>
+		BeginScope(projectRoot, selection, CodeCompressionScopeMode.Prewarm);
+
+	public CodeCompressionScope BeginMeasurement(string projectRoot) =>
+		BeginScope(
+			projectRoot,
+			new ContentSelectionSnapshot(0, [], string.Empty),
+			CodeCompressionScopeMode.Measurement);
+
+	private CodeCompressionScope BeginScope(
+		string projectRoot,
+		ContentSelectionSnapshot selection,
+		CodeCompressionScopeMode mode)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		var generation = CaptureGeneration();
 		return new CodeCompressionScope(
 			this,
 			compressor.CreateScope(projectRoot),
-			BuildSelectionKey(projectRoot, orderedFilePaths),
-			orderedFilePaths,
-			generation.Version);
+			mode == CodeCompressionScopeMode.Measurement
+				? string.Empty
+				: selection.SelectionFingerprint,
+			selection.OrderedPaths,
+			generation.Version,
+			mode);
 	}
 
 	internal CodeCompressionExecution Transform(
@@ -154,7 +199,9 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		string fullPath,
 		string relativePath,
 		string content,
+		ContentFingerprint? fingerprint,
 		long generation,
+		bool materializeOutput,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -168,7 +215,9 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				compressor.TransformIdentity);
 			return new CodeCompressionExecution(
 				empty,
-				new CodeCompressionResult(content, ContentTransformMap.Identity));
+				materializeOutput
+					? new CodeCompressionResult(content, ContentTransformMap.Identity)
+					: null);
 		}
 
 		if (!compressor.IsSupported(relativePath))
@@ -182,7 +231,9 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				compressor.TransformIdentity);
 			return new CodeCompressionExecution(
 				unsupported,
-				new CodeCompressionResult(content, ContentTransformMap.Identity));
+				materializeOutput
+					? new CodeCompressionResult(content, ContentTransformMap.Identity)
+					: null);
 		}
 		if (!IsCurrentGeneration(generation))
 		{
@@ -191,18 +242,26 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				CreatePreparedPlan(staleAnalysis),
 				relativePath,
 				content,
+				materializeOutput,
 				staleAnalysis.ValidatedResult);
 		}
 
-		var key = CodeCompressionCacheKey.Create(
-			fullPath,
-			content,
-			compressor.TransformIdentity);
-		Interlocked.Increment(ref _hashComputations);
+		var key = fingerprint is { } knownFingerprint
+			? CodeCompressionCacheKey.Create(
+				fullPath,
+				content.Length,
+				knownFingerprint,
+				compressor.TransformIdentity)
+			: CodeCompressionCacheKey.Create(
+				fullPath,
+				content,
+				compressor.TransformIdentity);
+		if (fingerprint is null)
+			Interlocked.Increment(ref _hashComputations);
 		if (TryGetCachedPlan(key, out var cached))
 		{
 			Interlocked.Increment(ref _cacheHits);
-			return CreateExecution(cached.Prepared, relativePath, content);
+			return CreateExecution(cached.Prepared, relativePath, content, materializeOutput);
 		}
 
 		if (_prewarmInFlight.TryGetValue(key, out var warming))
@@ -211,7 +270,12 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			var analysis = warming.Value;
 			cancellationToken.ThrowIfCancellationRequested();
 			var warmed = CacheAnalysisOrCreatePrepared(key, analysis, generation);
-			return CreateExecution(warmed, relativePath, content, analysis.ValidatedResult);
+			return CreateExecution(
+				warmed,
+				relativePath,
+				content,
+				materializeOutput,
+				analysis.ValidatedResult);
 		}
 
 		// Warmup publishes into the cache before removing its in-flight entry. If it completed
@@ -220,7 +284,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		if (TryGetCachedPlan(key, out cached))
 		{
 			Interlocked.Increment(ref _cacheHits);
-			return CreateExecution(cached.Prepared, relativePath, content);
+			return CreateExecution(cached.Prepared, relativePath, content, materializeOutput);
 		}
 
 		Interlocked.Increment(ref _cacheMisses);
@@ -242,7 +306,12 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			var analysis = pending.Value;
 			cancellationToken.ThrowIfCancellationRequested();
 			var cachedAnalysis = CacheAnalysisOrCreatePrepared(key, analysis, generation);
-			return CreateExecution(cachedAnalysis, relativePath, content, analysis.ValidatedResult);
+			return CreateExecution(
+				cachedAnalysis,
+				relativePath,
+				content,
+				materializeOutput,
+				analysis.ValidatedResult);
 		}
 		finally
 		{
@@ -256,6 +325,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		string fullPath,
 		string relativePath,
 		string content,
+		ContentFingerprint? fingerprint,
 		long scopeGeneration,
 		CancellationToken cancellationToken)
 	{
@@ -286,8 +356,15 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			return null;
 
 		Interlocked.Increment(ref _prewarmRequests);
-		var key = CodeCompressionCacheKey.Create(fullPath, content, compressor.TransformIdentity);
-		Interlocked.Increment(ref _hashComputations);
+		var key = fingerprint is { } knownFingerprint
+			? CodeCompressionCacheKey.Create(
+				fullPath,
+				content.Length,
+				knownFingerprint,
+				compressor.TransformIdentity)
+			: CodeCompressionCacheKey.Create(fullPath, content, compressor.TransformIdentity);
+		if (fingerprint is null)
+			Interlocked.Increment(ref _hashComputations);
 		if (TryGetCachedPlan(key, out var cached))
 		{
 			Interlocked.Increment(ref _prewarmCacheHits);
@@ -340,6 +417,37 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			if (_prewarmInFlight.TryGetValue(key, out var current) && ReferenceEquals(current, pending))
 				_prewarmInFlight.TryRemove(key, out _);
 		}
+	}
+
+	internal bool TryGetWarmCachedPlan(
+		string fullPath,
+		string relativePath,
+		int contentLength,
+		ContentFingerprint fingerprint,
+		long scopeGeneration,
+		out CodeCompressionPlan plan)
+	{
+		if (!IsCurrentGeneration(scopeGeneration))
+		{
+			plan = null!;
+			return false;
+		}
+
+		var key = CodeCompressionCacheKey.Create(
+			fullPath,
+			contentLength,
+			fingerprint,
+			compressor.TransformIdentity);
+		if (!TryGetCachedPlan(key, out var cached))
+		{
+			plan = null!;
+			return false;
+		}
+
+		Interlocked.Increment(ref _prewarmRequests);
+		Interlocked.Increment(ref _prewarmCacheHits);
+		plan = WithRelativePath(cached.Prepared.Plan, relativePath);
+		return true;
 	}
 
 	private bool TryGetActiveOutputAnalysis(
@@ -460,12 +568,15 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		PreparedPlan prepared,
 		string relativePath,
 		string content,
+		bool materializeOutput,
 		CodeCompressionResult? validatedResult = null)
 	{
 		var outputPlan = WithRelativePath(prepared.Plan, relativePath);
 		return new CodeCompressionExecution(
 			outputPlan,
-			validatedResult ?? prepared.Plan.Apply(content, prepared.Map));
+			materializeOutput
+				? validatedResult ?? prepared.Plan.Apply(content, prepared.Map)
+				: null);
 	}
 
 	private static CodeCompressionPlan WithRelativePath(
@@ -530,21 +641,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	}
 
 	public static string BuildSelectionKey(string projectRoot, IReadOnlyList<string> orderedFilePaths)
-	{
-		var canonicalPaths = orderedFilePaths
-			.OrderBy(static path => path, PathComparer.Default)
-			.ToArray();
-		var builder = new StringBuilder(projectRoot.Length + canonicalPaths.Sum(static path => path.Length + 12));
-		AppendLengthPrefixed(builder, projectRoot);
-		builder.Append(canonicalPaths.Length).Append(':');
-		foreach (var path in canonicalPaths)
-			AppendLengthPrefixed(builder, path);
-
-		return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
-	}
-
-	private static void AppendLengthPrefixed(StringBuilder builder, string value) =>
-		builder.Append(value.Length).Append(':').Append(value);
+		=> ContentSelectionSnapshot.Create(projectRoot, orderedFilePaths).SelectionFingerprint;
 
 	private GenerationSnapshot CaptureGeneration()
 	{
@@ -605,6 +702,20 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				BinaryPrimitives.ReadUInt64LittleEndian(hash[24..]),
 				transformIdentity);
 		}
+
+		public static CodeCompressionCacheKey Create(
+			string fullPath,
+			int contentLength,
+			ContentFingerprint fingerprint,
+			string transformIdentity) =>
+			new(
+				fullPath,
+				contentLength,
+				fingerprint.Part0,
+				fingerprint.Part1,
+				fingerprint.Part2,
+				fingerprint.Part3,
+				transformIdentity);
 	}
 }
 
@@ -613,21 +724,47 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 /// publish exact facts without materializing transformed strings and every output later reports the
 /// same plans after applying them.
 /// </summary>
-public sealed class CodeCompressionScope(
-	CodeCompressionSession session,
-	ICodeCompressionScope inner,
-	string selectionKey,
-	IReadOnlyList<string> orderedFilePaths,
-	long generation) : IDisposable
+public sealed class CodeCompressionScope : IDisposable
 {
-	private readonly ConcurrentQueue<OrderedCompressionOutcome> _unchanged = [];
-	private readonly IReadOnlyDictionary<string, int> _fileOrder = orderedFilePaths
-		.Select(static (path, index) => (path, index))
-		.ToDictionary(static item => item.path, static item => item.index, PathComparer.Default);
+	internal const int MaximumUnchangedDiagnosticExamples = 256;
+	private readonly CodeCompressionSession session;
+	private readonly ICodeCompressionScope inner;
+	private readonly string selectionKey;
+	private readonly long generation;
+	private readonly CodeCompressionScopeMode mode;
+	private readonly SortedDictionary<DiagnosticOrderKey, CodeCompressionFileOutcome>? _unchangedExamples;
+	private readonly int[]? _unchangedOutcomeCounts;
+	private readonly IReadOnlyDictionary<string, int>? _fileOrder;
+	private readonly object _diagnosticsSync = new();
 	private int _compressed;
+	private int _unchangedFiles;
 	private long _sourceCharacters;
 	private long _transformedCharacters;
 	private int _completed;
+
+	internal CodeCompressionScope(
+		CodeCompressionSession session,
+		ICodeCompressionScope inner,
+		string selectionKey,
+		IReadOnlyList<string> orderedFilePaths,
+		long generation,
+		CodeCompressionScopeMode mode)
+	{
+		this.session = session;
+		this.inner = inner;
+		this.selectionKey = selectionKey;
+		this.generation = generation;
+		this.mode = mode;
+		if (mode == CodeCompressionScopeMode.Measurement)
+			return;
+
+		_unchangedExamples = new SortedDictionary<DiagnosticOrderKey, CodeCompressionFileOutcome>(
+			DiagnosticOrderKeyComparer.Instance);
+		_unchangedOutcomeCounts = new int[Enum.GetValues<CodeCompressionOutcome>().Length];
+		_fileOrder = orderedFilePaths
+			.Select(static (path, index) => (path, index))
+			.ToDictionary(static item => item.path, static item => item.index, PathComparer.Default);
+	}
 
 	public CodeCompressionResult Transform(
 		string fullPath,
@@ -636,13 +773,86 @@ public sealed class CodeCompressionScope(
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
-		var execution = session.Transform(inner, fullPath, relativePath, content, generation, cancellationToken);
+		var execution = session.Transform(
+			inner,
+			fullPath,
+			relativePath,
+			content,
+			fingerprint: null,
+			generation,
+			materializeOutput: true,
+			cancellationToken);
 		var plan = execution.Plan;
 		RecordPlan(fullPath, plan);
 		if (plan.Outcome == CodeCompressionOutcome.Compressed)
-			return execution.Output;
+			return execution.Output!;
 
 		return new CodeCompressionResult(content, ContentTransformMap.Identity);
+	}
+
+	public CodeCompressionResult Transform(
+		string fullPath,
+		string relativePath,
+		string content,
+		ContentFingerprint fingerprint,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var execution = session.Transform(
+			inner,
+			fullPath,
+			relativePath,
+			content,
+			fingerprint,
+			generation,
+			materializeOutput: true,
+			cancellationToken);
+		var plan = execution.Plan;
+		RecordPlan(fullPath, plan);
+		return plan.Outcome == CodeCompressionOutcome.Compressed
+			? execution.Output!
+			: new CodeCompressionResult(content, ContentTransformMap.Identity);
+	}
+
+	public CodeCompressionPlan ResolvePlan(
+		string fullPath,
+		string relativePath,
+		string content,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var execution = session.Transform(
+			inner,
+			fullPath,
+			relativePath,
+			content,
+			fingerprint: null,
+			generation,
+			materializeOutput: false,
+			cancellationToken);
+		RecordPlan(fullPath, execution.Plan);
+		return execution.Plan;
+	}
+
+	public CodeCompressionPlan ResolvePlan(
+		string fullPath,
+		string relativePath,
+		string content,
+		ContentFingerprint fingerprint,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var execution = session.Transform(
+			inner,
+			fullPath,
+			relativePath,
+			content,
+			fingerprint,
+			generation,
+			materializeOutput: false,
+			cancellationToken);
+		RecordPlan(fullPath, execution.Plan);
+		return execution.Plan;
 	}
 
 	internal bool Warm(
@@ -657,6 +867,7 @@ public sealed class CodeCompressionScope(
 			fullPath,
 			relativePath,
 			content,
+			fingerprint: null,
 			generation,
 			cancellationToken);
 		if (plan is null)
@@ -666,8 +877,54 @@ public sealed class CodeCompressionScope(
 		return true;
 	}
 
+	internal bool TryWarmCached(
+		string fullPath,
+		string relativePath,
+		string content,
+		ContentFingerprint fingerprint)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		if (!session.TryGetWarmCachedPlan(
+				fullPath,
+				relativePath,
+				content.Length,
+				fingerprint,
+				generation,
+				out var plan))
+		{
+			return false;
+		}
+		RecordPlan(fullPath, plan);
+		return true;
+	}
+
+	internal bool Warm(
+		string fullPath,
+		string relativePath,
+		string content,
+		ContentFingerprint fingerprint,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		var plan = session.Warm(
+			inner,
+			fullPath,
+			relativePath,
+			content,
+			fingerprint,
+			generation,
+			cancellationToken);
+		if (plan is null)
+			return false;
+		RecordPlan(fullPath, plan);
+		return true;
+	}
+
 	private void RecordPlan(string fullPath, CodeCompressionPlan plan)
 	{
+		if (mode == CodeCompressionScopeMode.Measurement)
+			return;
+
 		Interlocked.Add(ref _sourceCharacters, plan.SourceLength);
 		if (plan.Outcome == CodeCompressionOutcome.Compressed)
 		{
@@ -677,41 +934,76 @@ public sealed class CodeCompressionScope(
 		}
 
 		Interlocked.Add(ref _transformedCharacters, plan.SourceLength);
-		_unchanged.Enqueue(new OrderedCompressionOutcome(
-			fullPath,
-			new CodeCompressionFileOutcome(
+		Interlocked.Increment(ref _unchangedFiles);
+		Interlocked.Increment(ref _unchangedOutcomeCounts![(int)plan.Outcome]);
+		var order = new DiagnosticOrderKey(
+			_fileOrder!.GetValueOrDefault(fullPath, int.MaxValue),
+			plan.RelativePath);
+		lock (_diagnosticsSync)
+		{
+			if (_unchangedExamples!.Count >= MaximumUnchangedDiagnosticExamples &&
+			    DiagnosticOrderKeyComparer.Instance.Compare(
+				    order,
+				    _unchangedExamples.Last().Key) >= 0)
+			{
+				return;
+			}
+			_unchangedExamples[order] = new CodeCompressionFileOutcome(
 				plan.RelativePath,
 				plan.LanguageId,
 				plan.Outcome,
 				plan.SourceLength,
-				plan.SourceLength)));
+				plan.SourceLength);
+			if (_unchangedExamples.Count > MaximumUnchangedDiagnosticExamples)
+				_unchangedExamples.Remove(_unchangedExamples.Last().Key);
+		}
 	}
 
 	public CodeCompressionSnapshot Complete()
 	{
+		if (mode == CodeCompressionScopeMode.Measurement)
+			throw new InvalidOperationException("A measurement scope cannot publish a compression snapshot.");
 		if (Interlocked.Exchange(ref _completed, 1) != 0)
 			throw new InvalidOperationException("The compression scope has already completed.");
-		var unchanged = _unchanged
-			.OrderBy(outcome => _fileOrder.GetValueOrDefault(outcome.FullPath, int.MaxValue))
-			.ThenBy(static outcome => outcome.Outcome.RelativePath, PathComparer.Default)
-			.Select(static outcome => outcome.Outcome)
-			.ToArray();
+		CodeCompressionFileOutcome[] unchanged;
+		lock (_diagnosticsSync)
+			unchanged = _unchangedExamples!.Values.ToArray();
+		var unchangedFiles = Volatile.Read(ref _unchangedFiles);
+		var outcomeCounts = Enum.GetValues<CodeCompressionOutcome>()
+			.Where(static outcome => outcome != CodeCompressionOutcome.Compressed)
+			.ToDictionary(
+				static outcome => outcome,
+				outcome => Volatile.Read(ref _unchangedOutcomeCounts![(int)outcome]));
 		var snapshot = new CodeCompressionSnapshot(
 			selectionKey,
 			Volatile.Read(ref _compressed),
-			unchanged.Length,
+			unchangedFiles,
 			Interlocked.Read(ref _sourceCharacters),
 			Interlocked.Read(ref _transformedCharacters),
-			unchanged);
+			unchanged,
+			outcomeCounts,
+			Math.Max(0, unchangedFiles - unchanged.Length));
 		session.Publish(snapshot, generation);
 		return snapshot;
 	}
 
 	public void Dispose() => inner.Dispose();
 
-	private sealed record OrderedCompressionOutcome(
-		string FullPath,
-		CodeCompressionFileOutcome Outcome);
+	private readonly record struct DiagnosticOrderKey(int Order, string RelativePath);
+
+	private sealed class DiagnosticOrderKeyComparer : IComparer<DiagnosticOrderKey>
+	{
+		public static DiagnosticOrderKeyComparer Instance { get; } = new();
+
+		public int Compare(DiagnosticOrderKey left, DiagnosticOrderKey right)
+		{
+			var order = left.Order.CompareTo(right.Order);
+			return order != 0
+				? order
+				: PathComparer.Default.Compare(left.RelativePath, right.RelativePath);
+		}
+	}
+
 }
 
 /// <summary>
@@ -722,4 +1014,16 @@ public sealed record CodeCompressionContext(string ProjectRoot, CodeCompressionS
 {
 	public CodeCompressionScope BeginOutput(IReadOnlyList<string> orderedFilePaths) =>
 		Session.BeginOutput(ProjectRoot, orderedFilePaths);
+
+	public CodeCompressionScope BeginOutput(ContentSelectionSnapshot selection) =>
+		Session.BeginOutput(ProjectRoot, selection);
+
+	internal CodeCompressionScope BeginPrewarm(IReadOnlyList<string> orderedFilePaths) =>
+		Session.BeginPrewarm(ProjectRoot, orderedFilePaths);
+
+	internal CodeCompressionScope BeginPrewarm(ContentSelectionSnapshot selection) =>
+		Session.BeginPrewarm(ProjectRoot, selection);
+
+	public CodeCompressionScope BeginMeasurement() =>
+		Session.BeginMeasurement(ProjectRoot);
 }

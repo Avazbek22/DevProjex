@@ -12,4 +12,9 @@ public sealed record SecretRedactionContext(
 		IReadOnlyList<string> orderedFilePaths,
 		string transformIdentity = "") =>
 		Session.BeginOutput(ProjectRoot, orderedFilePaths, transformIdentity);
+
+	public SecretRedactionScope BeginOutput(
+		ContentSelectionSnapshot selection,
+		string transformIdentity = "") =>
+		Session.BeginOutput(ProjectRoot, selection, transformIdentity);
 }

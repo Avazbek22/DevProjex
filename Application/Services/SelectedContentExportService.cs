@@ -16,6 +16,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 	private const string NoContentMarker = "[No Content, 0 bytes]";
 	private const string WhitespaceMarkerPrefix = "[Whitespace, ";
 	private const string WhitespaceMarkerSuffix = " bytes]";
+	private const long DefaultMaximumMaterializedFileBytes = 10L * 1024 * 1024;
 
 	public string Build(IEnumerable<string> filePaths) =>
 		Build(filePaths, displayPathMapper: null);
@@ -118,20 +119,35 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				break;
 
 			TextFileContent? content;
+			ContentFingerprint? contentFingerprint = null;
 			if (redactionScope is null)
 			{
-				content = maxFileSizeForFullRead is { } sizeLimit
-					? await contentAnalyzer.TryReadAsTextAsync(file, sizeLimit, cancellationToken).ConfigureAwait(false)
-					: await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
+				if (transformationScope?.Compression is not null)
+				{
+					var readFact = await contentAnalyzer.ReadFactAsync(
+						file,
+						maxFileSizeForFullRead ?? DefaultMaximumMaterializedFileBytes,
+						cancellationToken).ConfigureAwait(false);
+					content = readFact.ToReadResult().Content;
+					contentFingerprint = readFact.Fingerprint;
+				}
+				else
+				{
+					content = maxFileSizeForFullRead is { } sizeLimit
+						? await contentAnalyzer.TryReadAsTextAsync(file, sizeLimit, cancellationToken).ConfigureAwait(false)
+						: await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
+				}
 			}
 			else
 			{
 				var scanLimit = maxFileSizeForFullRead ??
 				                SecretRedactionOutputPreparer.MaximumScannableFileBytes;
-				var readResult = await contentAnalyzer
-					.ReadClassifiedAsync(file, scanLimit, cancellationToken)
+				var readFact = await contentAnalyzer
+					.ReadFactAsync(file, scanLimit, cancellationToken)
 					.ConfigureAwait(false);
+				var readResult = readFact.ToReadResult();
 				content = readResult.Content;
+				contentFingerprint = readFact.Fingerprint;
 				switch (readResult.Classification)
 				{
 					case FileContentClassification.Binary:
@@ -160,11 +176,18 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			// it would record a clean scan of a file that was never opened.
 			var compression = content.IsEstimated
 				? null
-				: transformationScope?.Compress(
-					file,
-					MapDisplayPath(file, displayPathMapper),
-					content.Content,
-					cancellationToken);
+				: contentFingerprint is { } fingerprint
+					? transformationScope?.Compress(
+						file,
+						MapDisplayPath(file, displayPathMapper),
+						content.Content,
+						fingerprint,
+						cancellationToken)
+					: transformationScope?.Compress(
+						file,
+						MapDisplayPath(file, displayPathMapper),
+						content.Content,
+						cancellationToken);
 			var transformedText = compression?.Text ?? content.Content;
 			var redactionPlan = content.IsEstimated
 				? null

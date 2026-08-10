@@ -1,3 +1,5 @@
+using DevProjex.Application.Diagnostics;
+
 namespace DevProjex.Application.Compression;
 
 /// <summary>
@@ -111,6 +113,7 @@ public sealed record CodeCompressionPlan(
 	/// </summary>
 	public CodeCompressionResult Apply(string source)
 	{
+		ContentPipelineDiagnostics.RecordPlanApply();
 		ArgumentNullException.ThrowIfNull(source);
 		if (source.Length != SourceLength)
 			throw new ArgumentException($"The plan was built for {SourceLength} characters but the text has {source.Length}.", nameof(source));
@@ -121,6 +124,7 @@ public sealed record CodeCompressionPlan(
 
 	internal CodeCompressionResult Apply(string source, ContentTransformMap map)
 	{
+		ContentPipelineDiagnostics.RecordPlanApply();
 		ArgumentNullException.ThrowIfNull(source);
 		ArgumentNullException.ThrowIfNull(map);
 		if (source.Length != SourceLength)
@@ -132,6 +136,7 @@ public sealed record CodeCompressionPlan(
 
 	public CodeCompressionResult Apply(ReadOnlySpan<char> source)
 	{
+		ContentPipelineDiagnostics.RecordPlanApply();
 		if (source.Length != SourceLength)
 			throw new ArgumentException($"The plan was built for {SourceLength} characters but the text has {source.Length}.", nameof(source));
 		if (!HasEdits)
@@ -183,4 +188,4 @@ public sealed record CodeCompressionResult(string Text, ContentTransformMap Map)
 
 internal sealed record CodeCompressionExecution(
 	CodeCompressionPlan Plan,
-	CodeCompressionResult Output);
+	CodeCompressionResult? Output);
