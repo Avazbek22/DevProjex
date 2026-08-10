@@ -83,6 +83,7 @@ selection. `open` additionally accepts `auto`:
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>             repeatable
 --hide-secrets [<true|false>]
+--compress [<true|false>]
 ```
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
@@ -131,6 +132,27 @@ selected text files and keeps their surrounding context. It is off in the
 `standard` profile. Binary
 files are not inspected, and no findings is not a security guarantee. See
 [HideSecrets.md](HideSecrets.md).
+
+`--compress` is also independent from path selection and is off in the
+`standard` profile. It replaces block bodies of named methods, functions, and
+constructors with minimal syntax-valid placeholders (`{ }`, or `...` for Python)
+in supported C, C++, C#, Go, Java, JavaScript, Python, Rust, TSX, and TypeScript
+files. JavaScript-family block
+functions stored in object properties, assigned or exported under a stable binding,
+or wrapped one or two calls deep under that binding are compressed as well. The
+property or binding name and function parameters remain visible; bare callbacks
+without a binding remain complete.
+An expression body whose expression fits on one source line remains byte-for-byte
+complete as signature-level context; a multiline expression is implementation and
+is compressed like a block body. Free lambdas or closures remain complete because
+removing an unbound body would leave no useful name. Fields and language-level
+properties are kept byte-for-byte complete, including their initializers and
+property accessors, because they describe project state and public behavior.
+Python also keeps a leading function docstring and the
+complete class `__init__` and `__post_init__` methods, where instance state is
+declared. Unsupported or conservatively rejected files remain complete. The same
+transformed content is used by analysis metrics, context documents, folder exports,
+and ZIP exports.
 
 Modern local profiles retain checked and unchecked states across roots, extensions,
 and Exclusions. Newly discovered rows use current defaults in Desktop, CLI, and TUI;
@@ -241,6 +263,7 @@ devprojex analyze .
 devprojex analyze . --format json -o -
 devprojex analyze ./app --format json -o report.json --strict
 devprojex analyze . --git-mode tracked --exclude smart-ignore
+devprojex analyze . --compress --format json
 ```
 
 ## Export Context
@@ -271,9 +294,10 @@ documents; Markdown contains headings, a fenced tree, and fenced text-file
 content. Binary bytes are never embedded in context output. Machine documents
 mark binary entries with metadata.
 
-With `--hide-secrets`, detection failure or a selected text file above the
-supported scan limit fails closed and produces no
-complete output artifact.
+With `--hide-secrets`, detection failure fails closed and produces no complete output
+artifact. A selected text file above the supported scan limit is omitted from the
+context document, the same as without `--hide-secrets`; `export project` leaves it out
+of the copy and names it in `DEVPROJEX-NOTICE.txt`.
 
 When output is stdout, stdout contains only the context document. When output is a
 file, stdout contains one absolute result path. Existing files are conflicts
@@ -293,6 +317,7 @@ devprojex export context . --view tree --format json -o -
 devprojex export context . --view content --format xml -o ../devprojex-context.xml
 devprojex export context . --format markdown -o ../devprojex-context.md --force
 devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
+devprojex export context . --compress --format markdown -o ../devprojex-compact.md
 ```
 
 ## Export Project
@@ -306,6 +331,7 @@ The destination is exact:
 ```shell
 devprojex export project . --as folder -o ../devprojex-submission
 devprojex export project . --as zip -o ../devprojex-submission.zip
+devprojex export project . --compress --as zip -o ../devprojex-compact.zip
 ```
 
 The first command creates exactly `../devprojex-submission`; it does not create an

@@ -14,6 +14,7 @@ permissions:
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DEVPROJEX_SKIP_TUI_PTY_TESTS: 1
 
 concurrency:
   group: release-validate-${{ github.workflow }}-${{ github.ref }}

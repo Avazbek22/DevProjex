@@ -49,14 +49,16 @@ public sealed class ExportProjectCommandHandler(
 		if (request.DryRun)
 		{
 			var redactSecrets = plan.Selection.HideSecrets == true;
+			string? unscannablePath = null;
 			if (redactSecrets)
 			{
-				await services.SecretRedactionOutputPreparer
+				var preflight = await services.SecretRedactionOutputPreparer
 					.AnalyzeAsync(
 						new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession),
 						plan.IncludedFiles,
 						cancellationToken)
 					.ConfigureAwait(false);
+				unscannablePath = preflight.UnscannablePath;
 			}
 			DryRunRenderer.WritePlan(
 				environment,
@@ -66,7 +68,17 @@ public sealed class ExportProjectCommandHandler(
 			{
 				environment.Error.WriteLine(
 					services.Localization["Terminal.DryRun.ProjectCopy.RedactionWarning"]);
+				// A dry run has to predict the real run, and the real run now leaves such a file
+				// out rather than refusing, so this says which one instead of failing.
+				if (unscannablePath is not null)
+				{
+					environment.Error.WriteLine(
+						services.Localization["ProjectCopy.Notice.UnscannableExcluded"]);
+				}
 			}
+
+			if (plan.Selection.CompressCode == true)
+				environment.Error.WriteLine(services.Localization["Compression.CopyNotice"]);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -82,7 +94,9 @@ public sealed class ExportProjectCommandHandler(
 			ConflictPolicy: request.Force
 				? ProjectCopyConflictPolicy.ReplaceAtomically
 				: ProjectCopyConflictPolicy.Fail,
-			RedactSecrets: plan.Selection.HideSecrets == true);
+			RedactSecrets: plan.Selection.HideSecrets == true,
+			CompressCode: plan.Selection.CompressCode == true,
+			NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(services.Localization));
 		var result = await new ProgressRenderer(environment, request.Output, services.Localization)
 			.RunProjectExportAsync(progress =>
 				services.ProjectCopyExportService.ExportAsync(

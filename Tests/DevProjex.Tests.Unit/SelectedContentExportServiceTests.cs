@@ -1,5 +1,7 @@
 namespace DevProjex.Tests.Unit;
 
+using DevProjex.Application.Compression;
+
 public sealed class SelectedContentExportServiceTests
 {
 	// Verifies missing or empty files are ignored when exporting content.
@@ -228,5 +230,82 @@ public sealed class SelectedContentExportServiceTests
 		Assert.Contains("large.txt:", result, StringComparison.Ordinal);
 		Assert.DoesNotContain(largePayload[..4096], result, StringComparison.Ordinal);
 		Assert.True(result.Length < 256);
+	}
+
+	[Fact]
+	public async Task BuildBoundedPreviewAsync_CompressesWarmupWithoutPublishingPartialSnapshot()
+	{
+		using var temp = new TemporaryDirectory();
+		const string source = "prefix { verbose body } suffix";
+		var file = temp.CreateFile("sample.cs", source);
+		var compressor = new RecordingCodeCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		var context = new CodeCompressionContext(temp.Path, session);
+		var publishedSnapshots = 0;
+		session.SnapshotPublished += (_, _) => publishedSnapshots++;
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
+
+		var warmup = await service.BuildBoundedPreviewAsync(
+			[file],
+			maxFileCount: 1,
+			maxFileSizeForFullRead: 4096,
+			maxOutputCharacters: 8192,
+			CancellationToken.None,
+			displayPathMapper: Path.GetFileName,
+			compressionContext: context);
+
+		Assert.Contains("prefix {...} suffix", warmup, StringComparison.Ordinal);
+		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.Equal(CodeCompressionSnapshot.Empty, session.Snapshot);
+		Assert.Equal(0, publishedSnapshots);
+
+		var complete = await service.BuildAsync(
+			[file],
+			CancellationToken.None,
+			Path.GetFileName,
+			ContentTransformationContext.For(context, redaction: null));
+
+		Assert.Contains("prefix {...} suffix", complete, StringComparison.Ordinal);
+		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.Equal(1, session.Snapshot.CompressedFiles);
+		Assert.Equal(1, publishedSnapshots);
+	}
+
+	private sealed class RecordingCodeCompressor : ICodeCompressor
+	{
+		private int _analysisCount;
+
+		public string TransformIdentity => "preview-warmup:v1";
+
+		public int AnalysisCount => Volatile.Read(ref _analysisCount);
+
+		public bool IsSupported(string relativePath) => true;
+
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
+
+		private sealed class Scope(RecordingCodeCompressor owner) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				Interlocked.Increment(ref owner._analysisCount);
+				var bodyStart = content.IndexOf("{ verbose body }", StringComparison.Ordinal);
+				var plan = CodeCompressionPlan.Create(
+					relativePath,
+					"csharp",
+					[new CodeCompressionEdit(bodyStart, "{ verbose body }".Length, "{...}")],
+					content.Length,
+					owner.TransformIdentity);
+				return new CodeCompressionAnalysis(plan, plan.Apply(content));
+			}
+
+			public void Dispose()
+			{
+			}
+		}
 	}
 }

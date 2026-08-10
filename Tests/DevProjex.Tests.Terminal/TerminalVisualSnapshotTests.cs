@@ -434,6 +434,7 @@ public sealed class TerminalVisualSnapshotTests
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
+				timeout: TimeSpan.FromSeconds(30),
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 

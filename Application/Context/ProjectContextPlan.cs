@@ -85,6 +85,12 @@ public sealed record ProjectSourceIdentity(
 
 public sealed record SecretRedactionSummary(int MatchedCount, int RedactedCount);
 
+public sealed record CodeCompressionSummary(
+	int CompressedFiles,
+	int UnchangedFiles,
+	long SourceCharacters,
+	long TransformedCharacters);
+
 public sealed record ProjectContextPlan(
 	string SourceRoot,
 	ProjectSelectionSpec Selection,
@@ -104,7 +110,8 @@ public sealed record ProjectContextPlan(
 	long IncludedBytes = 0,
 	IReadOnlyDictionary<string, long>? EffectiveFileSizes = null,
 	ProjectSourceIdentity? SourceIdentity = null,
-	SecretRedactionSummary? Redaction = null)
+	SecretRedactionSummary? Redaction = null,
+	CodeCompressionSummary? Compression = null)
 {
 	public bool HasErrors => Diagnostics.Any(static diagnostic =>
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);

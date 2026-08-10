@@ -20,19 +20,47 @@ public sealed class AnalyzeCommandHandler(
 					request.Selection,
 					cancellationToken: cancellationToken))
 			.ConfigureAwait(false);
-		if (plan.Selection.HideSecrets == true)
+		var transformationContext = ContentTransformationContext.For(
+			plan.Selection.CompressCode == true
+				? new CodeCompressionContext(plan.SourceRoot, services.CodeCompressionSession)
+				: null,
+			plan.Selection.HideSecrets == true
+				? new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession)
+				: null);
+		if (transformationContext is not null)
 		{
-			var redaction = await services.SecretRedactionOutputPreparer
-				.AnalyzeAsync(
-					new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession),
+			await using var prepared = await services.SecretRedactionOutputPreparer
+				.PrepareAsync(
+					transformationContext,
 					plan.IncludedFiles,
 					cancellationToken)
 				.ConfigureAwait(false);
+			var transformedAnalyzer = services.SecretRedactionOutputPreparer.CreatePreparedAnalyzer(prepared);
+			var transformedMetrics = await ProjectContentMetricsCalculator
+				.CalculateAsync(transformedAnalyzer, plan.IncludedFiles, cancellationToken)
+				.ConfigureAwait(false);
 			plan = plan with
 			{
-				Redaction = new SecretRedactionSummary(
-					redaction.DetectedCount,
-					redaction.RedactedCount)
+				Analysis = plan.Analysis with
+				{
+					Metrics = plan.Analysis.Metrics with
+					{
+						Content = new ProjectOutputMetricsReport(
+							transformedMetrics.Lines,
+							transformedMetrics.Chars,
+							transformedMetrics.Tokens)
+					}
+				},
+				Redaction = prepared.Snapshot is { } redaction
+					? new SecretRedactionSummary(redaction.DetectedCount, redaction.RedactedCount)
+					: null,
+				Compression = prepared.CompressionSnapshot is { } compression
+					? new CodeCompressionSummary(
+						compression.CompressedFiles,
+						compression.UnchangedFiles,
+						compression.SourceCharacters,
+						compression.TransformedCharacters)
+					: null
 			};
 		}
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
@@ -176,6 +204,18 @@ internal static class AnalysisTextFormatter
 					localization["Terminal.Analysis.SecretScanNotice"],
 					localization["SecretRedaction.NoFindingsNotice"]));
 			}
+		}
+		if (plan.Compression is { } compression)
+		{
+			var value = compression.CompressedFiles == 0
+				? localization["Settings.Compression.Status.NothingToCompress"]
+				: localization.Format(
+					"Settings.Compression.Status.Applied",
+					compression.CompressedFiles,
+					compression.CompressedFiles + compression.UnchangedFiles,
+					CodeCompressionSnapshot.EstimateTokens(compression.SourceCharacters),
+					CodeCompressionSnapshot.EstimateTokens(compression.TransformedCharacters));
+			rows.Add(new AnalysisTextRow(localization["Settings.Ignore.CompressCode"], value));
 		}
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Fingerprint"],

@@ -107,7 +107,24 @@ public partial class MainWindow : IRefreshTreePipelineHost
         _viewModel.TreeNodes.Clear();
 
         _currentTree = result.Tree;
-		InvalidateSecretRedactionCount();
+		if (!interactiveFilter)
+		{
+			// «Apply settings» is the commit point for the Compress Code checkbox. Every
+			// non-interactive tree publication - load, refresh, Apply - captures the checkbox as
+			// the applied transformation state; until then it is a draft with no effect on
+			// produced content, the preview, or the measured counters. Name-filter publications
+			// deliberately keep the previously applied state.
+			_appliedCompressCodeEnabled = _selectionCoordinator
+				.GetSelectedIgnoreOptionIds()
+				.Contains(IgnoreOptionId.CompressCode);
+			if (!_appliedCompressCodeEnabled)
+				_codeCompressionSnapshot = null;
+		}
+		// Keep tree publication visually pure. Initial/full refresh work must remain pending until
+		// StartPostLoadBackgroundWork releases it after the settings reveal and layout-settle gate.
+		// Scheduling secrets, compression or metrics here reintroduces the initial-load width jump.
+		// An interactive name filter has no reveal boundary and stays immediate.
+		InvalidateSecretRedactionCount(scheduleRefreshImmediately: interactiveFilter);
         if (interactiveFilter)
             _lastInteractiveFilterUsedInMemory = usedInMemoryFilter;
         UpdateCurrentTreeInventory(input, result, interactiveFilter, usedInMemoryFilter);

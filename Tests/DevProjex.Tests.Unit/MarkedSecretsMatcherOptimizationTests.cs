@@ -96,15 +96,14 @@ public sealed class MarkedSecretsMatcherOptimizationTests(ITestOutputHelper outp
 	}
 
 	[Fact]
-	public void SessionMark_ResolvesLineStartFromSharedNewlineIndex()
+	public void SessionMark_UsesCanonicalSourceOffsetAcrossMixedNewlines()
 	{
 		const string marked = "secret-value-0001";
 		const string content = "first\r\nsecond\nKEY=secret-value-0001\r\nlast";
 		var value = CreateValue(marked);
 		var sessionMark = new SessionMarkedSecret(
 			"config.env",
-			LineIndex: 2,
-			Column: "KEY=".Length,
+			content.IndexOf(marked, StringComparison.Ordinal),
 			value.Length,
 			value.Hash);
 		var matcher = new MarkedSecretsMatcher([], [sessionMark]);
@@ -113,6 +112,71 @@ public sealed class MarkedSecretsMatcherOptimizationTests(ITestOutputHelper outp
 
 		Assert.Equal(content.IndexOf(marked, StringComparison.Ordinal), finding.Start);
 		Assert.Equal(marked, finding.Value);
+	}
+
+	[Fact]
+	public void SessionOnlyMatching_ObservesCancellationWithoutBuildingAnIndex()
+	{
+		const string marked = "secret-value-0001";
+		var value = CreateValue(marked);
+		var matcher = new MarkedSecretsMatcher(
+			[],
+			[new SessionMarkedSecret("config.env", 4, value.Length, value.Hash)]);
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		Assert.Throws<OperationCanceledException>(() =>
+			matcher.Match("config.env", $"KEY={marked}", cancellation.Token));
+		Assert.Equal(0, matcher.PersistentIndexBuildCount);
+	}
+
+	[Fact]
+	public void SessionOnlyMark_DoesNotBuildAFullFilePositionIndex()
+	{
+		const string marked = "secret-value-0001";
+		var value = CreateValue(marked);
+		var matcher = new MarkedSecretsMatcher(
+			[],
+			[new SessionMarkedSecret("marked.env", 4, value.Length, value.Hash)]);
+		var unrelatedContent = new string('x', 16 * 1024 * 1024);
+
+		Assert.Empty(matcher.Match("unrelated.cs", unrelatedContent, CancellationToken));
+		var finding = Assert.Single(matcher.Match(
+			"marked.env",
+			$"KEY={marked}",
+			CancellationToken));
+
+		Assert.Equal(marked, finding.Value);
+		Assert.Equal(0, matcher.PersistentIndexBuildCount);
+	}
+
+	[Fact]
+	public void SessionOnlyMark_OnSixteenMiBInputHasBoundedAllocations()
+	{
+		const string marked = "secret-value-0001";
+		const int contentLength = 16 * 1024 * 1024;
+		var offset = contentLength / 2;
+		var characters = new string(' ', contentLength).ToCharArray();
+		marked.AsSpan().CopyTo(characters.AsSpan(offset));
+		var content = new string(characters);
+		var value = CreateValue(marked);
+		var matcher = new MarkedSecretsMatcher(
+			[],
+			[new SessionMarkedSecret("large.env", offset, value.Length, value.Hash)]);
+		_ = matcher.Match("large.env", "short", CancellationToken);
+
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+		var finding = Assert.Single(matcher.Match("large.env", content, CancellationToken));
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+		output.WriteLine(
+			"Session-only MarkedSecretsMatcher: {0:N0} chars, allocated={1:N0} bytes",
+			content.Length,
+			allocatedBytes);
+
+		Assert.Equal(offset, finding.Start);
+		Assert.Equal(marked, finding.Value);
+		Assert.Equal(0, matcher.PersistentIndexBuildCount);
+		Assert.InRange(allocatedBytes, 0, 1024 * 1024);
 	}
 
 	[Fact]

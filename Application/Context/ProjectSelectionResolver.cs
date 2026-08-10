@@ -34,6 +34,8 @@ public sealed class ProjectSelectionResolver(
 			GitMode = overrides.GitMode ?? baseline.GitMode,
 			Exclusions = resolvedExclusions,
 			HideSecrets = hideSecrets,
+			// Compression has no legacy exclusion form, so it resolves as a plain override.
+			CompressCode = overrides.CompressCode ?? baseline.CompressCode,
 			ProfileSource = profile
 		};
 		var applyProfileValues = profile.Kind != ProjectProfileSourceKind.Local;
@@ -59,7 +61,11 @@ public sealed class ProjectSelectionResolver(
 				HideSecrets: ResolveApplicationMode(
 					overrides.HideSecrets is not null,
 					applyProfileValues,
-					resolved.HideSecrets))
+					resolved.HideSecrets),
+				CompressCode: ResolveApplicationMode(
+					overrides.CompressCode is not null,
+					applyProfileValues,
+					resolved.CompressCode))
 		};
 
 		if (baseline.LocalProfileState is { } localState)
@@ -72,7 +78,8 @@ public sealed class ProjectSelectionResolver(
 					ExtensionsOverridden = overrides.Extensions is not null,
 					IgnoreOptionsOverridden = overrides.GitMode is not null ||
 					                          overrides.Exclusions is not null ||
-					                          overrides.HideSecrets is not null
+					                          overrides.HideSecrets is not null ||
+					                          overrides.CompressCode is not null
 				}
 			};
 		}

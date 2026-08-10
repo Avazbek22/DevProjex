@@ -194,6 +194,74 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
     [AvaloniaFact]
+    public async Task TreeChevron_HasAccessibleHitTargetWithoutGrowingItsGlyph()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var folderNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "src",
+                    StringComparison.Ordinal));
+            folderNode.IsExpanded = false;
+            folderNode.IsChecked = false;
+            folderNode.IsSelected = false;
+
+            var chevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, folderNode));
+            var glyph = Assert.Single(
+                chevron.GetVisualDescendants()
+                    .OfType<global::Avalonia.Controls.Shapes.Path>(),
+                path => path.Name == "ChevronPath");
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var targetBounds = UiTestDriver.GetBoundsInWindow(chevron, window);
+            var glyphBounds = UiTestDriver.GetBoundsInWindow(glyph, window);
+            Assert.InRange(targetBounds.Width, 23.5, 24.5);
+            Assert.InRange(targetBounds.Height, 23.5, 24.5);
+            Assert.InRange(glyphBounds.Width, 5.5, 6.5);
+            Assert.InRange(glyphBounds.Height, 11.5, 12.5);
+
+            var paddedClickPoint = new Point(
+                targetBounds.Left + 2,
+                targetBounds.Center.Y);
+            Assert.True(paddedClickPoint.X < glyphBounds.Left);
+
+            window.MouseMove(paddedClickPoint, RawInputModifiers.None);
+            window.MouseDown(
+                paddedClickPoint,
+                MouseButton.Left,
+                RawInputModifiers.LeftMouseButton);
+            window.MouseUp(
+                paddedClickPoint,
+                MouseButton.Left,
+                RawInputModifiers.None);
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => folderNode.IsExpanded,
+                "tree folder to expand from the padded chevron hit target");
+
+            Assert.False(folderNode.IsChecked);
+            Assert.False(folderNode.IsSelected);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task TreeChevron_RotatesSingleGeometryAndReturnsToCollapsedState()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

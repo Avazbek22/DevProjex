@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 namespace DevProjex.Tests.Unit;
 
 public sealed class SelectionProfileMatrixUnitTests
@@ -58,7 +59,7 @@ public sealed class SelectionProfileMatrixUnitTests
 		}
 
 		var availablePathOptions = availableIds
-			.Where(static option => option != IgnoreOptionId.HideSecrets)
+			.Where(static option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option))
 			.ToArray();
 		var ordinaryPathOptions = availablePathOptions
 			.Where(static option => !GitFilteringModeResolver.IsGitFilteringOption(option))
@@ -219,11 +220,11 @@ public sealed class SelectionProfileMatrixUnitTests
 		if (matched.Count > 0)
 			return matched;
 
-		// Legacy selected-only profiles may fall back to the old default-on filters when
-		// none of their saved options is available. Hide Secrets is explicitly opt-in and
-		// must never become enabled through that compatibility fallback.
+		// Legacy selected-only profiles may fall back to the old default-on filters when none of
+		// their saved options is available. Content transformations are explicitly opt-in and must
+		// never become enabled through that compatibility fallback.
 		return available
-			.Where(static option => option != IgnoreOptionId.HideSecrets)
+			.Where(static option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option))
 			.ToHashSet();
 	}
 

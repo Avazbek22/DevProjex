@@ -7,9 +7,16 @@ namespace DevProjex.Application.Services;
 public sealed class ProjectCopyExportService(
 	ProjectCopyExportPlanBuilder planBuilder,
 	IFileContentAnalyzer? contentAnalyzer = null,
-	SecretRedactionSession? secretRedactionSession = null)
+	SecretRedactionSession? secretRedactionSession = null,
+	CodeCompressionSession? codeCompressionSession = null)
 {
 	private const int CopyBufferSize = 128 * 1024;
+
+	/// <summary>
+	/// Named so it sorts to the top of a listing and cannot collide with a source file. It is never
+	/// written for an untransformed copy.
+	/// </summary>
+	public const string TransformationNoticeFileName = "DEVPROJEX-NOTICE.txt";
 	private const int CleanupAttemptCount = 6;
 	private const int CleanupInitialDelayMilliseconds = 25;
 
@@ -25,8 +32,8 @@ public sealed class ProjectCopyExportService(
 			ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
 
 			ValidateSources(plan, cancellationToken);
-			await using var prepared = request.RedactSecrets
-				? await PrepareRedactedOutputAsync(plan, cancellationToken).ConfigureAwait(false)
+			await using var prepared = request.RedactSecrets || request.CompressCode
+				? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
 				: null;
 			return request.Format switch
 			{
@@ -36,6 +43,7 @@ public sealed class ProjectCopyExportService(
 					request.DestinationMode,
 					request.ConflictPolicy,
 					prepared,
+					request.NoticeText,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				ProjectCopyExportFormat.Zip => await ExportZipAsync(
@@ -44,6 +52,7 @@ public sealed class ProjectCopyExportService(
 					request.DestinationMode,
 					request.ConflictPolicy,
 					prepared,
+					request.NoticeText,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				_ => throw new ProjectCopyExportException(
@@ -72,15 +81,82 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private async Task<PreparedSecretRedactionOutput> PrepareRedactedOutputAsync(
+	/// <summary>
+	/// The notice a transformed copy carries in its own root. A folder or ZIP that is not a
+	/// byte-for-byte copy of the project has to say so where it will be read - the confirmation the
+	/// user clicked is gone by the time someone else opens the archive.
+	///
+	/// Returns null when nothing was transformed, so an untouched copy stays untouched.
+	/// </summary>
+	private static string? BuildTransformationNotice(
+		PreparedSecretRedactionOutput? prepared,
 		ProjectCopyExportPlan plan,
+		ProjectCopyNoticeText? noticeText)
+	{
+		if (prepared is null || noticeText is null)
+			return null;
+
+		var lines = new List<string>(3);
+		if (prepared.Snapshot is { } redaction && redaction.RedactedCount > 0)
+			lines.Add(noticeText.Redaction);
+		if (prepared.CompressionSnapshot is { CompressedFiles: > 0 })
+			lines.Add(noticeText.Compression);
+		// Named, not merely counted: a copy that is missing a file has to say which one, or the
+		// reader cannot tell an omission from a file that was never in the project.
+		if (ShouldExcludeUnscannable(prepared) && prepared.UnscannablePaths.Count > 0)
+		{
+			var relativePaths = prepared.UnscannablePaths
+				.Select(path => NormalizeNoticePath(plan.ProjectRootPath, path))
+				.OrderBy(static path => path, StringComparer.Ordinal);
+			lines.Add(
+				noticeText.ExcludedUnscannable +
+				Environment.NewLine +
+				string.Join(Environment.NewLine, relativePaths.Select(static path => "  " + path)));
+		}
+
+		return lines.Count == 0
+			? null
+			: string.Join(Environment.NewLine + Environment.NewLine, lines) + Environment.NewLine;
+	}
+
+	/// <summary>
+	/// A file the scanner never read is left out of a copy only when Hide Secrets is on. With
+	/// compression alone there is no promise about its contents to keep, so it ships as it is.
+	/// </summary>
+	private static bool ShouldExcludeUnscannable(PreparedSecretRedactionOutput prepared) =>
+		prepared.Snapshot is not null;
+
+	private static bool IsExcludedFromCopy(
+		PreparedSecretRedactionOutput? prepared,
+		string sourcePath) =>
+		prepared is not null &&
+		ShouldExcludeUnscannable(prepared) &&
+		prepared.GetFile(sourcePath).IsUnscannable;
+
+	private static string NormalizeNoticePath(string projectRoot, string fullPath)
+	{
+		try
+		{
+			return Path.GetRelativePath(projectRoot, fullPath).Replace('\\', '/');
+		}
+		catch (ArgumentException)
+		{
+			return Path.GetFileName(fullPath);
+		}
+	}
+
+	private async Task<PreparedSecretRedactionOutput?> PrepareRedactedOutputAsync(
+		ProjectCopyExportPlan plan,
+		ProjectCopyExportRequest request,
 		CancellationToken cancellationToken)
 	{
-		if (contentAnalyzer is null || secretRedactionSession is null)
+		if (contentAnalyzer is null ||
+		    (request.RedactSecrets && secretRedactionSession is null) ||
+		    (request.CompressCode && codeCompressionSession is null))
 		{
 			throw new ProjectCopyExportException(
 				ProjectCopyExportError.InvalidRequest,
-				"Hide Secrets is unavailable because the redaction services were not configured.");
+				"A content transformation was requested but its services were not configured.");
 		}
 
 		var files = plan.Entries
@@ -88,12 +164,28 @@ public sealed class ProjectCopyExportService(
 			.Select(static entry => entry.SourcePath)
 			.ToArray();
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
-		return await preparer.PrepareAsync(
-				new SecretRedactionContext(plan.ProjectRootPath, secretRedactionSession),
-				files,
-				cancellationToken)
-			.ConfigureAwait(false);
+		var context = ContentTransformationContext.For(
+			request.CompressCode && codeCompressionSession is not null
+				? new CodeCompressionContext(plan.ProjectRootPath, codeCompressionSession)
+				: null,
+			request.RedactSecrets && secretRedactionSession is not null
+				? new SecretRedactionContext(plan.ProjectRootPath, secretRedactionSession)
+				: null);
+		return context is null
+			? null
+			: await preparer.PrepareAsync(context, files, cancellationToken).ConfigureAwait(false);
 	}
+
+	/// <summary>
+	/// The notice lines a transformed project copy can carry, in the user's language. Reuses the
+	/// wording the dry-run and the confirmation dialog already show, so the copy says the same thing
+	/// the user was told before agreeing to it.
+	/// </summary>
+	public static ProjectCopyNoticeText BuildProjectCopyNoticeText(LocalizationService localization) =>
+		new(
+			localization["Terminal.DryRun.ProjectCopy.RedactionWarning"],
+			localization["Compression.CopyNotice"],
+			localization["ProjectCopy.Notice.UnscannableExcluded"]);
 
 	public static void EnsureDestinationOutsideProject(string projectRootPath, string destinationPath)
 	{
@@ -123,6 +215,7 @@ public sealed class ProjectCopyExportService(
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
 		PreparedSecretRedactionOutput? prepared,
+		ProjectCopyNoticeText? noticeText,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -177,6 +270,13 @@ public sealed class ProjectCopyExportService(
 			foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
+				if (IsExcludedFromCopy(prepared, file.SourcePath))
+				{
+					processedEntries++;
+					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+					continue;
+				}
+
 				var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
 				Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
 				var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
@@ -193,6 +293,16 @@ public sealed class ProjectCopyExportService(
 				ReportProgress(progress, 0, 0, 0);
 
 			cancellationToken.ThrowIfCancellationRequested();
+			if (BuildTransformationNotice(prepared, plan, noticeText) is { } notice)
+			{
+				await File.WriteAllTextAsync(
+						Path.Combine(stagingPath, TransformationNoticeFileName),
+						notice,
+						new UTF8Encoding(false),
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
+
 			var finalPath = destinationMode == ProjectCopyDestinationMode.Exact
 				? MoveStagingDirectoryToExactPath(
 					stagingPath,
@@ -216,7 +326,7 @@ public sealed class ProjectCopyExportService(
 				processedFiles,
 				plan.DirectoryCount,
 				bytesWritten,
-				prepared?.Snapshot.RedactedCount ?? 0);
+				prepared?.Snapshot?.RedactedCount ?? 0);
 		}
 		catch (Exception exception)
 		{
@@ -245,6 +355,7 @@ public sealed class ProjectCopyExportService(
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
 		PreparedSecretRedactionOutput? prepared,
+		ProjectCopyNoticeText? noticeText,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -305,6 +416,13 @@ public sealed class ProjectCopyExportService(
 				foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
 				{
 					cancellationToken.ThrowIfCancellationRequested();
+					if (IsExcludedFromCopy(prepared, file.SourcePath))
+					{
+						processedEntries++;
+						ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+						continue;
+					}
+
 					var entryName = BuildZipEntryName(plan.ProjectName, file.RelativePath, isDirectory: false);
 					var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
 					TrySetZipLastWriteTime(entry, file.SourcePath);
@@ -320,6 +438,16 @@ public sealed class ProjectCopyExportService(
 
 				if (totalEntries == 0)
 					ReportProgress(progress, 0, 0, 0);
+
+				if (BuildTransformationNotice(prepared, plan, noticeText) is { } notice)
+				{
+					var noticeEntry = archive.CreateEntry(
+						BuildZipEntryName(plan.ProjectName, TransformationNoticeFileName, isDirectory: false),
+						CompressionLevel.Optimal);
+					await using var noticeStream = noticeEntry.Open();
+					await using var noticeWriter = new StreamWriter(noticeStream, new UTF8Encoding(false));
+					await noticeWriter.WriteAsync(notice.AsMemory(), cancellationToken).ConfigureAwait(false);
+				}
 			}
 
 			cancellationToken.ThrowIfCancellationRequested();
@@ -346,7 +474,7 @@ public sealed class ProjectCopyExportService(
 				processedFiles,
 				plan.DirectoryCount,
 				bytesWritten,
-				prepared?.Snapshot.RedactedCount ?? 0);
+				prepared?.Snapshot?.RedactedCount ?? 0);
 		}
 		catch (Exception exception)
 		{

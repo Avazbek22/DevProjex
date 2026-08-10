@@ -16,6 +16,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 	private const string NoContentMarker = "[No Content, 0 bytes]";
 	private const string WhitespaceMarkerPrefix = "[Whitespace, ";
 	private const string WhitespaceMarkerSuffix = " bytes]";
+	private const long DefaultMaximumMaterializedFileBytes = 10L * 1024 * 1024;
 
 	public string Build(IEnumerable<string> filePaths) =>
 		Build(filePaths, displayPathMapper: null);
@@ -30,7 +31,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		SecretRedactionContext? redactionContext = null)
+		ContentTransformationContext? transformationContext = null)
 		=> (await BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -38,13 +39,14 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount: null,
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
-			redactionContext).ConfigureAwait(false)).Text;
+			transformationContext,
+			publishCompressionSnapshot: true).ConfigureAwait(false)).Text;
 
 	public Task<SelectedContentExportResult> BuildResultAsync(
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		SecretRedactionContext? redactionContext) =>
+		ContentTransformationContext? transformationContext) =>
 		BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -52,7 +54,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount: null,
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
-			redactionContext);
+			transformationContext,
+			publishCompressionSnapshot: true);
 
 	public async Task<string> BuildBoundedPreviewAsync(
 		IEnumerable<string> filePaths,
@@ -60,7 +63,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		long maxFileSizeForFullRead,
 		int maxOutputCharacters,
 		CancellationToken cancellationToken,
-		Func<string, string>? displayPathMapper)
+		Func<string, string>? displayPathMapper,
+		CodeCompressionContext? compressionContext = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileCount);
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileSizeForFullRead);
@@ -73,7 +77,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileCount,
 			maxFileSizeForFullRead,
 			maxOutputCharacters,
-			redactionContext: null).ConfigureAwait(false)).Text;
+			ContentTransformationContext.For(compressionContext, redaction: null),
+			publishCompressionSnapshot: false).ConfigureAwait(false)).Text;
 	}
 
 	private async Task<SelectedContentExportResult> BuildCoreAsync(
@@ -83,7 +88,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		int? maxFileCount,
 		long? maxFileSizeForFullRead,
 		int? maxOutputCharacters,
-		SecretRedactionContext? redactionContext)
+		ContentTransformationContext? transformationContext,
+		bool publishCompressionSnapshot)
 	{
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
@@ -99,7 +105,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		// Convert to list and sort in-place
 		var files = new List<string>(uniqueFiles);
 		files.Sort(PathComparer.Default);
-		var redactionScope = redactionContext?.BeginOutput(files);
+		using var transformationScope = transformationContext?.BeginOutput(files);
+		var redactionScope = transformationScope?.Redaction;
 
 		var sb = new StringBuilder();
 		bool anyWritten = false;
@@ -112,29 +119,44 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				break;
 
 			TextFileContent? content;
+			ContentFingerprint? contentFingerprint = null;
 			if (redactionScope is null)
 			{
-				content = maxFileSizeForFullRead is { } sizeLimit
-					? await contentAnalyzer.TryReadAsTextAsync(file, sizeLimit, cancellationToken).ConfigureAwait(false)
-					: await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
+				if (transformationScope?.Compression is not null)
+				{
+					var readFact = await contentAnalyzer.ReadFactAsync(
+						file,
+						maxFileSizeForFullRead ?? DefaultMaximumMaterializedFileBytes,
+						cancellationToken).ConfigureAwait(false);
+					content = readFact.ToReadResult().Content;
+					contentFingerprint = readFact.Fingerprint;
+				}
+				else
+				{
+					content = maxFileSizeForFullRead is { } sizeLimit
+						? await contentAnalyzer.TryReadAsTextAsync(file, sizeLimit, cancellationToken).ConfigureAwait(false)
+						: await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
+				}
 			}
 			else
 			{
 				var scanLimit = maxFileSizeForFullRead ??
 				                SecretRedactionOutputPreparer.MaximumScannableFileBytes;
-				var readResult = await contentAnalyzer
-					.ReadClassifiedAsync(file, scanLimit, cancellationToken)
+				var readFact = await contentAnalyzer
+					.ReadFactAsync(file, scanLimit, cancellationToken)
 					.ConfigureAwait(false);
+				var readResult = readFact.ToReadResult();
 				content = readResult.Content;
+				contentFingerprint = readFact.Fingerprint;
 				switch (readResult.Classification)
 				{
 					case FileContentClassification.Binary:
 						continue;
 					case FileContentClassification.TooLarge:
-						throw new SecretScanLimitExceededException(
-							file,
-							content?.SizeBytes ?? new FileInfo(file).Length,
-							scanLimit);
+						// Estimated content carries no text, so this file contributes the same empty
+						// section it would with Hide Secrets off. One file the scanner may not read
+						// does not cost the user the rest of the selection.
+						break;
 					case FileContentClassification.Text when content is not null:
 						break;
 					default:
@@ -146,19 +168,34 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			// Skip binary files (null result)
 			if (content is null)
 				continue;
-			if (redactionScope is not null && content.IsEstimated)
-			{
-				throw new SecretScanLimitExceededException(
-					file,
-					content.SizeBytes,
-					maxFileSizeForFullRead ?? SecretRedactionOutputPreparer.MaximumScannableFileBytes);
-			}
 
 			using var contentLease = redactionScope?.TrackFullContentBuffer();
-			var redactionPlan = redactionScope?.CreatePlan(
-				file,
-				content.Content,
-				cancellationToken);
+			// Compression first, then secrets: the clipboard must carry exactly what the preview
+			// showed, and the secret counter must describe the text that actually leaves.
+			// Estimated content is an empty string standing in for text nobody read - transforming
+			// it would record a clean scan of a file that was never opened.
+			var compression = content.IsEstimated
+				? null
+				: contentFingerprint is { } fingerprint
+					? transformationScope?.Compress(
+						file,
+						MapDisplayPath(file, displayPathMapper),
+						content.Content,
+						fingerprint,
+						cancellationToken)
+					: transformationScope?.Compress(
+						file,
+						MapDisplayPath(file, displayPathMapper),
+						content.Content,
+						cancellationToken);
+			var transformedText = compression?.Text ?? content.Content;
+			var redactionPlan = content.IsEstimated
+				? null
+				: redactionScope?.CreatePlan(
+					file,
+					transformedText,
+					compression?.Map,
+					cancellationToken);
 
 			processedFileCount++;
 			if (anyWritten)
@@ -183,19 +220,21 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			}
 			else
 			{
+				// Written from the transformed text, never from the file on disk: the plan's offsets
+				// describe that text, and this surface has to carry the same bytes the preview showed.
 				// Trim trailing newlines for clipboard-friendly output without allocating a
 				// second whole-file string when redaction is enabled.
-				var sourceLength = content.Content.Length;
-				while (sourceLength > 0 && content.Content[sourceLength - 1] is '\r' or '\n')
+				var sourceLength = transformedText.Length;
+				while (sourceLength > 0 && transformedText[sourceLength - 1] is '\r' or '\n')
 					sourceLength--;
 				if (redactionPlan is null)
 				{
-					sb.Append(content.Content.AsSpan(0, sourceLength));
+					sb.Append(transformedText.AsSpan(0, sourceLength));
 					sb.AppendLine();
 				}
 				else
 				{
-					redactionPlan.AppendTo(sb, content.Content, sourceLength);
+					redactionPlan.AppendTo(sb, transformedText, sourceLength);
 					sb.AppendLine();
 				}
 			}
@@ -208,6 +247,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		}
 
 		var snapshot = redactionScope?.Complete();
+		if (publishCompressionSnapshot)
+			transformationScope?.Compression?.Complete();
 		var textOutput = anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
 
 		return new SelectedContentExportResult(textOutput, snapshot);

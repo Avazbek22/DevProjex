@@ -1,0 +1,11 @@
+{
+  "id": "cpp",
+  "displayName": "C++",
+  "extensions": [".h", ".cc", ".cpp", ".cxx", ".hh", ".hpp", ".hxx"],
+  "library": "tree-sitter-cpp",
+  "export": "tree_sitter_cpp",
+  "queryVersion": 5,
+  "blockPlaceholder": "{ }",
+  "containerNodeTypes": ["translation_unit", "field_declaration_list"],
+  "executableOwnerKinds": ["function_definition"]
+}

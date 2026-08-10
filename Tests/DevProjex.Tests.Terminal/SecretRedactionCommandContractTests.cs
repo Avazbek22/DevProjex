@@ -1,10 +1,111 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class SecretRedactionCommandContractTests
 {
 	private const string GithubToken = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+	private const string ManuallyMarkedValue = "manualprojectvalue";
+
+	[Fact]
+	public async Task ExportContext_LocalProfileAppliesPersistentManualSecretMarks()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		AddPersistentManualSecret(workspace);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", "local",
+				"--view", "content",
+				"--format", "text",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(ManuallyMarkedValue, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains(
+			"DEVPROJEX_REDACTED[manual-secret#1]",
+			environment.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task AnalyzeJson_LocalProfileCountsPersistentManualSecretMarks()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		AddPersistentManualSecret(workspace);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--profile", "local",
+				"--format", "json",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var redaction = document.RootElement.GetProperty("redaction");
+		Assert.Equal(1, redaction.GetProperty("matchedCount").GetInt32());
+		Assert.Equal(1, redaction.GetProperty("redactedCount").GetInt32());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	public async Task ExportProject_LocalProfileAppliesPersistentManualSecretMarks(string kind)
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		AddPersistentManualSecret(workspace);
+		var environment = new TestTerminalEnvironment();
+		var destination = kind == "folder"
+			? Path.Combine(workspace.OutputRoot, "manual-redacted")
+			: Path.Combine(workspace.OutputRoot, "manual-redacted.zip");
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "project", workspace.ProjectRoot,
+				"--profile", "local",
+				"--as", kind,
+				"-o", destination
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		string content;
+		if (kind == "folder")
+		{
+			content = File.ReadAllText(Path.Combine(destination, "src", "manual.txt"));
+		}
+		else
+		{
+			using var archive = System.IO.Compression.ZipFile.OpenRead(destination);
+			var entry = Assert.Single(
+				archive.Entries,
+				static candidate => candidate.FullName.EndsWith(
+					"src/manual.txt",
+					StringComparison.Ordinal));
+			using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+			content = reader.ReadToEnd();
+		}
+
+		Assert.DoesNotContain(ManuallyMarkedValue, content, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[manual-secret#1]", content, StringComparison.Ordinal);
+	}
 
 	[Fact]
 	public async Task ExportContext_AdditiveOptionWorksWithNoPathExclusions()
@@ -12,7 +113,8 @@ public sealed class SecretRedactionCommandContractTests
 		using var workspace = CreateWorkspace(includeSecret: false);
 		workspace.Temporary.WriteFile(
 			"project/appsettings.json",
-			"{ \"ConnectionStrings\": { \"Main\": \"Host=db;Username=admin;Password=postgres;Database=app\" } }");
+			"{ \"ConnectionStrings\": { \"Main\": \"Host=db;Username=admin;Pass" +
+			"word=postgres;Database=app\" } }");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(
@@ -207,8 +309,12 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Contains("Binary files remain unchanged", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	/// <summary>
+	/// A document omits text past the read limit whether Hide Secrets is on or off, so one oversized
+	/// file costs the user that file - not the export. Nothing unscanned reaches the output either way.
+	/// </summary>
 	[Fact]
-	public async Task ExportContext_OversizedSelectedTextFailsClosedWithoutCreatingOutput()
+	public async Task ExportContext_OversizedSelectedTextIsOmittedAndTheDocumentIsStillWritten()
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);
 		var environment = new TestTerminalEnvironment();
@@ -231,12 +337,21 @@ public sealed class SecretRedactionCommandContractTests
 				"-o", destination
 			]);
 
-		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
-		Assert.Empty(environment.StandardOutput);
-		Assert.Contains("DPX-SECRET-SCAN-LIMIT-EXCEEDED", environment.StandardError, StringComparison.Ordinal);
-		Assert.False(File.Exists(destination));
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(
+			"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
+			environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.True(File.Exists(destination));
+		var document = await File.ReadAllTextAsync(destination, TestContext.Current.CancellationToken);
+		Assert.Contains("oversized.txt", document, StringComparison.Ordinal);
+		Assert.DoesNotContain(new string('a', 4096), document, StringComparison.Ordinal);
 	}
 
+	/// <summary>
+	/// A dry run has to predict the real run, and the two commands now differ: a context document
+	/// omits an unreadable file and still ships, a project copy refuses because it reproduces bytes.
+	/// </summary>
 	[Theory]
 	[InlineData("context")]
 	[InlineData("project")]
@@ -274,10 +389,45 @@ public sealed class SecretRedactionCommandContractTests
 
 		var exitCode = await RunAsync(workspace, environment, arguments);
 
-		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
-		Assert.Empty(environment.StandardOutput);
-		Assert.Contains("DPX-SECRET-SCAN-LIMIT-EXCEEDED", environment.StandardError, StringComparison.Ordinal);
-		Assert.DoesNotContain("Dry run:", environment.StandardError, StringComparison.OrdinalIgnoreCase);
+		// Both commands now complete: neither refuses a whole operation over one unreadable file.
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(
+			"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
+			environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.False(Path.Exists(destination));
+	}
+
+	/// <summary>
+	/// A dry run has to predict the real run. The copy leaves an unreadable file out, so the dry
+	/// run says so rather than reporting a faithful copy.
+	/// </summary>
+	[Fact]
+	public async Task ExportProjectDryRun_AnnouncesThatAnUnreadableFileWillBeLeftOut()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		var environment = new TestTerminalEnvironment();
+		var destination = Path.Combine(workspace.OutputRoot, "project-copy");
+		await File.WriteAllTextAsync(
+			Path.Combine(workspace.ProjectRoot, "oversized.txt"),
+			new string('a', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1)),
+			TestContext.Current.CancellationToken);
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "project", workspace.ProjectRoot,
+				"--as", "folder",
+				"--git-mode", "none",
+				"--hide-secrets",
+				"--dry-run",
+				"--language", "en",
+				"-o", destination
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("left out of this copy", environment.StandardError, StringComparison.OrdinalIgnoreCase);
 		Assert.False(Path.Exists(destination));
 	}
 
@@ -371,6 +521,30 @@ public sealed class SecretRedactionCommandContractTests
 				environment,
 				new TerminalServiceFactory(() => workspace.AppDataRoot))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
+
+	private static void AddPersistentManualSecret(Workspace workspace)
+	{
+		workspace.Temporary.WriteFile(
+			"project/src/manual.txt",
+			$"setting={ManuallyMarkedValue}\n");
+		new ProjectProfileStore(() => workspace.AppDataRoot).SaveProfile(
+			workspace.ProjectRoot,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions: [IgnoreOptionId.HideSecrets],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.HideSecrets] = true
+				},
+				MarkedSecrets:
+				[
+					new MarkedSecretProfileEntry(
+						MarkedSecretValueNormalizer.ComputeHash(ManuallyMarkedValue),
+						"setting",
+						ManuallyMarkedValue.Length)
+				]));
+	}
 
 	private static Workspace CreateWorkspace(bool includeSecret = true)
 	{

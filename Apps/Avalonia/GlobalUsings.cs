@@ -11,6 +11,7 @@ global using Avalonia.Media;
 global using Avalonia.Styling;
 global using Avalonia.Threading;
 global using Avalonia.VisualTree;
+global using DevProjex.Application.Compression;
 global using DevProjex.Application.Preview;
 global using DevProjex.Application.Presentation;
 global using DevProjex.Application.Selection;

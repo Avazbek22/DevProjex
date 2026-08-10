@@ -1,0 +1,48 @@
+<Project>
+
+  <!--
+    TreeSitter.DotNet ships every grammar for the target architecture: 30 native libraries, ~68 MB
+    on win-x64, of which DevProjex uses ten. Referencing the package without filtering adds all of
+    them to every build output and to the single-file bundle, and the release scripts assert that a
+    publish produces exactly one file.
+
+    DevProjex therefore delivers grammars itself - embedded in Infrastructure and materialized on
+    first use - and removes the package's own copies everywhere. The core "tree-sitter" library is
+    deliberately NOT removed: it is resolved through DllImport, which works in a single-file app,
+    and without it the managed binding cannot load at all.
+
+    These targets live here rather than in each csproj so the rule cannot be forgotten when a new
+    executable project is added.
+  -->
+
+  <Target Name="DevProjexStripGrammarNativesFromBuildOutput"
+          AfterTargets="ResolveLockFileCopyLocalFiles">
+    <ItemGroup>
+      <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
+        Condition="$([System.String]::Copy('%(Filename)').Contains('tree-sitter-'))" />
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+        Condition="$([System.String]::Copy('%(Filename)').Contains('tree-sitter-'))" />
+    </ItemGroup>
+  </Target>
+
+  <!-- MSBuild runs a target at most once, so the single-file and folder publish paths need separate
+       hooks; listing both as BeforeTargets would fire while the publish list is still empty. -->
+  <Target Name="DevProjexStripGrammarNativesFromBundle" BeforeTargets="_ComputeFilesToBundle">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.NuGetPackageId)'=='TreeSitter.DotNet' and
+                   $([System.String]::Copy('%(Filename)').Contains('tree-sitter-'))" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="DevProjexStripGrammarNativesFromPublishFolder"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition="'$(PublishSingleFile)'!='true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(ResolvedFileToPublish.NuGetPackageId)'=='TreeSitter.DotNet' and
+                   $([System.String]::Copy('%(Filename)').Contains('tree-sitter-'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

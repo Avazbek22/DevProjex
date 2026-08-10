@@ -2,6 +2,7 @@ using Avalonia.VisualTree;
 using Avalonia.Interactivity;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Context;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Contracts;
@@ -960,6 +961,9 @@ internal static class UiTestDriver
 
         await WaitForSettledFramesAsync(frameCount: 12);
     }
+
+    public static CodeCompressionDiagnosticsSnapshot GetCodeCompressionDiagnostics(MainWindow window) =>
+        GetRequiredPrivateField<CodeCompressionSession>(window, "_codeCompressionSession").Diagnostics;
 
     public static async Task WaitForPreviewReadyAsync(MainWindow window)
     {

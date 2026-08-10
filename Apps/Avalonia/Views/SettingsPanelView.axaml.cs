@@ -23,6 +23,7 @@ public partial class SettingsPanelView : UserControl
     public event EventHandler<RoutedEventArgs>? IgnoreAllChanged;
     public event EventHandler<RoutedEventArgs>? ExtensionsAllChanged;
     public event EventHandler<SettingsPanelMinimumWidthChangedEventArgs>? MinimumWidthChanged;
+	public event EventHandler? SecretScanRetryRequested;
 
     public SettingsPanelView()
     {
@@ -54,7 +55,6 @@ public partial class SettingsPanelView : UserControl
 		if (sender is not ToolTip toolTip || DataContext is not MainWindowViewModel viewModel)
 			return;
 
-		toolTip.DataContext = viewModel;
 		PopupBackdropConfigurator.TryApply(
 			toolTip,
 			TopLevel.GetTopLevel(this),
@@ -62,17 +62,30 @@ public partial class SettingsPanelView : UserControl
 			PopupBackdropTransparencyFallback.Transparent);
 	}
 
-	private void OnContentProcessingHelpIndicatorPointerPressed(
+	private void OnContentProcessingStatusIndicatorPointerPressed(
 		object? sender,
 		PointerPressedEventArgs e)
 	{
 		e.Handled = true;
 	}
 
-	private void OnContentProcessingHelpIndicatorPointerReleased(
+	private void OnContentProcessingStatusIndicatorPointerReleased(
 		object? sender,
 		PointerReleasedEventArgs e)
 	{
+		// The warning triangle on Hide Secrets doubles as the retry control: a failure there is
+		// usually transient, and the status text invites this click. Informational indicators
+		// keep their tooltip-on-click behavior.
+		if (sender is Control
+		    {
+			    DataContext: IgnoreOptionViewModel { Id: IgnoreOptionId.HideSecrets, IsWarningStatus: true }
+		    })
+		{
+			SecretScanRetryRequested?.Invoke(this, EventArgs.Empty);
+			e.Handled = true;
+			return;
+		}
+
 		if (sender is Control indicator)
 			ToolTip.SetIsOpen(indicator, true);
 

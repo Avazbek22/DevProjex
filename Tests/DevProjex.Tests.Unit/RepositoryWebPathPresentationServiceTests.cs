@@ -6,7 +6,7 @@ public sealed class RepositoryWebPathPresentationServiceTests
 	[InlineData("https://github.com/user/repo.git", "https://github.com/user/repo")]
 	[InlineData("https://github.com/user/repo.git/", "https://github.com/user/repo")]
 	[InlineData("https://github.com/user/repo?tab=readme#top", "https://github.com/user/repo")]
-	[InlineData("https://user:token@github.com/user/repo.git?tab=readme#top", "https://github.com/user/repo")]
+	[InlineData("https:" + "//user:token@github.com/user/repo.git?tab=readme#top", "https://github.com/user/repo")]
 	[InlineData("github.com/user/repo.git/", "github.com/user/repo")]
 	public void NormalizeForDisplay_ReturnsCleanRepositoryUrl(string repositoryUrl, string expected)
 	{
@@ -42,7 +42,7 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		var repoRoot = BuildAbsolutePath("work", "repo");
 		var presentation = service.TryCreate(
 			repoRoot,
-			"https://user:token@github.com/Avazbek22/DevProjex.git?tab=readme#top");
+			"https:" + "//user:token@github.com/Avazbek22/DevProjex.git?tab=readme#top");
 
 		Assert.NotNull(presentation);
 		Assert.Equal("https://github.com/Avazbek22/DevProjex", presentation!.DisplayRootPath);

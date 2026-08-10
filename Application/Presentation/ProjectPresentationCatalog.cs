@@ -7,12 +7,25 @@ public sealed record GitFilteringDescriptor(
 	string LabelKey,
 	int Order);
 
+/// <summary>
+/// A row in the ignore/content-processing panel. <see cref="Id"/> is null for transformations that
+/// never existed as a v5 --exclude token: compression does not exclude anything, it transforms, and
+/// giving it an --exclude alias would freeze that confusion into the CLI contract.
+/// </summary>
 public sealed record ProjectExclusionDescriptor(
-	ProjectExclusion Id,
+	ProjectExclusion? Id,
 	IgnoreOptionId LegacyOptionId,
 	string Token,
 	string LabelKey,
-	int Order);
+	int Order)
+{
+	/// <summary>
+	/// The v5 --exclude id. Path exclusions always have one; call this only where the descriptor
+	/// is known to come from <see cref="ProjectPresentationCatalog.Exclusions"/>.
+	/// </summary>
+	public ProjectExclusion RequireId() =>
+		Id ?? throw new InvalidOperationException($"'{Token}' is a content transformation and has no exclusion id.");
+}
 
 public sealed record ProjectContextViewDescriptor(
 	ProjectContextView Id,
@@ -114,15 +127,29 @@ public static class ProjectPresentationCatalog
 			IgnoreOptionId.HideSecrets,
 			"hide-secrets",
 			"Settings.Ignore.HideSecrets",
-			0)
+			0),
+		new(
+			null,
+			IgnoreOptionId.CompressCode,
+			"compress-code",
+			"Settings.Ignore.CompressCode",
+			1)
 	];
+
+	/// <summary>
+	/// Single source of truth for "is this row a content transformation". Everything that used to
+	/// compare against HideSecrets by name reads this instead, so a second transformation cannot be
+	/// half-registered.
+	/// </summary>
+	public static IReadOnlySet<IgnoreOptionId> ContentTransformationOptionIds { get; } =
+		ContentTransformations.Select(static descriptor => descriptor.LegacyOptionId).ToHashSet();
 
 	/// <summary>
 	/// Preserves parsing of v5 --exclude tokens while new command surfaces expose transformations
 	/// through dedicated additive options.
 	/// </summary>
 	public static IReadOnlyList<ProjectExclusionDescriptor> LegacyExclusionChoices { get; } =
-		[.. Exclusions, .. ContentTransformations];
+		[.. Exclusions, .. ContentTransformations.Where(static descriptor => descriptor.Id is not null)];
 
 	public static IReadOnlyList<ProjectContextViewDescriptor> PreviewModes { get; } =
 	[

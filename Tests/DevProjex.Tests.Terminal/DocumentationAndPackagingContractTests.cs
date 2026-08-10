@@ -39,6 +39,73 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void EveryCuratedGrammarIsNamedInThirdPartyNotices()
+	{
+		var rootPath = FindRepositoryRoot();
+		var infrastructureProject = XDocument.Load(
+			Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var grammarNames = infrastructureProject
+			.Descendants("DevProjexGrammar")
+			.Select(element => element.Attribute("Include")?.Value)
+			.Where(static value => value is not null)
+			.Cast<string>()
+			.ToArray();
+		var notices = File.ReadAllText(Path.Combine(rootPath, "THIRD-PARTY-NOTICES.md"));
+
+		Assert.Equal(10, grammarNames.Length);
+		foreach (var grammarName in grammarNames)
+		{
+			Assert.Matches(
+				$@"(?<![a-z0-9-]){Regex.Escape(grammarName)}(?![a-z0-9-])",
+				notices);
+		}
+	}
+
+	[Fact]
+	public void CrossPublishRidFlowsToTheAssemblyThatEmbedsGrammars()
+	{
+		var rootPath = FindRepositoryRoot();
+		var desktopProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia.csproj"));
+		var terminalProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Apps",
+			"Terminal",
+			"DevProjex.Terminal.csproj"));
+		var probeProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Packaging",
+			"GrammarDeliveryProbe",
+			"GrammarDeliveryProbe.csproj"));
+		var infrastructureProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Infrastructure",
+			"Infrastructure.csproj"));
+
+		AssertProjectReferenceProperty(
+			desktopProject,
+			"Infrastructure.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			desktopProject,
+			"DevProjex.Terminal.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			terminalProject,
+			"Infrastructure.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			probeProject,
+			"Infrastructure.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
+		AssertRidPropertyDoesNotFlowPastInfrastructure(terminalProject, "Infrastructure.csproj");
+		AssertRidPropertyDoesNotFlowPastInfrastructure(infrastructureProject, excludedProject: null);
+	}
+
+	[Fact]
 	public void ReadmeCommandExamplesParseAgainstTheProductionCommandTree()
 	{
 		var rootPath = FindRepositoryRoot();
@@ -579,6 +646,41 @@ public sealed class DocumentationAndPackagingContractTests
 					$"Obsolete pre-flattening path in {Path.GetRelativePath(rootPath, sourcePath)}.");
 			}
 		}
+	}
+
+	private static void AssertProjectReferenceProperty(
+		XDocument project,
+		string projectFileName,
+		string expectedProperty)
+	{
+		var reference = project
+			.Descendants("ProjectReference")
+			.Single(element =>
+				(element.Attribute("Include")?.Value ?? string.Empty)
+				.EndsWith(projectFileName, StringComparison.OrdinalIgnoreCase));
+		var property = Assert.Single(reference.Elements("AdditionalProperties"));
+		Assert.Equal(expectedProperty, property.Value);
+		Assert.Contains(
+			"!=''",
+			property.Attribute("Condition")?.Value ?? string.Empty,
+			StringComparison.Ordinal);
+	}
+
+	private static void AssertRidPropertyDoesNotFlowPastInfrastructure(
+		XDocument project,
+		string? excludedProject)
+	{
+		var references = project
+			.Descendants("ProjectReference")
+			.Where(element => excludedProject is null ||
+				!(element.Attribute("Include")?.Value ?? string.Empty)
+				.EndsWith(excludedProject, StringComparison.OrdinalIgnoreCase))
+			.ToArray();
+		Assert.NotEmpty(references);
+		Assert.All(references, reference => Assert.Contains(
+			"DevProjexGrammarRuntimeIdentifier",
+			reference.Attribute("GlobalPropertiesToRemove")?.Value ?? string.Empty,
+			StringComparison.Ordinal));
 	}
 
 	private static IEnumerable<IReadOnlyList<string>> EnumeratePublicCommandPaths(RootCommand root)

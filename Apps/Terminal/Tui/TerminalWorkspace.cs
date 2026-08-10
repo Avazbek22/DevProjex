@@ -73,6 +73,8 @@ public sealed class TerminalWorkspace
 		// disposal, so bracket its teardown with idempotent visibility restoration.
 		using var postApplicationCursorRestoration =
 			new TerminalCursorRestoration(environment.Output);
+		using var inputShutdownGuard = new WindowsTerminalInputShutdownGuard();
+		using var inputShutdownRegistration = cancellationToken.Register(inputShutdownGuard.Arm);
 		using IApplication application = global::Terminal.Gui.App.Application.Create();
 		using var preDisposeCursorRestoration = new TerminalCursorRestoration(environment.Output);
 		application.Mouse.IsMouseDisabled = !mouseEnabled;
@@ -126,7 +128,8 @@ public sealed class TerminalWorkspace
 				options,
 				this,
 				operationObserver,
-				cancellationToken);
+				cancellationToken,
+				inputShutdownGuard.Arm);
 			session.Start();
 			try
 			{
@@ -143,6 +146,10 @@ public sealed class TerminalWorkspace
 		}
 		finally
 		{
+			// Terminal.Gui 2.4.17 (#5442) can race its one-shot CancelIoEx against a new
+			// synchronous Windows console read. Keep cancellation active until the
+			// application disposal below has actually joined the input worker.
+			inputShutdownGuard.Arm();
 			if (initialized)
 			{
 				try

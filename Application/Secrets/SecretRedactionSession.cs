@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Secrets;
 
@@ -17,8 +19,10 @@ public sealed class SecretRedactionSession : IDisposable
 		new(StringComparer.OrdinalIgnoreCase);
 	private readonly List<SessionMarkedSecret> _sessionMarks = [];
 	private readonly Dictionary<string, SecretRedactionSnapshot> _snapshots = new(StringComparer.Ordinal);
+	private SelectionKeyCacheEntry? _selectionKeyCache;
 	private Task? _detectorWarmUpTask;
 	private long _overrideRevision;
+	private long _snapshotRevision;
 	private int _markedSecretsRevision;
 	private int _activeFullContentBuffers;
 	private int _peakFullContentBuffers;
@@ -39,6 +43,15 @@ public sealed class SecretRedactionSession : IDisposable
 
 	public event EventHandler? OverridesChanged;
 	public event EventHandler<SecretRedactionSnapshotPublishedEventArgs>? SnapshotPublished;
+
+	public long OutputRevision
+	{
+		get
+		{
+			lock (_sync)
+				return _overrideRevision;
+		}
+	}
 
 	/// <summary>
 	/// Starts rule-engine initialization once for the process session. It retains compiled rules,
@@ -66,21 +79,35 @@ public sealed class SecretRedactionSession : IDisposable
 
 	public SecretRedactionScope BeginOutput(
 		string projectRoot,
-		IReadOnlyList<string> orderedFilePaths)
+		IReadOnlyList<string> orderedFilePaths,
+		string transformIdentity = "") =>
+		BeginOutput(
+			projectRoot,
+			ContentSelectionSnapshot.Create(projectRoot, orderedFilePaths),
+			transformIdentity);
+
+	public SecretRedactionScope BeginOutput(
+		string projectRoot,
+		ContentSelectionSnapshot selection,
+		string transformIdentity = "")
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
-		ArgumentNullException.ThrowIfNull(orderedFilePaths);
-		_scanCache.SynchronizeSelection(projectRoot, orderedFilePaths);
+		ArgumentNullException.ThrowIfNull(selection);
+		// Selection changes are frequent UI state, not a cache lifetime boundary. The LRU already
+		// bounds retained entries; keeping deselected files warm makes folder off/on cycles cheap.
+		_scanCache.SynchronizeProject(projectRoot);
 
 		HashSet<string> keptOccurrences;
 		long overrideRevision;
+		long snapshotRevision;
 		MarkedSecretsMatcher markedSecretsMatcher;
 		int markedSecretsRevision;
 		lock (_sync)
 		{
 			keptOccurrences = new HashSet<string>(_keptOccurrenceIds, StringComparer.Ordinal);
 			overrideRevision = _overrideRevision;
+			snapshotRevision = _snapshotRevision;
 			markedSecretsRevision = _markedSecretsRevision;
 			markedSecretsMatcher = new MarkedSecretsMatcher(
 				_persistentMarks.Values,
@@ -90,11 +117,13 @@ public sealed class SecretRedactionSession : IDisposable
 		return new SecretRedactionScope(
 			this,
 			projectRoot,
-			orderedFilePaths,
+			selection.CreateTransformFingerprint(transformIdentity),
 			keptOccurrences,
 			overrideRevision,
+			snapshotRevision,
 			markedSecretsMatcher,
-			markedSecretsRevision);
+			markedSecretsRevision,
+			transformIdentity);
 	}
 
 	public IReadOnlyCollection<MarkedSecretProfileEntry> GetMarkedSecrets()
@@ -153,17 +182,16 @@ public sealed class SecretRedactionSession : IDisposable
 
 	public bool AddSessionMarkedSecret(
 		string relativePath,
-		int lineIndex,
-		int column,
+		int sourceOffset,
 		MarkedSecretValue value)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentOutOfRangeException.ThrowIfNegative(sourceOffset);
 		ArgumentNullException.ThrowIfNull(value);
 		var mark = new SessionMarkedSecret(
 			relativePath.Replace('\\', '/'),
-			lineIndex,
-			column,
+			sourceOffset,
 			value.Length,
 			value.Hash);
 		bool added;
@@ -222,24 +250,60 @@ public sealed class SecretRedactionSession : IDisposable
 			if (!kept)
 				_keptOccurrenceIds.Remove(occurrenceId);
 			_overrideRevision++;
-			_snapshots.Clear();
+			InvalidateSnapshotsLocked();
 		}
 
 		OverridesChanged?.Invoke(this, EventArgs.Empty);
 		return kept;
 	}
 
-	public int? GetRedactionCount(string projectRoot, IReadOnlyList<string> orderedFilePaths)
-		=> GetSnapshot(projectRoot, orderedFilePaths)?.RedactedCount;
+	public int? GetRedactionCount(
+		string projectRoot,
+		IReadOnlyList<string> orderedFilePaths,
+		string transformIdentity = "")
+		=> GetSnapshot(projectRoot, orderedFilePaths, transformIdentity)?.RedactedCount;
 
 	public SecretRedactionSnapshot? GetSnapshot(
 		string projectRoot,
-		IReadOnlyList<string> orderedFilePaths)
+		IReadOnlyList<string> orderedFilePaths,
+		string transformIdentity = "")
 	{
-		var key = BuildSelectionKey(projectRoot, orderedFilePaths);
+		var key = GetOrComputeSelectionKey(projectRoot, orderedFilePaths, transformIdentity);
 		lock (_sync)
 			return _snapshots.GetValueOrDefault(key);
 	}
+
+	/// <summary>
+	/// The UI polls the snapshot for the same selection on every relabel and refresh. The ordered
+	/// file list it passes is reference-stable per selection revision, so the hashed key is reused
+	/// until any input actually changes instead of re-sorting and re-hashing every path per call.
+	/// </summary>
+	private string GetOrComputeSelectionKey(
+		string projectRoot,
+		IReadOnlyList<string> orderedFilePaths,
+		string transformIdentity)
+	{
+		var cached = Volatile.Read(ref _selectionKeyCache);
+		if (cached is not null &&
+		    ReferenceEquals(cached.OrderedFilePaths, orderedFilePaths) &&
+		    string.Equals(cached.ProjectRoot, projectRoot, StringComparison.Ordinal) &&
+		    string.Equals(cached.TransformIdentity, transformIdentity, StringComparison.Ordinal))
+		{
+			return cached.SelectionKey;
+		}
+
+		var key = BuildSelectionKey(projectRoot, orderedFilePaths, transformIdentity);
+		Volatile.Write(
+			ref _selectionKeyCache,
+			new SelectionKeyCacheEntry(projectRoot, orderedFilePaths, transformIdentity, key));
+		return key;
+	}
+
+	private sealed record SelectionKeyCacheEntry(
+		string ProjectRoot,
+		IReadOnlyList<string> OrderedFilePaths,
+		string TransformIdentity,
+		string SelectionKey);
 
 	public SecretScanCacheDiagnostics GetCacheDiagnostics()
 	{
@@ -259,7 +323,7 @@ public sealed class SecretRedactionSession : IDisposable
 	public void InvalidateSnapshots()
 	{
 		lock (_sync)
-			_snapshots.Clear();
+			InvalidateSnapshotsLocked();
 	}
 
 	/// <summary>
@@ -280,7 +344,7 @@ public sealed class SecretRedactionSession : IDisposable
 		_scanCache.Clear();
 		lock (_sync)
 		{
-			_snapshots.Clear();
+			InvalidateSnapshotsLocked();
 			_keptOccurrenceIds.Clear();
 			_persistentMarks.Clear();
 			_sessionMarks.Clear();
@@ -302,14 +366,19 @@ public sealed class SecretRedactionSession : IDisposable
 		string filePath,
 		SecretFileMetadata metadata,
 		ISecretDetectionScope detectorScope,
+		bool includeAutomaticDetection,
 		int markedSecretsRevision,
+		string transformIdentity,
 		out SecretScanCacheEntry entry) =>
 		_scanCache.TryGetByMetadata(
 			filePath,
 			metadata,
-			detectorScope.GetRulesIdentity(
+			GetRulesIdentity(
+				detectorScope,
 				filePath,
-				NormalizeRelativePath(projectRoot, filePath)),
+				NormalizeRelativePath(projectRoot, filePath),
+				includeAutomaticDetection),
+			transformIdentity,
 			markedSecretsRevision,
 			out entry);
 
@@ -320,8 +389,11 @@ public sealed class SecretRedactionSession : IDisposable
 		SecretFileMetadata metadata,
 		ISecretDetectionScope detectorScope,
 		MarkedSecretsMatcher markedSecretsMatcher,
+		bool includeAutomaticDetection,
 		int markedSecretsRevision,
-		CancellationToken cancellationToken) =>
+		string transformIdentity,
+		CancellationToken cancellationToken,
+		ContentTransformMap? transformMap = null) =>
 		GetOrDetectFindings(
 			projectRoot,
 			filePath,
@@ -329,8 +401,11 @@ public sealed class SecretRedactionSession : IDisposable
 			metadata,
 			detectorScope,
 			markedSecretsMatcher,
+			includeAutomaticDetection,
 			markedSecretsRevision,
-			cancellationToken);
+			transformIdentity,
+			cancellationToken,
+			transformMap);
 
 	internal SecretScanCacheEntry GetOrDetectFindings(
 		string projectRoot,
@@ -339,25 +414,63 @@ public sealed class SecretRedactionSession : IDisposable
 		SecretFileMetadata metadata,
 		ISecretDetectionScope detectorScope,
 		MarkedSecretsMatcher markedSecretsMatcher,
+		bool includeAutomaticDetection,
 		int markedSecretsRevision,
-		CancellationToken cancellationToken)
+		string transformIdentity,
+		CancellationToken cancellationToken,
+		ContentTransformMap? transformMap = null,
+		ContentFingerprint? knownFingerprint = null,
+		bool allowIdentityTransformFallback = false)
 	{
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
-		var rulesIdentity = detectorScope.GetRulesIdentity(filePath, relativePath);
-		var contentFingerprint = HashText(content);
+		var rulesIdentity = GetRulesIdentity(
+			detectorScope,
+			filePath,
+			relativePath,
+			includeAutomaticDetection);
+		string contentFingerprint;
+		if (knownFingerprint is { } fingerprint)
+		{
+			contentFingerprint = fingerprint.ToHexString();
+		}
+		else
+		{
+			ContentPipelineDiagnostics.RecordContentFingerprint();
+			contentFingerprint = HashText(content);
+		}
 		if (_scanCache.TryGetByContent(
 			    filePath,
 			    metadata,
 			    contentFingerprint,
 			    rulesIdentity,
+			    transformIdentity,
 			    markedSecretsRevision,
 			    out var cached))
 		{
 			return cached;
 		}
+		if (allowIdentityTransformFallback && transformIdentity.Length > 0 &&
+		    _scanCache.TryGetByContent(
+			    filePath,
+			    metadata,
+			    contentFingerprint,
+			    rulesIdentity,
+			    transformIdentity: string.Empty,
+			    markedSecretsRevision,
+			    out cached))
+		{
+			StoreEquivalentTransformAlias(cached, transformIdentity);
+			return cached;
+		}
 
-		var detectorFindings = detectorScope.Detect(filePath, relativePath, content, cancellationToken);
-		var markedFindings = markedSecretsMatcher.Match(relativePath, content, cancellationToken);
+		var detectorFindings = includeAutomaticDetection
+			? detectorScope.Detect(filePath, relativePath, content, cancellationToken)
+			: [];
+		var markedFindings = markedSecretsMatcher.Match(
+			relativePath,
+			content,
+			transformMap,
+			cancellationToken);
 		var detected = SecretRedactionScope.ResolveNonOverlappingMatches(
 			detectorFindings.Count == 0
 				? markedFindings
@@ -388,6 +501,7 @@ public sealed class SecretRedactionSession : IDisposable
 			metadata,
 			contentFingerprint,
 			rulesIdentity,
+			transformIdentity,
 			markedSecretsRevision,
 			IsBinary: false,
 			findings,
@@ -395,9 +509,29 @@ public sealed class SecretRedactionSession : IDisposable
 				normalizedPath,
 				contentFingerprint,
 				rulesIdentity,
+				transformIdentity,
 				findings));
 		_scanCache.Store(entry, detectionExecuted: true);
+		if (allowIdentityTransformFallback && transformIdentity.Length > 0)
+			StoreEquivalentTransformAlias(entry, transformIdentity: string.Empty);
 		return entry;
+	}
+
+	private void StoreEquivalentTransformAlias(
+		SecretScanCacheEntry source,
+		string transformIdentity)
+	{
+		var alias = source with
+		{
+			TransformIdentity = transformIdentity,
+			ApproximateRetainedBytes = EstimateRetainedBytes(
+				source.NormalizedPath,
+				source.ContentFingerprint,
+				source.RulesIdentity,
+				transformIdentity,
+				source.Findings)
+		};
+		_scanCache.Store(alias, detectionExecuted: false);
 	}
 
 	internal SecretScanCacheEntry StoreBinary(
@@ -405,21 +539,68 @@ public sealed class SecretRedactionSession : IDisposable
 		string filePath,
 		SecretFileMetadata metadata,
 		ISecretDetectionScope detectorScope,
-		int markedSecretsRevision)
+		bool includeAutomaticDetection,
+		int markedSecretsRevision,
+		string transformIdentity)
 	{
 		var normalizedPath = Path.GetFullPath(filePath);
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
-		var rulesIdentity = detectorScope.GetRulesIdentity(filePath, relativePath);
+		var rulesIdentity = GetRulesIdentity(
+			detectorScope,
+			filePath,
+			relativePath,
+			includeAutomaticDetection);
 		var entry = new SecretScanCacheEntry(
 			normalizedPath,
 			metadata,
 			ContentFingerprint: string.Empty,
 			rulesIdentity,
+			transformIdentity,
 			markedSecretsRevision,
 			IsBinary: true,
 			Findings: [],
 			ApproximateRetainedBytes: 96 +
-			                          (normalizedPath.Length + rulesIdentity.Length) * sizeof(char));
+			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length) *
+			                          sizeof(char));
+		_scanCache.Store(entry, detectionExecuted: false);
+		return entry;
+	}
+
+	/// <summary>
+	/// Records a text file the scanner never read because it is past the scan limit.
+	///
+	/// It is stored, not skipped, so a relabel does not re-stat it on every pass. The empty content
+	/// fingerprint is what tells a reader apart from a file that was scanned and found clean: no
+	/// text was hashed here, so the empty finding list means "unknown", not "nothing".
+	/// </summary>
+	internal SecretScanCacheEntry StoreUnscannable(
+		string projectRoot,
+		string filePath,
+		SecretFileMetadata metadata,
+		ISecretDetectionScope detectorScope,
+		bool includeAutomaticDetection,
+		int markedSecretsRevision,
+		string transformIdentity)
+	{
+		var normalizedPath = Path.GetFullPath(filePath);
+		var relativePath = NormalizeRelativePath(projectRoot, filePath);
+		var rulesIdentity = GetRulesIdentity(
+			detectorScope,
+			filePath,
+			relativePath,
+			includeAutomaticDetection);
+		var entry = new SecretScanCacheEntry(
+			normalizedPath,
+			metadata,
+			ContentFingerprint: string.Empty,
+			rulesIdentity,
+			transformIdentity,
+			markedSecretsRevision,
+			IsBinary: false,
+			Findings: [],
+			ApproximateRetainedBytes: 96 +
+			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length) *
+			                          sizeof(char));
 		_scanCache.Store(entry, detectionExecuted: false);
 		return entry;
 	}
@@ -439,29 +620,37 @@ public sealed class SecretRedactionSession : IDisposable
 	internal ISecretDetectionScope CreateDetectorScope(string projectRoot) =>
 		_detector.CreateScope(projectRoot);
 
-	internal void Publish(SecretRedactionSnapshot snapshot, long overrideRevision)
+	private static string GetRulesIdentity(
+		ISecretDetectionScope detectorScope,
+		string filePath,
+		string relativePath,
+		bool includeAutomaticDetection)
+	{
+		var identity = detectorScope.GetRulesIdentity(filePath, relativePath);
+		return includeAutomaticDetection ? identity : $"{identity}:manual-only";
+	}
+
+	internal void Publish(
+		SecretRedactionSnapshot snapshot,
+		long overrideRevision,
+		long snapshotRevision)
 	{
 		lock (_sync)
 		{
-			if (overrideRevision != _overrideRevision)
+			if (overrideRevision != _overrideRevision || snapshotRevision != _snapshotRevision)
 				return;
-			_snapshots.Clear();
 			_snapshots[snapshot.SelectionKey] = snapshot;
 		}
 		SnapshotPublished?.Invoke(this, new SecretRedactionSnapshotPublishedEventArgs(snapshot));
 	}
 
-	internal static string BuildSelectionKey(string projectRoot, IReadOnlyList<string> orderedFilePaths)
-	{
-		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-		AppendHashValue(hash, Path.GetFullPath(projectRoot));
-		var relativePaths = orderedFilePaths
-			.Select(path => NormalizeRelativePath(projectRoot, path))
-			.OrderBy(static path => path, StringComparer.Ordinal);
-		foreach (var relativePath in relativePaths)
-			AppendHashValue(hash, relativePath);
-		return Convert.ToHexString(hash.GetHashAndReset());
-	}
+	internal static string BuildSelectionKey(
+		string projectRoot,
+		IReadOnlyList<string> orderedFilePaths,
+		string transformIdentity = "") =>
+		ContentSelectionSnapshot
+			.Create(projectRoot, orderedFilePaths)
+			.CreateTransformFingerprint(transformIdentity);
 
 	internal static string NormalizeRelativePath(string projectRoot, string filePath)
 	{
@@ -484,26 +673,27 @@ public sealed class SecretRedactionSession : IDisposable
 		string normalizedPath,
 		string contentFingerprint,
 		string rulesIdentity,
+		string transformIdentity,
 		IReadOnlyList<SecretFindingMetadata> findings)
 	{
 		long bytes = 160 +
-		             (normalizedPath.Length + contentFingerprint.Length + rulesIdentity.Length) * sizeof(char);
+		             (normalizedPath.Length + contentFingerprint.Length + rulesIdentity.Length +
+		              transformIdentity.Length) * sizeof(char);
 		foreach (var finding in findings)
 			bytes += 64 + (finding.RuleId.Length + finding.ValueFingerprint.Length) * sizeof(char);
 		return bytes;
-	}
-
-	private static void AppendHashValue(IncrementalHash hash, string value)
-	{
-		var bytes = Encoding.UTF8.GetBytes(value);
-		hash.AppendData(BitConverter.GetBytes(bytes.Length));
-		hash.AppendData(bytes);
 	}
 
 	private void AdvanceMarkedSecretsRevisionLocked()
 	{
 		_markedSecretsRevision++;
 		_overrideRevision++;
+		InvalidateSnapshotsLocked();
+	}
+
+	private void InvalidateSnapshotsLocked()
+	{
+		_snapshotRevision++;
 		_snapshots.Clear();
 	}
 
@@ -531,45 +721,72 @@ public sealed class SecretRedactionScope
 	private readonly string _projectRoot;
 	private readonly IReadOnlySet<string> _keptOccurrenceIds;
 	private readonly long _overrideRevision;
+	private readonly long _snapshotRevision;
 	private readonly MarkedSecretsMatcher _markedSecretsMatcher;
 	private readonly int _markedSecretsRevision;
+	private readonly string _transformIdentity;
 	private readonly ISecretDetectionScope _detectorScope;
 	private readonly Dictionary<string, int> _identityIndexes = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, int> _ruleIdentityCounts = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, int> _markedSecretCounts = new(StringComparer.OrdinalIgnoreCase);
+	private readonly ConcurrentDictionary<string, SecretContentInspectionMode> _inspectionModes =
+		new(PathComparer.Default);
 	private int _detectedCount;
 	private int _redactedCount;
+	// The count scan runs files in parallel, so "first" would depend on thread timing. Keeping the
+	// ordinally smallest path makes the reported file the same on every run.
+	private string? _unscannablePath;
 	private bool _completed;
 
 	internal SecretRedactionScope(
 		SecretRedactionSession session,
 		string projectRoot,
-		IReadOnlyList<string> orderedFilePaths,
+		string selectionKey,
 		IReadOnlySet<string> keptOccurrenceIds,
 		long overrideRevision,
+		long snapshotRevision,
 		MarkedSecretsMatcher markedSecretsMatcher,
-		int markedSecretsRevision)
+		int markedSecretsRevision,
+		string transformIdentity = "")
 	{
 		_session = session;
+		_transformIdentity = transformIdentity;
 		_projectRoot = Path.GetFullPath(projectRoot);
 		_keptOccurrenceIds = keptOccurrenceIds;
 		_overrideRevision = overrideRevision;
+		_snapshotRevision = snapshotRevision;
 		_markedSecretsMatcher = markedSecretsMatcher;
 		_markedSecretsRevision = markedSecretsRevision;
 		_detectorScope = session.CreateDetectorScope(_projectRoot);
-		SelectionKey = SecretRedactionSession.BuildSelectionKey(_projectRoot, orderedFilePaths);
+		SelectionKey = selectionKey;
 	}
 
 	public string SelectionKey { get; }
 	public int DetectedCount => _detectedCount;
 	public int RedactedCount => _redactedCount;
 
+	internal SecretContentInspectionMode GetContentInspectionMode(string filePath)
+	{
+		EnsureActive();
+		return _inspectionModes.GetOrAdd(filePath, ResolveContentInspectionMode);
+	}
+
+	private SecretContentInspectionMode ResolveContentInspectionMode(string filePath)
+	{
+		var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
+		if (_detectorScope.ShouldInspectPath(filePath, relativePath))
+			return SecretContentInspectionMode.AutomaticAndManual;
+		return _markedSecretsMatcher.RequiresContentInspection(relativePath)
+			? SecretContentInspectionMode.ManualOnly
+			: SecretContentInspectionMode.None;
+	}
+
 	public bool TryAnalyzeCached(string filePath)
 	{
 		EnsureActive();
 		if (!TryGetCachedEntry(filePath, SecretFileMetadata.Capture(filePath), out var entry))
 			return false;
-		ProcessFindings(filePath, entry.Findings);
+		ProcessEntry(filePath, entry);
 		return true;
 	}
 
@@ -579,12 +796,20 @@ public sealed class SecretRedactionScope
 		out SecretScanCacheEntry entry)
 	{
 		EnsureActive();
+		var inspectionMode = GetContentInspectionMode(filePath);
+		if (inspectionMode == SecretContentInspectionMode.None)
+		{
+			entry = null!;
+			return false;
+		}
 		return _session.TryGetCachedFindings(
 			_projectRoot,
 			filePath,
 			metadata,
 			_detectorScope,
+			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
+			_transformIdentity,
 			out entry);
 	}
 
@@ -616,6 +841,12 @@ public sealed class SecretRedactionScope
 		CancellationToken cancellationToken = default)
 	{
 		EnsureActive();
+		var inspectionMode = GetContentInspectionMode(filePath);
+		if (inspectionMode == SecretContentInspectionMode.None)
+		{
+			throw new InvalidOperationException(
+				$"Secret detection was requested for a path excluded by detector policy: '{filePath}'.");
+		}
 		return _session.GetOrDetectFindings(
 			_projectRoot,
 			filePath,
@@ -623,59 +854,157 @@ public sealed class SecretRedactionScope
 			metadata,
 			_detectorScope,
 			_markedSecretsMatcher,
+			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
+			_transformIdentity,
 			cancellationToken);
 	}
 
 	internal void AnalyzeBinary(string filePath, SecretFileMetadata metadata)
 	{
 		EnsureActive();
+		var inspectionMode = GetContentInspectionMode(filePath);
+		if (inspectionMode == SecretContentInspectionMode.None)
+			return;
 		_session.StoreBinary(
 			_projectRoot,
 			filePath,
 			metadata,
 			_detectorScope,
-			_markedSecretsRevision);
+			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
+			_markedSecretsRevision,
+			_transformIdentity);
 	}
 
 	internal SecretScanCacheEntry StoreBinary(string filePath, SecretFileMetadata metadata)
 	{
 		EnsureActive();
+		var inspectionMode = GetContentInspectionMode(filePath);
+		if (inspectionMode == SecretContentInspectionMode.None)
+			throw new InvalidOperationException("An excluded path cannot be stored as binary scan input.");
 		return _session.StoreBinary(
 			_projectRoot,
 			filePath,
 			metadata,
 			_detectorScope,
-			_markedSecretsRevision);
+			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
+			_markedSecretsRevision,
+			_transformIdentity);
+	}
+
+	internal SecretScanCacheEntry StoreUnscannable(string filePath, SecretFileMetadata metadata)
+	{
+		EnsureActive();
+		var inspectionMode = GetContentInspectionMode(filePath);
+		if (inspectionMode == SecretContentInspectionMode.None)
+			throw new InvalidOperationException("An excluded path cannot be stored as unscannable input.");
+		RecordUnscannable(filePath);
+		return _session.StoreUnscannable(
+			_projectRoot,
+			filePath,
+			metadata,
+			_detectorScope,
+			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
+			_markedSecretsRevision,
+			_transformIdentity);
+	}
+
+	internal void AnalyzeUnscannable(string filePath, SecretFileMetadata metadata)
+	{
+		EnsureActive();
+		var inspectionMode = GetContentInspectionMode(filePath);
+		if (inspectionMode == SecretContentInspectionMode.None)
+			return;
+		RecordUnscannable(filePath);
+		_session.StoreUnscannable(
+			_projectRoot,
+			filePath,
+			metadata,
+			_detectorScope,
+			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
+			_markedSecretsRevision,
+			_transformIdentity);
+	}
+
+	private void RecordUnscannable(string filePath)
+	{
+		while (true)
+		{
+			var current = Volatile.Read(ref _unscannablePath);
+			if (current is not null && string.CompareOrdinal(current, filePath) <= 0)
+				return;
+			if (Interlocked.CompareExchange(ref _unscannablePath, filePath, current) == current)
+				return;
+		}
 	}
 
 	internal void ProcessEntry(string filePath, SecretScanCacheEntry entry)
 	{
 		EnsureActive();
+		// Also runs for entries served from the cache, which is the only way a second scan of the
+		// same unchanged file would otherwise forget that it was never read.
+		if (entry.IsUnscannable)
+			RecordUnscannable(filePath);
 		ProcessFindings(filePath, entry.Findings);
 	}
 
 	public SecretTextRedactionResult Redact(
 		string filePath,
 		string content,
+		CancellationToken cancellationToken = default) =>
+		Redact(filePath, content, null, cancellationToken);
+
+	/// <param name="content">The text to redact, after compression.</param>
+	/// <param name="transformMap">Translation from canonical source offsets into this text.</param>
+	public SecretTextRedactionResult Redact(
+		string filePath,
+		string content,
+		ContentTransformMap? transformMap,
 		CancellationToken cancellationToken = default)
 	{
-		var plan = CreatePlan(filePath, content, cancellationToken);
+		var plan = CreatePlan(filePath, content, transformMap, cancellationToken);
 		return plan.BuildResult(content);
 	}
 
 	internal SecretFileRedactionPlan CreatePlan(
 		string filePath,
 		string content,
+		CancellationToken cancellationToken = default) =>
+		CreatePlan(filePath, content, null, cancellationToken);
+
+	internal SecretFileRedactionPlan CreatePlan(
+		string filePath,
+		string content,
+		ContentTransformMap? transformMap,
+		CancellationToken cancellationToken = default) =>
+		CreatePlan(
+			filePath,
+			content,
+			transformMap,
+			knownFingerprint: null,
+			cancellationToken: cancellationToken);
+
+	internal SecretFileRedactionPlan CreatePlan(
+		string filePath,
+		string content,
+		ContentTransformMap? transformMap,
+		ContentFingerprint? knownFingerprint,
 		CancellationToken cancellationToken = default)
 	{
 		EnsureActive();
+		var inspectionMode = GetContentInspectionMode(filePath);
+		if (inspectionMode == SecretContentInspectionMode.None)
+			return ProcessFindings(filePath, []);
 		var metadata = SecretFileMetadata.Capture(filePath);
-		if (metadata.Length > SecretRedactionOutputPreparer.MaximumScannableFileBytes)
+		// Measured on the text this scope was handed, not on the file on disk. Compression runs
+		// first and the plan describes its output, so gating on the on-disk size would refuse work
+		// the scanner is about to do on a fraction of that text - the limit would fight the very
+		// setting a user enables to get under it.
+		if (content.Length > SecretRedactionOutputPreparer.MaximumScannableFileBytes)
 		{
 			throw new SecretScanLimitExceededException(
 				filePath,
-				metadata.Length,
+				content.Length,
 				SecretRedactionOutputPreparer.MaximumScannableFileBytes);
 		}
 		var entry = _session.GetOrDetectFindings(
@@ -685,23 +1014,37 @@ public sealed class SecretRedactionScope
 			metadata,
 			_detectorScope,
 			_markedSecretsMatcher,
+			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			cancellationToken);
+			_transformIdentity,
+			cancellationToken,
+			transformMap,
+			knownFingerprint,
+			allowIdentityTransformFallback:
+				knownFingerprint is not null && transformMap?.IsIdentity == true);
 		return ProcessFindings(filePath, entry.Findings);
 	}
 
 	internal IDisposable TrackFullContentBuffer() => _session.TrackFullContentBuffer();
 
 	public SecretRedactionSnapshot Complete()
+		=> Complete(skippedFileCount: 0, failedFileCount: 0);
+
+	internal SecretRedactionSnapshot Complete(int skippedFileCount, int failedFileCount)
 	{
 		EnsureActive();
+		ArgumentOutOfRangeException.ThrowIfNegative(skippedFileCount);
+		ArgumentOutOfRangeException.ThrowIfNegative(failedFileCount);
 		_completed = true;
 		var snapshot = new SecretRedactionSnapshot(
 			SelectionKey,
 			_detectedCount,
 			_redactedCount,
-			new Dictionary<string, int>(_markedSecretCounts, StringComparer.OrdinalIgnoreCase));
-		_session.Publish(snapshot, _overrideRevision);
+			new Dictionary<string, int>(_markedSecretCounts, StringComparer.OrdinalIgnoreCase),
+			Volatile.Read(ref _unscannablePath),
+			skippedFileCount,
+			failedFileCount);
+		_session.Publish(snapshot, _overrideRevision, _snapshotRevision);
 		return snapshot;
 	}
 
@@ -859,6 +1202,13 @@ public sealed class SecretRedactionScope
 	}
 }
 
+internal enum SecretContentInspectionMode : byte
+{
+	None = 0,
+	ManualOnly = 1,
+	AutomaticAndManual = 2
+}
+
 internal sealed record SecretReplacement(int SourceStart, int SourceLength, string? Replacement)
 {
 	public int SourceEnd => checked(SourceStart + SourceLength);
@@ -878,14 +1228,36 @@ internal sealed class SecretFileRedactionPlan(
 	public SecretTextRedactionResult BuildResult(string content)
 	{
 		if (Replacements.Count == 0)
-			return new SecretTextRedactionResult(content, Spans, 0, 0);
+		{
+			return new SecretTextRedactionResult(
+				content,
+				Spans,
+				0,
+				0,
+				ContentTransformMap.Identity);
+		}
 
 		var estimatedLength = content.Length;
+		var transformedRanges = new List<ContentTransformRange>(Replacements.Count);
 		foreach (var replacement in Replacements)
+		{
 			estimatedLength = checked(estimatedLength + (replacement.Replacement?.Length ?? replacement.SourceLength) - replacement.SourceLength);
+			if (replacement.Replacement is not null)
+			{
+				transformedRanges.Add(new ContentTransformRange(
+					replacement.SourceStart,
+					replacement.SourceLength,
+					replacement.Replacement.Length));
+			}
+		}
 		var builder = new StringBuilder(estimatedLength);
 		AppendTo(builder, content, content.Length);
-		return new SecretTextRedactionResult(builder.ToString(), Spans, DetectedCount, RedactedCount);
+		return new SecretTextRedactionResult(
+			builder.ToString(),
+			Spans,
+			DetectedCount,
+			RedactedCount,
+			ContentTransformMap.Create(transformedRanges, content.Length));
 	}
 
 	public void AppendTo(StringBuilder destination, string content, int sourceLength)

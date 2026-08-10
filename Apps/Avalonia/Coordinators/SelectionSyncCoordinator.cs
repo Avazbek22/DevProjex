@@ -16,7 +16,7 @@ public sealed partial class SelectionSyncCoordinator(
     Func<string, bool> tryElevateAndRestart,
     Func<string?> currentPathProvider,
     StatusOperationCoordinator? statusOperations = null,
-    Action? contentTransformationChanged = null,
+    Action<IgnoreOptionId?>? contentTransformationChanged = null,
     Action? selectionContentChanged = null)
     : IDisposable
 {
@@ -312,9 +312,11 @@ public sealed partial class SelectionSyncCoordinator(
 
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = isChecked;
+		// "All" governs path filters only: a content transformation is not something the user
+		// asked for by ticking every ignore row.
 		_session.IgnoreOptions.ApplyAllPreferenceToKnownStates(
 			isChecked,
-			IgnoreOptionId.HideSecrets);
+			ProjectPresentationCatalog.ContentTransformationOptionIds);
 
         _suppressIgnoreAllCheck = true;
         viewModel.AllIgnoreChecked = isChecked;
@@ -489,7 +491,9 @@ public sealed partial class SelectionSyncCoordinator(
 	    bool showAdvancedCounts,
 	    int? secretRedactionsCount = null,
 	    SecretScanState secretScanState = SecretScanState.Disabled,
-	    int? secretMatchesCount = null)
+	    int? secretMatchesCount = null,
+	    int? compressedFilesCount = null,
+	    int? uncompressedFilesCount = null)
     {
         if (viewModel.IgnoreOptions.Count == 0)
             return;
@@ -497,8 +501,12 @@ public sealed partial class SelectionSyncCoordinator(
 		var visibleIds = viewModel.IgnoreOptions
 			.Select(static option => option.Id)
 			.ToHashSet();
+		// Specifically Hide Secrets, not "any transformation": the secret counters must never be
+		// attached to a row that did not produce them.
 		var hideSecretsIsChecked = viewModel.IgnoreOptions.Any(static option =>
 			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
+		var compressCodeIsChecked = viewModel.IgnoreOptions.Any(static option =>
+			option.Id == IgnoreOptionId.CompressCode && option.IsChecked);
         var counts = _ignoreOptionCounts;
         var availability = new IgnoreOptionsAvailability(
             IncludeGitIgnore: visibleIds.Contains(IgnoreOptionId.UseGitIgnore),
@@ -520,12 +528,17 @@ public sealed partial class SelectionSyncCoordinator(
 			IncludeTrackedGitFilesOnly: visibleIds.Contains(IgnoreOptionId.TrackedGitFilesOnly),
 			SecretRedactionsCount: hideSecretsIsChecked ? secretRedactionsCount : null,
 			SecretMatchesCount: hideSecretsIsChecked ? secretMatchesCount : null,
+			CompressedFilesCount: compressCodeIsChecked ? compressedFilesCount : null,
+			UncompressedFilesCount: compressCodeIsChecked ? uncompressedFilesCount : null,
             ShowAdvancedCounts: showAdvancedCounts);
         var localizedDescriptors = ignoreOptionsService.GetOptions(availability);
         var descriptorsById = localizedDescriptors.ToDictionary(static descriptor => descriptor.Id);
 
         foreach (var option in viewModel.IgnoreOptions)
         {
+			// Hide Secrets carries a live scan state that the availability snapshot cannot express,
+			// so it is formatted here. Every other transformation takes the label the catalog
+			// dispatched for it - otherwise a second row silently inherits this one's name.
 			if (option.Id == IgnoreOptionId.HideSecrets)
 			{
 				option.Label = ignoreOptionsService.FormatHideSecretsLabel(
@@ -887,8 +900,11 @@ public sealed partial class SelectionSyncCoordinator(
     public bool CancelPendingRefreshes()
     {
         var shouldRestoreStableSelection = HasDirtySelectionRefresh();
-		var hideSecretsWasChecked = viewModel.IgnoreOptions.Any(static option =>
-			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
+		var transformationsWereChecked = viewModel.IgnoreOptions
+			.Where(static option => ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Id)
+			.ToHashSet();
         lock (_backgroundRefreshSync)
         {
             _liveOptionsRefreshCts?.Cancel();
@@ -902,14 +918,20 @@ public sealed partial class SelectionSyncCoordinator(
             return false;
 
 		RestoreStableSelectionSnapshot(snapshot);
-		var hideSecretsIsChecked = viewModel.IgnoreOptions.Any(static option =>
-			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
-		if (hideSecretsWasChecked != hideSecretsIsChecked)
+		var transformationsAreChecked = viewModel.IgnoreOptions
+			.Where(static option => ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Id)
+			.ToHashSet();
+		if (!transformationsWereChecked.SetEquals(transformationsAreChecked))
 		{
 			// Rollback is a real content-state transition. Notify the output pipeline just as
 			// an ordinary checkbox change would, otherwise Preview and the measured count lag
 			// behind the selection visibly restored to the user.
-			contentTransformationChanged?.Invoke();
+			contentTransformationChanged?.Invoke(
+				ResolveChangedTransformation(
+					transformationsWereChecked,
+					transformationsAreChecked));
 		}
         return true;
     }
@@ -1170,7 +1192,7 @@ public sealed partial class SelectionSyncCoordinator(
             var allOrdinaryOptionsChecked = true;
             foreach (var option in viewModel.IgnoreOptions)
             {
-				if (option.Id == IgnoreOptionId.HideSecrets)
+				if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
 					continue;
                 hasItems = true;
                 if (GitFilteringModeResolver.IsGitFilteringOption(option.Id))
@@ -1232,16 +1254,21 @@ public sealed partial class SelectionSyncCoordinator(
         SyncIgnoreAllCheckbox();
 
         UpdateIgnoreSelectionCache();
-		if (changedOption?.Id != IgnoreOptionId.HideSecrets)
+		var changedTransformation = changedOption is not null &&
+			ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(changedOption.Id);
+		if (!changedTransformation)
 			_session.AdvanceRevision();
         RequestPendingApplyEvaluation();
 
         var currentPath = currentPathProvider();
-		if (changedOption?.Id == IgnoreOptionId.HideSecrets)
+		if (changedTransformation)
 		{
-			// Hide Secrets changes produced content, never filesystem visibility. Rebuild the
-			// preview from the current selection without paying for an unrelated tree scan.
-			contentTransformationChanged?.Invoke();
+			// Hide Secrets is an immediate scan request: toggling it starts or stops the scan and
+			// touches no tree state, so it notifies the output pipeline right away. Compress Code
+			// rewrites produced content and every counter reading it, so it stays a draft that
+			// «Apply settings» commits together with the other filter checkboxes.
+			if (changedOption!.Id == IgnoreOptionId.HideSecrets)
+				contentTransformationChanged?.Invoke(changedOption.Id);
 			return;
 		}
 		selectionContentChanged?.Invoke();
@@ -1250,6 +1277,18 @@ public sealed partial class SelectionSyncCoordinator(
             QueueRefreshForIgnoreOptionChange(currentPath, changedOption?.Id);
         }
     }
+
+	private static IgnoreOptionId? ResolveChangedTransformation(
+		IReadOnlySet<IgnoreOptionId> before,
+		IReadOnlySet<IgnoreOptionId> after)
+	{
+		var changed = before
+			.Where(optionId => !after.Contains(optionId))
+			.Concat(after.Where(optionId => !before.Contains(optionId)))
+			.Take(2)
+			.ToArray();
+		return changed.Length == 1 ? changed[0] : null;
+	}
 
     private void QueueRefreshForIgnoreOptionChange(string currentPath, IgnoreOptionId? changedOptionId)
     {
@@ -2640,7 +2679,7 @@ public sealed partial class SelectionSyncCoordinator(
         if (_session.IgnoreOptions.TryGetCachedState(option.Id, out var cachedState))
             return cachedState;
 
-		if (option.Id != IgnoreOptionId.HideSecrets &&
+		if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id) &&
 		    _session.IgnoreOptions.AllPreference.HasValue)
             return _session.IgnoreOptions.AllPreference.Value;
 
@@ -2740,7 +2779,7 @@ public sealed partial class SelectionSyncCoordinator(
         {
             foreach (var option in viewModel.IgnoreOptions)
             {
-				if (option.Id == IgnoreOptionId.HideSecrets)
+				if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
 					continue;
                 option.IsChecked = option.Id switch
                 {

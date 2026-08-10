@@ -1,5 +1,6 @@
 global using System.Reflection;
 global using System.Text;
+global using DevProjex.Application.Compression;
 global using DevProjex.Application.Preview;
 global using DevProjex.Application.Presentation;
 global using DevProjex.Application.Context;

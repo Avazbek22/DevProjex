@@ -12,5 +12,6 @@ public enum IgnoreOptionId
 	EmptyFiles,
 	ExtensionlessFiles,
 	TrackedGitFilesOnly,
-	HideSecrets
+	HideSecrets,
+	CompressCode
 }

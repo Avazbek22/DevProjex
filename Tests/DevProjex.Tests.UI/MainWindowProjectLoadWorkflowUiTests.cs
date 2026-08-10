@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 using System.Text.RegularExpressions;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Abstractions;
@@ -776,7 +777,9 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
             if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
                 continue;
 
-			if (option.Id == IgnoreOptionId.HideSecrets)
+			// Content transformations are not path filters: their labels carry a processing result,
+			// not a count of what would be removed from the tree.
+			if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
 				continue;
 
             var match = Regex.Match(option.Label, @"\((\d+)\)$");

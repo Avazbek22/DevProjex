@@ -110,7 +110,9 @@ public partial class MainWindow
             selectedPaths,
             destinationPath,
 			format,
-			RedactSecrets: CreateSecretRedactionContext() is not null);
+			RedactSecrets: CreateSecretRedactionContext() is not null,
+			CompressCode: CreateCodeCompressionContext() is not null,
+			NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(_localization));
         var cancellation = new CancellationTokenSource();
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _projectCopyExportCts = cancellation;
@@ -177,16 +179,25 @@ public partial class MainWindow
 
 	private async Task<bool> ConfirmRedactedProjectCopyAsync()
 	{
-		if (CreateSecretRedactionContext() is null)
+		var context = CreateContentTransformationContext();
+		if (context is null)
 			return true;
+
+		// Both transformations make the copy something other than the project, and the user is told
+		// about each one that is actually enabled rather than about the pair.
+		var reasons = new List<string>(2);
+		if (context.HasRedaction)
+			reasons.Add(_localization["Dialog.ProjectCopy.Redaction.Message"]);
+		if (context.HasCompression)
+			reasons.Add(_localization["Compression.CopyNotice"]);
 
 		return await MessageDialog.ShowConfirmationAsync(
 			this,
 			_localization["Dialog.ProjectCopy.Redaction.Title"],
-			_localization["Dialog.ProjectCopy.Redaction.Message"],
+			string.Join(Environment.NewLine + Environment.NewLine, reasons),
 			_localization["Dialog.ProjectCopy.Redaction.Continue"],
 			_localization["Dialog.Cancel"],
-			height: 230);
+			height: reasons.Count > 1 ? 300 : 230);
 	}
 
     private string GetProjectCopyName()

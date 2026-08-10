@@ -41,7 +41,8 @@ internal sealed class PreviewWorkspacePipeline(
                 requestVersion,
                 Volatile.Read(ref _firstContentReady),
                 cancelSignalOnEarlyExit: false,
-                publicationReady: null);
+                publicationReady: null,
+                deferPresentationUntilPublication: false);
             return;
         }
 
@@ -52,7 +53,8 @@ internal sealed class PreviewWorkspacePipeline(
 
     public PreviewRefreshOperation RefreshNowAsync(
         bool allowDuringModeSwitch = false,
-        Task? publicationReady = null)
+        Task? publicationReady = null,
+        bool deferPresentationUntilPublication = false)
     {
         var requestVersion = RequestRefresh();
         var firstContentReady = new FirstContentReadySignal();
@@ -65,7 +67,8 @@ internal sealed class PreviewWorkspacePipeline(
             requestVersion,
             firstContentReady,
             cancelSignalOnEarlyExit: true,
-            publicationReady);
+            publicationReady,
+            deferPresentationUntilPublication);
         return new PreviewRefreshOperation(
             firstContentReady.Ready,
             completion);
@@ -106,14 +109,16 @@ internal sealed class PreviewWorkspacePipeline(
             Volatile.Read(ref _requestedRefreshVersion),
             Volatile.Read(ref _firstContentReady),
             cancelSignalOnEarlyExit: false,
-            publicationReady: null);
+            publicationReady: null,
+            deferPresentationUntilPublication: false);
 
     private async Task RefreshAsync(
         bool allowDuringModeSwitch,
         long requestVersion,
         FirstContentReadySignal? firstContentReady,
         bool cancelSignalOnEarlyExit,
-        Task? publicationReady)
+        Task? publicationReady,
+        bool deferPresentationUntilPublication)
     {
         if (!IsCurrentRefreshRequest(requestVersion) ||
             !host.ViewModel.IsProjectLoaded ||
@@ -195,16 +200,11 @@ internal sealed class PreviewWorkspacePipeline(
             return;
         }
 
-        host.ViewModel.IsPreviewLoading = true;
-
-        // The pipeline owns cancellation/version gates; the host owns UI-specific document work.
-        var statusOperation = new PreviewBuildStatusOperation(
-            host,
-            host.BeginPreviewBuildOperation(previewCts));
-        Interlocked.Exchange(
-                ref _activeBuildStatusOperation,
-                statusOperation)
-            ?.Complete();
+        var presentationDeferred =
+            deferPresentationUntilPublication && publicationReady is not null;
+        PreviewBuildStatusOperation? statusOperation = presentationDeferred
+            ? null
+            : BeginBuildPresentation(previewCts);
 
         if (!IsCurrentBuild(buildVersion) ||
             !IsCurrentRefreshRequest(requestVersion))
@@ -242,10 +242,11 @@ internal sealed class PreviewWorkspacePipeline(
                 return;
             }
 
-            var warmupSnapshot = await host.TryBuildPreviewWarmupSnapshotAsync(input, cancellationToken);
+            var warmupTask = host.TryBuildPreviewWarmupSnapshotAsync(input, cancellationToken);
             previewBuildTask = Task.Run(
                 () => host.BuildPreviewDocument(input, cancellationToken),
                 cancellationToken);
+            var warmupSnapshot = await warmupTask;
 
             if (publicationReady is null &&
                 warmupSnapshot is { } immediateWarmup &&
@@ -261,6 +262,9 @@ internal sealed class PreviewWorkspacePipeline(
             await WaitForPublicationAsync(
                 publicationReady,
                 cancellationToken);
+
+            if (presentationDeferred && !previewBuildTask.IsCompleted)
+                statusOperation = BeginBuildPresentation(previewCts);
 
             if (publicationReady is not null &&
                 !previewBuildTask.IsCompleted &&
@@ -309,6 +313,7 @@ internal sealed class PreviewWorkspacePipeline(
             {
                 InvalidateCache();
                 host.ApplyPreviewText(host.ResolvePreviewErrorMessage(ex));
+                host.HandlePreviewBuildFailure(ex);
                 CompleteFirstContentReady(firstContentReady, buildVersion);
                 CompleteRefreshRequest(requestVersion);
                 host.SchedulePreviewMemoryCleanup();
@@ -423,9 +428,26 @@ internal sealed class PreviewWorkspacePipeline(
                 null)
             ?.Complete();
 
-    private void CompleteBuildStatusOperation(
-        PreviewBuildStatusOperation statusOperation)
+    private PreviewBuildStatusOperation BeginBuildPresentation(
+        CancellationTokenSource previewCts)
     {
+        host.ViewModel.IsPreviewLoading = true;
+        var statusOperation = new PreviewBuildStatusOperation(
+            host,
+            host.BeginPreviewBuildOperation(previewCts));
+        Interlocked.Exchange(
+                ref _activeBuildStatusOperation,
+                statusOperation)
+            ?.Complete();
+        return statusOperation;
+    }
+
+    private void CompleteBuildStatusOperation(
+        PreviewBuildStatusOperation? statusOperation)
+    {
+        if (statusOperation is null)
+            return;
+
         Interlocked.CompareExchange(
             ref _activeBuildStatusOperation,
             null,
@@ -453,7 +475,8 @@ internal sealed class PreviewWorkspacePipeline(
             Volatile.Read(ref _requestedRefreshVersion),
             Volatile.Read(ref _firstContentReady),
             cancelSignalOnEarlyExit: false,
-            publicationReady: null);
+            publicationReady: null,
+            deferPresentationUntilPublication: false);
     }
 
     private long RequestRefresh() =>

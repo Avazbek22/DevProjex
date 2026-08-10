@@ -1,14 +1,20 @@
+using DevProjex.Application.Compression;
+
 namespace DevProjex.Application.Secrets;
 
+/// <summary>
+/// A value the user marked by hand during this session, anchored in canonical source coordinates.
+/// Every transformed preview maps the click back to this offset before the mark enters the session,
+/// so enabling and disabling transformations are symmetric.
+/// </summary>
 internal sealed record SessionMarkedSecret(
 	string RelativePath,
-	int LineIndex,
-	int Column,
+	int SourceOffset,
 	int Length,
 	string Hash)
 {
 	public string Id { get; } = SecretRedactionSession.HashValue(
-		$"{NormalizePath(RelativePath)}\n{LineIndex}\n{Column}\n{Length}\n{Hash}".AsSpan());
+		$"{NormalizePath(RelativePath)}\n{SourceOffset}\n{Length}\n{Hash}".AsSpan());
 
 	private static string NormalizePath(string path) => path.Replace('\\', '/');
 }
@@ -21,6 +27,9 @@ internal sealed class MarkedSecretsMatcher
 
 	private readonly PersistentHashGroup[] _persistentHashGroups;
 	private readonly IReadOnlyDictionary<string, PreparedSessionMark[]> _sessionMarksByPath;
+	private int _persistentIndexBuildCount;
+
+	internal int PersistentIndexBuildCount => Volatile.Read(ref _persistentIndexBuildCount);
 
 	public MarkedSecretsMatcher(
 		IEnumerable<MarkedSecretProfileEntry> persistentMarks,
@@ -53,15 +62,40 @@ internal sealed class MarkedSecretsMatcher
 	public IReadOnlyList<DetectedSecret> Match(
 		string relativePath,
 		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken) =>
+		Match(relativePath, content, null, cancellationToken);
+
+	public bool RequiresContentInspection(string relativePath) =>
+		_persistentHashGroups.Length > 0 ||
+		_sessionMarksByPath.ContainsKey(NormalizePath(relativePath));
+
+	/// <param name="content">The text being scanned, after every enabled transformation.</param>
+	/// <param name="transformMap">Translation from canonical source offsets into this text.</param>
+	public IReadOnlyList<DetectedSecret> Match(
+		string relativePath,
+		ReadOnlySpan<char> content,
+		ContentTransformMap? transformMap,
 		CancellationToken cancellationToken)
 	{
-		if (_persistentHashGroups.Length == 0 && _sessionMarksByPath.Count == 0)
+		_sessionMarksByPath.TryGetValue(
+			NormalizePath(relativePath),
+			out var sessionMarks);
+		if (_persistentHashGroups.Length == 0 && sessionMarks is null)
 			return [];
 
-		var positions = TextPositionIndex.Create(content, cancellationToken);
 		var findings = new List<DetectedSecret>();
-		MatchPersistent(content, positions, findings, cancellationToken);
-		MatchSession(relativePath, content, positions, findings);
+		if (_persistentHashGroups.Length > 0)
+		{
+			var positions = TextPositionIndex.Create(content, cancellationToken);
+			Interlocked.Increment(ref _persistentIndexBuildCount);
+			MatchPersistent(content, positions, findings, cancellationToken);
+		}
+		MatchSession(
+			sessionMarks,
+			content,
+			transformMap,
+			findings,
+			cancellationToken);
 		return findings;
 	}
 
@@ -76,17 +110,29 @@ internal sealed class MarkedSecretsMatcher
 
 		Span<byte> candidateHash = stackalloc byte[MarkedSecretValueNormalizer.PersistedHashByteLength];
 		var candidateIndex = 0;
-		foreach (var start in positions.BoundaryPositions)
+		var lineBreakIndex = 0;
+		for (var start = 0; start <= content.Length; start++)
 		{
+			if (!positions.IsBoundary(start))
+				continue;
+
 			if ((candidateIndex++ & CancellationCheckMask) == 0)
 				cancellationToken.ThrowIfCancellationRequested();
+			while (lineBreakIndex < positions.LineBreakPositions.Length &&
+			       positions.LineBreakPositions[lineBreakIndex] < start)
+			{
+				lineBreakIndex++;
+			}
+			var nextLineBreak = lineBreakIndex < positions.LineBreakPositions.Length
+				? positions.LineBreakPositions[lineBreakIndex]
+				: int.MaxValue;
 
 			foreach (var group in _persistentHashGroups)
 			{
 				var end = start + group.Length;
 				if (end > content.Length ||
 				    !positions.IsBoundary(end) ||
-				    positions.ContainsLineBreak(start, end))
+				    nextLineBreak < end)
 				{
 					continue;
 				}
@@ -108,28 +154,45 @@ internal sealed class MarkedSecretsMatcher
 	}
 
 	private void MatchSession(
-		string relativePath,
+		IReadOnlyList<PreparedSessionMark>? marks,
 		ReadOnlySpan<char> content,
-		TextPositionIndex positions,
-		ICollection<DetectedSecret> findings)
+		ContentTransformMap? transformMap,
+		ICollection<DetectedSecret> findings,
+		CancellationToken cancellationToken)
 	{
-		if (!_sessionMarksByPath.TryGetValue(NormalizePath(relativePath), out var marks))
+		if (marks is null)
 			return;
 
 		Span<byte> candidateHash = stackalloc byte[MarkedSecretValueNormalizer.PersistedHashByteLength];
-		foreach (var preparedMark in marks)
+		for (var index = 0; index < marks.Count; index++)
 		{
+			if ((index & 0xFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			var preparedMark = marks[index];
 			var mark = preparedMark.Mark;
-			var start = positions.ResolveOffset(content, mark.LineIndex, mark.Column);
-			if (start < 0 || start > content.Length - mark.Length ||
-			    !positions.IsBoundary(start) ||
-			    !positions.IsBoundary(start + mark.Length))
+			if (!TryResolveAnchor(
+				    mark,
+				    transformMap,
+				    out var start))
+			{
+				continue;
+			}
+
+			if (start > content.Length - mark.Length ||
+			    !SecretTokenBoundary.IsBoundary(content, start) ||
+			    !SecretTokenBoundary.IsBoundary(content, start + mark.Length))
 			{
 				continue;
 			}
 
 			var value = content.Slice(start, mark.Length);
+			if (value.IndexOfAny('\r', '\n') >= 0)
+				continue;
 			MarkedSecretValueNormalizer.ComputeHash(value, candidateHash);
+			// The hash is the last gate, not the only one. Translating the anchor puts the mark on
+			// the right characters when compression shifts them; verifying the value here means a
+			// mark that still cannot be placed is skipped rather than applied to whatever now sits
+			// at those coordinates.
 			if (!candidateHash.SequenceEqual(preparedMark.HashBytes))
 				continue;
 
@@ -141,6 +204,27 @@ internal sealed class MarkedSecretsMatcher
 				SecretFindingSource.SessionMark,
 				mark.Id));
 		}
+	}
+
+	/// <summary>
+	/// Places a mark in the text being scanned.
+	///
+	/// The source offset is used directly for an identity transform and carried through the current
+	/// map otherwise. A value inside a removed body has no counterpart, and the map says so rather
+	/// than allowing the mark to drift onto replacement text.
+	/// </summary>
+	private static bool TryResolveAnchor(
+		SessionMarkedSecret mark,
+		ContentTransformMap? transformMap,
+		out int start)
+	{
+		if (transformMap is null or { IsIdentity: true })
+		{
+			start = mark.SourceOffset;
+			return true;
+		}
+
+		return transformMap.TryToTransformed(mark.SourceOffset, out start);
 	}
 
 	private static DetectedSecret CreateFinding(
@@ -200,21 +284,17 @@ internal sealed class MarkedSecretsMatcher
 	private sealed record PreparedSessionMark(SessionMarkedSecret Mark, byte[] HashBytes);
 
 	private sealed class TextPositionIndex(
-		bool[] boundaries,
-		int[] boundaryPositions,
-		int[] lineBreakPrefixCounts,
-		int[] newlinePositions)
+		ulong[] boundaryBits,
+		int[] lineBreakPositions)
 	{
-		public IReadOnlyList<int> BoundaryPositions { get; } = boundaryPositions;
+		public int[] LineBreakPositions { get; } = lineBreakPositions;
 
 		public static TextPositionIndex Create(
 			ReadOnlySpan<char> content,
 			CancellationToken cancellationToken)
 		{
-			var boundaries = new bool[content.Length + 1];
-			var boundaryPositions = new List<int>();
-			var lineBreakPrefixCounts = new int[content.Length + 1];
-			var newlinePositions = new List<int>();
+			var boundaryBits = new ulong[((content.Length + 1) + 63) >> 6];
+			var lineBreakPositions = new List<int>();
 
 			for (var position = 0; position <= content.Length; position++)
 			{
@@ -222,47 +302,23 @@ internal sealed class MarkedSecretsMatcher
 					cancellationToken.ThrowIfCancellationRequested();
 
 				if (SecretTokenBoundary.IsBoundary(content, position))
-				{
-					boundaries[position] = true;
-					boundaryPositions.Add(position);
-				}
+					boundaryBits[position >> 6] |= 1UL << (position & 63);
 
 				if (position == content.Length)
 					continue;
 
-				var character = content[position];
-				lineBreakPrefixCounts[position + 1] =
-					lineBreakPrefixCounts[position] + (character is '\r' or '\n' ? 1 : 0);
-				if (character == '\n')
-					newlinePositions.Add(position);
+				if (content[position] is '\r' or '\n')
+					lineBreakPositions.Add(position);
 			}
 
 			return new TextPositionIndex(
-				boundaries,
-				boundaryPositions.ToArray(),
-				lineBreakPrefixCounts,
-				newlinePositions.ToArray());
+				boundaryBits,
+				lineBreakPositions.ToArray());
 		}
 
 		public bool IsBoundary(int position) =>
-			(uint)position < (uint)boundaries.Length && boundaries[position];
-
-		public bool ContainsLineBreak(int start, int end) =>
-			lineBreakPrefixCounts[end] != lineBreakPrefixCounts[start];
-
-		public int ResolveOffset(ReadOnlySpan<char> content, int lineIndex, int column)
-		{
-			if (lineIndex < 0 || column < 0 || lineIndex > newlinePositions.Length)
-				return -1;
-
-			var lineStart = lineIndex == 0 ? 0 : newlinePositions[lineIndex - 1] + 1;
-			var lineEnd = lineIndex < newlinePositions.Length
-				? newlinePositions[lineIndex]
-				: content.Length;
-			if (lineEnd > lineStart && content[lineEnd - 1] == '\r')
-				lineEnd--;
-
-			return column <= lineEnd - lineStart ? lineStart + column : -1;
-		}
+			position >= 0 &&
+			(uint)(position >> 6) < (uint)boundaryBits.Length &&
+			(boundaryBits[position >> 6] & (1UL << (position & 63))) != 0;
 	}
 }

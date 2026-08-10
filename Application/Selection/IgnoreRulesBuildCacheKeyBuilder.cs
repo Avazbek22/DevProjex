@@ -36,9 +36,9 @@ public static class IgnoreRulesBuildCacheKeyBuilder
 		var unique = new HashSet<int>(selectedIgnoreOptions.Count);
 		foreach (var option in selectedIgnoreOptions)
 		{
-			// Hide Secrets transforms selected text after traversal. It must not split or
-			// invalidate the path-ignore cache because it cannot change the scanned tree.
-			if (option != IgnoreOptionId.HideSecrets)
+			// Content transformations rewrite selected text after traversal. They must not split or
+			// invalidate the path-ignore cache because they cannot change the scanned tree.
+			if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option))
 				unique.Add((int)option);
 		}
 		if (unique.Count == 0)

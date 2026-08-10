@@ -56,6 +56,12 @@ When Hide Secrets is enabled, analysis adds a top-level `redaction` object with
 `matchedCount`, `redactedCount`, and a non-safety `notice`. Zero means the pinned
 rules matched nothing; it never means that the project is safe.
 
+When code compression is enabled, analysis content metrics are calculated from
+the transformed text and the document adds a top-level `compression` object with
+`compressedFiles`, `unchangedFiles`, `sourceCharacters`, and
+`transformedCharacters`. Inventory and source byte size still describe the selected
+project files, not a materialized export container.
+
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
 
@@ -144,6 +150,20 @@ A project-copy dry run with Hide Secrets enabled also states that detected text
 will be changed, binary files will remain unchanged, and the result may not build
 or run. This warning does not create or scan an output artifact.
 
+With code compression enabled, context, folder, and ZIP exports all consume the
+same validated transformed snapshot. Unsupported or rejected source files remain
+complete. Named block bodies become minimal syntax-valid placeholders (`{ }`, or
+`...` for Python); JavaScript-family block functions with stable assignment or
+export bindings follow the same rule, including function-valued object properties
+and inline functions wrapped one or two calls deep under a stable binding. Data
+properties and bare callbacks remain unchanged.
+An expression body whose expression fits on one source line remains byte-for-byte
+complete as signature-level context; a multiline expression is implementation and
+is compressed like a block body. Free lambdas or closures, fields, and language-level
+properties remain complete, including nested callbacks in initializers and
+property accessors. Python leading function docstrings and class `__init__` and
+`__post_init__` methods also remain complete. Project source files are never modified.
+
 ## Errors
 
 Human errors follow:
@@ -161,11 +181,12 @@ prints raw `Exception.Message`, an inner exception, or a platform-localized I/O
 message. Diagnostic verbosity may report an exception type, safe path context,
 stack trace, and request identifier, but never file content or secrets.
 
-Secret inspection is fail-closed. `DPX-SECRET-SCAN-LIMIT-EXCEEDED` identifies a
-selected text file above the supported 16 MiB limit;
+Secret inspection never emits uninspected text. A selected text file above the supported
+16 MiB limit fails no command: `export context` omits its text, and `export project`
+leaves it out of the copy and names it in `DEVPROJEX-NOTICE.txt`.
 `DPX-SECRET-DETECTION-FAILED` identifies rule loading, matching, timeout, or
-classified-read failure. Both are runtime failures (exit `1`) and never fall back to an
-unredacted artifact.
+classified-read failure on any command; it is a runtime failure (exit `1`) and never
+falls back to an unredacted artifact.
 
 ## Exit Codes
 

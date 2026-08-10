@@ -144,6 +144,7 @@ remains a usage error instead of silently selecting a later command.
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>                     repeatable
 --hide-secrets [<true|false>]
+--compress [<true|false>]
 ```
 
 Exclusion tokens are:
@@ -181,16 +182,28 @@ context documents, folder copies, and ZIP copies. Placeholders use the stable fo
 within a produced output. Preview keep-as-is overrides apply to every later output in the current
 application session and deliberately do not persist in profiles.
 
-Detection failure, regex timeout, or a selected text file above the 16 MiB scan
-limit fails closed. Direct commands report `DPX-SECRET-DETECTION-FAILED` or
-`DPX-SECRET-SCAN-LIMIT-EXCEEDED` and exit `1`; no complete artifact is published.
-No result describes zero matches as safe or clean.
+Detection failure and regex timeout fail closed on every command, reporting
+`DPX-SECRET-DETECTION-FAILED` and exit `1`; no complete artifact is published. A
+selected text file above the 16 MiB scan limit is not inspected, and costs only itself:
+`export context` omits that file's text and completes, exactly as it does for a file
+that large without `--hide-secrets`, while `export project` leaves it out of the copy
+and names it in `DEVPROJEX-NOTICE.txt`. `--dry-run` announces the same omission.
+Uninspected text is never emitted, a file left out of a copy is always named, and no
+result describes zero matches as safe or clean.
 
 For v5 compatibility, `--exclude hide-secrets` remains parseable but is omitted
 from current help and completion choices. Resolution migrates it to the separate
 `selection.hideSecrets` Boolean and removes it from canonical
 `selection.exclusions`. An explicit `--hide-secrets true|false` takes precedence
 over the legacy token.
+
+`--compress` is a separate, additive content transformation and is off in the
+`standard` profile. It preserves declarations and replaces executable bodies with
+syntax-valid placeholders in the curated C, C++, C#, Go, Java, JavaScript, Python,
+Rust, TSX, and TypeScript language set. A parse failure, unsupported language, size
+limit, structural-gate rejection, or non-shrinking result leaves that file complete.
+Analysis content metrics and every context/folder/ZIP output observe the same
+transformed bytes; source files are never modified.
 
 `gitignore` mode reads regular `.gitignore` files reachable in the selected working
 tree. When the selected path is below its owning repository/worktree root, the
@@ -521,6 +534,7 @@ that prevents an accepted option from becoming a no-op.
 | analyze/context/project/open | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; `tracked` requires Git CLI and at least one readable applicable index | on unavailable index, `analyze` preserves its requested report; context/project/open create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, handler, process |
 | analyze/context/project/open | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
 | analyze/context/project/open | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
+| analyze/context/project/open | `--compress` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | `analyze` | `--format` | `text` | selects the canonical text serializer or analysis JSON | none | document on stdout or in the selected file; invalid value exits `2` | parser, serializer, handler, process |
 | `analyze` | `-o`, `--output` | `-` | selects stdout or an exact new report file | existing/unsafe file is rejected; no force or dry-run | document or real absolute path on stdout; conflict exits `4` | handler, destination, process |
 | `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |

@@ -167,9 +167,8 @@
 				   Margin="0,0,0,6"
 				   FontSize="15" />
 		<Border Name="ContentProcessingOptionsBorder" Grid.Row="1" Classes="checklist-border">
-		  <Grid ColumnDefinitions="Auto,6,16,*">
+		  <Grid>
 			<ListBox Name="ContentProcessingOptionsList"
-					   Grid.Column="0"
 					   Classes="settings-list"
 					   ItemsSource="{Binding ContentProcessingOptions}"
 					   SelectionMode="Multiple"
@@ -182,69 +181,74 @@
 			  </ListBox.ItemsPanel>
 			  <ListBox.ItemTemplate>
 				<DataTemplate x:DataType="vm:IgnoreOptionViewModel">
-				  <CheckBox Classes="list-item settings-list-entry"
-							Content="{Binding Label}"
-							IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+				  <Grid ColumnDefinitions="Auto,6,16,*">
+					<CheckBox Grid.Column="0"
+							  Classes="list-item settings-list-entry"
+							  Content="{Binding Label}"
+							  IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+					<Border Name="ContentProcessingStatusIndicator"
+							Classes="content-processing-status-indicator"
+							Grid.Column="2"
+							Width="16"
+							Height="16"
+							Background="Transparent"
+							Margin="0,1,0,0"
+							VerticalAlignment="Center"
+							IsVisible="{Binding HasStatus}"
+							AutomationProperties.HelpText="{Binding StatusText}"
+							PointerPressed="OnContentProcessingStatusIndicatorPointerPressed"
+							PointerReleased="OnContentProcessingStatusIndicatorPointerReleased"
+							ToolTip.ShowDelay="450"
+							ToolTip.Placement="Bottom"
+							ToolTip.VerticalOffset="5">
+					  <Border.RenderTransform>
+						<TranslateTransform Y="3" />
+					  </Border.RenderTransform>
+					  <ToolTip.Tip>
+						<ToolTip Loaded="OnContentProcessingToolTipLoaded"
+								 MaxWidth="280">
+						  <TextBlock Text="{Binding StatusText}"
+									 MaxWidth="260"
+									 TextWrapping="Wrap" />
+						</ToolTip>
+					  </ToolTip.Tip>
+					  <Grid Width="16" Height="16">
+					  <Border Width="16"
+							  Height="16"
+							  CornerRadius="8"
+							  BorderThickness="1"
+							  BorderBrush="{DynamicResource AppMutedTextBrush}"
+							  Background="{DynamicResource MenuPressedBrush}"
+							  IsVisible="{Binding IsInformationStatus}">
+						<TextBlock Text="?"
+								   FontSize="10"
+								   FontWeight="SemiBold"
+								   Foreground="{DynamicResource AppTextBrush}"
+								   HorizontalAlignment="Center"
+								   VerticalAlignment="Center" />
+					  </Border>
+					  <Grid Width="16"
+							Height="16"
+							IsVisible="{Binding IsWarningStatus}">
+						<Path Data="M 8,1 L 15,14 L 1,14 Z"
+							  Stretch="Uniform"
+							  Fill="{DynamicResource MenuPressedBrush}"
+							  Stroke="{DynamicResource AppMutedTextBrush}"
+							  StrokeThickness="1" />
+						<TextBlock Text="!"
+								   Margin="0,2,0,0"
+								   FontSize="9"
+								   FontWeight="SemiBold"
+								   Foreground="{DynamicResource AppTextBrush}"
+								   HorizontalAlignment="Center"
+								   VerticalAlignment="Center" />
+					  </Grid>
+					  </Grid>
+					</Border>
+				  </Grid>
 				</DataTemplate>
 			  </ListBox.ItemTemplate>
 			</ListBox>
-			<Border Name="ContentProcessingHelpIndicator"
-					Classes="content-processing-status-indicator"
-					Grid.Column="2"
-					Width="16"
-					Height="16"
-					Background="Transparent"
-					RenderTransform="translate(0px, 4px)"
-					VerticalAlignment="Center"
-					IsVisible="{Binding HasContentProcessingStatus}"
-					AutomationProperties.HelpText="{Binding SettingsSecretsNotice}"
-					PointerPressed="OnContentProcessingHelpIndicatorPointerPressed"
-					PointerReleased="OnContentProcessingHelpIndicatorPointerReleased"
-					ToolTip.ShowDelay="450"
-					ToolTip.Placement="Left">
-			  <ToolTip.Tip>
-				<ToolTip Loaded="OnContentProcessingToolTipLoaded"
-						 DataContext="{Binding #SettingsPanelViewRoot.DataContext}"
-						 MaxWidth="260">
-				  <TextBlock x:DataType="vm:MainWindowViewModel"
-							 Text="{Binding SettingsSecretsNotice}"
-							 MaxWidth="240"
-							 TextWrapping="Wrap" />
-				</ToolTip>
-			  </ToolTip.Tip>
-			  <Grid>
-				<Border Name="ContentProcessingQuestionIcon"
-						Width="16"
-						Height="16"
-						CornerRadius="8"
-						BorderThickness="1"
-						BorderBrush="{DynamicResource AppMutedTextBrush}"
-						Background="{DynamicResource MenuPressedBrush}"
-						RenderTransform="translate(0px, -1px)"
-						IsVisible="{Binding !IsContentProcessingAnalysisFailed}">
-				  <TextBlock Text="?"
-							 FontSize="10"
-							 FontWeight="SemiBold"
-							 Foreground="{DynamicResource AppTextBrush}"
-							 HorizontalAlignment="Center"
-							 VerticalAlignment="Center" />
-				</Border>
-				<Grid Name="ContentProcessingWarningIcon"
-					  Width="16"
-					  Height="16"
-					  IsVisible="{Binding IsContentProcessingAnalysisFailed}">
-				  <PathIcon Data="M 8,1 L 15,14 L 1,14 Z"
-							Foreground="{DynamicResource AppMutedTextBrush}" />
-				  <TextBlock Text="!"
-							 FontSize="9"
-							 FontWeight="Bold"
-							 Foreground="{DynamicResource AppPanelBrush}"
-							 HorizontalAlignment="Center"
-							 VerticalAlignment="Bottom"
-							 Margin="0,0,0,1" />
-				</Grid>
-			  </Grid>
-			</Border>
 		  </Grid>
 		</Border>
 	  </Grid>

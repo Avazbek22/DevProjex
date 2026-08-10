@@ -34,15 +34,16 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		if (effectiveCount == 0)
 		{
 			Assert.Null(option);
-			var hideSecrets = Assert.Single(viewModel.IgnoreOptions);
-			Assert.Equal(IgnoreOptionId.HideSecrets, hideSecrets.Id);
-			Assert.False(hideSecrets.IsChecked);
+			Assert.Equal(
+				IgnoreOptionOrder.ContentTransformations,
+				viewModel.IgnoreOptions.Select(static item => item.Id));
+			Assert.All(viewModel.IgnoreOptions, static item => Assert.False(item.IsChecked));
 			Assert.False(viewModel.AllIgnoreChecked);
 			return;
 		}
 
 		Assert.NotNull(option);
-		Assert.Equal(2, viewModel.IgnoreOptions.Count);
+		Assert.Equal(1 + IgnoreOptionOrder.Count, viewModel.IgnoreOptions.Count);
 		Assert.Equal($"{optionCase.BaseLabel} ({effectiveCount})", option!.Label);
 		Assert.True(option.IsChecked);
 		Assert.False(GetHideSecretsOption(viewModel).IsChecked);
@@ -135,7 +136,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
 		Assert.DoesNotContain(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
-		Assert.Equal(2, viewModel.IgnoreOptions.Count);
+		Assert.Equal(1 + IgnoreOptionOrder.Count, viewModel.IgnoreOptions.Count);
 		Assert.False(GetHideSecretsOption(viewModel).IsChecked);
 		Assert.True(Assert.Single(
 			viewModel.IgnoreOptions,

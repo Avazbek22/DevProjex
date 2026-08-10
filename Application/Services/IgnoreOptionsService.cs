@@ -10,8 +10,10 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 		int? redactionCount)
 	{
 		var label = localization["Settings.Ignore.HideSecrets"];
-		return state == SecretScanState.Completed &&
-		       matchedCount is not null &&
+		// A clean scan keeps the plain label: the row's status indicator already says "no secrets
+		// found", and "(0/0)" next to it would read as a counter for something that is not there.
+		return state is SecretScanState.Completed or SecretScanState.Limited &&
+		       matchedCount is not null and > 0 &&
 		       redactionCount is not null
 			? $"{label} ({matchedCount}/{redactionCount})"
 			: label;
@@ -110,16 +112,27 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 		}
 	}
 
+	public string FormatCompressCodeLabel(int? compressedFiles, int? uncompressedFiles)
+		=> localization["Settings.Ignore.CompressCode"];
+
 	private void AppendContentTransformationOptions(
 		List<IgnoreOptionDescriptor> options,
 		IgnoreOptionsAvailability availability)
 	{
+		// Dispatched per descriptor: a single shared formatter would give every transformation the
+		// secret counters, so the compression row would silently advertise someone else's numbers.
 		foreach (var descriptor in ProjectPresentationCatalog.ContentTransformations)
 		{
-			var label = availability.SecretMatchesCount is { } matchedCount &&
-			            availability.SecretRedactionsCount is { } redactionCount
-				? FormatHideSecretsLabel(SecretScanState.Completed, matchedCount, redactionCount)
-				: localization[descriptor.LabelKey];
+			var label = descriptor.LegacyOptionId switch
+			{
+				IgnoreOptionId.HideSecrets when
+					availability.SecretMatchesCount is { } matchedCount &&
+					availability.SecretRedactionsCount is { } redactionCount =>
+					FormatHideSecretsLabel(SecretScanState.Completed, matchedCount, redactionCount),
+				IgnoreOptionId.CompressCode =>
+					FormatCompressCodeLabel(availability.CompressedFilesCount, availability.UncompressedFilesCount),
+				_ => localization[descriptor.LabelKey]
+			};
 			options.Add(new IgnoreOptionDescriptor(descriptor.LegacyOptionId, label, false));
 		}
 	}

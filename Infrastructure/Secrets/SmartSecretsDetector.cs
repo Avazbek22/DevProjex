@@ -22,6 +22,9 @@ public sealed class SmartSecretsDetector(
 	public void WarmUp(CancellationToken cancellationToken = default) =>
 		providerDetector.WarmUp(cancellationToken);
 
+	public bool ShouldInspectPath(string repositoryRelativePath) =>
+		providerDetector.ShouldInspectPath(repositoryRelativePath);
+
 	public ISecretDetectionScope CreateScope(string projectRoot) =>
 		new Scope(
 			providerDetector.CreateScope(projectRoot),
@@ -38,7 +41,9 @@ public sealed class SmartSecretsDetector(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken = default) =>
-		Combine(
+		!ShouldInspectPath(repositoryRelativePath)
+			? []
+			: Combine(
 			providerDetector.Detect(repositoryRelativePath, content, cancellationToken),
 			StructuredSecretDetector.Detect(
 				repositoryRelativePath,
@@ -91,12 +96,18 @@ public sealed class SmartSecretsDetector(
 			return GetContext(fullPath, fileKind).RulesIdentity;
 		}
 
+		public bool ShouldInspectPath(string fullPath, string repositoryRelativePath) =>
+			providerScope.ShouldInspectPath(fullPath, repositoryRelativePath);
+
 		public IReadOnlyList<DetectedSecret> Detect(
 			string fullPath,
 			string repositoryRelativePath,
 			ReadOnlySpan<char> content,
 			CancellationToken cancellationToken = default)
 		{
+			if (!ShouldInspectPath(fullPath, repositoryRelativePath))
+				return [];
+
 			var providerFindings = providerScope.Detect(
 				fullPath,
 				repositoryRelativePath,

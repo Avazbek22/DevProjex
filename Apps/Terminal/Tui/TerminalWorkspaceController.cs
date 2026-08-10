@@ -238,8 +238,11 @@ public sealed class TerminalWorkspaceController(
 		var redactionContext = CreateRedactionContext(plan);
 		if (view == ProjectContextView.Tree && redactionContext is not null)
 		{
+			// The tree view ships no file content; this scan only measures the selection so the
+			// Hide Secrets row can show a count. Discovery keeps one unreadable file from failing
+			// the whole view - the label reads the snapshot and reports coverage honestly.
 			await services.SecretRedactionOutputPreparer
-				.AnalyzeAsync(redactionContext, plan.IncludedFiles, cancellationToken)
+				.DiscoverAsync(redactionContext, plan.IncludedFiles, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		string MapDisplayPath(string path) =>
@@ -256,7 +259,7 @@ public sealed class TerminalWorkspaceController(
 						cancellationToken,
 						MapDisplayPath,
 						includeOmissionMarkers: true,
-						redactionContext: redactionContext)
+						transformationContext: redactionContext)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
 			ProjectContextView.TreeContent => await services.PreviewDocumentBuilder
@@ -266,7 +269,7 @@ public sealed class TerminalWorkspaceController(
 					cancellationToken,
 					MapDisplayPath,
 					includeOmissionMarkers: true,
-					redactionContext: redactionContext)
+					transformationContext: redactionContext)
 				.ConfigureAwait(false),
 			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};
@@ -396,7 +399,9 @@ public sealed class TerminalWorkspaceController(
 					Format: format,
 					DestinationMode: ProjectCopyDestinationMode.Exact,
 					ConflictPolicy: ProjectCopyConflictPolicy.Fail,
-					RedactSecrets: plan.Selection.HideSecrets == true),
+					RedactSecrets: plan.Selection.HideSecrets == true,
+					CompressCode: plan.Selection.CompressCode == true,
+					NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(services.Localization)),
 				progress,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);

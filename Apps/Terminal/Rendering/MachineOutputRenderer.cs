@@ -48,6 +48,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 				gitMode = ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value),
 				exclusions = plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken).ToArray(),
 				hideSecrets = plan.Selection.HideSecrets == true,
+				compressCode = plan.Selection.CompressCode == true,
 				roots = plan.SelectedRoots,
 				extensions = plan.SelectedExtensions,
 				selectedPaths = plan.Selection.SelectedPaths ?? []
@@ -73,18 +74,31 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			fingerprint = plan.Fingerprint
 		};
 		var json = JsonSerializer.Serialize(document, JsonOptions);
-		if (plan.Redaction is { } redaction)
+		if (plan.Redaction is not null || plan.Compression is not null)
 		{
 			var root = JsonNode.Parse(json)?.AsObject() ??
 			           throw new JsonException("The analysis document could not be materialized.");
-			root["redaction"] = new JsonObject
+			if (plan.Redaction is { } redaction)
 			{
-				["matchedCount"] = redaction.MatchedCount,
-				["redactedCount"] = redaction.RedactedCount,
-				["notice"] = redaction.MatchedCount == 0
-					? SecretRedactionLegendText.English.NoFindingsNotice
-					: SecretRedactionLegendText.English.Notice
-			};
+				root["redaction"] = new JsonObject
+				{
+					["matchedCount"] = redaction.MatchedCount,
+					["redactedCount"] = redaction.RedactedCount,
+					["notice"] = redaction.MatchedCount == 0
+						? SecretRedactionLegendText.English.NoFindingsNotice
+						: SecretRedactionLegendText.English.Notice
+				};
+			}
+			if (plan.Compression is { } compression)
+			{
+				root["compression"] = new JsonObject
+				{
+					["compressedFiles"] = compression.CompressedFiles,
+					["unchangedFiles"] = compression.UnchangedFiles,
+					["sourceCharacters"] = compression.SourceCharacters,
+					["transformedCharacters"] = compression.TransformedCharacters
+				};
+			}
 			json = root.ToJsonString(JsonOptions);
 		}
 		await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);

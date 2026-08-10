@@ -41,6 +41,7 @@ public sealed class TerminalServiceFactory(
 		var contentAnalyzer = new FileContentAnalyzer();
 		var secretRedactionSession = new SecretRedactionSession(
 			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore));
+		var codeCompressionSession = CodeCompressionFactory.CreateSession();
 		var analysis = new ProjectAnalysisService(
 			scanOptions,
 			buildTree,
@@ -56,11 +57,13 @@ public sealed class TerminalServiceFactory(
 			treeExport,
 			contentAnalyzer,
 			ResolveContentClassification,
-			secretRedactionSession);
+			secretRedactionSession,
+			codeCompressionSession);
 		var projectCopyExportService = new ProjectCopyExportService(
 			new ProjectCopyExportPlanBuilder(),
 			contentAnalyzer,
-			secretRedactionSession);
+			secretRedactionSession,
+			codeCompressionSession);
 		var localProfiles = new ProjectProfileStore(resolvedAppDataPathProvider);
 		var portableProfiles = new PortableProjectProfileService();
 		var selectionResolver = new ProjectSelectionResolver(
@@ -75,7 +78,10 @@ public sealed class TerminalServiceFactory(
 		var gitRepository = new GitRepositoryService();
 		var sourceIdentityResolver = new ProjectSourceIdentityResolver(gitRepository, repoCache);
 		var repositoryCacheCatalog = new RepositoryCacheCatalog(gitRepository, repoCache);
-		var contextFactory = new TerminalProjectContextFactory(contextPlanner, sourceIdentityResolver);
+		var contextFactory = new TerminalProjectContextFactory(
+			contextPlanner,
+			sourceIdentityResolver,
+			secretRedactionSession);
 
 		return new TerminalServices(
 			Localization: localization,
@@ -103,6 +109,7 @@ public sealed class TerminalServiceFactory(
 			GitRepositoryService: gitRepository,
 			RepoCacheService: repoCache,
 			SecretRedactionSession: secretRedactionSession,
+			CodeCompressionSession: codeCompressionSession,
 			SecretRedactionOutputPreparer: new SecretRedactionOutputPreparer(contentAnalyzer));
 	}
 }

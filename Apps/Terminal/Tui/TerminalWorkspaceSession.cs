@@ -30,6 +30,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly TerminalWorkspaceController _controller;
 	private readonly TerminalWorkspacePresentation _presentation;
 	private readonly ITerminalOperationObserver _operationObserver;
+	private readonly Action _prepareForShutdown;
 	private readonly CancellationTokenSource _sessionCts;
 	private readonly SemaphoreSlim _operationGate = new(1, 1);
 
@@ -103,7 +104,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		TerminalWorkspaceOptions options,
 		TerminalWorkspace workspace,
 		ITerminalOperationObserver operationObserver,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		Action prepareForShutdown)
 	{
 		_application = application;
 		_root = root;
@@ -113,6 +115,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_workspace = workspace;
 		_operationObserver = operationObserver ??
 			throw new ArgumentNullException(nameof(operationObserver));
+		_prepareForShutdown = prepareForShutdown ??
+			throw new ArgumentNullException(nameof(prepareForShutdown));
 		_controller = new TerminalWorkspaceController(services, environment);
 		_presentation = TerminalWorkspacePresentationPolicy.Resolve(
 			options.ColorMode,
@@ -3354,7 +3358,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		IReadOnlyCollection<ProjectExclusion> current)
 	{
 		var available = ProjectPresentationCatalog.Exclusions
-			.Select(descriptor => (descriptor.Id, Label: L(descriptor.LabelKey)))
+			.Select(descriptor => (Id: descriptor.RequireId(), Label: L(descriptor.LabelKey)))
 			.ToArray();
 		var labelsById = available.ToDictionary(
 			static item => item.Id,
@@ -3821,6 +3825,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private void RequestExit()
 	{
 		ExitRequested = true;
+		_prepareForShutdown();
 		_sessionCts.Cancel();
 		CancelActiveOperation();
 		CancelWorkspaceRefreshes();

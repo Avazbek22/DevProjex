@@ -1,3 +1,5 @@
+using DevProjex.Application.Compression;
+
 namespace DevProjex.Application.Secrets;
 
 public enum SecretPreviewSpanState
@@ -21,13 +23,45 @@ public sealed record SecretTextRedactionResult(
 	string Text,
 	IReadOnlyList<SecretPreviewSpan> Spans,
 	int DetectedCount,
-	int RedactedCount);
+	int RedactedCount,
+	ContentTransformMap CoordinateMap);
 
+/// <param name="UnscannablePath">
+/// One selected text file the scanner was not allowed to read, or null. Documents omit such a file
+/// and report a count for everything else; a project copy leaves it out and names it. The dry run
+/// reads this to say the same thing before anything is written.
+/// </param>
+/// <param name="SkippedFileCount">
+/// Selected text files intentionally left uninspected because they exceed the bounded scan limit.
+/// </param>
+/// <param name="FailedFileCount">
+/// Selected files discovery could not inspect because reading, decoding, or detection failed.
+/// </param>
 public sealed record SecretRedactionSnapshot(
 	string SelectionKey,
 	int DetectedCount,
 	int RedactedCount,
-	IReadOnlyDictionary<string, int>? MarkedSecretCounts = null);
+	IReadOnlyDictionary<string, int>? MarkedSecretCounts = null,
+	string? UnscannablePath = null,
+	int SkippedFileCount = 0,
+	int FailedFileCount = 0)
+{
+	public int IncompleteFileCount => checked(SkippedFileCount + FailedFileCount);
+	public bool IsComplete => IncompleteFileCount == 0;
+	public bool HasFailures => FailedFileCount > 0;
+	public bool HasLimitedCoverage => SkippedFileCount > 0;
+}
+
+public enum SecretDiscoveryCacheMode
+{
+	/// <summary>Reopens selected files and verifies their content fingerprints.</summary>
+	RevalidateContent = 0,
+	/// <summary>
+	/// Reuses previously verified findings while file metadata and all rule identities remain equal.
+	/// Intended for selection-only UI changes; output generation must use content revalidation.
+	/// </summary>
+	ReuseValidatedContent = 1
+}
 
 public readonly record struct ManualSecretMarkRemovalResult(
 	bool PersistentMarkRemoved,

@@ -43,6 +43,10 @@ Exclusions and remains off in the built-in `standard` profile. Individual
 keep-as-is decisions are session-only: profiles never store secret fingerprints,
 values, or occurrence locations.
 
+Code compression is stored as the independent `compressCode` Boolean and also
+remains off in the built-in `standard` profile. Profiles created before this field
+was introduced load it as `false`.
+
 ## Schema v1
 
 ```json
@@ -55,6 +59,7 @@ values, or occurrence locations.
     "selectedPaths": [],
     "gitMode": "gitignore",
     "hideSecrets": false,
+    "compressCode": false,
     "exclusions": [
       "smart-ignore",
       "hidden-folders",
@@ -73,6 +78,7 @@ Semantics:
 - a directory includes its effective subtree;
 - Git mode is exactly one of `none`, `gitignore`, or `tracked`;
 - `hideSecrets` independently enables the content transformation;
+- `compressCode` independently enables syntax-aware code compression;
 - Exclusions contain only known path-filter tokens.
 
 Profiles written by current DevProjex versions keep `hideSecrets` separate. For

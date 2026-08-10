@@ -37,8 +37,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Application\Application.csproj" />
-    <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj" />
-    <ProjectReference Include="..\Terminal\DevProjex.Terminal.csproj" />
+    <ProjectReference
+      Include="..\..\Infrastructure\Infrastructure.csproj">
+      <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
+    <ProjectReference
+      Include="..\Terminal\DevProjex.Terminal.csproj">
+      <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

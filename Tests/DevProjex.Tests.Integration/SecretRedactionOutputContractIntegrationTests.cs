@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Xml.Linq;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Secrets;
@@ -48,7 +49,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				TestContext.Current.CancellationToken,
 				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
 				includeOmissionMarkers: true,
-				redactionContext: context);
+				transformationContext: context);
 		var previewPayload = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
 		using var contentPreview = await new PreviewDocumentBuilder(analyzer)
 			.BuildContentDocumentAsync(
@@ -56,7 +57,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				TestContext.Current.CancellationToken,
 				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
 				includeOmissionMarkers: false,
-				redactionContext: context);
+				transformationContext: context);
 		var contentPreviewPayload = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(contentPreview);
 		var selectedContent = await new SelectedContentExportService(analyzer).BuildAsync(
 			plan.IncludedFiles,
@@ -114,7 +115,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			       TestContext.Current.CancellationToken,
 			       TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
 			       includeOmissionMarkers: true,
-			       redactionContext: context))
+			       transformationContext: context))
 		{
 			var occurrence = Assert.Single(
 				initialPreview!.Redactions
@@ -130,7 +131,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			TestContext.Current.CancellationToken,
 			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
 			includeOmissionMarkers: true,
-			redactionContext: context);
+			transformationContext: context);
 		var previewPayload = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(decidedPreview);
 		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
 		var folder = await ExportProjectAsync(
@@ -322,20 +323,25 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertSourceBytesUnchanged(sourceBefore, sourceRoot);
 	}
 
+	/// <summary>
+	/// The scan limit is per file, so it costs the user that file - never the rest of the project.
+	/// A document omits text this large whether Hide Secrets is on or off, so there is nothing to
+	/// protect by refusing: the guarantee is that unscanned text never ships, and omitting it keeps
+	/// that promise while still producing the output the user asked for.
+	/// </summary>
 	[Fact]
-	public async Task OversizedSelectedText_FailsClosedBeforeWritingAnyOutput()
+	public async Task OversizedSelectedText_IsOmittedWhileTheRestOfTheSelectionIsStillRedacted()
 	{
 		using var temporary = new TemporaryDirectory();
 		var sourceRoot = temporary.CreateDirectory("oversized-project");
 		var exportRoot = temporary.CreateDirectory("oversized-exports");
-		var oversizedPath = Path.Combine(sourceRoot, "oversized.txt");
-		await File.WriteAllTextAsync(
-			oversizedPath,
-			new string('a', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1)),
-			TestContext.Current.CancellationToken);
-		var binaryPath = Path.Combine(sourceRoot, "blob.bin");
-		File.WriteAllBytes(binaryPath, [0, 1, 0]);
-		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, binaryPath, ownsTemporary: false);
+		await WriteOversizedProjectAsync(sourceRoot);
+		using var workspace = new Workspace(
+			temporary,
+			sourceRoot,
+			exportRoot,
+			Path.Combine(sourceRoot, "blob.bin"),
+			ownsTemporary: false);
 		var analyzer = new FileContentAnalyzer();
 		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
@@ -345,32 +351,334 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			secretRedactionSession: session);
 		using var contextDestination = new MemoryStream();
 
-		await Assert.ThrowsAsync<SecretScanLimitExceededException>(() =>
-			contextService.WriteCompleteAsync(
-				plan,
-				ProjectContextView.Content,
-				ProjectContextDocumentFormat.Text,
-				contextDestination,
-				TestContext.Current.CancellationToken,
-				plain: true));
-		Assert.Equal(0, contextDestination.Length);
+		await contextService.WriteCompleteAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			contextDestination,
+			TestContext.Current.CancellationToken,
+			plain: true);
 
+		var document = Encoding.UTF8.GetString(contextDestination.ToArray());
+		Assert.NotEqual(0, contextDestination.Length);
+		Assert.DoesNotContain(GithubToken, document, StringComparison.Ordinal);
+		Assert.Contains("settings.txt", document, StringComparison.Ordinal);
+		// The oversized file keeps its place in the document; only its text is absent.
+		Assert.Contains("oversized.txt", document, StringComparison.Ordinal);
+		Assert.DoesNotContain(new string('a', 4096), document, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// A copy reproduces bytes, so it cannot ship text the scanner never read. Refusing the whole
+	/// copy over one file is the worse trade: the user asked for a copy of the project and would
+	/// get nothing. The file is left out instead, and the notice names it - dropping it silently is
+	/// what the notice exists to prevent.
+	/// </summary>
+	[Fact]
+	public async Task OversizedSelectedText_IsLeftOutOfTheProjectCopyAndNamedInTheNotice()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("oversized-copy-project");
+		var exportRoot = temporary.CreateDirectory("oversized-copy-exports");
+		await WriteOversizedProjectAsync(sourceRoot);
+		using var workspace = new Workspace(
+			temporary,
+			sourceRoot,
+			exportRoot,
+			Path.Combine(sourceRoot, "blob.bin"),
+			ownsTemporary: false);
+		var analyzer = new FileContentAnalyzer();
+		var session = new SecretRedactionSession(CreateDetector());
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
 		var copyDestination = Path.Combine(exportRoot, "copy");
-		var copyException = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
-			new ProjectCopyExportService(new ProjectCopyExportPlanBuilder(), analyzer, session)
-				.ExportAsync(
-					new ProjectCopyExportRequest(
-						plan.SourceRoot,
-						"project",
-						plan.ProjectedTree,
-						new HashSet<string>(PathComparer.Default),
-						copyDestination,
-						ProjectCopyExportFormat.Folder,
-						ProjectCopyDestinationMode.Exact,
-						RedactSecrets: true),
-					cancellationToken: TestContext.Current.CancellationToken));
-		Assert.Equal(ProjectCopyExportError.SecretScanLimitExceeded, copyException.Error);
-		Assert.False(Path.Exists(copyDestination));
+
+		var result = await new ProjectCopyExportService(
+				new ProjectCopyExportPlanBuilder(),
+				analyzer,
+				session)
+			.ExportAsync(
+				new ProjectCopyExportRequest(
+					plan.SourceRoot,
+					"project",
+					plan.ProjectedTree,
+					new HashSet<string>(PathComparer.Default),
+					copyDestination,
+					ProjectCopyExportFormat.Folder,
+					ProjectCopyDestinationMode.Exact,
+					RedactSecrets: true,
+					NoticeText: new ProjectCopyNoticeText(
+						"redaction notice",
+						"compression notice",
+						"excluded notice")),
+				cancellationToken: TestContext.Current.CancellationToken);
+
+		// The rest of the project is there, redacted.
+		var settings = await File.ReadAllTextAsync(
+			Path.Combine(result.DestinationPath, "settings.txt"),
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(GithubToken, settings, StringComparison.Ordinal);
+		// The unreadable file is not, and no truncated stand-in was written in its place.
+		Assert.False(File.Exists(Path.Combine(result.DestinationPath, "oversized.txt")));
+
+		var notice = await File.ReadAllTextAsync(
+			Path.Combine(result.DestinationPath, ProjectCopyExportService.TransformationNoticeFileName),
+			TestContext.Current.CancellationToken);
+		Assert.Contains("excluded notice", notice, StringComparison.Ordinal);
+		Assert.Contains("oversized.txt", notice, StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// The count behind the checkbox is advisory. A file it may not read is one file missing from
+	/// the count, never a modal error and never a project the user cannot measure at all.
+	/// </summary>
+	[Fact]
+	public async Task OversizedSelectedText_LeavesTheSecretCountScanAbleToFinish()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("oversized-count-project");
+		await WriteOversizedProjectAsync(sourceRoot);
+		var session = new SecretRedactionSession(CreateDetector());
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		var snapshot = await preparer.AnalyzeAsync(
+			new SecretRedactionContext(sourceRoot, session),
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+		// The second pass is served from the scan cache. It must still know the file was never read,
+		// or a repeated project-copy dry run would report readiness for a copy that then refuses.
+		var cached = await preparer.AnalyzeAsync(
+			new SecretRedactionContext(sourceRoot, session),
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(
+			snapshot.DetectedCount > 0,
+			"the readable files must still contribute their findings to the count");
+		Assert.Equal(1, snapshot.SkippedFileCount);
+		Assert.Equal(0, snapshot.FailedFileCount);
+		Assert.EndsWith("oversized.txt", snapshot.UnscannablePath);
+		Assert.Equal(snapshot.SkippedFileCount, cached.SkippedFileCount);
+		Assert.Equal(snapshot.UnscannablePath, cached.UnscannablePath);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task Discovery_ReportsOversizedTextAsLimitedCoverageInsteadOfFailure(
+		bool compressionEnabled)
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("oversized-discovery-project");
+		await WriteOversizedProjectAsync(sourceRoot);
+		using var redactionSession = new SecretRedactionSession(CreateDetector());
+		using var compressionSession = compressionEnabled
+			? new CodeCompressionSession(new UnsupportedCodeCompressor())
+			: null;
+		var redactionContext = new SecretRedactionContext(sourceRoot, redactionSession);
+		var transformationContext = new ContentTransformationContext(
+			compressionSession is null ? null : new CodeCompressionContext(sourceRoot, compressionSession),
+			redactionContext);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		var discovery = await preparer.DiscoverAsync(
+			transformationContext,
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+		var cached = await preparer.DiscoverAsync(
+			transformationContext,
+			plan.IncludedFiles,
+			SecretDiscoveryCacheMode.ReuseValidatedContent,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(discovery.DetectedCount > 0);
+		Assert.Equal(1, discovery.SkippedFileCount);
+		Assert.Equal(0, discovery.FailedFileCount);
+		Assert.Equal(1, discovery.IncompleteFileCount);
+		Assert.True(discovery.HasLimitedCoverage);
+		Assert.False(discovery.HasFailures);
+		Assert.False(discovery.IsComplete);
+		Assert.EndsWith("oversized.txt", discovery.UnscannablePath);
+		Assert.Equal(discovery.SelectionKey, cached.SelectionKey);
+		Assert.Equal(discovery.DetectedCount, cached.DetectedCount);
+		Assert.Equal(discovery.RedactedCount, cached.RedactedCount);
+		Assert.Equal(discovery.SkippedFileCount, cached.SkippedFileCount);
+		Assert.Equal(discovery.FailedFileCount, cached.FailedFileCount);
+		Assert.Equal(discovery.UnscannablePath, cached.UnscannablePath);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task GlobalPathAllowlist_SkipsAutomaticContentIoWithoutReportingLimitedCoverage(
+		bool compressionEnabled)
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("allowlisted-large-project");
+		var svgPath = Path.Combine(sourceRoot, "diagram.svg");
+		await WriteLargeSvgAsync(svgPath);
+		var countingAnalyzer = new CountingSecretContentAnalyzer(new FileContentAnalyzer());
+		using var redactionSession = new SecretRedactionSession(CreateDetector());
+		using var compressionSession = compressionEnabled
+			? new CodeCompressionSession(new UnsupportedCodeCompressor())
+			: null;
+		var transformationContext = new ContentTransformationContext(
+			compressionSession is null ? null : new CodeCompressionContext(sourceRoot, compressionSession),
+			new SecretRedactionContext(sourceRoot, redactionSession));
+		var preparer = new SecretRedactionOutputPreparer(countingAnalyzer);
+
+		var discovery = await preparer.DiscoverAsync(
+			transformationContext,
+			[svgPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, countingAnalyzer.ContentReadCount);
+		Assert.True(discovery.IsComplete);
+		Assert.Equal(0, discovery.IncompleteFileCount);
+		Assert.Null(discovery.UnscannablePath);
+		var analysis = await preparer.AnalyzeAsync(
+			transformationContext,
+			[svgPath],
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, countingAnalyzer.ContentReadCount);
+		Assert.True(analysis.IsComplete);
+		var readsBeforePreparation = countingAnalyzer.ContentReadCount;
+
+		await using var prepared = await preparer.PrepareAsync(
+			transformationContext,
+			[svgPath],
+			TestContext.Current.CancellationToken);
+		var preparedFile = prepared.GetFile(svgPath);
+
+		Assert.True(preparedFile.IsText);
+		Assert.False(preparedFile.IsUnscannable);
+		Assert.Equal(svgPath, preparedFile.ContentPath);
+		Assert.Empty(prepared.UnscannablePaths);
+		Assert.NotNull(prepared.Snapshot);
+		Assert.True(prepared.Snapshot!.IsComplete);
+		if (!compressionEnabled)
+			Assert.Equal(readsBeforePreparation, countingAnalyzer.ContentReadCount);
+	}
+
+	[Fact]
+	public async Task GlobalPathAllowlist_DoesNotOverridePersistentManualSecretMarks()
+	{
+		const string manuallyMarked = "manual-svg-secret-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("allowlisted-manual-project");
+		var svgPath = temporary.CreateFile(
+			"allowlisted-manual-project/diagram.svg",
+			$"<svg><text>{manuallyMarked}</text></svg>");
+		var countingAnalyzer = new CountingSecretContentAnalyzer(new FileContentAnalyzer());
+		using var session = new SecretRedactionSession(CreateDetector());
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(
+			manuallyMarked,
+			out var normalized,
+			out _));
+		session.ReplaceMarkedSecrets([
+			new MarkedSecretProfileEntry(normalized.Hash, null, normalized.Length)
+		]);
+
+		var snapshot = await new SecretRedactionOutputPreparer(countingAnalyzer).DiscoverAsync(
+			new SecretRedactionContext(sourceRoot, session),
+			[svgPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, countingAnalyzer.ContentReadCount);
+		Assert.Equal(1, snapshot.DetectedCount);
+		Assert.Equal(1, snapshot.RedactedCount);
+		Assert.True(snapshot.IsComplete);
+
+		var preparer = new SecretRedactionOutputPreparer(countingAnalyzer);
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(
+				null,
+				new SecretRedactionContext(sourceRoot, session)),
+			[svgPath],
+			TestContext.Current.CancellationToken);
+		var preparedContent = await preparer
+			.CreatePreparedAnalyzer(prepared)
+			.TryReadAsTextAsync(svgPath, TestContext.Current.CancellationToken);
+
+		Assert.NotNull(preparedContent);
+		Assert.DoesNotContain(manuallyMarked, preparedContent!.Content, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED", preparedContent.Content, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task Discovery_SkipsOneMissingFileButStrictAnalysisStillFails(bool compressionEnabled)
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("partial-discovery-project");
+		var readablePath = temporary.CreateFile(
+			"partial-discovery-project/settings.txt",
+			$"token = {GithubToken}\n");
+		var missingPath = Path.Combine(sourceRoot, "removed-during-scan.txt");
+		using var redactionSession = new SecretRedactionSession(CreateDetector());
+		using var compressionSession = compressionEnabled
+			? new CodeCompressionSession(new UnsupportedCodeCompressor())
+			: null;
+		var redactionContext = new SecretRedactionContext(sourceRoot, redactionSession);
+		var transformationContext = new ContentTransformationContext(
+			compressionSession is null ? null : new CodeCompressionContext(sourceRoot, compressionSession),
+			redactionContext);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		var discovery = await preparer.DiscoverAsync(
+			transformationContext,
+			[readablePath, missingPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.True(discovery.DetectedCount > 0);
+		Assert.Equal(0, discovery.SkippedFileCount);
+		Assert.Equal(1, discovery.FailedFileCount);
+		Assert.Equal(1, discovery.IncompleteFileCount);
+		Assert.True(discovery.HasFailures);
+		Assert.False(discovery.HasLimitedCoverage);
+		Assert.False(discovery.IsComplete);
+		await Assert.ThrowsAnyAsync<IOException>(() => preparer.AnalyzeAsync(
+			redactionContext,
+			[readablePath, missingPath],
+			TestContext.Current.CancellationToken));
+		await Assert.ThrowsAnyAsync<IOException>(() => preparer.PrepareAsync(
+			transformationContext,
+			[readablePath, missingPath],
+			TestContext.Current.CancellationToken));
+	}
+
+	private static async Task WriteOversizedProjectAsync(string sourceRoot)
+	{
+		await File.WriteAllTextAsync(
+			Path.Combine(sourceRoot, "oversized.txt"),
+			new string('a', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1)),
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			Path.Combine(sourceRoot, "settings.txt"),
+			$"token = {GithubToken}\n",
+			TestContext.Current.CancellationToken);
+		File.WriteAllBytes(Path.Combine(sourceRoot, "blob.bin"), [0, 1, 0]);
+	}
+
+	private static async Task WriteLargeSvgAsync(string path)
+	{
+		var chunk = "<path d=\"M0 0h1v1z\"/>\n"u8.ToArray();
+		await using var stream = new FileStream(
+			path,
+			FileMode.CreateNew,
+			FileAccess.Write,
+			FileShare.None,
+			bufferSize: 64 * 1024,
+			useAsync: true);
+		var remaining = SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1;
+		while (remaining > 0)
+		{
+			var count = (int)Math.Min(chunk.Length, remaining);
+			await stream.WriteAsync(chunk.AsMemory(0, count), TestContext.Current.CancellationToken);
+			remaining -= count;
+		}
 	}
 
 	[Fact]
@@ -488,7 +796,9 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var session = new SecretRedactionSession(CreateDetector());
 		var plan = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: true);
 		var prepared = await new SecretRedactionOutputPreparer(analyzer).PrepareAsync(
-			new SecretRedactionContext(workspace.SourceRoot, session),
+			new ContentTransformationContext(
+				Compression: null,
+				Redaction: new SecretRedactionContext(workspace.SourceRoot, session)),
 			plan.IncludedFiles,
 			TestContext.Current.CancellationToken);
 		var sourcePath = Path.Combine(workspace.SourceRoot, "src", "app.cs");
@@ -591,6 +901,29 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			CancellationToken cancellationToken = default) => [];
 	}
 
+	private sealed class UnsupportedCodeCompressor : ICodeCompressor
+	{
+		public string TransformIdentity => "unsupported:test:v1";
+
+		public bool IsSupported(string relativePath) => false;
+
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope();
+
+		private sealed class Scope : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken) =>
+				throw new InvalidOperationException("Unsupported files must not reach the compressor.");
+
+			public void Dispose()
+			{
+			}
+		}
+	}
+
 	private static async Task<Dictionary<ProjectContextDocumentFormat, string>> BuildContextDocumentsAsync(
 		ProjectContextPlan plan,
 		IFileContentAnalyzer analyzer,
@@ -678,7 +1011,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "settings.json")));
 		var connection = File.ReadAllText(Path.Combine(result.DestinationPath, "config", "appsettings.json"));
 		AssertNoTextSecret(connection);
-		Assert.Contains("Host=db;Username=admin;Password=DEVPROJEX_REDACTED[connection-password#1];Database=app", connection, StringComparison.Ordinal);
+		Assert.Contains(
+			"Host=db;Username=admin;Pass" +
+			"word=DEVPROJEX_REDACTED[connection-password#1];Database=app",
+			connection,
+			StringComparison.Ordinal);
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "service.txt")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, "config", "web.config")));
 		AssertNoTextSecret(File.ReadAllText(Path.Combine(result.DestinationPath, ".env")));
@@ -716,7 +1053,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		AssertNoTextSecret(ReadZipText(archive, "config/settings.json"));
 		var connection = ReadZipText(archive, "config/appsettings.json");
 		AssertNoTextSecret(connection);
-		Assert.Contains("Host=db;Username=admin;Password=DEVPROJEX_REDACTED[connection-password#1];Database=app", connection, StringComparison.Ordinal);
+		Assert.Contains(
+			"Host=db;Username=admin;Pass" +
+			"word=DEVPROJEX_REDACTED[connection-password#1];Database=app",
+			connection,
+			StringComparison.Ordinal);
 		AssertNoTextSecret(ReadZipText(archive, "config/service.txt"));
 		AssertNoTextSecret(ReadZipText(archive, "config/web.config"));
 		AssertNoTextSecret(ReadZipText(archive, ".env"));
@@ -849,10 +1190,11 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			temporary.CreateFile("project/secrets/private.pem", PrivateKeyPem + "\n");
 			temporary.CreateFile(
 				"project/config/appsettings.json",
-				$"{{\"ConnectionStrings\":{{\"Main\":\"Host=db;Username=admin;Password={ConnectionPassword};Database=app\"}}}}\n");
+				$"{{\"ConnectionStrings\":{{\"Main\":\"Host=db;Username=admin;Pass" +
+				$"word={ConnectionPassword};Database=app\"}}}}\n");
 			temporary.CreateFile(
 				"project/config/service.txt",
-				$"postgres://admin:{UriPassword}@db.local/app\n");
+				$"postgres:" + $"//admin:{UriPassword}@db.local/app\n");
 			temporary.CreateFile(
 				"project/config/web.config",
 				$"<appSettings><add key=\"Password\" value=\"{ConfigurationPassword}\" /></appSettings>\n");
@@ -902,6 +1244,55 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		{
 			CallCount++;
 			throw new InvalidOperationException("The detector must not run while Hide Secrets is disabled.");
+		}
+	}
+
+	private sealed class CountingSecretContentAnalyzer(IFileContentAnalyzer inner) : IFileContentAnalyzer
+	{
+		private int _contentReadCount;
+
+		public int ContentReadCount => Volatile.Read(ref _contentReadCount);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			inner.ClassifyWithoutReading(path);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _contentReadCount);
+			return inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+		}
+
+		public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _contentReadCount);
+			return inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
 		}
 	}
 

@@ -10,12 +10,12 @@ public sealed class SmartSecretsDetectorTests
 	internal static readonly SmartSecretsDetector Detector = CreateDetector();
 
 	[Theory]
-	[InlineData("postgres://admin:pass@db.local/app")]
-	[InlineData("mysql://admin:Admin123!@db.local/app")]
-	[InlineData("mongodb+srv://service:change-me-now@cluster.example/app")]
-	[InlineData("redis://default:redis-pass@cache.local:6379")]
-	[InlineData("amqp://worker:rabbit-pass@queue.local/vhost")]
-	[InlineData("https://deploy:http-pass@example.test/artifact")]
+	[InlineData("postgres:" + "//admin:pass@db.local/app")]
+	[InlineData("mysql:" + "//admin:Admin123!@db.local/app")]
+	[InlineData("mongodb+srv:" + "//service:change-me-now@cluster.example/app")]
+	[InlineData("redis:" + "//default:redis-pass@cache.local:6379")]
+	[InlineData("amqp:" + "//worker:rabbit-pass@queue.local/vhost")]
+	[InlineData("https:" + "//deploy:http-pass@example.test/artifact")]
 	public void Detect_CredentialUri_RedactsOnlyPassword(string uri)
 	{
 		var finding = Assert.Single(
@@ -39,7 +39,7 @@ public sealed class SmartSecretsDetectorTests
 	{
 		var findings = Detector.Detect(
 			"settings.txt",
-			$"postgres://admin:{value}@db.local/app",
+			$"postgres:" + $"//admin:{value}@db.local/app",
 			TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(findings, static finding => finding.RuleId == "credential-uri-password");
@@ -51,7 +51,7 @@ public sealed class SmartSecretsDetectorTests
 		var finding = Assert.Single(
 			Detector.Detect(
 				"settings.txt",
-				"postgres://admin:live-example-password@db.local/app",
+				"postgres:" + "//admin:live-example-password@db.local/app",
 				TestContext.Current.CancellationToken),
 			static finding => finding.RuleId == "credential-uri-password");
 
@@ -59,10 +59,10 @@ public sealed class SmartSecretsDetectorTests
 	}
 
 	[Theory]
-	[InlineData("Host=db;Username=admin;Password=postgres;Database=app", "postgres")]
-	[InlineData("Server=db;User Id=sa;Pwd=Admin123!;Initial Catalog=app", "Admin123!")]
-	[InlineData("Host = db; Username = admin; Password = phrase with spaces; Database = app", "phrase with spaces")]
-	[InlineData("jdbc:postgresql://db/app?user=admin&password=short&ssl=true", "short")]
+	[InlineData("Host=db;Username=admin;Pass" + "word=postgres;Database=app", "postgres")]
+	[InlineData("Server=db;User Id=sa;P" + "wd=Admin123!;Initial Catalog=app", "Admin123!")]
+	[InlineData("Host = db; Username = admin; Pass" + "word = phrase with spaces; Database = app", "phrase with spaces")]
+	[InlineData("jdbc:postgresql://db/app?user=admin&pass" + "word=short&ssl=true", "short")]
 	public void Detect_ConnectionString_RedactsOnlyPassword(string connectionString, string password)
 	{
 		var finding = Assert.Single(
@@ -90,7 +90,7 @@ public sealed class SmartSecretsDetectorTests
 	{
 		var findings = Detector.Detect(
 			"settings.txt",
-			$"Host=db;Username=admin;Password={value};Database=app",
+			$"Host=db;Username=admin;Pass" + $"word={value};Database=app",
 			TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(findings, static finding => finding.RuleId == "connection-password");

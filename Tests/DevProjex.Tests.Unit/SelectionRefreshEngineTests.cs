@@ -58,6 +58,20 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	[Fact]
+	public void ComputeFullRefreshSnapshot_AllPreferenceDoesNotEnableContentTransformations()
+	{
+		var engine = CreateEngine(new DotFolderNoiseScanner());
+		var context = CreateDefaultsContext() with { IgnoreAllPreference = true };
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(context, CancellationToken.None);
+
+		Assert.Contains(snapshot.IgnoreOptions, option =>
+			option.Id == IgnoreOptionId.HideSecrets && !option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option =>
+			option.Id == IgnoreOptionId.CompressCode && !option.IsChecked);
+	}
+
+	[Fact]
 	public void ComputeFullRefreshSnapshot_SelfHiddenRuntimeOptions_DoNotOscillateAcrossMaximumPasses()
 	{
 		var scanner = new SelfHiddenRuntimeOptionsScanner();
@@ -462,6 +476,7 @@ public sealed class SelectionRefreshEngineTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",

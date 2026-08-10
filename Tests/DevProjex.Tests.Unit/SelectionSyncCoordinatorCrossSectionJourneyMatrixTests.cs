@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 using DevProjex.Application.Models;
 using DevProjex.Infrastructure.FileSystem;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
@@ -84,14 +85,18 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			oracle,
 			workspace.RootPath,
 			SettingsAction.SetAllIgnore(true));
-		if (!Assert.Single(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.HideSecrets).IsChecked)
+		// "All" deliberately leaves content transformations alone, so the power set starts from a
+		// state where each of them has been turned on by hand.
+		foreach (var transformationId in IgnoreOptionOrder.ContentTransformations)
 		{
+			if (Assert.Single(viewModel.IgnoreOptions, option => option.Id == transformationId).IsChecked)
+				continue;
 			await ExecuteActionAndRefreshAsync(
 				viewModel,
 				coordinator,
 				oracle,
 				workspace.RootPath,
-				SettingsAction.ToggleIgnore(IgnoreOptionId.HideSecrets));
+				SettingsAction.ToggleIgnore(transformationId));
 		}
 		var ignoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).ToArray();
 		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), ignoreOptionIds.Order());
@@ -1117,7 +1122,8 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 	{
 		foreach (var option in snapshot.IgnoreOptions)
 		{
-			if (option.Id is IgnoreOptionId.SmartIgnore or IgnoreOptionId.HideSecrets or IgnoreOptionId.UseGitIgnore)
+			if (option.Id is IgnoreOptionId.SmartIgnore or IgnoreOptionId.UseGitIgnore ||
+			    ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
 				continue;
 
 			var expectedCount = GetIgnoreOptionCount(snapshot.IgnoreOptionCounts, option.Id);
@@ -1145,7 +1151,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		IEnumerable<(IgnoreOptionId Id, string Label, bool IsChecked)> options)
 	{
 		var pathOptions = options
-			.Where(static option => option.Id != IgnoreOptionId.HideSecrets)
+			.Where(static option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
 			.ToArray();
 		if (pathOptions.Length == 0)
 			return false;
@@ -1306,7 +1312,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 					break;
 				case SettingsActionKind.ToggleIgnore:
 					ToggleVisibleIgnore(action.IgnoreOptionId!.Value);
-					if (action.IgnoreOptionId.Value != IgnoreOptionId.HideSecrets)
+					if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(action.IgnoreOptionId.Value))
 					{
 						PromoteRefreshRoute(IsLiveIgnoreOption(action.IgnoreOptionId.Value)
 							? RefreshRoute.Live
@@ -1419,7 +1425,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			_ignoreStates[optionId] = !_ignoreStates[optionId];
 			_ignoreAllPreference = null;
 
-			if (optionId != IgnoreOptionId.HideSecrets)
+			if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(optionId))
 				return;
 
 			// Hide Secrets transforms selected content but never changes filesystem visibility.
@@ -1450,7 +1456,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		{
 			foreach (var optionId in _ignoreStates.Keys.ToArray())
 			{
-				if (optionId != IgnoreOptionId.HideSecrets)
+				if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(optionId))
 					_ignoreStates[optionId] = isChecked;
 			}
 			_ignoreAllPreference = isChecked;

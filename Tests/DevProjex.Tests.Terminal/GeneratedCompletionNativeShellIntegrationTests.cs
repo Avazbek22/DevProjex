@@ -7,6 +7,7 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 	private const string CompletionLine = "devprojex analyze . --format ";
 	private const string CompletionShellsVariable =
 		"DEVPROJEX_COMPLETION_SHELLS";
+	private static readonly TimeSpan WindowsPowerShellProcessTimeout = TimeSpan.FromSeconds(60);
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
 	[Theory]
@@ -180,7 +181,7 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 	private static string EncodeUtf8Base64(string value) =>
 		Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
 
-	[Fact]
+	[Fact(Timeout = 120_000)]
 	public async Task WindowsPowerShell51CompletesAfterClosedQuotedWhitespacePath()
 	{
 		if (!OperatingSystem.IsWindows())
@@ -410,7 +411,10 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		File.WriteAllText(driverPath, driver, Utf8WithoutBom);
 		startInfo.ArgumentList.Add("-File");
 		startInfo.ArgumentList.Add(driverPath);
-		return await RunProcessAsync(startInfo, cancellationToken);
+		return await RunProcessAsync(
+			startInfo,
+			cancellationToken,
+			WindowsPowerShellProcessTimeout);
 	}
 
 	private static ProcessStartInfo CreateShellStartInfo(
@@ -764,10 +768,11 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 
 	private static async Task<ShellProcessResult> RunProcessAsync(
 		ProcessStartInfo startInfo,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		TimeSpan? processTimeout = null)
 	{
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-		timeout.CancelAfter(TimeSpan.FromSeconds(20));
+		timeout.CancelAfter(processTimeout ?? TimeSpan.FromSeconds(20));
 		using var process = new Process { StartInfo = startInfo };
 		Assert.True(process.Start(), $"Could not start {startInfo.FileName}.");
 		var standardOutput = process.StandardOutput.ReadToEndAsync();

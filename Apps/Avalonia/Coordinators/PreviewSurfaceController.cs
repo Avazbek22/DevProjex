@@ -40,7 +40,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly Func<bool> _ensureClipboardOutputReady;
     private readonly Func<string, Task> _setClipboardTextAsync;
     private readonly Func<string, Task> _showErrorAsync;
-	private readonly Func<SecretRedactionContext?> _redactionContextProvider;
+	private readonly Func<ContentTransformationContext?> _transformationContextProvider;
 	private readonly Action _requestRedactionRefresh;
 	private readonly Func<bool> _ensureHideSecretsEnabled;
 	private readonly Action _persistProjectProfile;
@@ -73,7 +73,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         Func<bool> ensureClipboardOutputReady,
         Func<string, Task> setClipboardTextAsync,
         Func<string, Task> showErrorAsync,
-		Func<SecretRedactionContext?> redactionContextProvider,
+		Func<ContentTransformationContext?> transformationContextProvider,
 		Action requestRedactionRefresh,
 		Func<bool> ensureHideSecretsEnabled,
 		Action persistProjectProfile)
@@ -94,7 +94,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         _ensureClipboardOutputReady = ensureClipboardOutputReady;
         _setClipboardTextAsync = setClipboardTextAsync;
         _showErrorAsync = showErrorAsync;
-		_redactionContextProvider = redactionContextProvider;
+		_transformationContextProvider = transformationContextProvider;
 		_requestRedactionRefresh = requestRedactionRefresh;
 		_ensureHideSecretsEnabled = ensureHideSecretsEnabled;
 		_persistProjectProfile = persistProjectProfile;
@@ -118,7 +118,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		object? sender,
 		PreviewRedactionToggleRequestedEventArgs e)
 	{
-		var context = _redactionContextProvider();
+		var context = _transformationContextProvider()?.Redaction;
 		if (context is null)
 			return;
 
@@ -140,8 +140,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 				new MarkedSecretProfileEntry(e.Value.Hash, location.Key, e.Value.Length))
 			: _secretRedactionSession.AddSessionMarkedSecret(
 				location.RelativePath,
-				location.LineIndex,
-				location.Column,
+				location.SourceOffset,
 				e.Value);
 		if (!changed && !e.Persistent)
 			return;
@@ -191,25 +190,22 @@ internal sealed class PreviewSurfaceController : IDisposable
 		if (section is null || selection.StartLine < section.ContentStartLine)
 			return false;
 
-		var sourceColumn = selection.StartColumn + request.Value.LeadingCharactersRemoved;
-		foreach (var redaction in document.Redactions)
-		{
-			if (redaction.LineNumber != selection.StartLine ||
-			    redaction.StartColumn + redaction.Length > selection.StartColumn)
-			{
-				continue;
-			}
-			sourceColumn += redaction.SourceLength - redaction.Length;
-		}
-
 		var previewLine = document.GetLineText(selection.StartLine);
 		var key = MarkedSecretValueNormalizer.ExtractKey(
 			previewLine,
 			selection.StartColumn + request.Value.LeadingCharactersRemoved);
+		if (section.CoordinateMap is null ||
+		    !section.CoordinateMap.TryToSourceOffset(
+			    selection.StartLine - section.ContentStartLine,
+			    selection.StartColumn + request.Value.LeadingCharactersRemoved,
+			    out var sourceOffset))
+		{
+			return false;
+		}
+
 		location = new ManualSecretLocation(
 			section.DisplayPath,
-			selection.StartLine - section.ContentStartLine,
-			sourceColumn,
+			sourceOffset,
 			key);
 		return true;
 	}
@@ -446,10 +442,12 @@ internal sealed class PreviewSurfaceController : IDisposable
             string noCheckedFilesText,
             CancellationToken cancellationToken)
     {
-		// A partial warmup cannot assign the same deterministic secret indexes as the full
-		// selection. Skip it instead of briefly presenting an unredacted or inconsistent preview.
-		if (_redactionContextProvider() is not null)
-			return null;
+        var transformationContext = _transformationContextProvider();
+        // A partial warmup cannot assign the same deterministic secret indexes as the full
+        // selection. Compression is safe here: its plans are file-local and reused by the full build.
+        if (!PreviewWarmupPolicy.SupportsTransformationContext(transformationContext))
+            return null;
+        var compressionContext = transformationContext?.Compression;
 
         if (!PreviewWarmupPolicy.ShouldBuildPreviewWarmup(
                 mode,
@@ -490,7 +488,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                         PreviewWarmupMaxFileBytes,
                         PreviewWarmupMaxCharacters,
                         cancellationToken,
-                        pathPresentation?.MapFilePath)
+                        pathPresentation?.MapFilePath,
+                        compressionContext)
                     .GetAwaiter()
                     .GetResult();
                 if (string.IsNullOrWhiteSpace(contentText))
@@ -540,7 +539,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     cancellationToken,
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
-                            currentPath))
+                            currentPath),
+                    compressionContext)
                 .GetAwaiter()
                 .GetResult();
             if (string.IsNullOrWhiteSpace(combinedContent))
@@ -577,8 +577,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         if (selectedMode == PreviewContentMode.Tree)
         {
-			var redactionContext = _redactionContextProvider();
-			if (redactionContext is not null && currentTreeRoot is not null)
+			var transformationContext = _transformationContextProvider();
+			if (transformationContext?.Redaction is not null && currentTreeRoot is not null)
 			{
 				var selectedFiles = ResolvePreviewFiles(
 					selectedPaths,
@@ -586,7 +586,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 					currentTreeRoot,
 					currentTreeOrderedFilePaths);
 				_secretRedactionPreparer
-					.AnalyzeAsync(redactionContext, selectedFiles, cancellationToken)
+					.AnalyzeAsync(transformationContext, selectedFiles, cancellationToken)
 					.GetAwaiter()
 					.GetResult();
 			}
@@ -635,8 +635,9 @@ internal sealed class PreviewSurfaceController : IDisposable
                 _previewDocumentBuilder.BuildContentDocumentAsync(
                         files,
                         cancellationToken,
-						pathPresentation?.MapFilePath,
-						redactionContext: _redactionContextProvider())
+                        pathPresentation?.MapFilePath,
+                        transformationContext: _transformationContextProvider(),
+                        includeSourceCoordinateMaps: true)
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -699,8 +700,9 @@ internal sealed class PreviewSurfaceController : IDisposable
                     cancellationToken,
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
-							currentPath),
-					redactionContext: _redactionContextProvider())
+                            currentPath),
+                    transformationContext: _transformationContextProvider(),
+                    includeSourceCoordinateMaps: true)
                 .GetAwaiter()
                 .GetResult();
         return new PreviewBuildResult(document);
@@ -889,8 +891,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
 	private readonly record struct ManualSecretLocation(
 		string RelativePath,
-		int LineIndex,
-		int Column,
+		int SourceOffset,
 		string? Key);
 
 	private void RestoreViewportAfterRedaction(Vector requestedOffset)

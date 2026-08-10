@@ -23,6 +23,8 @@ public static class ProjectSelectionAdapter
 			options.Add(ToIgnoreOption(exclusion));
 		if (selection.HideSecrets is true)
 			options.Add(IgnoreOptionId.HideSecrets);
+		if (selection.CompressCode is true)
+			options.Add(IgnoreOptionId.CompressCode);
 
 		return options.OrderBy(static option => (int)option).ToArray();
 	}
@@ -35,7 +37,8 @@ public static class ProjectSelectionAdapter
 		var exclusions = new HashSet<ProjectExclusion>();
 		foreach (var option in options)
 		{
-			if (option == IgnoreOptionId.HideSecrets)
+			// Content transformations are carried as dedicated flags, never as exclusions.
+			if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option))
 				continue;
 			if (TryToExclusion(option, out var exclusion))
 				exclusions.Add(exclusion);
@@ -58,6 +61,7 @@ public static class ProjectSelectionAdapter
 			GitMode: GitFilteringModeResolver.Resolve(profile.SelectedIgnoreOptions),
 			Exclusions: ToExclusions(profile.SelectedIgnoreOptions),
 			HideSecrets: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets),
+			CompressCode: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.CompressCode),
 			ProfileSource: source);
 	}
 

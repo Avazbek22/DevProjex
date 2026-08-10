@@ -1,3 +1,4 @@
+using DevProjex.Application.Compression;
 using DevProjex.Application.Preview;
 
 namespace DevProjex.Tests.Unit;
@@ -191,6 +192,7 @@ public sealed class PreviewDocumentBuilderTests
                 Assert.Equal(4, section.EndLine);
                 Assert.Equal(1, section.HeaderLine);
                 Assert.Equal(3, section.ContentStartLine);
+				Assert.Null(section.CoordinateMap);
             },
             section =>
             {
@@ -199,8 +201,28 @@ public sealed class PreviewDocumentBuilderTests
                 Assert.Equal(9, section.EndLine);
                 Assert.Equal(7, section.HeaderLine);
                 Assert.Equal(9, section.ContentStartLine);
+				Assert.Null(section.CoordinateMap);
             });
     }
+
+	[Fact]
+	public async Task BuildContentDocumentAsync_SourceCoordinateMapsAreOptInForInteractivePreview()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("config.txt", "first\r\nTOKEN=secret-value-42");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[path],
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			includeSourceCoordinateMaps: true);
+
+		var section = Assert.Single(document!.Sections);
+		var map = Assert.IsType<PreviewContentCoordinateMap>(section.CoordinateMap);
+		Assert.True(map.TryToSourceOffset(1, "TOKEN=".Length, out var sourceOffset));
+		Assert.Equal("first\r\nTOKEN=".Length, sourceOffset);
+	}
 
     [Fact]
     public async Task BuildTreeAndContentDocumentAsync_WithoutFiles_ReturnsTrimmedTreeText()
@@ -258,6 +280,38 @@ public sealed class PreviewDocumentBuilderTests
             });
     }
 
+	[Fact]
+	public async Task BuildContentDocumentAsync_WithCompression_PreparesFilesConcurrentlyAndKeepsOrder()
+	{
+		using var temp = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, 16)
+			.Select(index => temp.CreateFile($"file-{index:D2}.cs", $"content-{index:D2}"))
+			.Reverse()
+			.ToArray();
+		using var compressor = new DelayedCodeCompressor(
+			TimeSpan.Zero,
+			coordinateFirstPair: Environment.ProcessorCount > 1);
+		using var session = new CodeCompressionSession(compressor);
+		var context = ContentTransformationContext.For(
+			new CodeCompressionContext(temp.Path, session),
+			redaction: null);
+
+		using var document = await new PreviewDocumentBuilder(new FileContentAnalyzer())
+			.BuildContentDocumentAsync(
+				paths,
+				TestContext.Current.CancellationToken,
+				Path.GetFileName,
+				transformationContext: context);
+
+		Assert.NotNull(document);
+		Assert.True(
+			Environment.ProcessorCount == 1 || compressor.MaximumConcurrency > 1,
+			$"Expected concurrent preparation; maximum concurrency was {compressor.MaximumConcurrency}.");
+		Assert.Equal(
+			paths.OrderBy(static path => path, PathComparer.Default).Select(Path.GetFileName),
+			document.Sections.Select(static section => section.DisplayPath));
+	}
+
     private static TextFileContent CreateTextContent(string content)
     {
         var normalized = content.Replace("\r\n", "\n");
@@ -305,4 +359,79 @@ public sealed class PreviewDocumentBuilderTests
             CancellationToken cancellationToken = default)
             => TryReadAsTextAsync(path, cancellationToken);
     }
+
+	private sealed class DelayedCodeCompressor(
+		TimeSpan delay,
+		bool coordinateFirstPair = false) : ICodeCompressor, IDisposable
+	{
+		private readonly ManualResetEventSlim _firstPairReady = new(false);
+		private int _active;
+		private int _firstPairArrivals;
+		private int _maximumConcurrency;
+
+		public string TransformIdentity => "preview-concurrency:v1";
+		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+		public bool IsSupported(string relativePath) => true;
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this, delay);
+		public void Dispose() => _firstPairReady.Dispose();
+
+		private void CoordinateFirstPair(CancellationToken cancellationToken)
+		{
+			if (!coordinateFirstPair || Volatile.Read(ref _firstPairArrivals) >= 2)
+				return;
+
+			if (Interlocked.Increment(ref _firstPairArrivals) >= 2)
+				_firstPairReady.Set();
+
+			if (!_firstPairReady.Wait(TimeSpan.FromSeconds(5), cancellationToken))
+				throw new TimeoutException("Parallel Preview preparation did not start a second worker.");
+		}
+
+		private sealed class Scope(DelayedCodeCompressor owner, TimeSpan delay) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken)
+			{
+				var active = Interlocked.Increment(ref owner._active);
+				UpdateMaximum(ref owner._maximumConcurrency, active);
+				try
+				{
+					owner.CoordinateFirstPair(cancellationToken);
+					cancellationToken.WaitHandle.WaitOne(delay);
+					cancellationToken.ThrowIfCancellationRequested();
+					return new CodeCompressionAnalysis(
+						CodeCompressionPlan.Unchanged(
+							relativePath,
+							"test",
+							CodeCompressionOutcome.UnchangedNoBenefit,
+							content.Length,
+							owner.TransformIdentity),
+						null);
+				}
+				finally
+				{
+					Interlocked.Decrement(ref owner._active);
+				}
+			}
+
+			public void Dispose()
+			{
+			}
+		}
+
+		private static void UpdateMaximum(ref int target, int candidate)
+		{
+			var current = Volatile.Read(ref target);
+			while (candidate > current)
+			{
+				var observed = Interlocked.CompareExchange(ref target, candidate, current);
+				if (observed == current)
+					return;
+				current = observed;
+			}
+		}
+	}
 }

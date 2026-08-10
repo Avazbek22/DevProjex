@@ -1,0 +1,29 @@
+{
+  "id": "csharp",
+  "displayName": "C#",
+  "extensions": [
+    ".cs",
+    ".csx"
+  ],
+  "library": "tree-sitter-c-sharp",
+  "export": "tree_sitter_c_sharp",
+  "queryVersion": 8,
+  "blockPlaceholder": "{ }",
+  "expressionBodyStyle": "declaration",
+  "containerNodeTypes": [
+    "compilation_unit",
+    "declaration_list",
+    "enum_member_declaration_list",
+    "accessor_list",
+    "switch_body"
+  ],
+  "executableOwnerKinds": [
+    "method_declaration",
+    "constructor_declaration",
+    "destructor_declaration",
+    "operator_declaration",
+    "conversion_operator_declaration",
+    "accessor_declaration",
+    "local_function_statement"
+  ]
+}
