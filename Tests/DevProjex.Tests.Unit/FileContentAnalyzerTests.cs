@@ -444,6 +444,10 @@ public sealed class FileContentAnalyzerTests
 				path,
 				long.MaxValue,
 				TestContext.Current.CancellationToken);
+			var fact = await _analyzer.ReadFactAsync(
+				path,
+				long.MaxValue,
+				TestContext.Current.CancellationToken);
 			var metrics = await _analyzer.GetTextFileMetricsAsync(
 				path,
 				TestContext.Current.CancellationToken);
@@ -454,6 +458,11 @@ public sealed class FileContentAnalyzerTests
 			Assert.Equal(FileContentClassification.Text, classified.Classification);
 			Assert.Equal(FileContentClassification.Text, classifiedMetrics.Classification);
 			Assert.Equal(source, classified.Content?.Content);
+			Assert.Equal(source, fact.Content);
+			Assert.Equal(
+				FileContentAnalyzer.ComputeMetrics(source, payload.Length),
+				fact.RawMetrics);
+			Assert.Equal(ContentFingerprint.Compute(source), fact.Fingerprint);
 			Assert.True(await _analyzer.IsTextFileAsync(
 				path,
 				TestContext.Current.CancellationToken));

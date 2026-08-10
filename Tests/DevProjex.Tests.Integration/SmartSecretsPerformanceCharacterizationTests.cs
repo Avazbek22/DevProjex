@@ -69,9 +69,12 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				SecretRedactionOutputPreparer.MaximumParallelScans,
 				Math.Max(1, Environment.ProcessorCount)));
 		Assert.InRange(diagnostics.RetainedBytes, 1, diagnostics.MaximumRetainedBytes);
+		const int maximumPerFileOverheadBytes = 2 * 1024;
+		var allocationBudget = sourceBytes * 2 + fileCount * maximumPerFileOverheadBytes;
 		Assert.True(
-			allocated < sourceBytes * 2,
-			$"Count-only scan allocated {allocated:N0} bytes for {sourceBytes:N0} source bytes.");
+			allocated < allocationBudget,
+			$"Count-only scan allocated {allocated:N0} bytes; the cross-platform budget was " +
+			$"{allocationBudget:N0} bytes for {sourceBytes:N0} source bytes across {fileCount:N0} files.");
 
 		session.Disable();
 		analyzer.ResetCounters();

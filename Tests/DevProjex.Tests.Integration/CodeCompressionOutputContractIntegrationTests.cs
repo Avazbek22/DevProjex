@@ -210,17 +210,22 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		var python = await File.ReadAllTextAsync(
 			prepared.GetFile(pythonPath).ContentPath,
 			TestContext.Current.CancellationToken);
+		var normalizedPython = python.ReplaceLineEndings("\n");
 		Assert.Contains("self.root = root", python, StringComparison.Ordinal);
-		Assert.Contains("\"\"\"Scan the configured root.\"\"\"\n        ...", python, StringComparison.Ordinal);
+		Assert.Contains(
+			"\"\"\"Scan the configured root.\"\"\"\n        ...",
+			normalizedPython,
+			StringComparison.Ordinal);
 		Assert.DoesNotContain("python_implementation_marker", python, StringComparison.Ordinal);
 
 		var tsx = await File.ReadAllTextAsync(
 			prepared.GetFile(tsxPath).ContentPath,
 			TestContext.Current.CancellationToken);
+		var normalizedTsx = tsx.ReplaceLineEndings("\n");
 		Assert.Contains("const Panel = memo(forwardRef((props, ref) => { }));", tsx, StringComparison.Ordinal);
 		Assert.Contains("const normalize = (value) => value.trim();", tsx, StringComparison.Ordinal);
 		Assert.Contains("const Card = (props) => { };", tsx, StringComparison.Ordinal);
-		Assert.Contains("const Pipeline = (items) =>\n  { };", tsx, StringComparison.Ordinal);
+		Assert.Contains("const Pipeline = (items) =>\n  { };", normalizedTsx, StringComparison.Ordinal);
 		Assert.Contains("name: \"Panel\"", tsx, StringComparison.Ordinal);
 		Assert.Contains("render: function (value) { }", tsx, StringComparison.Ordinal);
 		Assert.Contains("normalize: (value) => value + 1", tsx, StringComparison.Ordinal);

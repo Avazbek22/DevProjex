@@ -28,11 +28,12 @@ public sealed class CodeCompressionLanguageBalanceTests
 			"""";
 
 		var (plan, text) = Compress("service.py", source);
+		var normalizedText = text.ReplaceLineEndings("\n");
 
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
-		Assert.Contains("\"\"\"Load a document from disk.\"\"\"\n    ...", text, StringComparison.Ordinal);
-		Assert.Contains("\"\"\"Parse one document.\"\"\"\n        ...", text, StringComparison.Ordinal);
-		Assert.Contains("def plain(value):\n    ...", text, StringComparison.Ordinal);
+		Assert.Contains("\"\"\"Load a document from disk.\"\"\"\n    ...", normalizedText, StringComparison.Ordinal);
+		Assert.Contains("\"\"\"Parse one document.\"\"\"\n        ...", normalizedText, StringComparison.Ordinal);
+		Assert.Contains("def plain(value):\n    ...", normalizedText, StringComparison.Ordinal);
 		Assert.DoesNotContain("async_marker", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("decorated_marker", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("plain_marker", text, StringComparison.Ordinal);
@@ -53,12 +54,13 @@ public sealed class CodeCompressionLanguageBalanceTests
 			"""";
 
 		var (plan, text) = Compress("documentation.py", source);
+		var normalizedText = text.ReplaceLineEndings("\n");
 
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		var nextFunction = source.IndexOf("def interpolated", StringComparison.Ordinal);
 		var transformedNextFunction = text.IndexOf("def interpolated", StringComparison.Ordinal);
 		Assert.Equal(source[..nextFunction], text[..transformedNextFunction]);
-		Assert.Contains("def interpolated(name):\n    ...", text, StringComparison.Ordinal);
+		Assert.Contains("def interpolated(name):\n    ...", normalizedText, StringComparison.Ordinal);
 		Assert.DoesNotContain("Hello {name}", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("interpolated_marker", text, StringComparison.Ordinal);
 		AssertNoNewParseDefects("python", source, text);
@@ -89,6 +91,7 @@ public sealed class CodeCompressionLanguageBalanceTests
 			""";
 
 		var (plan, text) = Compress("session.py", source);
+		var normalizedText = text.ReplaceLineEndings("\n");
 
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.Contains("self.root = Path(root)", text, StringComparison.Ordinal);
@@ -98,8 +101,8 @@ public sealed class CodeCompressionLanguageBalanceTests
 		Assert.Contains("self.ready = True", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("method_marker", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("module_marker", text, StringComparison.Ordinal);
-		Assert.Contains("def scan(self):\n        ...", text, StringComparison.Ordinal);
-		Assert.Contains("def __init__():\n    ...", text, StringComparison.Ordinal);
+		Assert.Contains("def scan(self):\n        ...", normalizedText, StringComparison.Ordinal);
+		Assert.Contains("def __init__():\n    ...", normalizedText, StringComparison.Ordinal);
 		AssertNoNewParseDefects("python", source, text);
 	}
 

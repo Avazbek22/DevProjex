@@ -1,4 +1,5 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Compression;
 
 namespace DevProjex.Tests.Unit;
 
@@ -193,6 +194,52 @@ public sealed class SecretRedactionCacheTests
 
 		Assert.Null(session.GetSnapshot(workspace.Path, [path]));
 		Assert.Null(session.GetSnapshot(workspace.Path, [path], "signatures-v1"));
+	}
+
+	[Fact]
+	public void IdentityCompression_ReusesRawFindingsOnlyWithTheSameContentFingerprint()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/config.cs", $"const string Token = \"{Secret}\";\n");
+		var content = File.ReadAllText(path);
+		var fingerprint = ContentFingerprint.Compute(content);
+		var detector = new CountingDetector();
+		using var session = new SecretRedactionSession(detector);
+
+		var raw = session.BeginOutput(workspace.Path, [path]);
+		var rawPlan = raw.CreatePlan(
+			path,
+			content,
+			ContentTransformMap.Identity,
+			fingerprint,
+			TestContext.Current.CancellationToken);
+		_ = raw.Complete();
+
+		var compressed = session.BeginOutput(workspace.Path, [path], "signatures-v1");
+		var compressedPlan = compressed.CreatePlan(
+			path,
+			content,
+			ContentTransformMap.Identity,
+			fingerprint,
+			TestContext.Current.CancellationToken);
+		_ = compressed.Complete();
+
+		Assert.Equal(rawPlan.RedactedCount, compressedPlan.RedactedCount);
+		Assert.Equal(1, detector.CallCount);
+		Assert.Equal(2, session.GetCacheDiagnostics().EntryCount);
+
+		var changed = content.Replace(Secret, SameLengthPublicValue, StringComparison.Ordinal);
+		var changedScope = session.BeginOutput(workspace.Path, [path], "signatures-v1");
+		var changedPlan = changedScope.CreatePlan(
+			path,
+			changed,
+			ContentTransformMap.Identity,
+			ContentFingerprint.Compute(changed),
+			TestContext.Current.CancellationToken);
+		_ = changedScope.Complete();
+
+		Assert.Equal(0, changedPlan.RedactedCount);
+		Assert.Equal(2, detector.CallCount);
 	}
 
 	[Fact]

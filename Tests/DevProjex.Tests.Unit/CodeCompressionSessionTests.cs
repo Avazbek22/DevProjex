@@ -1,10 +1,35 @@
 using System.Collections.Concurrent;
 using DevProjex.Application.Compression;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Tests.Unit;
 
 public sealed class CodeCompressionSessionTests
 {
+	[Fact]
+	public void MeasurementScope_ResolvesPlanWithoutPublishingOrApplyingIt()
+	{
+		const string content = "prefix-0123456789-suffix";
+		using var compressor = new FixedPlanCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		var published = 0;
+		session.SnapshotPublished += (_, _) => published++;
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		using var scope = session.BeginMeasurement("project");
+
+		var plan = scope.ResolvePlan(
+			"sample.cs",
+			"sample.cs",
+			content,
+			CancellationToken.None);
+
+		Assert.True(plan.HasEdits);
+		Assert.Equal(0, measurement.Capture().PlanApplications);
+		Assert.Same(CodeCompressionSnapshot.Empty, session.Snapshot);
+		Assert.Equal(0, published);
+		Assert.Throws<InvalidOperationException>(() => scope.Complete());
+	}
+
 	[Fact]
 	public void SelectionKey_UsesTheFileSetRatherThanCallerEnumerationOrder()
 	{
@@ -107,6 +132,10 @@ public sealed class CodeCompressionSessionTests
 
 		var warmup = await new CodeCompressionPrewarmer(new FileContentAnalyzer())
 			.WarmAsync(context, [path], TestContext.Current.CancellationToken);
+		Assert.Equal(0, session.Diagnostics.HashComputations);
+		Assert.NotNull(warmup.ReadFacts);
+		Assert.True(warmup.ReadFacts.TryGet(path, out var retainedFact));
+		Assert.Equal(ContentFingerprint.Compute("same-content"), retainedFact.Fingerprint);
 		using var output = context.BeginOutput([path]);
 		_ = output.Transform(path, "sample.cs", "same-content", TestContext.Current.CancellationToken);
 		_ = output.Complete();
@@ -366,6 +395,30 @@ public sealed class CodeCompressionSessionTests
 			diagnostics.RetainedCacheBytes,
 			1,
 			diagnostics.MaximumRetainedCacheBytes);
+	}
+
+	[Fact]
+	public void Snapshot_BoundsUnchangedDetailsWithoutChangingExactAggregates()
+	{
+		var paths = Enumerable.Range(0, 300)
+			.Select(index => $"src/sample-{index:D3}.cs")
+			.ToArray();
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		using var scope = session.BeginOutput("project", paths);
+		foreach (var path in paths.Reverse())
+			_ = scope.Transform(path, path, $"content:{path}", CancellationToken.None);
+
+		var snapshot = scope.Complete();
+
+		Assert.Equal(300, snapshot.UnchangedFiles);
+		Assert.Equal(CodeCompressionScope.MaximumUnchangedDiagnosticExamples, snapshot.Unchanged.Count);
+		Assert.Equal(44, snapshot.AdditionalUnchangedFiles);
+		Assert.Equal(paths[0], snapshot.Unchanged[0].RelativePath);
+		Assert.Equal(paths[255], snapshot.Unchanged[^1].RelativePath);
+		Assert.Equal(
+			300,
+			snapshot.UnchangedOutcomeCounts![CodeCompressionOutcome.UnchangedNoBenefit]);
 	}
 
 	[Fact]

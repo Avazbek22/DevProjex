@@ -29,6 +29,28 @@ public interface ICodeCompressor
 	ICodeCompressionScope CreateScope(string projectRoot);
 }
 
+/// <summary>Optional native-runtime facts used by bounded orchestration and developer diagnostics.</summary>
+public interface ICodeCompressionRuntimeDiagnosticsProvider
+{
+	int AnalysisWorkerCapacity { get; }
+
+	CodeCompressionRuntimeDiagnosticSnapshot CaptureRuntimeDiagnostics();
+}
+
+public readonly record struct CodeCompressionRuntimeDiagnosticSnapshot(
+	int CompiledQuerySets,
+	int MaterializedWorkers,
+	int AvailableWorkers,
+	int LeasedWorkers,
+	int GlobalWorkerCapacity,
+	int GlobalActiveWorkers,
+	int GlobalPeakActiveWorkers,
+	int GlobalRetainedWorkers,
+	int GlobalRetainedWorkerCapacity)
+{
+	public static CodeCompressionRuntimeDiagnosticSnapshot Empty { get; } = new();
+}
+
 /// <summary>
 /// A single output operation. Implementations must support concurrent analysis: metrics and export
 /// pipelines process independent files in parallel while the scope keeps one coherent operation.

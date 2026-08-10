@@ -18,7 +18,10 @@ public sealed record CompressionLanguageInfo(
 /// Builds compression plans with tree-sitter. Everything language-specific is data: the grammar,
 /// the queries and the placeholder come from <see cref="CompressionLanguagePack"/>.
 /// </summary>
-public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
+public sealed class TreeSitterCodeCompressor :
+	ICodeCompressor,
+	ICodeCompressionRuntimeDiagnosticsProvider,
+	IDisposable
 {
 	/// <summary>
 	/// Parsing cannot be interrupted. tree-sitter 0.26.3 removed ts_parser_set_timeout_micros and
@@ -78,6 +81,23 @@ public sealed class TreeSitterCodeCompressor : ICodeCompressor, IDisposable
 	}
 
 	public string TransformIdentity { get; }
+
+	public int AnalysisWorkerCapacity => _workerBudget.Diagnostics.Capacity;
+
+	public CodeCompressionRuntimeDiagnosticSnapshot CaptureRuntimeDiagnostics()
+	{
+		var diagnostics = RuntimeDiagnostics;
+		return new CodeCompressionRuntimeDiagnosticSnapshot(
+			diagnostics.CompiledQuerySets,
+			diagnostics.MaterializedWorkers,
+			diagnostics.AvailableWorkers,
+			diagnostics.LeasedWorkers,
+			diagnostics.GlobalWorkerCapacity,
+			diagnostics.GlobalActiveWorkers,
+			diagnostics.GlobalPeakActiveWorkers,
+			diagnostics.GlobalRetainedWorkers,
+			diagnostics.GlobalRetainedWorkerCapacity);
+	}
 
 	internal IReadOnlyList<CompressionLanguagePack> Packs => _packs;
 
@@ -214,10 +234,17 @@ internal sealed class TreeSitterCompressionScope(
 
 		if (!byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates))
 			return Refused(relativePath, "unknown", CodeCompressionOutcome.UnchangedUnsupportedLanguage, content.Length);
-		var pack = ResolveLanguagePack(candidates, relativePath, content);
 
 		if (content.Length > TreeSitterCodeCompressor.MaximumParsableCharacters)
-			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedTooLarge, content.Length);
+		{
+			return Refused(
+				relativePath,
+				candidates[0].Id,
+				CodeCompressionOutcome.UnchangedTooLarge,
+				content.Length);
+		}
+
+		var pack = ResolveLanguagePack(candidates, relativePath, content);
 
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -234,28 +261,49 @@ internal sealed class TreeSitterCompressionScope(
 		using var languageLease = lease;
 		var language = languageLease.Worker;
 		var source = content;
-		using var original = language.Parser.Parse(source);
+		var original = language.Parser.Parse(source);
 		if (original is null)
 			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedParseFailed, content.Length);
 
-		var edits = CollectEdits(pack, language, original, source, cancellationToken);
-		if (edits is null)
-			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
 		CodeCompressionPlan plan;
+		List<CodeDeclaration>? originalDeclarations;
+		List<CodeParseDefect>? originalDefects;
 		try
 		{
-			plan = CodeCompressionPlan.Create(relativePath, pack.Id, edits, source.Length, transformIdentity);
+			var edits = CollectEdits(pack, language, original, source, cancellationToken);
+			if (edits is null)
+				return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
+			try
+			{
+				plan = CodeCompressionPlan.Create(relativePath, pack.Id, edits, source.Length, transformIdentity);
+			}
+			catch (Exception exception) when (exception is ArgumentException or ArgumentOutOfRangeException)
+			{
+				// A malformed pack must refuse one file rather than take down the output operation.
+				return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
+			}
+
+			if (plan.Outcome != CodeCompressionOutcome.Compressed)
+				return new CodeCompressionAnalysis(plan, null);
+
+			originalDeclarations = ReadDeclarations(
+				language,
+				original.RootNode,
+				ContentTransformMap.Identity);
+			originalDefects = ReadDefects(original.RootNode, ContentTransformMap.Identity);
 		}
-		catch (Exception exception) when (exception is ArgumentException or ArgumentOutOfRangeException)
+		finally
 		{
-			// A query that captures overlapping or out-of-range spans is a defect in the language
-			// pack, but Plan is contracted never to throw for a refusal: a malformed pattern must
-			// leave one file uncompressed, not take down the export.
-			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
+			language.ReleaseQueryTreeReferences();
+			original.Dispose();
 		}
 
-		if (plan.Outcome != CodeCompressionOutcome.Compressed)
-			return new CodeCompressionAnalysis(plan, null);
+		if (originalDeclarations is null || originalDefects is null)
+		{
+			return new CodeCompressionAnalysis(
+				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
+				null);
+		}
 
 		var applied = plan.Apply(source);
 		using var compressed = language.Parser.Parse(applied.Text);
@@ -264,14 +312,10 @@ internal sealed class TreeSitterCompressionScope(
 				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
 				null);
 
-		var originalDeclarations = ReadDeclarations(language, original.RootNode, ContentTransformMap.Identity);
 		var compressedDeclarations = ReadDeclarations(language, compressed.RootNode, applied.Map);
-		var originalDefects = ReadDefects(original.RootNode, ContentTransformMap.Identity);
 		var compressedDefects = ReadDefects(compressed.RootNode, applied.Map);
-		if (originalDeclarations is null ||
-		    compressedDeclarations is null ||
-		    originalDefects is null ||
-		    compressedDefects is null)
+		language.ReleaseQueryTreeReferences();
+		if (compressedDeclarations is null || compressedDefects is null)
 		{
 			return new CodeCompressionAnalysis(
 				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
@@ -992,14 +1036,13 @@ internal sealed class TreeSitterCompressionScope(
 	private static List<CodeParseDefect>? ReadDefects(Node root, ContentTransformMap map)
 	{
 		var defects = new List<CodeParseDefect>();
-		var stack = new Stack<Node>();
-		stack.Push(root);
+		using var cursor = new TreeCursor(root);
 		var visitedNodes = 0;
-		while (stack.Count > 0)
+		while (true)
 		{
 			if (++visitedNodes > TreeSitterCodeCompressor.MaximumVisitedSyntaxNodesPerFile)
 				return null;
-			var node = stack.Pop();
+			var node = cursor.CurrentNode;
 			// See CodeParseDefect: HasError lies in both directions against the shipped grammars,
 			// and a MISSING node surfaces here only as a named node of zero width.
 			var isDefect = node.IsError || node.IsMissing || (node.IsNamed && node.StartIndex == node.EndIndex);
@@ -1011,11 +1054,15 @@ internal sealed class TreeSitterCompressionScope(
 				defects.Add(new CodeParseDefect(kind, map.TryToSource(node.StartIndex, out var source) ? source : -1));
 			}
 
-			foreach (var child in node.Children)
-				stack.Push(child);
-		}
+			if (cursor.GotoFirstChild())
+				continue;
 
-		return defects;
+			while (!cursor.GotoNextSibling())
+			{
+				if (!cursor.GotoParent())
+					return defects;
+			}
+		}
 	}
 
 	private static bool IsLanguageRuntimeFailure(Exception exception) =>
@@ -1541,6 +1588,9 @@ internal sealed record LoadedLanguage(
 	/// process-lifetime tree prevents an idle pool from retaining the last large files it parsed.
 	/// </summary>
 	public void PrepareForReturn()
+		=> ReleaseQueryTreeReferences();
+
+	public void ReleaseQueryTreeReferences()
 	{
 		var root = IdleTree.RootNode;
 		BodiesCursor.Execute(Runtime.Bodies, root);

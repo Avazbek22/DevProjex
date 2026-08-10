@@ -505,6 +505,19 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
+	public void OversizedAmbiguousHeader_IsRejectedBeforeCppEvidenceScan()
+	{
+		var huge = "namespace sample { class Widget {}; }" +
+		           new string(' ', TreeSitterCodeCompressor.MaximumParsableCharacters);
+
+		var (plan, text) = Compress("huge.h", huge);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedTooLarge, plan.Outcome);
+		Assert.Equal("c", plan.LanguageId);
+		Assert.Same(huge, text);
+	}
+
+	[Fact]
 	public void AMalformedLanguagePackRefusesOneFileRatherThanThrowing()
 	{
 		// A query capturing overlapping spans is a pack defect. Plan is contracted never to throw
