@@ -11,7 +11,10 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 {
 	public const long MaximumScannableFileBytes = 16 * 1024 * 1024;
 	private const long MaximumParallelScanFileBytes = 1024 * 1024;
-	private const int MaximumParallelScans = 8;
+	// Parallel scanning applies only to files at or below the per-file parallel limit, so the
+	// worst-case buffered content is MaximumParallelScans * 1 MiB. Scaling with the machine keeps
+	// wide desktops from idling behind a fixed cap while small machines are not oversubscribed.
+	public static readonly int MaximumParallelScans = Math.Clamp(Environment.ProcessorCount, 4, 16);
 
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared)
 	{
@@ -48,13 +51,26 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		var unscannablePaths = new List<string>();
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
 		var scope = transformationScope.Redaction;
+		var requiredInspectionScope = context.Compression is null ? scope : null;
+		if (requiredInspectionScope is not null)
+		{
+			foreach (var sourcePath in orderedFilePaths)
+			{
+				if (requiredInspectionScope.GetContentInspectionMode(sourcePath) ==
+				    SecretContentInspectionMode.None)
+				{
+					preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
+				}
+			}
+		}
 		try
 		{
 			await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
 			                   context,
 			                   transformationScope,
 			                   orderedFilePaths,
-			                   cancellationToken).ConfigureAwait(false))
+			                   cancellationToken,
+			                   requiredInspectionScope).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var sourcePath = prepared.SourcePath;
@@ -75,7 +91,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 						// this large anyway, so nothing that used to ship stops shipping. A project
 						// copy leaves it out and names it in the notice, because copying the bytes
 						// would hand over text the scanner never saw.
-						if (scope is not null)
+						if (scope is not null &&
+						    scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None)
 						{
 							scope.AnalyzeUnscannable(sourcePath, metadataAfterRead);
 							preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(sourcePath);
@@ -83,8 +100,9 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 							continue;
 						}
 
-						// Compression alone has no promise to break, and the file is far past the
-						// parse limit anyway, so it ships unchanged from its original.
+						// Compression has no redaction promise to break, and detector policy may
+						// exclude this path before content inspection. In both cases the original
+						// remains the authoritative unchanged output.
 						preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
 						continue;
 					case FileContentClassification.Text:
@@ -134,7 +152,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					redactions);
 			}
 
-			var snapshot = scope?.Complete();
+			var snapshot = scope?.Complete(unscannablePaths.Count, failedFileCount: 0);
 			var compression = transformationScope.Compression?.Complete();
 			return new PreparedSecretRedactionOutput(
 				workingDirectory,
@@ -155,13 +173,19 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		ContentTransformationContext context,
 		ContentTransformationScope transformationScope,
 		IReadOnlyList<string> orderedFilePaths,
-		[EnumeratorCancellation] CancellationToken cancellationToken)
+		[EnumeratorCancellation] CancellationToken cancellationToken,
+		SecretRedactionScope? requiredInspectionScope = null)
 	{
 		var batch = new List<CompressionWorkItem>(MaximumParallelScans);
 		for (var index = 0; index < orderedFilePaths.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var item = new CompressionWorkItem(index, orderedFilePaths[index]);
+			if (requiredInspectionScope?.GetContentInspectionMode(item.SourcePath) ==
+			    SecretContentInspectionMode.None)
+			{
+				continue;
+			}
 			if (SecretFileMetadata.Capture(item.SourcePath).Length > MaximumParallelScanFileBytes)
 			{
 				await foreach (var prepared in PrepareTransformationBatchAsync(
@@ -477,6 +501,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var sourcePath = orderedFilePaths[index];
+			if (scope.GetContentInspectionMode(sourcePath) == SecretContentInspectionMode.None)
+				continue;
 			var metadata = SecretFileMetadata.Capture(sourcePath);
 			if (scope.TryGetCachedEntry(sourcePath, metadata, out var cached))
 			{
@@ -524,15 +550,156 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				.ConfigureAwait(false);
 		}
 
+		var skippedFileCount = 0;
 		for (var index = 0; index < entries.Length; index++)
 		{
-			var entry = entries[index] ??
-			            throw new SecretDetectionException(
-				            $"Hide Secrets produced no scan result for '{orderedFilePaths[index]}'.");
+			var entry = entries[index];
+			if (entry is null &&
+			    scope.GetContentInspectionMode(orderedFilePaths[index]) == SecretContentInspectionMode.None)
+			{
+				continue;
+			}
+			if (entry is null)
+			{
+				throw new SecretDetectionException(
+					$"Hide Secrets produced no scan result for '{orderedFilePaths[index]}'.");
+			}
 			scope.ProcessEntry(orderedFilePaths[index], entry);
+			if (entry.IsUnscannable)
+				skippedFileCount++;
 		}
 
-		return scope.Complete();
+		return scope.Complete(skippedFileCount, failedFileCount: 0);
+	}
+
+	/// <summary>
+	/// Discovers whether the current selection contains secrets without weakening output safety.
+	/// Files that disappear, change, or cannot be read are counted as failures while the remaining
+	/// files are still inspected. Text beyond the interactive scan limit is reported separately as
+	/// skipped, because a deliberate resource bound is not an engine failure. Preview and export
+	/// callers intentionally continue to use the strict
+	/// <see cref="AnalyzeAsync(SecretRedactionContext,IReadOnlyList{string},CancellationToken)"/> path.
+	/// </summary>
+	public Task<SecretRedactionSnapshot> DiscoverAsync(
+		SecretRedactionContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		CancellationToken cancellationToken = default) =>
+		DiscoverAsync(
+			context,
+			orderedFilePaths,
+			SecretDiscoveryCacheMode.RevalidateContent,
+			cancellationToken);
+
+	public async Task<SecretRedactionSnapshot> DiscoverAsync(
+		SecretRedactionContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		SecretDiscoveryCacheMode cacheMode,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(orderedFilePaths);
+		await context.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+		var scope = context.BeginOutput(orderedFilePaths);
+		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
+		var outcomes = new SecretDiscoveryFileOutcome[orderedFilePaths.Count];
+		var parallelWork = new List<SecretScanWorkItem>();
+		var serialWork = new List<SecretScanWorkItem>();
+
+		for (var index = 0; index < orderedFilePaths.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var sourcePath = orderedFilePaths[index];
+			if (scope.GetContentInspectionMode(sourcePath) == SecretContentInspectionMode.None)
+				continue;
+			SecretFileMetadata metadata;
+			try
+			{
+				metadata = SecretFileMetadata.Capture(sourcePath);
+			}
+			catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
+			{
+				outcomes[index] = SecretDiscoveryFileOutcome.Failed;
+				continue;
+			}
+
+			if (scope.TryGetCachedEntry(sourcePath, metadata, out var cached) &&
+			    (cacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent || cached.IsUnscannable))
+			{
+				entries[index] = cached;
+				if (cached.IsUnscannable)
+					outcomes[index] = SecretDiscoveryFileOutcome.SkippedByLimit;
+				continue;
+			}
+
+			var workItem = new SecretScanWorkItem(index, sourcePath, metadata);
+			if (metadata.Length <= MaximumParallelScanFileBytes)
+				parallelWork.Add(workItem);
+			else
+				serialWork.Add(workItem);
+		}
+
+		if (parallelWork.Count > 0)
+		{
+			await Parallel.ForEachAsync(
+				parallelWork,
+				new ParallelOptions
+				{
+					CancellationToken = cancellationToken,
+					MaxDegreeOfParallelism = Math.Min(
+						MaximumParallelScans,
+						Math.Max(1, Environment.ProcessorCount))
+				},
+				async (workItem, token) =>
+				{
+					try
+					{
+						entries[workItem.Index] = await AnalyzeFileAsync(scope, workItem, token)
+							.ConfigureAwait(false);
+					}
+					catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
+					{
+						outcomes[workItem.Index] = SecretDiscoveryFileOutcome.Failed;
+					}
+				}).ConfigureAwait(false);
+		}
+
+		foreach (var workItem in serialWork)
+		{
+			try
+			{
+				entries[workItem.Index] = await AnalyzeFileAsync(scope, workItem, cancellationToken)
+					.ConfigureAwait(false);
+			}
+			catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
+			{
+				outcomes[workItem.Index] = SecretDiscoveryFileOutcome.Failed;
+			}
+		}
+
+		var skippedFileCount = 0;
+		var failedFileCount = 0;
+		for (var index = 0; index < entries.Length; index++)
+		{
+			var entry = entries[index];
+			if (entry is not null)
+			{
+				scope.ProcessEntry(orderedFilePaths[index], entry);
+				if (entry.IsUnscannable)
+					outcomes[index] = SecretDiscoveryFileOutcome.SkippedByLimit;
+			}
+
+			switch (outcomes[index])
+			{
+				case SecretDiscoveryFileOutcome.SkippedByLimit:
+					skippedFileCount++;
+					break;
+				case SecretDiscoveryFileOutcome.Failed:
+					failedFileCount++;
+					break;
+			}
+		}
+
+		return scope.Complete(skippedFileCount, failedFileCount);
 	}
 
 	public async Task<SecretRedactionSnapshot> AnalyzeAsync(
@@ -557,12 +724,14 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		var redactionScope = transformationScope.Redaction ??
 		                     throw new InvalidOperationException(
 			                     "The transformation scope did not create secret redaction state.");
+		var skippedFileCount = 0;
 
 		await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
 		                   context,
 		                   transformationScope,
 		                   orderedFilePaths,
-		                   cancellationToken).ConfigureAwait(false))
+		                   cancellationToken,
+		                   redactionScope).ConfigureAwait(false))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			switch (prepared.ReadResult.Classification)
@@ -572,6 +741,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					break;
 				case FileContentClassification.TooLarge:
 					redactionScope.AnalyzeUnscannable(prepared.SourcePath, prepared.Metadata);
+					skippedFileCount++;
 					break;
 				case FileContentClassification.Text:
 					redactionScope.CreatePlan(
@@ -587,9 +757,300 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			}
 		}
 
-		// Discovery borrows the compression pipeline but is not an output surface. Publishing its
-		// auxiliary snapshot would make compression statistics appear before Preview or export ran.
-		return redactionScope.Complete();
+		// Analysis borrows the compression pipeline but is not itself a transformed output. Publishing
+		// its auxiliary snapshot would make compression statistics appear before Preview or export ran.
+		return redactionScope.Complete(skippedFileCount, failedFileCount: 0);
+	}
+
+	public Task<SecretRedactionSnapshot> DiscoverAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		CancellationToken cancellationToken = default) =>
+		DiscoverAsync(
+			context,
+			orderedFilePaths,
+			SecretDiscoveryCacheMode.RevalidateContent,
+			cancellationToken);
+
+	public async Task<SecretRedactionSnapshot> DiscoverAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		SecretDiscoveryCacheMode cacheMode,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		ArgumentNullException.ThrowIfNull(orderedFilePaths);
+		var redactionContext = context.Redaction ??
+		                       throw new ArgumentException(
+			                       "The transformation context must include secret redaction.",
+			                       nameof(context));
+		if (context.Compression is null)
+		{
+			return await DiscoverAsync(redactionContext, orderedFilePaths, cacheMode, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		await redactionContext.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+		using var transformationScope = context.BeginOutput(orderedFilePaths);
+		var redactionScope = transformationScope.Redaction ??
+		                     throw new InvalidOperationException(
+			                     "The transformation scope did not create secret redaction state.");
+		var skippedFileCount = 0;
+		var failedFileCount = 0;
+
+		await foreach (var attempt in PrepareOrderedDiscoveryEntriesAsync(
+		                   context,
+		                   transformationScope,
+		                   redactionScope,
+		                   orderedFilePaths,
+		                   cacheMode,
+		                   cancellationToken).ConfigureAwait(false))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (attempt.IsPolicyExcluded)
+				continue;
+			if (attempt.CachedEntry is not null)
+			{
+				redactionScope.ProcessEntry(attempt.SourcePath!, attempt.CachedEntry);
+				if (attempt.CachedEntry.IsUnscannable)
+					skippedFileCount++;
+				continue;
+			}
+
+			if (attempt.Entry is null)
+			{
+				failedFileCount++;
+				continue;
+			}
+
+			var prepared = attempt.Entry;
+			switch (prepared.ReadResult.Classification)
+			{
+				case FileContentClassification.Binary:
+					redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
+					break;
+				case FileContentClassification.TooLarge:
+					redactionScope.AnalyzeUnscannable(prepared.SourcePath, prepared.Metadata);
+					skippedFileCount++;
+					break;
+				case FileContentClassification.Text:
+					redactionScope.CreatePlan(
+						prepared.SourcePath,
+						prepared.Compression.Text,
+						prepared.Compression.Map,
+						cancellationToken);
+					break;
+				default:
+					failedFileCount++;
+					break;
+			}
+		}
+
+		return redactionScope.Complete(skippedFileCount, failedFileCount);
+	}
+
+	private async IAsyncEnumerable<DiscoveryTransformationAttempt> PrepareOrderedDiscoveryEntriesAsync(
+		ContentTransformationContext context,
+		ContentTransformationScope transformationScope,
+		SecretRedactionScope redactionScope,
+		IReadOnlyList<string> orderedFilePaths,
+		SecretDiscoveryCacheMode cacheMode,
+		[EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		var batch = new List<CompressionWorkItem>(MaximumParallelScans);
+		for (var index = 0; index < orderedFilePaths.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var item = new CompressionWorkItem(index, orderedFilePaths[index]);
+			if (redactionScope.GetContentInspectionMode(item.SourcePath) ==
+			    SecretContentInspectionMode.None)
+			{
+				await foreach (var attempt in PrepareDiscoveryBatchAsync(
+				                   context,
+				                   transformationScope,
+				                   batch,
+				                   cancellationToken).ConfigureAwait(false))
+				{
+					yield return attempt;
+				}
+				batch.Clear();
+				yield return DiscoveryTransformationAttempt.PolicyExcluded();
+				continue;
+			}
+			SecretFileMetadata? metadata = null;
+			try
+			{
+				metadata = SecretFileMetadata.Capture(item.SourcePath);
+			}
+			catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
+			{
+				// Iterator blocks cannot yield from catch clauses. The null value is handled below.
+			}
+			if (metadata is null)
+			{
+				await foreach (var attempt in PrepareDiscoveryBatchAsync(
+				                   context,
+				                   transformationScope,
+				                   batch,
+				                   cancellationToken).ConfigureAwait(false))
+				{
+					yield return attempt;
+				}
+				batch.Clear();
+				yield return DiscoveryTransformationAttempt.Incomplete();
+				continue;
+			}
+
+			if (redactionScope.TryGetCachedEntry(item.SourcePath, metadata.Value, out var cached) &&
+			    (cacheMode == SecretDiscoveryCacheMode.ReuseValidatedContent || cached.IsUnscannable))
+			{
+				await foreach (var attempt in PrepareDiscoveryBatchAsync(
+				                   context,
+				                   transformationScope,
+				                   batch,
+				                   cancellationToken).ConfigureAwait(false))
+				{
+					yield return attempt;
+				}
+				batch.Clear();
+				yield return DiscoveryTransformationAttempt.Cached(item.SourcePath, cached);
+				continue;
+			}
+
+			if (metadata.Value.Length > MaximumParallelScanFileBytes)
+			{
+				await foreach (var attempt in PrepareDiscoveryBatchAsync(
+				                   context,
+				                   transformationScope,
+				                   batch,
+				                   cancellationToken).ConfigureAwait(false))
+				{
+					yield return attempt;
+				}
+				batch.Clear();
+				yield return await TryPrepareDiscoveryEntryAsync(
+					context,
+					transformationScope,
+					item,
+					cancellationToken).ConfigureAwait(false);
+				continue;
+			}
+
+			batch.Add(item);
+			if (batch.Count < MaximumParallelScans)
+				continue;
+
+			await foreach (var attempt in PrepareDiscoveryBatchAsync(
+			                   context,
+			                   transformationScope,
+			                   batch,
+			                   cancellationToken).ConfigureAwait(false))
+			{
+				yield return attempt;
+			}
+			batch.Clear();
+		}
+
+		await foreach (var attempt in PrepareDiscoveryBatchAsync(
+		                   context,
+		                   transformationScope,
+		                   batch,
+		                   cancellationToken).ConfigureAwait(false))
+		{
+			yield return attempt;
+		}
+	}
+
+	private async IAsyncEnumerable<DiscoveryTransformationAttempt> PrepareDiscoveryBatchAsync(
+		ContentTransformationContext context,
+		ContentTransformationScope transformationScope,
+		IReadOnlyList<CompressionWorkItem> items,
+		[EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		if (items.Count == 0)
+			yield break;
+
+		var tasks = items
+			.Select(item => TryPrepareDiscoveryEntryAsync(
+					context,
+					transformationScope,
+					item,
+					cancellationToken))
+			.ToArray();
+		DiscoveryTransformationAttempt[] attempts;
+		try
+		{
+			attempts = await Task.WhenAll(tasks).ConfigureAwait(false);
+		}
+		catch
+		{
+			foreach (var task in tasks)
+			{
+				if (task.IsCompletedSuccessfully)
+					task.Result.Dispose();
+			}
+			throw;
+		}
+		var next = 0;
+		try
+		{
+			for (; next < attempts.Length; next++)
+			{
+				yield return attempts[next];
+				attempts[next].Dispose();
+			}
+		}
+		finally
+		{
+			for (; next < attempts.Length; next++)
+				attempts[next].Dispose();
+		}
+	}
+
+	private async Task<DiscoveryTransformationAttempt> TryPrepareDiscoveryEntryAsync(
+		ContentTransformationContext context,
+		ContentTransformationScope transformationScope,
+		CompressionWorkItem item,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			var entry = await PrepareTransformationEntryAsync(
+				context,
+				transformationScope,
+				item,
+				cancellationToken).ConfigureAwait(false);
+			return DiscoveryTransformationAttempt.Prepared(entry);
+		}
+		catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
+		{
+			return DiscoveryTransformationAttempt.Incomplete();
+		}
+	}
+
+	private static bool IsRecoverableDiscoveryFailure(Exception exception) =>
+		exception is IOException or UnauthorizedAccessException or SecretDetectionException or DecoderFallbackException;
+
+	private readonly record struct DiscoveryTransformationAttempt(
+		PreparedTransformationEntry? Entry,
+		string? SourcePath,
+		SecretScanCacheEntry? CachedEntry,
+		bool IsPolicyExcluded) : IDisposable
+	{
+		public static DiscoveryTransformationAttempt Prepared(PreparedTransformationEntry entry) =>
+			new(entry, null, null, false);
+
+		public static DiscoveryTransformationAttempt Cached(
+			string sourcePath,
+			SecretScanCacheEntry entry) =>
+			new(null, sourcePath, entry, false);
+
+		public static DiscoveryTransformationAttempt Incomplete() => new(null, null, null, false);
+
+		public static DiscoveryTransformationAttempt PolicyExcluded() =>
+			new(null, null, null, true);
+
+		public void Dispose() => Entry?.Dispose();
 	}
 
 	private async Task<SecretScanCacheEntry> AnalyzeFileAsync(
@@ -642,6 +1103,13 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		int Index,
 		string SourcePath,
 		SecretFileMetadata Metadata);
+
+	private enum SecretDiscoveryFileOutcome : byte
+	{
+		None = 0,
+		SkippedByLimit = 1,
+		Failed = 2
+	}
 
 	private static Encoding ResolveEncoding(TextFileEncoding encoding) => encoding switch
 	{

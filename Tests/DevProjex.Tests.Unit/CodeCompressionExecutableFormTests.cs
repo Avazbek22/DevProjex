@@ -29,8 +29,8 @@ public sealed class CodeCompressionExecutableFormTests
 			},
 			{
 				"csharp", "Accessors.cs",
-				"public sealed class Accessors { private int _value; public int Value { get { var executable_csharp_getter = _value; return executable_csharp_getter; } set { var executable_csharp_setter = value; _value = executable_csharp_setter; } } }",
-				"executable_csharp_getter"
+				"public sealed class Accessors { private int _value; public int Value { get { var preserved_csharp_getter = _value; return preserved_csharp_getter; } set { var preserved_csharp_setter = value; _value = preserved_csharp_setter; } } public int Read() { var executable_csharp_method = _value; return executable_csharp_method; } }",
+				"executable_csharp_method"
 			},
 			{
 				"csharp", "Operators.cs",
@@ -65,7 +65,7 @@ public sealed class CodeCompressionExecutableFormTests
 			{
 				"javascript", "object-methods.mjs",
 				"export const service = { get value() { const executableJsGetter = 42; return executableJsGetter; }, async run(value) { const executableJsMethod = await value; return executableJsMethod; } };",
-				"executableJsGetter"
+				"executableJsMethod"
 			},
 			{
 				"python", "nested.py",
@@ -105,7 +105,7 @@ public sealed class CodeCompressionExecutableFormTests
 			{
 				"typescript", "accessors.ts",
 				"export class Store { get value(): number { const executableTypeScriptGetter = 42; return executableTypeScriptGetter; } async map(value: Promise<number>): Promise<number> { const executableTypeScriptMethod = await value; return executableTypeScriptMethod; } }",
-				"executableTypeScriptGetter"
+				"executableTypeScriptMethod"
 			}
 		};
 

@@ -37,9 +37,18 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
                 window,
                 IgnoreOptionId.CompressCode);
             await UiTestDriver.ClickAsync(window, checkBox);
+            // The checkbox is a draft; the preview and the measured counters change only after
+            // «Apply settings» commits it.
+            Assert.Contains(
+                "return \"app-value-1\";",
+                UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+                StringComparison.Ordinal);
+            await UiTestDriver.ClickApplySettingsAsync(window);
             await UiTestDriver.WaitForConditionAsync(
                 window,
-                () => option.IsChecked &&
+                () => viewModel.ContentProcessingOptions.Any(
+                          static candidate =>
+                              candidate.Id == IgnoreOptionId.CompressCode && candidate.IsChecked) &&
                       !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
                           "return \"app-value-1\";",
                           StringComparison.Ordinal) &&
@@ -53,10 +62,16 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
             Assert.Contains("BuildAppValue1()", compressedPreview, StringComparison.Ordinal);
             Assert.True(UiTestDriver.GetCodeCompressionDiagnostics(window).AnalysisExecutions > 0);
 
+            checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(
+                window,
+                IgnoreOptionId.CompressCode);
             await UiTestDriver.ClickAsync(window, checkBox);
+            await UiTestDriver.ClickApplySettingsAsync(window);
             await UiTestDriver.WaitForConditionAsync(
                 window,
-                () => !option.IsChecked &&
+                () => viewModel.ContentProcessingOptions.Any(
+                          static candidate =>
+                              candidate.Id == IgnoreOptionId.CompressCode && !candidate.IsChecked) &&
                       UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
                           "return \"app-value-1\";",
                           StringComparison.Ordinal) &&
@@ -91,7 +106,8 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 				viewModel.ContentProcessingOptions,
 				static candidate => candidate.Id == IgnoreOptionId.CompressCode);
 			compressionOption.IsChecked = true;
-			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			// The checkbox is a draft; compression starts only after «Apply settings» commits it.
+			await UiTestDriver.ClickApplySettingsAsync(window);
 
 			CodeCompressionSnapshot? fullSelectionSnapshot = null;
 			await UiTestDriver.WaitForConditionAsync(
@@ -99,8 +115,7 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 				() =>
 				{
 					fullSelectionSnapshot = GetCompressionSnapshot(window);
-					return compressionOption.IsChecked &&
-					       fullSelectionSnapshot is { SelectionKey.Length: > 0 } &&
+					return fullSelectionSnapshot is { SelectionKey.Length: > 0 } &&
 					       viewModel.SettingsCompressionNotice.StartsWith(
 						       "Compressed ",
 						       StringComparison.Ordinal);

@@ -212,12 +212,14 @@
 									 TextWrapping="Wrap" />
 						</ToolTip>
 					  </ToolTip.Tip>
+					  <Grid Width="16" Height="16">
 					  <Border Width="16"
 							  Height="16"
 							  CornerRadius="8"
 							  BorderThickness="1"
 							  BorderBrush="{DynamicResource AppMutedTextBrush}"
-							  Background="{DynamicResource MenuPressedBrush}">
+							  Background="{DynamicResource MenuPressedBrush}"
+							  IsVisible="{Binding IsInformationStatus}">
 						<TextBlock Text="?"
 								   FontSize="10"
 								   FontWeight="SemiBold"
@@ -225,6 +227,23 @@
 								   HorizontalAlignment="Center"
 								   VerticalAlignment="Center" />
 					  </Border>
+					  <Grid Width="16"
+							Height="16"
+							IsVisible="{Binding IsWarningStatus}">
+						<Path Data="M 8,1 L 15,14 L 1,14 Z"
+							  Stretch="Uniform"
+							  Fill="{DynamicResource MenuPressedBrush}"
+							  Stroke="{DynamicResource AppMutedTextBrush}"
+							  StrokeThickness="1" />
+						<TextBlock Text="!"
+								   Margin="0,2,0,0"
+								   FontSize="9"
+								   FontWeight="SemiBold"
+								   Foreground="{DynamicResource AppTextBrush}"
+								   HorizontalAlignment="Center"
+								   VerticalAlignment="Center" />
+					  </Grid>
+					  </Grid>
 					</Border>
 				  </Grid>
 				</DataTemplate>

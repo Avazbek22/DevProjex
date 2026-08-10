@@ -993,6 +993,34 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.Equal(1, contentTransformationChanges);
 	}
 
+	[AvaloniaFact]
+	public void ContentTransformationCallback_IdentifiesTheChangedPipelineStage()
+	{
+		var changedOptions = new List<IgnoreOptionId?>();
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => @"C:\Project",
+			contentTransformationChangedWithId: changedOptions.Add);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
+		HookAllOptionListeners(coordinator, viewModel);
+		Assert.True(coordinator.ApplyCompressCodeOverride(false));
+		changedOptions.Clear();
+
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		Assert.True(coordinator.ApplyCompressCodeOverride(true));
+
+		Assert.Equal(
+			[IgnoreOptionId.HideSecrets, IgnoreOptionId.CompressCode],
+			changedOptions);
+		Assert.False(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.HideSecrets));
+		Assert.True(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.CompressCode));
+		Assert.True(MainWindow.RequiresCompressionRefresh(changedOptionId: null));
+	}
+
 	[Fact]
 	public void ReversibleRefresh_CoupledGitModeSnapshotIsNotRestoredForSingleCheckboxClear()
 	{
@@ -1583,7 +1611,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		IFileSystemScanner? scanner = null,
 		Func<string?>? currentPathProvider = null,
 		Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability>? availabilityProvider = null,
-		Action? contentTransformationChanged = null)
+		Action? contentTransformationChanged = null,
+		Action<IgnoreOptionId?>? contentTransformationChangedWithId = null)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		scanner ??= new StubFileSystemScanner();
@@ -1597,7 +1626,9 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			new HashSet<string>(),
 			new HashSet<string>());
 
-		if (availabilityProvider is null && contentTransformationChanged is null)
+		if (availabilityProvider is null &&
+		    contentTransformationChanged is null &&
+		    contentTransformationChangedWithId is null)
 		{
 			return new SelectionSyncCoordinator(
 				viewModel,
@@ -1622,7 +1653,10 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			availabilityProvider,
 			_ => false,
 			currentPathProvider ?? (() => null),
-			contentTransformationChanged: contentTransformationChanged);
+			contentTransformationChanged: contentTransformationChangedWithId ??
+				(contentTransformationChanged is null
+					? null
+					: _ => contentTransformationChanged()));
 	}
 
 	[Fact]

@@ -248,21 +248,16 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.Equal(CodeCompressionTestHarness.LanguagePacks.Count, Directory.GetFiles(locator.RootDirectory).Length);
 	}
 
-	[Theory]
-	[InlineData(
-		"sample.cpp",
-		"auto transform = [](int value) { int doubled = value * 2; int adjusted = doubled + 10; return adjusted; };",
-		"doubled =")]
-	[InlineData(
-		"Sample.java",
-		"class Sample { java.util.function.Function<Integer, Integer> transform = value -> { int doubled = value * 2; int adjusted = doubled + 10; return adjusted; }; }",
-		"doubled =")]
-	public void CommonLambdaBodiesAreCompressed(string path, string source, string removedText)
+	[Fact]
+	public void FreeCppLambdaWithoutNamedExecutableRemainsUnchanged()
 	{
-		var (plan, text) = Compress(path, source);
+		const string source =
+			"auto transform = [](int value) { int doubled = value * 2; int adjusted = doubled + 10; return adjusted; };";
 
-		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
-		Assert.DoesNotContain(removedText, text, StringComparison.Ordinal);
+		var (plan, text) = Compress("sample.cpp", source);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedNoBenefit, plan.Outcome);
+		Assert.Equal(source, text);
 	}
 
 	[Fact]
@@ -437,7 +432,7 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.Contains("Multi-line docstring.", text, StringComparison.Ordinal);
 		Assert.Contains("\"\"\"Doc.\"\"\"", text, StringComparison.Ordinal);
-		Assert.DoesNotContain("self._cache = {}", text, StringComparison.Ordinal);
+		Assert.Contains("self._cache = {}", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("return a + b", text, StringComparison.Ordinal);
 	}
 

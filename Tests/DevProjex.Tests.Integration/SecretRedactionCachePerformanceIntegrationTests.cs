@@ -54,7 +54,9 @@ public sealed class SecretRedactionCachePerformanceIntegrationTests
 		Assert.InRange(
 			firstDiagnostics.PeakFullContentBuffers,
 			1,
-			Math.Min(8, Math.Max(1, Environment.ProcessorCount)));
+			Math.Min(
+				SecretRedactionOutputPreparer.MaximumParallelScans,
+				Math.Max(1, Environment.ProcessorCount)));
 		var sourceCharacterCount = FileCount * (long)CharactersPerFile;
 		Assert.True(
 			firstAllocated < sourceCharacterCount,

@@ -25,6 +25,22 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private static readonly string EmbeddedConfigurationFileName = $"gitleaks-{RulesVersion}.toml";
 	private const string GitleaksAllowSignature = "gitleaks:allow";
 	private const string GenericApiKeyRuleId = "generic-api-key";
+	private const string PrivateKeyRuleId = "private-key";
+	// Reviewed override for the upstream private-key rule. The upstream body pattern accepts any
+	// character, so in a file that merely mentions PEM markers - test fixtures, documentation -
+	// a match can start at one marker and run across arbitrary source code to the next "KEY-----"
+	// occurrence, redacting everything between as one giant secret. The override permits only
+	// characters a PEM payload can contain (base64, armor headers, whitespace, and escaped
+	// newlines inside string literals), bounds the body, and requires a real END marker. Real
+	// keys still match byte-for-byte; marker mentions can no longer bridge unrelated text.
+	private const string UpstreamPrivateKeyPattern =
+		@"(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----[\s\S-]{64,}?KEY(?: BLOCK)?-----";
+	// The body bound must stay below the non-backtracking engine's automaton size limit while
+	// still covering an RSA-8192 PEM body (~6.5K characters including newlines).
+	private const string BoundedPrivateKeyPattern =
+		@"(?i)-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----" +
+		@"[a-z0-9+/=\\\s:.,_-]{64,8192}?" +
+		@"-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----";
 	private const string TwitterBearerPrefix = "AAAAAAAAAAAAAAAAAAAAAA";
 	private const string RegexWarmUpProbe =
 		"apiKey = \"A7d9mQ2xK4vN8sR6tY3uW5zB1cE0fG2h\"; /src/config.json";
@@ -60,7 +76,9 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	}
 
 	public int RuleCount => _configuration.Value.Rules.Count;
-	public string RulesIdentity => $"gitleaks:{RulesVersion}:{ConfigurationSha256}";
+	// The "+pkb" marker records the reviewed private-key override so cached findings produced by
+	// the unbounded upstream pattern are never mistaken for results of the bounded one.
+	public string RulesIdentity => $"gitleaks:{RulesVersion}:{ConfigurationSha256}+pkb";
 
 	public void WarmUp(CancellationToken cancellationToken = default)
 	{
@@ -98,6 +116,20 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		catch (RegexMatchTimeoutException exception)
 		{
 			throw new SecretDetectionException("Secret detector warm-up timed out.", exception);
+		}
+	}
+
+	public bool ShouldInspectPath(string repositoryRelativePath)
+	{
+		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
+		try
+		{
+			var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+			return ShouldInspectPath(_configuration.Value, normalizedPath);
+		}
+		catch (RegexMatchTimeoutException exception)
+		{
+			throw new SecretDetectionException("Secret path policy evaluation timed out.", exception);
 		}
 	}
 
@@ -212,9 +244,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		var configuration = _configuration.Value;
 		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
-		if (IsEmbeddedConfigurationPath(normalizedPath))
-			return [];
-		if (configuration.GlobalAllowlists.Any(allowlist => allowlist.AllowsWholeFileByPath(normalizedPath)))
+		if (!ShouldInspectPath(configuration, normalizedPath))
 			return [];
 		Span<ulong> candidateRules = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
 		configuration.KeywordPrefilter.FindCandidates(content, candidateRules, cancellationToken);
@@ -288,6 +318,13 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 		return findings;
 	}
+
+	private static bool ShouldInspectPath(
+		CompiledConfiguration configuration,
+		string normalizedPath) =>
+		!IsEmbeddedConfigurationPath(normalizedPath) &&
+		!configuration.GlobalAllowlists.Any(
+			allowlist => allowlist.AllowsWholeFileByPath(normalizedPath));
 
 	private static bool IsEmbeddedConfigurationPath(string normalizedPath) =>
 		normalizedPath.Equals(EmbeddedConfigurationFileName, StringComparison.OrdinalIgnoreCase) ||
@@ -922,7 +959,19 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private static CompiledRule CompileRule(TomlTable table, int order)
 	{
 		var id = GetRequiredString(table, "id");
-		var regex = GetOptionalString(table, "regex") is { Length: > 0 } pattern
+		var patternSource = GetOptionalString(table, "regex");
+		if (string.Equals(id, PrivateKeyRuleId, StringComparison.Ordinal))
+		{
+			if (!string.Equals(patternSource, UpstreamPrivateKeyPattern, StringComparison.Ordinal))
+			{
+				throw new SecretDetectionException(
+					"The upstream private-key rule changed and its bounded override needs a new review.");
+			}
+
+			patternSource = BoundedPrivateKeyPattern;
+		}
+
+		var regex = patternSource is { Length: > 0 } pattern
 			? CreateDeferredRegex(pattern, $"rule '{id}'")
 			: null;
 		var pathRegex = GetOptionalString(table, "path") is { Length: > 0 } path

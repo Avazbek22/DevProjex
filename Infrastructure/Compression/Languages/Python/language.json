@@ -7,9 +7,9 @@
   ],
   "library": "tree-sitter-python",
   "export": "tree_sitter_python",
-  "queryVersion": 1,
+  "queryVersion": 3,
   "blockPlaceholder": "...",
-  "expressionPlaceholder": null,
+  "preserveLeadingDocstring": true,
   "containerNodeTypes": [
     "module",
     "class_definition"

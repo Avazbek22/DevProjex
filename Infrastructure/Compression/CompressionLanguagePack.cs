@@ -1,10 +1,16 @@
 namespace DevProjex.Infrastructure.Compression;
 
+internal enum ExpressionBodyStyle
+{
+	None,
+	Inline,
+	Declaration
+}
+
 /// <summary>
 /// One language, expressed as data. Adding a language is a manifest, a set of .scm queries and
-/// fixtures — no C# changes for the common case. That is not a promise that it is ALWAYS enough:
-/// Python already needs its own docstring handling, so the pack carries optional queries and the
-/// compressor keeps a small amount of per-language behaviour behind them.
+/// fixtures — no C# changes for the common case. Language-specific syntax exceptions are explicit
+/// manifest capabilities rather than language-name checks in the compressor.
 /// </summary>
 internal sealed record CompressionLanguagePack(
 	string Id,
@@ -14,12 +20,13 @@ internal sealed record CompressionLanguagePack(
 	string Export,
 	int QueryVersion,
 	string BlockPlaceholder,
-	string? ExpressionPlaceholder,
+	bool PreserveLeadingDocstring,
+	ExpressionBodyStyle ExpressionBodyStyle,
 	IReadOnlySet<string> ContainerNodeTypes,
 	IReadOnlySet<string> ExecutableOwnerKinds,
 	string BodiesQuery,
 	string DeclarationsQuery,
-	string? DocstringsQuery)
+	string? PreservesQuery)
 {
 	/// <summary>
 	/// Goes into the cache key. A grammar or query change must change this string, or plans built
@@ -35,7 +42,8 @@ internal sealed record CompressionLanguagePack(
 		string Export,
 		int QueryVersion,
 		string BlockPlaceholder,
-		string? ExpressionPlaceholder,
+		bool PreserveLeadingDocstring,
+		string? ExpressionBodyStyle,
 		string[] ContainerNodeTypes,
 		string[] ExecutableOwnerKinds);
 
@@ -71,16 +79,27 @@ internal sealed record CompressionLanguagePack(
 				manifest.Export,
 				manifest.QueryVersion,
 				manifest.BlockPlaceholder,
-				manifest.ExpressionPlaceholder,
+				manifest.PreserveLeadingDocstring,
+				ParseExpressionBodyStyle(manifest.ExpressionBodyStyle, resource),
 				manifest.ContainerNodeTypes.ToHashSet(StringComparer.Ordinal),
 				manifest.ExecutableOwnerKinds.ToHashSet(StringComparer.Ordinal),
 				ReadText(assembly, directory + "bodies.scm"),
 				ReadText(assembly, directory + "declarations.scm"),
-				TryReadText(assembly, directory + "docstrings.scm")));
+				TryReadText(assembly, directory + "preserve.scm")));
 		}
 
 		return packs.OrderBy(static pack => pack.Id, StringComparer.Ordinal).ToArray();
 	}
+
+	private static ExpressionBodyStyle ParseExpressionBodyStyle(string? value, string resource) =>
+		value switch
+		{
+			null or "" => ExpressionBodyStyle.None,
+			"inline" => ExpressionBodyStyle.Inline,
+			"declaration" => ExpressionBodyStyle.Declaration,
+			_ => throw new InvalidOperationException(
+				$"Language manifest '{resource}' has unsupported expressionBodyStyle '{value}'.")
+		};
 
 	private static string ReadText(Assembly assembly, string resource) =>
 		TryReadText(assembly, resource)

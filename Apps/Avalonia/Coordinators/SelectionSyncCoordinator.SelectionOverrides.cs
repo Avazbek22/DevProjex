@@ -41,7 +41,7 @@ public sealed partial class SelectionSyncCoordinator
 		}
 
 		RequestPendingApplyEvaluation();
-		contentTransformationChanged?.Invoke();
+		contentTransformationChanged?.Invoke(optionId);
 		return true;
 	}
 

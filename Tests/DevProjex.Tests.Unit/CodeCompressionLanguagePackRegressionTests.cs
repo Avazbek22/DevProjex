@@ -149,8 +149,8 @@ public sealed class CodeCompressionLanguagePackRegressionTests
 			    }
 			}
 			""",
-			["[System.Obsolete]", "class Pipeline<T>", "where T : class", "RunAsync(T value)", "_map = value =>"],
-			["csharp_lambda_marker", "csharp_method_marker"],
+			["[System.Obsolete]", "class Pipeline<T>", "where T : class", "RunAsync(T value)", "_map = value =>", "csharp_lambda_marker"],
+			["csharp_method_marker"],
 			"\npublic sealed class BrokenCSharp<\n",
 			"class BrokenCSharp<"),
 		new(
@@ -218,8 +218,8 @@ public sealed class CodeCompressionLanguagePackRegressionTests
 			    };
 			}
 			""",
-			["@sealed", "class Pipeline<T extends", "run(value: T): string;", "run(value: T, suffix", "map = <R>"],
-			["typescript_overload_marker", "typescript_arrow_marker"],
+			["@sealed", "class Pipeline<T extends", "run(value: T): string;", "run(value: T, suffix", "map = <R>", "typescript_arrow_marker"],
+			["typescript_overload_marker"],
 			"\nexport interface BrokenTypeScript<\n",
 			"interface BrokenTypeScript<"),
 		new(

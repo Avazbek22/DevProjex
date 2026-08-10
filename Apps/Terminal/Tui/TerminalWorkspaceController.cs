@@ -238,8 +238,11 @@ public sealed class TerminalWorkspaceController(
 		var redactionContext = CreateRedactionContext(plan);
 		if (view == ProjectContextView.Tree && redactionContext is not null)
 		{
+			// The tree view ships no file content; this scan only measures the selection so the
+			// Hide Secrets row can show a count. Discovery keeps one unreadable file from failing
+			// the whole view - the label reads the snapshot and reports coverage honestly.
 			await services.SecretRedactionOutputPreparer
-				.AnalyzeAsync(redactionContext, plan.IncludedFiles, cancellationToken)
+				.DiscoverAsync(redactionContext, plan.IncludedFiles, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		string MapDisplayPath(string path) =>

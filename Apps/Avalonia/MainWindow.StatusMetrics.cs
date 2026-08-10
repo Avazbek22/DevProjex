@@ -7,8 +7,40 @@ public partial class MainWindow
     private bool IsBackgroundMetricsActive()
         => _metrics.IsBackgroundActive;
 
-    private void OnTreeNodeCheckedChanged(TreeNodeViewModel _)
+	private void OnTreeNodeCheckedChanged(TreeNodeViewModel _)
     {
+		if (_treeSelectionChangeBatchDepth > 0)
+		{
+			_treeSelectionChangedDuringBatch = true;
+			return;
+		}
+
+		PublishTreeSelectionChange();
+	}
+
+	private void ApplyTreeSelectionBatch(Action applyChanges)
+	{
+		ArgumentNullException.ThrowIfNull(applyChanges);
+		_treeSelectionChangeBatchDepth++;
+		try
+		{
+			applyChanges();
+		}
+		finally
+		{
+			_treeSelectionChangeBatchDepth--;
+			if (_treeSelectionChangeBatchDepth == 0 && _treeSelectionChangedDuringBatch)
+			{
+				// Restoring a saved selection may touch thousands of nodes. Publish it as one atomic
+				// selection revision so dependent scans start once from the final state.
+				_treeSelectionChangedDuringBatch = false;
+				PublishTreeSelectionChange();
+			}
+		}
+	}
+
+	private void PublishTreeSelectionChange()
+	{
         _treeSelectionSnapshotCache.Invalidate();
 		InvalidateSecretRedactionCount();
 		ScheduleCompressionRefreshForSelectionChange();
@@ -66,6 +98,9 @@ public partial class MainWindow
             case StatusOperationType.ProjectCopyExport:
                 _projectCopyExportCts?.Cancel();
                 break;
+			case StatusOperationType.SecretAnalysis:
+				_secretRedactionCountCts?.Cancel();
+				break;
             case StatusOperationType.MetricsCalculation:
             case StatusOperationType.None:
             default:

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using DevProjex.Application.Presentation;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
@@ -208,8 +209,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					viewModel.SettingsSecretsNotice,
 					"DevProjex found no secrets",
 					StringComparison.Ordinal) &&
-				      viewModel.ContentProcessingOptions.All(
-					      static option => option.Id != IgnoreOptionId.HideSecrets) &&
+				      viewModel.ContentProcessingOptions.Any(
+					      static option =>
+						      option.Id == IgnoreOptionId.HideSecrets &&
+						      option.StatusText == "DevProjex found no secrets" &&
+						      option.IsInformationStatus) &&
 				      viewModel.ContentProcessingOptions.Any(
 					      static option =>
 						      option.Id == IgnoreOptionId.CompressCode &&
@@ -239,8 +243,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				await UiTestDriver.SwitchPreviewModeAsync(window, mode);
 				await UiTestDriver.WaitForConditionAsync(
 					window,
-					() => viewModel.ContentProcessingOptions.All(
-						      static option => option.Id != IgnoreOptionId.HideSecrets) &&
+					() => viewModel.ContentProcessingOptions.Any(
+						      static option =>
+							      option.Id == IgnoreOptionId.HideSecrets &&
+							      option.StatusText == "DevProjex found no secrets") &&
 					      viewModel.ContentProcessingOptions.Any(
 						      static option =>
 							      option.Id == IgnoreOptionId.CompressCode &&
@@ -255,7 +261,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
-	public async Task HideSecrets_AutomaticEmptyScanCompletesWhilePreviewIsOpen()
+	public async Task HideSecrets_OptInEmptyScanCompletesWhilePreviewIsOpen()
 	{
 		using var project = UiTestProject.CreateWithPythonSmartIgnoreWorkspace();
 		for (var index = 0; index < 120; index++)
@@ -269,16 +275,22 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		{
 			await UiTestDriver.OpenPreviewAsync(window);
 			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => viewModel.IsAnyPreviewVisible &&
-				      viewModel.ContentProcessingOptions.Count == 1 &&
-				      viewModel.ContentProcessingOptions[0].Id == IgnoreOptionId.CompressCode &&
+				      viewModel.ContentProcessingOptions.Any(
+					      static option =>
+						      option.Id == IgnoreOptionId.HideSecrets &&
+						      option.StatusText == "DevProjex found no secrets" &&
+						      option.IsInformationStatus) &&
 				      string.Equals(
 					      viewModel.SettingsSecretsNotice,
 					      "DevProjex found no secrets",
 					      StringComparison.Ordinal),
-				"the automatic empty scan to complete without closing Preview");
+				"the opt-in empty scan to complete without closing Preview");
 		}
 		finally
 		{
@@ -321,18 +333,31 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var viewModel = UiTestDriver.GetViewModel(window);
 			if (expectedCount == 0)
 			{
+				// No scan may run before the user opts in: the row is offered idle, without status.
 				await UiTestDriver.WaitForConditionAsync(
 					window,
 					() => viewModel.HasContentProcessingOptions &&
 					      UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible &&
-					      viewModel.ContentProcessingOptions.Count == 1 &&
-					      viewModel.ContentProcessingOptions[0].Id == IgnoreOptionId.CompressCode &&
+					      viewModel.ContentProcessingOptions.Any(
+						      static option =>
+							      option.Id == IgnoreOptionId.HideSecrets &&
+							      !option.HasStatus),
+					"the idle Hide secrets row to appear without any background scan");
+				Assert.False(viewModel.HideSecretsOption?.IsChecked);
+				Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+				await UiTestDriver.WaitForConditionAsync(
+					window,
+					() => viewModel.ContentProcessingOptions.Any(
+						      static option =>
+							      option.Id == IgnoreOptionId.HideSecrets &&
+							      option.StatusText == "DevProjex found no secrets" &&
+							      option.IsInformationStatus) &&
 					      string.Equals(
 						      viewModel.SettingsSecretsNotice,
 						      "DevProjex found no secrets",
 						      StringComparison.Ordinal),
-					"the automatic empty scan to hide Hide secrets");
-				Assert.False(viewModel.HideSecretsOption?.IsChecked);
+					"the opt-in scan to confirm no secrets on the visible row");
 			}
 			else
 			{
@@ -340,18 +365,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					window,
 					IgnoreOptionId.HideSecrets,
 					"Hide secrets");
-				await UiTestDriver.WaitForConditionAsync(
-					window,
-					() => string.Equals(
-						viewModel.SettingsSecretsNotice,
-						$"Found: {expectedCount}. Hidden: 0.",
-						StringComparison.Ordinal),
-					"the automatic scan to report findings without claiming they are hidden");
+				Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
 				await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 					window,
 					IgnoreOptionId.HideSecrets,
 					$"Hide secrets ({expectedCount}/{expectedCount})");
+				await UiTestDriver.WaitForConditionAsync(
+					window,
+					() => string.Equals(
+						viewModel.SettingsSecretsNotice,
+						$"Found: {expectedCount}. Hidden: {expectedCount}.",
+						StringComparison.Ordinal),
+					"the opt-in scan to report and hide the findings");
 				Assert.True(UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible);
 			}
 
@@ -377,13 +403,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					window,
 					IgnoreOptionId.HideSecrets,
 					"Hide secrets");
+				// Switching the option off withdraws the request entirely: no counters remain.
 				await UiTestDriver.WaitForConditionAsync(
 					window,
-					() => string.Equals(
-						viewModel.SettingsSecretsNotice,
-						$"Found: {expectedCount}. Hidden: 0.",
-						StringComparison.Ordinal),
-					"disabling Hide secrets to stop claiming that findings are hidden");
+					() => viewModel.SettingsSecretsNotice.Length == 0,
+					"disabling Hide secrets to clear its status");
 			}
 			await UiTestDriver.WaitForIgnoreOptionStateAsync(
 				window,
@@ -1915,11 +1939,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				window,
 				() => viewModel.ContentProcessingOptions.Any(
 					      static option => option.Id == IgnoreOptionId.HideSecrets) &&
-				      string.Equals(
-					      viewModel.SettingsSecretsNotice,
-					      "Found: 1. Hidden: 0.",
-					      StringComparison.Ordinal),
-				"the automatic scan to expose Hide secrets after a confirmed finding");
+				      viewModel.SettingsSecretsNotice.Length == 0,
+				"the content processing section to offer Hide secrets without scanning");
 			var hideSecrets = Assert.IsType<IgnoreOptionViewModel>(viewModel.HideSecretsOption);
 			var compressCode = Assert.Single(
 				viewModel.IgnoreOptions,
@@ -1936,7 +1957,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal("Content processing:", UiTestDriver.GetRequiredControl<TextBlock>(window, "ContentProcessingHeaderText").Text);
 			Assert.Contains(processingList, processingContent.Children);
 			Assert.Null(helpIndicator.Cursor);
-			Assert.True(helpIndicator.IsVisible);
+			// No scan has run yet, so the idle row offers its checkbox without any indicator.
+			Assert.False(helpIndicator.IsVisible);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 3, hiddenCount: 2);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
@@ -1961,12 +1983,46 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.InRange(indicatorCenter - checkBoxCenter, 1, 3);
 			var indicatorGap = indicatorPosition.X - (checkBoxPosition.X + checkBox.Bounds.Width);
 			Assert.InRange(indicatorGap, 4, 8);
+			var processingCollectionChanges = 0;
+			viewModel.ContentProcessingOptions.CollectionChanged += (_, _) =>
+				processingCollectionChanges++;
+
+			viewModel.SetContentProcessingStatus(
+				SecretScanState.Limited,
+				detectedCount: 3,
+				hiddenCount: 2,
+				skippedFileCount: 2);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(
+				$"Found: 3. Hidden: 2.{Environment.NewLine}Files larger than 16 MiB were not checked: 2.",
+				hideSecrets.StatusText);
+			Assert.False(hideSecrets.IsWarningStatus);
+			Assert.True(hideSecrets.IsInformationStatus);
+			Assert.Equal(0, processingCollectionChanges);
+
+			viewModel.SetContentProcessingStatus(
+				SecretScanState.Limited,
+				detectedCount: 0,
+				hiddenCount: 0,
+				skippedFileCount: 2);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal("Files larger than 16 MiB were not checked: 2.", hideSecrets.StatusText);
+			Assert.DoesNotContain("found no secrets", hideSecrets.StatusText, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HideSecrets);
+			viewModel.SetContentProcessingStatus(
+				SecretScanState.Limited,
+				detectedCount: 3,
+				hiddenCount: 2,
+				skippedFileCount: 2);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Pending);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Contains(
 				viewModel.ContentProcessingOptions,
 				static option => option.Id == IgnoreOptionId.HideSecrets);
+			Assert.Equal(0, processingCollectionChanges);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Scanning);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
@@ -1979,15 +2035,25 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Contains(
 				viewModel.ContentProcessingOptions,
 				static option => option.Id == IgnoreOptionId.HideSecrets);
-			Assert.Equal(string.Empty, hideSecrets.StatusText);
+			Assert.Equal(
+				$"The analysis could not be completed.{Environment.NewLine}Click to run the check again.",
+				hideSecrets.StatusText);
+			Assert.True(hideSecrets.IsWarningStatus);
+			Assert.Equal(0, processingCollectionChanges);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 0, hiddenCount: 0);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Equal("DevProjex found no secrets", viewModel.SettingsSecretsNotice);
 			Assert.True(UiTestDriver.GetRequiredControl<Grid>(window, "ContentProcessingSection").IsVisible);
-			var remainingOption = Assert.Single(viewModel.ContentProcessingOptions);
-			Assert.Equal(IgnoreOptionId.CompressCode, remainingOption.Id);
-			Assert.Equal(string.Empty, hideSecrets.StatusText);
+			// A clean completed scan keeps the row and confirms the result on its indicator, so
+			// "no secrets found" and "not scanned yet" are visibly different states.
+			Assert.Contains(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HideSecrets);
+			Assert.Equal("DevProjex found no secrets", hideSecrets.StatusText);
+			Assert.False(hideSecrets.IsWarningStatus);
+			Assert.True(hideSecrets.IsInformationStatus);
+			Assert.Equal(0, processingCollectionChanges);
 
 			viewModel.SetContentProcessingStatus(SecretScanState.Completed, detectedCount: 3, hiddenCount: 2);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
@@ -2024,7 +2090,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
-	public async Task CompressionWithoutSecretFindings_DoesNotExposeTheSecretsIndicator()
+	public async Task CompressionWithoutSecretFindings_KeepsCompressionAndSecretsStatusesSeparate()
 	{
 		using var project = UiTestProject.CreateDefault();
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
@@ -2033,15 +2099,17 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => string.Equals(
-					viewModel.SettingsSecretsNotice,
-					"DevProjex found no secrets",
-					StringComparison.Ordinal),
-				"the automatic scan to complete without findings");
+				() => viewModel.ContentProcessingOptions.Any(
+					static candidate => candidate.Id == IgnoreOptionId.CompressCode),
+				"the content processing section to offer its rows");
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 
-			var option = Assert.Single(viewModel.ContentProcessingOptions);
-			Assert.Equal(IgnoreOptionId.CompressCode, option.Id);
+			var option = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static candidate => candidate.Id == IgnoreOptionId.CompressCode);
 			option.IsChecked = true;
+			// The checkbox is a draft; compression starts only after «Apply settings» commits it.
+			await UiTestDriver.ClickApplySettingsAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => viewModel.SettingsCompressionNotice.StartsWith(
@@ -2089,12 +2157,14 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal(
 				option.StatusText,
 				Assert.IsType<TextBlock>(compressionToolTip.Content).Text);
-			Assert.DoesNotContain(
-				window.GetVisualDescendants().OfType<Border>(),
-				control =>
-					string.Equals(control.Name, "ContentProcessingStatusIndicator", StringComparison.Ordinal) &&
-					control.DataContext is IgnoreOptionViewModel { Id: IgnoreOptionId.HideSecrets });
-			Assert.Equal("DevProjex found no secrets", viewModel.SettingsSecretsNotice);
+			// Compression status stays on its own row: the never-enabled Hide Secrets row keeps
+			// no status at all, because no scan was requested for it.
+			var secretsOption = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static candidate => candidate.Id == IgnoreOptionId.HideSecrets);
+			Assert.False(secretsOption.HasStatus);
+			Assert.False(secretsOption.IsWarningStatus);
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 		}
 		finally
 		{
@@ -2103,7 +2173,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
-	public async Task AutomaticSecretDiscoveryFailure_DoesNotOpenModalOrAttachStatusToCompression()
+	public async Task OptInSecretDiscoveryFailure_ShowsPersistentSecretWarningWithoutModal()
 	{
 		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
@@ -2115,27 +2185,52 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		try
 		{
 			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			var expectedFailureStatus =
+				$"Files that could not be checked: 2.{Environment.NewLine}Click to run the check again.";
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => string.Equals(
 					viewModel.SettingsSecretsNotice,
-					"The analysis could not be completed.",
+					expectedFailureStatus,
 					StringComparison.Ordinal),
-				"the failed background secret discovery to settle");
+				"the failed opt-in secret discovery to settle");
 
-			var option = Assert.Single(viewModel.ContentProcessingOptions);
-			Assert.Equal(IgnoreOptionId.CompressCode, option.Id);
-			Assert.False(option.HasStatus);
-			Assert.DoesNotContain(
-				window.GetVisualDescendants().OfType<Border>(),
-				control =>
-					string.Equals(control.Name, "ContentProcessingStatusIndicator", StringComparison.Ordinal) &&
-					control.IsVisible);
+			Assert.Equal(2, viewModel.ContentProcessingOptions.Count);
+			var compression = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.CompressCode);
+			var hideSecrets = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HideSecrets);
+			Assert.False(compression.HasStatus);
+			Assert.Equal(expectedFailureStatus, hideSecrets.StatusText);
+			Assert.True(hideSecrets.IsWarningStatus);
+			var contentProcessingList = UiTestDriver.GetRequiredControl<ListBox>(
+				window,
+				"ContentProcessingOptionsList");
+			contentProcessingList.ScrollIntoView(hideSecrets);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			var warningIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HideSecrets);
+			Assert.True(warningIndicator.IsVisible);
+			Assert.Contains(
+				warningIndicator.GetVisualDescendants().OfType<global::Avalonia.Controls.Shapes.Path>(),
+				static warning => warning.IsVisible);
+			Assert.Contains(
+				warningIndicator.GetVisualDescendants().OfType<TextBlock>(),
+				static label => label.IsVisible && label.Text == "!");
+			var informationLabel = Assert.Single(
+				warningIndicator.GetVisualDescendants().OfType<TextBlock>(),
+				static label => label.Text == "?");
+			var informationIndicator = Assert.IsType<Border>(
+				informationLabel.GetVisualParent());
+			Assert.False(informationIndicator.IsVisible);
 			Assert.Empty(window.OwnedWindows);
 
-			option.IsChecked = true;
+			compression.IsChecked = true;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
-			Assert.True(option.IsChecked);
+			Assert.True(compression.IsChecked);
 			Assert.Empty(window.OwnedWindows);
 		}
 		finally
@@ -2144,8 +2239,230 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		}
 	}
 
-	private sealed class FailingSecretScanContentAnalyzer(IFileContentAnalyzer inner) : IFileContentAnalyzer
+	[AvaloniaFact]
+	public async Task OversizedSecretDiscovery_ShowsLimitedCoverageWithoutEngineFailure()
 	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = new LimitedSecretScanContentAnalyzer(
+					services.FileContentAnalyzer,
+					"README.md")
+			});
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			var expectedStatus =
+				$"Found: 1. Hidden: 1.{Environment.NewLine}Files larger than 16 MiB were not checked: 1.";
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(viewModel.SettingsSecretsNotice, expectedStatus, StringComparison.Ordinal),
+				"the size-limited discovery to publish its findings and coverage");
+
+			var hideSecrets = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HideSecrets);
+			Assert.Equal(expectedStatus, hideSecrets.StatusText);
+			Assert.False(hideSecrets.IsWarningStatus);
+			Assert.True(hideSecrets.IsInformationStatus);
+			var indicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HideSecrets);
+			Assert.Contains(
+				indicator.GetVisualDescendants().OfType<TextBlock>(),
+				static label => label.IsVisible && label.Text == "?");
+			var warningLabel = Assert.Single(
+				indicator.GetVisualDescendants().OfType<TextBlock>(),
+				static label => label.Text == "!");
+			Assert.False(Assert.IsType<Grid>(warningLabel.GetVisualParent()).IsVisible);
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PartialSecretDiscovery_PreservesFindingsAndBecomesCompleteForNarrowerSelection()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = new FailingSecretScanContentAnalyzer(
+					services.FileContentAnalyzer,
+					"README.md")
+			});
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.HideSecretsOption is { IsWarningStatus: true },
+				"the incomplete full-project discovery to expose a persistent warning");
+			Assert.Equal(
+				$"Found: 1. Hidden: 1.{Environment.NewLine}" +
+				$"Files that could not be checked: 1.{Environment.NewLine}" +
+				"Click to run the check again.",
+				viewModel.SettingsSecretsNotice);
+
+			Assert.Single(viewModel.TreeNodes).IsExpanded = true;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+			var srcCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
+			await UiTestDriver.ClickAsync(window, srcCheckBox);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 1.",
+					StringComparison.Ordinal),
+				"the narrower readable scope to publish its exact secret count");
+			Assert.False(viewModel.HideSecretsOption!.IsWarningStatus);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Hide secrets (1/1)");
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task SecretDiscovery_SelectionChangesReuseValidatedFilesAndScanOnlyNewEntries()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionSelectionWorkspace();
+		var analyzer = new CountingSecretScanContentAnalyzer();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = analyzer.Attach(services.FileContentAnalyzer)
+			});
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 1.",
+					StringComparison.Ordinal),
+				"the opt-in secret discovery to complete");
+			analyzer.Reset();
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Equal("Found: 1. Hidden: 1.", viewModel.SettingsSecretsNotice);
+			Assert.Equal(0, analyzer.TotalReadCount);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 1.",
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
+				"the expanded selection secret discovery to settle");
+
+			Assert.Equal(0, analyzer.GetReadCount("Secrets.cs"));
+			Assert.Equal(0, analyzer.GetReadCount("README.md"));
+			Assert.Equal(1, analyzer.GetReadCount("empty.txt"));
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Equal(1, analyzer.TotalReadCount);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 1.",
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
+				"the restored selection secret discovery to settle");
+
+			Assert.Equal(1, analyzer.TotalReadCount);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task EnablingHideSecrets_StartsScanWithImmediateActionAndIndeterminateProgress()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var analyzer = new BlockingSecretScanContentAnalyzer();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = analyzer.Attach(services.FileContentAnalyzer)
+			},
+			waitForStatusIdle: false);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			// The load itself must not touch a single file for secrets: scanning is opt-in.
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			Assert.Equal(0, analyzer.ReadAttempts);
+			Assert.False(analyzer.Started.Task.IsCompleted);
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await analyzer.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.StatusOperationVisible &&
+				      string.Equals(
+					      viewModel.StatusOperationText,
+					      "Searching for secrets…",
+					      StringComparison.Ordinal),
+				"the opt-in secret search progress to be visible");
+
+			Assert.True(viewModel.StatusProgressIsIndeterminate);
+			Assert.Contains(
+				window.GetVisualDescendants().OfType<TextBlock>(),
+				static text => text.IsVisible && text.Text == "Searching for secrets…");
+			Assert.Contains(
+				window.GetVisualDescendants().OfType<ProgressBar>(),
+				static progress => progress.IsVisible && progress.IsIndeterminate);
+
+			analyzer.Release();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !viewModel.StatusBusy,
+				"the opt-in secret search progress to complete");
+			Assert.DoesNotContain(
+				window.GetVisualDescendants().OfType<TextBlock>(),
+				static text => text.IsVisible && text.Text == "Searching for secrets…");
+		}
+		finally
+		{
+			analyzer.Release();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	private sealed class FailingSecretScanContentAnalyzer(
+		IFileContentAnalyzer inner,
+		string? failingFileName = null) : IFileContentAnalyzer
+	{
+		private bool ShouldFail(string path) =>
+			failingFileName is null ||
+			string.Equals(Path.GetFileName(path), failingFileName, StringComparison.OrdinalIgnoreCase);
+
 		public FileContentClassification? ClassifyWithoutReading(string path) =>
 			inner.ClassifyWithoutReading(path);
 
@@ -2153,7 +2470,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			string path,
 			long maxSizeForFullRead,
 			CancellationToken cancellationToken = default) =>
-			maxSizeForFullRead == SecretRedactionOutputPreparer.MaximumScannableFileBytes
+			maxSizeForFullRead == SecretRedactionOutputPreparer.MaximumScannableFileBytes && ShouldFail(path)
 				? ValueTask.FromException<FileContentReadResult>(new IOException("Injected background scan failure."))
 				: inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
 
@@ -2179,7 +2496,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			string path,
 			long maximumBytes,
 			CancellationToken cancellationToken = default) =>
-			maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes
+			maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes && ShouldFail(path)
 				? ValueTask.FromException<ICompleteTextFileBuffer>(new IOException("Injected background scan failure."))
 				: inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
 
@@ -2193,6 +2510,231 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			long maxSizeForFullRead,
 			CancellationToken cancellationToken = default) =>
 			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+	}
+
+	private sealed class LimitedSecretScanContentAnalyzer(
+		IFileContentAnalyzer inner,
+		string limitedFileName) : IFileContentAnalyzer
+	{
+		private bool ShouldLimit(string path, long maximumBytes) =>
+			maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes &&
+			string.Equals(Path.GetFileName(path), limitedFileName, StringComparison.OrdinalIgnoreCase);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			inner.ClassifyWithoutReading(path);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ShouldLimit(path, maxSizeForFullRead)
+				? ValueTask.FromResult(new FileContentReadResult(FileContentClassification.TooLarge))
+				: inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetClassifiedMetricsAsync(path, cancellationToken);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.OpenCompleteSnapshotAsync(path, cancellationToken);
+
+		public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default) =>
+			ShouldLimit(path, maximumBytes)
+				? ValueTask.FromResult<ICompleteTextFileBuffer>(new LimitedTextFileBuffer())
+				: inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		private sealed class LimitedTextFileBuffer : ICompleteTextFileBuffer
+		{
+			public FileContentClassification Classification => FileContentClassification.TooLarge;
+			public long SizeBytes => 0;
+			public ReadOnlyMemory<char> Content => ReadOnlyMemory<char>.Empty;
+			public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+		}
+	}
+
+	private sealed class BlockingSecretScanContentAnalyzer : IFileContentAnalyzer
+	{
+		private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private IFileContentAnalyzer? _inner;
+		private int _readAttempts;
+		private int _cancellationCount;
+
+		public TaskCompletionSource Started => _started;
+		public int ReadAttempts => Volatile.Read(ref _readAttempts);
+		public int CancellationCount => Volatile.Read(ref _cancellationCount);
+
+		public IFileContentAnalyzer Attach(IFileContentAnalyzer inner)
+		{
+			_inner = inner;
+			return this;
+		}
+
+		public void Release() => _release.TrySetResult();
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			Inner.ClassifyWithoutReading(path);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			Inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.GetClassifiedMetricsAsync(path, cancellationToken);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.OpenCompleteSnapshotAsync(path, cancellationToken);
+
+		public async ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default)
+		{
+			if (maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes)
+			{
+				Interlocked.Increment(ref _readAttempts);
+				_started.TrySetResult();
+				try
+				{
+					await _release.Task.WaitAsync(cancellationToken);
+				}
+				catch (OperationCanceledException)
+				{
+					Interlocked.Increment(ref _cancellationCount);
+					throw;
+				}
+			}
+
+			return await Inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+		}
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			Inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		private IFileContentAnalyzer Inner =>
+			_inner ?? throw new InvalidOperationException("The analyzer is not attached.");
+	}
+
+	private sealed class CountingSecretScanContentAnalyzer : IFileContentAnalyzer
+	{
+		private readonly ConcurrentDictionary<string, int> _reads = new(StringComparer.OrdinalIgnoreCase);
+		private IFileContentAnalyzer? _inner;
+
+		public int TotalReadCount => _reads.Values.Sum();
+
+		public IFileContentAnalyzer Attach(IFileContentAnalyzer inner)
+		{
+			_inner = inner;
+			return this;
+		}
+
+		public void Reset() => _reads.Clear();
+
+		public int GetReadCount(string fileName) => _reads.GetValueOrDefault(fileName);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			Inner.ClassifyWithoutReading(path);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			Inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.GetClassifiedMetricsAsync(path, cancellationToken);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.OpenCompleteSnapshotAsync(path, cancellationToken);
+
+		public async ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default)
+		{
+			var buffer = await Inner
+				.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+			if (maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes)
+				_reads.AddOrUpdate(Path.GetFileName(path), 1, static (_, count) => count + 1);
+			return buffer;
+		}
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			Inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			Inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		private IFileContentAnalyzer Inner =>
+			_inner ?? throw new InvalidOperationException("The analyzer is not attached.");
 	}
 
     private static async Task SetIgnoreAllCheckedAsync(MainWindow window, bool isChecked)

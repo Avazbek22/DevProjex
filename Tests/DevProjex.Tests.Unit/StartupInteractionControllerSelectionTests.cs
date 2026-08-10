@@ -5,6 +5,33 @@ namespace DevProjex.Tests.Unit;
 public sealed class StartupInteractionControllerSelectionTests
 {
 	[Fact]
+	public void ApplyCheckedStates_RestoresLargeSelectionThroughOneBatchBoundary()
+	{
+		var callbackCount = 0;
+		var batchCount = 0;
+		var nodes = Enumerable.Range(0, 128)
+			.Select(index => new TreeNodeViewModel(
+				new TreeNodeDescriptor($"file-{index}.cs", $"C:\\project\\file-{index}.cs", false, false, "file", []),
+				parent: null,
+				icon: null,
+				checkedChanged: _ => callbackCount++))
+			.ToArray();
+
+		StartupInteractionController.ApplyCheckedStates(
+			nodes,
+			Enumerable.Repeat(true, nodes.Length).ToArray(),
+			applyChanges =>
+			{
+				batchCount++;
+				applyChanges();
+			});
+
+		Assert.Equal(1, batchCount);
+		Assert.Equal(nodes.Length, callbackCount);
+		Assert.All(nodes, static node => Assert.True(node.IsChecked));
+	}
+
+	[Fact]
 	public async Task ResolveAsync_StandardProfile_ResetsOpenRootAndExtensionSelections()
 	{
 		using var temp = new TemporaryDirectory();

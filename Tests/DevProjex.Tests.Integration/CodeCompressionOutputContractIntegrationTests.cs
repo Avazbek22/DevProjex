@@ -151,6 +151,86 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task CompressionPreparationCarriesPythonAndTsxBalanceRulesIntoOutputFiles()
+	{
+		const string pythonSource = """"
+			class Session:
+			    def __init__(self, root):
+			        self.root = root
+			        self.items = []
+
+			    def scan(self):
+			        """Scan the configured root."""
+			        python_implementation_marker = list(self.root.walk())
+			        return python_implementation_marker
+			"""";
+		const string tsxSource = """
+			const Panel = memo(forwardRef((props, ref) => {
+			  const wrapped_implementation_marker = props.value;
+			  return <section ref={ref}>{wrapped_implementation_marker}</section>;
+			}));
+			const normalize = (value) => value.trim();
+			const Card = (props) => (
+			  <article>
+			    <h2>{props.title}</h2>
+			    <p>{props.multiline_jsx_marker}</p>
+			  </article>
+			);
+			const Pipeline = (items) =>
+			  items
+			    .map((item) => item.value)
+			    .filter((multiline_chain_marker) => multiline_chain_marker);
+			export const options = {
+			  name: "Panel",
+			  methods: {
+			    render: function (value) {
+			      const object_implementation_marker = value + 1;
+			      return object_implementation_marker;
+			    },
+			    normalize: (value) => value + 1,
+			  },
+			};
+			""";
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("balanced-project");
+		var pythonPath = Path.Combine(projectRoot, "session.py");
+		var tsxPath = Path.Combine(projectRoot, "Panel.tsx");
+		File.WriteAllText(pythonPath, pythonSource);
+		File.WriteAllText(tsxPath, tsxSource);
+		using var session = CodeCompressionFactory.CreateSession();
+
+		await using var prepared = await new SecretRedactionOutputPreparer(new FileContentAnalyzer())
+			.PrepareAsync(
+				new ContentTransformationContext(new CodeCompressionContext(projectRoot, session), null),
+				[pythonPath, tsxPath],
+				TestContext.Current.CancellationToken);
+
+		var snapshot = Assert.IsType<CodeCompressionSnapshot>(prepared.CompressionSnapshot);
+		Assert.Equal(2, snapshot.CompressedFiles);
+		var python = await File.ReadAllTextAsync(
+			prepared.GetFile(pythonPath).ContentPath,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("self.root = root", python, StringComparison.Ordinal);
+		Assert.Contains("\"\"\"Scan the configured root.\"\"\"\n        ...", python, StringComparison.Ordinal);
+		Assert.DoesNotContain("python_implementation_marker", python, StringComparison.Ordinal);
+
+		var tsx = await File.ReadAllTextAsync(
+			prepared.GetFile(tsxPath).ContentPath,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("const Panel = memo(forwardRef((props, ref) => { }));", tsx, StringComparison.Ordinal);
+		Assert.Contains("const normalize = (value) => value.trim();", tsx, StringComparison.Ordinal);
+		Assert.Contains("const Card = (props) => { };", tsx, StringComparison.Ordinal);
+		Assert.Contains("const Pipeline = (items) =>\n  { };", tsx, StringComparison.Ordinal);
+		Assert.Contains("name: \"Panel\"", tsx, StringComparison.Ordinal);
+		Assert.Contains("render: function (value) { }", tsx, StringComparison.Ordinal);
+		Assert.Contains("normalize: (value) => value + 1", tsx, StringComparison.Ordinal);
+		Assert.DoesNotContain("wrapped_implementation_marker", tsx, StringComparison.Ordinal);
+		Assert.DoesNotContain("multiline_jsx_marker", tsx, StringComparison.Ordinal);
+		Assert.DoesNotContain("multiline_chain_marker", tsx, StringComparison.Ordinal);
+		Assert.DoesNotContain("object_implementation_marker", tsx, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task CompressionWithHideSecrets_PreparesSmallFilesConcurrentlyAndCommitsInSelectionOrder()
 	{
 		using var temporary = new TemporaryDirectory();
@@ -443,7 +523,7 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		Assert.DoesNotContain(AutomaticRemovedSecret, result.Text, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[exact-value#1]", result.Text, StringComparison.Ordinal);
 		Assert.Equal(1, result.RedactionCount);
-		var snapshot = Assert.IsType<SecretRedactionSnapshot>(workspace.GetSnapshot(secrets));
+		var snapshot = Assert.IsType<SecretRedactionSnapshot>(workspace.GetSnapshot(secrets, compress: true));
 		Assert.Equal(1, snapshot.DetectedCount);
 		Assert.Equal(1, snapshot.RedactedCount);
 	}
@@ -627,6 +707,59 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			candidate => candidate.FullName.EndsWith(
 				ProjectCopyExportService.TransformationNoticeFileName,
 				StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task ContextFolderAndZipKeepFieldsAndPropertiesWhileCompressingMethods()
+	{
+		const string source = """
+			public sealed class Settings
+			{
+			    private readonly System.Func<int, int> _normalize = value =>
+			    {
+			        var preserved_field_marker = value + 1;
+			        return preserved_field_marker;
+			    };
+
+			    public int Value
+			    {
+			        get
+			        {
+			            var preserved_property_marker = _normalize(41);
+			            return preserved_property_marker;
+			        }
+			    }
+
+			    public int Calculate(int value)
+			    {
+			        var removed_method_marker = value + 2;
+			        removed_method_marker += 3;
+			        return removed_method_marker;
+			    }
+			}
+			""";
+		using var workspace = CompressionWorkspace.Create(source);
+
+		var context = await workspace.BuildContextAsync(compress: true);
+		var folder = await workspace.ExportFolderAsync(compress: true);
+		var folderText = await File.ReadAllTextAsync(
+			Path.Combine(folder.DestinationPath, "Widget.cs"),
+			TestContext.Current.CancellationToken);
+		var zipPath = Path.Combine(workspace.DestinationParent, "preserved-members.zip");
+		await workspace.ExportZipAsync(zipPath, compress: true);
+		using var archive = ZipFile.OpenRead(zipPath);
+		var sourceEntry = archive.Entries.Single(entry =>
+			entry.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+		using var reader = new StreamReader(sourceEntry.Open());
+		var zipText = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+		foreach (var output in new[] { context, folderText, zipText })
+		{
+			Assert.Contains("preserved_field_marker", output, StringComparison.Ordinal);
+			Assert.Contains("preserved_property_marker", output, StringComparison.Ordinal);
+			Assert.DoesNotContain("removed_method_marker", output, StringComparison.Ordinal);
+		}
+		Assert.Equal(folderText, zipText);
 	}
 
 	[Fact]
@@ -925,8 +1058,16 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			return result;
 		}
 
-		public SecretRedactionSnapshot? GetSnapshot(SecretRedactionSession secrets) =>
-			secrets.GetSnapshot(SourceRoot, [SourceFile]);
+		public SecretRedactionSnapshot? GetSnapshot(
+			SecretRedactionSession secrets,
+			bool compress)
+		{
+			using var compression = CodeCompressionFactory.CreateSession();
+			return secrets.GetSnapshot(
+				SourceRoot,
+				[SourceFile],
+				compress ? compression.TransformIdentity : string.Empty);
+		}
 
 		/// <summary>Builds the preview document - the single source of truth for every export.</summary>
 		public async Task<TransformedContent> BuildContentAsync(

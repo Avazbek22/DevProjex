@@ -152,7 +152,17 @@ or run. This warning does not create or scan an output artifact.
 
 With code compression enabled, context, folder, and ZIP exports all consume the
 same validated transformed snapshot. Unsupported or rejected source files remain
-complete; project source files are never modified.
+complete. Named block bodies become minimal syntax-valid placeholders (`{ }`, or
+`...` for Python); JavaScript-family block functions with stable assignment or
+export bindings follow the same rule, including function-valued object properties
+and inline functions wrapped one or two calls deep under a stable binding. Data
+properties and bare callbacks remain unchanged.
+An expression body whose expression fits on one source line remains byte-for-byte
+complete as signature-level context; a multiline expression is implementation and
+is compressed like a block body. Free lambdas or closures, fields, and language-level
+properties remain complete, including nested callbacks in initializers and
+property accessors. Python leading function docstrings and class `__init__` and
+`__post_init__` methods also remain complete. Project source files are never modified.
 
 ## Errors
 

@@ -129,7 +129,21 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 	}
 
 	[Theory]
-	[InlineData(0, 0, "Hide secrets (0/0)")]
+	[InlineData(SecretScanState.Completed)]
+	[InlineData(SecretScanState.Limited)]
+	public void FormatHideSecretsLabel_WithMeasuredResult_ShowsMatchedAndHiddenCounts(
+		SecretScanState state)
+	{
+		var service = new IgnoreOptionsService(
+			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		Assert.Equal(
+			"Hide secrets (4/1)",
+			service.FormatHideSecretsLabel(state, matchedCount: 4, redactionCount: 1));
+	}
+
+	[Theory]
+	[InlineData(0, 0, "Hide secrets")]
 	[InlineData(4, 4, "Hide secrets (4/4)")]
 	[InlineData(4, 1, "Hide secrets (4/1)")]
 	[InlineData(4, 0, "Hide secrets (4/0)")]

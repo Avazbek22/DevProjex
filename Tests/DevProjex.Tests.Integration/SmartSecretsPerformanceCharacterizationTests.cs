@@ -53,7 +53,7 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		analyzer.ResetCounters();
 		var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
 		var firstStopwatch = Stopwatch.StartNew();
-		var first = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
+		var first = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
 		firstStopwatch.Stop();
 		var allocated = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
 		var diagnostics = session.GetCacheDiagnostics();
@@ -65,7 +65,9 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		Assert.InRange(
 			diagnostics.PeakFullContentBuffers,
 			1,
-			Math.Min(8, Math.Max(1, Environment.ProcessorCount)));
+			Math.Min(
+				SecretRedactionOutputPreparer.MaximumParallelScans,
+				Math.Max(1, Environment.ProcessorCount)));
 		Assert.InRange(diagnostics.RetainedBytes, 1, diagnostics.MaximumRetainedBytes);
 		Assert.True(
 			allocated < sourceBytes * 2,
@@ -74,18 +76,42 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		session.Disable();
 		analyzer.ResetCounters();
 		var steadyStopwatch = Stopwatch.StartNew();
-		_ = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
+		_ = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
 		steadyStopwatch.Stop();
 		Assert.Equal(fileCount, analyzer.ReadCount);
+		var detectionsAfterCacheRepopulation = session.GetCacheDiagnostics().DetectionRuns;
 
-		_ = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
-		Assert.Equal(fileCount, analyzer.ReadCount);
+		_ = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
+		// Equal size and timestamp are not proof that privacy-sensitive content is unchanged. A warm
+		// refresh re-reads each file for its fingerprint, but cached findings avoid every detector run.
+		Assert.Equal(fileCount * 2, analyzer.ReadCount);
+		Assert.Equal(
+			detectionsAfterCacheRepopulation,
+			session.GetCacheDiagnostics().DetectionRuns);
+
+		var readsBeforeSelectionOnlyRefresh = analyzer.ReadCount;
+		var detectionsBeforeSelectionOnlyRefresh = session.GetCacheDiagnostics().DetectionRuns;
+		var selectionOnlyStopwatch = Stopwatch.StartNew();
+		var selectionOnly = await preparer.DiscoverAsync(
+			context,
+			paths,
+			SecretDiscoveryCacheMode.ReuseValidatedContent,
+			TestContext.Current.CancellationToken);
+		selectionOnlyStopwatch.Stop();
+		Assert.Equal(expectedRedactions, selectionOnly.RedactedCount);
+		Assert.Equal(readsBeforeSelectionOnlyRefresh, analyzer.ReadCount);
+		Assert.Equal(
+			detectionsBeforeSelectionOnlyRefresh,
+			session.GetCacheDiagnostics().DetectionRuns);
 
 		var changed = await File.ReadAllTextAsync(paths[0], TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(paths[0], changed[..^1] + "y", TestContext.Current.CancellationToken);
 		File.SetLastWriteTimeUtc(paths[0], DateTime.UtcNow.AddSeconds(2));
-		_ = await preparer.AnalyzeAsync(context, paths, TestContext.Current.CancellationToken);
-		Assert.Equal(fileCount + 1, analyzer.ReadCount);
+		_ = await preparer.DiscoverAsync(context, paths, TestContext.Current.CancellationToken);
+		Assert.Equal(fileCount * 3, analyzer.ReadCount);
+		Assert.Equal(
+			detectionsAfterCacheRepopulation + 1,
+			session.GetCacheDiagnostics().DetectionRuns);
 
 		session.Disable();
 		diagnostics = session.GetCacheDiagnostics();
@@ -94,7 +120,9 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 		TestContext.Current.TestOutputHelper?.WriteLine(
 			$"Smart Secrets many-small-files baseline: files={fileCount:N0}, bytes={sourceBytes:N0}, " +
 			$"first={firstStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
-			$"steady={steadyStopwatch.Elapsed.TotalMilliseconds:F2} ms, allocated={allocated:N0} B.");
+			$"strict-warm={steadyStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
+			$"selection-only={selectionOnlyStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
+			$"allocated={allocated:N0} B.");
 	}
 
 	[Fact]
@@ -157,8 +185,16 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				orderedPaths,
 				TestContext.Current.CancellationToken);
 			cachedStopwatch.Stop();
+			var selectionOnlyStopwatch = Stopwatch.StartNew();
+			var selectionOnlyResult = await preparer.DiscoverAsync(
+				context,
+				orderedPaths,
+				SecretDiscoveryCacheMode.ReuseValidatedContent,
+				TestContext.Current.CancellationToken);
+			selectionOnlyStopwatch.Stop();
 			Assert.Equal(firstResult.RedactedCount, steadyResult.RedactedCount);
 			Assert.Equal(firstResult.RedactedCount, cachedResult.RedactedCount);
+			Assert.Equal(firstResult.RedactedCount, selectionOnlyResult.RedactedCount);
 
 			var smartScope = smartDetector.CreateScope(root);
 			var actualRuleIds = files
@@ -209,6 +245,7 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				$"first={firstStopwatch.Elapsed.TotalMilliseconds:F2} ms/{firstAllocated:N0} B, " +
 				$"steady={steadyStopwatch.Elapsed.TotalMilliseconds:F2} ms/{steadyAllocated:N0} B, " +
 				$"cached={cachedStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
+				$"selectionOnly={selectionOnlyStopwatch.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"candidate={candidateMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"detect={detectionMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +
 				$"smart={smartMeasurement.Elapsed.TotalMilliseconds:F2} ms, " +

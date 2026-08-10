@@ -6,7 +6,8 @@ public enum SecretScanState
 	Pending = 1,
 	Scanning = 2,
 	Completed = 3,
-	Failed = 4
+	Failed = 4,
+	Limited = 5
 }
 
 public sealed record SecretScanCacheDiagnostics(
@@ -46,6 +47,7 @@ internal sealed record SecretScanCacheEntry(
 	SecretFileMetadata FileMetadata,
 	string ContentFingerprint,
 	string RulesIdentity,
+	string TransformIdentity,
 	int MarkedSecretsRevision,
 	bool IsBinary,
 	IReadOnlyList<SecretFindingMetadata> Findings,
@@ -67,8 +69,8 @@ internal sealed class SecretScanCache
 	private readonly object _sync = new();
 	private readonly int _maximumEntries;
 	private readonly long _maximumRetainedBytes;
-	private readonly Dictionary<string, LinkedListNode<SecretScanCacheEntry>> _entries =
-		new(PathComparer.Default);
+	private readonly Dictionary<SecretScanCacheKey, LinkedListNode<SecretScanCacheEntry>> _entries =
+		new(SecretScanCacheKeyComparer.Instance);
 	private readonly LinkedList<SecretScanCacheEntry> _lru = new();
 	private string? _projectRoot;
 	private long _retainedBytes;
@@ -89,10 +91,9 @@ internal sealed class SecretScanCache
 	public int MaximumEntries => _maximumEntries;
 	public long MaximumRetainedBytes => _maximumRetainedBytes;
 
-	public void SynchronizeSelection(string projectRoot, IReadOnlyList<string> selectedFiles)
+	public void SynchronizeProject(string projectRoot)
 	{
 		var canonicalRoot = Path.GetFullPath(projectRoot);
-		var selected = new HashSet<string>(selectedFiles.Select(Path.GetFullPath), PathComparer.Default);
 		lock (_sync)
 		{
 			if (_projectRoot is null || !PathComparer.Default.Equals(_projectRoot, canonicalRoot))
@@ -100,10 +101,6 @@ internal sealed class SecretScanCache
 				ClearEntriesLocked();
 				_projectRoot = canonicalRoot;
 			}
-
-			var stale = _entries.Keys.Where(path => !selected.Contains(path)).ToArray();
-			foreach (var path in stale)
-				RemoveLocked(path);
 		}
 	}
 
@@ -111,12 +108,14 @@ internal sealed class SecretScanCache
 		string path,
 		SecretFileMetadata metadata,
 		string rulesIdentity,
+		string transformIdentity,
 		int markedSecretsRevision,
 		out SecretScanCacheEntry entry)
 	{
 		lock (_sync)
 		{
-			if (TryGetNodeLocked(path, metadata, rulesIdentity, markedSecretsRevision, out var node))
+			var key = CreateKey(path, rulesIdentity, transformIdentity, markedSecretsRevision);
+			if (TryGetNodeLocked(key, metadata, out var node))
 			{
 				_cacheHits++;
 				TouchLocked(node);
@@ -135,12 +134,14 @@ internal sealed class SecretScanCache
 		SecretFileMetadata metadata,
 		string contentFingerprint,
 		string rulesIdentity,
+		string transformIdentity,
 		int markedSecretsRevision,
 		out SecretScanCacheEntry entry)
 	{
 		lock (_sync)
 		{
-			if (TryGetNodeLocked(path, metadata, rulesIdentity, markedSecretsRevision, out var node) &&
+			var key = CreateKey(path, rulesIdentity, transformIdentity, markedSecretsRevision);
+			if (TryGetNodeLocked(key, metadata, out var node) &&
 			    node.Value.ContentFingerprint.Equals(contentFingerprint, StringComparison.Ordinal))
 			{
 				_cacheHits++;
@@ -150,7 +151,7 @@ internal sealed class SecretScanCache
 			}
 
 			_cacheMisses++;
-			RemoveLocked(Path.GetFullPath(path));
+			RemoveLocked(key);
 			entry = null!;
 			return false;
 		}
@@ -162,19 +163,20 @@ internal sealed class SecretScanCache
 		{
 			if (detectionExecuted)
 				_detectionRuns++;
-			RemoveLocked(entry.NormalizedPath);
+			var key = CreateKey(entry);
+			RemoveLocked(key);
 			if (entry.ApproximateRetainedBytes > _maximumRetainedBytes)
 				return;
 
 			var node = _lru.AddFirst(entry);
-			_entries.Add(entry.NormalizedPath, node);
+			_entries.Add(key, node);
 			_retainedBytes += entry.ApproximateRetainedBytes;
 			while (_entries.Count > _maximumEntries || _retainedBytes > _maximumRetainedBytes)
 			{
 				var oldest = _lru.Last;
 				if (oldest is null)
 					break;
-				RemoveLocked(oldest.Value.NormalizedPath);
+				RemoveLocked(CreateKey(oldest.Value));
 			}
 		}
 	}
@@ -195,23 +197,17 @@ internal sealed class SecretScanCache
 	}
 
 	private bool TryGetNodeLocked(
-		string path,
+		SecretScanCacheKey key,
 		SecretFileMetadata metadata,
-		string rulesIdentity,
-		int markedSecretsRevision,
 		out LinkedListNode<SecretScanCacheEntry> node)
 	{
-		var normalizedPath = Path.GetFullPath(path);
-		if (_entries.TryGetValue(normalizedPath, out node!) &&
-		    node.Value.FileMetadata == metadata &&
-		    node.Value.RulesIdentity.Equals(rulesIdentity, StringComparison.Ordinal) &&
-		    node.Value.MarkedSecretsRevision == markedSecretsRevision)
+		if (_entries.TryGetValue(key, out node!) && node.Value.FileMetadata == metadata)
 		{
 			return true;
 		}
 
 		if (node is not null)
-			RemoveLocked(normalizedPath);
+			RemoveLocked(key);
 		node = null!;
 		return false;
 	}
@@ -222,18 +218,55 @@ internal sealed class SecretScanCache
 		_lru.AddFirst(node);
 	}
 
-	private void RemoveLocked(string path)
+	private void RemoveLocked(SecretScanCacheKey key)
 	{
-		if (!_entries.Remove(path, out var node))
+		if (!_entries.Remove(key, out var node))
 			return;
 		_lru.Remove(node);
 		_retainedBytes -= node.Value.ApproximateRetainedBytes;
 	}
+
+	private static SecretScanCacheKey CreateKey(
+		string path,
+		string rulesIdentity,
+		string transformIdentity,
+		int markedSecretsRevision) =>
+		new(Path.GetFullPath(path), rulesIdentity, transformIdentity, markedSecretsRevision);
+
+	private static SecretScanCacheKey CreateKey(SecretScanCacheEntry entry) =>
+		new(
+			entry.NormalizedPath,
+			entry.RulesIdentity,
+			entry.TransformIdentity,
+			entry.MarkedSecretsRevision);
 
 	private void ClearEntriesLocked()
 	{
 		_entries.Clear();
 		_lru.Clear();
 		_retainedBytes = 0;
+	}
+
+	private readonly record struct SecretScanCacheKey(
+		string NormalizedPath,
+		string RulesIdentity,
+		string TransformIdentity,
+		int MarkedSecretsRevision);
+
+	private sealed class SecretScanCacheKeyComparer : IEqualityComparer<SecretScanCacheKey>
+	{
+		public static SecretScanCacheKeyComparer Instance { get; } = new();
+
+		public bool Equals(SecretScanCacheKey x, SecretScanCacheKey y) =>
+			x.MarkedSecretsRevision == y.MarkedSecretsRevision &&
+			PathComparer.Default.Equals(x.NormalizedPath, y.NormalizedPath) &&
+			x.RulesIdentity.Equals(y.RulesIdentity, StringComparison.Ordinal) &&
+			x.TransformIdentity.Equals(y.TransformIdentity, StringComparison.Ordinal);
+
+		public int GetHashCode(SecretScanCacheKey key) => HashCode.Combine(
+			PathComparer.Default.GetHashCode(key.NormalizedPath),
+			StringComparer.Ordinal.GetHashCode(key.RulesIdentity),
+			StringComparer.Ordinal.GetHashCode(key.TransformIdentity),
+			key.MarkedSecretsRevision);
 	}
 }

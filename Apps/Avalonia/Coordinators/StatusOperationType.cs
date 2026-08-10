@@ -12,5 +12,6 @@ public enum StatusOperationType
     SelectionRefresh = 7,
     ApplySettings = 8,
     ProjectCopyExport = 9,
-    CompressionPreparation = 10
+    CompressionPreparation = 10,
+	SecretAnalysis = 11
 }

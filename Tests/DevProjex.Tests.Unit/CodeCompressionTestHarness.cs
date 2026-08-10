@@ -26,7 +26,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		Parser = new Parser(language);
 		Bodies = new Query(language, pack.BodiesQuery);
 		Declarations = new Query(language, pack.DeclarationsQuery);
-		Docstrings = pack.DocstringsQuery is null ? null : new Query(language, pack.DocstringsQuery);
+		Preserves = pack.PreservesQuery is null ? null : new Query(language, pack.PreservesQuery);
 	}
 
 	public CompressionLanguagePack Pack { get; }
@@ -39,7 +39,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 
 	public Query Declarations { get; }
 
-	public Query? Docstrings { get; }
+	public Query? Preserves { get; }
 
 	public string Fixture { get; }
 
@@ -108,7 +108,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 
 	public void Dispose()
 	{
-		Docstrings?.Dispose();
+		Preserves?.Dispose();
 		Declarations.Dispose();
 		Bodies.Dispose();
 		Parser.Dispose();

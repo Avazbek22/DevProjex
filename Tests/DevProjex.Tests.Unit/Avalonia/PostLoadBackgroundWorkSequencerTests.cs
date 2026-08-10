@@ -22,6 +22,7 @@ public sealed class PostLoadBackgroundWorkSequencerTests
     [InlineData(StatusOperationType.SelectionRefresh)]
     [InlineData(StatusOperationType.ApplySettings)]
     [InlineData(StatusOperationType.CompressionPreparation)]
+	[InlineData(StatusOperationType.SecretAnalysis)]
     public void ResolveStatusPresentation_InteractiveOrUnscopedWork_KeepsDelay(
         StatusOperationType sourceOperation)
     {

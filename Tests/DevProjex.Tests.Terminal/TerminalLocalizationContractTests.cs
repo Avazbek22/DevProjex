@@ -212,18 +212,31 @@ public sealed partial class TerminalLocalizationContractTests
 				catalog.ContainsKey("Settings.ContentProcessing.Title"),
 				$"{locale}.json contains a second content-processing title contract.");
 			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.Secrets.Status.Failed"]));
+			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.Secrets.Status.Retry"]));
 			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.Ignore.HideSecrets.NoMatches"]));
 			Assert.Contains("{0}", catalog["Settings.Secrets.Status.Applied"], StringComparison.Ordinal);
 			Assert.Contains("{1}", catalog["Settings.Secrets.Status.Applied"], StringComparison.Ordinal);
+			Assert.Contains("{0}", catalog["Settings.Secrets.Status.SizeLimit"], StringComparison.Ordinal);
+			Assert.Contains("{1}", catalog["Settings.Secrets.Status.SizeLimit"], StringComparison.Ordinal);
+			Assert.Contains("{0}", catalog["Settings.Secrets.Status.FailedFiles"], StringComparison.Ordinal);
 			Assert.Equal(3, catalog["Preview.Secret.Redacted.Tooltip"].Split('\n').Length);
 			Assert.Equal(4, catalog["Preview.Secret.Kept.Tooltip"].Split('\n').Length);
 		}
 
 		Assert.Equal("Content processing:", catalogs["en"]["Settings.Secrets.Title"]);
 		Assert.Equal("Обработка содержимого:", catalogs["ru"]["Settings.Secrets.Title"]);
-		Assert.Equal("DevProjex не нашел секреты", catalogs["ru"]["Settings.Ignore.HideSecrets.NoMatches"]);
+		Assert.Equal("DevProjex не нашёл секреты", catalogs["ru"]["Settings.Ignore.HideSecrets.NoMatches"]);
 		Assert.Equal("Найдено: {0}. Скрыто: {1}.", catalogs["ru"]["Settings.Secrets.Status.Applied"]);
 		Assert.Equal("Не удалось завершить анализ.", catalogs["ru"]["Settings.Secrets.Status.Failed"]);
+		Assert.Equal(
+			"Не удалось проверить файлов: {0}.",
+			catalogs["ru"]["Settings.Secrets.Status.FailedFiles"]);
+		Assert.Equal(
+			"Нажмите, чтобы повторить проверку.",
+			catalogs["ru"]["Settings.Secrets.Status.Retry"]);
+		Assert.Equal(
+			"Файлы больше {1} МиБ не проверены: {0}.",
+			catalogs["ru"]["Settings.Secrets.Status.SizeLimit"]);
 	}
 
 	private static Dictionary<string, Dictionary<string, string>> ReadCatalogs()

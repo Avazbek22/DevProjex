@@ -377,53 +377,54 @@ public partial class MainWindow : Window
         _previewPipeline.ScheduleRefresh(immediate);
     }
 
-	private void ScheduleContentTransformationRefresh()
+	private void ScheduleContentTransformationRefresh(IgnoreOptionId? changedOptionId)
 	{
 		// The regular cache key already tracks selection and presentation changes. Redaction
 		// overrides are separate content state, so invalidate only when that state changes;
 		// invalidating every preview refresh would rescan all selected text unnecessarily.
 		InvalidatePreviewCache();
 		PublishTransformationContext();
-		// A complete baseline only describes one transformation identity. Mark it incomplete so
-		// MetricsPipeline fills the missing raw/compressed variants instead of republishing the
-		// previous identity; already measured variants remain cached and are reused on later toggles.
-		_metrics.HasCompleteBaseline = false;
-		_metrics.ScheduleRecalculate();
-		// Compression publishes its counts only once an output has been produced, so switching the
-		// option off has to clear them here. Leaving them would attach the last run's numbers to a
-		// row that is no longer doing anything.
-		var compressionEnabled = _selectionCoordinator
-			.GetSelectedIgnoreOptionIds()
-			.Contains(IgnoreOptionId.CompressCode);
-		_metrics.CancelCompressionPrewarm();
-		if (compressionEnabled && _currentTree is not null)
+		if (RequiresCompressionRefresh(changedOptionId))
 		{
-			ObserveDetachedTask(
-				_metrics.PrewarmCompressionAsync(_currentTree, CancellationToken.None),
-				"PrewarmCodeCompression");
+			// A complete baseline only describes one transformation identity. Mark it incomplete so
+			// MetricsPipeline fills the missing raw/compressed variants instead of republishing the
+			// previous identity; already measured variants remain cached and are reused on later
+			// toggles. The metrics identity contains only compression, so a Hide Secrets toggle
+			// would recompute the exact numbers already on screen - it skips this block entirely.
+			_metrics.HasCompleteBaseline = false;
+			_metrics.ScheduleRecalculate();
+			// Redaction consumes compressed text but does not change the compression plan. Restarting
+			// Tree-sitter for a Hide Secrets toggle stalls the checkbox without changing its result.
+			var compressionEnabled = CreateCodeCompressionContext() is not null;
+			_metrics.CancelCompressionPrewarm();
+			if (compressionEnabled && _currentTree is not null)
+			{
+				ObserveDetachedTask(
+					_metrics.PrewarmCompressionAsync(_currentTree, CancellationToken.None),
+					"PrewarmCodeCompression");
+			}
+
+			// Compression publishes counts only after it has produced output. Clear a disabled
+			// transformation immediately instead of attaching the previous run to an inactive row.
+			_codeCompressionSnapshot = compressionEnabled
+				? GetCompressionSnapshotForCurrentSelection()
+				: null;
 		}
-		_codeCompressionSnapshot = compressionEnabled
-			? GetCompressionSnapshotForCurrentSelection()
-			: null;
 		var enabled = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
 			.Contains(IgnoreOptionId.HideSecrets);
 		if (!enabled)
 		{
-			var cachedSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
-			_secretRedactionMatchedCount = cachedSnapshot?.DetectedCount;
-			_secretRedactionCount = cachedSnapshot is null ? null : 0;
-			_secretRedactionScanState = cachedSnapshot is null
-				? SecretScanState.Pending
-				: SecretScanState.Completed;
-			_viewModel.SetContentProcessingStatus(
-				_secretRedactionScanState,
-				_secretRedactionMatchedCount,
-				_secretRedactionCount);
+			// Secret scanning is strictly opt-in: with the checkbox off no discovery may run, not
+			// even in the background. Cancel anything in flight and return the row to neutral.
+			CancelSecretRedactionDiscovery();
+			_secretRedactionMatchedCount = null;
+			_secretRedactionCount = null;
+			_secretRedactionScanState = SecretScanState.Disabled;
+			_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
 			RelabelIgnoreOptionsWithCurrentCounts();
 			if (_viewModel.IsAnyPreviewVisible)
 				_previewPipeline.ScheduleRefresh(immediate: true);
-			ScheduleSecretRedactionCountRefresh();
 			return;
 		}
 		// Start detector-only initialization before Preview and count pipelines read any
@@ -431,26 +432,52 @@ public partial class MainWindow : Window
 		_ = _secretRedactionSession.BeginWarmUp();
 		// A canceled option refresh may restore the exact selection that was already scanned.
 		// Reuse that snapshot synchronously so rollback also restores the measured label.
+		var discoveryActive = IsSecretDiscoveryActiveForCurrentSelection();
 		var cachedRedactionSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
 		_secretRedactionMatchedCount = cachedRedactionSnapshot?.DetectedCount;
 		_secretRedactionCount = cachedRedactionSnapshot?.RedactedCount;
-		_secretRedactionScanState = cachedRedactionSnapshot is null
-			? SecretScanState.Pending
-			: SecretScanState.Completed;
+		_secretRedactionScanState = discoveryActive && cachedRedactionSnapshot is null
+			? SecretScanState.Scanning
+			: ResolveSecretScanState(cachedRedactionSnapshot);
 		_viewModel.SetContentProcessingStatus(
 			_secretRedactionScanState,
 			cachedRedactionSnapshot?.DetectedCount,
-			cachedRedactionSnapshot?.RedactedCount);
+			cachedRedactionSnapshot?.RedactedCount,
+			cachedRedactionSnapshot?.SkippedFileCount,
+			cachedRedactionSnapshot?.FailedFileCount);
 		RelabelIgnoreOptionsWithCurrentCounts();
 		if (_viewModel.IsAnyPreviewVisible)
 			_previewPipeline.ScheduleRefresh(immediate: true);
-		ScheduleSecretRedactionCountRefresh();
+		// The enabling click is an explicit request: its scan starts without a debounce and with
+		// visible progress, and it revalidates content because files may have changed while the
+		// option was off. Every other path keeps the delayed anti-flash presentation.
+		ScheduleSecretRedactionCountRefresh(
+			changedOptionId == IgnoreOptionId.HideSecrets
+				? StatusOperationPresentation.Immediate
+				: StatusOperationPresentation.ExtendedDelay);
 	}
+
+	internal static bool RequiresCompressionRefresh(IgnoreOptionId? changedOptionId) =>
+		changedOptionId is null or IgnoreOptionId.CompressCode;
+
+	private static SecretScanState ResolveSecretScanState(SecretRedactionSnapshot? snapshot) =>
+		snapshot switch
+		{
+			null => SecretScanState.Pending,
+			{ HasFailures: true } => SecretScanState.Failed,
+			{ HasLimitedCoverage: true } => SecretScanState.Limited,
+			{ IsComplete: true } => SecretScanState.Completed,
+			_ => SecretScanState.Failed
+		};
 
 	private void InvalidateSecretRedactionCount(bool scheduleRefreshImmediately = true)
 	{
+		CancelSecretRedactionDiscovery();
 		_secretRedactionSession.InvalidateSnapshots();
-		_secretRedactionScanState = SecretScanState.Pending;
+		var enabled = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.HideSecrets);
+		_secretRedactionScanState = enabled ? SecretScanState.Pending : SecretScanState.Disabled;
 		_viewModel.SetContentProcessingStatus(_secretRedactionScanState);
 		if (_secretRedactionCount is not null)
 			_secretRedactionCount = null;
@@ -1165,6 +1192,7 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterBaseTree = null;
         _currentTreeInventory = null;
+        _appliedCompressCodeEnabled = false;
         _metrics.HasCompleteBaseline = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;
@@ -1341,7 +1369,7 @@ public partial class MainWindow : Window
                     token,
                     statusPresentation),
                 initializeMetricsAsync,
-                ScheduleSecretRedactionCountRefresh,
+				() => ScheduleSecretRedactionCountRefresh(statusPresentation),
                 cancellationToken),
             "RunPostLoadBackgroundWork");
     }
@@ -1791,19 +1819,20 @@ public partial class MainWindow : Window
 
     private IReadOnlySet<string> GetCheckedPaths()
     {
-        var selectedPaths = _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
-        return _currentTree is null
-            ? selectedPaths
-            : ProjectTreeSelectionProjection.NormalizeSelectedPaths(
-                _currentTree.Root,
-                selectedPaths);
+		return _currentTree is null
+			? _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes)
+			: _treeSelectionSnapshotCache.GetOrCreateNormalized(
+				_viewModel.TreeNodes,
+				_currentTree.Root);
     }
 
-    private static List<string> BuildOrderedSelectedFilePaths(
-        TreeNodeDescriptor treeRoot,
-        IReadOnlySet<string> selectedPaths,
-        bool ensureExists = true) =>
-        PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, treeRoot, ensureExists);
+	private IReadOnlyList<string> GetOrderedSelectedFilePaths() =>
+		_currentTree is null
+			? Array.Empty<string>()
+			: _treeSelectionSnapshotCache.GetOrCreateOrderedFiles(
+				_viewModel.TreeNodes,
+				_currentTree.Root,
+				_currentTree.OrderedFilePaths);
 
     /// <summary>
     /// Validates that URL looks like a valid Git repository URL.

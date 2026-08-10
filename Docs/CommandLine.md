@@ -134,11 +134,25 @@ files are not inspected, and no findings is not a security guarantee. See
 [HideSecrets.md](HideSecrets.md).
 
 `--compress` is also independent from path selection and is off in the
-`standard` profile. It replaces executable bodies with syntax-valid placeholders
-while preserving declarations in supported C, C++, C#, Go, Java, JavaScript,
-Python, Rust, TSX, and TypeScript files. Unsupported or conservatively rejected
-files remain complete. The same transformed content is used by analysis metrics,
-context documents, folder exports, and ZIP exports.
+`standard` profile. It replaces block bodies of named methods, functions, and
+constructors with minimal syntax-valid placeholders (`{ }`, or `...` for Python)
+in supported C, C++, C#, Go, Java, JavaScript, Python, Rust, TSX, and TypeScript
+files. JavaScript-family block
+functions stored in object properties, assigned or exported under a stable binding,
+or wrapped one or two calls deep under that binding are compressed as well. The
+property or binding name and function parameters remain visible; bare callbacks
+without a binding remain complete.
+An expression body whose expression fits on one source line remains byte-for-byte
+complete as signature-level context; a multiline expression is implementation and
+is compressed like a block body. Free lambdas or closures remain complete because
+removing an unbound body would leave no useful name. Fields and language-level
+properties are kept byte-for-byte complete, including their initializers and
+property accessors, because they describe project state and public behavior.
+Python also keeps a leading function docstring and the
+complete class `__init__` and `__post_init__` methods, where instance state is
+declared. Unsupported or conservatively rejected files remain complete. The same
+transformed content is used by analysis metrics, context documents, folder exports,
+and ZIP exports.
 
 Modern local profiles retain checked and unchecked states across roots, extensions,
 and Exclusions. Newly discovered rows use current defaults in Desktop, CLI, and TUI;
