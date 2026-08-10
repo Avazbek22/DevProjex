@@ -182,6 +182,58 @@ internal static class CodeCompressionAdversarialFixtures
 				["adversarialJsGeneratorMarker", "adversarialJsPrivateMarker", "adversarialJsArrowMarker"],
 				"export function brokenJs(value) { const malformedJsMarker = value + 1;"),
 			new CodeCompressionAdversarialFixture(
+				"kotlin",
+				"Repository.kt",
+				"""
+				package sample
+
+				@JvmInline
+				value class Key(val value: String)
+
+				data class Envelope<T>(val value: T)
+
+				class Repository<T : Any>(
+				    val root: String,
+				) {
+				    val normalize: (String) -> String = { value -> value.trim() }
+
+				    init {
+				        val adversarialKotlinInitMarker = root.length
+				        require(adversarialKotlinInitMarker >= 0)
+				    }
+
+				    constructor(root: String, enabled: Boolean) : this(root) {
+				        val adversarialKotlinConstructorMarker = enabled
+				        require(adversarialKotlinConstructorMarker || root.isNotEmpty())
+				    }
+
+				    suspend inline fun <reified R> map(value: T, transform: (T) -> R): Envelope<R> {
+				        val adversarialKotlinMapMarker = transform(value)
+				        return Envelope(adversarialKotlinMapMarker)
+				    }
+
+				    fun T.key(): Key {
+				        val adversarialKotlinExtensionMarker = normalize(toString())
+				        return Key(adversarialKotlinExtensionMarker)
+				    }
+				}
+				""",
+				[
+					"value class Key(val value: String)",
+					"data class Envelope<T>(val value: T)",
+					"val root: String",
+					"val normalize: (String) -> String",
+					"suspend inline fun <reified R> map",
+					"fun T.key(): Key"
+				],
+				[
+					"adversarialKotlinInitMarker",
+					"adversarialKotlinConstructorMarker",
+					"adversarialKotlinMapMarker",
+					"adversarialKotlinExtensionMarker"
+				],
+				"class Broken { fun broken(value: Int): Int { val malformedKotlinMarker = value + 1"),
+			new CodeCompressionAdversarialFixture(
 				"php",
 				"Repository.phtml",
 				"""

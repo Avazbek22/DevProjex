@@ -45,7 +45,9 @@ public sealed class DocumentationAndPackagingContractTests
 		var infrastructureProject = XDocument.Load(
 			Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
 		var grammarNames = infrastructureProject
-			.Descendants("DevProjexGrammar")
+			.Descendants()
+			.Where(static element =>
+				element.Name.LocalName is "DevProjexGrammar" or "DevProjexVendoredGrammar")
 			.Select(element => element.Attribute("Include")?.Value)
 			.Where(static value => value is not null)
 			.Cast<string>()

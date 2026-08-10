@@ -168,7 +168,10 @@ anonymous/arrow functions are not treated as named bodies. Mixed HTML around PHP
 remains byte-for-byte complete. Scala braced named `def` bodies and multiline ordinary
 expression bodies are compressed; state declarations, `given` values, class-level constructor
 statements, and Scala 3 significant-indentation bodies remain complete. Project source files are
-never modified.
+never modified. Kotlin properties and primary-constructor state remain complete, including lambda
+initializers and custom accessors; named block functions, `init` blocks, secondary constructors,
+and multiline expression bodies are compressed. Top-level Kotlin DSL calls and free lambdas are
+not captured.
 
 ## Errors
 

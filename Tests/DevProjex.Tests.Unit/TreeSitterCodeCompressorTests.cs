@@ -24,10 +24,10 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
-	public void ShippedLanguageCatalog_MatchesTheThirteenLanguageProductContract()
+	public void ShippedLanguageCatalog_MatchesTheFourteenLanguageProductContract()
 	{
 		Assert.Equal(
-			["c", "cpp", "csharp", "go", "java", "javascript", "php", "python", "ruby", "rust", "scala", "tsx", "typescript"],
+			["c", "cpp", "csharp", "go", "java", "javascript", "kotlin", "php", "python", "ruby", "rust", "scala", "tsx", "typescript"],
 			CodeCompressionTestHarness.LanguageIds.Order(StringComparer.Ordinal));
 	}
 

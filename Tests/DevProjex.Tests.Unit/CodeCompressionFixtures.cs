@@ -183,6 +183,27 @@ internal static class CodeCompressionFixtures
 		}
 		""";
 
+	public const string Kotlin = """
+		package sample
+
+		class Calculator(
+		    val offset: Int,
+		) {
+		    val normalize: (Int) -> Int = { value -> value + offset }
+
+		    init {
+		        require(offset >= 0)
+		    }
+
+		    fun add(left: Int, right: Int): Int {
+		        val total = normalize(left + right)
+		        return total
+		    }
+
+		    fun count(): Int = offset
+		}
+		""";
+
 	public const string Ruby = """
 		class Calculator
 		  UNIT = "points"

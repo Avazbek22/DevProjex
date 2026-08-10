@@ -17,7 +17,7 @@ public sealed class CodeCompressionQueryContractTests
 {
 	private static readonly string[] ExpectedLanguageIds =
 	[
-		"c", "cpp", "csharp", "go", "java", "javascript", "php", "python", "ruby", "rust", "scala", "tsx", "typescript"
+		"c", "cpp", "csharp", "go", "java", "javascript", "kotlin", "php", "python", "ruby", "rust", "scala", "tsx", "typescript"
 	];
 
 	[Fact]
@@ -93,6 +93,7 @@ public sealed class CodeCompressionQueryContractTests
 
 		Assert.Equal(ExpressionBodyStyle.Declaration, packs["csharp"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["javascript"].ExpressionBodyStyle);
+		Assert.Equal(ExpressionBodyStyle.Inline, packs["kotlin"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["typescript"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["tsx"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["scala"].ExpressionBodyStyle);
@@ -100,7 +101,7 @@ public sealed class CodeCompressionQueryContractTests
 			packs.Values.Where(static pack => pack.ExpressionBodyStyle != ExpressionBodyStyle.None),
 			static pack => Assert.Contains("@expression", pack.BodiesQuery, StringComparison.Ordinal));
 		Assert.All(
-		packs.Values.Where(static pack => pack.Id is not ("csharp" or "javascript" or "scala" or "typescript" or "tsx")),
+		packs.Values.Where(static pack => pack.Id is not ("csharp" or "javascript" or "kotlin" or "scala" or "typescript" or "tsx")),
 			static pack =>
 			{
 				Assert.Equal(ExpressionBodyStyle.None, pack.ExpressionBodyStyle);

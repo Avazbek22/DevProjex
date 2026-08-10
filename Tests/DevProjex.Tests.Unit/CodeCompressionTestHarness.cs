@@ -99,6 +99,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		"go" => CodeCompressionFixtures.Go,
 		"java" => CodeCompressionFixtures.Java,
 		"javascript" => CodeCompressionFixtures.JavaScript,
+		"kotlin" => CodeCompressionFixtures.Kotlin,
 		"php" => CodeCompressionFixtures.Php,
 		"python" => CodeCompressionFixtures.PythonSource,
 		"ruby" => CodeCompressionFixtures.Ruby,
