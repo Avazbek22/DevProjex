@@ -161,8 +161,9 @@ constructor statements. Scala 3 significant-indentation bodies remain complete w
 grammar because their replacement boundary is not structurally stable. Kotlin preserves
 properties, custom accessors, primary-constructor state, data classes, enum entries, annotations,
 and free lambdas. Named block functions, `init` blocks, secondary constructors, and multiline
-expression bodies are compressed in both `.kt` and `.kts`; one-line expression functions remain
-complete. Unsupported or
+expression bodies are compressed to block-form declarations in both `.kt` and `.kts`; one-line
+expression functions remain complete. Kotlin never emits `= { }`, because that form is a lambda;
+Scala intentionally uses it as a block expression. Unsupported or
 conservatively rejected files remain complete. The same
 transformed content is used by analysis metrics, context documents, folder exports,
 and ZIP exports.

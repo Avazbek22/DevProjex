@@ -208,7 +208,8 @@ Scala 3 significant-indentation bodies remain complete because the pinned gramma
 a structurally stable replacement boundary for every following declaration.
 Kotlin preserves properties, accessor implementations, primary-constructor state and free
 lambdas, while block functions, `init`, secondary constructors and multiline expression bodies are
-compressed for `.kt` and `.kts` files.
+compressed to block-form declarations for `.kt` and `.kts` files. Kotlin output never uses the
+lambda-valued `= { }` form; Scala uses the same text intentionally as a block expression.
 Analysis content metrics and every context/folder/ZIP output observe the same
 transformed bytes; source files are never modified.
 

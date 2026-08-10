@@ -34,6 +34,13 @@ public sealed class CodeCompressionAdversarialLanguageTests
 			Assert.Contains(fragment, result.Text, StringComparison.Ordinal));
 		Assert.All(fixture.RemovedFragments, fragment =>
 			Assert.DoesNotContain(fragment, result.Text, StringComparison.Ordinal));
+		if (languageId.Equals("kotlin", StringComparison.Ordinal))
+		{
+			Assert.DoesNotContain(
+				"= { }",
+				result.Text,
+				StringComparison.Ordinal);
+		}
 	}
 
 	[Theory]

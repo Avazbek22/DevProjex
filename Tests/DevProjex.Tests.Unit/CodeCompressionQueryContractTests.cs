@@ -92,8 +92,8 @@ public sealed class CodeCompressionQueryContractTests
 			StringComparer.Ordinal);
 
 		Assert.Equal(ExpressionBodyStyle.Declaration, packs["csharp"].ExpressionBodyStyle);
+		Assert.Equal(ExpressionBodyStyle.Declaration, packs["kotlin"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["javascript"].ExpressionBodyStyle);
-		Assert.Equal(ExpressionBodyStyle.Inline, packs["kotlin"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["typescript"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["tsx"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["scala"].ExpressionBodyStyle);

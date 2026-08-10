@@ -7,11 +7,11 @@
   ],
   "library": "tree-sitter-kotlin",
   "export": "tree_sitter_kotlin",
-  "queryVersion": 1,
+  "queryVersion": 2,
   "blockPlaceholder": "{ }",
   "blockBodyStyle": "inline",
   "preserveLeadingDocstring": false,
-  "expressionBodyStyle": "inline",
+  "expressionBodyStyle": "declaration",
   "containerNodeTypes": [
     "source_file",
     "class_body",

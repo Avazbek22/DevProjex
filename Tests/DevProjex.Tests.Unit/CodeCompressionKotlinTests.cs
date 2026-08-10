@@ -140,19 +140,40 @@ public sealed class CodeCompressionKotlinTests
 	}
 
 	[Fact]
-	public void KotlinCompressesOnlyMultilineExpressionBodies()
+	public void KotlinCompressesQaExpressionBodiesAsFunctionDeclarationsWithoutLambdaPlaceholders()
 	{
 		const string source = """
+			import java.time.format.DateTimeFormatter
+
 			fun oneLine(value: String): String = value.trim()
 
 			fun lineBreakAfterEquals(value: String): String =
 			    value.trim()
 
-			fun multiline(value: String): String = (
-			    value
-			        .trim()
-			        .uppercase()
-			)
+			fun dateFormatted(value: String): String =
+			    DateTimeFormatter
+			        .ofPattern(value)
+			        .toString()
+
+			fun providesOnFrameListener(): OnFrameListener =
+			    OnFrameListener {
+			        println("frame")
+			    }
+
+			class IndexHintQuery {
+			    override fun <T> copy(value: T): IndexHintQuery
+			        where T : CharSequence,
+			              T : Comparable<T> =
+			        IndexHintQuery(
+			            value,
+			        )
+			}
+
+			operator fun String.invoke(value: Int): String =
+			    buildString {
+			        append(this@invoke)
+			        append(value)
+			    }
 			""";
 
 		var (plan, text) = Compress("Expressions.kt", source);
@@ -160,9 +181,48 @@ public sealed class CodeCompressionKotlinTests
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.Contains("fun oneLine(value: String): String = value.trim()", text, StringComparison.Ordinal);
 		Assert.Contains("fun lineBreakAfterEquals(value: String): String =\n    value.trim()", text, StringComparison.Ordinal);
-		Assert.Contains("fun multiline(value: String): String = { }", text, StringComparison.Ordinal);
-		Assert.DoesNotContain(".uppercase()", text, StringComparison.Ordinal);
+		Assert.Contains("fun dateFormatted(value: String): String { }", text, StringComparison.Ordinal);
+		Assert.Contains("fun providesOnFrameListener(): OnFrameListener { }", text, StringComparison.Ordinal);
+		Assert.Contains("override fun <T> copy(value: T): IndexHintQuery\n        where T : CharSequence,\n              T : Comparable<T> { }", text, StringComparison.Ordinal);
+		Assert.Contains("operator fun String.invoke(value: Int): String { }", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(".ofPattern(value)", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("println(\"frame\")", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("IndexHintQuery(\n", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("buildString {", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("= { }", text, StringComparison.Ordinal);
 		AssertStructurePreserved(source, text);
+	}
+
+	[Fact]
+	public void KotlinExpressionCaptureEndsWithItsOwningDeclaration()
+	{
+		const string source = """
+			class Query {
+			    override fun <T> copy(value: T): String
+			        where T : CharSequence,
+			              T : Comparable<T> =
+			        value
+			            .trim()
+			            .uppercase()
+			}
+			""";
+		using var harness = CodeCompressionTestHarness.For("kotlin");
+		using var tree = harness.Parser.Parse(source)!;
+		using var cursor = harness.Bodies.Execute(tree.RootNode);
+		var expression = Assert.Single(
+			cursor.Captures,
+			static capture => capture.Name.Equals("expression", StringComparison.Ordinal)).Node;
+		var functionBody = Assert.IsType<Node>(expression.Parent);
+		var declaration = Assert.IsType<Node>(functionBody.Parent);
+
+		Assert.Equal("function_body", functionBody.Type);
+		Assert.Equal("function_declaration", declaration.Type);
+		Assert.Equal(functionBody.EndIndex, declaration.EndIndex);
+
+		var (_, text) = Compress("Query.kt", source);
+		Assert.Contains("override fun <T> copy(value: T): String", text, StringComparison.Ordinal);
+		Assert.Contains("where T : CharSequence", text, StringComparison.Ordinal);
+		Assert.Contains("T : Comparable<T> { }", text, StringComparison.Ordinal);
 	}
 
 	[Fact]

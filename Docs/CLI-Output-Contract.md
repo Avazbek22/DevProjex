@@ -170,8 +170,10 @@ expression bodies are compressed; state declarations, `given` values, class-leve
 statements, and Scala 3 significant-indentation bodies remain complete. Project source files are
 never modified. Kotlin properties and primary-constructor state remain complete, including lambda
 initializers and custom accessors; named block functions, `init` blocks, secondary constructors,
-and multiline expression bodies are compressed. Top-level Kotlin DSL calls and free lambdas are
-not captured.
+and multiline expression bodies are compressed to block-form declarations. Kotlin output never
+uses `= { }`, which would denote a lambda rather than a function body. Scala deliberately retains
+`= { }` because braces denote a block expression there. Top-level Kotlin DSL calls and free lambdas
+are not captured.
 
 ## Errors
 

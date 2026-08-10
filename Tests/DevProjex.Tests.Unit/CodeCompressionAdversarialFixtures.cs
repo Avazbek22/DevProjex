@@ -216,6 +216,11 @@ internal static class CodeCompressionAdversarialFixtures
 				        val adversarialKotlinExtensionMarker = normalize(toString())
 				        return Key(adversarialKotlinExtensionMarker)
 				    }
+
+				    fun transformed(value: String): String =
+				        normalize(
+				            value + "adversarialKotlinExpressionMarker",
+				        )
 				}
 				""",
 				[
@@ -224,13 +229,15 @@ internal static class CodeCompressionAdversarialFixtures
 					"val root: String",
 					"val normalize: (String) -> String",
 					"suspend inline fun <reified R> map",
-					"fun T.key(): Key"
+					"fun T.key(): Key",
+					"fun transformed(value: String): String { }"
 				],
 				[
 					"adversarialKotlinInitMarker",
 					"adversarialKotlinConstructorMarker",
 					"adversarialKotlinMapMarker",
-					"adversarialKotlinExtensionMarker"
+					"adversarialKotlinExtensionMarker",
+					"adversarialKotlinExpressionMarker"
 				],
 				"class Broken { fun broken(value: Int): Int { val malformedKotlinMarker = value + 1"),
 			new CodeCompressionAdversarialFixture(
