@@ -17,7 +17,8 @@ public sealed class CodeCompressionQueryContractTests
 {
 	private static readonly string[] ExpectedLanguageIds =
 	[
-		"c", "cpp", "csharp", "go", "java", "javascript", "kotlin", "php", "python", "ruby", "rust", "scala", "tsx", "typescript"
+		"bash", "c", "cpp", "csharp", "css", "go", "html", "java", "javascript", "kotlin",
+		"php", "python", "ruby", "rust", "scala", "toml", "tsx", "typescript"
 	];
 
 	[Fact]
@@ -41,9 +42,13 @@ public sealed class CodeCompressionQueryContractTests
 		using var harness = CodeCompressionTestHarness.For(languageId);
 
 		// Compiling is the assertion: an impossible pattern throws here rather than at run time.
-		Assert.NotNull(harness.Bodies);
+		Assert.Equal(
+			(harness.Pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0,
+			harness.Bodies is not null);
 		Assert.NotNull(harness.Declarations);
-		Assert.NotNull(harness.Preserves);
+		Assert.Equal(
+			(harness.Pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0,
+			harness.Preserves is not null);
 		Assert.NotNull(harness.Comments);
 	}
 
@@ -53,11 +58,42 @@ public sealed class CodeCompressionQueryContractTests
 	{
 		using var harness = CodeCompressionTestHarness.For(languageId);
 
-		Assert.True(harness.CountCaptures(harness.Bodies) > 0, "the bodies query captured nothing");
-		Assert.True(harness.CountCaptures(harness.Declarations) > 0, "the declarations query captured nothing");
+		if ((harness.Pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0)
+		{
+			Assert.True(harness.CountCaptures(harness.Bodies!) > 0, "the bodies query captured nothing");
+			Assert.True(harness.CountCaptures(harness.Declarations) > 0, "the declarations query captured nothing");
+		}
+		else if (languageId.Equals("bash", StringComparison.Ordinal))
+		{
+			Assert.True(harness.CountCaptures(harness.Declarations) > 0, "the Bash declarations query captured nothing");
+		}
+		else
+		{
+			Assert.Equal(0, harness.CountCaptures(harness.Declarations));
+		}
 		Assert.True(
 			harness.CountCaptures(harness.Comments!, CodeCompressionTestHarness.CommentFixtureFor(languageId)) > 0,
 			"the comments query captured nothing");
+	}
+
+	[Fact]
+	public void TransformCapabilitiesDistinguishBodyAndCommentLanguageSets()
+	{
+		var bodyLanguages = CodeCompressionTestHarness.LanguagePacks
+			.Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0)
+			.Select(static pack => pack.Id)
+			.ToArray();
+		var commentLanguages = CodeCompressionTestHarness.LanguagePacks
+			.Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.Comments) != 0)
+			.Select(static pack => pack.Id)
+			.ToArray();
+
+		Assert.Equal(14, bodyLanguages.Length);
+		Assert.Equal(ExpectedLanguageIds, commentLanguages);
+		Assert.DoesNotContain("bash", bodyLanguages);
+		Assert.DoesNotContain("css", bodyLanguages);
+		Assert.DoesNotContain("html", bodyLanguages);
+		Assert.DoesNotContain("toml", bodyLanguages);
 	}
 
 	[Fact]
@@ -77,10 +113,13 @@ public sealed class CodeCompressionQueryContractTests
 	{
 		var expectedVersions = new Dictionary<string, int>(StringComparer.Ordinal)
 		{
+			["bash"] = 1,
 			["c"] = 4,
 			["cpp"] = 6,
 			["csharp"] = 9,
+			["css"] = 1,
 			["go"] = 5,
+			["html"] = 1,
 			["java"] = 6,
 			["javascript"] = 8,
 			["kotlin"] = 3,
@@ -89,6 +128,7 @@ public sealed class CodeCompressionQueryContractTests
 			["ruby"] = 2,
 			["rust"] = 5,
 			["scala"] = 2,
+			["toml"] = 1,
 			["tsx"] = 8,
 			["typescript"] = 8
 		};
@@ -125,7 +165,9 @@ public sealed class CodeCompressionQueryContractTests
 		Assert.Equal(BlockBodyStyle.IndentedStatement, packs["python"].BlockBodyStyle);
 		Assert.Equal(BlockBodyStyle.RemoveCompleteLines, packs["ruby"].BlockBodyStyle);
 		Assert.All(
-			packs.Values.Where(static pack => pack.Id is not ("python" or "ruby")),
+			packs.Values.Where(static pack =>
+				(pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0 &&
+				pack.Id is not ("python" or "ruby")),
 			static pack => Assert.Equal(BlockBodyStyle.Inline, pack.BlockBodyStyle));
 	}
 
@@ -144,13 +186,15 @@ public sealed class CodeCompressionQueryContractTests
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["scala"].ExpressionBodyStyle);
 		Assert.All(
 			packs.Values.Where(static pack => pack.ExpressionBodyStyle != ExpressionBodyStyle.None),
-			static pack => Assert.Contains("@expression", pack.BodiesQuery, StringComparison.Ordinal));
+			static pack => Assert.Contains("@expression", pack.BodiesQuery!, StringComparison.Ordinal));
 		Assert.All(
-		packs.Values.Where(static pack => pack.Id is not ("csharp" or "javascript" or "kotlin" or "scala" or "typescript" or "tsx")),
+		packs.Values.Where(static pack =>
+			(pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0 &&
+			pack.Id is not ("csharp" or "javascript" or "kotlin" or "scala" or "typescript" or "tsx")),
 			static pack =>
 			{
 				Assert.Equal(ExpressionBodyStyle.None, pack.ExpressionBodyStyle);
-				Assert.DoesNotContain("@expression", pack.BodiesQuery, StringComparison.Ordinal);
+				Assert.DoesNotContain("@expression", pack.BodiesQuery!, StringComparison.Ordinal);
 			});
 	}
 
@@ -216,10 +260,12 @@ public sealed class CodeCompressionQueryContractTests
 	{
 		// The safety list is defence in depth, but if a pattern ever does reach a container the
 		// splice would delete a class or namespace body wholesale.
-		foreach (var languageId in CodeCompressionTestHarness.LanguageIds)
+		foreach (var languageId in CodeCompressionTestHarness.LanguagePacks
+			         .Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0)
+			         .Select(static pack => pack.Id))
 		{
 			using var harness = CodeCompressionTestHarness.For(languageId);
-			var captured = harness.CapturedNodeTypes(harness.Bodies);
+			var captured = harness.CapturedNodeTypes(harness.Bodies!);
 			var containers = captured.Intersect(harness.Pack.ContainerNodeTypes).ToArray();
 			Assert.True(containers.Length == 0, $"{languageId}: bodies query captured container nodes {string.Join(", ", containers)}");
 		}
@@ -230,7 +276,9 @@ public sealed class CodeCompressionQueryContractTests
 	{
 		// A bare "…" is not valid syntax anywhere, so the reverse-parse gate refuses every file and
 		// the feature compresses nothing while looking conservative. Measured: 872 of 872 files.
-		foreach (var languageId in CodeCompressionTestHarness.LanguageIds)
+		foreach (var languageId in CodeCompressionTestHarness.LanguagePacks
+			         .Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0)
+			         .Select(static pack => pack.Id))
 		{
 			using var harness = CodeCompressionTestHarness.For(languageId);
 			Assert.NotEqual("…", harness.Pack.BlockPlaceholder.Trim());
@@ -246,6 +294,8 @@ public sealed class CodeCompressionQueryContractTests
 	public void ShippedPlaceholdersDoNotExposeCommentSyntax(string languageId)
 	{
 		using var harness = CodeCompressionTestHarness.For(languageId);
+		if ((harness.Pack.TransformCapabilities & CodeTransformKinds.Bodies) == 0)
+			return;
 
 		Assert.DoesNotContain("/*", harness.Pack.BlockPlaceholder, StringComparison.Ordinal);
 		Assert.DoesNotContain("*/", harness.Pack.BlockPlaceholder, StringComparison.Ordinal);

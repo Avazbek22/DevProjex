@@ -464,8 +464,8 @@ internal sealed class MetricsPipeline(
                     metrics.TrailingNewlineLineBreaks),
                 HasMetrics: true);
 
-    private bool IsCompressible(string filePath) =>
-        transformationContextProvider?.Invoke()?.Compression?.Session.IsSupported(filePath) == true;
+	private bool IsCompressible(string filePath) =>
+		transformationContextProvider?.Invoke()?.Compression?.IsSupported(filePath) == true;
 
     private string ResolveTransformationProjectRoot() =>
         transformationContextProvider?.Invoke()?.Compression?.ProjectRoot ?? string.Empty;

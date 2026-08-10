@@ -176,7 +176,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 					if (retainedPaths.Contains(path))
 						retainedFacts[path] = fact;
 					var relativePath = BuildRelativePath(context.ProjectRoot, path);
-					if (!context.Session.IsSupported(relativePath))
+					if (!context.IsSupported(relativePath))
 					{
 						var recorded = scope.Warm(
 							path,

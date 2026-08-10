@@ -45,9 +45,18 @@ under the MIT License.
 - Binding source: https://github.com/mariusgreuel/tree-sitter-dotnet-bindings
 - Pinned package: TreeSitter.DotNet 1.3.0, which vendors tree-sitter 0.26.3
 - tree-sitter: https://github.com/tree-sitter/tree-sitter
-- Grammars shipped: tree-sitter-c, tree-sitter-c-sharp, tree-sitter-cpp, tree-sitter-go,
-  tree-sitter-java, tree-sitter-javascript, tree-sitter-kotlin, tree-sitter-php, tree-sitter-python,
-  tree-sitter-ruby, tree-sitter-rust, tree-sitter-scala, tree-sitter-tsx, tree-sitter-typescript
+- Grammars shipped: tree-sitter-bash, tree-sitter-c, tree-sitter-c-sharp, tree-sitter-cpp,
+  tree-sitter-css, tree-sitter-go, tree-sitter-html, tree-sitter-java, tree-sitter-javascript,
+  tree-sitter-kotlin, tree-sitter-php, tree-sitter-python, tree-sitter-ruby, tree-sitter-rust,
+  tree-sitter-scala, tree-sitter-toml, tree-sitter-tsx, tree-sitter-typescript
+- Bash grammar source: https://github.com/tree-sitter/tree-sitter-bash
+- CSS grammar source: https://github.com/tree-sitter/tree-sitter-css
+- HTML grammar source: https://github.com/tree-sitter/tree-sitter-html
+- TOML grammar source: https://github.com/tree-sitter-grammars/tree-sitter-toml
+- Bash grammar revision in TreeSitter.DotNet 1.3.0: `a06c2e4415e9bc0346c6b86d401879ffb44058f7`
+- CSS grammar revision in TreeSitter.DotNet 1.3.0: `dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f`
+- HTML grammar revision in TreeSitter.DotNet 1.3.0: `73a3947324f6efddf9e17c0ea58d454843590cc0`
+- TOML grammar revision in TreeSitter.DotNet 1.3.0: `342d9be207c2dba869b9967124c679b5e6fd0ebe`
 - Ruby grammar source: https://github.com/tree-sitter/tree-sitter-ruby
 - PHP grammar source: https://github.com/tree-sitter/tree-sitter-php
 - Scala grammar source: https://github.com/tree-sitter/tree-sitter-scala

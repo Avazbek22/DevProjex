@@ -24,7 +24,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		Language = language;
 		Fixture = fixture;
 		Parser = new Parser(language);
-		Bodies = new Query(language, pack.BodiesQuery);
+		Bodies = pack.BodiesQuery is null ? null : new Query(language, pack.BodiesQuery);
 		Declarations = new Query(language, pack.DeclarationsQuery);
 		Preserves = pack.PreservesQuery is null ? null : new Query(language, pack.PreservesQuery);
 		Comments = pack.CommentsQuery is null ? null : new Query(language, pack.CommentsQuery);
@@ -36,7 +36,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 
 	public Parser Parser { get; }
 
-	public Query Bodies { get; }
+	public Query? Bodies { get; }
 
 	public Query Declarations { get; }
 
@@ -58,6 +58,8 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 	public static CompressionLanguagePack PackWithOverlappingBodyQuery(string languageId)
 	{
 		var pack = Packs.Single(candidate => candidate.Id.Equals(languageId, StringComparison.Ordinal));
+		if (pack.BodiesQuery is null)
+			throw new InvalidOperationException($"Language pack '{languageId}' has no body query.");
 		return pack with
 		{
 			BodiesQuery = pack.BodiesQuery + "\n(class_declaration body: (declaration_list) @body)\n",
@@ -99,10 +101,13 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 
 	public static string FixtureFor(string languageId) => languageId switch
 	{
+		"bash" => "#!/usr/bin/env bash\n# note\nbuild() { printf '%s\\n' \"ready#now\"; }\n",
 		"c" => CodeCompressionFixtures.C,
 		"csharp" => CodeCompressionFixtures.CSharp,
 		"cpp" => CodeCompressionFixtures.Cpp,
+		"css" => "/* note */\n.card { content: \"/* literal */\"; color: red; }\n",
 		"go" => CodeCompressionFixtures.Go,
+		"html" => "<!doctype html>\n<!-- note -->\n<main>Ready</main>\n",
 		"java" => CodeCompressionFixtures.Java,
 		"javascript" => CodeCompressionFixtures.JavaScript,
 		"kotlin" => CodeCompressionFixtures.Kotlin,
@@ -111,6 +116,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		"ruby" => CodeCompressionFixtures.Ruby,
 		"rust" => CodeCompressionFixtures.Rust,
 		"scala" => CodeCompressionFixtures.Scala,
+		"toml" => "# note\n[service]\nname = \"api#worker\"\n",
 		"tsx" => CodeCompressionFixtures.Tsx,
 		"typescript" => CodeCompressionFixtures.TypeScript,
 		_ => throw new ArgumentOutOfRangeException(nameof(languageId), languageId, "No fixture for this language.")
@@ -118,6 +124,9 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 
 	public static string CommentFixtureFor(string languageId) => languageId switch
 	{
+		"bash" or "toml" => "# comment\n",
+		"css" => "/* comment */\n",
+		"html" => "<!-- comment -->\n",
 		"python" or "ruby" => "# comment\n",
 		"php" => "<?php // comment\n?>",
 		_ => "// comment\n"
@@ -128,7 +137,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		Comments?.Dispose();
 		Preserves?.Dispose();
 		Declarations.Dispose();
-		Bodies.Dispose();
+		Bodies?.Dispose();
 		Parser.Dispose();
 		Language.Dispose();
 	}

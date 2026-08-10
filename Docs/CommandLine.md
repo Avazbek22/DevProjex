@@ -176,6 +176,11 @@ the beginning of a script remains intact. Comment-like text inside strings, inte
 heredocs, compiler directives, attributes, and annotations is not treated as a comment.
 Directive comments such as `// eslint-disable`, `// @ts-ignore`, and `# type: ignore` are
 removed because this output is intended for reading rather than compilation.
+Comment removal supports the 14 body-compression languages plus HTML (`.html`, `.htm`), CSS
+(`.css`), TOML (`.toml`), and Bash (`.sh`, `.bash`). These four additional packs are
+comments-only: enabling `--compress` alone keeps them on the unsupported fast path, while
+`--strip-comments` enables their syntax-aware processing. HTML comments are removed, but
+JavaScript and CSS comment text inside HTML `script` and `style` raw-text nodes remains intact.
 
 Compression and comment removal are independent and share one syntax analysis and one
 validated edit plan:
@@ -187,7 +192,7 @@ validated edit plan:
 | Both | A bare declaration skeleton without comments or docstrings |
 
 When Hide Secrets is also enabled, syntax edits are applied first and secret detection runs
-over that exact transformed text. Unsupported languages such as YAML and Markdown remain
+over that exact transformed text. Unsupported languages such as XML, YAML, and Markdown remain
 byte-for-byte complete. Source files are never modified by any combination.
 
 Modern local profiles retain checked and unchecked states across roots, extensions,

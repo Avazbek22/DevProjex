@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 using DevProjex.Application.Compression;
@@ -46,13 +47,16 @@ public sealed class CompressionOptimizationBenchmarkTests
 			Environment.GetEnvironmentVariable("DEVPROJEX_COMPRESSION_BENCHMARK_STAGE"));
 		var baselinePlan = await BuildPlanAsync(root);
 		var goldenPlan = await BuildGoldenPlanAsync();
+		var commentsOnlyPlan = await BuildCommentsOnlyPlanAsync();
 		Assert.NotEmpty(baselinePlan.IncludedFiles);
+		Assert.NotEmpty(commentsOnlyPlan.IncludedFiles);
 		var iterations = new List<BenchmarkIteration>(MeasuredRuns);
 		for (var index = 0; index < MeasuredRuns; index++)
 		{
 			iterations.Add(await RunIterationAsync(
 				index + 1,
 				baselinePlan,
+				commentsOnlyPlan,
 				goldenPlan,
 				TestContext.Current.CancellationToken));
 		}
@@ -71,6 +75,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 				Environment.ProcessorCount),
 			ProjectRoot: root,
 			FileCount: baselinePlan.IncludedFiles.Count,
+			CommentsOnlyCorpusFileCount: commentsOnlyPlan.IncludedFiles.Count,
 			Runs: iterations,
 			Medians: BuildMedians(iterations));
 
@@ -87,6 +92,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 	private static async Task<BenchmarkIteration> RunIterationAsync(
 		int index,
 		ProjectContextPlan plan,
+		ProjectContextPlan commentsOnlyPlan,
 		ProjectContextPlan goldenPlan,
 		CancellationToken cancellationToken)
 	{
@@ -107,7 +113,13 @@ public sealed class CompressionOptimizationBenchmarkTests
 			["compressionAndSecrets"] = await RunScenarioAsync(
 				plan, compress: true, stripComments: false, hideSecrets: true, cancellationToken),
 			["all"] = await RunScenarioAsync(
-				plan, compress: true, stripComments: true, hideSecrets: true, cancellationToken)
+				plan, compress: true, stripComments: true, hideSecrets: true, cancellationToken),
+			["commentsOnlyCorpusCompression"] = await RunScenarioAsync(
+				commentsOnlyPlan, compress: true, stripComments: false, hideSecrets: false, cancellationToken),
+			["commentsOnlyCorpusComments"] = await RunScenarioAsync(
+				commentsOnlyPlan, compress: false, stripComments: true, hideSecrets: false, cancellationToken),
+			["commentsOnlyCorpusBoth"] = await RunScenarioAsync(
+				commentsOnlyPlan, compress: true, stripComments: true, hideSecrets: false, cancellationToken)
 		};
 		var toggle = await RunToggleScenarioAsync(plan, cancellationToken);
 		var golden = await BuildGoldenAsync(goldenPlan, cancellationToken);
@@ -351,7 +363,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 			ContentReadFact? retainedFact = null;
 			if (readFacts is not null && readFacts.TryGet(path, out var retained))
 				retainedFact = retained;
-			if (scope is null || !compression!.Session.IsSupported(path))
+			if (scope is null || !compression!.IsSupported(path))
 			{
 				var metrics = retainedFact?.RawMetrics ??
 					(await analyzer.GetClassifiedMetricsAsync(path, cancellationToken)).Metrics;
@@ -573,6 +585,49 @@ public sealed class CompressionOptimizationBenchmarkTests
 		return await BuildPlanAsync(root);
 	}
 
+	private static async Task<ProjectContextPlan> BuildCommentsOnlyPlanAsync()
+	{
+		var root = Path.Combine(
+			Path.GetTempPath(),
+			"DevProjex.CompressionOptimization.CommentsOnlyCorpus");
+		if (Directory.Exists(root))
+			Directory.Delete(root, recursive: true);
+		Directory.CreateDirectory(root);
+
+		var templates = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["web/page-{0}.html"] =
+				"<!doctype html>\n<!-- page metadata -->\n<html><head><style>/* embedded CSS stays raw */ .card { color: red; }</style></head>\n<body><!-- navigation --><main class=\"card\">Dashboard</main>\n<script>// embedded JavaScript stays raw\nwindow.app = { ready: true };</script></body></html>\n",
+			["web/site-{0}.css"] =
+				"/* design tokens */\n:root { --asset: \"/* literal */\"; --gap: 1rem; }\n/* layout */\n.dashboard { display: grid; gap: var(--gap); background: url(\"/img/*hero*/.png\"); }\n.card { padding: 1rem; /* compact spacing */ border: 1px solid #ddd; }\n",
+			["config/app-{0}.toml"] =
+				"# service configuration\n[service]\nname = \"api#worker\" # deployment name\nendpoint = \"https://example.test/v1#health\"\n# retry policy\nretries = 4\n",
+			["scripts/deploy-{0}.sh"] =
+				"#!/usr/bin/env bash\n# Fail on the first deployment error.\nset -euo pipefail\nlabel=\"release#stable\" # visible release channel\ncat <<'EOF'\n# heredoc content is data\nEOF\nprintf '%s\\n' \"$label\"\n"
+		};
+		var timestamp = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+		for (var copy = 0; copy < 8; copy++)
+		{
+			foreach (var (relativePathTemplate, content) in templates)
+			{
+				var relativePath = string.Format(
+					CultureInfo.InvariantCulture,
+					relativePathTemplate,
+					copy);
+				var path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+				Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+				await File.WriteAllTextAsync(
+					path,
+					content,
+					new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+					TestContext.Current.CancellationToken);
+				File.SetLastWriteTimeUtc(path, timestamp);
+			}
+		}
+
+		return await BuildPlanAsync(root);
+	}
+
 	private static SmartSecretsDetector CreateSmartSecretsDetector() =>
 		new(
 			new GitleaksSecretDetector(),
@@ -630,6 +685,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 		BenchmarkMachine Machine,
 		string ProjectRoot,
 		int FileCount,
+		int CommentsOnlyCorpusFileCount,
 		IReadOnlyList<BenchmarkIteration> Runs,
 		IReadOnlyDictionary<string, BenchmarkMedian> Medians);
 

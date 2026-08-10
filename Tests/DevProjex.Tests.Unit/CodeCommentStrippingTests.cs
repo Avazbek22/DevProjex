@@ -7,6 +7,11 @@ public sealed class CodeCommentStrippingTests
 	public static TheoryData<string, string, string> LanguageCases => new()
 	{
 		{
+			"sample.sh",
+			"#!/usr/bin/env bash\n# doc_marker\nvalue=1 # line_marker\ntext='# string_marker'\ncat <<'EOF'\n# heredoc_marker\nEOF\n",
+			"#!/usr/bin/env bash\nvalue=1\ntext='# string_marker'\ncat <<'EOF'\n# heredoc_marker\nEOF\n"
+		},
+		{
 			"sample.c",
 			"/** doc_marker */\nint value = 1; // line_marker\n/* block_marker */\nconst char *text = \"// string_marker\";\n",
 			"int value = 1;\nconst char *text = \"// string_marker\";\n"
@@ -22,6 +27,11 @@ public sealed class CodeCommentStrippingTests
 			"internal static class Sample\n{\n    private const string Text = \"// string_marker\";\n}\n"
 		},
 		{
+			"sample.css",
+			"/* doc_marker */\n.card { content: \"/* string_marker */\"; color: red; /* line_marker */ }\n.hero { background: url(\"/img/*asset*/.png\"); }\n",
+			".card { content: \"/* string_marker */\"; color: red;  }\n.hero { background: url(\"/img/*asset*/.png\"); }\n"
+		},
+		{
 			"sample.go",
 			"package sample\n\n// doc_marker\nconst Value = 1 // line_marker\n/* block_marker */\nconst Text = \"// string_marker\"\n",
 			"package sample\n\nconst Value = 1\nconst Text = \"// string_marker\"\n"
@@ -30,6 +40,11 @@ public sealed class CodeCommentStrippingTests
 			"Sample.java",
 			"/** doc_marker */\nfinal class Sample {\n    /* block_marker */\n    static final String TEXT = \"// string_marker\"; // line_marker\n}\n",
 			"final class Sample {\n    static final String TEXT = \"// string_marker\";\n}\n"
+		},
+		{
+			"sample.html",
+			"<!-- doc_marker -->\n<!--[if IE]>legacy<![endif]-->\n<main>Ready<!-- line_marker --></main>\n<script>// raw_js_marker\nwindow.ready = true;</script>\n<style>/* raw_css_marker */ .card { color: red; }</style>\n",
+			"<main>Ready</main>\n<script>// raw_js_marker\nwindow.ready = true;</script>\n<style>/* raw_css_marker */ .card { color: red; }</style>\n"
 		},
 		{
 			"sample.js",
@@ -65,6 +80,11 @@ public sealed class CodeCommentStrippingTests
 			"Sample.scala",
 			"/** doc_marker */\nval value = 1 // line_marker\n/* block_marker */\nval text = \"// string_marker\"\n",
 			"val value = 1\nval text = \"// string_marker\"\n"
+		},
+		{
+			"sample.toml",
+			"# doc_marker\n[service]\nname = \"api#string_marker\" # line_marker\nendpoint = 'https://example.test/#fragment'\n",
+			"[service]\nname = \"api#string_marker\"\nendpoint = 'https://example.test/#fragment'\n"
 		},
 		{
 			"sample.tsx",
@@ -439,6 +459,103 @@ public sealed class CodeCommentStrippingTests
 		Assert.Equal(CodeCompressionOutcome.UnchangedUnsupportedLanguage, result.Plan.Outcome);
 		Assert.Equal(source, result.Text);
 		Assert.Empty(result.Plan.Edits);
+	}
+
+	[Fact]
+	public void CommentOnlyLanguages_AreModeAwareBeforeAnyRuntimeIsLoaded()
+	{
+		const string source = ".card { color: red; /* remove */ }\n";
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+
+		Assert.False(compressor.IsSupported("site.css"));
+		Assert.False(compressor.IsSupported("site.css", CodeTransformKinds.Bodies));
+		Assert.True(compressor.IsSupported("site.css", CodeTransformKinds.Comments));
+		Assert.True(compressor.IsSupported(
+			"site.css",
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments));
+
+		using (var bodiesScope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Bodies))
+		{
+			var bodyAnalysis = bodiesScope.Analyze(
+				"site.css",
+				"site.css",
+				source,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(CodeCompressionOutcome.UnchangedUnsupportedLanguage, bodyAnalysis.Plan.Outcome);
+		}
+
+		Assert.Equal(0, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.MaterializedWorkers);
+
+		using var bothScope = compressor.CreateScope(
+			Path.GetTempPath(),
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		var bothAnalysis = bothScope.Analyze(
+			"site.css",
+			"site.css",
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, bothAnalysis.Plan.Outcome);
+		Assert.Equal(CodeTransformKinds.Comments, bothAnalysis.Plan.AffectedKinds);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.MaterializedWorkers);
+	}
+
+	[Theory]
+	[InlineData("page.html")]
+	[InlineData("page.htm")]
+	[InlineData("site.css")]
+	[InlineData("app.toml")]
+	[InlineData("deploy.sh")]
+	[InlineData("deploy.bash")]
+	public void EveryCommentOnlyExtensionSupportsCommentsButNotBodies(string path)
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+
+		Assert.False(compressor.IsSupported(path, CodeTransformKinds.Bodies));
+		Assert.True(compressor.IsSupported(path, CodeTransformKinds.Comments));
+		Assert.True(compressor.IsSupported(
+			path,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments));
+	}
+
+	[Theory]
+	[InlineData("comments.html", "<!-- first -->\r\n<!-- second -->")]
+	[InlineData("comments.css", "/* first */\r\n/* second */")]
+	[InlineData("comments.toml", "# first\r\n# second")]
+	[InlineData("comments.sh", "# first\r\n# second")]
+	public void CommentOnlyFile_CanBecomeEmptyAcrossNewFormats(string path, string source)
+	{
+		var result = Transform(path, source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
+		Assert.Equal(string.Empty, result.Text);
+	}
+
+	[Fact]
+	public void CommentOnlyLanguage_CacheIsIsolatedByRequestedModeAndReused()
+	{
+		const string source = "/* remove */\n.card { color: red; }\n";
+		var fullPath = Path.Combine(Path.GetTempPath(), "mode-cache.css");
+		using var session = new CodeCompressionSession(CodeCompressionTestHarness.CreateCompressor());
+
+		var comments = Transform(session, fullPath, source, CodeTransformKinds.Comments);
+		var afterComments = session.Diagnostics;
+		var both = Transform(
+			session,
+			fullPath,
+			source,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		var afterBoth = session.Diagnostics;
+		var commentsAgain = Transform(session, fullPath, source, CodeTransformKinds.Comments);
+		var afterReuse = session.Diagnostics;
+
+		Assert.Equal(comments, both);
+		Assert.Equal(comments, commentsAgain);
+		Assert.Equal(afterComments.AnalysisExecutions + 1, afterBoth.AnalysisExecutions);
+		Assert.Equal(afterBoth.AnalysisExecutions, afterReuse.AnalysisExecutions);
+		Assert.True(afterReuse.CacheHits > afterBoth.CacheHits);
 	}
 
 	private static (CodeCompressionPlan Plan, string Text) Transform(

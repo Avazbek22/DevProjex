@@ -85,6 +85,29 @@ public sealed class CodeCompressionMetricsTests
 		}
 	}
 
+	[Theory]
+	[InlineData("page.html", "<!-- first -->\r\n<main>Ready<!-- trailing --></main>\r\n")]
+	[InlineData("site.css", "/* first */\r\n.card { color: red; /* trailing */ }\r\n")]
+	[InlineData("app.toml", "# first\r\nname = \"api#worker\" # trailing\r\n")]
+	[InlineData("deploy.sh", "#!/usr/bin/env bash\r\n# first\r\nvalue=1 # trailing")]
+	public void MetricsFromCommentOnlyLanguagePlan_EqualMaterializedOutput(
+		string path,
+		string source)
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Comments);
+		var analysis = scope.Analyze(path, path, source, TestContext.Current.CancellationToken);
+		var applied = analysis.GetResult(source).Text;
+		var expected = FileContentAnalyzer.ComputeMetrics(
+			applied,
+			Encoding.UTF8.GetByteCount(applied));
+
+		var actual = FileContentAnalyzer.ComputeTransformedMetrics(source, analysis.Plan);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
+		Assert.Equal(expected, actual);
+	}
+
 	private static void AddCase(
 		TheoryData<string, CodeCompressionPlan> cases,
 		string source,

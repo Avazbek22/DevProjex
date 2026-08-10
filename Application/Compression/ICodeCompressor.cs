@@ -23,6 +23,13 @@ public interface ICodeCompressor
 	bool IsSupported(string relativePath);
 
 	/// <summary>
+	/// True when the language pack can apply at least one requested edit family. The default keeps
+	/// existing test and third-party implementations source-compatible; data-driven compressors
+	/// should override this to preserve unsupported-language fast paths per mode.
+	/// </summary>
+	bool IsSupported(string relativePath, CodeTransformKinds kinds) => IsSupported(relativePath);
+
+	/// <summary>
 	/// Loads whatever the selection needs and nothing else. Grammars are expensive to materialize
 	/// and load, so nothing is touched until a language actually appears in the selection.
 	/// </summary>

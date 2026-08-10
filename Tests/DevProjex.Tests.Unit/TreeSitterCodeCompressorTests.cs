@@ -10,8 +10,11 @@ public sealed class TreeSitterCodeCompressorTests
 	public static TheoryData<string> ShippedLanguages()
 	{
 		var data = new TheoryData<string>();
-		foreach (var languageId in CodeCompressionTestHarness.LanguageIds)
-			data.Add(languageId);
+		foreach (var pack in CodeCompressionTestHarness.LanguagePacks)
+		{
+			if ((pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0)
+				data.Add(pack.Id);
+		}
 		return data;
 	}
 
@@ -24,11 +27,17 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
-	public void ShippedLanguageCatalog_MatchesTheFourteenLanguageProductContract()
+	public void ShippedLanguageCatalog_MatchesTheCapabilityAwareProductContract()
 	{
 		Assert.Equal(
-			["c", "cpp", "csharp", "go", "java", "javascript", "kotlin", "php", "python", "ruby", "rust", "scala", "tsx", "typescript"],
+			["bash", "c", "cpp", "csharp", "css", "go", "html", "java", "javascript", "kotlin", "php", "python", "ruby", "rust", "scala", "toml", "tsx", "typescript"],
 			CodeCompressionTestHarness.LanguageIds.Order(StringComparer.Ordinal));
+		Assert.Equal(
+			["c", "cpp", "csharp", "go", "java", "javascript", "kotlin", "php", "python", "ruby", "rust", "scala", "tsx", "typescript"],
+			CodeCompressionTestHarness.LanguagePacks
+				.Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0)
+				.Select(static pack => pack.Id)
+				.Order(StringComparer.Ordinal));
 	}
 
 	[Fact]
@@ -229,7 +238,10 @@ public sealed class TreeSitterCodeCompressorTests
 		using var scope = compressor.CreateScope(temp.Path);
 		using var start = new ManualResetEventSlim();
 
-		var tasks = CodeCompressionTestHarness.LanguagePacks.Select(pack => Task.Run(() =>
+		var bodyPacks = CodeCompressionTestHarness.LanguagePacks
+			.Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0)
+			.ToArray();
+		var tasks = bodyPacks.Select(pack => Task.Run(() =>
 		{
 			start.Wait(TestContext.Current.CancellationToken);
 			var source = CodeCompressionTestHarness.FixtureFor(pack.Id);
@@ -245,7 +257,7 @@ public sealed class TreeSitterCodeCompressorTests
 		var plans = await Task.WhenAll(tasks);
 
 		Assert.All(plans, plan => Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome));
-		Assert.Equal(CodeCompressionTestHarness.LanguagePacks.Count, Directory.GetFiles(locator.RootDirectory).Length);
+		Assert.Equal(bodyPacks.Length, Directory.GetFiles(locator.RootDirectory).Length);
 	}
 
 	[Fact]
@@ -796,7 +808,10 @@ public sealed class TreeSitterCodeCompressorTests
 		var locator = new CountingGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());
 		using var compressor = new TreeSitterCodeCompressor(locator);
 		using var scope = compressor.CreateScope(Path.GetTempPath());
-		var tasks = CodeCompressionTestHarness.LanguagePacks
+		var bodyPacks = CodeCompressionTestHarness.LanguagePacks
+			.Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0)
+			.ToArray();
+		var tasks = bodyPacks
 			.SelectMany(pack => Enumerable.Range(0, 12).Select(index => (pack, index)))
 			.Select(item => Task.Run(() => scope.Analyze(
 				$"{item.pack.Id}-{item.index}{item.pack.Extensions[0]}",
@@ -810,8 +825,8 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.All(analyses, analysis =>
 			Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome));
 		var diagnostics = compressor.RuntimeDiagnostics;
-		Assert.Equal(CodeCompressionTestHarness.LanguagePacks.Count, locator.ResolveCount);
-		Assert.Equal(CodeCompressionTestHarness.LanguagePacks.Count, diagnostics.CompiledQuerySets);
+		Assert.Equal(bodyPacks.Length, locator.ResolveCount);
+		Assert.Equal(bodyPacks.Length, diagnostics.CompiledQuerySets);
 		Assert.Equal(0, diagnostics.LeasedWorkers);
 		Assert.Equal(0, diagnostics.GlobalActiveWorkers);
 		Assert.InRange(
@@ -820,8 +835,8 @@ public sealed class TreeSitterCodeCompressorTests
 			diagnostics.GlobalWorkerCapacity);
 		Assert.InRange(
 			diagnostics.AvailableWorkers,
-			CodeCompressionTestHarness.LanguagePacks.Count,
-			CodeCompressionTestHarness.LanguagePacks.Count * 2);
+			bodyPacks.Length,
+			bodyPacks.Length * 2);
 		Assert.Equal(diagnostics.AvailableWorkers, diagnostics.MaterializedWorkers);
 		Assert.Equal(diagnostics.AvailableWorkers, diagnostics.GlobalRetainedWorkers);
 		Assert.InRange(

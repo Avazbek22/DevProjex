@@ -116,6 +116,9 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 	public bool IsSupported(string relativePath) => compressor.IsSupported(relativePath);
 
+	public bool IsSupported(string relativePath, CodeTransformKinds kinds) =>
+		compressor.IsSupported(relativePath, kinds);
+
 	public int AnalysisWorkerCapacity =>
 		(compressor as ICodeCompressionRuntimeDiagnosticsProvider)?.AnalysisWorkerCapacity ?? 1;
 
@@ -224,6 +227,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			selection.OrderedPaths,
 			generation.Version,
 			mode,
+			kinds,
 			transformIdentity);
 	}
 
@@ -235,6 +239,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		ContentFingerprint? fingerprint,
 		long generation,
 		bool materializeOutput,
+		CodeTransformKinds kinds,
 		string transformIdentity,
 		CancellationToken cancellationToken)
 	{
@@ -254,7 +259,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 					: null);
 		}
 
-		if (!compressor.IsSupported(relativePath))
+		if (!compressor.IsSupported(relativePath, kinds))
 		{
 			Interlocked.Increment(ref _unsupportedFastPaths);
 			var unsupported = CodeCompressionPlan.Unchanged(
@@ -361,6 +366,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		string content,
 		ContentFingerprint? fingerprint,
 		long scopeGeneration,
+		CodeTransformKinds kinds,
 		string transformIdentity,
 		CancellationToken cancellationToken)
 	{
@@ -375,7 +381,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				transformIdentity);
 		}
 
-		if (!compressor.IsSupported(relativePath))
+		if (!compressor.IsSupported(relativePath, kinds))
 		{
 			Interlocked.Increment(ref _unsupportedFastPaths);
 			return CodeCompressionPlan.Unchanged(
@@ -460,10 +466,12 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		int contentLength,
 		ContentFingerprint fingerprint,
 		long scopeGeneration,
+		CodeTransformKinds kinds,
 		string transformIdentity,
 		out CodeCompressionPlan plan)
 	{
-		if (!IsCurrentGeneration(scopeGeneration))
+		if (!compressor.IsSupported(relativePath, kinds) ||
+		    !IsCurrentGeneration(scopeGeneration))
 		{
 			plan = null!;
 			return false;
@@ -768,6 +776,7 @@ public sealed class CodeCompressionScope : IDisposable
 	private readonly string selectionKey;
 	private readonly long generation;
 	private readonly CodeCompressionScopeMode mode;
+	private readonly CodeTransformKinds kinds;
 	private readonly string transformIdentity;
 	private readonly SortedDictionary<DiagnosticOrderKey, CodeCompressionFileOutcome>? _unchangedExamples;
 	private readonly int[]? _unchangedOutcomeCounts;
@@ -788,6 +797,7 @@ public sealed class CodeCompressionScope : IDisposable
 		IReadOnlyList<string> orderedFilePaths,
 		long generation,
 		CodeCompressionScopeMode mode,
+		CodeTransformKinds kinds,
 		string transformIdentity)
 	{
 		this.session = session;
@@ -795,6 +805,7 @@ public sealed class CodeCompressionScope : IDisposable
 		this.selectionKey = selectionKey;
 		this.generation = generation;
 		this.mode = mode;
+		this.kinds = kinds;
 		this.transformIdentity = transformIdentity;
 		if (mode == CodeCompressionScopeMode.Measurement)
 			return;
@@ -822,6 +833,7 @@ public sealed class CodeCompressionScope : IDisposable
 			fingerprint: null,
 			generation,
 			materializeOutput: true,
+			kinds,
 			transformIdentity,
 			cancellationToken);
 		var plan = execution.Plan;
@@ -848,6 +860,7 @@ public sealed class CodeCompressionScope : IDisposable
 			fingerprint,
 			generation,
 			materializeOutput: true,
+			kinds,
 			transformIdentity,
 			cancellationToken);
 		var plan = execution.Plan;
@@ -872,6 +885,7 @@ public sealed class CodeCompressionScope : IDisposable
 			fingerprint: null,
 			generation,
 			materializeOutput: false,
+			kinds,
 			transformIdentity,
 			cancellationToken);
 		RecordPlan(fullPath, execution.Plan);
@@ -894,6 +908,7 @@ public sealed class CodeCompressionScope : IDisposable
 			fingerprint,
 			generation,
 			materializeOutput: false,
+			kinds,
 			transformIdentity,
 			cancellationToken);
 		RecordPlan(fullPath, execution.Plan);
@@ -914,6 +929,7 @@ public sealed class CodeCompressionScope : IDisposable
 			content,
 			fingerprint: null,
 			generation,
+			kinds,
 			transformIdentity,
 			cancellationToken);
 		if (plan is null)
@@ -936,6 +952,7 @@ public sealed class CodeCompressionScope : IDisposable
 				content.Length,
 				fingerprint,
 				generation,
+				kinds,
 				transformIdentity,
 				out var plan))
 		{
@@ -960,6 +977,7 @@ public sealed class CodeCompressionScope : IDisposable
 			content,
 			fingerprint,
 			generation,
+			kinds,
 			transformIdentity,
 			cancellationToken);
 		if (plan is null)
@@ -1071,6 +1089,8 @@ public sealed record CodeCompressionContext(
 	CodeTransformKinds Kinds = CodeTransformKinds.Bodies)
 {
 	public string TransformIdentity => Session.GetTransformIdentity(Kinds);
+
+	public bool IsSupported(string relativePath) => Session.IsSupported(relativePath, Kinds);
 
 	public CodeCompressionScope BeginOutput(IReadOnlyList<string> orderedFilePaths) =>
 		Session.BeginOutput(

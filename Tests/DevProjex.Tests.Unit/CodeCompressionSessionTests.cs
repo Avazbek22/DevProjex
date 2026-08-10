@@ -220,6 +220,30 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public async Task Prewarm_BodiesModeKeepsCommentOnlyLanguagesOnTheUnsupportedFastPath()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("web/site.css", "/* remove */\n.card { color: red; }\n");
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		var context = new CodeCompressionContext(temp.Path, session, CodeTransformKinds.Bodies);
+
+		var result = await new CodeCompressionPrewarmer(new FileContentAnalyzer()).WarmAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, result.WarmedFiles);
+		Assert.Equal(0, session.Diagnostics.AnalysisExecutions);
+		Assert.Equal(1, session.Diagnostics.UnsupportedFastPaths);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.MaterializedWorkers);
+		Assert.Equal(
+			CodeCompressionOutcome.UnchangedUnsupportedLanguage,
+			Assert.Single(session.Snapshot.Unchanged).Outcome);
+	}
+
+	[Fact]
 	public async Task Prewarm_PublishesExactCompressionFactsBeforeAnyOutputIsBuilt()
 	{
 		const string source = "prefix-1234567890-suffix";

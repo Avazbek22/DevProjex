@@ -27,10 +27,13 @@
     cannot find them. Everything is loaded by absolute path instead.
   -->
   <ItemGroup>
+    <DevProjexGrammar Include="tree-sitter-bash" />
     <DevProjexGrammar Include="tree-sitter-c" />
     <DevProjexGrammar Include="tree-sitter-c-sharp" />
     <DevProjexGrammar Include="tree-sitter-cpp" />
+    <DevProjexGrammar Include="tree-sitter-css" />
     <DevProjexGrammar Include="tree-sitter-go" />
+    <DevProjexGrammar Include="tree-sitter-html" />
     <DevProjexGrammar Include="tree-sitter-java" />
     <DevProjexGrammar Include="tree-sitter-javascript" />
     <DevProjexGrammar Include="tree-sitter-php" />
@@ -38,6 +41,7 @@
     <DevProjexGrammar Include="tree-sitter-ruby" />
     <DevProjexGrammar Include="tree-sitter-rust" />
     <DevProjexGrammar Include="tree-sitter-scala" />
+    <DevProjexGrammar Include="tree-sitter-toml" />
     <DevProjexGrammar Include="tree-sitter-tsx" />
     <DevProjexGrammar Include="tree-sitter-typescript" />
 

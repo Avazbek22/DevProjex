@@ -212,7 +212,7 @@ public sealed class CodeCompressionKotlinTests
 			""";
 		using var harness = CodeCompressionTestHarness.For("kotlin");
 		using var tree = harness.Parser.Parse(source)!;
-		using var cursor = harness.Bodies.Execute(tree.RootNode);
+		using var cursor = harness.Bodies!.Execute(tree.RootNode);
 		var expression = Assert.Single(
 			cursor.Captures,
 			static capture => capture.Name.Equals("expression", StringComparison.Ordinal)).Node;

@@ -297,6 +297,52 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Fact]
+	public async Task ContextExportWithStripCommentsTransformsMixedCommentOnlyLanguages()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile(
+			"web/page.html",
+			"<!-- html_remove -->\n<main>Ready</main>\n<script>// raw_js_keep\nwindow.ready = true;</script>\n");
+		workspace.WriteFile(
+			"web/site.css",
+			"/* css_remove */\n.card { content: \"/* css_string_keep */\"; }\n");
+		workspace.WriteFile(
+			"config/app.toml",
+			"# toml_remove\nname = \"api#toml_string_keep\"\n");
+		workspace.WriteFile(
+			"scripts/deploy.sh",
+			"#!/usr/bin/env bash\n# bash_remove\nname='# bash_string_keep'\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+			[
+				"export", "context", workspace.Path,
+				"--view", "content",
+				"--format", "markdown",
+				"--strip-comments",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", "-"
+			],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain("html_remove", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("css_remove", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("toml_remove", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("bash_remove", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("raw_js_keep", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("css_string_keep", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("toml_string_keep", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("#!/usr/bin/env bash", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("bash_string_keep", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Theory]
 	[InlineData("src/service.rb", RubyCompressibleSource, "@root = root", "ruby_direct_cli_marker")]
 	[InlineData("src/Service.php", PhpCompressibleSource, "$this->root = trim($root);", "$php_direct_cli_marker")]

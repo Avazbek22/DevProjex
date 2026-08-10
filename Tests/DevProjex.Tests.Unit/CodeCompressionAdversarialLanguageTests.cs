@@ -68,7 +68,7 @@ public sealed class CodeCompressionAdversarialLanguageTests
 		{
 			using var diagnosticHarness = CodeCompressionTestHarness.For(languageId);
 			using var diagnosticTree = diagnosticHarness.Parser.Parse(source)!;
-			using var bodyCursor = diagnosticHarness.Bodies.Execute(diagnosticTree.RootNode);
+			using var bodyCursor = diagnosticHarness.Bodies!.Execute(diagnosticTree.RootNode);
 			var bodies = string.Join(", ", bodyCursor.Captures.Select(static capture =>
 				$"{capture.Name}:{capture.Node.Type}[{capture.Node.StartIndex},{capture.Node.EndIndex})"));
 			using var preserveCursor = diagnosticHarness.Preserves?.Execute(diagnosticTree.RootNode);
@@ -100,7 +100,7 @@ public sealed class CodeCompressionAdversarialLanguageTests
 		var fixture = CodeCompressionAdversarialFixtures.For(languageId);
 		using var harness = CodeCompressionTestHarness.For(languageId);
 		using var tree = harness.Parser.Parse(fixture.Source)!;
-		using var bodiesCursor = harness.Bodies.Execute(tree.RootNode);
+		using var bodiesCursor = harness.Bodies!.Execute(tree.RootNode);
 		using var declarationsCursor = harness.Declarations.Execute(tree.RootNode);
 		var bodies = bodiesCursor.Captures
 			.Where(static capture => capture.Name.Equals("body", StringComparison.Ordinal))

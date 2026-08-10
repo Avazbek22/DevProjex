@@ -178,14 +178,17 @@ uses `= { }`, which would denote a lambda rather than a function body. Scala del
 `= { }` because braces denote a block expression there. Top-level Kotlin DSL calls and free lambdas
 are not captured.
 
-With `--strip-comments`, syntax-tree comments are removed in all 14 supported language
-packs. Python leading module, class, and function docstrings are documentation for this
+With `--strip-comments`, syntax-tree comments are removed in 18 language packs: the 14
+body-compression languages plus HTML, CSS, TOML, and Bash. The four additional packs are
+comments-only and remain on the unsupported fast path when only `--compress` is enabled.
+Python leading module, class, and function docstrings are documentation for this
 mode and are removed too; a suite that would otherwise become empty retains `...`.
 The initial shebang remains, while directive comments such as `// eslint-disable`,
 `// @ts-ignore`, and `# type: ignore` are deliberately removed. Comment-like text in
 strings, interpolations, heredocs, attributes, annotations, and preprocessor directives
 remains unchanged. PHP text outside `<?php ... ?>` sections is never classified as a PHP
-comment.
+comment. HTML comments are removed, including conditional comments, while content in HTML
+`script` and `style` raw-text nodes is not recursively parsed and remains byte-for-byte complete.
 
 The mode matrix is deterministic: compression alone keeps documentation while shortening
 named implementations; comment removal alone keeps all implementation code without

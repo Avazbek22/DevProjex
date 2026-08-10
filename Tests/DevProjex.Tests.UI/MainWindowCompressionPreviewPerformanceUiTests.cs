@@ -10,6 +10,7 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 	public async Task StripCommentsCheckbox_IsDraftUntilApplyAndRestoresFullSourceWhenDisabled()
 	{
 		const string commentMarker = "strip-comments-ui-marker";
+		const string cssCommentMarker = "strip-comments-css-ui-marker";
 		using var project = UiTestProject.CreateDefault();
 		var sourcePath = Path.Combine(project.RootPath, "src", "AppHost", "Program.cs");
 		var originalSource = await File.ReadAllTextAsync(
@@ -19,6 +20,11 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 		await File.WriteAllTextAsync(
 			sourcePath,
 			$"{commentLine}{Environment.NewLine}{originalSource}",
+			TestContext.Current.CancellationToken);
+		var cssPath = Path.Combine(project.RootPath, "src", "AppHost", "site.css");
+		await File.WriteAllTextAsync(
+			cssPath,
+			$"/* {cssCommentMarker} */{Environment.NewLine}.app {{ color: red; }}{Environment.NewLine}",
 			TestContext.Current.CancellationToken);
 		var sourceBytes = await File.ReadAllBytesAsync(
 			sourcePath,
@@ -63,13 +69,14 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 				"comment-removal prewarm to publish its exact snapshot after Apply");
 			var snapshot = Assert.IsType<CodeCompressionSnapshot>(GetCompressionSnapshot(window));
 			Assert.Equal(0, snapshot.BodyTransformedFiles);
-			Assert.True(snapshot.CommentTransformedFiles > 0);
+			Assert.True(snapshot.CommentTransformedFiles >= 2);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() =>
 				{
 					var preview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
 					return !preview.Contains(commentMarker, StringComparison.Ordinal) &&
+					       !preview.Contains(cssCommentMarker, StringComparison.Ordinal) &&
 					       preview.Contains("return \"app-value-1\";", StringComparison.Ordinal);
 				},
 				"comment removal to update Preview while preserving implementation code");

@@ -215,7 +215,9 @@ Analysis content metrics and every context/folder/ZIP output observe the same
 transformed bytes; source files are never modified.
 
 `--strip-comments` is an independent, additive content transformation and is off in the
-`standard` profile. It removes syntax-tree comments in the same 14-language set and also
+`standard` profile. It removes syntax-tree comments in the 14 body-compression languages plus
+comments-only HTML, CSS, TOML, and Bash packs, for 18 comment-capable languages in total.
+The four comments-only packs remain unsupported when only `--compress` is enabled. It also
 removes leading Python module/class/function docstrings. A shebang at byte offset zero is
 preserved. Strings, heredocs, attributes, annotations, and compiler directives are not
 comments; pragma comments intended for compilers or linters are removed. Compression-only

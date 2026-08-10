@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Xml.Linq;
+using System.Globalization;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Secrets;
@@ -549,6 +550,52 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Equal(1, plain.DetectedCount);
 		Assert.Equal(1, stripped.DetectedCount);
 		Assert.Equal(1, detector.CallCount);
+	}
+
+	[Theory]
+	[InlineData("page.html", "<!-- api_token = {0} -->\n<main>safe</main>\n", "<main>safe</main>\n")]
+	[InlineData("app.toml", "# api_token = {0}\nname = \"safe\"\n", "name = \"safe\"\n")]
+	public async Task StripComments_RemovesCommentSecretsFromNewLanguagePacksBeforeDetection(
+		string fileName,
+		string sourceTemplate,
+		string expected)
+	{
+		const string secret = "comments-only-pack-secret-value-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("comments-only-secret-project");
+		var path = temporary.CreateFile(
+			Path.Combine("comments-only-secret-project", fileName),
+			string.Format(CultureInfo.InvariantCulture, sourceTemplate, secret));
+		using var redactionSession = new SecretRedactionSession(new ExactValueDetector(secret));
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var redaction = new SecretRedactionContext(sourceRoot, redactionSession);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		var plain = await preparer.AnalyzeAsync(
+			ContentTransformationContext.For(compression: null, redaction)!,
+			[path],
+			TestContext.Current.CancellationToken);
+		var strippedContext = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				sourceRoot,
+				compressionSession,
+				CodeTransformKinds.Comments),
+			redaction)!;
+		var stripped = await preparer.AnalyzeAsync(
+			strippedContext,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, plain.DetectedCount);
+		Assert.Equal(0, stripped.DetectedCount);
+		await using var prepared = await preparer.PrepareAsync(
+			strippedContext,
+			[path],
+			TestContext.Current.CancellationToken);
+		Assert.Equal(
+			expected,
+			await File.ReadAllTextAsync(
+				prepared.GetFile(path).ContentPath,
+				TestContext.Current.CancellationToken));
 	}
 
 	[Theory]

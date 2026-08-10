@@ -12,7 +12,8 @@ public sealed record CompressionLanguageInfo(
 	string DisplayName,
 	IReadOnlyList<string> Extensions,
 	string GrammarLibrary,
-	string GrammarExport);
+	string GrammarExport,
+	CodeTransformKinds TransformCapabilities);
 
 /// <summary>
 /// Builds compression plans with tree-sitter. Everything language-specific is data: the grammar,
@@ -138,21 +139,25 @@ public sealed class TreeSitterCodeCompressor :
 			pack.DisplayName,
 			pack.Extensions,
 			pack.Library,
-			pack.Export)).ToArray();
+			pack.Export,
+			pack.TransformCapabilities)).ToArray();
 
 	public bool IsSupported(string relativePath) =>
-		_byExtension.ContainsKey(Path.GetExtension(relativePath));
+		IsSupported(relativePath, CodeTransformKinds.Bodies);
+
+	public bool IsSupported(string relativePath, CodeTransformKinds kinds)
+	{
+		ValidateTransformKinds(kinds);
+		return _byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates) &&
+		       candidates.Any(pack => (pack.TransformCapabilities & kinds) != CodeTransformKinds.None);
+	}
 
 	public ICodeCompressionScope CreateScope(string projectRoot) =>
 		CreateScope(projectRoot, CodeTransformKinds.Bodies);
 
 	public ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds)
 	{
-		if (kinds is CodeTransformKinds.None ||
-		    (kinds & ~(CodeTransformKinds.Bodies | CodeTransformKinds.Comments)) != 0)
-		{
-			throw new ArgumentOutOfRangeException(nameof(kinds), kinds, null);
-		}
+		ValidateTransformKinds(kinds);
 
 		lock (_lifetimeSync)
 		{
@@ -220,6 +225,15 @@ public sealed class TreeSitterCodeCompressor :
 		_languagePools.Clear();
 		_workerBudget.Dispose();
 	}
+
+	private static void ValidateTransformKinds(CodeTransformKinds kinds)
+	{
+		if (kinds is CodeTransformKinds.None ||
+		    (kinds & ~(CodeTransformKinds.Bodies | CodeTransformKinds.Comments)) != 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(kinds), kinds, null);
+		}
+	}
 }
 
 /// <summary>
@@ -246,17 +260,22 @@ internal sealed class TreeSitterCompressionScope(
 
 		if (!byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates))
 			return Refused(relativePath, "unknown", CodeCompressionOutcome.UnchangedUnsupportedLanguage, content.Length);
+		var firstCapable = candidates.FirstOrDefault(
+			candidate => (candidate.TransformCapabilities & transformKinds) != CodeTransformKinds.None);
+		if (firstCapable is null)
+			return Refused(relativePath, "unknown", CodeCompressionOutcome.UnchangedUnsupportedLanguage, content.Length);
 
 		if (content.Length > TreeSitterCodeCompressor.MaximumParsableCharacters)
 		{
 			return Refused(
 				relativePath,
-				candidates[0].Id,
+				firstCapable.Id,
 				CodeCompressionOutcome.UnchangedTooLarge,
 				content.Length);
 		}
 
-		var pack = ResolveLanguagePack(candidates, relativePath, content);
+		var pack = ResolveLanguagePack(candidates, relativePath, content, transformKinds);
+		var effectiveKinds = transformKinds & pack.TransformCapabilities;
 
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -265,7 +284,7 @@ internal sealed class TreeSitterCompressionScope(
 		{
 			lease = languagePoolProvider(pack).Rent(
 				operationId,
-				(transformKinds & CodeTransformKinds.Comments) != 0,
+				(effectiveKinds & CodeTransformKinds.Comments) != 0,
 				cancellationToken);
 		}
 		catch (Exception exception) when (IsLanguageRuntimeFailure(exception))
@@ -290,7 +309,7 @@ internal sealed class TreeSitterCompressionScope(
 				language,
 				original,
 				source,
-				transformKinds,
+				effectiveKinds,
 				cancellationToken);
 			if (edits is null)
 				return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
@@ -368,7 +387,8 @@ internal sealed class TreeSitterCompressionScope(
 	private static CompressionLanguagePack ResolveLanguagePack(
 		IReadOnlyList<CompressionLanguagePack> candidates,
 		string relativePath,
-		string source)
+		string source,
+		CodeTransformKinds transformKinds)
 	{
 		if (candidates.Count == 1)
 			return candidates[0];
@@ -377,12 +397,14 @@ internal sealed class TreeSitterCompressionScope(
 		{
 			var languageId = ContainsCppHeaderEvidence(source) ? "cpp" : "c";
 			var selected = candidates.FirstOrDefault(candidate =>
+				(candidate.TransformCapabilities & transformKinds) != CodeTransformKinds.None &&
 				candidate.Id.Equals(languageId, StringComparison.Ordinal));
 			if (selected is not null)
 				return selected;
 		}
 
-		return candidates[0];
+		return candidates.First(candidate =>
+			(candidate.TransformCapabilities & transformKinds) != CodeTransformKinds.None);
 	}
 
 	private static bool ContainsCppHeaderEvidence(string source)
@@ -630,9 +652,11 @@ internal sealed class TreeSitterCompressionScope(
 		var expressionCaptures = new List<Node>();
 		if ((transformKinds & CodeTransformKinds.Bodies) != 0)
 		{
+			if (language.Runtime.Bodies is not { } bodies || language.BodiesCursor is not { } bodiesCursor)
+				return null;
 			var captureCount = 0;
-			language.BodiesCursor.Execute(language.Runtime.Bodies, tree.RootNode);
-			foreach (var capture in language.BodiesCursor.Captures)
+			bodiesCursor.Execute(bodies, tree.RootNode);
+			foreach (var capture in bodiesCursor.Captures)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				if (capture.Name is not ("body" or "expression"))
@@ -644,7 +668,7 @@ internal sealed class TreeSitterCompressionScope(
 					? bodyCaptures
 					: expressionCaptures).Add(capture.Node);
 			}
-			if (language.BodiesCursor.IsMatchLimitExceeded)
+			if (bodiesCursor.IsMatchLimitExceeded)
 				return null;
 		}
 
@@ -1724,7 +1748,7 @@ internal readonly record struct LanguageWorkerBudgetDiagnostics(
 /// </summary>
 internal sealed record LanguageRuntime(
 	Language Language,
-	Query Bodies,
+	Query? Bodies,
 	Query Declarations,
 	Query? Preserves,
 	Lazy<Query?> Comments) : IDisposable
@@ -1737,7 +1761,9 @@ internal sealed record LanguageRuntime(
 		Query? preserves = null;
 		try
 		{
-			bodies = new Query(language, pack.BodiesQuery);
+			bodies = pack.BodiesQuery is null
+				? null
+				: new Query(language, pack.BodiesQuery);
 			declarations = new Query(language, pack.DeclarationsQuery);
 			preserves = pack.PreservesQuery is null
 				? null
@@ -1765,7 +1791,7 @@ internal sealed record LanguageRuntime(
 			Comments.Value?.Dispose();
 		Preserves?.Dispose();
 		Declarations.Dispose();
-		Bodies.Dispose();
+		Bodies?.Dispose();
 		Language.Dispose();
 	}
 }
@@ -1775,7 +1801,7 @@ internal sealed record LoadedLanguage(
 	LanguageRuntime Runtime,
 	Parser Parser,
 	Tree IdleTree,
-	QueryCursor BodiesCursor,
+	QueryCursor? BodiesCursor,
 	QueryCursor DeclarationsCursor,
 	QueryCursor? PreservesCursor) : IDisposable
 {
@@ -1794,7 +1820,9 @@ internal sealed record LoadedLanguage(
 		{
 			idleTree = parser.Parse(string.Empty) ??
 			           throw new InvalidOperationException("Tree-sitter could not create an idle tree.");
-			bodiesCursor = CreateBoundedCursor(queryMatchLimit);
+			bodiesCursor = runtime.Bodies is null
+				? null
+				: CreateBoundedCursor(queryMatchLimit);
 			declarationsCursor = CreateBoundedCursor(queryMatchLimit);
 			preservesCursor = runtime.Preserves is null
 				? null
@@ -1851,7 +1879,8 @@ internal sealed record LoadedLanguage(
 	public void ReleaseQueryTreeReferences()
 	{
 		var root = IdleTree.RootNode;
-		BodiesCursor.Execute(Runtime.Bodies, root);
+		if (BodiesCursor is not null && Runtime.Bodies is not null)
+			BodiesCursor.Execute(Runtime.Bodies, root);
 		DeclarationsCursor.Execute(Runtime.Declarations, root);
 		if (PreservesCursor is not null && Runtime.Preserves is not null)
 			PreservesCursor.Execute(Runtime.Preserves, root);
@@ -1869,7 +1898,7 @@ internal sealed record LoadedLanguage(
 		CommentsCursor?.Dispose();
 		PreservesCursor?.Dispose();
 		DeclarationsCursor.Dispose();
-		BodiesCursor.Dispose();
+		BodiesCursor?.Dispose();
 		IdleTree.Dispose();
 		Parser.Dispose();
 	}
