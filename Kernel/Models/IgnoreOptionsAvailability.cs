@@ -22,4 +22,6 @@ public sealed record IgnoreOptionsAvailability(
 	int? SecretRedactionsCount = null,
 	int? SecretMatchesCount = null,
 	int? CompressedFilesCount = null,
-	int? UncompressedFilesCount = null);
+	int? UncompressedFilesCount = null,
+	int? CommentStrippedFilesCount = null,
+	int? CommentUnchangedFilesCount = null);

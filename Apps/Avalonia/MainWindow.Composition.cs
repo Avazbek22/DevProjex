@@ -73,7 +73,10 @@ public partial class MainWindow
 
 		var files = GetOrderedSelectedFilePaths();
 		var snapshot = _codeCompressionSession.Snapshot;
-		return snapshot.SelectionKey == CodeCompressionSession.BuildSelectionKey(_currentPath, files)
+		var context = CreateCodeCompressionContext();
+		return context is not null &&
+		       snapshot.SelectionKey == CodeCompressionSession.BuildSelectionKey(_currentPath, files) &&
+		       snapshot.TransformIdentity.Equals(context.TransformIdentity, StringComparison.Ordinal)
 			? snapshot
 			: null;
 	}
@@ -90,13 +93,18 @@ public partial class MainWindow
 			_secretRedactionCount,
 			_secretRedactionScanState,
 			_secretRedactionMatchedCount,
-			_codeCompressionSnapshot?.CompressedFiles,
+			_codeCompressionSnapshot?.BodyTransformedFiles,
+			_codeCompressionSnapshot?.UnchangedFiles,
+			_codeCompressionSnapshot?.CommentTransformedFiles,
 			_codeCompressionSnapshot?.UnchangedFiles);
 		_viewModel.SetCompressionStatus(
-			_codeCompressionSnapshot?.CompressedFiles,
+			_codeCompressionSnapshot?.BodyTransformedFiles,
 			_codeCompressionSnapshot?.TotalFiles,
 			_codeCompressionSnapshot?.SourceCharacters,
 			_codeCompressionSnapshot?.TransformedCharacters);
+		_viewModel.SetCommentStripStatus(
+			_codeCompressionSnapshot?.CommentTransformedFiles,
+			_codeCompressionSnapshot?.TotalFiles);
 	}
 
 	private void ScheduleCompressionRefreshForSelectionChange()
@@ -145,17 +153,21 @@ public partial class MainWindow
 	}
 
 	private string GetCurrentSecretTransformIdentity() =>
-		CreateCodeCompressionContext()?.Session.TransformIdentity ?? string.Empty;
+		CreateCodeCompressionContext()?.TransformIdentity ?? string.Empty;
 
 	private CodeCompressionContext? CreateCodeCompressionContext()
 	{
-		// The Compress Code checkbox is a draft until «Apply settings» publishes a tree; only the
-		// state captured at that point drives compression, so the preview, the status bar and the
-		// produced output never change from an uncommitted checkbox.
-		if (string.IsNullOrWhiteSpace(_currentPath) || !_appliedCompressCodeEnabled)
+		// Syntax transformations are drafts until «Apply settings» publishes a tree. Only the
+		// captured state drives output, previews and counters; uncommitted checkboxes do no work.
+		if (string.IsNullOrWhiteSpace(_currentPath))
 			return null;
 
-		return new CodeCompressionContext(_currentPath, _codeCompressionSession);
+		var kinds = CodeTransformIdentity.Resolve(
+			_appliedCompressCodeEnabled,
+			_appliedStripCommentsEnabled);
+		return kinds == CodeTransformKinds.None
+			? null
+			: new CodeCompressionContext(_currentPath, _codeCompressionSession, kinds);
 	}
 
 	/// <summary>
@@ -219,7 +231,7 @@ public partial class MainWindow
 			_currentPath,
 			_currentTree,
 			files,
-			compressionContext?.Session.TransformIdentity ?? string.Empty,
+			compressionContext?.TransformIdentity ?? string.Empty,
 			_secretRedactionSession.OutputRevision,
 			new ContentTransformationContext(
 				compressionContext,
@@ -725,6 +737,7 @@ public partial class MainWindow
 	private int? _secretRedactionMatchedCount;
 	private SecretScanState _secretRedactionScanState = SecretScanState.Disabled;
 	private bool _appliedCompressCodeEnabled;
+	private bool _appliedStripCommentsEnabled;
 
     public MainWindow(
         DesktopStartupOptions startupOptions,

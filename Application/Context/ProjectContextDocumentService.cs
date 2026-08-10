@@ -166,14 +166,19 @@ public sealed class ProjectContextDocumentService(
 	private bool ShouldRedact(ProjectContextPlan plan, ProjectContextView view) =>
 		IncludesContent(view) && CreateTransformationContext(plan) is not null;
 
-	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan) =>
-		ContentTransformationContext.For(
-			codeCompressionSession is not null && plan.Selection.CompressCode == true
-				? new CodeCompressionContext(plan.SourceRoot, codeCompressionSession)
+	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan)
+	{
+		var kinds = CodeTransformIdentity.Resolve(
+			plan.Selection.CompressCode == true,
+			plan.Selection.StripComments == true);
+		return ContentTransformationContext.For(
+			codeCompressionSession is not null && kinds != CodeTransformKinds.None
+				? new CodeCompressionContext(plan.SourceRoot, codeCompressionSession, kinds)
 				: null,
 			secretRedactionSession is not null && plan.Selection.HideSecrets == true
 				? new SecretRedactionContext(plan.SourceRoot, secretRedactionSession)
 				: null);
+	}
 
 	private async Task<string> BuildRedactedAsync(
 		ProjectContextPlan plan,

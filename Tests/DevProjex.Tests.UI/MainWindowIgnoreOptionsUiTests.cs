@@ -2165,6 +2165,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.False(secretsOption.HasStatus);
 			Assert.False(secretsOption.IsWarningStatus);
 			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+
+			var commentsOption = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static candidate => candidate.Id == IgnoreOptionId.StripComments);
+			Assert.False(commentsOption.IsChecked);
+			Assert.False(commentsOption.HasStatus);
+			commentsOption.IsChecked = true;
+			viewModel.SetCommentStripPreparationStatus(isActive: true);
+			Assert.Equal("Removing comments…", commentsOption.StatusText);
+			viewModel.SetCommentStripStatus(strippedFiles: 7, totalFiles: 11);
+			Assert.Equal("Removing comments…", commentsOption.StatusText);
+			viewModel.SetCommentStripPreparationStatus(isActive: false);
+			Assert.Equal("Removed comments from 7 of 11 files.", commentsOption.StatusText);
 		}
 		finally
 		{
@@ -2197,7 +2210,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					StringComparison.Ordinal),
 				"the failed opt-in secret discovery to settle");
 
-			Assert.Equal(2, viewModel.ContentProcessingOptions.Count);
+			Assert.Equal(
+				ProjectPresentationCatalog.ContentTransformationOptionIds.Count,
+				viewModel.ContentProcessingOptions.Count);
 			var compression = Assert.Single(
 				viewModel.ContentProcessingOptions,
 				static option => option.Id == IgnoreOptionId.CompressCode);

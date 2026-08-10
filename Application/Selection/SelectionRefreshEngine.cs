@@ -789,6 +789,7 @@ public sealed class SelectionRefreshEngine(
             IgnoreOptionId.SmartIgnore => controllerImpactCounts.SmartIgnore > 0,
 			IgnoreOptionId.HideSecrets => true,
 			IgnoreOptionId.CompressCode => true,
+			IgnoreOptionId.StripComments => true,
             IgnoreOptionId.HiddenFolders => counts.HiddenFolders > 0,
             IgnoreOptionId.HiddenFiles => counts.HiddenFiles > 0,
             IgnoreOptionId.DotFolders => counts.DotFolders > 0,

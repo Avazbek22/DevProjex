@@ -47,6 +47,10 @@ Code compression is stored as the independent `compressCode` Boolean and also
 remains off in the built-in `standard` profile. Profiles created before this field
 was introduced load it as `false`.
 
+Comment removal is stored as the independent `stripComments` Boolean. It remains off in
+the built-in `standard` profile, and profiles created before the field existed load it as
+`false`.
+
 ## Schema v1
 
 ```json
@@ -60,6 +64,7 @@ was introduced load it as `false`.
     "gitMode": "gitignore",
     "hideSecrets": false,
     "compressCode": false,
+    "stripComments": false,
     "exclusions": [
       "smart-ignore",
       "hidden-folders",
@@ -79,6 +84,7 @@ Semantics:
 - Git mode is exactly one of `none`, `gitignore`, or `tracked`;
 - `hideSecrets` independently enables the content transformation;
 - `compressCode` independently enables syntax-aware code compression;
+- `stripComments` independently removes syntax-tree comments and Python docstrings from output;
 - Exclusions contain only known path-filter tokens.
 
 Profiles written by current DevProjex versions keep `hideSecrets` separate. For

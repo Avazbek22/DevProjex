@@ -92,10 +92,22 @@ public sealed class CompressionOptimizationBenchmarkTests
 	{
 		var scenarios = new Dictionary<string, ScenarioRun>(StringComparer.Ordinal)
 		{
-			["none"] = await RunScenarioAsync(plan, compress: false, hideSecrets: false, cancellationToken),
-			["compression"] = await RunScenarioAsync(plan, compress: true, hideSecrets: false, cancellationToken),
-			["secrets"] = await RunScenarioAsync(plan, compress: false, hideSecrets: true, cancellationToken),
-			["compressionAndSecrets"] = await RunScenarioAsync(plan, compress: true, hideSecrets: true, cancellationToken)
+			["none"] = await RunScenarioAsync(
+				plan, compress: false, stripComments: false, hideSecrets: false, cancellationToken),
+			["compression"] = await RunScenarioAsync(
+				plan, compress: true, stripComments: false, hideSecrets: false, cancellationToken),
+			["comments"] = await RunScenarioAsync(
+				plan, compress: false, stripComments: true, hideSecrets: false, cancellationToken),
+			["secrets"] = await RunScenarioAsync(
+				plan, compress: false, stripComments: false, hideSecrets: true, cancellationToken),
+			["compressionAndComments"] = await RunScenarioAsync(
+				plan, compress: true, stripComments: true, hideSecrets: false, cancellationToken),
+			["commentsAndSecrets"] = await RunScenarioAsync(
+				plan, compress: false, stripComments: true, hideSecrets: true, cancellationToken),
+			["compressionAndSecrets"] = await RunScenarioAsync(
+				plan, compress: true, stripComments: false, hideSecrets: true, cancellationToken),
+			["all"] = await RunScenarioAsync(
+				plan, compress: true, stripComments: true, hideSecrets: true, cancellationToken)
 		};
 		var toggle = await RunToggleScenarioAsync(plan, cancellationToken);
 		var golden = await BuildGoldenAsync(goldenPlan, cancellationToken);
@@ -105,9 +117,11 @@ public sealed class CompressionOptimizationBenchmarkTests
 	private static async Task<ScenarioRun> RunScenarioAsync(
 		ProjectContextPlan plan,
 		bool compress,
+		bool stripComments,
 		bool hideSecrets,
 		CancellationToken cancellationToken)
 	{
+		var transformKinds = CodeTransformIdentity.Resolve(compress, stripComments);
 		var coldPreview = await MeasurePhaseAsync(
 			async token =>
 			{
@@ -115,7 +129,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 				using var coldSecrets = new SecretRedactionSession(CreateSmartSecretsDetector());
 				return await BuildContentPreviewAsync(
 					plan,
-					compress ? coldCompression : null,
+					transformKinds == CodeTransformKinds.None ? null : coldCompression,
+					transformKinds,
 					hideSecrets ? coldSecrets : null,
 					token);
 			},
@@ -126,8 +141,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 		var analyzer = new FileContentAnalyzer();
 		using var compression = CodeCompressionFactory.CreateSession();
 		using var secrets = new SecretRedactionSession(CreateSmartSecretsDetector());
-		var compressionContext = compress
-			? new CodeCompressionContext(plan.SourceRoot, compression)
+		var compressionContext = transformKinds != CodeTransformKinds.None
+			? new CodeCompressionContext(plan.SourceRoot, compression, transformKinds)
 			: null;
 		var redactionContext = hideSecrets
 			? new SecretRedactionContext(plan.SourceRoot, secrets)
@@ -176,10 +191,11 @@ public sealed class CompressionOptimizationBenchmarkTests
 			cancellationToken);
 
 		var warmPreview = await MeasurePhaseAsync(
-			token => BuildContentPreviewAsync(
-				plan,
-				compress ? compression : null,
-				hideSecrets ? secrets : null,
+				token => BuildContentPreviewAsync(
+					plan,
+					compressionContext is null ? null : compression,
+					transformKinds,
+					hideSecrets ? secrets : null,
 				token),
 			compression,
 			secrets,
@@ -187,7 +203,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 		var repeatedPreview = await MeasurePhaseAsync(
 			token => BuildContentPreviewAsync(
 				plan,
-				compress ? compression : null,
+				compressionContext is null ? null : compression,
+				transformKinds,
 				hideSecrets ? secrets : null,
 				token),
 			compression,
@@ -286,6 +303,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 	private static async Task<long> BuildContentPreviewAsync(
 		ProjectContextPlan plan,
 		CodeCompressionSession? compression,
+		CodeTransformKinds transformKinds,
 		SecretRedactionSession? secrets,
 		CancellationToken cancellationToken)
 	{
@@ -295,7 +313,9 @@ public sealed class CompressionOptimizationBenchmarkTests
 				cancellationToken,
 				path => Path.GetRelativePath(plan.SourceRoot, path).Replace('\\', '/'),
 				transformationContext: ContentTransformationContext.For(
-					compression is null ? null : new CodeCompressionContext(plan.SourceRoot, compression),
+					compression is null
+						? null
+						: new CodeCompressionContext(plan.SourceRoot, compression, transformKinds),
 					secrets is null ? null : new SecretRedactionContext(plan.SourceRoot, secrets)));
 		return document?.CharacterCount ?? 0;
 	}

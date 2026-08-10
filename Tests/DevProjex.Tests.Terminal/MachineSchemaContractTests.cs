@@ -43,6 +43,8 @@ public sealed class MachineSchemaContractTests
 		using var document = JsonDocument.Parse(environment.StandardOutput);
 		var selectionPayload = document.RootElement.GetProperty("selection");
 		Assert.False(selectionPayload.GetProperty("hideSecrets").GetBoolean());
+		Assert.False(selectionPayload.GetProperty("compressCode").GetBoolean());
+		Assert.False(selectionPayload.GetProperty("stripComments").GetBoolean());
 		Assert.DoesNotContain(
 			"hide-secrets",
 			selectionPayload.GetProperty("exclusions")

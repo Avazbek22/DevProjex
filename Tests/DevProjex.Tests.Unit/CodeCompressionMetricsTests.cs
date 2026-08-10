@@ -36,6 +36,10 @@ public sealed class CodeCompressionMetricsTests
 			AddCase(cases,
 			"void Work()\n{\n    Execute();\n}\n",
 			new CodeCompressionEdit(12, 19, "{ }"));
+			AddCase(cases,
+			"// docs\r\nint value = 1; // trailing\r\n",
+			new CodeCompressionEdit(0, 9, string.Empty) { Kinds = CodeTransformKinds.Comments },
+			new CodeCompressionEdit(23, 11, string.Empty) { Kinds = CodeTransformKinds.Comments });
 			return cases;
 		}
 	}

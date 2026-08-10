@@ -17,6 +17,20 @@ public sealed class DirectCommandIntegrationTests
 		}
 		""";
 
+	private const string CommentedSource = """
+		// file documentation that must disappear
+		namespace Sample;
+
+		public sealed class CommentedWidget
+		{
+			public string Value() // trailing note that must disappear
+			{
+				var marker = "// string content must remain";
+				return marker; /* inline note that must disappear */
+			}
+		}
+		""";
+
 	private const string RubyCompressibleSource = """
 		class Service
 		  def initialize(root)
@@ -177,6 +191,112 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Fact]
+	public async Task AnalyzeWithStripCommentsReportsIndependentModeAndCounters()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/CommentedWidget.cs", CommentedSource);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+			[
+				"analyze", workspace.Path,
+				"--format", "json",
+				"--strip-comments",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--language", "en"
+			],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var root = document.RootElement;
+		var selection = root.GetProperty("selection");
+		Assert.False(selection.GetProperty("compressCode").GetBoolean());
+		Assert.True(selection.GetProperty("stripComments").GetBoolean());
+		var compression = root.GetProperty("compression");
+		Assert.Equal(1, compression.GetProperty("compressedFiles").GetInt32());
+		Assert.Equal(0, compression.GetProperty("bodyTransformedFiles").GetInt32());
+		Assert.Equal(1, compression.GetProperty("commentTransformedFiles").GetInt32());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task AnalyzeTextKeepsBodyAndCommentFileCountersIndependent()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile(
+			"src/BodyOnly.cs",
+			"public static class BodyOnly { public static int Run() { var value = 40; return value + 2; } }");
+		workspace.WriteFile(
+			"src/CommentOnly.cs",
+			"// documentation that is deliberately long enough to shrink\n" +
+			"public static class CommentOnly { public const string Value = \"kept\"; }");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+			[
+				"analyze", workspace.Path,
+				"--compress",
+				"--strip-comments",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--language", "en"
+			],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("Compressed 1 of 2 files.", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Removed comments from 1 of 2 files.", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ContextExportWithStripCommentsPreservesCodeAndOptionallyCompressesBodies(
+		bool compress)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/CommentedWidget.cs", CommentedSource);
+		var environment = new TestTerminalEnvironment();
+		var arguments = new List<string>
+		{
+			"export", "context", workspace.Path,
+			"--view", "content",
+			"--format", "markdown",
+			"--strip-comments",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"-o", "-"
+		};
+		if (compress)
+			arguments.Add("--compress");
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(arguments, TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain("must disappear", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("public string Value()", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(
+			!compress,
+			environment.StandardOutput.Contains(
+				"// string content must remain",
+				StringComparison.Ordinal));
+		Assert.Equal(!compress, environment.StandardOutput.Contains("return marker;", StringComparison.Ordinal));
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Theory]
 	[InlineData("src/service.rb", RubyCompressibleSource, "@root = root", "ruby_direct_cli_marker")]
 	[InlineData("src/Service.php", PhpCompressibleSource, "$this->root = trim($root);", "$php_direct_cli_marker")]
@@ -253,6 +373,48 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Contains("public int Compute(int left, int right)", exported, StringComparison.Ordinal);
 		Assert.DoesNotContain("valueThatMustDisappear", exported, StringComparison.Ordinal);
 		Assert.Equal(Path.GetFullPath(destination) + Environment.NewLine, environment.StandardOutput);
+	}
+
+	[Theory]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	public async Task ProjectExportWithStripCommentsWritesTheSameTransformedBytes(string kind)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/CommentedWidget.cs", CommentedSource);
+		var destination = kind == "zip"
+			? Path.Combine(workspace.Path, "comments.zip")
+			: Path.Combine(workspace.Path, "comments");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunProjectExportAsync(
+			project,
+			destination,
+			kind,
+			environment,
+			stripComments: true);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		string exported;
+		if (kind == "zip")
+		{
+			using var archive = System.IO.Compression.ZipFile.OpenRead(destination);
+			var entry = Assert.Single(archive.Entries, static candidate =>
+				candidate.FullName.EndsWith("CommentedWidget.cs", StringComparison.Ordinal));
+			using var reader = new StreamReader(entry.Open());
+			exported = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+		}
+		else
+		{
+			exported = await File.ReadAllTextAsync(
+				Path.Combine(destination, "src", "CommentedWidget.cs"),
+				TestContext.Current.CancellationToken);
+		}
+
+		Assert.DoesNotContain("must disappear", exported, StringComparison.Ordinal);
+		Assert.Contains("return marker;", exported, StringComparison.Ordinal);
+		Assert.Contains("// string content must remain", exported, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -572,7 +734,8 @@ public sealed class DirectCommandIntegrationTests
 		string output,
 		string kind,
 		TestTerminalEnvironment environment,
-		bool compress = false)
+		bool compress = false,
+		bool stripComments = false)
 	{
 		var arguments = new List<string>
 		{
@@ -585,6 +748,8 @@ public sealed class DirectCommandIntegrationTests
 		};
 		if (compress)
 			arguments.Add("--compress");
+		if (stripComments)
+			arguments.Add("--strip-comments");
 		return new TerminalApplication(environment, new TerminalServiceFactory())
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
 	}

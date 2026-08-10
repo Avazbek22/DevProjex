@@ -614,6 +614,97 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
+	public void CommentQueryMatchLimitExceededRejectsTheWholeFileAndCachesTheRefusal()
+	{
+		using var harness = CodeCompressionTestHarness.For("javascript");
+		var boundedPack = harness.Pack with
+		{
+			CommentsQuery = harness.Pack.CommentsQuery + """
+
+			(array
+			  (identifier) @comment
+			  (identifier) @comment)
+			"""
+		};
+		const uint matchLimit = 32;
+		using var compressor = new TreeSitterCodeCompressor(
+			CodeCompressionTestHarness.CreateLocator(),
+			[boundedPack],
+			matchLimit);
+		using var session = new CodeCompressionSession(compressor);
+		var identifiers = string.Join(", ", Enumerable.Range(0, 64).Select(index => $"value{index}"));
+		var source = $"// docs\nconst values = [{identifiers}];\n";
+
+		for (var pass = 0; pass < 2; pass++)
+		{
+			using var scope = new CodeCompressionContext(
+				"project",
+				session,
+				CodeTransformKinds.Comments).BeginOutput(["sample.js"]);
+			var result = scope.Transform(
+				"sample.js",
+				"sample.js",
+				source,
+				TestContext.Current.CancellationToken);
+			var snapshot = scope.Complete();
+
+			Assert.Equal(source, result.Text);
+			Assert.Equal(
+				CodeCompressionOutcome.UnchangedGateRejected,
+				Assert.Single(snapshot.Unchanged).Outcome);
+		}
+
+		Assert.Equal(1, session.Diagnostics.AnalysisExecutions);
+		Assert.Equal(1, session.Diagnostics.CacheEntries);
+		Assert.Equal(1, session.Diagnostics.CacheHits);
+	}
+
+	[Fact]
+	public void CommentQueryIsLazyAndACorruptOptionalQueryDoesNotPoisonBodyCompression()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var pack = harness.Pack with
+		{
+			CommentsQuery = "(definitely_not_a_csharp_node) @comment"
+		};
+		using var compressor = CodeCompressionTestHarness.CreateCompressor(pack);
+
+		using (var bodies = compressor.CreateScope(
+			       Path.GetTempPath(),
+			       CodeTransformKinds.Bodies))
+		{
+			var analysis = bodies.Analyze(
+				"Widget.cs",
+				"Widget.cs",
+				CodeCompressionFixtures.CSharp,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
+		}
+
+		using (var comments = compressor.CreateScope(
+			       Path.GetTempPath(),
+			       CodeTransformKinds.Comments))
+		{
+			var analysis = comments.Analyze(
+				"Widget.cs",
+				"Widget.cs",
+				CodeCompressionFixtures.CSharp,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(CodeCompressionOutcome.UnchangedParseFailed, analysis.Plan.Outcome);
+		}
+
+		using var secondBodies = compressor.CreateScope(
+			Path.GetTempPath(),
+			CodeTransformKinds.Bodies);
+		var secondAnalysis = secondBodies.Analyze(
+			"Widget.cs",
+			"Widget.cs",
+			CodeCompressionFixtures.CSharp,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CodeCompressionOutcome.Compressed, secondAnalysis.Plan.Outcome);
+	}
+
+	[Fact]
 	public void CompressionIsDeterministic()
 	{
 		var first = Compress("Widget.cs", CodeCompressionFixtures.CSharp);

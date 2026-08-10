@@ -40,6 +40,7 @@ public sealed record ProjectSelectionSpec(
 	IReadOnlyCollection<ProjectExclusion>? Exclusions = null,
 	bool? HideSecrets = null,
 	bool? CompressCode = null,
+	bool? StripComments = null,
 	ProjectProfileReference? ProfileSource = null)
 {
 	/// <summary>
@@ -71,6 +72,7 @@ public sealed record ProjectSelectionSpec(
 		Exclusions: StandardExclusions,
 		HideSecrets: false,
 		CompressCode: false,
+		StripComments: false,
 		ProfileSource: ProjectProfileReference.Standard);
 }
 
@@ -87,7 +89,8 @@ public sealed record ProjectSelectionApplicationIntent(
 	ProjectSelectionApplicationMode GitMode,
 	ProjectSelectionApplicationMode Exclusions,
 	ProjectSelectionApplicationMode HideSecrets = ProjectSelectionApplicationMode.Preserve,
-	ProjectSelectionApplicationMode CompressCode = ProjectSelectionApplicationMode.Preserve);
+	ProjectSelectionApplicationMode CompressCode = ProjectSelectionApplicationMode.Preserve,
+	ProjectSelectionApplicationMode StripComments = ProjectSelectionApplicationMode.Preserve);
 
 internal sealed record LocalProjectSelectionState(
 	ProjectSelectionProfile Profile,

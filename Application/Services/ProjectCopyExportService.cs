@@ -32,7 +32,7 @@ public sealed class ProjectCopyExportService(
 			ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
 
 			ValidateSources(plan, cancellationToken);
-			await using var prepared = request.RedactSecrets || request.CompressCode
+			await using var prepared = request.RedactSecrets || request.CompressCode || request.StripComments
 				? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
 				: null;
 			return request.Format switch
@@ -152,7 +152,7 @@ public sealed class ProjectCopyExportService(
 	{
 		if (contentAnalyzer is null ||
 		    (request.RedactSecrets && secretRedactionSession is null) ||
-		    (request.CompressCode && codeCompressionSession is null))
+		    ((request.CompressCode || request.StripComments) && codeCompressionSession is null))
 		{
 			throw new ProjectCopyExportException(
 				ProjectCopyExportError.InvalidRequest,
@@ -164,9 +164,10 @@ public sealed class ProjectCopyExportService(
 			.Select(static entry => entry.SourcePath)
 			.ToArray();
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
+		var transformKinds = CodeTransformIdentity.Resolve(request.CompressCode, request.StripComments);
 		var context = ContentTransformationContext.For(
-			request.CompressCode && codeCompressionSession is not null
-				? new CodeCompressionContext(plan.ProjectRootPath, codeCompressionSession)
+			transformKinds != CodeTransformKinds.None && codeCompressionSession is not null
+				? new CodeCompressionContext(plan.ProjectRootPath, codeCompressionSession, transformKinds)
 				: null,
 			request.RedactSecrets && secretRedactionSession is not null
 				? new SecretRedactionContext(plan.ProjectRootPath, secretRedactionSession)

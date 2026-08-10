@@ -44,6 +44,7 @@ public sealed class CodeCompressionQueryContractTests
 		Assert.NotNull(harness.Bodies);
 		Assert.NotNull(harness.Declarations);
 		Assert.NotNull(harness.Preserves);
+		Assert.NotNull(harness.Comments);
 	}
 
 	[Theory]
@@ -54,6 +55,50 @@ public sealed class CodeCompressionQueryContractTests
 
 		Assert.True(harness.CountCaptures(harness.Bodies) > 0, "the bodies query captured nothing");
 		Assert.True(harness.CountCaptures(harness.Declarations) > 0, "the declarations query captured nothing");
+		Assert.True(
+			harness.CountCaptures(harness.Comments!, CodeCompressionTestHarness.CommentFixtureFor(languageId)) > 0,
+			"the comments query captured nothing");
+	}
+
+	[Fact]
+	public void EveryPackShipsACommentCaptureQuery()
+	{
+		Assert.All(
+			CodeCompressionTestHarness.LanguagePacks,
+			static pack =>
+			{
+				Assert.NotNull(pack.CommentsQuery);
+				Assert.Contains("@comment", pack.CommentsQuery, StringComparison.Ordinal);
+			});
+	}
+
+	[Fact]
+	public void EveryPackIdentityIncludesItsCommentQueryRevision()
+	{
+		var expectedVersions = new Dictionary<string, int>(StringComparer.Ordinal)
+		{
+			["c"] = 4,
+			["cpp"] = 6,
+			["csharp"] = 9,
+			["go"] = 5,
+			["java"] = 6,
+			["javascript"] = 8,
+			["kotlin"] = 3,
+			["php"] = 2,
+			["python"] = 4,
+			["ruby"] = 2,
+			["rust"] = 5,
+			["scala"] = 2,
+			["tsx"] = 8,
+			["typescript"] = 8
+		};
+
+		Assert.Equal(
+			expectedVersions,
+			CodeCompressionTestHarness.LanguagePacks.ToDictionary(
+				static pack => pack.Id,
+				static pack => pack.QueryVersion,
+				StringComparer.Ordinal));
 	}
 
 	[Fact]

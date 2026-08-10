@@ -33,6 +33,7 @@ public sealed class TreeSitterCodeCompressor :
 	public const int MaximumParsableCharacters = 2 * 1024 * 1024;
 	internal const uint MaximumQueryMatchLimit = 4096;
 	internal const int MaximumBodyCapturesPerFile = 20_000;
+	internal const int MaximumCommentCapturesPerFile = 20_000;
 	internal const int MaximumPreservedRangesPerFile = 20_000;
 	internal const int MaximumEditsPerFile = 10_000;
 	internal const int MaximumDeclarationsPerFile = 25_000;
@@ -142,15 +143,25 @@ public sealed class TreeSitterCodeCompressor :
 	public bool IsSupported(string relativePath) =>
 		_byExtension.ContainsKey(Path.GetExtension(relativePath));
 
-	public ICodeCompressionScope CreateScope(string projectRoot)
+	public ICodeCompressionScope CreateScope(string projectRoot) =>
+		CreateScope(projectRoot, CodeTransformKinds.Bodies);
+
+	public ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds)
 	{
+		if (kinds is CodeTransformKinds.None ||
+		    (kinds & ~(CodeTransformKinds.Bodies | CodeTransformKinds.Comments)) != 0)
+		{
+			throw new ArgumentOutOfRangeException(nameof(kinds), kinds, null);
+		}
+
 		lock (_lifetimeSync)
 		{
 			ObjectDisposedException.ThrowIf(_disposeRequested, this);
 			_activeScopes++;
 			return new TreeSitterCompressionScope(
 				_byExtension,
-				TransformIdentity,
+				CodeTransformIdentity.Create(TransformIdentity, kinds),
+				kinds,
 				Interlocked.Increment(ref _nextScopeId),
 				GetLanguagePool,
 				ReleaseScope);
@@ -218,6 +229,7 @@ public sealed class TreeSitterCodeCompressor :
 internal sealed class TreeSitterCompressionScope(
 	IReadOnlyDictionary<string, IReadOnlyList<CompressionLanguagePack>> byExtension,
 	string transformIdentity,
+	CodeTransformKinds transformKinds,
 	long operationId,
 	Func<CompressionLanguagePack, LanguageWorkerPool> languagePoolProvider,
 	Action releaseScope) : ICodeCompressionScope
@@ -251,7 +263,10 @@ internal sealed class TreeSitterCompressionScope(
 		LanguageWorkerLease lease;
 		try
 		{
-			lease = languagePoolProvider(pack).Rent(operationId, cancellationToken);
+			lease = languagePoolProvider(pack).Rent(
+				operationId,
+				(transformKinds & CodeTransformKinds.Comments) != 0,
+				cancellationToken);
 		}
 		catch (Exception exception) when (IsLanguageRuntimeFailure(exception))
 		{
@@ -270,7 +285,13 @@ internal sealed class TreeSitterCompressionScope(
 		List<CodeParseDefect>? originalDefects;
 		try
 		{
-			var edits = CollectEdits(pack, language, original, source, cancellationToken);
+			var edits = CollectEdits(
+				pack,
+				language,
+				original,
+				source,
+				transformKinds,
+				cancellationToken);
 			if (edits is null)
 				return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
 			try
@@ -598,6 +619,7 @@ internal sealed class TreeSitterCompressionScope(
 		LoadedLanguage language,
 		Tree tree,
 		string source,
+		CodeTransformKinds transformKinds,
 		CancellationToken cancellationToken)
 	{
 		var preservedRanges = ReadPreservedRanges(language, tree.RootNode, cancellationToken);
@@ -606,25 +628,30 @@ internal sealed class TreeSitterCompressionScope(
 
 		var bodyCaptures = new List<Node>();
 		var expressionCaptures = new List<Node>();
-		var captureCount = 0;
-		language.BodiesCursor.Execute(language.Runtime.Bodies, tree.RootNode);
-		foreach (var capture in language.BodiesCursor.Captures)
+		if ((transformKinds & CodeTransformKinds.Bodies) != 0)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			if (capture.Name is not ("body" or "expression"))
-				continue;
-			if (captureCount >= TreeSitterCodeCompressor.MaximumBodyCapturesPerFile)
+			var captureCount = 0;
+			language.BodiesCursor.Execute(language.Runtime.Bodies, tree.RootNode);
+			foreach (var capture in language.BodiesCursor.Captures)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (capture.Name is not ("body" or "expression"))
+					continue;
+				if (captureCount >= TreeSitterCodeCompressor.MaximumBodyCapturesPerFile)
+					return null;
+				captureCount++;
+				(capture.Name.Equals("body", StringComparison.Ordinal)
+					? bodyCaptures
+					: expressionCaptures).Add(capture.Node);
+			}
+			if (language.BodiesCursor.IsMatchLimitExceeded)
 				return null;
-			captureCount++;
-			(capture.Name.Equals("body", StringComparison.Ordinal)
-				? bodyCaptures
-				: expressionCaptures).Add(capture.Node);
 		}
-		if (language.BodiesCursor.IsMatchLimitExceeded)
-			return null;
 
 		var raw = new List<RawCompressionEdit>(bodyCaptures.Count + expressionCaptures.Count);
-		var bodyRanges = expressionCaptures.Count == 0
+		var needsBodyRanges = expressionCaptures.Count > 0 ||
+		                      (transformKinds & CodeTransformKinds.Comments) != 0;
+		var bodyRanges = bodyCaptures.Count == 0 || !needsBodyRanges
 			? null
 			: bodyCaptures
 				.Select(static node => new SourceRange(node.StartIndex, node.EndIndex))
@@ -641,7 +668,8 @@ internal sealed class TreeSitterCompressionScope(
 				continue;
 
 			var start = node.StartIndex;
-			if (pack.PreserveLeadingDocstring)
+			if (pack.PreserveLeadingDocstring &&
+			    (transformKinds & CodeTransformKinds.Comments) == 0)
 			{
 				if (!TryResolveContentAfterLeadingDocstring(
 						node,
@@ -661,13 +689,42 @@ internal sealed class TreeSitterCompressionScope(
 		foreach (var node in expressionCaptures)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (bodyRanges!.Contains(new SourceRange(node.StartIndex, node.EndIndex)))
+			if (bodyRanges?.Contains(new SourceRange(node.StartIndex, node.EndIndex)) == true)
 				continue;
 			if (node.StartPosition.Row == node.EndPosition.Row)
 				continue;
 			if (!TryResolveExpressionEdit(pack, node, source.Length, out var expressionEdit))
 				return null;
 			raw.Add(expressionEdit);
+		}
+
+		if ((transformKinds & CodeTransformKinds.Comments) != 0)
+		{
+			var commentsCursor = language.ExecuteComments(tree.RootNode);
+			if (commentsCursor is null)
+				return null;
+			var commentCount = 0;
+			foreach (var capture in commentsCursor.Captures)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (capture.Name is not ("comment" or "docstring"))
+					continue;
+				if (commentCount >= TreeSitterCodeCompressor.MaximumCommentCapturesPerFile)
+					return null;
+				commentCount++;
+				if (TryResolveCommentEdit(
+						pack,
+						capture.Node,
+						capture.Name.Equals("docstring", StringComparison.Ordinal),
+						bodyRanges,
+						source,
+						out var commentEdit))
+				{
+					raw.Add(commentEdit);
+				}
+			}
+			if (commentsCursor.IsMatchLimitExceeded)
+				return null;
 		}
 
 		// Outermost wins: a lambda body inside a method body must not be spliced twice.
@@ -678,10 +735,14 @@ internal sealed class TreeSitterCompressionScope(
 		var edits = new List<CodeCompressionEdit>(raw.Count);
 		var reach = -1;
 		var preservedIndex = 0;
-		foreach (var (start, end, replacement) in raw)
+		foreach (var (start, end, replacement, kinds) in raw)
 		{
 			if (start < reach)
+			{
+				if (edits.Count > 0 && end <= edits[^1].SourceEnd)
+					edits[^1] = edits[^1] with { Kinds = edits[^1].Kinds | kinds };
 				continue;
+			}
 			while (preservedIndex < preservedRanges.Count && preservedRanges[preservedIndex].End <= start)
 				preservedIndex++;
 			if (preservedIndex < preservedRanges.Count &&
@@ -693,7 +754,22 @@ internal sealed class TreeSitterCompressionScope(
 			reach = end;
 			if (edits.Count >= TreeSitterCodeCompressor.MaximumEditsPerFile)
 				return null;
-			edits.Add(new CodeCompressionEdit(start, end - start, replacement));
+			if (edits.Count > 0 &&
+			    edits[^1].SourceEnd == start &&
+			    edits[^1].Replacement.Length == 0 &&
+			    replacement.Length == 0)
+			{
+				var previous = edits[^1];
+				edits[^1] = new CodeCompressionEdit(
+					previous.SourceStart,
+					end - previous.SourceStart,
+					string.Empty)
+				{
+					Kinds = previous.Kinds | kinds
+				};
+				continue;
+			}
+			edits.Add(new CodeCompressionEdit(start, end - start, replacement) { Kinds = kinds });
 		}
 
 		return edits;
@@ -736,7 +812,145 @@ internal sealed class TreeSitterCompressionScope(
 			return false;
 		}
 
-		edit = new RawCompressionEdit(start, end, pack.BlockPlaceholder);
+		edit = new RawCompressionEdit(start, end, pack.BlockPlaceholder, CodeTransformKinds.Bodies);
+		return true;
+	}
+
+	private static bool TryResolveCommentEdit(
+		CompressionLanguagePack pack,
+		Node node,
+		bool isDocstring,
+		IReadOnlySet<SourceRange>? capturedBodyRanges,
+		string source,
+		out RawCompressionEdit edit)
+	{
+		if (isDocstring &&
+		    (!IsLeadingDocstring(node) || !IsSimpleStringStatement(node, source)))
+		{
+			edit = default;
+			return false;
+		}
+
+		var start = node.StartIndex;
+		var end = node.EndIndex;
+		if (start < 0 || end > source.Length || end <= start)
+		{
+			edit = default;
+			return false;
+		}
+
+		if (!isDocstring && start == 0 && source.AsSpan(start, end - start).StartsWith("#!"))
+		{
+			edit = default;
+			return false;
+		}
+
+		if (isDocstring && RequiresSuitePlaceholder(node))
+		{
+			edit = new RawCompressionEdit(
+				start,
+				end,
+				pack.BlockPlaceholder,
+				CodeTransformKinds.Comments);
+			return true;
+		}
+
+		// Some scanners include the CR in a line-comment node while others stop before it.
+		// Normalize the editable syntax span so a trailing comment can never consume half of CRLF.
+		var syntaxEnd = end > start &&
+		                end < source.Length &&
+		                source[end - 1] == '\r' &&
+		                source[end] == '\n'
+			? end - 1
+			: end;
+		var lineStart = source.LastIndexOf('\n', Math.Max(0, start - 1)) + 1;
+		var nextLineFeed = source.IndexOf('\n', syntaxEnd);
+		var lineEnd = nextLineFeed >= 0 ? nextLineFeed : source.Length;
+		var contentEnd = lineEnd > lineStart && source[lineEnd - 1] == '\r'
+			? lineEnd - 1
+			: lineEnd;
+		var hasOnlyWhitespaceBefore = source.AsSpan(lineStart, start - lineStart).IsWhiteSpace();
+		var hasOnlyWhitespaceAfter = syntaxEnd <= contentEnd &&
+		                             source.AsSpan(syntaxEnd, contentEnd - syntaxEnd).IsWhiteSpace();
+		if (hasOnlyWhitespaceBefore && hasOnlyWhitespaceAfter)
+		{
+			// A body node can start at the first syntax token while its indentation belongs to the
+			// surrounding declaration. Keep that indentation when the body edit will absorb this
+			// comment; otherwise the two edits partially overlap and the body placeholder is lost.
+			var expandedStart = ClampToContainingBodyStart(node, lineStart, capturedBodyRanges);
+			var expandedEnd = nextLineFeed >= 0 ? nextLineFeed + 1 : source.Length;
+			edit = new RawCompressionEdit(
+				expandedStart,
+				expandedEnd,
+				string.Empty,
+				CodeTransformKinds.Comments);
+			return true;
+		}
+
+		// A trailing comment owns the separator before its marker, but never the line ending.
+		// Inline block comments retain their exact syntax-node span so surrounding code is untouched.
+		if (hasOnlyWhitespaceAfter)
+		{
+			while (start > lineStart && source[start - 1] is ' ' or '\t')
+				start--;
+		}
+
+		edit = new RawCompressionEdit(
+			start,
+			syntaxEnd,
+			string.Empty,
+			CodeTransformKinds.Comments);
+		return true;
+	}
+
+	private static int ClampToContainingBodyStart(
+		Node node,
+		int expandedStart,
+		IReadOnlySet<SourceRange>? capturedBodyRanges)
+	{
+		if (capturedBodyRanges is null)
+			return expandedStart;
+
+		for (var ancestor = node.Parent; ancestor is not null; ancestor = ancestor.Parent)
+		{
+			var range = new SourceRange(ancestor.StartIndex, ancestor.EndIndex);
+			if (capturedBodyRanges.Contains(range))
+				return Math.Max(expandedStart, range.Start);
+		}
+
+		return expandedStart;
+	}
+
+	private static bool IsLeadingDocstring(Node docstring)
+	{
+		var container = docstring.Parent;
+		if (container is null)
+			return false;
+
+		foreach (var child in container.Children)
+		{
+			if (!child.IsNamed || child.Type.Contains("comment", StringComparison.OrdinalIgnoreCase))
+				continue;
+			return child.StartIndex == docstring.StartIndex && child.EndIndex == docstring.EndIndex;
+		}
+
+		return false;
+	}
+
+	private static bool RequiresSuitePlaceholder(Node docstring)
+	{
+		var suite = docstring.Parent;
+		if (suite is null || !suite.Type.Equals("block", StringComparison.Ordinal))
+			return false;
+
+		foreach (var child in suite.Children)
+		{
+			if (!child.IsNamed || child.StartIndex == docstring.StartIndex && child.EndIndex == docstring.EndIndex)
+				continue;
+			if (!child.Type.Contains("comment", StringComparison.OrdinalIgnoreCase))
+				return false;
+		}
+
 		return true;
 	}
 
@@ -852,7 +1066,11 @@ internal sealed class TreeSitterCompressionScope(
 
 	private readonly record struct SourceRange(int Start, int End);
 
-	private readonly record struct RawCompressionEdit(int Start, int End, string Replacement);
+	private readonly record struct RawCompressionEdit(
+		int Start,
+		int End,
+		string Replacement,
+		CodeTransformKinds Kinds);
 
 	private static bool IsMisparsedCppClassBody(
 		CompressionLanguagePack pack,
@@ -939,11 +1157,16 @@ internal sealed class TreeSitterCompressionScope(
 	{
 		return pack.BlockBodyStyle switch
 		{
-			BlockBodyStyle.Inline => new RawCompressionEdit(start, end, pack.BlockPlaceholder),
+			BlockBodyStyle.Inline => new RawCompressionEdit(
+				start,
+				end,
+				pack.BlockPlaceholder,
+				CodeTransformKinds.Bodies),
 			BlockBodyStyle.IndentedStatement => new RawCompressionEdit(
 				start,
 				end,
-				IndentedStatementPlaceholder(pack.BlockPlaceholder, source, start, end)),
+				IndentedStatementPlaceholder(pack.BlockPlaceholder, source, start, end),
+				CodeTransformKinds.Bodies),
 			BlockBodyStyle.RemoveCompleteLines => RemoveCompleteBodyLines(source, start, end),
 			_ => throw new InvalidOperationException($"Unsupported block body style '{pack.BlockBodyStyle}'.")
 		};
@@ -1014,7 +1237,11 @@ internal sealed class TreeSitterCompressionScope(
 			expandedEnd++;
 		}
 
-		return new RawCompressionEdit(expandedStart, expandedEnd, string.Empty);
+		return new RawCompressionEdit(
+			expandedStart,
+			expandedEnd,
+			string.Empty,
+			CodeTransformKinds.Bodies);
 	}
 
 	private static string ResolveLineEnding(string source, int precedingLineFeed)
@@ -1079,7 +1306,9 @@ internal sealed class TreeSitterCompressionScope(
 			var node = cursor.CurrentNode;
 			// See CodeParseDefect: HasError lies in both directions against the shipped grammars,
 			// and a MISSING node surfaces here only as a named node of zero width.
-			var isDefect = node.IsError || node.IsMissing || (node.IsNamed && node.StartIndex == node.EndIndex);
+			var isDefect = node.IsError ||
+			               node.IsMissing ||
+			               (node.IsNamed && node.StartIndex == node.EndIndex && node.Parent is not null);
 			if (isDefect)
 			{
 				if (defects.Count >= TreeSitterCodeCompressor.MaximumDefectsPerFile)
@@ -1183,9 +1412,12 @@ internal sealed class LanguageWorkerPool : IDisposable
 	}
 
 	public LanguageWorkerLease Rent(CancellationToken cancellationToken) =>
-		Rent(operationId: 0, cancellationToken);
+		Rent(operationId: 0, needsComments: false, cancellationToken);
 
-	internal LanguageWorkerLease Rent(long operationId, CancellationToken cancellationToken)
+	internal LanguageWorkerLease Rent(
+		long operationId,
+		bool needsComments,
+		CancellationToken cancellationToken)
 	{
 		var budgetLease = _workerBudget.Rent(cancellationToken);
 		LoadedLanguage? worker = null;
@@ -1209,6 +1441,8 @@ internal sealed class LanguageWorkerPool : IDisposable
 				lock (_sync)
 					_materializedWorkers++;
 			}
+			if (needsComments)
+				worker.EnsureCommentsCursor(_queryMatchLimit);
 			lock (_sync)
 				ObjectDisposedException.ThrowIf(_disposed, this);
 			return new LanguageWorkerLease(this, worker, budgetLease);
@@ -1492,46 +1726,34 @@ internal sealed record LanguageRuntime(
 	Language Language,
 	Query Bodies,
 	Query Declarations,
-	Query? Preserves) : IDisposable
+	Query? Preserves,
+	Lazy<Query?> Comments) : IDisposable
 {
 	public static LanguageRuntime Create(string libraryPath, CompressionLanguagePack pack)
 	{
 		var language = new Language(libraryPath, pack.Export);
+		Query? bodies = null;
+		Query? declarations = null;
+		Query? preserves = null;
 		try
 		{
-			var bodies = new Query(language, pack.BodiesQuery);
-			try
-			{
-				var declarations = new Query(language, pack.DeclarationsQuery);
-				try
-				{
-					var preserves = pack.PreservesQuery is null
-						? null
-						: new Query(language, pack.PreservesQuery);
-					try
-					{
-						return new LanguageRuntime(language, bodies, declarations, preserves);
-					}
-					catch
-					{
-						preserves?.Dispose();
-						throw;
-					}
-				}
-				catch
-				{
-					declarations.Dispose();
-					throw;
-				}
-			}
-			catch
-			{
-				bodies.Dispose();
-				throw;
-			}
+			bodies = new Query(language, pack.BodiesQuery);
+			declarations = new Query(language, pack.DeclarationsQuery);
+			preserves = pack.PreservesQuery is null
+				? null
+				: new Query(language, pack.PreservesQuery);
+			var comments = new Lazy<Query?>(
+				() => pack.CommentsQuery is null
+					? null
+					: new Query(language, pack.CommentsQuery),
+				LazyThreadSafetyMode.ExecutionAndPublication);
+			return new LanguageRuntime(language, bodies, declarations, preserves, comments);
 		}
 		catch
 		{
+			preserves?.Dispose();
+			declarations?.Dispose();
+			bodies?.Dispose();
 			language.Dispose();
 			throw;
 		}
@@ -1539,6 +1761,8 @@ internal sealed record LanguageRuntime(
 
 	public void Dispose()
 	{
+		if (Comments.IsValueCreated)
+			Comments.Value?.Dispose();
 		Preserves?.Dispose();
 		Declarations.Dispose();
 		Bodies.Dispose();
@@ -1555,60 +1779,40 @@ internal sealed record LoadedLanguage(
 	QueryCursor DeclarationsCursor,
 	QueryCursor? PreservesCursor) : IDisposable
 {
+	private bool _commentsCursorHasTreeReference;
+
+	public QueryCursor? CommentsCursor { get; private set; }
+
 	public static LoadedLanguage Create(LanguageRuntime runtime, uint queryMatchLimit)
 	{
 		var parser = new Parser(runtime.Language);
+		Tree? idleTree = null;
+		QueryCursor? bodiesCursor = null;
+		QueryCursor? declarationsCursor = null;
+		QueryCursor? preservesCursor = null;
 		try
 		{
-			var idleTree = parser.Parse(string.Empty) ??
-			               throw new InvalidOperationException("Tree-sitter could not create an idle tree.");
-			try
-			{
-				var bodiesCursor = CreateBoundedCursor(queryMatchLimit);
-				try
-				{
-					var declarationsCursor = CreateBoundedCursor(queryMatchLimit);
-					try
-					{
-						var preservesCursor = runtime.Preserves is null
-							? null
-							: CreateBoundedCursor(queryMatchLimit);
-						try
-						{
-							return new LoadedLanguage(
-								runtime,
-								parser,
-								idleTree,
-								bodiesCursor,
-								declarationsCursor,
-								preservesCursor);
-						}
-						catch
-						{
-							preservesCursor?.Dispose();
-							throw;
-						}
-					}
-					catch
-					{
-						declarationsCursor.Dispose();
-						throw;
-					}
-				}
-				catch
-				{
-					bodiesCursor.Dispose();
-					throw;
-				}
-			}
-			catch
-			{
-				idleTree.Dispose();
-				throw;
-			}
+			idleTree = parser.Parse(string.Empty) ??
+			           throw new InvalidOperationException("Tree-sitter could not create an idle tree.");
+			bodiesCursor = CreateBoundedCursor(queryMatchLimit);
+			declarationsCursor = CreateBoundedCursor(queryMatchLimit);
+			preservesCursor = runtime.Preserves is null
+				? null
+				: CreateBoundedCursor(queryMatchLimit);
+			return new LoadedLanguage(
+				runtime,
+				parser,
+				idleTree,
+				bodiesCursor,
+				declarationsCursor,
+				preservesCursor);
 		}
 		catch
 		{
+			preservesCursor?.Dispose();
+			declarationsCursor?.Dispose();
+			bodiesCursor?.Dispose();
+			idleTree?.Dispose();
 			parser.Dispose();
 			throw;
 		}
@@ -1616,6 +1820,26 @@ internal sealed record LoadedLanguage(
 
 	private static QueryCursor CreateBoundedCursor(uint queryMatchLimit) =>
 		new() { MatchLimit = queryMatchLimit };
+
+	public void EnsureCommentsCursor(uint queryMatchLimit)
+	{
+		if (CommentsCursor is not null)
+			return;
+
+		if (Runtime.Comments.Value is not null)
+			CommentsCursor = CreateBoundedCursor(queryMatchLimit);
+	}
+
+	public QueryCursor? ExecuteComments(Node root)
+	{
+		var comments = Runtime.Comments.Value;
+		if (CommentsCursor is null || comments is null)
+			return null;
+
+		CommentsCursor.Execute(comments, root);
+		_commentsCursorHasTreeReference = true;
+		return CommentsCursor;
+	}
 
 	/// <summary>
 	/// QueryCursor retains its last Tree and Tree retains the parsed string. Rebinding to a tiny
@@ -1631,10 +1855,18 @@ internal sealed record LoadedLanguage(
 		DeclarationsCursor.Execute(Runtime.Declarations, root);
 		if (PreservesCursor is not null && Runtime.Preserves is not null)
 			PreservesCursor.Execute(Runtime.Preserves, root);
+		if (_commentsCursorHasTreeReference &&
+		    CommentsCursor is not null &&
+		    Runtime.Comments.Value is { } comments)
+		{
+			CommentsCursor.Execute(comments, root);
+			_commentsCursorHasTreeReference = false;
+		}
 	}
 
 	public void Dispose()
 	{
+		CommentsCursor?.Dispose();
 		PreservesCursor?.Dispose();
 		DeclarationsCursor.Dispose();
 		BodiesCursor.Dispose();

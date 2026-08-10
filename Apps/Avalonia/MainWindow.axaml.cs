@@ -458,7 +458,7 @@ public partial class MainWindow : Window
 	}
 
 	internal static bool RequiresCompressionRefresh(IgnoreOptionId? changedOptionId) =>
-		changedOptionId is null or IgnoreOptionId.CompressCode;
+		changedOptionId is null or IgnoreOptionId.CompressCode or IgnoreOptionId.StripComments;
 
 	private static SecretScanState ResolveSecretScanState(SecretRedactionSnapshot? snapshot) =>
 		snapshot switch
@@ -1192,7 +1192,12 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterBaseTree = null;
         _currentTreeInventory = null;
-        _appliedCompressCodeEnabled = false;
+		_appliedCompressCodeEnabled = false;
+		_appliedStripCommentsEnabled = false;
+		_viewModel.SetCompressionPreparationStatus(isActive: false);
+		_viewModel.SetCommentStripPreparationStatus(isActive: false);
+		_viewModel.SetCompressionStatus(null, null, null, null);
+		_viewModel.SetCommentStripStatus(null, null);
         _metrics.HasCompleteBaseline = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;

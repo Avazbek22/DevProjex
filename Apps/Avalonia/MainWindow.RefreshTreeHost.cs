@@ -117,7 +117,10 @@ public partial class MainWindow : IRefreshTreePipelineHost
 			_appliedCompressCodeEnabled = _selectionCoordinator
 				.GetSelectedIgnoreOptionIds()
 				.Contains(IgnoreOptionId.CompressCode);
-			if (!_appliedCompressCodeEnabled)
+			_appliedStripCommentsEnabled = _selectionCoordinator
+				.GetSelectedIgnoreOptionIds()
+				.Contains(IgnoreOptionId.StripComments);
+			if (!_appliedCompressCodeEnabled && !_appliedStripCommentsEnabled)
 				_codeCompressionSnapshot = null;
 		}
 		// Keep tree publication visually pure. Initial/full refresh work must remain pending until

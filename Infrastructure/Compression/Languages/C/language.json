@@ -4,7 +4,7 @@
   "extensions": [".c", ".h"],
   "library": "tree-sitter-c",
   "export": "tree_sitter_c",
-  "queryVersion": 3,
+  "queryVersion": 4,
   "blockPlaceholder": "{ }",
   "containerNodeTypes": ["translation_unit", "field_declaration_list"],
   "executableOwnerKinds": ["function_definition"]

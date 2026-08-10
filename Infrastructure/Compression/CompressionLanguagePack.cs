@@ -34,7 +34,8 @@ internal sealed record CompressionLanguagePack(
 	IReadOnlySet<string> ExecutableOwnerKinds,
 	string BodiesQuery,
 	string DeclarationsQuery,
-	string? PreservesQuery)
+	string? PreservesQuery,
+	string? CommentsQuery)
 {
 	/// <summary>
 	/// Goes into the cache key. A grammar or query change must change this string, or plans built
@@ -95,7 +96,8 @@ internal sealed record CompressionLanguagePack(
 				manifest.ExecutableOwnerKinds.ToHashSet(StringComparer.Ordinal),
 				ReadText(assembly, directory + "bodies.scm"),
 				ReadText(assembly, directory + "declarations.scm"),
-				TryReadText(assembly, directory + "preserve.scm")));
+				TryReadText(assembly, directory + "preserve.scm"),
+				TryReadText(assembly, directory + "comments.scm")));
 		}
 
 		return packs.OrderBy(static pack => pack.Id, StringComparer.Ordinal).ToArray();

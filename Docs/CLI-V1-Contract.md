@@ -145,6 +145,7 @@ remains a usage error instead of silently selecting a later command.
 --exclude <NAME>                     repeatable
 --hide-secrets [<true|false>]
 --compress [<true|false>]
+--strip-comments [<true|false>]
 ```
 
 Exclusion tokens are:
@@ -212,6 +213,16 @@ compressed to block-form declarations for `.kt` and `.kts` files. Kotlin output 
 lambda-valued `= { }` form; Scala uses the same text intentionally as a block expression.
 Analysis content metrics and every context/folder/ZIP output observe the same
 transformed bytes; source files are never modified.
+
+`--strip-comments` is an independent, additive content transformation and is off in the
+`standard` profile. It removes syntax-tree comments in the same 14-language set and also
+removes leading Python module/class/function docstrings. A shebang at byte offset zero is
+preserved. Strings, heredocs, attributes, annotations, and compiler directives are not
+comments; pragma comments intended for compilers or linters are removed. Compression-only
+output keeps documentation, comments-only output keeps complete implementation code, and
+enabling both produces the declaration skeleton. Syntax edits share one parse, plan,
+application, reverse parse, and structural gate; Hide Secrets runs afterward. Unsupported
+files remain complete and source files are never modified.
 
 `gitignore` mode reads regular `.gitignore` files reachable in the selected working
 tree. When the selected path is below its owning repository/worktree root, the
@@ -543,6 +554,7 @@ that prevents an accepted option from becoming a no-op.
 | analyze/context/project/open | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
 | analyze/context/project/open | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | analyze/context/project/open | `--compress` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
+| analyze/context/project/open | `--strip-comments` | profile content-transformation state | independently removes syntax-tree comments and Python docstrings without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | `analyze` | `--format` | `text` | selects the canonical text serializer or analysis JSON | none | document on stdout or in the selected file; invalid value exits `2` | parser, serializer, handler, process |
 | `analyze` | `-o`, `--output` | `-` | selects stdout or an exact new report file | existing/unsafe file is rejected; no force or dry-run | document or real absolute path on stdout; conflict exits `4` | handler, destination, process |
 | `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |

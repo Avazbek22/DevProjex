@@ -6,8 +6,9 @@ namespace DevProjex.Application.Compression;
 /// The enabled content transformations for one output operation, as ONE ordered pipeline rather
 /// than two independent optional parameters.
 ///
-/// Order is the whole point and it is fixed here so no call site can get it wrong: compression
-/// first, secret redaction second. Secrets must run on the text that actually leaves the
+/// Order is the whole point and it is fixed here so no call site can get it wrong: syntax edits
+/// (body compression and/or comment removal) first, secret redaction second. Secrets must run on
+/// the text that actually leaves the
 /// application - a value inside a body that was removed never ships and must not be counted, while
 /// a value in a constant, an attribute or a default argument does ship and must be hidden.
 ///
@@ -42,7 +43,7 @@ public sealed record ContentTransformationContext(
 			Compression?.BeginOutput(selection),
 			// The redaction cache is keyed on the text that was scanned, and compression decides what
 			// that text is. Without this, toggling the checkbox would reuse offsets from the other one.
-			Redaction?.BeginOutput(selection, Compression?.Session.TransformIdentity ?? string.Empty));
+			Redaction?.BeginOutput(selection, Compression?.TransformIdentity ?? string.Empty));
 }
 
 /// <summary>

@@ -27,6 +27,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		Bodies = new Query(language, pack.BodiesQuery);
 		Declarations = new Query(language, pack.DeclarationsQuery);
 		Preserves = pack.PreservesQuery is null ? null : new Query(language, pack.PreservesQuery);
+		Comments = pack.CommentsQuery is null ? null : new Query(language, pack.CommentsQuery);
 	}
 
 	public CompressionLanguagePack Pack { get; }
@@ -40,6 +41,8 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 	public Query Declarations { get; }
 
 	public Query? Preserves { get; }
+
+	public Query? Comments { get; }
 
 	public string Fixture { get; }
 
@@ -76,8 +79,11 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 	}
 
 	public int CountCaptures(Query query)
+		=> CountCaptures(query, Fixture);
+
+	public int CountCaptures(Query query, string source)
 	{
-		using var tree = Parser.Parse(Fixture)!;
+		using var tree = Parser.Parse(source)!;
 		using var cursor = query.Execute(tree.RootNode);
 		return cursor.Captures.Count();
 	}
@@ -110,8 +116,16 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		_ => throw new ArgumentOutOfRangeException(nameof(languageId), languageId, "No fixture for this language.")
 	};
 
+	public static string CommentFixtureFor(string languageId) => languageId switch
+	{
+		"python" or "ruby" => "# comment\n",
+		"php" => "<?php // comment\n?>",
+		_ => "// comment\n"
+	};
+
 	public void Dispose()
 	{
+		Comments?.Dispose();
 		Preserves?.Dispose();
 		Declarations.Dispose();
 		Bodies.Dispose();

@@ -4,7 +4,7 @@
   "extensions": [".ts", ".mts", ".cts"],
   "library": "tree-sitter-typescript",
   "export": "tree_sitter_typescript",
-  "queryVersion": 7,
+  "queryVersion": 8,
   "blockPlaceholder": "{ }",
   "expressionBodyStyle": "inline",
   "containerNodeTypes": ["program", "class_body", "interface_body"],

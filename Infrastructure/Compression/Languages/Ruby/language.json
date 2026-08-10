@@ -8,7 +8,7 @@
   ],
   "library": "tree-sitter-ruby",
   "export": "tree_sitter_ruby",
-  "queryVersion": 1,
+  "queryVersion": 2,
   "blockPlaceholder": "",
   "blockBodyStyle": "remove-complete-lines",
   "preserveLeadingDocstring": false,

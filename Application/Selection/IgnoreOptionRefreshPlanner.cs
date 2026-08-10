@@ -41,6 +41,7 @@ public static class IgnoreOptionRefreshPlanner
             IgnoreOptionId.ExtensionlessFiles => IgnoreOptionRefreshImpact.FileVisibility,
 			IgnoreOptionId.HideSecrets => IgnoreOptionRefreshImpact.None,
 			IgnoreOptionId.CompressCode => IgnoreOptionRefreshImpact.None,
+			IgnoreOptionId.StripComments => IgnoreOptionRefreshImpact.None,
             _ => IgnoreOptionRefreshImpact.RootStructure
         };
     }

@@ -8,6 +8,9 @@ public sealed partial class SelectionSyncCoordinator
 	internal bool ApplyCompressCodeOverride(bool? enabled) =>
 		ApplyContentTransformationOverride(IgnoreOptionId.CompressCode, enabled);
 
+	internal bool ApplyStripCommentsOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.StripComments, enabled);
+
 	private bool ApplyContentTransformationOverride(IgnoreOptionId optionId, bool? enabled)
 	{
 		if (enabled is null)

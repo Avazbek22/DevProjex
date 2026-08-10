@@ -4,7 +4,7 @@
   "extensions": [".tsx"],
   "library": "tree-sitter-tsx",
   "export": "tree_sitter_tsx",
-  "queryVersion": 7,
+  "queryVersion": 8,
   "blockPlaceholder": "{ }",
   "expressionBodyStyle": "inline",
   "containerNodeTypes": ["program", "class_body", "interface_body"],

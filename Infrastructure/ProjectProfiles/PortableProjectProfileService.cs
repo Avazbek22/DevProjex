@@ -206,6 +206,7 @@ public sealed class PortableProjectProfileService
 			Exclusions: exclusions.OrderBy(static exclusion => exclusion).ToArray(),
 			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
 			CompressCode: document.Selection.CompressCode ?? false,
+			StripComments: document.Selection.StripComments ?? false,
 			ProfileSource: new ProjectProfileReference(ProjectProfileSourceKind.Portable, fullPath));
 	}
 
@@ -234,7 +235,8 @@ public sealed class PortableProjectProfileService
 					.OrderBy(static value => value, StringComparer.Ordinal)
 					.ToArray(),
 				HideSecrets = selection.HideSecrets == true,
-				CompressCode = selection.CompressCode == true
+				CompressCode = selection.CompressCode == true,
+				StripComments = selection.StripComments == true
 			}
 		};
 	}
@@ -305,6 +307,7 @@ public sealed class PortableProjectProfileService
 		public IReadOnlyList<string> Exclusions { get; set; } = [];
 		public bool? HideSecrets { get; set; }
 		public bool? CompressCode { get; set; }
+		public bool? StripComments { get; set; }
 
 		[JsonExtensionData]
 		public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }

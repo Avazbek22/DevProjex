@@ -89,7 +89,9 @@ public sealed record CodeCompressionSummary(
 	int CompressedFiles,
 	int UnchangedFiles,
 	long SourceCharacters,
-	long TransformedCharacters);
+	long TransformedCharacters,
+	int BodyTransformedFiles = 0,
+	int CommentTransformedFiles = 0);
 
 public sealed record ProjectContextPlan(
 	string SourceRoot,

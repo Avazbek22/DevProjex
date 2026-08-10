@@ -108,6 +108,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Exclusions = ResolveExclusionIntent(selection, refreshedLocalState, loaded),
 			HideSecrets = ResolveHideSecretsIntent(selection, refreshedLocalState, loaded),
 			CompressCode = ResolveCompressCodeIntent(selection, refreshedLocalState, loaded),
+			StripComments = ResolveStripCommentsIntent(selection, refreshedLocalState, loaded),
 			SelectedPaths = NormalizeRelativeSelectionForOutput(
 				sourceRoot,
 				selectedFullPaths),
@@ -234,13 +235,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 	public ProjectContextPlan ApplyContentTransformationSelection(
 		ProjectContextPlan baseline,
 		bool hideSecrets,
-		bool? compressCode = null)
+		bool? compressCode = null,
+		bool? stripComments = null)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
 		var selection = baseline.Selection with
 		{
 			HideSecrets = hideSecrets,
-			CompressCode = compressCode ?? baseline.Selection.CompressCode
+			CompressCode = compressCode ?? baseline.Selection.CompressCode,
+			StripComments = stripComments ?? baseline.Selection.StripComments
 		};
 		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodes(
 			baseline.EffectiveTree,
@@ -385,7 +388,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				.ToArray(),
 			HideSecrets = selection.HideSecrets ?? legacyHideSecrets,
 			// Compression never had a v5 --exclude token, so there is nothing legacy to fall back to.
-			CompressCode = selection.CompressCode ?? false
+			CompressCode = selection.CompressCode ?? false,
+			StripComments = selection.StripComments ?? false
 		};
 	}
 
@@ -414,7 +418,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				                          ProjectSelectionAdapter.ToExclusions(profileIgnoreOptions),
 				                          EqualityComparer<ProjectExclusion>.Default) ||
 			                          selection.HideSecrets != profileIgnoreOptions.Contains(IgnoreOptionId.HideSecrets) ||
-			                          selection.CompressCode != profileIgnoreOptions.Contains(IgnoreOptionId.CompressCode)
+			                          selection.CompressCode != profileIgnoreOptions.Contains(IgnoreOptionId.CompressCode) ||
+			                          selection.StripComments != profileIgnoreOptions.Contains(IgnoreOptionId.StripComments)
 		};
 
 		return selection with { LocalProfileState = inferredState };
@@ -589,6 +594,16 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				? loaded.SelectedIgnoreOptions.Contains(IgnoreOptionId.CompressCode)
 				: selection.CompressCode == true
 			: ResolveStoredIgnoreSelection(state.Profile).Contains(IgnoreOptionId.CompressCode);
+
+	private static bool ResolveStripCommentsIntent(
+		ProjectSelectionSpec selection,
+		LocalProjectSelectionState? state,
+		LoadedProjectAnalysisRequest loaded) =>
+		state is null || state.IgnoreOptionsOverridden
+			? state is null
+				? loaded.SelectedIgnoreOptions.Contains(IgnoreOptionId.StripComments)
+				: selection.StripComments == true
+			: ResolveStoredIgnoreSelection(state.Profile).Contains(IgnoreOptionId.StripComments);
 
 	private static IReadOnlyCollection<string> ResolveStoredSelection(
 		IReadOnlyCollection<string> selected,
@@ -780,6 +795,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Append(exclusion.ToString());
 		Append($"hide-secrets:{selection.HideSecrets == true}");
 		Append($"compress-code:{selection.CompressCode == true}");
+		Append($"strip-comments:{selection.StripComments == true}");
 		foreach (var root in selection.Roots ?? [])
 			Append("r:" + root);
 		foreach (var extension in selection.Extensions ?? [])

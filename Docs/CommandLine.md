@@ -84,6 +84,7 @@ selection. `open` additionally accepts `auto`:
 --exclude <NAME>             repeatable
 --hide-secrets [<true|false>]
 --compress [<true|false>]
+--strip-comments [<true|false>]
 ```
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
@@ -167,6 +168,27 @@ Scala intentionally uses it as a block expression. Unsupported or
 conservatively rejected files remain complete. The same
 transformed content is used by analysis metrics, context documents, folder exports,
 and ZIP exports.
+
+`--strip-comments` is the third independent content transformation and is off in the
+`standard` profile. It removes syntax-tree comment nodes from supported code files; Python
+module, class, and function docstrings are removed as documentation as well. A shebang at
+the beginning of a script remains intact. Comment-like text inside strings, interpolation,
+heredocs, compiler directives, attributes, and annotations is not treated as a comment.
+Directive comments such as `// eslint-disable`, `// @ts-ignore`, and `# type: ignore` are
+removed because this output is intended for reading rather than compilation.
+
+Compression and comment removal are independent and share one syntax analysis and one
+validated edit plan:
+
+| Enabled transformations | Result |
+|---|---|
+| `--compress` | Signatures and declarative state; comments and docstrings remain |
+| `--strip-comments` | Complete implementation code without comments or docstrings |
+| Both | A bare declaration skeleton without comments or docstrings |
+
+When Hide Secrets is also enabled, syntax edits are applied first and secret detection runs
+over that exact transformed text. Unsupported languages such as YAML and Markdown remain
+byte-for-byte complete. Source files are never modified by any combination.
 
 Modern local profiles retain checked and unchecked states across roots, extensions,
 and Exclusions. Newly discovered rows use current defaults in Desktop, CLI, and TUI;

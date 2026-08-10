@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.Secrets;
 using DevProjex.Infrastructure.SmartIgnore;
 
@@ -462,6 +463,94 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Equal(snapshot.UnscannablePath, cached.UnscannablePath);
 	}
 
+	[Fact]
+	public async Task StripComments_RemovesACommentSecretBeforeDetectionAndKeepsModeCachesIsolated()
+	{
+		const string secret = "comment-only-secret-value-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("comment-secret-project");
+		var path = temporary.CreateFile(
+			"comment-secret-project/Commented.cs",
+			$"// api_token = {secret}{Environment.NewLine}internal static class Commented {{ }}");
+		var detector = new ExactValueDetector(secret);
+		using var redactionSession = new SecretRedactionSession(detector);
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var redaction = new SecretRedactionContext(sourceRoot, redactionSession);
+		var plainContext = ContentTransformationContext.For(compression: null, redaction)!;
+		var strippedContext = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				sourceRoot,
+				compressionSession,
+				CodeTransformKinds.Comments),
+			redaction)!;
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		var plain = await preparer.AnalyzeAsync(
+			plainContext,
+			[path],
+			TestContext.Current.CancellationToken);
+		var stripped = await preparer.AnalyzeAsync(
+			strippedContext,
+			[path],
+			TestContext.Current.CancellationToken);
+		var plainAgain = await preparer.AnalyzeAsync(
+			plainContext,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, plain.DetectedCount);
+		Assert.Equal(1, plain.RedactedCount);
+		Assert.Equal(0, stripped.DetectedCount);
+		Assert.Equal(0, stripped.RedactedCount);
+		Assert.Equal(plain.DetectedCount, plainAgain.DetectedCount);
+		Assert.Equal(2, detector.CallCount);
+		await using var prepared = await preparer.PrepareAsync(
+			strippedContext,
+			[path],
+			TestContext.Current.CancellationToken);
+		var output = await File.ReadAllTextAsync(
+			prepared.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(secret, output, StringComparison.Ordinal);
+		Assert.Equal("internal static class Commented { }", output);
+	}
+
+	[Fact]
+	public async Task StripComments_ReusesSecretFindingsWhenTheSyntaxPlanIsIdentity()
+	{
+		const string secret = "identity-secret-value-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("identity-secret-project");
+		var path = temporary.CreateFile(
+			"identity-secret-project/State.cs",
+			$"internal static class State {{ public const string Token = \"{secret}\"; }}");
+		var detector = new ExactValueDetector(secret);
+		using var redactionSession = new SecretRedactionSession(detector);
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var redaction = new SecretRedactionContext(sourceRoot, redactionSession);
+		var plainContext = ContentTransformationContext.For(compression: null, redaction)!;
+		var strippedContext = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				sourceRoot,
+				compressionSession,
+				CodeTransformKinds.Comments),
+			redaction)!;
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		var plain = await preparer.AnalyzeAsync(
+			plainContext,
+			[path],
+			TestContext.Current.CancellationToken);
+		var stripped = await preparer.AnalyzeAsync(
+			strippedContext,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, plain.DetectedCount);
+		Assert.Equal(1, stripped.DetectedCount);
+		Assert.Equal(1, detector.CallCount);
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
@@ -899,6 +988,23 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			string repositoryRelativePath,
 			string content,
 			CancellationToken cancellationToken = default) => [];
+	}
+
+	private sealed class ExactValueDetector(string secret) : ISecretDetector
+	{
+		public int CallCount { get; private set; }
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default)
+		{
+			CallCount++;
+			var index = content.IndexOf(secret, StringComparison.Ordinal);
+			return index < 0
+				? []
+				: [new DetectedSecret("exact-value", index, secret.Length, secret, RuleOrder: 0)];
+		}
 	}
 
 	private sealed class UnsupportedCodeCompressor : ICodeCompressor

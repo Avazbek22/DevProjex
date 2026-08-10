@@ -6,6 +6,114 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowCompressionPreviewPerformanceUiTests
 {
+	[AvaloniaFact]
+	public async Task StripCommentsCheckbox_IsDraftUntilApplyAndRestoresFullSourceWhenDisabled()
+	{
+		const string commentMarker = "strip-comments-ui-marker";
+		using var project = UiTestProject.CreateDefault();
+		var sourcePath = Path.Combine(project.RootPath, "src", "AppHost", "Program.cs");
+		var originalSource = await File.ReadAllTextAsync(
+			sourcePath,
+			TestContext.Current.CancellationToken);
+		var commentLine = $"// {commentMarker} {new string('x', 4096)}";
+		await File.WriteAllTextAsync(
+			sourcePath,
+			$"{commentLine}{Environment.NewLine}{originalSource}",
+			TestContext.Current.CancellationToken);
+		var sourceBytes = await File.ReadAllBytesAsync(
+			sourcePath,
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var option = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static candidate => candidate.Id == IgnoreOptionId.StripComments);
+			Assert.False(option.IsChecked);
+			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var sourceMetrics));
+			Assert.Contains(
+				commentMarker,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+			var diagnosticsBeforeDraft = UiTestDriver.GetCodeCompressionDiagnostics(window);
+
+			var checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(
+				window,
+				IgnoreOptionId.StripComments);
+			await UiTestDriver.ClickAsync(window, checkBox);
+			Assert.Contains(
+				commentMarker,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+			Assert.Equal(
+				diagnosticsBeforeDraft.AnalysisExecutions,
+				UiTestDriver.GetCodeCompressionDiagnostics(window).AnalysisExecutions);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.SettingsCommentStripNotice.StartsWith(
+					"Removed comments from ",
+					StringComparison.Ordinal),
+				"comment-removal prewarm to publish its exact snapshot after Apply");
+			var snapshot = Assert.IsType<CodeCompressionSnapshot>(GetCompressionSnapshot(window));
+			Assert.Equal(0, snapshot.BodyTransformedFiles);
+			Assert.True(snapshot.CommentTransformedFiles > 0);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var preview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+					return !preview.Contains(commentMarker, StringComparison.Ordinal) &&
+					       preview.Contains("return \"app-value-1\";", StringComparison.Ordinal);
+				},
+				"comment removal to update Preview while preserving implementation code");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+					UiTestDriver.TryGetCurrentStatusMetrics(
+						window,
+						out _,
+						out var strippedMetrics) &&
+					strippedMetrics.Chars < sourceMetrics.Chars,
+				"comment removal to publish metrics for the transformed text");
+
+			checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(
+				window,
+				IgnoreOptionId.StripComments);
+			await UiTestDriver.ClickAsync(window, checkBox);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+					!option.IsChecked &&
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+						commentMarker,
+						StringComparison.Ordinal) &&
+					UiTestDriver.TryGetCurrentStatusMetrics(
+						window,
+						out _,
+						out var restoredMetrics) &&
+					restoredMetrics == sourceMetrics,
+				"disabling comment removal to restore the original Preview and metrics");
+
+			Assert.Equal(
+				sourceBytes,
+				await File.ReadAllBytesAsync(
+					sourcePath,
+					TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task CompressionCheckbox_UpdatesVisiblePreviewAndRestoresFullSourceWhenDisabled()
     {
