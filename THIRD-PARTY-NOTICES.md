@@ -46,8 +46,10 @@ under the MIT License.
 - Pinned package: TreeSitter.DotNet 1.3.0, which vendors tree-sitter 0.26.3
 - tree-sitter: https://github.com/tree-sitter/tree-sitter
 - Grammars shipped: tree-sitter-c, tree-sitter-c-sharp, tree-sitter-cpp, tree-sitter-go,
-  tree-sitter-java, tree-sitter-javascript, tree-sitter-python, tree-sitter-rust,
-  tree-sitter-tsx, tree-sitter-typescript
+  tree-sitter-java, tree-sitter-javascript, tree-sitter-php, tree-sitter-python,
+  tree-sitter-ruby, tree-sitter-rust, tree-sitter-tsx, tree-sitter-typescript
+- Ruby grammar source: https://github.com/tree-sitter/tree-sitter-ruby
+- PHP grammar source: https://github.com/tree-sitter/tree-sitter-php
 
 Only the grammars listed above are shipped. The remaining grammars in the package are
 removed from every build output by `Directory.Build.targets`.
@@ -57,6 +59,9 @@ MIT License
 
 Copyright (c) 2018-2024 Max Brunsfeld
 Copyright (c) 2025 Marius Greuel
+Copyright (c) 2016 Rob Rix
+Copyright (c) 2017 Josh Vera, GitHub
+Copyright (c) 2019 Max Brunsfeld, Amaan Qureshi, Christian Frøystad, Caleb White
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

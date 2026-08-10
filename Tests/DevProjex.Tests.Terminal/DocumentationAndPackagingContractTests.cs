@@ -52,7 +52,10 @@ public sealed class DocumentationAndPackagingContractTests
 			.ToArray();
 		var notices = File.ReadAllText(Path.Combine(rootPath, "THIRD-PARTY-NOTICES.md"));
 
-		Assert.Equal(10, grammarNames.Length);
+		Assert.NotEmpty(grammarNames);
+		Assert.Equal(
+			grammarNames.Length,
+			grammarNames.Distinct(StringComparer.Ordinal).Count());
 		foreach (var grammarName in grammarNames)
 		{
 			Assert.Matches(

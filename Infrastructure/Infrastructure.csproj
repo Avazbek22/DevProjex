@@ -32,7 +32,9 @@
     <DevProjexGrammar Include="tree-sitter-go" />
     <DevProjexGrammar Include="tree-sitter-java" />
     <DevProjexGrammar Include="tree-sitter-javascript" />
+    <DevProjexGrammar Include="tree-sitter-php" />
     <DevProjexGrammar Include="tree-sitter-python" />
+    <DevProjexGrammar Include="tree-sitter-ruby" />
     <DevProjexGrammar Include="tree-sitter-rust" />
     <DevProjexGrammar Include="tree-sitter-tsx" />
     <DevProjexGrammar Include="tree-sitter-typescript" />

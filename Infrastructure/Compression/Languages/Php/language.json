@@ -1,0 +1,22 @@
+{
+  "id": "php",
+  "displayName": "PHP",
+  "extensions": [
+    ".php",
+    ".phtml"
+  ],
+  "library": "tree-sitter-php",
+  "export": "tree_sitter_php",
+  "queryVersion": 1,
+  "blockPlaceholder": "{ }",
+  "preserveLeadingDocstring": false,
+  "containerNodeTypes": [
+    "program",
+    "declaration_list",
+    "enum_declaration_list"
+  ],
+  "executableOwnerKinds": [
+    "function_definition",
+    "method_declaration"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "ruby",
+  "displayName": "Ruby",
+  "extensions": [
+    ".rb",
+    ".rake",
+    ".gemspec"
+  ],
+  "library": "tree-sitter-ruby",
+  "export": "tree_sitter_ruby",
+  "queryVersion": 1,
+  "blockPlaceholder": "",
+  "blockBodyStyle": "remove-complete-lines",
+  "preserveLeadingDocstring": false,
+  "containerNodeTypes": [
+    "program",
+    "class",
+    "module"
+  ],
+  "executableOwnerKinds": [
+    "method",
+    "singleton_method"
+  ]
+}

@@ -182,4 +182,49 @@ internal static class CodeCompressionFixtures
 		    total
 		}
 		""";
+
+	public const string Ruby = """
+		class Calculator
+		  UNIT = "points"
+		  attr_reader :offset
+
+		  def initialize(offset)
+		    @offset = offset
+		  end
+
+		  def add(left, right)
+		    total = left + right + @offset
+		    "#{total} #{UNIT}"
+		  end
+
+		  def self.identity(value)
+		    normalized = value.to_s
+		    normalized
+		  end
+		end
+		""";
+
+	public const string Php = """
+		<!doctype html>
+		<title>Calculator</title>
+		<?php
+		final class Calculator
+		{
+		    private const UNIT = 'points';
+		    private int $offset = 0;
+
+		    public function __construct(private string $name)
+		    {
+		        $this->offset = strlen($name);
+		    }
+
+		    public function add(int $left, int $right): int
+		    {
+		        $total = $left + $right + $this->offset;
+		        return $total;
+		    }
+		}
+		?>
+		<footer>Unchanged HTML</footer>
+		""";
 }

@@ -182,6 +182,34 @@ internal static class CodeCompressionAdversarialFixtures
 				["adversarialJsGeneratorMarker", "adversarialJsPrivateMarker", "adversarialJsArrowMarker"],
 				"export function brokenJs(value) { const malformedJsMarker = value + 1;"),
 			new CodeCompressionAdversarialFixture(
+				"php",
+				"Repository.phtml",
+				"""
+				<section data-stack="php">Repository</section>
+				<?php
+				#[RepositoryAttribute]
+				final class Repository
+				{
+				    private const LIMIT = 64;
+				    private array $values = [];
+
+				    public function __construct(public readonly string $name)
+				    {
+				        $this->values = [$name];
+				    }
+
+				    public function map(callable $transform): array
+				    {
+				        $adversarialPhpMapMarker = array_map($transform, $this->values);
+				        return $adversarialPhpMapMarker;
+				    }
+				}
+				?>
+				""",
+				["<section data-stack=\"php\">", "#[RepositoryAttribute]", "private const LIMIT", "private array $values", "public readonly string $name", "$this->values = [$name]"],
+				["$adversarialPhpMapMarker"],
+				"<?php function broken_php(int $value): int { $malformedPhpMarker = $value + 1;"),
+			new CodeCompressionAdversarialFixture(
 				"python",
 				"service.py",
 				""""
@@ -209,6 +237,35 @@ internal static class CodeCompressionAdversarialFixtures
 				["def traced(function):", "class Service:", "@classmethod", "async def create", "@traced", "def stream"],
 				["adversarial_python_decorator_marker", "adversarial_python_create_marker", "adversarial_python_stream_marker"],
 				"def broken_python(value):\n"),
+			new CodeCompressionAdversarialFixture(
+				"ruby",
+				"repository.rb",
+				"""
+				module Persistence
+				  class Repository
+				    LIMIT = 64
+				    attr_reader :root
+
+				    def initialize(root)
+				      @root = root
+				      @normalizer = ->(value) { value.to_s.strip }
+				    end
+
+				    def fetch(key)
+				      adversarial_ruby_fetch_marker = File.join(@root, key)
+				      File.read(adversarial_ruby_fetch_marker)
+				    end
+
+				    def self.open(root)
+				      adversarial_ruby_singleton_marker = new(root)
+				      adversarial_ruby_singleton_marker
+				    end
+				  end
+				end
+				""",
+				["module Persistence", "class Repository", "LIMIT = 64", "attr_reader :root", "@root = root", "@normalizer = ->"],
+				["adversarial_ruby_fetch_marker", "adversarial_ruby_singleton_marker"],
+				"class Broken\n  def broken(value)\n    malformed_ruby_marker = value + 1\n"),
 			new CodeCompressionAdversarialFixture(
 				"rust",
 				"repository.rs",

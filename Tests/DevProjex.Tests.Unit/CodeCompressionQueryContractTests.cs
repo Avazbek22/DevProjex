@@ -17,7 +17,7 @@ public sealed class CodeCompressionQueryContractTests
 {
 	private static readonly string[] ExpectedLanguageIds =
 	[
-		"c", "cpp", "csharp", "go", "java", "javascript", "python", "rust", "tsx", "typescript"
+		"c", "cpp", "csharp", "go", "java", "javascript", "php", "python", "ruby", "rust", "tsx", "typescript"
 	];
 
 	[Fact]
@@ -68,6 +68,20 @@ public sealed class CodeCompressionQueryContractTests
 			CodeCompressionTestHarness.LanguagePacks.Where(
 				static pack => !pack.Id.Equals("python", StringComparison.Ordinal)),
 			static pack => Assert.False(pack.PreserveLeadingDocstring));
+	}
+
+	[Fact]
+	public void BlockBodyStylesMatchTheLanguagePackContract()
+	{
+		var packs = CodeCompressionTestHarness.LanguagePacks.ToDictionary(
+			static pack => pack.Id,
+			StringComparer.Ordinal);
+
+		Assert.Equal(BlockBodyStyle.IndentedStatement, packs["python"].BlockBodyStyle);
+		Assert.Equal(BlockBodyStyle.RemoveCompleteLines, packs["ruby"].BlockBodyStyle);
+		Assert.All(
+			packs.Values.Where(static pack => pack.Id is not ("python" or "ruby")),
+			static pack => Assert.Equal(BlockBodyStyle.Inline, pack.BlockBodyStyle));
 	}
 
 	[Fact]
@@ -165,7 +179,7 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
-	public void EveryPackDeclaresAPlaceholderThatIsNotABareEllipsis()
+	public void EveryPackDeclaresAValidPlaceholderForItsBlockStyle()
 	{
 		// A bare "…" is not valid syntax anywhere, so the reverse-parse gate refuses every file and
 		// the feature compresses nothing while looking conservative. Measured: 872 of 872 files.
@@ -173,7 +187,10 @@ public sealed class CodeCompressionQueryContractTests
 		{
 			using var harness = CodeCompressionTestHarness.For(languageId);
 			Assert.NotEqual("…", harness.Pack.BlockPlaceholder.Trim());
-			Assert.NotEmpty(harness.Pack.BlockPlaceholder);
+			if (harness.Pack.BlockBodyStyle == BlockBodyStyle.RemoveCompleteLines)
+				Assert.Empty(harness.Pack.BlockPlaceholder);
+			else
+				Assert.NotEmpty(harness.Pack.BlockPlaceholder);
 		}
 	}
 

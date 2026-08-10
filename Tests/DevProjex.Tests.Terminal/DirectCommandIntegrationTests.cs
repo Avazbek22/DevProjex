@@ -17,6 +17,36 @@ public sealed class DirectCommandIntegrationTests
 		}
 		""";
 
+	private const string RubyCompressibleSource = """
+		class Service
+		  def initialize(root)
+		    @root = root
+		  end
+
+		  def run(value)
+		    ruby_direct_cli_marker = File.join(@root, value)
+		    ruby_direct_cli_marker
+		  end
+		end
+		""";
+
+	private const string PhpCompressibleSource = """
+		<?php
+		final class Service
+		{
+		    public function __construct(private string $root)
+		    {
+		        $this->root = trim($root);
+		    }
+
+		    public function run(string $value): string
+		    {
+		        $php_direct_cli_marker = $this->root.'/'.$value;
+		        return $php_direct_cli_marker;
+		    }
+		}
+		""";
+
 	[Fact]
 	public async Task AnalyzeJsonWritesStableMachineDocumentOnlyToStdout()
 	{
@@ -120,6 +150,40 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Contains("public int Compute(int left, int right)", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("valueThatMustDisappear", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("src/service.rb", RubyCompressibleSource, "@root = root", "ruby_direct_cli_marker")]
+	[InlineData("src/Service.php", PhpCompressibleSource, "$this->root = trim($root);", "$php_direct_cli_marker")]
+	public async Task ContextExportWithCompressionAppliesRubyAndPhpStateContracts(
+		string relativePath,
+		string source,
+		string preservedState,
+		string removedImplementation)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile(relativePath, source);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+			[
+				"export", "context", workspace.Path,
+				"--view", "content",
+				"--format", "markdown",
+				"--compress",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", "-"
+			],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains(preservedState, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(removedImplementation, environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
 	}
 

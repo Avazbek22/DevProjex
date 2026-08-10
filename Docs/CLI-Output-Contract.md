@@ -162,7 +162,10 @@ complete as signature-level context; a multiline expression is implementation an
 is compressed like a block body. Free lambdas or closures, fields, and language-level
 properties remain complete, including nested callbacks in initializers and
 property accessors. Python leading function docstrings and class `__init__` and
-`__post_init__` methods also remain complete. Project source files are never modified.
+`__post_init__` methods also remain complete. Ruby `initialize` and PHP `__construct`
+remain complete because they declare instance state; Ruby DSL/free blocks and PHP
+anonymous/arrow functions are not treated as named bodies. Mixed HTML around PHP sections
+remains byte-for-byte complete. Project source files are never modified.
 
 ## Errors
 

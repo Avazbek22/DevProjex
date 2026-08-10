@@ -7,6 +7,13 @@ internal enum ExpressionBodyStyle
 	Declaration
 }
 
+internal enum BlockBodyStyle
+{
+	Inline,
+	IndentedStatement,
+	RemoveCompleteLines
+}
+
 /// <summary>
 /// One language, expressed as data. Adding a language is a manifest, a set of .scm queries and
 /// fixtures — no C# changes for the common case. Language-specific syntax exceptions are explicit
@@ -20,6 +27,7 @@ internal sealed record CompressionLanguagePack(
 	string Export,
 	int QueryVersion,
 	string BlockPlaceholder,
+	BlockBodyStyle BlockBodyStyle,
 	bool PreserveLeadingDocstring,
 	ExpressionBodyStyle ExpressionBodyStyle,
 	IReadOnlySet<string> ContainerNodeTypes,
@@ -42,6 +50,7 @@ internal sealed record CompressionLanguagePack(
 		string Export,
 		int QueryVersion,
 		string BlockPlaceholder,
+		string? BlockBodyStyle,
 		bool PreserveLeadingDocstring,
 		string? ExpressionBodyStyle,
 		string[] ContainerNodeTypes,
@@ -79,6 +88,7 @@ internal sealed record CompressionLanguagePack(
 				manifest.Export,
 				manifest.QueryVersion,
 				manifest.BlockPlaceholder,
+				ParseBlockBodyStyle(manifest.BlockBodyStyle, resource),
 				manifest.PreserveLeadingDocstring,
 				ParseExpressionBodyStyle(manifest.ExpressionBodyStyle, resource),
 				manifest.ContainerNodeTypes.ToHashSet(StringComparer.Ordinal),
@@ -90,6 +100,16 @@ internal sealed record CompressionLanguagePack(
 
 		return packs.OrderBy(static pack => pack.Id, StringComparer.Ordinal).ToArray();
 	}
+
+	private static BlockBodyStyle ParseBlockBodyStyle(string? value, string resource) =>
+		value switch
+		{
+			null or "" or "inline" => BlockBodyStyle.Inline,
+			"indented-statement" => BlockBodyStyle.IndentedStatement,
+			"remove-complete-lines" => BlockBodyStyle.RemoveCompleteLines,
+			_ => throw new InvalidOperationException(
+				$"Language manifest '{resource}' has unsupported blockBodyStyle '{value}'.")
+		};
 
 	private static ExpressionBodyStyle ParseExpressionBodyStyle(string? value, string resource) =>
 		value switch

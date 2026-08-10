@@ -135,8 +135,9 @@ files are not inspected, and no findings is not a security guarantee. See
 
 `--compress` is also independent from path selection and is off in the
 `standard` profile. It replaces block bodies of named methods, functions, and
-constructors with minimal syntax-valid placeholders (`{ }`, or `...` for Python)
-in supported C, C++, C#, Go, Java, JavaScript, Python, Rust, TSX, and TypeScript
+constructors with minimal syntax-valid placeholders (`{ }`, `...` for Python, or an empty Ruby
+method body between its declaration and `end`) in supported C, C++, C#, Go, Java, JavaScript,
+PHP, Python, Ruby, Rust, TSX, and TypeScript
 files. JavaScript-family block
 functions stored in object properties, assigned or exported under a stable binding,
 or wrapped one or two calls deep under that binding are compressed as well. The
@@ -150,7 +151,11 @@ properties are kept byte-for-byte complete, including their initializers and
 property accessors, because they describe project state and public behavior.
 Python also keeps a leading function docstring and the
 complete class `__init__` and `__post_init__` methods, where instance state is
-declared. Unsupported or conservatively rejected files remain complete. The same
+declared. Ruby likewise keeps class `initialize` methods, while named `method` and
+`singleton_method` bodies are removed without collapsing class/module or DSL blocks.
+PHP keeps properties, constants, enum cases, and `__construct`; named functions and methods
+are compressed in both PHP-only and mixed HTML/PHP files, while anonymous functions and arrow
+functions remain complete. Unsupported or conservatively rejected files remain complete. The same
 transformed content is used by analysis metrics, context documents, folder exports,
 and ZIP exports.
 
