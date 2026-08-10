@@ -139,10 +139,13 @@ public sealed class CodeCompressionKotlinTests
 		AssertStructurePreserved(source, text);
 	}
 
-	[Fact]
-	public void KotlinCompressesQaExpressionBodiesAsFunctionDeclarationsWithoutLambdaPlaceholders()
+	[Theory]
+	[InlineData("\n")]
+	[InlineData("\r\n")]
+	public void KotlinCompressesQaExpressionBodiesAsFunctionDeclarationsWithoutLambdaPlaceholders(
+		string newLine)
 	{
-		const string source = """
+		var source = """
 			import java.time.format.DateTimeFormatter
 
 			fun oneLine(value: String): String = value.trim()
@@ -174,20 +177,21 @@ public sealed class CodeCompressionKotlinTests
 			        append(this@invoke)
 			        append(value)
 			    }
-			""";
+			""".ReplaceLineEndings(newLine);
 
 		var (plan, text) = Compress("Expressions.kt", source);
+		var normalizedText = text.ReplaceLineEndings("\n");
 
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.Contains("fun oneLine(value: String): String = value.trim()", text, StringComparison.Ordinal);
-		Assert.Contains("fun lineBreakAfterEquals(value: String): String =\n    value.trim()", text, StringComparison.Ordinal);
+		Assert.Contains("fun lineBreakAfterEquals(value: String): String =\n    value.trim()", normalizedText, StringComparison.Ordinal);
 		Assert.Contains("fun dateFormatted(value: String): String { }", text, StringComparison.Ordinal);
 		Assert.Contains("fun providesOnFrameListener(): OnFrameListener { }", text, StringComparison.Ordinal);
-		Assert.Contains("override fun <T> copy(value: T): IndexHintQuery\n        where T : CharSequence,\n              T : Comparable<T> { }", text, StringComparison.Ordinal);
+		Assert.Contains("override fun <T> copy(value: T): IndexHintQuery\n        where T : CharSequence,\n              T : Comparable<T> { }", normalizedText, StringComparison.Ordinal);
 		Assert.Contains("operator fun String.invoke(value: Int): String { }", text, StringComparison.Ordinal);
 		Assert.DoesNotContain(".ofPattern(value)", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("println(\"frame\")", text, StringComparison.Ordinal);
-		Assert.DoesNotContain("IndexHintQuery(\n", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("IndexHintQuery(\n", normalizedText, StringComparison.Ordinal);
 		Assert.DoesNotContain("buildString {", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("= { }", text, StringComparison.Ordinal);
 		AssertStructurePreserved(source, text);
