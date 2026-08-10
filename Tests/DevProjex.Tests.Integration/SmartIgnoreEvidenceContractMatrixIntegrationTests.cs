@@ -15,8 +15,10 @@ public sealed class SmartIgnoreEvidenceContractMatrixIntegrationTests
 			new StackFolderCase("dotnet-bin", "App.csproj", "bin", "tools/source.cs", new DotNetArtifactsIgnoreRule()),
 			new StackFolderCase("dotnet-obj", "App.csproj", "obj", "models/source.cs", new DotNetArtifactsIgnoreRule()),
 			new StackFolderCase("jvm-build", "settings.gradle", "build", "source.kt", new JvmArtifactsIgnoreRule()),
+			new StackFolderCase("android-kotlin-build", "settings.gradle.kts", "build", "src/main/kotlin/App.kt", new JvmArtifactsIgnoreRule()),
 			new StackFolderCase("jvm-out", "settings.gradle", "out", "source.kt", new JvmArtifactsIgnoreRule()),
 			new StackFolderCase("jvm-target", "pom.xml", "target", "source.java", new JvmArtifactsIgnoreRule()),
+			new StackFolderCase("sbt-target", "build.sbt", "target", "source.scala", new JvmArtifactsIgnoreRule()),
 			new StackFolderCase("rust-target", "Cargo.toml", "target", "source.rs", new RustArtifactsIgnoreRule()),
 			new StackFolderCase("python-venv", "pyproject.toml", "venv", "source.py", new PythonArtifactsIgnoreRule()),
 			new StackFolderCase("python-env", "pyproject.toml", "env", "source.py", new PythonArtifactsIgnoreRule()),
@@ -26,7 +28,9 @@ public sealed class SmartIgnoreEvidenceContractMatrixIntegrationTests
 			new StackFolderCase("ruby-vendor", "Gemfile", "vendor", "source.rb", new RubyArtifactsIgnoreRule()),
 			new StackFolderCase("ruby-log", "Gemfile", "log", "README.md", new RubyArtifactsIgnoreRule()),
 			new StackFolderCase("ruby-log-fixture", "Gemfile", "log", "fixture.log", new RubyArtifactsIgnoreRule()),
-			new StackFolderCase("ruby-tmp", "Gemfile", "tmp", "source.rb", new RubyArtifactsIgnoreRule())
+			new StackFolderCase("ruby-tmp", "Gemfile", "tmp", "source.rb", new RubyArtifactsIgnoreRule()),
+			new StackFolderCase("swift-pods", "Package.swift", "Pods", "Sources/Widget.swift", new SwiftArtifactsIgnoreRule()),
+			new StackFolderCase("dart-build", "pubspec.yaml", "build", "lib/generated.dart", new DartArtifactsIgnoreRule())
 		};
 
 		foreach (var testCase in cases)
@@ -67,8 +71,10 @@ public sealed class SmartIgnoreEvidenceContractMatrixIntegrationTests
 			new StackFolderCase("python-env", "pyproject.toml", "env", "pyvenv.cfg", new PythonArtifactsIgnoreRule()),
 			new StackFolderCase("python-cache", "pyproject.toml", "__pycache__", "app.pyc", new PythonArtifactsIgnoreRule()),
 			new StackFolderCase("jvm-build", "settings.gradle", "build", "classes/App.class", new JvmArtifactsIgnoreRule()),
+			new StackFolderCase("android-kotlin-build", "settings.gradle.kts", "build", "classes/MainActivity.class", new JvmArtifactsIgnoreRule()),
 			new StackFolderCase("jvm-out", "settings.gradle", "out", "classes/App.class", new JvmArtifactsIgnoreRule()),
 			new StackFolderCase("jvm-target", "pom.xml", "target", "classes/App.class", new JvmArtifactsIgnoreRule()),
+			new StackFolderCase("sbt-target", "build.sbt", "target", "classes/App.class", new JvmArtifactsIgnoreRule()),
 			new StackFolderCase("rust-target", "Cargo.toml", "target", "debug/app", new RustArtifactsIgnoreRule()),
 			new StackFolderCase("go-vendor", "go.mod", "vendor", "modules.txt", new GoArtifactsIgnoreRule()),
 			new StackFolderCase(
@@ -86,7 +92,13 @@ public sealed class SmartIgnoreEvidenceContractMatrixIntegrationTests
 				"bundle/ruby/3.3.0/specifications/example.gemspec",
 				new RubyArtifactsIgnoreRule()),
 			new StackFolderCase("ruby-log", "Gemfile", "log", "development.log", new RubyArtifactsIgnoreRule()),
-			new StackFolderCase("ruby-tmp", "Gemfile", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule())
+			new StackFolderCase("ruby-tmp", "Gemfile", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule()),
+			new StackFolderCase("swift-spm", "Package.swift", ".build", "workspace-state.json", new SwiftArtifactsIgnoreRule()),
+			new StackFolderCase("swift-derived-data", "Package.swift", "DerivedData", "Build/artifact", new SwiftArtifactsIgnoreRule()),
+			new StackFolderCase("swift-pods", "Podfile", "Pods", "Manifest.lock", new SwiftArtifactsIgnoreRule()),
+			new StackFolderCase("swift-carthage", "Cartfile", "Carthage", "Build/artifact", new SwiftArtifactsIgnoreRule()),
+			new StackFolderCase("dart-tool", "pubspec.yaml", ".dart_tool", "package_config.json", new DartArtifactsIgnoreRule()),
+			new StackFolderCase("flutter-build", "pubspec.yaml", "build", "flutter_assets/AssetManifest.bin", new DartArtifactsIgnoreRule())
 		};
 
 		foreach (var testCase in cases)

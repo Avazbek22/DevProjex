@@ -130,7 +130,12 @@ foreach (var library in libraries)
 		using var language = new Language(locator.Resolve(library), expectedGrammars[library]);
 		var loadMilliseconds = watch.Elapsed.TotalMilliseconds;
 		using var parser = new Parser(language);
-		using var tree = parser.Parse("x") ?? throw new InvalidOperationException("parser returned no tree");
+		var probeSource = library.Equals("tree-sitter-kotlin", StringComparison.Ordinal)
+			? "fun main() { println(\"grammar delivery\") }"
+			: "x";
+		using var tree = parser.Parse(probeSource) ?? throw new InvalidOperationException("parser returned no tree");
+		if (library.Equals("tree-sitter-kotlin", StringComparison.Ordinal) && tree.RootNode.HasError)
+			throw new InvalidOperationException("Kotlin grammar could not parse the delivery fixture");
 		_ = tree.RootNode.Type;
 		watch.Stop();
 		loaded++;

@@ -135,8 +135,9 @@ files are not inspected, and no findings is not a security guarantee. See
 
 `--compress` is also independent from path selection and is off in the
 `standard` profile. It replaces block bodies of named methods, functions, and
-constructors with minimal syntax-valid placeholders (`{ }`, or `...` for Python)
-in supported C, C++, C#, Go, Java, JavaScript, Python, Rust, TSX, and TypeScript
+constructors with minimal syntax-valid placeholders (`{ }`, `...` for Python, or an empty Ruby
+method body between its declaration and `end`) in supported C, C++, C#, Go, Java, JavaScript,
+Kotlin, PHP, Python, Ruby, Rust, Scala, TSX, and TypeScript
 files. JavaScript-family block
 functions stored in object properties, assigned or exported under a stable binding,
 or wrapped one or two calls deep under that binding are compressed as well. The
@@ -150,7 +151,20 @@ properties are kept byte-for-byte complete, including their initializers and
 property accessors, because they describe project state and public behavior.
 Python also keeps a leading function docstring and the
 complete class `__init__` and `__post_init__` methods, where instance state is
-declared. Unsupported or conservatively rejected files remain complete. The same
+declared. Ruby likewise keeps class `initialize` methods, while named `method` and
+`singleton_method` bodies are removed without collapsing class/module or DSL blocks.
+PHP keeps properties, constants, enum cases, and `__construct`; named functions and methods
+are compressed in both PHP-only and mixed HTML/PHP files, while anonymous functions and arrow
+functions remain complete. Scala compresses braced named `def` bodies and multiline ordinary
+expression bodies while preserving `val`, `var`, `given`, case-class parameters, and class-level
+constructor statements. Scala 3 significant-indentation bodies remain complete with the pinned
+grammar because their replacement boundary is not structurally stable. Kotlin preserves
+properties, custom accessors, primary-constructor state, data classes, enum entries, annotations,
+and free lambdas. Named block functions, `init` blocks, secondary constructors, and multiline
+expression bodies are compressed to block-form declarations in both `.kt` and `.kts`; one-line
+expression functions remain complete. Kotlin never emits `= { }`, because that form is a lambda;
+Scala intentionally uses it as a block expression. Unsupported or
+conservatively rejected files remain complete. The same
 transformed content is used by analysis metrics, context documents, folder exports,
 and ZIP exports.
 

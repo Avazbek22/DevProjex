@@ -9,6 +9,7 @@
   "export": "tree_sitter_python",
   "queryVersion": 3,
   "blockPlaceholder": "...",
+  "blockBodyStyle": "indented-statement",
   "preserveLeadingDocstring": true,
   "containerNodeTypes": [
     "module",

@@ -43,11 +43,13 @@ Examples include:
 | .NET | `.sln`, `.csproj`, `.fsproj`, `.vbproj` | `bin`, `obj` |
 | Frontend / Node.js | `package.json`, lock files, workspace files | `node_modules`, `dist`, `build`, framework caches |
 | Python | `pyproject.toml`, requirements files, `Pipfile`, Poetry files | virtual environments and tool caches |
-| JVM / Gradle / Maven | `pom.xml`, Gradle build and settings files | `target`, `.gradle`, `build`, `out` |
+| JVM / Gradle / Maven / sbt | `pom.xml`, Gradle build and settings files, `build.sbt` | `target`, `.gradle`, `build`, `out` |
 | Go | `go.mod`, `go.work` | `vendor`, `bin` |
 | Rust | `Cargo.toml` | `target` |
 | PHP | `composer.json` | `vendor` |
 | Ruby | `Gemfile`, `Gemfile.lock` | `.bundle`, `vendor`, `log`, `tmp` |
+| Swift / Apple platforms | `Package.swift`, `Podfile`, `Cartfile` | `.build`, `DerivedData`, `Pods`, `Carthage` |
+| Dart / Flutter | `pubspec.yaml`, `pubspec.lock` | `.dart_tool`, `build` |
 
 The table is illustrative rather than an exhaustive public blacklist. The maintained stack catalog lives in [`Infrastructure/SmartIgnore`](../Infrastructure/SmartIgnore/).
 

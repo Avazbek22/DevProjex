@@ -182,4 +182,92 @@ internal static class CodeCompressionFixtures
 		    total
 		}
 		""";
+
+	public const string Kotlin = """
+		package sample
+
+		class Calculator(
+		    val offset: Int,
+		) {
+		    val normalize: (Int) -> Int = { value -> value + offset }
+
+		    init {
+		        require(offset >= 0)
+		    }
+
+		    fun add(left: Int, right: Int): Int {
+		        val total = normalize(left + right)
+		        return total
+		    }
+
+		    fun count(): Int = offset
+		}
+		""";
+
+	public const string Ruby = """
+		class Calculator
+		  UNIT = "points"
+		  attr_reader :offset
+
+		  def initialize(offset)
+		    @offset = offset
+		  end
+
+		  def add(left, right)
+		    total = left + right + @offset
+		    "#{total} #{UNIT}"
+		  end
+
+		  def self.identity(value)
+		    normalized = value.to_s
+		    normalized
+		  end
+		end
+		""";
+
+	public const string Php = """
+		<!doctype html>
+		<title>Calculator</title>
+		<?php
+		final class Calculator
+		{
+		    private const UNIT = 'points';
+		    private int $offset = 0;
+
+		    public function __construct(private string $name)
+		    {
+		        $this->offset = strlen($name);
+		    }
+
+		    public function add(int $left, int $right): int
+		    {
+		        $total = $left + $right + $this->offset;
+		        return $total;
+		    }
+		}
+		?>
+		<footer>Unchanged HTML</footer>
+		""";
+
+	public const string Scala = """
+		package sample
+
+		final class Repository(private val root: String):
+		  val normalize: String => String = value => value.trim
+		  var count: Int = 0
+
+		  def load(name: String): String =
+		    val path = s"$root/$name"
+		    count += 1
+		    path
+
+		  def size: Int = count
+
+		object Repository {
+		  def create(root: String): Repository = {
+		    val normalized = root.trim
+		    new Repository(normalized)
+		  }
+		}
+		""";
 }

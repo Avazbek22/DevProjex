@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "grammars": [
+    {
+      "name": "tree-sitter-kotlin",
+      "export": "tree_sitter_kotlin",
+      "abiVersion": 14,
+      "source": {
+        "repository": "https://github.com/tree-sitter-grammars/tree-sitter-kotlin",
+        "tag": "v1.1.0",
+        "commit": "77dd60ea0a9003ce062c9728a513ffe1aaff8c82",
+        "archiveUrl": "https://codeload.github.com/tree-sitter-grammars/tree-sitter-kotlin/zip/refs/tags/v1.1.0",
+        "archiveSha256": "73c45375934dcb1a764a7c1c3b03059ec78d0755e0bf4874ddb06b4df4fbd091"
+      },
+      "toolchain": {
+        "name": "zig",
+        "version": "0.16.0",
+        "archiveUrl": "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip",
+        "archiveSha256": "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e",
+        "compilerFlags": [
+          "-shared",
+          "-O2",
+          "-DNDEBUG",
+          "-fno-ident",
+          "-fvisibility=hidden",
+          "-g0",
+          "-s"
+        ],
+        "postProcessing": "Zero Mach-O LC_UUID after stripping debug symbols to make cross-build hashes reproducible."
+      },
+      "binaries": [
+        {
+          "rid": "win-x64",
+          "target": "x86_64-windows-gnu",
+          "path": "win-x64/tree-sitter-kotlin.dll",
+          "format": "pe",
+          "architecture": "x64",
+          "size": 3478528,
+          "sha256": "0cae6212ac6b9c25133dbce74afb4e8dadb74c3ccd4ddbfbd74bec73cbeb93d2"
+        },
+        {
+          "rid": "win-arm64",
+          "target": "aarch64-windows-gnu",
+          "path": "win-arm64/tree-sitter-kotlin.dll",
+          "format": "pe",
+          "architecture": "arm64",
+          "size": 3458048,
+          "sha256": "6edf24c96d58688fe10b27721dff6e4547a3643a53318ce713f5e867ab404a5e"
+        },
+        {
+          "rid": "linux-x64",
+          "target": "x86_64-linux-gnu",
+          "path": "linux-x64/libtree-sitter-kotlin.so",
+          "format": "elf",
+          "architecture": "x64",
+          "size": 3417848,
+          "sha256": "b130b74a07cfaa43b951dbb751bc16daafd941212ced6ff83ece5e6306f48769"
+        },
+        {
+          "rid": "linux-arm64",
+          "target": "aarch64-linux-gnu",
+          "path": "linux-arm64/libtree-sitter-kotlin.so",
+          "format": "elf",
+          "architecture": "arm64",
+          "size": 3454360,
+          "sha256": "e2fb80e7c71e2e6e10d871a2ce1569cae4c74925243e6fb0d2ddbd97db526dc3"
+        },
+        {
+          "rid": "osx-x64",
+          "target": "x86_64-macos",
+          "linkerFlags": [
+            "-Wl,-install_name,@rpath/libtree-sitter-kotlin.dylib"
+          ],
+          "path": "osx-x64/libtree-sitter-kotlin.dylib",
+          "format": "macho",
+          "architecture": "x64",
+          "size": 3419147,
+          "sha256": "dc370be6fd6b635a4c64f2711ec917ba6ad0270c3057f8f0e8857476182b5c5a"
+        },
+        {
+          "rid": "osx-arm64",
+          "target": "aarch64-macos",
+          "linkerFlags": [
+            "-Wl,-install_name,@rpath/libtree-sitter-kotlin.dylib"
+          ],
+          "path": "osx-arm64/libtree-sitter-kotlin.dylib",
+          "format": "macho",
+          "architecture": "arm64",
+          "size": 3483496,
+          "sha256": "3b009b3d3f7f8038926da8d352995ffea1eb4a0d47bab8f2e28ba8193293fbfd"
+        }
+      ]
+    }
+  ]
+}

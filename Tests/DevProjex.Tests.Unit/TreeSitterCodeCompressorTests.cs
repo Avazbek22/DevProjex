@@ -24,10 +24,10 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
-	public void ShippedLanguageCatalog_MatchesTheTenLanguageProductContract()
+	public void ShippedLanguageCatalog_MatchesTheFourteenLanguageProductContract()
 	{
 		Assert.Equal(
-			["c", "cpp", "csharp", "go", "java", "javascript", "python", "rust", "tsx", "typescript"],
+			["c", "cpp", "csharp", "go", "java", "javascript", "kotlin", "php", "python", "ruby", "rust", "scala", "tsx", "typescript"],
 			CodeCompressionTestHarness.LanguageIds.Order(StringComparer.Ordinal));
 	}
 
@@ -641,6 +641,27 @@ public sealed class TreeSitterCodeCompressorTests
 			Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
 		}
 
+		Assert.Equal(1, locator.ResolveCount);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.MaterializedWorkers);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.AvailableWorkers);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.LeasedWorkers);
+	}
+
+	[Fact]
+	public void FullLanguageCatalogLoadsOnlyTheGrammarUsedByTheProject()
+	{
+		var locator = new CountingGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());
+		using var compressor = new TreeSitterCodeCompressor(locator);
+		using var scope = compressor.CreateScope(Path.GetTempPath());
+
+		var analysis = scope.Analyze(
+			"Widget.cs",
+			"Widget.cs",
+			CodeCompressionFixtures.CSharp,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
 		Assert.Equal(1, locator.ResolveCount);
 		Assert.Equal(1, compressor.RuntimeDiagnostics.CompiledQuerySets);
 		Assert.Equal(1, compressor.RuntimeDiagnostics.MaterializedWorkers);

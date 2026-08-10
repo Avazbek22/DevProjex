@@ -199,9 +199,17 @@ over the legacy token.
 
 `--compress` is a separate, additive content transformation and is off in the
 `standard` profile. It preserves declarations and replaces executable bodies with
-syntax-valid placeholders in the curated C, C++, C#, Go, Java, JavaScript, Python,
-Rust, TSX, and TypeScript language set. A parse failure, unsupported language, size
+syntax-valid placeholders in the curated C, C++, C#, Go, Java, JavaScript, Kotlin, PHP, Python,
+Ruby, Rust, Scala, TSX, and TypeScript language set. Ruby removes complete method-body lines between
+the declaration and `end`; mixed HTML outside PHP sections remains unchanged. A parse failure,
+unsupported language, size
 limit, structural-gate rejection, or non-shrinking result leaves that file complete.
+Scala 3 significant-indentation bodies remain complete because the pinned grammar does not expose
+a structurally stable replacement boundary for every following declaration.
+Kotlin preserves properties, accessor implementations, primary-constructor state and free
+lambdas, while block functions, `init`, secondary constructors and multiline expression bodies are
+compressed to block-form declarations for `.kt` and `.kts` files. Kotlin output never uses the
+lambda-valued `= { }` form; Scala uses the same text intentionally as a block expression.
 Analysis content metrics and every context/folder/ZIP output observe the same
 transformed bytes; source files are never modified.
 

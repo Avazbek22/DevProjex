@@ -17,7 +17,7 @@ public sealed class CodeCompressionQueryContractTests
 {
 	private static readonly string[] ExpectedLanguageIds =
 	[
-		"c", "cpp", "csharp", "go", "java", "javascript", "python", "rust", "tsx", "typescript"
+		"c", "cpp", "csharp", "go", "java", "javascript", "kotlin", "php", "python", "ruby", "rust", "scala", "tsx", "typescript"
 	];
 
 	[Fact]
@@ -71,6 +71,20 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
+	public void BlockBodyStylesMatchTheLanguagePackContract()
+	{
+		var packs = CodeCompressionTestHarness.LanguagePacks.ToDictionary(
+			static pack => pack.Id,
+			StringComparer.Ordinal);
+
+		Assert.Equal(BlockBodyStyle.IndentedStatement, packs["python"].BlockBodyStyle);
+		Assert.Equal(BlockBodyStyle.RemoveCompleteLines, packs["ruby"].BlockBodyStyle);
+		Assert.All(
+			packs.Values.Where(static pack => pack.Id is not ("python" or "ruby")),
+			static pack => Assert.Equal(BlockBodyStyle.Inline, pack.BlockBodyStyle));
+	}
+
+	[Fact]
 	public void ExpressionBodyStylesMatchTheLanguagePackContract()
 	{
 		var packs = CodeCompressionTestHarness.LanguagePacks.ToDictionary(
@@ -78,14 +92,16 @@ public sealed class CodeCompressionQueryContractTests
 			StringComparer.Ordinal);
 
 		Assert.Equal(ExpressionBodyStyle.Declaration, packs["csharp"].ExpressionBodyStyle);
+		Assert.Equal(ExpressionBodyStyle.Declaration, packs["kotlin"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["javascript"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["typescript"].ExpressionBodyStyle);
 		Assert.Equal(ExpressionBodyStyle.Inline, packs["tsx"].ExpressionBodyStyle);
+		Assert.Equal(ExpressionBodyStyle.Inline, packs["scala"].ExpressionBodyStyle);
 		Assert.All(
 			packs.Values.Where(static pack => pack.ExpressionBodyStyle != ExpressionBodyStyle.None),
 			static pack => Assert.Contains("@expression", pack.BodiesQuery, StringComparison.Ordinal));
 		Assert.All(
-			packs.Values.Where(static pack => pack.Id is not ("csharp" or "javascript" or "typescript" or "tsx")),
+		packs.Values.Where(static pack => pack.Id is not ("csharp" or "javascript" or "kotlin" or "scala" or "typescript" or "tsx")),
 			static pack =>
 			{
 				Assert.Equal(ExpressionBodyStyle.None, pack.ExpressionBodyStyle);
@@ -165,7 +181,7 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
-	public void EveryPackDeclaresAPlaceholderThatIsNotABareEllipsis()
+	public void EveryPackDeclaresAValidPlaceholderForItsBlockStyle()
 	{
 		// A bare "…" is not valid syntax anywhere, so the reverse-parse gate refuses every file and
 		// the feature compresses nothing while looking conservative. Measured: 872 of 872 files.
@@ -173,7 +189,10 @@ public sealed class CodeCompressionQueryContractTests
 		{
 			using var harness = CodeCompressionTestHarness.For(languageId);
 			Assert.NotEqual("…", harness.Pack.BlockPlaceholder.Trim());
-			Assert.NotEmpty(harness.Pack.BlockPlaceholder);
+			if (harness.Pack.BlockBodyStyle == BlockBodyStyle.RemoveCompleteLines)
+				Assert.Empty(harness.Pack.BlockPlaceholder);
+			else
+				Assert.NotEmpty(harness.Pack.BlockPlaceholder);
 		}
 	}
 

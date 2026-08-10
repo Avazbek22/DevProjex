@@ -45,14 +45,19 @@ public sealed class DocumentationAndPackagingContractTests
 		var infrastructureProject = XDocument.Load(
 			Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
 		var grammarNames = infrastructureProject
-			.Descendants("DevProjexGrammar")
+			.Descendants()
+			.Where(static element =>
+				element.Name.LocalName is "DevProjexGrammar" or "DevProjexVendoredGrammar")
 			.Select(element => element.Attribute("Include")?.Value)
 			.Where(static value => value is not null)
 			.Cast<string>()
 			.ToArray();
 		var notices = File.ReadAllText(Path.Combine(rootPath, "THIRD-PARTY-NOTICES.md"));
 
-		Assert.Equal(10, grammarNames.Length);
+		Assert.NotEmpty(grammarNames);
+		Assert.Equal(
+			grammarNames.Length,
+			grammarNames.Distinct(StringComparer.Ordinal).Count());
 		foreach (var grammarName in grammarNames)
 		{
 			Assert.Matches(

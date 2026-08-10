@@ -84,7 +84,9 @@ public sealed class SmartIgnoreRulesAdditionalTests
 			new RuleCase(new GoArtifactsIgnoreRule(), "go.mod"),
 			new RuleCase(new PhpArtifactsIgnoreRule(), "composer.json"),
 			new RuleCase(new RubyArtifactsIgnoreRule(), "Gemfile"),
-			new RuleCase(new RustArtifactsIgnoreRule(), "Cargo.toml")
+			new RuleCase(new RustArtifactsIgnoreRule(), "Cargo.toml"),
+			new RuleCase(new SwiftArtifactsIgnoreRule(), "Package.swift"),
+			new RuleCase(new DartArtifactsIgnoreRule(), "pubspec.yaml")
 		};
 
 		foreach (var testCase in cases)
@@ -113,7 +115,9 @@ public sealed class SmartIgnoreRulesAdditionalTests
 			new GoArtifactsIgnoreRule(),
 			new PhpArtifactsIgnoreRule(),
 			new RubyArtifactsIgnoreRule(),
-			new RustArtifactsIgnoreRule()
+			new RustArtifactsIgnoreRule(),
+			new SwiftArtifactsIgnoreRule(),
+			new DartArtifactsIgnoreRule()
 		};
 
 		foreach (var rule in rules)

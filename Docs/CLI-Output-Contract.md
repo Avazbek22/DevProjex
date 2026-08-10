@@ -162,7 +162,18 @@ complete as signature-level context; a multiline expression is implementation an
 is compressed like a block body. Free lambdas or closures, fields, and language-level
 properties remain complete, including nested callbacks in initializers and
 property accessors. Python leading function docstrings and class `__init__` and
-`__post_init__` methods also remain complete. Project source files are never modified.
+`__post_init__` methods also remain complete. Ruby `initialize` and PHP `__construct`
+remain complete because they declare instance state; Ruby DSL/free blocks and PHP
+anonymous/arrow functions are not treated as named bodies. Mixed HTML around PHP sections
+remains byte-for-byte complete. Scala braced named `def` bodies and multiline ordinary
+expression bodies are compressed; state declarations, `given` values, class-level constructor
+statements, and Scala 3 significant-indentation bodies remain complete. Project source files are
+never modified. Kotlin properties and primary-constructor state remain complete, including lambda
+initializers and custom accessors; named block functions, `init` blocks, secondary constructors,
+and multiline expression bodies are compressed to block-form declarations. Kotlin output never
+uses `= { }`, which would denote a lambda rather than a function body. Scala deliberately retains
+`= { }` because braces denote a block expression there. Top-level Kotlin DSL calls and free lambdas
+are not captured.
 
 ## Errors
 

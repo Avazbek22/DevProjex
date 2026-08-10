@@ -1,0 +1,25 @@
+{
+  "id": "kotlin",
+  "displayName": "Kotlin",
+  "extensions": [
+    ".kt",
+    ".kts"
+  ],
+  "library": "tree-sitter-kotlin",
+  "export": "tree_sitter_kotlin",
+  "queryVersion": 2,
+  "blockPlaceholder": "{ }",
+  "blockBodyStyle": "inline",
+  "preserveLeadingDocstring": false,
+  "expressionBodyStyle": "declaration",
+  "containerNodeTypes": [
+    "source_file",
+    "class_body",
+    "enum_class_body"
+  ],
+  "executableOwnerKinds": [
+    "function_declaration",
+    "anonymous_initializer",
+    "secondary_constructor"
+  ]
+}

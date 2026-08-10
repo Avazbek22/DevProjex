@@ -18,8 +18,9 @@
   </ItemGroup>
 
   <!--
-    The curated grammar set. Declared once here; Directory.Build.targets removes the package's own
-    copies from every output so only these embedded ones ship.
+    The curated grammar set. NuGet and vendored sources converge into CuratedGrammarFile below;
+    Directory.Build.targets removes the package's own copies from every output so only this set
+    ships.
 
     Grammars are embedded rather than left as native assets because a single-file publish extracts
     natives to a directory the OS loader does not search, so TreeSitter's Language(id) constructor
@@ -32,10 +33,17 @@
     <DevProjexGrammar Include="tree-sitter-go" />
     <DevProjexGrammar Include="tree-sitter-java" />
     <DevProjexGrammar Include="tree-sitter-javascript" />
+    <DevProjexGrammar Include="tree-sitter-php" />
     <DevProjexGrammar Include="tree-sitter-python" />
+    <DevProjexGrammar Include="tree-sitter-ruby" />
     <DevProjexGrammar Include="tree-sitter-rust" />
+    <DevProjexGrammar Include="tree-sitter-scala" />
     <DevProjexGrammar Include="tree-sitter-tsx" />
     <DevProjexGrammar Include="tree-sitter-typescript" />
+
+    <!-- Kotlin is absent from TreeSitter.DotNet 1.3.0. Its six pinned native binaries are built by
+         tools/grammars/build-kotlin.ps1 and verified against the adjacent supply-chain lock. -->
+    <DevProjexVendoredGrammar Include="tree-sitter-kotlin" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -46,6 +54,7 @@
     <_GrammarRid Condition="'$(_GrammarRid)'=='' and '$(RuntimeIdentifier)'!=''">$(RuntimeIdentifier)</_GrammarRid>
     <_GrammarRid Condition="'$(_GrammarRid)'==''">$(NETCoreSdkPortableRuntimeIdentifier)</_GrammarRid>
     <_GrammarSourceDir>$(NuGetPackageRoot)treesitter.dotnet/$(TreeSitterDotNetVersion)/runtimes/$(_GrammarRid)/native/</_GrammarSourceDir>
+    <_VendoredGrammarSourceDir>$(MSBuildThisFileDirectory)Grammars/vendored/$(_GrammarRid)/</_VendoredGrammarSourceDir>
     <_GrammarPrefix Condition="!$(_GrammarRid.StartsWith('win'))">lib</_GrammarPrefix>
     <_GrammarExtension Condition="$(_GrammarRid.StartsWith('win'))">.dll</_GrammarExtension>
     <_GrammarExtension Condition="$(_GrammarRid.StartsWith('linux'))">.so</_GrammarExtension>
@@ -58,6 +67,7 @@
        feature can be measured rather than estimated. Never set in a shipping build. -->
   <ItemGroup Condition="'$(DevProjexExcludeGrammars)'!='true'">
     <CuratedGrammarFile Include="@(DevProjexGrammar->'$(_GrammarSourceDir)$(_GrammarPrefix)%(Identity)$(_GrammarExtension)')" />
+    <CuratedGrammarFile Include="@(DevProjexVendoredGrammar->'$(_VendoredGrammarSourceDir)$(_GrammarPrefix)%(Identity)$(_GrammarExtension)')" />
   </ItemGroup>
 
   <!-- Embedded is the portable default. The MSIX build sets DevProjexGrammarDelivery=Content so

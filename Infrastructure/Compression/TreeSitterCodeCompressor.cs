@@ -655,10 +655,7 @@ internal sealed class TreeSitterCompressionScope(
 
 			if (start < 0 || node.EndIndex > source.Length || node.EndIndex <= start)
 				continue;
-			raw.Add(new RawCompressionEdit(
-				start,
-				node.EndIndex,
-				PlaceholderFor(pack, source, start, node.EndIndex)));
+			raw.Add(ResolveBlockEdit(pack, source, start, node.EndIndex));
 		}
 
 		foreach (var node in expressionCaptures)
@@ -934,20 +931,33 @@ internal sealed class TreeSitterCompressionScope(
 		}
 	}
 
-	/// <summary>
-	/// A placeholder must be valid syntax: the reverse-parse gate refuses anything that does not
-	/// parse. Empty blocks are deliberately neutral and avoid exposing implementation-style comment
-	/// markers in the generated context. Python uses its valid ellipsis statement instead.
-	/// A retained Python docstring moves the edit to the first executable statement, so the same
-	/// indentation logic works for documented and undocumented functions.
-	/// </summary>
-	private static string PlaceholderFor(CompressionLanguagePack pack, string source, int start, int end)
+	private static RawCompressionEdit ResolveBlockEdit(
+		CompressionLanguagePack pack,
+		string source,
+		int start,
+		int end)
 	{
-		if (!pack.Id.Equals("python", StringComparison.Ordinal))
-			return pack.BlockPlaceholder;
+		return pack.BlockBodyStyle switch
+		{
+			BlockBodyStyle.Inline => new RawCompressionEdit(start, end, pack.BlockPlaceholder),
+			BlockBodyStyle.IndentedStatement => new RawCompressionEdit(
+				start,
+				end,
+				IndentedStatementPlaceholder(pack.BlockPlaceholder, source, start, end)),
+			BlockBodyStyle.RemoveCompleteLines => RemoveCompleteBodyLines(source, start, end),
+			_ => throw new InvalidOperationException($"Unsupported block body style '{pack.BlockBodyStyle}'.")
+		};
+	}
 
-		// Python: an indented "..." keeps the suite non-empty. The indentation of the first removed
-		// line is reused so the result stays parseable.
+	/// <summary>
+	/// Indentation-sensitive grammars need a valid statement at the original suite depth. A retained
+	/// leading declaration can move the edit, so the indentation is always derived from the edit.
+	/// </summary>
+	private static string IndentedStatementPlaceholder(string placeholder, string source, int start, int end)
+	{
+
+		// An indented placeholder keeps an indentation-sensitive suite non-empty. Reusing the first
+		// removed line's indentation keeps the result parseable after retained leading declarations.
 		var lineStart = source.LastIndexOf('\n', Math.Max(0, Math.Min(start, source.Length - 1)));
 		var indentation = new string(' ', 4);
 		if (lineStart >= 0 && lineStart + 1 < source.Length)
@@ -980,7 +990,31 @@ internal sealed class TreeSitterCompressionScope(
 			: retainedEndsAtLineStart
 				? indentation
 				: $"{lineEnding}{indentation}";
-		return $"{leading}{pack.BlockPlaceholder}{trailingNewline}";
+		return $"{leading}{placeholder}{trailingNewline}";
+	}
+
+	private static RawCompressionEdit RemoveCompleteBodyLines(string source, int start, int end)
+	{
+		var expandedStart = start;
+		var lineStart = source.LastIndexOf('\n', Math.Max(0, start - 1)) + 1;
+		if (source.AsSpan(lineStart, start - lineStart).IsWhiteSpace())
+			expandedStart = lineStart;
+
+		var expandedEnd = end;
+		while (expandedEnd < source.Length && source[expandedEnd] is ' ' or '\t')
+			expandedEnd++;
+		if (expandedEnd < source.Length && source[expandedEnd] == '\r')
+		{
+			expandedEnd++;
+			if (expandedEnd < source.Length && source[expandedEnd] == '\n')
+				expandedEnd++;
+		}
+		else if (expandedEnd < source.Length && source[expandedEnd] == '\n')
+		{
+			expandedEnd++;
+		}
+
+		return new RawCompressionEdit(expandedStart, expandedEnd, string.Empty);
 	}
 
 	private static string ResolveLineEnding(string source, int precedingLineFeed)

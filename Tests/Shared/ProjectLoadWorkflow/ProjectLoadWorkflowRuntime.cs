@@ -34,7 +34,9 @@ public static class ProjectLoadWorkflowRuntime
             new RustArtifactsIgnoreRule(),
             new GoArtifactsIgnoreRule(),
             new PhpArtifactsIgnoreRule(),
-            new RubyArtifactsIgnoreRule()
+            new RubyArtifactsIgnoreRule(),
+            new SwiftArtifactsIgnoreRule(),
+            new DartArtifactsIgnoreRule()
         };
 
         return new IgnoreRulesService(

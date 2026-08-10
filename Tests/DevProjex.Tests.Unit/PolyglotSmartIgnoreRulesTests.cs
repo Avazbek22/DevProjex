@@ -98,6 +98,7 @@ public sealed class PolyglotSmartIgnoreRulesTests
 
 	[Theory]
 	[InlineData("pom.xml")]
+	[InlineData("build.sbt")]
 	[InlineData("build.gradle")]
 	[InlineData("build.gradle.kts")]
 	[InlineData("settings.gradle")]
@@ -187,6 +188,39 @@ public sealed class PolyglotSmartIgnoreRulesTests
 	}
 
 	[Theory]
+	[InlineData("Package.swift")]
+	[InlineData("Podfile")]
+	[InlineData("Cartfile")]
+	public void SwiftArtifactsIgnoreRule_ActivatesForSwiftProjectMarkers(string marker)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(marker, "fixture");
+		var rule = new SwiftArtifactsIgnoreRule();
+
+		var result = rule.Evaluate(temp.Path);
+
+		Assert.Equal(
+			[".build", "Carthage", "DerivedData", "Pods"],
+			result.FolderNames.Order(StringComparer.OrdinalIgnoreCase));
+	}
+
+	[Theory]
+	[InlineData("pubspec.yaml")]
+	[InlineData("pubspec.lock")]
+	public void DartArtifactsIgnoreRule_ActivatesForPubProjectMarkers(string marker)
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(marker, "name: fixture");
+		var rule = new DartArtifactsIgnoreRule();
+
+		var result = rule.Evaluate(temp.Path);
+
+		Assert.Equal(
+			[".dart_tool", "build"],
+			result.FolderNames.Order(StringComparer.OrdinalIgnoreCase));
+	}
+
+	[Theory]
 	[InlineData("frontend")]
 	[InlineData("python")]
 	[InlineData("jvm")]
@@ -194,6 +228,8 @@ public sealed class PolyglotSmartIgnoreRulesTests
 	[InlineData("php")]
 	[InlineData("ruby")]
 	[InlineData("rust")]
+	[InlineData("swift")]
+	[InlineData("dart")]
 	public void Rules_WithoutMatchingMarkers_ReturnEmptySets(string stack)
 	{
 		using var temp = new TemporaryDirectory();
@@ -206,6 +242,8 @@ public sealed class PolyglotSmartIgnoreRulesTests
 			"php" => new PhpArtifactsIgnoreRule().Evaluate(temp.Path),
 			"ruby" => new RubyArtifactsIgnoreRule().Evaluate(temp.Path),
 			"rust" => new RustArtifactsIgnoreRule().Evaluate(temp.Path),
+			"swift" => new SwiftArtifactsIgnoreRule().Evaluate(temp.Path),
+			"dart" => new DartArtifactsIgnoreRule().Evaluate(temp.Path),
 			_ => throw new ArgumentOutOfRangeException(nameof(stack), stack, null)
 		};
 

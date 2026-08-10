@@ -56,7 +56,9 @@ public static class AvaloniaCompositionRoot
             new RustArtifactsIgnoreRule(),
             new GoArtifactsIgnoreRule(),
             new PhpArtifactsIgnoreRule(),
-            new RubyArtifactsIgnoreRule()
+            new RubyArtifactsIgnoreRule(),
+            new SwiftArtifactsIgnoreRule(),
+            new DartArtifactsIgnoreRule()
         };
         var smartIgnoreService = new SmartIgnoreService(smartIgnoreRules);
         var ignoreOptionsService = new IgnoreOptionsService(localization);
