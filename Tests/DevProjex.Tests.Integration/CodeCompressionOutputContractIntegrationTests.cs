@@ -774,7 +774,7 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	[InlineData(true)]
 	public async Task CommentRemovalProducesDeterministicBytesAcrossContextFolderAndZip(bool compress)
 	{
-		const string source = """
+		var source = """
 			// file documentation to remove
 			public sealed class Commented
 			{
@@ -784,7 +784,7 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			        return marker; /* block comment to remove */
 			    }
 			}
-			""";
+			""".ReplaceLineEndings("\n");
 		using var workspace = CompressionWorkspace.Create(source);
 
 		var firstContext = await workspace.BuildContextAsync(compress, stripComments: true);

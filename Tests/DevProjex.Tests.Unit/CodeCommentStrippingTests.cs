@@ -170,7 +170,7 @@ public sealed class CodeCommentStrippingTests
 	[Fact]
 	public void Python_StripsLeadingDocstringsAndKeepsSuitesValid()
 	{
-		const string source = """"
+		var source = """"
 			#!/usr/bin/env python3
 			"""Module docs."""
 
@@ -183,7 +183,7 @@ public sealed class CodeCommentStrippingTests
 			    return value
 
 			"not a docstring"
-			"""";
+			"""".ReplaceLineEndings("\n");
 
 		var result = Transform("sample.py", source, CodeTransformKinds.Comments);
 
