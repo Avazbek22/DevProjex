@@ -23,12 +23,13 @@ public sealed class CodeCompressionExpressionBodyTests
 			""";
 
 		var (plan, text) = Compress("Service.cs", source);
+		var normalizedText = text.ReplaceLineEndings("\n");
 
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.Contains("public bool IsSupported(string path) => compressor.IsSupported(path);", text, StringComparison.Ordinal);
 		Assert.Contains(
 			"private static StreamWriter CreateStreamWriter(Stream destination) =>\n        new(destination, Utf8WithoutBom, bufferSize: 8192, leaveOpen: true);",
-			text,
+			normalizedText,
 			StringComparison.Ordinal);
 		Assert.Contains("items.Where(x => { Log(); return x.IsValid; }).Count();", text, StringComparison.Ordinal);
 		Assert.Contains("Join(\";\", parts) + \"=>;\";", text, StringComparison.Ordinal);
@@ -197,18 +198,22 @@ public sealed class CodeCompressionExpressionBodyTests
 			""";
 
 		var (plan, text) = Compress(path, source);
+		var normalizedText = text.ReplaceLineEndings("\n");
 
 		Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome);
 		Assert.Contains("const normalize = (value) => value.trim()", text, StringComparison.Ordinal);
 		Assert.Contains("const computed = (value) => { }", text, StringComparison.Ordinal);
-		Assert.Contains("const chained = (items) =>\n  { }", text, StringComparison.Ordinal);
+		Assert.Contains("const chained = (items) =>\n  { }", normalizedText, StringComparison.Ordinal);
 		Assert.Contains("assigned = (value) => { }", text, StringComparison.Ordinal);
 		Assert.Contains("export default (value) => { }", text, StringComparison.Ordinal);
 		Assert.Contains("short: (value) => value.trim()", text, StringComparison.Ordinal);
 		Assert.Contains("long: (value) => { }", text, StringComparison.Ordinal);
 		Assert.Contains("block: () => { }", text, StringComparison.Ordinal);
 		Assert.Contains("describe(\"suite\", () => (", text, StringComparison.Ordinal);
-		Assert.Contains("handler = () => (\n    this.items\n      .map((item) => item.value)\n  )", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"handler = () => (\n    this.items\n      .map((item) => item.value)\n  )",
+			normalizedText,
+			StringComparison.Ordinal);
 		Assert.DoesNotContain("block_marker", text, StringComparison.Ordinal);
 		AssertNoNewParseDefects(languageId, source, text);
 	}
