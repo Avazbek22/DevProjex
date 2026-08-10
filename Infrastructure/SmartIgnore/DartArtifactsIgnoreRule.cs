@@ -1,29 +1,23 @@
 namespace DevProjex.Infrastructure.SmartIgnore;
 
 /// <summary>
-/// Smart ignore rule for Java/Kotlin/Gradle build output folders.
-/// Activates when Maven/Gradle markers are present in the scope root.
+/// Smart ignore rule for Dart and Flutter generated state and build output.
+/// Activates when a pub manifest or lock file exists in the scope root.
 /// </summary>
-public sealed class JvmArtifactsIgnoreRule :
+public sealed class DartArtifactsIgnoreRule :
 	ISmartIgnoreRule,
 	IProjectRootFactsSmartIgnoreRule,
 	ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
-		"pom.xml",
-		"build.sbt",
-		"build.gradle",
-		"build.gradle.kts",
-		"settings.gradle",
-		"settings.gradle.kts");
+		"pubspec.yaml",
+		"pubspec.lock");
 
 	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create(
-		"target",
-		".gradle",
-		"build",
-		"out");
+		".dart_tool",
+		"build");
 	private static readonly IReadOnlySet<string> EvidenceRequiredFolderNames =
-		SmartIgnoreRuleSet.Create("target", "build", "out");
+		SmartIgnoreRuleSet.Create(".dart_tool", "build");
 
 	private static readonly SmartIgnoreResult MatchResult =
 		SmartIgnoreRuleSet.Result(folderNames: FolderNames);

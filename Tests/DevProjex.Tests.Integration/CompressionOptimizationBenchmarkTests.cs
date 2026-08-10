@@ -566,7 +566,9 @@ public sealed class CompressionOptimizationBenchmarkTests
 				new RustArtifactsIgnoreRule(),
 				new GoArtifactsIgnoreRule(),
 				new PhpArtifactsIgnoreRule(),
-				new RubyArtifactsIgnoreRule()
+				new RubyArtifactsIgnoreRule(),
+				new SwiftArtifactsIgnoreRule(),
+				new DartArtifactsIgnoreRule()
 			]));
 
 	private static string ResolveOutputPath(string stage)

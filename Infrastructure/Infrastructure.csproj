@@ -36,6 +36,7 @@
     <DevProjexGrammar Include="tree-sitter-python" />
     <DevProjexGrammar Include="tree-sitter-ruby" />
     <DevProjexGrammar Include="tree-sitter-rust" />
+    <DevProjexGrammar Include="tree-sitter-scala" />
     <DevProjexGrammar Include="tree-sitter-tsx" />
     <DevProjexGrammar Include="tree-sitter-typescript" />
   </ItemGroup>

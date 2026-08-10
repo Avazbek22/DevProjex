@@ -103,6 +103,7 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		"python" => CodeCompressionFixtures.PythonSource,
 		"ruby" => CodeCompressionFixtures.Ruby,
 		"rust" => CodeCompressionFixtures.Rust,
+		"scala" => CodeCompressionFixtures.Scala,
 		"tsx" => CodeCompressionFixtures.Tsx,
 		"typescript" => CodeCompressionFixtures.TypeScript,
 		_ => throw new ArgumentOutOfRangeException(nameof(languageId), languageId, "No fixture for this language.")

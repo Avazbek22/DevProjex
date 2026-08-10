@@ -165,7 +165,10 @@ property accessors. Python leading function docstrings and class `__init__` and
 `__post_init__` methods also remain complete. Ruby `initialize` and PHP `__construct`
 remain complete because they declare instance state; Ruby DSL/free blocks and PHP
 anonymous/arrow functions are not treated as named bodies. Mixed HTML around PHP sections
-remains byte-for-byte complete. Project source files are never modified.
+remains byte-for-byte complete. Scala braced named `def` bodies and multiline ordinary
+expression bodies are compressed; state declarations, `given` values, class-level constructor
+statements, and Scala 3 significant-indentation bodies remain complete. Project source files are
+never modified.
 
 ## Errors
 

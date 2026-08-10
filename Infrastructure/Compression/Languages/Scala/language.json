@@ -1,0 +1,24 @@
+{
+  "id": "scala",
+  "displayName": "Scala",
+  "extensions": [
+    ".scala",
+    ".sc"
+  ],
+  "library": "tree-sitter-scala",
+  "export": "tree_sitter_scala",
+  "queryVersion": 1,
+  "blockPlaceholder": "{ }",
+  "blockBodyStyle": "inline",
+  "preserveLeadingDocstring": false,
+  "expressionBodyStyle": "inline",
+  "containerNodeTypes": [
+    "compilation_unit",
+    "template_body",
+    "enum_body",
+    "with_template_body"
+  ],
+  "executableOwnerKinds": [
+    "function_definition"
+  ]
+}

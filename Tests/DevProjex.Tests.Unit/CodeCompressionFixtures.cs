@@ -227,4 +227,26 @@ internal static class CodeCompressionFixtures
 		?>
 		<footer>Unchanged HTML</footer>
 		""";
+
+	public const string Scala = """
+		package sample
+
+		final class Repository(private val root: String):
+		  val normalize: String => String = value => value.trim
+		  var count: Int = 0
+
+		  def load(name: String): String =
+		    val path = s"$root/$name"
+		    count += 1
+		    path
+
+		  def size: Int = count
+
+		object Repository {
+		  def create(root: String): Repository = {
+		    val normalized = root.trim
+		    new Repository(normalized)
+		  }
+		}
+		""";
 }

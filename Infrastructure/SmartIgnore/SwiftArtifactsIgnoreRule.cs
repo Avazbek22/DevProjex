@@ -1,29 +1,26 @@
 namespace DevProjex.Infrastructure.SmartIgnore;
 
 /// <summary>
-/// Smart ignore rule for Java/Kotlin/Gradle build output folders.
-/// Activates when Maven/Gradle markers are present in the scope root.
+/// Smart ignore rule for Swift package-manager and Apple-platform build artifacts.
+/// Activates only inside a scope marked by a Swift dependency manifest.
 /// </summary>
-public sealed class JvmArtifactsIgnoreRule :
+public sealed class SwiftArtifactsIgnoreRule :
 	ISmartIgnoreRule,
 	IProjectRootFactsSmartIgnoreRule,
 	ISmartIgnoreRuleDescriptorProvider
 {
 	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
-		"pom.xml",
-		"build.sbt",
-		"build.gradle",
-		"build.gradle.kts",
-		"settings.gradle",
-		"settings.gradle.kts");
+		"Package.swift",
+		"Podfile",
+		"Cartfile");
 
 	private static readonly IReadOnlySet<string> FolderNames = SmartIgnoreRuleSet.Create(
-		"target",
-		".gradle",
-		"build",
-		"out");
+		".build",
+		"DerivedData",
+		"Pods",
+		"Carthage");
 	private static readonly IReadOnlySet<string> EvidenceRequiredFolderNames =
-		SmartIgnoreRuleSet.Create("target", "build", "out");
+		SmartIgnoreRuleSet.Create(".build", "DerivedData", "Pods", "Carthage");
 
 	private static readonly SmartIgnoreResult MatchResult =
 		SmartIgnoreRuleSet.Result(folderNames: FolderNames);

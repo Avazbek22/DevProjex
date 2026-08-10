@@ -47,6 +47,17 @@ public sealed class DirectCommandIntegrationTests
 		}
 		""";
 
+	private const string ScalaCompressibleSource = """
+		object Service {
+		  val normalize: String => String = value => value.trim
+
+		  def run(value: String): String = {
+		    val scala_direct_cli_marker = normalize(value)
+		    scala_direct_cli_marker
+		  }
+		}
+		""";
+
 	[Fact]
 	public async Task AnalyzeJsonWritesStableMachineDocumentOnlyToStdout()
 	{
@@ -156,7 +167,8 @@ public sealed class DirectCommandIntegrationTests
 	[Theory]
 	[InlineData("src/service.rb", RubyCompressibleSource, "@root = root", "ruby_direct_cli_marker")]
 	[InlineData("src/Service.php", PhpCompressibleSource, "$this->root = trim($root);", "$php_direct_cli_marker")]
-	public async Task ContextExportWithCompressionAppliesRubyAndPhpStateContracts(
+	[InlineData("src/Service.scala", ScalaCompressibleSource, "val normalize: String => String", "scala_direct_cli_marker")]
+	public async Task ContextExportWithCompressionAppliesLanguageStateContracts(
 		string relativePath,
 		string source,
 		string preservedState,

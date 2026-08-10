@@ -47,9 +47,11 @@ under the MIT License.
 - tree-sitter: https://github.com/tree-sitter/tree-sitter
 - Grammars shipped: tree-sitter-c, tree-sitter-c-sharp, tree-sitter-cpp, tree-sitter-go,
   tree-sitter-java, tree-sitter-javascript, tree-sitter-php, tree-sitter-python,
-  tree-sitter-ruby, tree-sitter-rust, tree-sitter-tsx, tree-sitter-typescript
+  tree-sitter-ruby, tree-sitter-rust, tree-sitter-scala, tree-sitter-tsx, tree-sitter-typescript
 - Ruby grammar source: https://github.com/tree-sitter/tree-sitter-ruby
 - PHP grammar source: https://github.com/tree-sitter/tree-sitter-php
+- Scala grammar source: https://github.com/tree-sitter/tree-sitter-scala
+- Scala grammar revision in TreeSitter.DotNet 1.3.0: `97aead18d97708190a51d4f551ea9b05b60641c9`
 
 Only the grammars listed above are shipped. The remaining grammars in the package are
 removed from every build output by `Directory.Build.targets`.

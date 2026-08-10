@@ -30,7 +30,9 @@ public sealed class TerminalServiceFactory(
 			new RustArtifactsIgnoreRule(),
 			new GoArtifactsIgnoreRule(),
 			new PhpArtifactsIgnoreRule(),
-			new RubyArtifactsIgnoreRule()
+			new RubyArtifactsIgnoreRule(),
+			new SwiftArtifactsIgnoreRule(),
+			new DartArtifactsIgnoreRule()
 		]);
 		var ignoreOptions = new IgnoreOptionsService(localization);
 		var ignoreRules = new IgnoreRulesService(

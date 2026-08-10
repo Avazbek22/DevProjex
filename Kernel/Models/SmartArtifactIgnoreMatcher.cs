@@ -348,19 +348,38 @@ public sealed class SmartArtifactIgnoreMatcher
 			files: [".rustc_info.json"]),
 		SmartArtifactDirectoryRule.Exact(
 			"build",
-			files: ["build.ninja", "compile_commands.json", "CMakeCache.txt", "asset-manifest.json"],
+			files:
+			[
+				"build.ninja",
+				"compile_commands.json",
+				"CMakeCache.txt",
+				"asset-manifest.json",
+				"app.dill",
+				"snapshot_blob.bin.d"
+			],
 			directories:
 			[
 				"CMakeFiles",
 				"classes",
+				"flutter_assets",
 				"generated",
 				"intermediates",
 				"kotlin",
 				"libs",
+				"native_assets",
 				"outputs",
 				"reports",
 				"static",
 				"tmp"
+			],
+			childFiles:
+			[
+				"AssetManifest.bin",
+				"AssetManifest.json",
+				"FontManifest.json",
+				"flutter.js",
+				"flutter_bootstrap.js",
+				"main.dart.js"
 			]),
 		SmartArtifactDirectoryRule.Exact(
 			"dist",
@@ -428,6 +447,13 @@ public sealed class SmartArtifactIgnoreMatcher
 		SmartArtifactDirectoryRule.Exact(
 			"DerivedData",
 			directories: ["Build", "Index.noindex", "Logs", "ModuleCache.noindex", "SourcePackages"]),
+		SmartArtifactDirectoryRule.Exact(
+			"Pods",
+			files: ["Manifest.lock"],
+			directories: ["Pods.xcodeproj"]),
+		SmartArtifactDirectoryRule.Exact(
+			"Carthage",
+			directories: ["Build", "Checkouts"]),
 		SmartArtifactDirectoryRule.Exact(
 			"CMakeFiles",
 			files: ["CMakeOutput.log", "CMakeError.log", "TargetDirectories.txt", "cmake.check_cache"],

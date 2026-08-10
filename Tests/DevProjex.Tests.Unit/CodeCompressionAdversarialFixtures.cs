@@ -299,6 +299,47 @@ internal static class CodeCompressionAdversarialFixtures
 				["adversarial_rust_trait_marker", "adversarial_rust_closure_marker", "adversarial_rust_map_marker"],
 				"pub fn broken_rust(value: i32) -> i32 { let malformed_rust_marker = value + 1;"),
 			new CodeCompressionAdversarialFixture(
+				"scala",
+				"Repository.scala",
+				"""
+				package sample
+
+				final case class Envelope[T](value: T)
+
+				trait Transform[-T, +R] {
+				  def apply(value: T): R
+				}
+
+				object Repository {
+				  val normalize: String => String = value => value.trim
+				  var created: Int = 0
+
+				  def create[T](value: T)(using transform: Transform[T, String]): Envelope[String] = {
+				    val adversarial_scala_create_marker = transform(value)
+				    created += 1
+				    Envelope(adversarial_scala_create_marker)
+				  }
+				}
+
+				extension [T](values: List[T]) {
+				  def indexed: List[(T, Int)] = {
+				    val adversarial_scala_extension_marker = values.zipWithIndex
+				    adversarial_scala_extension_marker
+				  }
+				}
+				""",
+				[
+					"case class Envelope[T](value: T)",
+					"trait Transform[-T, +R]",
+					"val normalize: String => String = value => value.trim",
+					"var created: Int = 0",
+					"def create[T](value: T)(using transform: Transform[T, String])",
+					"extension [T](values: List[T])",
+					"def indexed: List[(T, Int)]"
+				],
+				["adversarial_scala_create_marker", "adversarial_scala_extension_marker"],
+				"object Broken { def broken(value: Int): Int = { val malformed_scala_marker = value + 1"),
+			new CodeCompressionAdversarialFixture(
 				"tsx",
 				"Widget.tsx",
 				"""

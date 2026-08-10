@@ -73,7 +73,7 @@ Works with any language, repository, or project structure.
 **Choose and control**
 * **Smart Ignore** — filters stack-specific build output, dependency folders, and caches without touching your source. [How it works ↓](#how-smart-ignore-works-)
 * **Hide Secrets** — replaces detected credential values in place while keeping the file and surrounding code. [Details](Docs/HideSecrets.md)
-* **Code compression** — keeps declarations and state while shortening named implementations across 12 languages
+* **Code compression** — keeps declarations and state while shortening named implementations across 13 languages
 * File tree with checkboxes, search, and name filters
 * Two Git-aware modes: follow `.gitignore`, or show only tracked files
 
