@@ -331,6 +331,47 @@ public sealed class TreeSitterAnalysisDiagnosticsTests
 		Assert.True(phase.P99Milliseconds <= phase.MaximumMilliseconds);
 	}
 
+	[Fact]
+	public async Task Dispose_FreezesCaptureAndKeepsLateScopeDataOutOfTheNextSession()
+	{
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		using var observer = new BlockingPhaseObserver(TreeSitterAnalysisPhase.OriginalParse);
+		using var compressor = new TreeSitterCodeCompressor(
+			CodeCompressionTestHarness.CreateLocator(),
+			[harness.Pack],
+			analysisPhaseObserver: observer);
+		var diagnosticsA = compressor.BeginAnalysisDiagnostics();
+		using var scopeA = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Bodies);
+		var analysisTask = Task.Run(
+			() => scopeA.Analyze(
+				"Widget.cs",
+				"Widget.cs",
+				"public sealed class Widget { public void Run() { System.Console.WriteLine(1); } }",
+				TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken);
+		await observer.Reached.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		diagnosticsA.Dispose();
+		var frozenBeforeCompletion = diagnosticsA.Capture();
+		using var diagnosticsB = compressor.BeginAnalysisDiagnostics();
+		observer.Release();
+		_ = await analysisTask.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+		var frozenAfterCompletion = diagnosticsA.Capture();
+
+		Assert.Same(frozenBeforeCompletion, frozenAfterCompletion);
+		Assert.Equal(1, frozenAfterCompletion.DroppedLateSamples);
+		Assert.Equal(0, frozenAfterCompletion.CompletedFiles);
+		Assert.All(frozenAfterCompletion.Phases, static phase => Assert.Equal(0, phase.Count));
+		var nextSnapshot = diagnosticsB.Capture();
+		Assert.Equal(0, nextSnapshot.CompletedFiles);
+		Assert.Equal(0, nextSnapshot.DroppedLateSamples);
+		Assert.All(nextSnapshot.Phases, static phase => Assert.Equal(0, phase.Count));
+	}
+
 	private static string CreateCaptureSpillSource()
 	{
 		var source = new StringBuilder();
@@ -355,6 +396,34 @@ public sealed class TreeSitterAnalysisDiagnosticsTests
 			}
 			""");
 		return source.ToString();
+	}
+
+	private sealed class BlockingPhaseObserver(TreeSitterAnalysisPhase targetPhase) :
+		ITreeSitterAnalysisPhaseObserver,
+		IDisposable
+	{
+		private readonly ManualResetEventSlim _release = new(initialState: false);
+		private readonly TaskCompletionSource _reached =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public Task Reached => _reached.Task;
+
+		public void OnPhaseCompleted(TreeSitterAnalysisPhase phase)
+		{
+			if (phase != targetPhase)
+				return;
+			_reached.TrySetResult();
+			if (!_release.Wait(TimeSpan.FromSeconds(5)))
+				throw new TimeoutException("The diagnostics freeze test did not release analysis.");
+		}
+
+		public void Release() => _release.Set();
+
+		public void Dispose()
+		{
+			_release.Set();
+			_release.Dispose();
+		}
 	}
 
 	private static void AssertEquivalentAnalysis(

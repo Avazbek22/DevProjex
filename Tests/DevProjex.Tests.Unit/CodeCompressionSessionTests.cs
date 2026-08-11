@@ -262,6 +262,62 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public async Task Prewarm_SmallStatCannotUnderReserveLargeMaterializedFacts()
+	{
+		const int materializedCharacters = 9 * 1024 * 1024;
+		const long maximumInFlightBytes = 32L * 1024 * 1024;
+		const long oneDecodeScratch = 10L * 1024 * 1024 * sizeof(char);
+		using var temp = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, 4)
+			.Select(index => temp.CreateFile($"small-{index}.cs", "x"))
+			.ToArray();
+		var analyzer = new RetainedBytesTrackingAnalyzer(materializedCharacters);
+		using var compressor = new RetainedBytesReleasingCompressor(analyzer);
+		using var session = new CodeCompressionSession(compressor);
+
+		var result = await new CodeCompressionPrewarmer(analyzer).WarmAsync(
+			new CodeCompressionContext(temp.Path, session),
+			paths,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(paths.Length, result.WarmedFiles);
+		Assert.Equal(0, analyzer.CurrentRetainedBytes);
+		Assert.InRange(
+			analyzer.PeakRetainedBytes,
+			1,
+			128L + materializedCharacters * sizeof(char));
+		Assert.InRange(
+			analyzer.PeakRetainedBytes,
+			1,
+			maximumInFlightBytes + oneDecodeScratch);
+	}
+
+	[Fact]
+	public async Task Prewarm_UnknownLengthReservesForTheMaximumMaterializedFact()
+	{
+		const int materializedCharacters = 1024 * 1024;
+		const long maximumInFlightBytes = 32L * 1024 * 1024;
+		const long oneDecodeScratch = 10L * 1024 * 1024 * sizeof(char);
+		using var temp = new TemporaryDirectory();
+		var missingPath = Path.Combine(temp.Path, "stat-fails.cs");
+		var analyzer = new RetainedBytesTrackingAnalyzer(materializedCharacters);
+		using var compressor = new RetainedBytesReleasingCompressor(analyzer);
+		using var session = new CodeCompressionSession(compressor);
+
+		var result = await new CodeCompressionPrewarmer(analyzer).WarmAsync(
+			new CodeCompressionContext(temp.Path, session),
+			[missingPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, result.WarmedFiles);
+		Assert.Equal(0, analyzer.CurrentRetainedBytes);
+		Assert.InRange(
+			analyzer.PeakRetainedBytes,
+			1,
+			maximumInFlightBytes + oneDecodeScratch);
+	}
+
+	[Fact]
 	public async Task Prewarm_EmptyUnsupportedFilePreservesNoBenefitOutcomeWithoutMaterializingContent()
 	{
 		using var temp = new TemporaryDirectory();
@@ -1049,7 +1105,157 @@ public sealed class CodeCompressionSessionTests
 		public void Report(T value) => report(value);
 	}
 
-	private sealed class TrackingFileContentAnalyzer : IFileContentAnalyzer
+	private static async ValueTask<BudgetedContentReadResult> ReadTestFactWithBudgetAsync(
+		Func<ValueTask<ContentReadFact>> readFact,
+		long retainedBytes,
+		WeightedByteBudget byteBudget,
+		SemaphoreSlim decodeScratchGate,
+		CancellationToken cancellationToken)
+	{
+		var lease = await byteBudget.AcquireAsync(retainedBytes, cancellationToken);
+		await decodeScratchGate.WaitAsync(cancellationToken);
+		try
+		{
+			var fact = await readFact();
+			return new BudgetedContentReadResult(fact, null, lease);
+		}
+		catch
+		{
+			lease.Dispose();
+			throw;
+		}
+		finally
+		{
+			decodeScratchGate.Release();
+		}
+	}
+
+	private sealed class RetainedBytesTrackingAnalyzer : IFileContentAnalyzer
+	{
+		private readonly int _contentCharacters;
+		private readonly ContentFingerprint _fingerprint;
+		private long _currentRetainedBytes;
+		private long _peakRetainedBytes;
+
+		public RetainedBytesTrackingAnalyzer(int contentCharacters)
+		{
+			_contentCharacters = contentCharacters;
+			_fingerprint = ContentFingerprint.Compute(new string('x', contentCharacters));
+		}
+
+		public long CurrentRetainedBytes => Interlocked.Read(ref _currentRetainedBytes);
+		public long PeakRetainedBytes => Interlocked.Read(ref _peakRetainedBytes);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) => null;
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var content = new string('x', _contentCharacters);
+			var retainedBytes = 128L + content.Length * sizeof(char);
+			var current = Interlocked.Add(ref _currentRetainedBytes, retainedBytes);
+			UpdateMaximum(ref _peakRetainedBytes, current);
+			return ValueTask.FromResult(new ContentReadFact(
+				content,
+				FileContentClassification.Text,
+				new TextFileMetrics(
+					SizeBytes: content.Length,
+					LineCount: 1,
+					CharCount: content.Length,
+					IsEmpty: false,
+					IsWhitespaceOnly: false),
+				_fingerprint));
+		}
+
+		public void Release(string content)
+		{
+			var retainedBytes = 128L + content.Length * sizeof(char);
+			Interlocked.Add(ref _currentRetainedBytes, -retainedBytes);
+		}
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		private static void UpdateMaximum(ref long target, long candidate)
+		{
+			var current = Interlocked.Read(ref target);
+			while (candidate > current)
+			{
+				var observed = Interlocked.CompareExchange(ref target, candidate, current);
+				if (observed == current)
+					return;
+				current = observed;
+			}
+		}
+	}
+
+	private sealed class RetainedBytesReleasingCompressor(
+		RetainedBytesTrackingAnalyzer analyzer) : ICodeCompressor, IDisposable
+	{
+		public string TransformIdentity => "retained-budget-test:v1";
+		public bool IsSupported(string relativePath) => true;
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(analyzer, TransformIdentity);
+		public void Dispose()
+		{
+		}
+
+		private sealed class Scope(
+			RetainedBytesTrackingAnalyzer analyzer,
+			string transformIdentity) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken)
+			{
+				try
+				{
+					cancellationToken.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(50));
+					cancellationToken.ThrowIfCancellationRequested();
+					return new CodeCompressionAnalysis(
+						CodeCompressionPlan.Unchanged(
+							relativePath,
+							"test",
+							CodeCompressionOutcome.UnchangedNoBenefit,
+							content.Length,
+							transformIdentity),
+						null);
+				}
+				finally
+				{
+					analyzer.Release(content);
+				}
+			}
+
+			public void Dispose()
+			{
+			}
+		}
+	}
+
+	private sealed class TrackingFileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileContentAnalyzer
 	{
 		private readonly FileContentAnalyzer inner = new();
 		private int _classifiedMetricsCalls;
@@ -1079,6 +1285,16 @@ public sealed class CodeCompressionSessionTests
 			return inner.GetClassifiedMetricsAsync(path, cancellationToken);
 		}
 
+		public ValueTask<IdentifiedFileContentMetricsResult> GetClassifiedMetricsWithIdentityAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _classifiedMetricsCalls);
+			return ((IPrewarmFileContentAnalyzer)inner).GetClassifiedMetricsWithIdentityAsync(
+				path,
+				cancellationToken);
+		}
+
 		public ValueTask<TextFileContent?> TryReadAsTextAsync(
 			string path,
 			CancellationToken cancellationToken = default) =>
@@ -1097,6 +1313,22 @@ public sealed class CodeCompressionSessionTests
 		{
 			Interlocked.Increment(ref _readFactCalls);
 			return inner.ReadFactAsync(path, maxSizeForFullRead, cancellationToken);
+		}
+
+		public ValueTask<BudgetedContentReadResult> ReadFactWithBudgetAsync(
+			string path,
+			long maximumReadBytes,
+			WeightedByteBudget byteBudget,
+			SemaphoreSlim decodeScratchGate,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _readFactCalls);
+			return ((IPrewarmFileContentAnalyzer)inner).ReadFactWithBudgetAsync(
+				path,
+				maximumReadBytes,
+				byteBudget,
+				decodeScratchGate,
+				cancellationToken);
 		}
 	}
 
@@ -1220,7 +1452,7 @@ public sealed class CodeCompressionSessionTests
 
 	private sealed class CoordinatedFailureFileContentAnalyzer(
 		Task analysisStarted,
-		string primaryMessage) : IFileContentAnalyzer
+		string primaryMessage) : IFileContentAnalyzer, IPrewarmFileContentAnalyzer
 	{
 		public TaskCompletionSource FailureObserved { get; } =
 			new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1268,6 +1500,24 @@ public sealed class CodeCompressionSessionTests
 				new TextFileMetrics(content.Length, 1, content.Length, false, false),
 				ContentFingerprint.Compute(content));
 		}
+
+		public ValueTask<BudgetedContentReadResult> ReadFactWithBudgetAsync(
+			string path,
+			long maximumReadBytes,
+			WeightedByteBudget byteBudget,
+			SemaphoreSlim decodeScratchGate,
+			CancellationToken cancellationToken = default) =>
+			ReadTestFactWithBudgetAsync(
+				() => ReadFactAsync(path, maximumReadBytes, cancellationToken),
+				128 + "same-content".Length * sizeof(char),
+				byteBudget,
+				decodeScratchGate,
+				cancellationToken);
+
+		public ValueTask<IdentifiedFileContentMetricsResult> GetClassifiedMetricsWithIdentityAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
 	}
 
 	private sealed class DisposalTrackingBlockingCompressor : ICodeCompressor, IDisposable
@@ -1321,7 +1571,9 @@ public sealed class CodeCompressionSessionTests
 		}
 	}
 
-	private sealed class PipelineFillFileContentAnalyzer(int requiredReads) : IFileContentAnalyzer
+	private sealed class PipelineFillFileContentAnalyzer(int requiredReads) :
+		IFileContentAnalyzer,
+		IPrewarmFileContentAnalyzer
 	{
 		private int _readFactCalls;
 
@@ -1369,6 +1621,24 @@ public sealed class CodeCompressionSessionTests
 				new TextFileMetrics(content.Length, 1, content.Length, false, false),
 				ContentFingerprint.Compute(content)));
 		}
+
+		public ValueTask<BudgetedContentReadResult> ReadFactWithBudgetAsync(
+			string path,
+			long maximumReadBytes,
+			WeightedByteBudget byteBudget,
+			SemaphoreSlim decodeScratchGate,
+			CancellationToken cancellationToken = default) =>
+			ReadTestFactWithBudgetAsync(
+				() => ReadFactAsync(path, maximumReadBytes, cancellationToken),
+				128 + "pipeline-content".Length * sizeof(char),
+				byteBudget,
+				decodeScratchGate,
+				cancellationToken);
+
+		public ValueTask<IdentifiedFileContentMetricsResult> GetClassifiedMetricsWithIdentityAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
 	}
 
 	private sealed class PipelineFillFailureCompressor(

@@ -225,6 +225,85 @@ public sealed class WeightedByteBudgetTests
 		}
 	}
 
+	[Fact]
+	public async Task DisposeCancellationAndLeaseReturnInterleavings_NeverDeadlockOrLoseCapacity()
+	{
+		const int capacity = 64;
+		var random = new Random(918_273);
+		for (var iteration = 0; iteration < 40; iteration++)
+		{
+			var testCancellation = TestContext.Current.CancellationToken;
+			var budget = new WeightedByteBudget(capacity);
+			var active = new List<WeightedByteBudget.Lease>();
+			for (var index = 0; index < 4; index++)
+				active.Add(await budget.AcquireAsync(16, TestContext.Current.CancellationToken));
+
+			var cancellations = Enumerable.Range(0, 12)
+				.Select(_ => new CancellationTokenSource())
+				.ToArray();
+			var waiters = cancellations
+				.Select((source, index) => budget.AcquireAsync(
+					1 + (index * 11 + iteration * 7) % 16,
+					source.Token).AsTask())
+				.ToArray();
+			AssertDiagnostics(budget, availableBytes: 0, issuedBytes: capacity, pendingWaiters: 12);
+
+			var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+			var disposeDelay = random.Next(0, 4);
+			var cancelDelay = random.Next(0, 4);
+			var releaseDelay = random.Next(0, 4);
+			var disposeTask = Task.Run(async () =>
+			{
+				await start.Task;
+				await Task.Delay(disposeDelay, testCancellation);
+				budget.Dispose();
+			}, testCancellation);
+			var cancelTask = Task.Run(async () =>
+			{
+				await start.Task;
+				await Task.Delay(cancelDelay, testCancellation);
+				foreach (var source in cancellations.Where((_, index) => (index & 1) == 0))
+					source.Cancel();
+			}, testCancellation);
+			var releaseTask = Task.Run(async () =>
+			{
+				await start.Task;
+				await Task.Delay(releaseDelay, testCancellation);
+				foreach (var lease in active.OrderBy(_ => random.Next()))
+					lease.Dispose();
+			}, testCancellation);
+
+			start.SetResult();
+			await Task.WhenAll(disposeTask, cancelTask, releaseTask).WaitAsync(
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken);
+			foreach (var waiter in waiters)
+			{
+				try
+				{
+					using var granted = await waiter.WaitAsync(
+						TimeSpan.FromSeconds(5),
+						TestContext.Current.CancellationToken);
+				}
+				catch (OperationCanceledException) when (!testCancellation.IsCancellationRequested)
+				{
+				}
+				catch (ObjectDisposedException)
+				{
+				}
+			}
+
+			foreach (var source in cancellations)
+				source.Dispose();
+			AssertDiagnostics(
+				budget,
+				availableBytes: capacity,
+				issuedBytes: 0,
+				pendingWaiters: 0);
+			budget.Dispose();
+		}
+	}
+
 	private static void UpdateMaximum(ref int maximum, int candidate)
 	{
 		var current = Volatile.Read(ref maximum);

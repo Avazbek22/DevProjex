@@ -7,6 +7,60 @@ public sealed class FileContentAnalyzerTests
 {
 	private readonly IFileContentAnalyzer _analyzer = new FileContentAnalyzer();
 
+	[Theory]
+	[InlineData(ProbeOperation.CompleteTextBuffer)]
+	[InlineData(ProbeOperation.StreamingMetrics)]
+	[InlineData(ProbeOperation.CompleteSnapshot)]
+	[InlineData(ProbeOperation.ReadFact)]
+	public async Task NullByteProbe_IoFailureIsUnreadableRatherThanBinary(ProbeOperation operation)
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("probe.txt", "ordinary text");
+		var analyzer = new FileContentAnalyzer(
+			(filePath, _, _, _) => new ProbeFailureFileStream(filePath));
+
+		var classification = await ClassifyAsync(analyzer, path, operation);
+
+		Assert.Equal(FileContentClassification.Unreadable, classification);
+		Assert.NotEqual(FileContentClassification.Binary, classification);
+	}
+
+	private static async Task<FileContentClassification> ClassifyAsync(
+		FileContentAnalyzer analyzer,
+		string path,
+		ProbeOperation operation)
+	{
+		switch (operation)
+		{
+			case ProbeOperation.CompleteTextBuffer:
+				await using (var buffer = await analyzer.OpenCompleteTextBufferAsync(
+				             path,
+				             maximumBytes: 1024,
+				             TestContext.Current.CancellationToken))
+				{
+					return buffer.Classification;
+				}
+			case ProbeOperation.StreamingMetrics:
+				return (await analyzer.GetClassifiedMetricsAsync(
+					path,
+					TestContext.Current.CancellationToken)).Classification;
+			case ProbeOperation.CompleteSnapshot:
+				await using (var snapshot = await analyzer.OpenCompleteSnapshotAsync(
+				             path,
+				             TestContext.Current.CancellationToken))
+				{
+					return snapshot.Result.Classification;
+				}
+			case ProbeOperation.ReadFact:
+				return (await analyzer.ReadFactAsync(
+					path,
+					maxSizeForFullRead: 1024,
+					TestContext.Current.CancellationToken)).Classification;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(operation), operation, null);
+		}
+	}
+
 	#region IsTextFileAsync Tests
 
 	[Fact]
@@ -957,6 +1011,32 @@ public sealed class FileContentAnalyzerTests
 				throwOnInvalidCharacters: true),
 			_ => throw new ArgumentOutOfRangeException(nameof(encodingId))
 		};
+
+	public enum ProbeOperation
+	{
+		CompleteTextBuffer,
+		StreamingMetrics,
+		CompleteSnapshot,
+		ReadFact
+	}
+
+	private sealed class ProbeFailureFileStream(string path) : FileStream(
+		path,
+		FileMode.Open,
+		FileAccess.Read,
+		FileShare.ReadWrite | FileShare.Delete,
+		bufferSize: 1,
+		FileOptions.SequentialScan)
+	{
+		private int _spanReads;
+
+		public override int Read(Span<byte> buffer)
+		{
+			if (Interlocked.Increment(ref _spanReads) == 2)
+				throw new IOException("Injected null-byte probe failure.");
+			return base.Read(buffer);
+		}
+	}
 
 	#endregion
 }

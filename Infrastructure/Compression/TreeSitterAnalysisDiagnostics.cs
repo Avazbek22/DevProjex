@@ -23,6 +23,9 @@ internal sealed class TreeSitterAnalysisDiagnosticsSession : IDisposable
 	private long _reverseVisitedNodes;
 	private long _completedFiles;
 	private long _cancelledFiles;
+	private long _activeFiles;
+	private long _droppedLateSamples;
+	private TreeSitterAnalysisDiagnosticsSnapshot? _frozenSnapshot;
 	private int _disposed;
 
 	internal TreeSitterAnalysisDiagnosticsSession(
@@ -40,8 +43,16 @@ internal sealed class TreeSitterAnalysisDiagnosticsSession : IDisposable
 		_files = new FileAccumulator(topCapacity);
 	}
 
-	internal TreeSitterFileAnalysisTiming BeginFile(string relativePath, int sourceCharacters) =>
-		new(relativePath, sourceCharacters);
+	internal TreeSitterFileAnalysisTiming BeginFile(string relativePath, int sourceCharacters)
+	{
+		lock (_sync)
+		{
+			if (_disposed != 0)
+				return new TreeSitterFileAnalysisTiming(relativePath, sourceCharacters, isRegistered: false);
+			_activeFiles++;
+			return new TreeSitterFileAnalysisTiming(relativePath, sourceCharacters, isRegistered: true);
+		}
+	}
 
 	internal long StartPhase() => Stopwatch.GetTimestamp();
 
@@ -58,8 +69,16 @@ internal sealed class TreeSitterAnalysisDiagnosticsSession : IDisposable
 
 	internal void RecordFile(ref TreeSitterFileAnalysisTiming file)
 	{
+		if (!file.IsRegistered)
+			return;
+
 		lock (_sync)
 		{
+			_activeFiles--;
+			file.IsRegistered = false;
+			if (_disposed != 0)
+				return;
+
 			if (file.IsCancelled)
 			{
 				_cancelledFiles++;
@@ -100,34 +119,47 @@ internal sealed class TreeSitterAnalysisDiagnosticsSession : IDisposable
 	{
 		lock (_sync)
 		{
-			var phases = new TreeSitterAnalysisPhaseSnapshot[_phases.Length];
-			for (var index = 0; index < phases.Length; index++)
-				phases[index] = _phases[index].Capture((TreeSitterAnalysisPhase)index);
-
-			return new TreeSitterAnalysisDiagnosticsSnapshot(
-				phases,
-				_files.Capture(),
-				_completedFiles,
-				_cancelledFiles,
-				new TreeSitterAnalysisWorkSnapshot(
-					_preserveCaptures,
-					_bodyCaptures,
-					_commentCaptures,
-					_originalDeclarations,
-					_originalDefects,
-					_originalVisitedNodes,
-					_rawEdits,
-					_finalEdits,
-					_reverseDeclarations,
-					_reverseDefects,
-					_reverseVisitedNodes));
+			return _frozenSnapshot ?? CaptureLocked();
 		}
+	}
+
+	private TreeSitterAnalysisDiagnosticsSnapshot CaptureLocked()
+	{
+		var phases = new TreeSitterAnalysisPhaseSnapshot[_phases.Length];
+		for (var index = 0; index < phases.Length; index++)
+			phases[index] = _phases[index].Capture((TreeSitterAnalysisPhase)index);
+
+		return new TreeSitterAnalysisDiagnosticsSnapshot(
+			phases,
+			_files.Capture(),
+			_completedFiles,
+			_cancelledFiles,
+			_droppedLateSamples,
+			new TreeSitterAnalysisWorkSnapshot(
+				_preserveCaptures,
+				_bodyCaptures,
+				_commentCaptures,
+				_originalDeclarations,
+				_originalDefects,
+				_originalVisitedNodes,
+				_rawEdits,
+				_finalEdits,
+				_reverseDeclarations,
+				_reverseDefects,
+				_reverseVisitedNodes));
 	}
 
 	public void Dispose()
 	{
-		if (Interlocked.Exchange(ref _disposed, 1) == 0)
-			_release(this);
+		lock (_sync)
+		{
+			if (_disposed != 0)
+				return;
+			_disposed = 1;
+			_droppedLateSamples = _activeFiles;
+			_frozenSnapshot = CaptureLocked();
+		}
+		_release(this);
 	}
 
 	private sealed class FileAccumulator
@@ -337,15 +369,20 @@ internal struct TreeSitterFileAnalysisTiming
 
 	private uint _completedPhaseMask;
 
-	internal TreeSitterFileAnalysisTiming(string relativePath, int sourceCharacters)
+	internal TreeSitterFileAnalysisTiming(
+		string relativePath,
+		int sourceCharacters,
+		bool isRegistered = false)
 	{
 		RelativePath = relativePath;
 		SourceCharacters = sourceCharacters;
+		IsRegistered = isRegistered;
 	}
 
 	internal string? RelativePath { get; }
 	internal int SourceCharacters { get; }
 	internal bool IsCancelled { get; set; }
+	internal bool IsRegistered { get; set; }
 	internal int PreserveCaptures { get; set; }
 	internal int BodyCaptures { get; set; }
 	internal int CommentCaptures { get; set; }
@@ -502,6 +539,7 @@ internal sealed record TreeSitterAnalysisDiagnosticsSnapshot(
 	IReadOnlyList<TreeSitterFileAnalysisSnapshot> SlowestFiles,
 	long CompletedFiles,
 	long CancelledFiles,
+	long DroppedLateSamples,
 	TreeSitterAnalysisWorkSnapshot Work);
 
 internal sealed record TreeSitterAnalysisPhaseSnapshot(

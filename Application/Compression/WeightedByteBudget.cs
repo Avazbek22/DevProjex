@@ -134,16 +134,15 @@ internal sealed class WeightedByteBudget : IDisposable
 
 	private void Release(long bytes)
 	{
-		Waiter? grants;
+		Waiter? grants = null;
 		lock (_sync)
 		{
-			if (_disposed)
-				return;
 			var availableBytes = checked(_availableBytes + bytes);
 			if (availableBytes > _maximumBytes)
 				throw new InvalidOperationException("The weighted byte budget was released beyond its capacity.");
 			_availableBytes = availableBytes;
-			grants = DrainWaitersLocked();
+			if (!_disposed)
+				grants = DrainWaitersLocked();
 		}
 
 		CompleteGrants(grants);
