@@ -90,7 +90,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 				new ContentReadFactSnapshot(selection, new Dictionary<string, ContentReadFact>(), 0));
 		}
 
-		var retainedPaths = BuildRetainedPathSet(candidates);
+		var retainedPaths = BuildRetainedPathSet(context, candidates);
 		var retainedFacts = new ConcurrentDictionary<string, ContentReadFact>(PathComparer.Default);
 		var parserWorkers = Math.Max(1, Math.Min(context.Session.AnalysisWorkerCapacity, candidates.Count));
 		var channel = Channel.CreateBounded<WarmWorkItem>(new BoundedChannelOptions(parserWorkers * 2)
@@ -114,7 +114,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 			Math.Min(MaximumIoParallelism, Math.Max(1, Environment.ProcessorCount)),
 			candidates.Count);
 		var producers = Enumerable.Range(0, producerCount)
-			.Select(_ => ProduceAsync())
+			.Select(_ => Task.Run(ProduceAsync, cancellationToken))
 			.ToArray();
 		try
 		{
@@ -125,9 +125,18 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		catch
 		{
 			channel.Writer.TryComplete();
+			try
+			{
+				await Task.WhenAll(workers).ConfigureAwait(false);
+			}
+			catch
+			{
+				// Preserve the producer/coordination failure that initiated pipeline teardown.
+			}
 			throw;
 		}
 
+		cancellationToken.ThrowIfCancellationRequested();
 		var snapshot = scope.Complete();
 		Debug.Assert(snapshot.TotalFiles == Volatile.Read(ref warmed));
 		stopwatch.Stop();
@@ -147,6 +156,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		{
 			while (true)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var index = Interlocked.Increment(ref nextIndex);
 				if (index >= candidates.Count)
 					return;
@@ -161,11 +171,41 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 						continue;
 					}
 
+					var relativePath = BuildRelativePath(context.ProjectRoot, path);
+					if (!context.IsSupported(relativePath))
+					{
+						var metricsResult = await contentAnalyzer
+							.GetClassifiedMetricsAsync(path, cancellationToken)
+							.ConfigureAwait(false);
+						cancellationToken.ThrowIfCancellationRequested();
+						if (metricsResult.Classification != FileContentClassification.Text ||
+						    metricsResult.Metrics is not { IsEstimated: false } metrics)
+						{
+							Increment(WarmFileOutcome.Skipped, ref warmed, ref skipped, ref failed);
+							ReportProgress(progress, ref processed, candidates.Count);
+							continue;
+						}
+
+						if (retainedPaths.Contains(path))
+						{
+							retainedFacts[path] = new ContentReadFact(
+								Content: null,
+								Classification: FileContentClassification.Text,
+								RawMetrics: metrics,
+								Fingerprint: null);
+						}
+						scope.RecordUnsupported(path, relativePath, metrics.CharCount);
+						Increment(WarmFileOutcome.Warmed, ref warmed, ref skipped, ref failed);
+						ReportProgress(progress, ref processed, candidates.Count);
+						continue;
+					}
+
 					lease = await byteBudget.AcquireAsync(EstimateInFlightBytes(path), cancellationToken)
 						.ConfigureAwait(false);
 					var fact = await contentAnalyzer
 						.ReadFactAsync(path, MaximumReadBytes, cancellationToken)
 						.ConfigureAwait(false);
+					cancellationToken.ThrowIfCancellationRequested();
 					if (!fact.IsMaterializedText || fact.Fingerprint is not { } fingerprint)
 					{
 						Increment(WarmFileOutcome.Skipped, ref warmed, ref skipped, ref failed);
@@ -175,23 +215,6 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 
 					if (retainedPaths.Contains(path))
 						retainedFacts[path] = fact;
-					var relativePath = BuildRelativePath(context.ProjectRoot, path);
-					if (!context.IsSupported(relativePath))
-					{
-						var recorded = scope.Warm(
-							path,
-							relativePath,
-							fact.Content!,
-							fingerprint,
-							cancellationToken);
-						Increment(
-							recorded ? WarmFileOutcome.Warmed : WarmFileOutcome.Skipped,
-							ref warmed,
-							ref skipped,
-							ref failed);
-						ReportProgress(progress, ref processed, candidates.Count);
-						continue;
-					}
 					if (scope.TryWarmCached(path, relativePath, fact.Content!, fingerprint))
 					{
 						Increment(WarmFileOutcome.Warmed, ref warmed, ref skipped, ref failed);
@@ -259,15 +282,26 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		}
 	}
 
-	private HashSet<string> BuildRetainedPathSet(IReadOnlyList<string> paths)
+	private HashSet<string> BuildRetainedPathSet(
+		CodeCompressionContext context,
+		IReadOnlyList<string> paths)
 	{
 		var retained = new HashSet<string>(PathComparer.Default);
 		long bytes = 0;
 		foreach (var path in paths)
 		{
-			if (contentAnalyzer.ClassifyWithoutReading(path) == FileContentClassification.Binary ||
-			    !TryGetLength(path, out var length) ||
-			    length > MaximumReadBytes)
+			if (contentAnalyzer.ClassifyWithoutReading(path) == FileContentClassification.Binary)
+				continue;
+			var relativePath = BuildRelativePath(context.ProjectRoot, path);
+			if (!context.IsSupported(relativePath))
+			{
+				if (bytes + 128L > MaximumRetainedReadFactBytes)
+					continue;
+				retained.Add(path);
+				bytes += 128L;
+				continue;
+			}
+			if (!TryGetLength(path, out var length) || length > MaximumReadBytes)
 				continue;
 			var estimate = 128L + length * sizeof(char);
 			if (bytes + estimate > MaximumRetainedReadFactBytes)

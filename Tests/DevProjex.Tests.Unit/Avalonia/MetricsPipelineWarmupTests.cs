@@ -273,6 +273,128 @@ public sealed class MetricsPipelineWarmupTests
 	}
 
 	[AvaloniaFact]
+	public async Task PostLoadMetrics_ReusesStreamedUnsupportedMetricsWithoutMaterializingTheFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile(
+			"site.css",
+			"/* documentation */\n.card { color: red; }\n");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("site.css", textFile, false, false, "css", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(temp.Path, compressionSession),
+			redaction: null);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => transformation);
+
+		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+		Assert.Equal(
+			CodeCompressionOutcome.UnchangedUnsupportedLanguage,
+			Assert.Single(compressionSession.Snapshot.Unchanged).Outcome);
+
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+		Assert.True(pipeline.HasCompleteBaseline);
+	}
+
+	[AvaloniaFact]
+	public async Task PostLoadMetrics_RereadsMetricsOnlyFactWhenTheFileBecomesSupportedInAnotherMode()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile(
+			"site.css",
+			"/* documentation */\n.card { color: red; }\n");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("site.css", textFile, false, false, "css", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		var compressor = new CommentsOnlyCssCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				temp.Path,
+				compressionSession,
+				CodeTransformKinds.Bodies),
+			redaction: null);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => transformation);
+
+		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+
+		transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				temp.Path,
+				compressionSession,
+				CodeTransformKinds.Comments),
+			redaction: null);
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+		Assert.True(pipeline.HasCompleteBaseline);
+	}
+
+	[AvaloniaFact]
 	public async Task CompressionPrewarm_AnalyzesOnlyTheEffectiveSelection()
 	{
 		using var temp = new TemporaryDirectory();
@@ -960,6 +1082,52 @@ public sealed class MetricsPipelineWarmupTests
 						owner.TransformIdentity),
 					null);
 			}
+
+			public void Dispose()
+			{
+			}
+		}
+	}
+
+	private sealed class CommentsOnlyCssCompressor : ICodeCompressor
+	{
+		public string TransformIdentity => "metrics-comments-only:v1";
+
+		public bool IsSupported(string relativePath) => false;
+
+		public bool IsSupported(string relativePath, CodeTransformKinds kinds) =>
+			Path.GetExtension(relativePath).Equals(".css", StringComparison.OrdinalIgnoreCase) &&
+			(kinds & CodeTransformKinds.Comments) != 0;
+
+		public CodeTransformKinds GetEffectiveTransformKinds(
+			string relativePath,
+			CodeTransformKinds kinds) =>
+			IsSupported(relativePath, kinds)
+				? kinds & CodeTransformKinds.Comments
+				: CodeTransformKinds.None;
+
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
+
+		public ICodeCompressionScope CreateScope(
+			string projectRoot,
+			CodeTransformKinds kinds) =>
+			new Scope(this);
+
+		private sealed class Scope(CommentsOnlyCssCompressor owner) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken) =>
+				new(
+					CodeCompressionPlan.Unchanged(
+						relativePath,
+						"css",
+						CodeCompressionOutcome.UnchangedNoBenefit,
+						content.Length,
+						owner.TransformIdentity),
+					null);
 
 			public void Dispose()
 			{

@@ -891,9 +891,11 @@ internal sealed class MetricsPipeline(
 					retainedFact = retained;
                 if (transformationScope is not null && IsCompressible(filePath))
                 {
-					var fact = retainedFact ?? await fileContentAnalyzer
-						.ReadFactAsync(filePath, MaximumMetricsMaterializationBytes, ct)
-						.ConfigureAwait(false);
+					var fact = retainedFact is { IsMaterializedText: true }
+						? retainedFact
+						: await fileContentAnalyzer
+							.ReadFactAsync(filePath, MaximumMetricsMaterializationBytes, ct)
+							.ConfigureAwait(false);
 					rawMetrics = fact.RawMetrics;
 					effectiveMetrics = rawMetrics is { IsEstimated: false } && fact.IsMaterializedText
 						? MeasureTransformed(

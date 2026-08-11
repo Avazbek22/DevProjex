@@ -277,7 +277,8 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 			if (HasKnownBinaryExtension(path))
 				return new FileContentMetricsResult(FileContentClassification.Binary);
 
-			using var stream = OpenSequentialRead(path, StreamingBufferSize, FileShare.Read);
+			// Decoding owns pooled byte/char buffers; a second FileStream buffer only duplicates memory.
+			using var stream = OpenSequentialRead(path, bufferSize: 1, FileShare.Read);
 			var sizeBytes = stream.Length;
 
 			if (sizeBytes == 0)
@@ -720,35 +721,74 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		ContentPipelineDiagnostics.RecordFullFileRead(sizeBytes);
 		contentFingerprint = null;
 
-		// Rent buffer from pool to avoid allocation per file
-		char[] buffer = ArrayPool<char>.Shared.Rent(StreamingBufferSize);
+		byte[]? byteBuffer = null;
+		char[]? charBuffer = null;
 		using var fingerprint = calculateFingerprint
 			? IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
 			: null;
 		try
 		{
 			var counter = new TextMetricsCounter();
+			var bomEncoding = DetectBomEncoding(stream, cancellationToken);
+			var effectiveEncoding = bomEncoding is null
+				? encoding
+				: ResolveBomFallbackEncoding(bomEncoding);
+			var decoder = effectiveEncoding.GetDecoder();
+			byteBuffer = ArrayPool<byte>.Shared.Rent(StreamingBufferSize);
+			charBuffer = ArrayPool<char>.Shared.Rent(
+				Math.Max(1, effectiveEncoding.GetMaxCharCount(StreamingBufferSize)));
+			stream.Position = GetPreambleLength(bomEncoding);
 
-			stream.Position = 0;
-			using var reader = new StreamReader(
-				stream,
-				encoding,
-				detectEncodingFromByteOrderMarks: true,
-				bufferSize: StreamingBufferSize,
-				leaveOpen: true);
-
-			int charsRead;
-
-			while ((charsRead = reader.Read(buffer, 0, StreamingBufferSize)) > 0)
+			while (true)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
+				var bytesRead = stream.Read(byteBuffer, 0, StreamingBufferSize);
+				if (bytesRead == 0)
+					break;
 
-				// Use Span for faster iteration without bounds checking
-				var span = buffer.AsSpan(0, charsRead);
-				fingerprint?.AppendData(MemoryMarshal.AsBytes(span));
-				// A null byte after the first 512 bytes still means binary.
-				if (!counter.Append(span))
+				var bytesConsumed = 0;
+				while (bytesConsumed < bytesRead)
+				{
+					decoder.Convert(
+						byteBuffer.AsSpan(bytesConsumed, bytesRead - bytesConsumed),
+						charBuffer,
+						flush: false,
+						out var bytesUsed,
+						out var charsUsed,
+						out _);
+					if (bytesUsed == 0 && charsUsed == 0)
+						throw new IOException("The streaming decoder made no progress.");
+					bytesConsumed += bytesUsed;
+					if (!AppendDecodedMetrics(
+							ref counter,
+							fingerprint,
+							charBuffer.AsSpan(0, charsUsed)))
+					{
+						return null;
+					}
+				}
+			}
+
+			while (true)
+			{
+				decoder.Convert(
+					ReadOnlySpan<byte>.Empty,
+					charBuffer,
+					flush: true,
+					out _,
+					out var charsUsed,
+					out var completed);
+				if (!AppendDecodedMetrics(
+						ref counter,
+						fingerprint,
+						charBuffer.AsSpan(0, charsUsed)))
+				{
 					return null;
+				}
+				if (completed)
+					break;
+				if (charsUsed == 0)
+					throw new IOException("The streaming decoder could not flush its pending state.");
 			}
 
 			contentFingerprint = fingerprint?.GetHashAndReset();
@@ -758,9 +798,48 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer
 		}
 		finally
 		{
-			// Always return buffer to pool
-			ArrayPool<char>.Shared.Return(buffer);
+			if (byteBuffer is not null)
+			{
+				CryptographicOperations.ZeroMemory(byteBuffer.AsSpan());
+				ArrayPool<byte>.Shared.Return(byteBuffer);
+			}
+			if (charBuffer is not null)
+			{
+				CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(charBuffer.AsSpan()));
+				ArrayPool<char>.Shared.Return(charBuffer);
+			}
 		}
+	}
+
+	private static bool AppendDecodedMetrics(
+		ref TextMetricsCounter counter,
+		IncrementalHash? fingerprint,
+		ReadOnlySpan<char> characters)
+	{
+		if (characters.IsEmpty)
+			return true;
+		// A null character after the initial binary probe still makes the file binary.
+		if (!counter.Append(characters))
+			return false;
+		fingerprint?.AppendData(MemoryMarshal.AsBytes(characters));
+		return true;
+	}
+
+	private static Encoding ResolveBomFallbackEncoding(Encoding bomEncoding)
+	{
+		// The BOM-less strict UTF-8 instance has no preamble, so StreamReader auto-detection switches
+		// it to the framework replacement-fallback UTF-8 encoding. UTF-16/32 preambles match their
+		// supplied strict encodings and keep exception fallback. Preserve that established split.
+		if (ReferenceEquals(bomEncoding, StrictUtf8))
+			return Encoding.UTF8;
+		if (ReferenceEquals(bomEncoding, StrictUtf16Le) ||
+		    ReferenceEquals(bomEncoding, StrictUtf16Be) ||
+		    ReferenceEquals(bomEncoding, StrictUtf32Le) ||
+		    ReferenceEquals(bomEncoding, StrictUtf32Be))
+		{
+			return bomEncoding;
+		}
+		throw new ArgumentOutOfRangeException(nameof(bomEncoding));
 	}
 
 

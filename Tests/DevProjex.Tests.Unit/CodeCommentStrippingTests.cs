@@ -689,28 +689,77 @@ public sealed class CodeCommentStrippingTests
 	}
 
 	[Fact]
-	public void CommentOnlyLanguage_CacheIsIsolatedByRequestedModeAndReused()
+	public void CommentOnlyLanguage_CacheUsesEffectiveModeAndPreservesOperationIdentity()
 	{
 		const string source = "/* remove */\n.card { color: red; }\n";
 		var fullPath = Path.Combine(Path.GetTempPath(), "mode-cache.css");
 		using var session = new CodeCompressionSession(CodeCompressionTestHarness.CreateCompressor());
 
-		var comments = Transform(session, fullPath, source, CodeTransformKinds.Comments);
+		var comments = Resolve(session, fullPath, source, CodeTransformKinds.Comments);
 		var afterComments = session.Diagnostics;
-		var both = Transform(
+		var both = Resolve(
 			session,
 			fullPath,
 			source,
 			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
 		var afterBoth = session.Diagnostics;
-		var commentsAgain = Transform(session, fullPath, source, CodeTransformKinds.Comments);
+		var commentsAgain = Resolve(session, fullPath, source, CodeTransformKinds.Comments);
 		var afterReuse = session.Diagnostics;
 
-		Assert.Equal(comments, both);
-		Assert.Equal(comments, commentsAgain);
-		Assert.Equal(afterComments.AnalysisExecutions + 1, afterBoth.AnalysisExecutions);
+		Assert.Equal(comments.Text, both.Text);
+		Assert.Equal(comments.Text, commentsAgain.Text);
+		Assert.Equal(session.GetTransformIdentity(CodeTransformKinds.Comments), comments.PlanIdentity);
+		Assert.Equal(
+			session.GetTransformIdentity(CodeTransformKinds.Bodies | CodeTransformKinds.Comments),
+			both.PlanIdentity);
+		Assert.Equal(comments.PlanIdentity, commentsAgain.PlanIdentity);
+		Assert.Equal(comments.PlanIdentity, comments.SnapshotIdentity);
+		Assert.Equal(both.PlanIdentity, both.SnapshotIdentity);
+		Assert.Equal(commentsAgain.PlanIdentity, commentsAgain.SnapshotIdentity);
+		Assert.Equal(afterComments.AnalysisExecutions, afterBoth.AnalysisExecutions);
 		Assert.Equal(afterBoth.AnalysisExecutions, afterReuse.AnalysisExecutions);
-		Assert.True(afterReuse.CacheHits > afterBoth.CacheHits);
+		Assert.Equal(afterComments.CacheHits + 1, afterBoth.CacheHits);
+		Assert.Equal(afterBoth.CacheHits + 1, afterReuse.CacheHits);
+		Assert.Equal(1, afterReuse.CacheEntries);
+	}
+
+	[Theory]
+	[InlineData(
+		"mode-cache.cs",
+		"// docs\ninternal static class Sample\n{\n    internal static int Run()\n    {\n        // implementation\n        return 42;\n    }\n}\n")]
+	[InlineData(
+		"mode-cache.py",
+		"# docs\ndef run():\n    # implementation\n    return 42\n")]
+	public void FullLanguageCache_RemainsIsolatedByRequestedModeAndReusesPreviousMode(
+		string fileName,
+		string source)
+	{
+		var fullPath = Path.Combine(Path.GetTempPath(), fileName);
+		using var session = new CodeCompressionSession(CodeCompressionTestHarness.CreateCompressor());
+
+		var comments = Resolve(session, fullPath, source, CodeTransformKinds.Comments);
+		var afterComments = session.Diagnostics;
+		var both = Resolve(
+			session,
+			fullPath,
+			source,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		var afterBoth = session.Diagnostics;
+		var commentsAgain = Resolve(session, fullPath, source, CodeTransformKinds.Comments);
+		var afterReuse = session.Diagnostics;
+
+		Assert.NotEqual(comments.Text, both.Text);
+		Assert.Equal(comments.Text, commentsAgain.Text);
+		Assert.Equal(afterComments.AnalysisExecutions + 1, afterBoth.AnalysisExecutions);
+		Assert.Equal(afterComments.CacheHits, afterBoth.CacheHits);
+		Assert.Equal(afterBoth.AnalysisExecutions, afterReuse.AnalysisExecutions);
+		Assert.Equal(afterBoth.CacheHits + 1, afterReuse.CacheHits);
+		Assert.Equal(2, afterReuse.CacheEntries);
+		Assert.Equal(session.GetTransformIdentity(CodeTransformKinds.Comments), comments.PlanIdentity);
+		Assert.Equal(
+			session.GetTransformIdentity(CodeTransformKinds.Bodies | CodeTransformKinds.Comments),
+			both.PlanIdentity);
+		Assert.Equal(comments.PlanIdentity, commentsAgain.PlanIdentity);
 	}
 
 	private static (CodeCompressionPlan Plan, string Text) Transform(
@@ -733,5 +782,23 @@ public sealed class CodeCommentStrippingTests
 		using var scope = new CodeCompressionContext(Path.GetTempPath(), session, kinds)
 			.BeginOutput([fullPath]);
 		return scope.Transform(fullPath, Path.GetFileName(fullPath), source, TestContext.Current.CancellationToken).Text;
+	}
+
+	private static (string Text, string PlanIdentity, string SnapshotIdentity) Resolve(
+		CodeCompressionSession session,
+		string fullPath,
+		string source,
+		CodeTransformKinds kinds)
+	{
+		using var scope = new CodeCompressionContext(Path.GetTempPath(), session, kinds)
+			.BeginOutput([fullPath]);
+		var plan = scope.ResolvePlan(
+			fullPath,
+			Path.GetFileName(fullPath),
+			source,
+			TestContext.Current.CancellationToken);
+		var text = plan.Apply(source).Text;
+		var snapshot = scope.Complete();
+		return (text, plan.TransformIdentity, snapshot.TransformIdentity);
 	}
 }

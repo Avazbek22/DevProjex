@@ -80,6 +80,14 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	private readonly object _sync = new();
 	private readonly int _maximumCacheEntries = PlanCacheCapacity;
 	private readonly long _maximumRetainedCacheBytes = MaximumRetainedPlanCacheBytes;
+	private readonly string _bodiesTransformIdentity =
+		CodeTransformIdentity.Create(compressor.TransformIdentity, CodeTransformKinds.Bodies);
+	private readonly string _commentsTransformIdentity =
+		CodeTransformIdentity.Create(compressor.TransformIdentity, CodeTransformKinds.Comments);
+	private readonly string _combinedTransformIdentity =
+		CodeTransformIdentity.Create(
+			compressor.TransformIdentity,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
 	private CodeCompressionSnapshot _snapshot = CodeCompressionSnapshot.Empty;
 	private CancellationTokenSource _generationCts = new();
 	private long _generation;
@@ -109,10 +117,16 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 	public event EventHandler? SnapshotPublished;
 
-	public string TransformIdentity => GetTransformIdentity(CodeTransformKinds.Bodies);
+	public string TransformIdentity => _bodiesTransformIdentity;
 
 	public string GetTransformIdentity(CodeTransformKinds kinds) =>
-		CodeTransformIdentity.Create(compressor.TransformIdentity, kinds);
+		kinds switch
+		{
+			CodeTransformKinds.Bodies => _bodiesTransformIdentity,
+			CodeTransformKinds.Comments => _commentsTransformIdentity,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments => _combinedTransformIdentity,
+			_ => throw new ArgumentOutOfRangeException(nameof(kinds), kinds, null)
+		};
 
 	public bool IsSupported(string relativePath) => compressor.IsSupported(relativePath);
 
@@ -261,11 +275,8 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 		if (!compressor.IsSupported(relativePath, kinds))
 		{
-			Interlocked.Increment(ref _unsupportedFastPaths);
-			var unsupported = CodeCompressionPlan.Unchanged(
+			var unsupported = CreateUnsupportedPlan(
 				relativePath,
-				"unknown",
-				CodeCompressionOutcome.UnchangedUnsupportedLanguage,
 				content.Length,
 				transformIdentity);
 			return new CodeCompressionExecution(
@@ -282,25 +293,32 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				relativePath,
 				content,
 				materializeOutput,
+				transformIdentity,
 				staleAnalysis.ValidatedResult);
 		}
 
+		var cacheTransformIdentity = GetCacheTransformIdentity(relativePath, kinds, transformIdentity);
 		var key = fingerprint is { } knownFingerprint
 			? CodeCompressionCacheKey.Create(
 				fullPath,
 				content.Length,
 				knownFingerprint,
-				transformIdentity)
+				cacheTransformIdentity)
 			: CodeCompressionCacheKey.Create(
 				fullPath,
 				content,
-				transformIdentity);
+				cacheTransformIdentity);
 		if (fingerprint is null)
 			Interlocked.Increment(ref _hashComputations);
 		if (TryGetCachedPlan(key, out var cached))
 		{
 			Interlocked.Increment(ref _cacheHits);
-			return CreateExecution(cached.Prepared, relativePath, content, materializeOutput);
+			return CreateExecution(
+				cached.Prepared,
+				relativePath,
+				content,
+				materializeOutput,
+				transformIdentity);
 		}
 
 		if (_prewarmInFlight.TryGetValue(key, out var warming))
@@ -314,6 +332,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				relativePath,
 				content,
 				materializeOutput,
+				transformIdentity,
 				analysis.ValidatedResult);
 		}
 
@@ -323,7 +342,12 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		if (TryGetCachedPlan(key, out cached))
 		{
 			Interlocked.Increment(ref _cacheHits);
-			return CreateExecution(cached.Prepared, relativePath, content, materializeOutput);
+			return CreateExecution(
+				cached.Prepared,
+				relativePath,
+				content,
+				materializeOutput,
+				transformIdentity);
 		}
 
 		Interlocked.Increment(ref _cacheMisses);
@@ -350,6 +374,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				relativePath,
 				content,
 				materializeOutput,
+				transformIdentity,
 				analysis.ValidatedResult);
 		}
 		finally
@@ -382,34 +407,27 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		}
 
 		if (!compressor.IsSupported(relativePath, kinds))
-		{
-			Interlocked.Increment(ref _unsupportedFastPaths);
-			return CodeCompressionPlan.Unchanged(
-				relativePath,
-				"unknown",
-				CodeCompressionOutcome.UnchangedUnsupportedLanguage,
-				content.Length,
-				transformIdentity);
-		}
+			return CreateUnsupportedPlan(relativePath, content.Length, transformIdentity);
 
 		var generation = CaptureGeneration();
 		if (generation.Version != scopeGeneration)
 			return null;
 
 		Interlocked.Increment(ref _prewarmRequests);
+		var cacheTransformIdentity = GetCacheTransformIdentity(relativePath, kinds, transformIdentity);
 		var key = fingerprint is { } knownFingerprint
 			? CodeCompressionCacheKey.Create(
 				fullPath,
 				content.Length,
 				knownFingerprint,
-				transformIdentity)
-			: CodeCompressionCacheKey.Create(fullPath, content, transformIdentity);
+				cacheTransformIdentity)
+			: CodeCompressionCacheKey.Create(fullPath, content, cacheTransformIdentity);
 		if (fingerprint is null)
 			Interlocked.Increment(ref _hashComputations);
 		if (TryGetCachedPlan(key, out var cached))
 		{
 			Interlocked.Increment(ref _prewarmCacheHits);
-			return WithRelativePath(cached.Prepared.Plan, relativePath);
+			return WithOutputContext(cached.Prepared.Plan, relativePath, transformIdentity);
 		}
 
 		if (TryGetActiveOutputAnalysis(key, out var activeOutput))
@@ -423,7 +441,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 					analysis,
 					generation.Version);
 				cancellationToken.ThrowIfCancellationRequested();
-				return WithRelativePath(prepared.Plan, relativePath);
+				return WithOutputContext(prepared.Plan, relativePath, transformIdentity);
 			}
 			catch (OperationCanceledException) when (
 				!generation.Token.IsCancellationRequested &&
@@ -451,13 +469,38 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				analysis,
 				generation.Version);
 			cancellationToken.ThrowIfCancellationRequested();
-			return WithRelativePath(prepared.Plan, relativePath);
+			return WithOutputContext(prepared.Plan, relativePath, transformIdentity);
 		}
 		finally
 		{
 			if (_prewarmInFlight.TryGetValue(key, out var current) && ReferenceEquals(current, pending))
 				_prewarmInFlight.TryRemove(key, out _);
 		}
+	}
+
+	internal CodeCompressionPlan CreateUnsupportedPlan(
+		string relativePath,
+		int sourceLength,
+		string transformIdentity)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(sourceLength);
+		if (sourceLength == 0)
+		{
+			return CodeCompressionPlan.Unchanged(
+				relativePath,
+				"unknown",
+				CodeCompressionOutcome.UnchangedNoBenefit,
+				0,
+				transformIdentity);
+		}
+
+		Interlocked.Increment(ref _unsupportedFastPaths);
+		return CodeCompressionPlan.Unchanged(
+			relativePath,
+			"unknown",
+			CodeCompressionOutcome.UnchangedUnsupportedLanguage,
+			sourceLength,
+			transformIdentity);
 	}
 
 	internal bool TryGetWarmCachedPlan(
@@ -481,7 +524,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 			fullPath,
 			contentLength,
 			fingerprint,
-			transformIdentity);
+			GetCacheTransformIdentity(relativePath, kinds, transformIdentity));
 		if (!TryGetCachedPlan(key, out var cached))
 		{
 			plan = null!;
@@ -490,7 +533,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 
 		Interlocked.Increment(ref _prewarmRequests);
 		Interlocked.Increment(ref _prewarmCacheHits);
-		plan = WithRelativePath(cached.Prepared.Plan, relativePath);
+		plan = WithOutputContext(cached.Prepared.Plan, relativePath, transformIdentity);
 		return true;
 	}
 
@@ -613,9 +656,10 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		string relativePath,
 		string content,
 		bool materializeOutput,
+		string transformIdentity,
 		CodeCompressionResult? validatedResult = null)
 	{
-		var outputPlan = WithRelativePath(prepared.Plan, relativePath);
+		var outputPlan = WithOutputContext(prepared.Plan, relativePath, transformIdentity);
 		return new CodeCompressionExecution(
 			outputPlan,
 			materializeOutput
@@ -623,12 +667,35 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 				: null);
 	}
 
-	private static CodeCompressionPlan WithRelativePath(
+	private static CodeCompressionPlan WithOutputContext(
 		CodeCompressionPlan plan,
-		string relativePath) =>
-		string.Equals(plan.RelativePath, relativePath, StringComparison.Ordinal)
+		string relativePath,
+		string transformIdentity) =>
+		string.Equals(plan.RelativePath, relativePath, StringComparison.Ordinal) &&
+		string.Equals(plan.TransformIdentity, transformIdentity, StringComparison.Ordinal)
 			? plan
-			: plan with { RelativePath = relativePath };
+			: plan with
+			{
+				RelativePath = relativePath,
+				TransformIdentity = transformIdentity
+			};
+
+	private string GetCacheTransformIdentity(
+		string relativePath,
+		CodeTransformKinds requestedKinds,
+		string operationTransformIdentity)
+	{
+		var effectiveKinds = compressor.GetEffectiveTransformKinds(relativePath, requestedKinds);
+		if (effectiveKinds == CodeTransformKinds.None ||
+		    (effectiveKinds & requestedKinds) != effectiveKinds)
+		{
+			return operationTransformIdentity;
+		}
+
+		return effectiveKinds == requestedKinds
+			? operationTransformIdentity
+			: GetTransformIdentity(effectiveKinds);
+	}
 
 	internal void Publish(CodeCompressionSnapshot snapshot, long generation)
 	{
@@ -984,6 +1051,17 @@ public sealed class CodeCompressionScope : IDisposable
 			return false;
 		RecordPlan(fullPath, plan);
 		return true;
+	}
+
+	internal void RecordUnsupported(
+		string fullPath,
+		string relativePath,
+		int sourceLength)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _completed) != 0, this);
+		RecordPlan(
+			fullPath,
+			session.CreateUnsupportedPlan(relativePath, sourceLength, transformIdentity));
 	}
 
 	private void RecordPlan(string fullPath, CodeCompressionPlan plan)

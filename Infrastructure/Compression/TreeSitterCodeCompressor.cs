@@ -145,11 +145,19 @@ public sealed class TreeSitterCodeCompressor :
 	public bool IsSupported(string relativePath) =>
 		IsSupported(relativePath, CodeTransformKinds.Bodies);
 
-	public bool IsSupported(string relativePath, CodeTransformKinds kinds)
+	public bool IsSupported(string relativePath, CodeTransformKinds kinds) =>
+		GetEffectiveTransformKinds(relativePath, kinds) != CodeTransformKinds.None;
+
+	public CodeTransformKinds GetEffectiveTransformKinds(string relativePath, CodeTransformKinds kinds)
 	{
 		ValidateTransformKinds(kinds);
-		return _byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates) &&
-		       candidates.Any(pack => (pack.TransformCapabilities & kinds) != CodeTransformKinds.None);
+		if (!_byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates))
+			return CodeTransformKinds.None;
+
+		var capabilities = CodeTransformKinds.None;
+		foreach (var candidate in candidates)
+			capabilities |= candidate.TransformCapabilities;
+		return kinds & capabilities;
 	}
 
 	public ICodeCompressionScope CreateScope(string projectRoot) =>
