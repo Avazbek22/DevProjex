@@ -312,6 +312,71 @@ public sealed class PreviewDocumentBuilderTests
 			document.Sections.Select(static section => section.DisplayPath));
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task EmptySelection_PublishesAnEmptyCompressionSnapshotAndAllowsReuse(bool includeTree)
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("sample.cs", "abcdefghij");
+		using var compressor = new SnapshotProducingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		var transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(temp.Path, session),
+			redaction: null);
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		using (var first = await BuildPreviewAsync(builder, [path], transformation, includeTree))
+		{
+			Assert.NotNull(first);
+		}
+		Assert.Equal(1, session.Snapshot.TotalFiles);
+		Assert.Equal(1, session.Snapshot.CompressedFiles);
+
+		using (var empty = await BuildPreviewAsync(builder, [], transformation, includeTree))
+		{
+			Assert.Equal(includeTree, empty is not null);
+		}
+		Assert.Equal(0, session.Snapshot.TotalFiles);
+		Assert.Equal(0, session.Snapshot.CompressedFiles);
+		Assert.Equal(0, session.Snapshot.UnchangedFiles);
+		Assert.Equal(0, session.Snapshot.SourceCharacters);
+		Assert.Equal(0, session.Snapshot.TransformedCharacters);
+		Assert.Equal(
+			CodeCompressionSession.BuildSelectionKey(temp.Path, []),
+			session.Snapshot.SelectionKey);
+
+		using (var repeated = await BuildPreviewAsync(builder, [path], transformation, includeTree))
+		{
+			Assert.NotNull(repeated);
+		}
+		Assert.Equal(1, session.Snapshot.TotalFiles);
+		Assert.Equal(1, session.Snapshot.CompressedFiles);
+	}
+
+	private static async Task<IPreviewTextDocument?> BuildPreviewAsync(
+		PreviewDocumentBuilder builder,
+		IReadOnlyList<string> paths,
+		ContentTransformationContext? transformation,
+		bool includeTree)
+	{
+		if (includeTree)
+		{
+			return await builder.BuildTreeAndContentDocumentAsync(
+				"root",
+				paths,
+				TestContext.Current.CancellationToken,
+				Path.GetFileName,
+				transformationContext: transformation);
+		}
+
+		return await builder.BuildContentDocumentAsync(
+				paths,
+				TestContext.Current.CancellationToken,
+				Path.GetFileName,
+				transformationContext: transformation);
+	}
+
     private static TextFileContent CreateTextContent(string content)
     {
         var normalized = content.Replace("\r\n", "\n");
@@ -431,6 +496,40 @@ public sealed class PreviewDocumentBuilderTests
 				if (observed == current)
 					return;
 				current = observed;
+			}
+		}
+	}
+
+	private sealed class SnapshotProducingCompressor : ICodeCompressor, IDisposable
+	{
+		public string TransformIdentity => "preview-empty-selection:v1";
+		public bool IsSupported(string relativePath) => true;
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(TransformIdentity);
+		public void Dispose()
+		{
+		}
+
+		private sealed class Scope(string transformIdentity) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var editLength = Math.Max(1, content.Length / 2);
+				var plan = CodeCompressionPlan.Create(
+					relativePath,
+					"test",
+					[new CodeCompressionEdit(content.Length - editLength, editLength, string.Empty)],
+					content.Length,
+					transformIdentity);
+				return new CodeCompressionAnalysis(plan, plan.Apply(content));
+			}
+
+			public void Dispose()
+			{
 			}
 		}
 	}

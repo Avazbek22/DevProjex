@@ -273,6 +273,254 @@ public sealed class MetricsPipelineWarmupTests
 	}
 
 	[AvaloniaFact]
+	public async Task PostLoadMetrics_ChangedFileRejectsThePrewarmReadFact()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile(
+			"Program.cs",
+			"internal class Program { void Run() { } }");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(temp.Path, compressionSession),
+			redaction: null);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => transformation);
+
+		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
+
+		const string changedSource =
+			"internal class Program { void Run() { System.Console.WriteLine(12345); } }";
+		await File.WriteAllTextAsync(textFile, changedSource, TestContext.Current.CancellationToken);
+		File.SetLastWriteTimeUtc(textFile, DateTime.UtcNow.AddMinutes(1));
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+		await WaitUntilAsync(
+			() => pipeline.HasStatusMetricsSnapshot,
+			TimeSpan.FromSeconds(5));
+
+		Assert.Equal(2, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
+		var renderedContent = await new SelectedContentExportService(new FileContentAnalyzer())
+			.BuildAsync([textFile], TestContext.Current.CancellationToken);
+		var expectedMetrics = ExportOutputMetricsCalculator.FromText(renderedContent);
+		using var document = new InMemoryPreviewTextDocument("x");
+		Assert.True(pipeline.TryGetCachedPreviewSelectionMetrics(
+			PreviewContentMode.Content,
+			document,
+			new PreviewSelectionRange(1, 0, 1, 1),
+			out var actualMetrics));
+		Assert.Equal(expectedMetrics, actualMetrics);
+	}
+
+	[AvaloniaFact]
+	public async Task PostLoadMetrics_DeletedFileRejectsThePrewarmReadFactWithoutThrowing()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile(
+			"Program.cs",
+			"internal class Program { void Run() { } }");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(temp.Path, compressionSession),
+			redaction: null);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => transformation);
+
+		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
+		File.Delete(textFile);
+
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
+		Assert.True(pipeline.HasCompleteBaseline);
+	}
+
+	[AvaloniaFact]
+	public async Task PostLoadMetrics_ReusesStreamedUnsupportedMetricsWithoutMaterializingTheFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile(
+			"site.css",
+			"/* documentation */\n.card { color: red; }\n");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("site.css", textFile, false, false, "css", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(temp.Path, compressionSession),
+			redaction: null);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => transformation);
+
+		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+		Assert.Equal(
+			CodeCompressionOutcome.UnchangedUnsupportedLanguage,
+			Assert.Single(compressionSession.Snapshot.Unchanged).Outcome);
+
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+		Assert.True(pipeline.HasCompleteBaseline);
+	}
+
+	[AvaloniaFact]
+	public async Task PostLoadMetrics_RereadsMetricsOnlyFactWhenTheFileBecomesSupportedInAnotherMode()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile(
+			"site.css",
+			"/* documentation */\n.card { color: red; }\n");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("site.css", textFile, false, false, "css", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		var compressor = new CommentsOnlyCssCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				temp.Path,
+				compressionSession,
+				CodeTransformKinds.Bodies),
+			redaction: null);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => transformation);
+
+		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+
+		transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				temp.Path,
+				compressionSession,
+				CodeTransformKinds.Comments),
+			redaction: null);
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
+		Assert.True(pipeline.HasCompleteBaseline);
+	}
+
+	[AvaloniaFact]
 	public async Task CompressionPrewarm_AnalyzesOnlyTheEffectiveSelection()
 	{
 		using var temp = new TemporaryDirectory();
@@ -768,7 +1016,9 @@ public sealed class MetricsPipelineWarmupTests
         }
     }
 
-    private sealed class CountingFileContentAnalyzer(IFileContentAnalyzer inner) : IFileContentAnalyzer
+    private sealed class CountingFileContentAnalyzer(IFileContentAnalyzer inner) :
+		IFileContentAnalyzer,
+		IPrewarmFileContentAnalyzer
     {
         private readonly Dictionary<string, int> _metricsCalls = new(PathComparer.Default);
         private readonly Dictionary<string, int> _classifiedReadCalls = new(PathComparer.Default);
@@ -794,6 +1044,34 @@ public sealed class MetricsPipelineWarmupTests
 			lock (_sync)
 				_classifiedReadCalls[path] = _classifiedReadCalls.GetValueOrDefault(path) + 1;
 			return inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+		}
+
+		public ValueTask<BudgetedContentReadResult> ReadFactWithBudgetAsync(
+			string path,
+			long maximumReadBytes,
+			WeightedByteBudget byteBudget,
+			SemaphoreSlim decodeScratchGate,
+			CancellationToken cancellationToken = default)
+		{
+			lock (_sync)
+				_classifiedReadCalls[path] = _classifiedReadCalls.GetValueOrDefault(path) + 1;
+			return ((IPrewarmFileContentAnalyzer)inner).ReadFactWithBudgetAsync(
+				path,
+				maximumReadBytes,
+				byteBudget,
+				decodeScratchGate,
+				cancellationToken);
+		}
+
+		public ValueTask<IdentifiedFileContentMetricsResult> GetClassifiedMetricsWithIdentityAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			lock (_sync)
+				_metricsCalls[path] = _metricsCalls.GetValueOrDefault(path) + 1;
+			return ((IPrewarmFileContentAnalyzer)inner).GetClassifiedMetricsWithIdentityAsync(
+				path,
+				cancellationToken);
 		}
 
         public FileContentClassification? ClassifyWithoutReading(string path) =>
@@ -960,6 +1238,52 @@ public sealed class MetricsPipelineWarmupTests
 						owner.TransformIdentity),
 					null);
 			}
+
+			public void Dispose()
+			{
+			}
+		}
+	}
+
+	private sealed class CommentsOnlyCssCompressor : ICodeCompressor
+	{
+		public string TransformIdentity => "metrics-comments-only:v1";
+
+		public bool IsSupported(string relativePath) => false;
+
+		public bool IsSupported(string relativePath, CodeTransformKinds kinds) =>
+			Path.GetExtension(relativePath).Equals(".css", StringComparison.OrdinalIgnoreCase) &&
+			(kinds & CodeTransformKinds.Comments) != 0;
+
+		public CodeTransformKinds GetEffectiveTransformKinds(
+			string relativePath,
+			CodeTransformKinds kinds) =>
+			IsSupported(relativePath, kinds)
+				? kinds & CodeTransformKinds.Comments
+				: CodeTransformKinds.None;
+
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
+
+		public ICodeCompressionScope CreateScope(
+			string projectRoot,
+			CodeTransformKinds kinds) =>
+			new Scope(this);
+
+		private sealed class Scope(CommentsOnlyCssCompressor owner) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken) =>
+				new(
+					CodeCompressionPlan.Unchanged(
+						relativePath,
+						"css",
+						CodeCompressionOutcome.UnchangedNoBenefit,
+						content.Length,
+						owner.TransformIdentity),
+					null);
 
 			public void Dispose()
 			{

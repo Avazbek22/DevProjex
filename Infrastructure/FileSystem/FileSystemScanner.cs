@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Security;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Selection;
 
@@ -17,13 +18,15 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			_ = enumerator.MoveNext();
 			return true;
 		}
-		catch (UnauthorizedAccessException)
+		catch (Exception exception) when (
+			exception is UnauthorizedAccessException or
+			SecurityException or
+			DirectoryNotFoundException or
+			IOException or
+			ArgumentException or
+			NotSupportedException)
 		{
 			return false;
-		}
-		catch
-		{
-			return true;
 		}
 	}
 

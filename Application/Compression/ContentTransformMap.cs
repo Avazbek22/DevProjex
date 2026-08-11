@@ -52,18 +52,33 @@ public sealed class ContentTransformMap
 	/// the shape <see cref="CodeCompressionPlan"/> guarantees.
 	/// </summary>
 	internal static ContentTransformMap Create(IReadOnlyList<CodeCompressionEdit> edits, int sourceLength)
+		=> CreateFromEdits(edits, sourceLength, CancellationToken.None);
+
+	internal static ContentTransformMap CreateForAnalysis(
+		IReadOnlyList<CodeCompressionEdit> edits,
+		int sourceLength,
+		CancellationToken cancellationToken) =>
+		CreateFromEdits(edits, sourceLength, cancellationToken);
+
+	private static ContentTransformMap CreateFromEdits(
+		IReadOnlyList<CodeCompressionEdit> edits,
+		int sourceLength,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var ranges = new ContentTransformRange[edits.Count];
 		for (var index = 0; index < edits.Count; index++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
 			var edit = edits[index];
 			ranges[index] = new ContentTransformRange(
 				edit.SourceStart,
 				edit.SourceLength,
 				edit.Replacement.Length);
 		}
+		cancellationToken.ThrowIfCancellationRequested();
 
-		return Create(ranges, sourceLength);
+		return Create(ranges, sourceLength, cancellationToken);
 	}
 
 	/// <summary>
@@ -72,9 +87,16 @@ public sealed class ContentTransformMap
 	/// </summary>
 	internal static ContentTransformMap Create(
 		IReadOnlyList<ContentTransformRange> ranges,
-		int sourceLength)
+		int sourceLength) =>
+		Create(ranges, sourceLength, CancellationToken.None);
+
+	private static ContentTransformMap Create(
+		IReadOnlyList<ContentTransformRange> ranges,
+		int sourceLength,
+		CancellationToken cancellationToken)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegative(sourceLength);
+		cancellationToken.ThrowIfCancellationRequested();
 		if (ranges.Count == 0)
 			return Identity;
 
@@ -87,6 +109,7 @@ public sealed class ContentTransformMap
 		var previousEnd = 0;
 		for (var index = 0; index < ranges.Count; index++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
 			var range = ranges[index];
 			if (range.SourceStart < previousEnd ||
 			    range.SourceLength < 0 ||
@@ -105,6 +128,7 @@ public sealed class ContentTransformMap
 			delta = checked(delta + range.TransformedLength - range.SourceLength);
 			previousEnd = checked(range.SourceStart + range.SourceLength);
 		}
+		cancellationToken.ThrowIfCancellationRequested();
 
 		return new ContentTransformMap(
 			sourceStarts,
@@ -113,6 +137,14 @@ public sealed class ContentTransformMap
 			transformedLengths,
 			sourceLength,
 			sourceLength + delta);
+	}
+
+	private static void ThrowIfCancellationRequestedPeriodically(
+		CancellationToken cancellationToken,
+		int iteration)
+	{
+		if (cancellationToken.CanBeCanceled && iteration != 0 && (iteration & 1023) == 0)
+			cancellationToken.ThrowIfCancellationRequested();
 	}
 
 	/// <summary>

@@ -885,19 +885,58 @@ public partial class MainWindow : Window
         _projectProfiles.FlushPending();
     }
 
-    private async Task<bool> TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
+    private async Task<bool> TryOpenFolderAsync(
+        string path,
+        bool fromDialog,
+        bool recordRecentFolder = true,
+        IRepositoryCacheSession? preparedSession = null)
     {
         if (!_viewModel.CanChangeProjectTree)
+        {
+            preparedSession?.Dispose();
             return false;
+        }
 
         var stopwatch = Stopwatch.StartNew();
+        var candidateSession = preparedSession;
+        var ownsCandidateSession = candidateSession is not null;
         string normalizedPath;
         try
         {
             normalizedPath = PathUtility.Normalize(path);
+
+            if (candidateSession is null && _repoCacheService.IsInCache(normalizedPath))
+            {
+                if (_currentRepositorySession is not null &&
+                    PathComparer.Default.Equals(
+                        _currentRepositorySession.RepositoryPath,
+                        normalizedPath))
+                {
+                    candidateSession = _currentRepositorySession;
+                }
+                else
+                {
+                    candidateSession = await _repoCacheService.TryAcquireRepositorySessionByPathAsync(
+                        normalizedPath,
+                        _windowLifetimeCts?.Token ?? CancellationToken.None);
+                    ownsCandidateSession = candidateSession is not null;
+                }
+            }
+
+            if (candidateSession is not null)
+                normalizedPath = PathUtility.Normalize(candidateSession.RepositoryPath);
+        }
+        catch (OperationCanceledException)
+        {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+            return false;
         }
         catch
         {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "invalid-path");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
@@ -915,6 +954,8 @@ public partial class MainWindow : Window
 
         if (!rootAccess.Exists)
         {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "folder-not-found");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
@@ -922,6 +963,8 @@ public partial class MainWindow : Window
 
         if (!rootAccess.CanRead)
         {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "access-denied");
             if (TryElevateAndRestart(normalizedPath))
                 return false;
@@ -932,9 +975,68 @@ public partial class MainWindow : Window
         }
 
         var projectLoadFinalization = BeginProjectLoadFinalization();
+        var previousSourceType = _viewModel.ProjectSourceType;
+        var previousBranch = _viewModel.CurrentBranch;
+        var previousRepositoryUrl = _currentRepositoryUrl;
+        var previousProjectDisplayName = _currentProjectDisplayName;
+        var candidateBranch = ReferenceEquals(candidateSession, _currentRepositorySession)
+            ? previousBranch
+            : candidateSession?.Branch ?? string.Empty;
+        if (candidateSession is not null)
+        {
+            _viewModel.ProjectSourceType = candidateSession.ContentKind == RepositoryCacheContentKind.Git
+                ? ProjectSourceType.GitClone
+                : ProjectSourceType.ZipDownload;
+            _viewModel.CurrentBranch = candidateBranch;
+            _currentRepositoryUrl = candidateSession.RepositoryUrl;
+            _currentProjectDisplayName = RepositoryUrlUtility.GetRepositoryName(
+                candidateSession.RepositoryUrl);
+        }
         try
         {
-            await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
+            await _projectLoadPipeline.OpenFolderAsync(
+                normalizedPath,
+                candidateSession is null && (fromDialog || _currentRepositorySession is not null),
+                recordRecentFolder);
+            if (!PathComparer.Default.Equals(_currentPath, normalizedPath) ||
+                !_viewModel.IsProjectLoaded)
+            {
+                if (ownsCandidateSession)
+                    candidateSession?.Dispose();
+                _viewModel.ProjectSourceType = previousSourceType;
+                _viewModel.CurrentBranch = previousBranch;
+                _currentRepositoryUrl = previousRepositoryUrl;
+                _currentProjectDisplayName = previousProjectDisplayName;
+                _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+                return false;
+            }
+
+            var previousSession = _currentRepositorySession;
+            if (!ReferenceEquals(previousSession, candidateSession))
+            {
+                _currentRepositorySession = candidateSession;
+                previousSession?.Dispose();
+                if (previousSession is not null)
+                    _ = Task.Run(_repoCacheService.CollectGarbage);
+            }
+
+            if (candidateSession is not null)
+            {
+                _currentCachedRepoPath = candidateSession.RepositoryPath;
+                _currentRepositoryUrl = candidateSession.RepositoryUrl;
+                _currentProjectDisplayName = RepositoryUrlUtility.GetRepositoryName(
+                    candidateSession.RepositoryUrl);
+                _viewModel.ProjectSourceType = candidateSession.ContentKind == RepositoryCacheContentKind.Git
+                    ? ProjectSourceType.GitClone
+                    : ProjectSourceType.ZipDownload;
+                _viewModel.CurrentBranch = candidateBranch;
+                UpdateTitle();
+            }
+            else
+            {
+                _currentCachedRepoPath = null;
+            }
+
             if (_desktopControlServer is not null)
                 await _desktopControlServer.UpdateProjectAsync(normalizedPath);
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: true);
@@ -942,6 +1044,15 @@ public partial class MainWindow : Window
         }
         catch
         {
+            if (ownsCandidateSession && !ReferenceEquals(candidateSession, _currentRepositorySession))
+                candidateSession?.Dispose();
+            if (!ReferenceEquals(candidateSession, _currentRepositorySession))
+            {
+                _viewModel.ProjectSourceType = previousSourceType;
+                _viewModel.CurrentBranch = previousBranch;
+                _currentRepositoryUrl = previousRepositoryUrl;
+                _currentProjectDisplayName = previousProjectDisplayName;
+            }
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-failed");
             throw;
         }

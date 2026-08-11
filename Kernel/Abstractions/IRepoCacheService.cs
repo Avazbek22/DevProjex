@@ -37,6 +37,29 @@ public interface IRepoCacheService
     RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl);
 
     /// <summary>
+    /// Pins a cache checkout for an indexed repository. Cache roots must be on a local file system;
+    /// exclusive file-handle leases are not reliable on every network file system.
+    /// </summary>
+    Task<IRepositoryCacheSession?> TryAcquireRepositorySessionAsync(
+        string repositoryUrl,
+        string? branch = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pins the indexed repository containing an existing cache path.
+    /// </summary>
+    Task<IRepositoryCacheSession?> TryAcquireRepositorySessionByPathAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Serializes initial publication for equivalent repository URLs across processes.
+    /// </summary>
+    Task<IAsyncDisposable> AcquireRepositoryOperationAsync(
+        string repositoryUrl,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Records repository metadata after a cache is published, opened or refreshed.
     /// </summary>
     void RecordIndexedRepository(
@@ -68,6 +91,16 @@ public interface IRepoCacheService
     /// regardless of age until an explicit cache-management policy removes them.
     /// </summary>
     void CleanupStaleCacheOnStartup();
+
+    /// <summary>
+    /// Runs best-effort trash cleanup and size/age eviction without touching pinned repositories.
+    /// </summary>
+    void CollectGarbage();
+
+    /// <summary>
+    /// Recomputes the approximate size after an explicit repository update.
+    /// </summary>
+    void RefreshIndexedRepositorySize(string localPath);
 
     /// <summary>
     /// Checks if the given path is within the cache.

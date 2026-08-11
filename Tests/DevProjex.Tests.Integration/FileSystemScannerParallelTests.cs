@@ -375,7 +375,7 @@ public sealed class FileSystemScannerParallelTests
 		var scanner = new FileSystemScanner();
 
 		Assert.True(scanner.CanReadRoot(temp.Path));
-		Assert.True(scanner.CanReadRoot("/non/existent")); // Returns true for non-existent (not access denied)
+		Assert.False(scanner.CanReadRoot(Path.Combine(temp.Path, "non-existent")));
 	}
 
 	/// <summary>

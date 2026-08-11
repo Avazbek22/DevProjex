@@ -182,8 +182,9 @@ public partial class MainWindow
             // Clear file metrics cache
             _metrics.ClearFileMetricsCache(trimCapacity: true);
 
-            // Clean up repository cache on exit
-            _repoCacheService.ClearAllCache();
+            // Releasing the file-handle lease makes this checkout eligible for silent cache GC.
+            Interlocked.Exchange(ref _currentRepositorySession, null)?.Dispose();
+            _ = Task.Run(_repoCacheService.CollectGarbage);
 
             _taskbarProgress.Dispose();
             _desktopInteractionGate.Dispose();

@@ -209,7 +209,7 @@ internal static class UiTestDriver
 
         var task = await window.Dispatcher.InvokeAsync<Task>(() =>
         {
-            var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder]);
+            var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder, null]);
             return Assert.IsAssignableFrom<Task>(result);
         }, DispatcherPriority.Normal);
         await task;

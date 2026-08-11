@@ -129,6 +129,33 @@ public sealed class FileSystemScannerTests
 		Assert.True(scanner.CanReadRoot(temp.Path));
 	}
 
+	[Fact]
+	public void CanReadRoot_ReturnsTrueForExistingNonEmptyFolder()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("source.cs", "class Source;");
+		var scanner = new FileSystemScanner();
+
+		Assert.True(scanner.CanReadRoot(temp.Path));
+	}
+
+	[Fact]
+	public void CanReadRoot_ReturnsFalseForMissingFolder()
+	{
+		using var temp = new TemporaryDirectory();
+		var scanner = new FileSystemScanner();
+
+		Assert.False(scanner.CanReadRoot(Path.Combine(temp.Path, "missing")));
+	}
+
+	[Fact]
+	public void CanReadRoot_ReturnsFalseForInvalidPath()
+	{
+		var scanner = new FileSystemScanner();
+
+		Assert.False(scanner.CanReadRoot("invalid\0path"));
+	}
+
 	// Verifies scanner gracefully handles a missing root directory.
 	[Fact]
 	public void GetExtensions_ReturnsEmptyForMissingRoot()

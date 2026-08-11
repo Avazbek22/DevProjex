@@ -64,20 +64,26 @@ public static class CodeStructureGate
 		IReadOnlyList<CodeParseDefect> originalDefects,
 		IReadOnlyList<CodeParseDefect> compressedDefects,
 		IReadOnlyList<CodeCompressionEdit> edits,
-		IReadOnlySet<string> executableOwnerKinds)
+		IReadOnlySet<string> executableOwnerKinds,
+		CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var orderedEdits = edits.Count <= 1
 			? edits
 			: edits.OrderBy(static edit => edit.SourceStart).ToArray();
+		cancellationToken.ThrowIfCancellationRequested();
 
 		// An edit that only partially overlaps a declaration means the query captured something
 		// that is not a leaf body. Splicing it would cut a declaration in half.
-		foreach (var declaration in originalDeclarations)
+		for (var declarationIndex = 0; declarationIndex < originalDeclarations.Count; declarationIndex++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, declarationIndex);
+			var declaration = originalDeclarations[declarationIndex];
 			for (var editIndex = FindFirstEditEndingAfter(orderedEdits, declaration.Start);
 			     editIndex < orderedEdits.Count && orderedEdits[editIndex].SourceStart < declaration.End;
 			     editIndex++)
 			{
+				ThrowIfCancellationRequestedPeriodically(cancellationToken, editIndex);
 				var edit = orderedEdits[editIndex];
 				var containedInEdit = declaration.Start >= edit.SourceStart && declaration.End <= edit.SourceEnd;
 				var containsEdit = edit.SourceStart >= declaration.Start && edit.SourceEnd <= declaration.End;
@@ -91,24 +97,41 @@ public static class CodeStructureGate
 		// expects them gone and the gate accepts wholesale deletion. Requiring the innermost
 		// declaration around an edit to be one that legitimately OWNS an executable body is what
 		// keeps "leaf bodies only" a property of the gate rather than a property of the query.
-		var bodyEdits = orderedEdits
-			.Where(static edit => (edit.Kinds & CodeTransformKinds.Bodies) != 0)
-			.ToArray();
-		var owners = ResolveInnermostOwners(originalDeclarations, bodyEdits);
-		for (var editIndex = 0; editIndex < bodyEdits.Length; editIndex++)
+		List<CodeCompressionEdit>? bodyEdits = null;
+		for (var editIndex = 0; editIndex < orderedEdits.Count; editIndex++)
 		{
-			// No owner at all means the edit is not inside any declaration - a whole-file splice
-			// passes every other check, because "everything was excised" is trivially consistent.
-			var owner = owners[editIndex];
-			if (owner is null || !executableOwnerKinds.Contains(owner.Kind))
-				return CodeStructureGateVerdict.RejectedEditOutsideAnExecutableBody;
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, editIndex);
+			var edit = orderedEdits[editIndex];
+			if ((edit.Kinds & CodeTransformKinds.Bodies) != 0)
+				(bodyEdits ??= []).Add(edit);
+		}
+		if (bodyEdits is not null)
+		{
+			var owners = ResolveInnermostOwners(originalDeclarations, bodyEdits, cancellationToken);
+			for (var editIndex = 0; editIndex < bodyEdits.Count; editIndex++)
+			{
+				ThrowIfCancellationRequestedPeriodically(cancellationToken, editIndex);
+				// No owner at all means the edit is not inside any declaration - a whole-file splice
+				// passes every other check, because "everything was excised" is trivially consistent.
+				var owner = owners[editIndex];
+				if (owner is null || !executableOwnerKinds.Contains(owner.Kind))
+					return CodeStructureGateVerdict.RejectedEditOutsideAnExecutableBody;
+			}
 		}
 
-		var known = originalDefects
-			.GroupBy(static defect => (defect.Kind, defect.Start))
-			.ToDictionary(static group => group.Key, static group => group.Count());
-		foreach (var defect in compressedDefects)
+		var known = new Dictionary<(string Kind, int Start), int>();
+		for (var defectIndex = 0; defectIndex < originalDefects.Count; defectIndex++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, defectIndex);
+			var defect = originalDefects[defectIndex];
+			var key = (defect.Kind, defect.Start);
+			known.TryGetValue(key, out var count);
+			known[key] = count + 1;
+		}
+		for (var defectIndex = 0; defectIndex < compressedDefects.Count; defectIndex++)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, defectIndex);
+			var defect = compressedDefects[defectIndex];
 			// Unmappable means the defect sits inside text the splice invented, so it cannot
 			// have existed before by construction.
 			var key = (defect.Kind, defect.Start);
@@ -117,13 +140,22 @@ public static class CodeStructureGate
 			known[key] = remaining - 1;
 		}
 
-		var expected = originalDeclarations
-			.Where(declaration => !IsExcisedSorted(declaration, orderedEdits))
-			.Select(static declaration => (declaration.Kind, declaration.Name, declaration.Start))
-			.ToList();
-		var actual = compressedDeclarations
-			.Select(static declaration => (declaration.Kind, declaration.Name, declaration.Start))
-			.ToList();
+		var expected = new List<(string Kind, string Name, int Start)>(originalDeclarations.Count);
+		for (var declarationIndex = 0; declarationIndex < originalDeclarations.Count; declarationIndex++)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, declarationIndex);
+			var declaration = originalDeclarations[declarationIndex];
+			if (!IsExcisedSorted(declaration, orderedEdits))
+				expected.Add((declaration.Kind, declaration.Name, declaration.Start));
+		}
+		var actual = new List<(string Kind, string Name, int Start)>(compressedDeclarations.Count);
+		for (var declarationIndex = 0; declarationIndex < compressedDeclarations.Count; declarationIndex++)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, declarationIndex);
+			var declaration = compressedDeclarations[declarationIndex];
+			actual.Add((declaration.Kind, declaration.Name, declaration.Start));
+		}
+		cancellationToken.ThrowIfCancellationRequested();
 
 		if (actual.Count < expected.Count)
 			return CodeStructureGateVerdict.RejectedDeclarationsLost;
@@ -133,6 +165,7 @@ public static class CodeStructureGate
 		var sameOrder = true;
 		for (var index = 0; index < expected.Count; index++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
 			if (expected[index] == actual[index])
 				continue;
 
@@ -146,11 +179,18 @@ public static class CodeStructureGate
 		// Query captures at the same source range have no stable traversal order after a splice.
 		// Fall back to a multiset only on the uncommon reordered path so missing, invented and
 		// duplicate declarations remain observable without taxing ordinary files.
-		var remainingDeclarations = expected
-			.GroupBy(static declaration => declaration)
-			.ToDictionary(static group => group.Key, static group => group.Count());
-		foreach (var declaration in actual)
+		var remainingDeclarations = new Dictionary<(string Kind, string Name, int Start), int>();
+		for (var declarationIndex = 0; declarationIndex < expected.Count; declarationIndex++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, declarationIndex);
+			var declaration = expected[declarationIndex];
+			remainingDeclarations.TryGetValue(declaration, out var count);
+			remainingDeclarations[declaration] = count + 1;
+		}
+		for (var declarationIndex = 0; declarationIndex < actual.Count; declarationIndex++)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, declarationIndex);
+			var declaration = actual[declarationIndex];
 			if (!remainingDeclarations.TryGetValue(declaration, out var count) || count == 0)
 			{
 				return CodeStructureGateVerdict.RejectedDeclarationsAdded;
@@ -159,9 +199,15 @@ public static class CodeStructureGate
 			remainingDeclarations[declaration] = count - 1;
 		}
 
-		if (remainingDeclarations.Values.Any(static count => count != 0))
-			return CodeStructureGateVerdict.RejectedDeclarationsLost;
+		var remainingIndex = 0;
+		foreach (var count in remainingDeclarations.Values)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, remainingIndex++);
+			if (count != 0)
+				return CodeStructureGateVerdict.RejectedDeclarationsLost;
+		}
 
+		cancellationToken.ThrowIfCancellationRequested();
 		return CodeStructureGateVerdict.Accepted;
 	}
 
@@ -171,15 +217,19 @@ public static class CodeStructureGate
 	/// </summary>
 	private static CodeDeclaration?[] ResolveInnermostOwners(
 		IReadOnlyList<CodeDeclaration> declarations,
-		IReadOnlyList<CodeCompressionEdit> orderedEdits)
+		IReadOnlyList<CodeCompressionEdit> orderedEdits,
+		CancellationToken cancellationToken)
 	{
 		var owners = new CodeDeclaration?[orderedEdits.Count];
-		foreach (var declaration in declarations)
+		for (var declarationIndex = 0; declarationIndex < declarations.Count; declarationIndex++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, declarationIndex);
+			var declaration = declarations[declarationIndex];
 			for (var editIndex = FindFirstEditStartingAtOrAfter(orderedEdits, declaration.Start);
 			     editIndex < orderedEdits.Count && orderedEdits[editIndex].SourceStart < declaration.End;
 			     editIndex++)
 			{
+				ThrowIfCancellationRequestedPeriodically(cancellationToken, editIndex);
 				var edit = orderedEdits[editIndex];
 				if (edit.SourceEnd > declaration.End ||
 				    declaration.Start == edit.SourceStart && declaration.End == edit.SourceEnd)
@@ -193,6 +243,14 @@ public static class CodeStructureGate
 		}
 
 		return owners;
+	}
+
+	private static void ThrowIfCancellationRequestedPeriodically(
+		CancellationToken cancellationToken,
+		int iteration)
+	{
+		if (cancellationToken.CanBeCanceled && iteration != 0 && (iteration & 1023) == 0)
+			cancellationToken.ThrowIfCancellationRequested();
 	}
 
 	/// <summary>

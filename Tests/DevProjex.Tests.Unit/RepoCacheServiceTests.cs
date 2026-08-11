@@ -342,6 +342,28 @@ public class RepoCacheServiceTests : IDisposable
         try { Directory.Delete(dir, recursive: true); } catch { }
     }
 
+    [Theory]
+    [InlineData("CON", "CON_repo_")]
+    [InlineData("nul", "nul_repo_")]
+    [InlineData("com1", "com1_repo_")]
+    [InlineData("con.git", "con_repo_")]
+    [InlineData("con.something", "con_repo.something_")]
+    [InlineData("repository.", "repository_")]
+    [InlineData("repository ", "repository_")]
+    [InlineData("ordinary", "ordinary_")]
+    public void CreateRepositoryDirectory_NormalizesPortableRepositoryName(
+        string repositoryName,
+        string expectedPrefix)
+    {
+        var directory = _service.CreateRepositoryDirectory(
+            $"https://github.com/user/{repositoryName}");
+
+        Assert.StartsWith(
+            expectedPrefix,
+            Path.GetFileName(directory),
+            StringComparison.Ordinal);
+    }
+
     [Fact]
     public void DeleteRepositoryDirectory_RemovesDirectory()
     {

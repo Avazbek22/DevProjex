@@ -30,6 +30,15 @@ public interface ICodeCompressor
 	bool IsSupported(string relativePath, CodeTransformKinds kinds) => IsSupported(relativePath);
 
 	/// <summary>
+	/// Returns the edit families that can actually affect this file. Implementations that cannot
+	/// prove a narrower capability set conservatively keep every requested kind, preventing plans
+	/// from different modes from sharing a cache entry. Callers use this only after
+	/// <see cref="IsSupported(string, CodeTransformKinds)"/> succeeds.
+	/// </summary>
+	CodeTransformKinds GetEffectiveTransformKinds(string relativePath, CodeTransformKinds kinds) =>
+		kinds;
+
+	/// <summary>
 	/// Loads whatever the selection needs and nothing else. Grammars are expensive to materialize
 	/// and load, so nothing is touched until a language actually appears in the selection.
 	/// </summary>

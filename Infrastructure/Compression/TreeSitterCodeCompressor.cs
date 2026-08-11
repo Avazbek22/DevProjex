@@ -15,6 +15,42 @@ public sealed record CompressionLanguageInfo(
 	string GrammarExport,
 	CodeTransformKinds TransformCapabilities);
 
+internal enum TreeSitterAnalysisPhase
+{
+	LanguageResolution,
+	WorkerRent,
+	OriginalParse,
+	PreserveQuery,
+	BodyQuery,
+	CommentQuery,
+	OriginalDeclarations,
+	OriginalDefectWalk,
+	EditShaping,
+	PlanBuild,
+	PlanApply,
+	ReverseParse,
+	ReverseDeclarations,
+	ReverseDefectWalk,
+	StructureGate
+}
+
+internal interface ITreeSitterAnalysisPhaseObserver
+{
+	void OnPhaseCompleted(TreeSitterAnalysisPhase phase);
+}
+
+internal enum TreeSitterAnalysisCheckpoint
+{
+	TrailingWhitespaceScan,
+	ContainingBodyAncestorWalk,
+	CommentClusterScan
+}
+
+internal interface ITreeSitterAnalysisCheckpointObserver
+{
+	void OnCheckpoint(TreeSitterAnalysisCheckpoint checkpoint, int iteration);
+}
+
 /// <summary>
 /// Builds compression plans with tree-sitter. Everything language-specific is data: the grammar,
 /// the queries and the placeholder come from <see cref="CompressionLanguagePack"/>.
@@ -47,7 +83,9 @@ public sealed class TreeSitterCodeCompressor :
 	private readonly Dictionary<string, LanguageWorkerPool> _languagePools = [];
 	private readonly LanguageWorkerBudget _workerBudget;
 	private readonly uint _queryMatchLimit;
+	private readonly ITreeSitterAnalysisPhaseObserver? _analysisPhaseObserver;
 	private readonly object _lifetimeSync = new();
+	private TreeSitterAnalysisDiagnosticsSession? _analysisDiagnostics;
 	private long _nextScopeId;
 	private int _activeScopes;
 	private bool _disposeRequested;
@@ -61,12 +99,14 @@ public sealed class TreeSitterCodeCompressor :
 	internal TreeSitterCodeCompressor(
 		IGrammarLibraryLocator locator,
 		IReadOnlyList<CompressionLanguagePack> packs,
-		uint queryMatchLimit = MaximumQueryMatchLimit)
+		uint queryMatchLimit = MaximumQueryMatchLimit,
+		ITreeSitterAnalysisPhaseObserver? analysisPhaseObserver = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfZero(queryMatchLimit);
 		_locator = locator;
 		_packs = packs;
 		_queryMatchLimit = queryMatchLimit;
+		_analysisPhaseObserver = analysisPhaseObserver;
 		_workerBudget = new LanguageWorkerBudget(
 			packs.Select(static pack => pack.Id).Distinct(StringComparer.Ordinal).Count());
 		_byExtension = packs
@@ -145,11 +185,35 @@ public sealed class TreeSitterCodeCompressor :
 	public bool IsSupported(string relativePath) =>
 		IsSupported(relativePath, CodeTransformKinds.Bodies);
 
-	public bool IsSupported(string relativePath, CodeTransformKinds kinds)
+	public bool IsSupported(string relativePath, CodeTransformKinds kinds) =>
+		GetEffectiveTransformKinds(relativePath, kinds) != CodeTransformKinds.None;
+
+	public CodeTransformKinds GetEffectiveTransformKinds(string relativePath, CodeTransformKinds kinds)
 	{
 		ValidateTransformKinds(kinds);
-		return _byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates) &&
-		       candidates.Any(pack => (pack.TransformCapabilities & kinds) != CodeTransformKinds.None);
+		if (!_byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates))
+			return CodeTransformKinds.None;
+
+		var capabilities = CodeTransformKinds.None;
+		foreach (var candidate in candidates)
+			capabilities |= candidate.TransformCapabilities;
+		return kinds & capabilities;
+	}
+
+	internal TreeSitterAnalysisDiagnosticsSession BeginAnalysisDiagnostics(int topCapacity = 10)
+	{
+		lock (_lifetimeSync)
+		{
+			ObjectDisposedException.ThrowIf(_disposeRequested, this);
+			if (_analysisDiagnostics is not null)
+				throw new InvalidOperationException("An analysis diagnostics session is already active.");
+
+			var diagnostics = new TreeSitterAnalysisDiagnosticsSession(
+				ReleaseAnalysisDiagnostics,
+				topCapacity);
+			_analysisDiagnostics = diagnostics;
+			return diagnostics;
+		}
 	}
 
 	public ICodeCompressionScope CreateScope(string projectRoot) =>
@@ -169,7 +233,18 @@ public sealed class TreeSitterCodeCompressor :
 				kinds,
 				Interlocked.Increment(ref _nextScopeId),
 				GetLanguagePool,
-				ReleaseScope);
+				ReleaseScope,
+				_analysisPhaseObserver,
+				_analysisDiagnostics);
+		}
+	}
+
+	private void ReleaseAnalysisDiagnostics(TreeSitterAnalysisDiagnosticsSession diagnostics)
+	{
+		lock (_lifetimeSync)
+		{
+			if (ReferenceEquals(_analysisDiagnostics, diagnostics))
+				_analysisDiagnostics = null;
 		}
 	}
 
@@ -246,8 +321,12 @@ internal sealed class TreeSitterCompressionScope(
 	CodeTransformKinds transformKinds,
 	long operationId,
 	Func<CompressionLanguagePack, LanguageWorkerPool> languagePoolProvider,
-	Action releaseScope) : ICodeCompressionScope
+	Action releaseScope,
+	ITreeSitterAnalysisPhaseObserver? analysisPhaseObserver = null,
+	TreeSitterAnalysisDiagnosticsSession? analysisDiagnostics = null) : ICodeCompressionScope
 {
+	private const int CancellationCheckBatchMask = 1023;
+	private const int CancellationCheckBatchSize = CancellationCheckBatchMask + 1;
 	private int _disposed;
 
 	public CodeCompressionAnalysis Analyze(
@@ -257,6 +336,34 @@ internal sealed class TreeSitterCompressionScope(
 		CancellationToken cancellationToken)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (analysisDiagnostics is null)
+		{
+			var unmeasured = default(TreeSitterFileAnalysisTiming);
+			return AnalyzeCore(relativePath, content, cancellationToken, ref unmeasured);
+		}
+
+		var timing = analysisDiagnostics.BeginFile(relativePath, content.Length);
+		try
+		{
+			var analysis = AnalyzeCore(relativePath, content, cancellationToken, ref timing);
+			analysisDiagnostics.RecordFile(ref timing);
+			return analysis;
+		}
+		catch (OperationCanceledException)
+		{
+			timing.IsCancelled = true;
+			analysisDiagnostics.RecordFile(ref timing);
+			throw;
+		}
+	}
+
+	private CodeCompressionAnalysis AnalyzeCore(
+		string relativePath,
+		string content,
+		CancellationToken cancellationToken,
+		ref TreeSitterFileAnalysisTiming timing)
+	{
 
 		if (!byExtension.TryGetValue(Path.GetExtension(relativePath), out var candidates))
 			return Refused(relativePath, "unknown", CodeCompressionOutcome.UnchangedUnsupportedLanguage, content.Length);
@@ -274,10 +381,9 @@ internal sealed class TreeSitterCompressionScope(
 				content.Length);
 		}
 
-		var pack = ResolveLanguagePack(candidates, relativePath, content, transformKinds);
+		var pack = ResolveLanguagePack(candidates, relativePath, content, transformKinds, cancellationToken);
 		var effectiveKinds = transformKinds & pack.TransformCapabilities;
-
-		cancellationToken.ThrowIfCancellationRequested();
+		CompletePhase(TreeSitterAnalysisPhase.LanguageResolution, cancellationToken);
 
 		LanguageWorkerLease lease;
 		try
@@ -289,53 +395,130 @@ internal sealed class TreeSitterCompressionScope(
 		}
 		catch (Exception exception) when (IsLanguageRuntimeFailure(exception))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedParseFailed, content.Length);
 		}
 
 		using var languageLease = lease;
+		CompletePhase(TreeSitterAnalysisPhase.WorkerRent, cancellationToken);
 		var language = languageLease.Worker;
 		var source = content;
+		var phaseStartedAt = StartMeasuredPhase();
 		var original = language.Parser.Parse(source);
 		if (original is null)
+		{
+			CompleteMeasuredPhase(
+				TreeSitterAnalysisPhase.OriginalParse,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
 			return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedParseFailed, content.Length);
+		}
 
 		CodeCompressionPlan plan;
 		List<CodeDeclaration>? originalDeclarations;
 		List<CodeParseDefect>? originalDefects;
 		try
 		{
+			CompleteMeasuredPhase(
+				TreeSitterAnalysisPhase.OriginalParse,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
 			var edits = CollectEdits(
 				pack,
 				language,
 				original,
 				source,
 				effectiveKinds,
-				cancellationToken);
+				cancellationToken,
+				analysisPhaseObserver,
+				analysisDiagnostics,
+				relativePath,
+				ref timing);
+			cancellationToken.ThrowIfCancellationRequested();
 			if (edits is null)
 				return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
+			phaseStartedAt = StartMeasuredPhase();
 			try
 			{
-				plan = CodeCompressionPlan.Create(relativePath, pack.Id, edits, source.Length, transformIdentity);
+				plan = CodeCompressionPlan.CreateForAnalysis(
+					relativePath,
+					pack.Id,
+					edits,
+					source.Length,
+					transformIdentity,
+					cancellationToken);
 			}
 			catch (Exception exception) when (exception is ArgumentException or ArgumentOutOfRangeException)
 			{
+				CompleteMeasuredPhase(
+					TreeSitterAnalysisPhase.PlanBuild,
+					phaseStartedAt,
+					relativePath,
+					source.Length,
+					ref timing,
+					cancellationToken);
 				// A malformed pack must refuse one file rather than take down the output operation.
 				return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
 			}
+			CompleteMeasuredPhase(
+				TreeSitterAnalysisPhase.PlanBuild,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
 
 			if (plan.Outcome != CodeCompressionOutcome.Compressed)
 				return new CodeCompressionAnalysis(plan, null);
 
+			phaseStartedAt = StartMeasuredPhase();
 			originalDeclarations = ReadDeclarations(
 				language,
 				original.RootNode,
-				ContentTransformMap.Identity);
-			originalDefects = ReadDefects(original.RootNode, ContentTransformMap.Identity);
+				ContentTransformMap.Identity,
+				cancellationToken,
+				out var originalDeclarationCount);
+			timing.OriginalDeclarations = originalDeclarationCount;
+			CompleteMeasuredPhase(
+				TreeSitterAnalysisPhase.OriginalDeclarations,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
+			phaseStartedAt = StartMeasuredPhase();
+			originalDefects = ReadDefects(
+				original.RootNode,
+				ContentTransformMap.Identity,
+				cancellationToken,
+				out var originalDefectCount,
+				out var originalVisitedNodes);
+			timing.OriginalDefects = originalDefectCount;
+			timing.OriginalVisitedNodes = originalVisitedNodes;
+			CompleteMeasuredPhase(
+				TreeSitterAnalysisPhase.OriginalDefectWalk,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
 		}
 		finally
 		{
-			language.ReleaseQueryTreeReferences();
-			original.Dispose();
+			try
+			{
+				language.ReleaseQueryTreeReferences();
+			}
+			finally
+			{
+				original.Dispose();
+			}
 		}
 
 		if (originalDeclarations is null || originalDefects is null)
@@ -345,16 +528,85 @@ internal sealed class TreeSitterCompressionScope(
 				null);
 		}
 
-		var applied = plan.Apply(source);
-		using var compressed = language.Parser.Parse(applied.Text);
+		phaseStartedAt = StartMeasuredPhase();
+		var applied = plan.ApplyForAnalysis(source, cancellationToken);
+		CompleteMeasuredPhase(
+			TreeSitterAnalysisPhase.PlanApply,
+			phaseStartedAt,
+			relativePath,
+			source.Length,
+			ref timing,
+			cancellationToken);
+		phaseStartedAt = StartMeasuredPhase();
+		var compressed = language.Parser.Parse(applied.Text);
 		if (compressed is null)
+		{
+			CompleteMeasuredPhase(
+				TreeSitterAnalysisPhase.ReverseParse,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
 			return new CodeCompressionAnalysis(
 				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
 				null);
+		}
 
-		var compressedDeclarations = ReadDeclarations(language, compressed.RootNode, applied.Map);
-		var compressedDefects = ReadDefects(compressed.RootNode, applied.Map);
-		language.ReleaseQueryTreeReferences();
+		List<CodeDeclaration>? compressedDeclarations;
+		List<CodeParseDefect>? compressedDefects;
+		try
+		{
+			CompleteMeasuredPhase(
+				TreeSitterAnalysisPhase.ReverseParse,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
+			phaseStartedAt = StartMeasuredPhase();
+			compressedDeclarations = ReadDeclarations(
+				language,
+				compressed.RootNode,
+				applied.Map,
+				cancellationToken,
+				out var reverseDeclarationCount);
+			timing.ReverseDeclarations = reverseDeclarationCount;
+			CompleteMeasuredPhase(
+				TreeSitterAnalysisPhase.ReverseDeclarations,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
+			phaseStartedAt = StartMeasuredPhase();
+			compressedDefects = ReadDefects(
+				compressed.RootNode,
+				applied.Map,
+				cancellationToken,
+				out var reverseDefectCount,
+				out var reverseVisitedNodes);
+			timing.ReverseDefects = reverseDefectCount;
+			timing.ReverseVisitedNodes = reverseVisitedNodes;
+			CompleteMeasuredPhase(
+				TreeSitterAnalysisPhase.ReverseDefectWalk,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
+		}
+		finally
+		{
+			try
+			{
+				language.ReleaseQueryTreeReferences();
+			}
+			finally
+			{
+				compressed.Dispose();
+			}
+		}
 		if (compressedDeclarations is null || compressedDefects is null)
 		{
 			return new CodeCompressionAnalysis(
@@ -362,19 +614,105 @@ internal sealed class TreeSitterCompressionScope(
 				null);
 		}
 
+		phaseStartedAt = StartMeasuredPhase();
 		var verdict = CodeStructureGate.Evaluate(
 			originalDeclarations,
 			compressedDeclarations,
 			originalDefects,
 			compressedDefects,
 			plan.Edits,
-			pack.ExecutableOwnerKinds);
+			pack.ExecutableOwnerKinds,
+			cancellationToken);
+		CompleteMeasuredPhase(
+			TreeSitterAnalysisPhase.StructureGate,
+			phaseStartedAt,
+			relativePath,
+			source.Length,
+			ref timing,
+			cancellationToken);
 
 		return verdict == CodeStructureGateVerdict.Accepted
 			? new CodeCompressionAnalysis(plan, applied)
 			: new CodeCompressionAnalysis(
 				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
 				null);
+	}
+
+	private long StartMeasuredPhase() => analysisDiagnostics?.StartPhase() ?? 0;
+
+	private void CompleteMeasuredPhase(
+		TreeSitterAnalysisPhase phase,
+		long startedAt,
+		string relativePath,
+		int sourceCharacters,
+		ref TreeSitterFileAnalysisTiming timing,
+		CancellationToken cancellationToken)
+		=> CompleteMeasuredPhase(
+			analysisDiagnostics,
+			analysisPhaseObserver,
+			phase,
+			startedAt,
+			relativePath,
+			sourceCharacters,
+			ref timing,
+			cancellationToken);
+
+	private static void CompleteMeasuredPhase(
+		TreeSitterAnalysisDiagnosticsSession? diagnostics,
+		ITreeSitterAnalysisPhaseObserver? observer,
+		TreeSitterAnalysisPhase phase,
+		long startedAt,
+		string relativePath,
+		int sourceCharacters,
+		ref TreeSitterFileAnalysisTiming timing,
+		CancellationToken cancellationToken)
+	{
+		diagnostics?.CompletePhase(
+			phase,
+			startedAt,
+			relativePath,
+			sourceCharacters,
+			ref timing);
+		CompletePhase(observer, phase, cancellationToken);
+	}
+
+	private void CompletePhase(TreeSitterAnalysisPhase phase, CancellationToken cancellationToken)
+		=> CompletePhase(analysisPhaseObserver, phase, cancellationToken);
+
+	private static void CompletePhase(
+		ITreeSitterAnalysisPhaseObserver? observer,
+		TreeSitterAnalysisPhase phase,
+		CancellationToken cancellationToken)
+	{
+		observer?.OnPhaseCompleted(phase);
+		cancellationToken.ThrowIfCancellationRequested();
+	}
+
+	private static void ThrowIfCancellationRequestedPeriodically(
+		CancellationToken cancellationToken,
+		int iteration)
+	{
+		if (cancellationToken.CanBeCanceled &&
+		    iteration != 0 &&
+		    (iteration & CancellationCheckBatchMask) == 0)
+			cancellationToken.ThrowIfCancellationRequested();
+	}
+
+	private static void ThrowIfCancellationRequestedAtCheckpoint(
+		CancellationToken cancellationToken,
+		int iteration,
+		ITreeSitterAnalysisPhaseObserver? observer,
+		TreeSitterAnalysisCheckpoint checkpoint)
+	{
+		if (!cancellationToken.CanBeCanceled ||
+		    iteration == 0 ||
+		    (iteration & CancellationCheckBatchMask) != 0)
+		{
+			return;
+		}
+
+		(observer as ITreeSitterAnalysisCheckpointObserver)?.OnCheckpoint(checkpoint, iteration);
+		cancellationToken.ThrowIfCancellationRequested();
 	}
 
 	private CodeCompressionAnalysis Refused(
@@ -388,14 +726,15 @@ internal sealed class TreeSitterCompressionScope(
 		IReadOnlyList<CompressionLanguagePack> candidates,
 		string relativePath,
 		string source,
-		CodeTransformKinds transformKinds)
+		CodeTransformKinds transformKinds,
+		CancellationToken cancellationToken)
 	{
 		if (candidates.Count == 1)
 			return candidates[0];
 
 		if (Path.GetExtension(relativePath).Equals(".h", StringComparison.OrdinalIgnoreCase))
 		{
-			var languageId = ContainsCppHeaderEvidence(source) ? "cpp" : "c";
+			var languageId = ContainsCppHeaderEvidence(source, cancellationToken) ? "cpp" : "c";
 			var selected = candidates.FirstOrDefault(candidate =>
 				(candidate.TransformCapabilities & transformKinds) != CodeTransformKinds.None &&
 				candidate.Id.Equals(languageId, StringComparison.Ordinal));
@@ -407,23 +746,23 @@ internal sealed class TreeSitterCompressionScope(
 			(candidate.TransformCapabilities & transformKinds) != CodeTransformKinds.None);
 	}
 
-	private static bool ContainsCppHeaderEvidence(string source)
+	private static bool ContainsCppHeaderEvidence(string source, CancellationToken cancellationToken)
 	{
 		var buffer = ArrayPool<char>.Shared.Rent(Math.Max(1, source.Length));
 		try
 		{
 			var code = buffer.AsSpan(0, source.Length);
-			StripCommentsStringsAndPreprocessor(source.AsSpan(), code);
-			return ContainsWord(code, "namespace") ||
-			       ContainsWord(code, "template") ||
-			       ContainsWord(code, "class") ||
-			       ContainsWord(code, "constexpr") ||
-			       ContainsWord(code, "typename") ||
+			StripCommentsStringsAndPreprocessor(source.AsSpan(), code, cancellationToken);
+			return ContainsWord(code, "namespace", cancellationToken) ||
+			       ContainsWord(code, "template", cancellationToken) ||
+			       ContainsWord(code, "class", cancellationToken) ||
+			       ContainsWord(code, "constexpr", cancellationToken) ||
+			       ContainsWord(code, "typename", cancellationToken) ||
 			       code.Contains("::", StringComparison.Ordinal) ||
-			       ContainsAccessLabel(code, "public") ||
-			       ContainsAccessLabel(code, "private") ||
-			       ContainsAccessLabel(code, "protected") ||
-			       ContainsInlineStructMethod(code);
+			       ContainsAccessLabel(code, "public", cancellationToken) ||
+			       ContainsAccessLabel(code, "private", cancellationToken) ||
+			       ContainsAccessLabel(code, "protected", cancellationToken) ||
+			       ContainsInlineStructMethod(code, cancellationToken);
 		}
 		finally
 		{
@@ -433,7 +772,8 @@ internal sealed class TreeSitterCompressionScope(
 
 	private static void StripCommentsStringsAndPreprocessor(
 		ReadOnlySpan<char> source,
-		Span<char> destination)
+		Span<char> destination,
+		CancellationToken cancellationToken)
 	{
 		destination.Fill(' ');
 		var state = HeaderLexicalState.Code;
@@ -442,6 +782,7 @@ internal sealed class TreeSitterCompressionScope(
 		var lastNonWhitespace = '\0';
 		for (var index = 0; index < source.Length; index++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
 			var current = source[index];
 			var next = index + 1 < source.Length ? source[index + 1] : '\0';
 			if (current == '\n')
@@ -523,11 +864,15 @@ internal sealed class TreeSitterCompressionScope(
 		}
 	}
 
-	private static bool ContainsWord(ReadOnlySpan<char> code, ReadOnlySpan<char> word)
+	private static bool ContainsWord(
+		ReadOnlySpan<char> code,
+		ReadOnlySpan<char> word,
+		CancellationToken cancellationToken)
 	{
 		var offset = 0;
 		while (offset <= code.Length - word.Length)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, offset);
 			var relative = code[offset..].IndexOf(word, StringComparison.Ordinal);
 			if (relative < 0)
 				return false;
@@ -543,11 +888,15 @@ internal sealed class TreeSitterCompressionScope(
 		return false;
 	}
 
-	private static bool ContainsAccessLabel(ReadOnlySpan<char> code, ReadOnlySpan<char> label)
+	private static bool ContainsAccessLabel(
+		ReadOnlySpan<char> code,
+		ReadOnlySpan<char> label,
+		CancellationToken cancellationToken)
 	{
 		var offset = 0;
 		while (offset <= code.Length - label.Length)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, offset);
 			var relative = code[offset..].IndexOf(label, StringComparison.Ordinal);
 			if (relative < 0)
 				return false;
@@ -557,7 +906,10 @@ internal sealed class TreeSitterCompressionScope(
 			    (end == code.Length || !IsIdentifierCharacter(code[end])))
 			{
 				while (end < code.Length && char.IsWhiteSpace(code[end]))
+				{
+					ThrowIfCancellationRequestedPeriodically(cancellationToken, end - start);
 					end++;
+				}
 				if (end < code.Length && code[end] == ':')
 					return true;
 			}
@@ -566,11 +918,14 @@ internal sealed class TreeSitterCompressionScope(
 		return false;
 	}
 
-	private static bool ContainsInlineStructMethod(ReadOnlySpan<char> code)
+	private static bool ContainsInlineStructMethod(
+		ReadOnlySpan<char> code,
+		CancellationToken cancellationToken)
 	{
 		var searchOffset = 0;
 		while (searchOffset < code.Length)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, searchOffset);
 			var relative = code[searchOffset..].IndexOf("struct", StringComparison.Ordinal);
 			if (relative < 0)
 				return false;
@@ -591,6 +946,7 @@ internal sealed class TreeSitterCompressionScope(
 			var depth = 1;
 			for (var index = open + 1; index < code.Length && depth > 0; index++)
 			{
+				ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
 				if (code[index] == '{')
 				{
 					depth++;
@@ -603,17 +959,21 @@ internal sealed class TreeSitterCompressionScope(
 				}
 				if (depth != 1 || code[index] != ')')
 					continue;
-				if (HasInlineDefinitionAfter(code, index + 1))
+				if (HasInlineDefinitionAfter(code, index + 1, cancellationToken))
 					return true;
 			}
 		}
 		return false;
 	}
 
-	private static bool HasInlineDefinitionAfter(ReadOnlySpan<char> code, int offset)
+	private static bool HasInlineDefinitionAfter(
+		ReadOnlySpan<char> code,
+		int offset,
+		CancellationToken cancellationToken)
 	{
 		for (var index = offset; index < code.Length; index++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
 			if (code[index] == '{')
 				return true;
 			if (code[index] is ';' or '}')
@@ -642,53 +1002,358 @@ internal sealed class TreeSitterCompressionScope(
 		Tree tree,
 		string source,
 		CodeTransformKinds transformKinds,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		ITreeSitterAnalysisPhaseObserver? observer,
+		TreeSitterAnalysisDiagnosticsSession? diagnostics,
+		string relativePath,
+		ref TreeSitterFileAnalysisTiming timing)
 	{
-		var preservedRanges = ReadPreservedRanges(language, tree.RootNode, cancellationToken);
+		var phaseStartedAt = diagnostics?.StartPhase() ?? 0;
+		var preservedRanges = ReadPreservedRanges(
+			language,
+			tree.RootNode,
+			cancellationToken,
+			out var preserveCaptureCount);
+		timing.PreserveCaptures = preserveCaptureCount;
+		CompleteMeasuredPhase(
+			diagnostics,
+			observer,
+			TreeSitterAnalysisPhase.PreserveQuery,
+			phaseStartedAt,
+			relativePath,
+			source.Length,
+			ref timing,
+			cancellationToken);
 		if (preservedRanges is null)
 			return null;
 
 		var bodyCaptures = new List<Node>();
 		var expressionCaptures = new List<Node>();
+		var bodyQueryValid = true;
+		var bodyCaptureCount = 0;
+		phaseStartedAt = diagnostics?.StartPhase() ?? 0;
 		if ((transformKinds & CodeTransformKinds.Bodies) != 0)
 		{
 			if (language.Runtime.Bodies is not { } bodies || language.BodiesCursor is not { } bodiesCursor)
-				return null;
-			var captureCount = 0;
-			bodiesCursor.Execute(bodies, tree.RootNode);
-			foreach (var capture in bodiesCursor.Captures)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
-				if (capture.Name is not ("body" or "expression"))
-					continue;
-				if (captureCount >= TreeSitterCodeCompressor.MaximumBodyCapturesPerFile)
-					return null;
-				captureCount++;
-				(capture.Name.Equals("body", StringComparison.Ordinal)
-					? bodyCaptures
-					: expressionCaptures).Add(capture.Node);
+				bodyQueryValid = false;
 			}
-			if (bodiesCursor.IsMatchLimitExceeded)
-				return null;
+			else
+			{
+				var captureIndex = 0;
+				bodiesCursor.Execute(bodies, tree.RootNode);
+				foreach (var capture in bodiesCursor.Captures)
+				{
+					ThrowIfCancellationRequestedPeriodically(cancellationToken, captureIndex++);
+					if (capture.Name is not ("body" or "expression"))
+						continue;
+					if (bodyCaptureCount >= TreeSitterCodeCompressor.MaximumBodyCapturesPerFile)
+					{
+						bodyQueryValid = false;
+						break;
+					}
+					bodyCaptureCount++;
+					(capture.Name.Equals("body", StringComparison.Ordinal)
+						? bodyCaptures
+						: expressionCaptures).Add(capture.Node);
+				}
+				if (bodiesCursor.IsMatchLimitExceeded)
+					bodyQueryValid = false;
+			}
 		}
+		timing.BodyCaptures = bodyCaptureCount;
+		CompleteMeasuredPhase(
+			diagnostics,
+			observer,
+			TreeSitterAnalysisPhase.BodyQuery,
+			phaseStartedAt,
+			relativePath,
+			source.Length,
+			ref timing,
+			cancellationToken);
+		if (!bodyQueryValid)
+			return null;
 
 		var raw = new List<RawCompressionEdit>(bodyCaptures.Count + expressionCaptures.Count);
 		var needsBodyRanges = expressionCaptures.Count > 0 ||
 		                      (transformKinds & CodeTransformKinds.Comments) != 0;
-		var bodyRanges = bodyCaptures.Count == 0 || !needsBodyRanges
-			? null
-			: bodyCaptures
-				.Select(static node => new SourceRange(node.StartIndex, node.EndIndex))
-				.ToHashSet();
-		foreach (var node in bodyCaptures)
+		HashSet<SourceRange>? bodyRanges = null;
+		var deferCommentShaping = diagnostics is not null || observer is not null;
+		if (!deferCommentShaping &&
+		    !TryAppendBodyEdits(
+			    pack,
+			    source,
+			    transformKinds,
+			    bodyCaptures,
+			    expressionCaptures,
+			    needsBodyRanges,
+			    raw,
+			    cancellationToken,
+			    out bodyRanges))
 		{
+			return null;
+		}
 
+		var deferredComments = default(DeferredCommentBuffer);
+		var deferredCommentCount = 0;
+		List<CommentLineCollapseCandidate>? collapseCandidates = null;
+		var commentQueryValid = true;
+		phaseStartedAt = diagnostics?.StartPhase() ?? 0;
+		try
+		{
+			if ((transformKinds & CodeTransformKinds.Comments) != 0)
+			{
+				var commentsCursor = language.ExecuteComments(tree.RootNode);
+				if (commentsCursor is null)
+				{
+					commentQueryValid = false;
+				}
+				else
+				{
+					var commentCaptureIndex = 0;
+					foreach (var capture in commentsCursor.Captures)
+					{
+						ThrowIfCancellationRequestedPeriodically(cancellationToken, commentCaptureIndex++);
+						if (capture.Name is not ("comment" or "docstring"))
+							continue;
+						if (deferredCommentCount >= TreeSitterCodeCompressor.MaximumCommentCapturesPerFile)
+						{
+							commentQueryValid = false;
+							break;
+						}
+						var isDocstring = capture.Name.Equals("docstring", StringComparison.Ordinal);
+						if (deferCommentShaping)
+						{
+							deferredComments.Add(new CommentCapture(capture.Node, isDocstring));
+						}
+						else
+						{
+							AppendCommentEdit(
+								pack,
+								capture.Node,
+								isDocstring,
+								bodyRanges,
+								source,
+								raw,
+								ref collapseCandidates,
+								cancellationToken,
+								observer);
+						}
+						deferredCommentCount++;
+					}
+					if (commentsCursor.IsMatchLimitExceeded)
+						commentQueryValid = false;
+				}
+			}
+			timing.CommentCaptures = deferredCommentCount;
+			CompleteMeasuredPhase(
+				diagnostics,
+				observer,
+				TreeSitterAnalysisPhase.CommentQuery,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				ref timing,
+				cancellationToken);
+			if (!commentQueryValid)
+				return null;
+
+			phaseStartedAt = diagnostics?.StartPhase() ?? 0;
+			preservedRanges = MergePreservedRanges(preservedRanges, cancellationToken);
+			if (deferCommentShaping)
+			{
+				if (!TryAppendBodyEdits(
+					    pack,
+					    source,
+					    transformKinds,
+					    bodyCaptures,
+					    expressionCaptures,
+					    needsBodyRanges,
+					    raw,
+					    cancellationToken,
+					    out bodyRanges))
+				{
+					CompleteEditShapingPhase(
+						diagnostics,
+						observer,
+						phaseStartedAt,
+						relativePath,
+						source.Length,
+						raw.Count,
+						finalEditCount: 0,
+						ref timing,
+						cancellationToken);
+					return null;
+				}
+				for (var index = 0; index < deferredCommentCount; index++)
+				{
+					ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
+					var capture = deferredComments[index];
+					AppendCommentEdit(
+						pack,
+						capture.Node,
+						capture.IsDocstring,
+						bodyRanges,
+						source,
+						raw,
+						ref collapseCandidates,
+						cancellationToken,
+						observer);
+				}
+			}
+
+			if ((transformKinds & CodeTransformKinds.Comments) != 0)
+			{
+				raw = CollapseBlankLinesAroundRemovedComments(
+					source,
+					raw,
+					preservedRanges,
+					collapseCandidates,
+					cancellationToken,
+					observer);
+			}
+
+			// Outermost wins: a lambda body inside a method body must not be spliced twice.
+			cancellationToken.ThrowIfCancellationRequested();
+			raw.Sort(static (left, right) =>
+				left.Start != right.Start
+					? left.Start.CompareTo(right.Start)
+					: right.End.CompareTo(left.End));
+			cancellationToken.ThrowIfCancellationRequested();
+			var edits = new List<CodeCompressionEdit>(raw.Count);
+			var reach = -1;
+			var preservedIndex = 0;
+			var rawEditIndex = 0;
+			foreach (var rawEdit in raw)
+			{
+				ThrowIfCancellationRequestedPeriodically(cancellationToken, rawEditIndex++);
+				var start = rawEdit.Start;
+				var end = rawEdit.End;
+				var replacement = rawEdit.Replacement;
+				var kinds = rawEdit.Kinds;
+				if (start < reach)
+				{
+					if (edits.Count > 0 && end <= edits[^1].SourceEnd)
+						edits[^1] = edits[^1] with { Kinds = edits[^1].Kinds | kinds };
+					continue;
+				}
+				while (preservedIndex < preservedRanges.Count && preservedRanges[preservedIndex].End <= start)
+					preservedIndex++;
+				if (preservedIndex < preservedRanges.Count &&
+				    preservedRanges[preservedIndex].Start <= start &&
+				    end <= preservedRanges[preservedIndex].End)
+				{
+					continue;
+				}
+				reach = end;
+				if (edits.Count >= TreeSitterCodeCompressor.MaximumEditsPerFile)
+				{
+					CompleteEditShapingPhase(
+						diagnostics,
+						observer,
+						phaseStartedAt,
+						relativePath,
+						source.Length,
+						raw.Count,
+						edits.Count,
+						ref timing,
+						cancellationToken);
+					return null;
+				}
+				if (edits.Count > 0 &&
+				    edits[^1].SourceEnd == start &&
+				    edits[^1].Replacement.Length == 0 &&
+				    replacement.Length == 0)
+				{
+					var previous = edits[^1];
+					edits[^1] = new CodeCompressionEdit(
+						previous.SourceStart,
+						end - previous.SourceStart,
+						string.Empty)
+					{
+						Kinds = previous.Kinds | kinds
+					};
+					continue;
+				}
+				edits.Add(new CodeCompressionEdit(start, end - start, replacement) { Kinds = kinds });
+			}
+
+			CompleteEditShapingPhase(
+				diagnostics,
+				observer,
+				phaseStartedAt,
+				relativePath,
+				source.Length,
+				raw.Count,
+				edits.Count,
+				ref timing,
+				cancellationToken);
+			return edits;
+		}
+		finally
+		{
+			deferredComments.Dispose();
+		}
+	}
+
+	private static void CompleteEditShapingPhase(
+		TreeSitterAnalysisDiagnosticsSession? diagnostics,
+		ITreeSitterAnalysisPhaseObserver? observer,
+		long phaseStartedAt,
+		string relativePath,
+		int sourceCharacters,
+		int rawEditCount,
+		int finalEditCount,
+		ref TreeSitterFileAnalysisTiming timing,
+		CancellationToken cancellationToken)
+	{
+		timing.RawEdits = rawEditCount;
+		timing.FinalEdits = finalEditCount;
+		CompleteMeasuredPhase(
+			diagnostics,
+			observer,
+			TreeSitterAnalysisPhase.EditShaping,
+			phaseStartedAt,
+			relativePath,
+			sourceCharacters,
+			ref timing,
+			cancellationToken);
+	}
+
+	private static bool TryAppendBodyEdits(
+		CompressionLanguagePack pack,
+		string source,
+		CodeTransformKinds transformKinds,
+		IReadOnlyList<Node> bodyCaptures,
+		IReadOnlyList<Node> expressionCaptures,
+		bool needsBodyRanges,
+		List<RawCompressionEdit> raw,
+		CancellationToken cancellationToken,
+		out HashSet<SourceRange>? bodyRanges)
+	{
+		bodyRanges = null;
+		if (bodyCaptures.Count > 0 && needsBodyRanges)
+		{
+			bodyRanges = new HashSet<SourceRange>(bodyCaptures.Count);
+			for (var index = 0; index < bodyCaptures.Count; index++)
+			{
+				ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
+				var node = bodyCaptures[index];
+				bodyRanges.Add(new SourceRange(node.StartIndex, node.EndIndex));
+			}
+			cancellationToken.ThrowIfCancellationRequested();
+		}
+
+		for (var index = 0; index < bodyCaptures.Count; index++)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
+			var node = bodyCaptures[index];
 			// Defence in depth. The queries are anchored on the parent declaration's body: field, so
 			// a container should be unreachable - but a grammar upgrade must fail loudly, not
 			// silently delete a class body.
 			if (pack.ContainerNodeTypes.Contains(node.Type))
 				continue;
-			if (IsMisparsedCppClassBody(pack, node, source))
+			if (IsMisparsedCppClassBody(pack, node, source, cancellationToken))
 				continue;
 
 			var start = node.StartIndex;
@@ -699,119 +1364,65 @@ internal sealed class TreeSitterCompressionScope(
 						node,
 						source,
 						out start,
-						out var hasLeadingDocstring))
+						out var hasLeadingDocstring,
+						cancellationToken))
+				{
 					continue;
+				}
 				if (!hasLeadingDocstring)
-					start = ExtendOverLeadingPythonComments(source, node);
+					start = ExtendOverLeadingPythonComments(source, node, cancellationToken);
 			}
 
 			if (start < 0 || node.EndIndex > source.Length || node.EndIndex <= start)
 				continue;
-			raw.Add(ResolveBlockEdit(pack, source, start, node.EndIndex));
+			raw.Add(ResolveBlockEdit(pack, source, start, node.EndIndex, cancellationToken));
 		}
 
-		foreach (var node in expressionCaptures)
+		for (var index = 0; index < expressionCaptures.Count; index++)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
+			var node = expressionCaptures[index];
 			if (bodyRanges?.Contains(new SourceRange(node.StartIndex, node.EndIndex)) == true)
 				continue;
 			if (node.StartPosition.Row == node.EndPosition.Row)
 				continue;
 			if (!TryResolveExpressionEdit(pack, node, source.Length, out var expressionEdit))
-				return null;
+				return false;
 			raw.Add(expressionEdit);
 		}
 
-		if ((transformKinds & CodeTransformKinds.Comments) != 0)
-		{
-			var commentsCursor = language.ExecuteComments(tree.RootNode);
-			if (commentsCursor is null)
-				return null;
-			var commentCount = 0;
-			List<CommentLineCollapseCandidate>? collapseCandidates = null;
-			foreach (var capture in commentsCursor.Captures)
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				if (capture.Name is not ("comment" or "docstring"))
-					continue;
-				if (commentCount >= TreeSitterCodeCompressor.MaximumCommentCapturesPerFile)
-					return null;
-				commentCount++;
-				if (TryResolveCommentEdit(
-						pack,
-						capture.Node,
-						capture.Name.Equals("docstring", StringComparison.Ordinal),
-						bodyRanges,
-						source,
-						out var commentEdit,
-						out var collapseBounds))
-				{
-					var editIndex = raw.Count;
-					raw.Add(commentEdit);
-					if (collapseBounds is { } bounds)
-						(collapseCandidates ??= []).Add(new CommentLineCollapseCandidate(editIndex, bounds));
-				}
-			}
-			if (commentsCursor.IsMatchLimitExceeded)
-				return null;
+		return true;
+	}
 
-			raw = CollapseBlankLinesAroundRemovedComments(
+	private static void AppendCommentEdit(
+		CompressionLanguagePack pack,
+		Node node,
+		bool isDocstring,
+		HashSet<SourceRange>? bodyRanges,
+		string source,
+		List<RawCompressionEdit> raw,
+		ref List<CommentLineCollapseCandidate>? collapseCandidates,
+		CancellationToken cancellationToken,
+		ITreeSitterAnalysisPhaseObserver? observer)
+	{
+		if (!TryResolveCommentEdit(
+				pack,
+				node,
+				isDocstring,
+				bodyRanges,
 				source,
-				raw,
-				preservedRanges,
-				collapseCandidates);
-		}
-
-		// Outermost wins: a lambda body inside a method body must not be spliced twice.
-		raw.Sort(static (left, right) =>
-			left.Start != right.Start
-				? left.Start.CompareTo(right.Start)
-				: right.End.CompareTo(left.End));
-		var edits = new List<CodeCompressionEdit>(raw.Count);
-		var reach = -1;
-		var preservedIndex = 0;
-		foreach (var rawEdit in raw)
+			out var commentEdit,
+			out var collapseBounds,
+			cancellationToken,
+			observer))
 		{
-			var start = rawEdit.Start;
-			var end = rawEdit.End;
-			var replacement = rawEdit.Replacement;
-			var kinds = rawEdit.Kinds;
-			if (start < reach)
-			{
-				if (edits.Count > 0 && end <= edits[^1].SourceEnd)
-					edits[^1] = edits[^1] with { Kinds = edits[^1].Kinds | kinds };
-				continue;
-			}
-			while (preservedIndex < preservedRanges.Count && preservedRanges[preservedIndex].End <= start)
-				preservedIndex++;
-			if (preservedIndex < preservedRanges.Count &&
-			    preservedRanges[preservedIndex].Start <= start &&
-			    end <= preservedRanges[preservedIndex].End)
-			{
-				continue;
-			}
-			reach = end;
-			if (edits.Count >= TreeSitterCodeCompressor.MaximumEditsPerFile)
-				return null;
-			if (edits.Count > 0 &&
-			    edits[^1].SourceEnd == start &&
-			    edits[^1].Replacement.Length == 0 &&
-			    replacement.Length == 0)
-			{
-				var previous = edits[^1];
-				edits[^1] = new CodeCompressionEdit(
-					previous.SourceStart,
-					end - previous.SourceStart,
-					string.Empty)
-				{
-					Kinds = previous.Kinds | kinds
-				};
-				continue;
-			}
-			edits.Add(new CodeCompressionEdit(start, end - start, replacement) { Kinds = kinds });
+			return;
 		}
 
-		return edits;
+		var editIndex = raw.Count;
+		raw.Add(commentEdit);
+		if (collapseBounds is { } bounds)
+			(collapseCandidates ??= []).Add(new CommentLineCollapseCandidate(editIndex, bounds));
 	}
 
 	private static bool TryResolveExpressionEdit(
@@ -862,11 +1473,13 @@ internal sealed class TreeSitterCompressionScope(
 		IReadOnlySet<SourceRange>? capturedBodyRanges,
 		string source,
 		out RawCompressionEdit edit,
-		out SourceRange? collapseBounds)
+		out SourceRange? collapseBounds,
+		CancellationToken cancellationToken,
+		ITreeSitterAnalysisPhaseObserver? observer)
 	{
 		collapseBounds = null;
 		if (isDocstring &&
-		    (!IsLeadingDocstring(node) || !IsSimpleStringStatement(node, source)))
+		    (!IsLeadingDocstring(node, cancellationToken) || !IsSimpleStringStatement(node, source)))
 		{
 			edit = default;
 			return false;
@@ -886,7 +1499,7 @@ internal sealed class TreeSitterCompressionScope(
 			return false;
 		}
 
-		if (isDocstring && RequiresSuitePlaceholder(node))
+		if (isDocstring && RequiresSuitePlaceholder(node, cancellationToken))
 		{
 			edit = new RawCompressionEdit(
 				start,
@@ -913,15 +1526,27 @@ internal sealed class TreeSitterCompressionScope(
 		var contentEnd = lineEnd > lineStart && source[lineEnd - 1] == '\r'
 			? lineEnd - 1
 			: lineEnd;
-		var hasOnlyWhitespaceBefore = source.AsSpan(editableLineStart, start - editableLineStart).IsWhiteSpace();
+		var hasOnlyWhitespaceBefore = ContainsOnlyWhitespace(
+			source,
+			editableLineStart,
+			start,
+			cancellationToken);
 		var hasOnlyWhitespaceAfter = syntaxEnd <= contentEnd &&
-		                             source.AsSpan(syntaxEnd, contentEnd - syntaxEnd).IsWhiteSpace();
+		                             ContainsOnlyWhitespace(
+			                             source,
+			                             syntaxEnd,
+			                             contentEnd,
+			                             cancellationToken);
 		if (hasOnlyWhitespaceBefore && hasOnlyWhitespaceAfter)
 		{
 			// A body node can start at the first syntax token while its indentation belongs to the
 			// surrounding declaration. Keep that indentation when the body edit will absorb this
 			// comment; otherwise the two edits partially overlap and the body placeholder is lost.
-			var containingBody = FindContainingBodyRange(node, capturedBodyRanges);
+			var containingBody = FindContainingBodyRange(
+				node,
+				capturedBodyRanges,
+				cancellationToken,
+				observer);
 			var expandedStart = containingBody is { } body
 				? Math.Max(editableLineStart, body.Start)
 				: editableLineStart;
@@ -943,8 +1568,16 @@ internal sealed class TreeSitterCompressionScope(
 		// Inline block comments retain their exact syntax-node span so surrounding code is untouched.
 		if (hasOnlyWhitespaceAfter)
 		{
+			var scannedWhitespace = 0;
 			while (start > lineStart && source[start - 1] is ' ' or '\t')
+			{
 				start--;
+				ThrowIfCancellationRequestedAtCheckpoint(
+					cancellationToken,
+					++scannedWhitespace,
+					observer,
+					TreeSitterAnalysisCheckpoint.TrailingWhitespaceScan);
+			}
 		}
 
 		edit = new RawCompressionEdit(
@@ -957,13 +1590,21 @@ internal sealed class TreeSitterCompressionScope(
 
 	private static SourceRange? FindContainingBodyRange(
 		Node node,
-		IReadOnlySet<SourceRange>? capturedBodyRanges)
+		IReadOnlySet<SourceRange>? capturedBodyRanges,
+		CancellationToken cancellationToken,
+		ITreeSitterAnalysisPhaseObserver? observer)
 	{
 		if (capturedBodyRanges is null)
 			return null;
 
+		var depth = 0;
 		for (var ancestor = node.Parent; ancestor is not null; ancestor = ancestor.Parent)
 		{
+			ThrowIfCancellationRequestedAtCheckpoint(
+				cancellationToken,
+				++depth,
+				observer,
+				TreeSitterAnalysisCheckpoint.ContainingBodyAncestorWalk);
 			var range = new SourceRange(ancestor.StartIndex, ancestor.EndIndex);
 			if (capturedBodyRanges.Contains(range))
 				return range;
@@ -976,7 +1617,9 @@ internal sealed class TreeSitterCompressionScope(
 		string source,
 		List<RawCompressionEdit> edits,
 		IReadOnlyList<SourceRange> preservedRanges,
-		List<CommentLineCollapseCandidate>? candidates)
+		List<CommentLineCollapseCandidate>? candidates,
+		CancellationToken cancellationToken,
+		ITreeSitterAnalysisPhaseObserver? observer)
 	{
 		if (candidates is null)
 			return edits;
@@ -984,6 +1627,7 @@ internal sealed class TreeSitterCompressionScope(
 		var eligibleCount = 0;
 		for (var candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, candidateIndex);
 			var candidate = candidates[candidateIndex];
 			var edit = edits[candidate.EditIndex];
 			if (IsContainedInPreservedRange(edit.Start, edit.End, preservedRanges))
@@ -1009,6 +1653,7 @@ internal sealed class TreeSitterCompressionScope(
 		var collapsed = new List<RawCompressionEdit>();
 		for (var candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, candidateIndex);
 			var clusterFirstCandidateIndex = candidateIndex;
 			var first = candidates[candidateIndex];
 			var firstEdit = edits[first.EditIndex];
@@ -1018,11 +1663,20 @@ internal sealed class TreeSitterCompressionScope(
 
 			while (candidateIndex + 1 < candidates.Count)
 			{
+				ThrowIfCancellationRequestedAtCheckpoint(
+					cancellationToken,
+					candidateIndex - clusterFirstCandidateIndex + 1,
+					observer,
+					TreeSitterAnalysisCheckpoint.CommentClusterScan);
 				var next = candidates[candidateIndex + 1];
 				var nextEdit = edits[next.EditIndex];
 				if (next.Bounds != bounds ||
 				    nextEdit.Start < clusterEnd ||
-				    !ContainsOnlyBlankLineCharacters(source, clusterEnd, nextEdit.Start))
+				    !ContainsOnlyBlankLineCharacters(
+					    source,
+					    clusterEnd,
+					    nextEdit.Start,
+					    cancellationToken))
 				{
 					break;
 				}
@@ -1037,7 +1691,8 @@ internal sealed class TreeSitterCompressionScope(
 				clusterStart,
 				clusterEnd,
 				bounds,
-				collapsed);
+				collapsed,
+				cancellationToken);
 			if (clusterFirstCandidateIndex == candidateIndex &&
 			    collapsed.Count == collapsedCount + 1 &&
 			    collapsed[^1].Start == firstEdit.Start &&
@@ -1052,6 +1707,9 @@ internal sealed class TreeSitterCompressionScope(
 			     clusterIndex <= candidateIndex;
 			     clusterIndex++)
 			{
+				ThrowIfCancellationRequestedPeriodically(
+					cancellationToken,
+					clusterIndex - clusterFirstCandidateIndex);
 				replaced[candidates[clusterIndex].EditIndex] = true;
 			}
 		}
@@ -1062,6 +1720,7 @@ internal sealed class TreeSitterCompressionScope(
 		var writeIndex = 0;
 		for (var readIndex = 0; readIndex < edits.Count; readIndex++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, readIndex);
 			if (!replaced[readIndex])
 				edits[writeIndex++] = edits[readIndex];
 		}
@@ -1076,12 +1735,20 @@ internal sealed class TreeSitterCompressionScope(
 		int clusterStart,
 		int clusterEnd,
 		SourceRange bounds,
-		List<RawCompressionEdit> destination)
+		List<RawCompressionEdit> destination,
+		CancellationToken cancellationToken)
 	{
 		var prefixStart = clusterStart;
 		SourceRange? retainedPrefixBlank = null;
-		while (TryReadBlankLineBefore(source, prefixStart, bounds.Start, out var blank))
+		var scannedLines = 0;
+		while (TryReadBlankLineBefore(
+			       source,
+			       prefixStart,
+			       bounds.Start,
+			       out var blank,
+			       cancellationToken))
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, scannedLines++);
 			if (retainedPrefixBlank is null && IsEmptyBlankLine(source, blank))
 				retainedPrefixBlank = blank;
 			prefixStart = blank.Start;
@@ -1089,8 +1756,15 @@ internal sealed class TreeSitterCompressionScope(
 
 		var suffixEnd = clusterEnd;
 		SourceRange? retainedSuffixBlank = null;
-		while (TryReadBlankLineAfter(source, suffixEnd, bounds.End, out var blank))
+		scannedLines = 0;
+		while (TryReadBlankLineAfter(
+			       source,
+			       suffixEnd,
+			       bounds.End,
+			       out var blank,
+			       cancellationToken))
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, scannedLines++);
 			if (retainedSuffixBlank is null && IsEmptyBlankLine(source, blank))
 				retainedSuffixBlank = blank;
 			suffixEnd = blank.End;
@@ -1136,7 +1810,8 @@ internal sealed class TreeSitterCompressionScope(
 		string source,
 		int end,
 		int lowerBound,
-		out SourceRange blank)
+		out SourceRange blank,
+		CancellationToken cancellationToken)
 	{
 		if (end <= lowerBound)
 		{
@@ -1156,7 +1831,8 @@ internal sealed class TreeSitterCompressionScope(
 			? source.LastIndexOf('\n', contentEnd - 1)
 			: -1;
 		var start = previousLineFeed + 1;
-		if (start < lowerBound || !ContainsOnlyHorizontalWhitespace(source, start, contentEnd))
+		if (start < lowerBound ||
+		    !ContainsOnlyHorizontalWhitespace(source, start, contentEnd, cancellationToken))
 		{
 			blank = default;
 			return false;
@@ -1170,7 +1846,8 @@ internal sealed class TreeSitterCompressionScope(
 		string source,
 		int start,
 		int upperBound,
-		out SourceRange blank)
+		out SourceRange blank,
+		CancellationToken cancellationToken)
 	{
 		if (start >= upperBound)
 		{
@@ -1189,7 +1866,7 @@ internal sealed class TreeSitterCompressionScope(
 		var contentEnd = nextLineFeed >= 0 ? nextLineFeed : upperBound;
 		if (contentEnd > start && source[contentEnd - 1] == '\r')
 			contentEnd--;
-		if (!ContainsOnlyHorizontalWhitespace(source, start, contentEnd))
+		if (!ContainsOnlyHorizontalWhitespace(source, start, contentEnd, cancellationToken))
 		{
 			blank = default;
 			return false;
@@ -1199,12 +1876,51 @@ internal sealed class TreeSitterCompressionScope(
 		return true;
 	}
 
-	private static bool ContainsOnlyHorizontalWhitespace(string source, int start, int end)
+	private static bool ContainsOnlyHorizontalWhitespace(
+		string source,
+		int start,
+		int end,
+		CancellationToken cancellationToken)
 	{
-		for (var index = start; index < end; index++)
+		if (!cancellationToken.CanBeCanceled)
 		{
-			if (source[index] is not (' ' or '\t'))
+			for (var index = start; index < end; index++)
+			{
+				if (source[index] is not (' ' or '\t'))
+					return false;
+			}
+
+			return true;
+		}
+
+		cancellationToken.ThrowIfCancellationRequested();
+		for (var index = start; index < end; index += CancellationCheckBatchSize)
+		{
+			var length = Math.Min(CancellationCheckBatchSize, end - index);
+			if (source.AsSpan(index, length).IndexOfAnyExcept(' ', '\t') >= 0)
 				return false;
+			cancellationToken.ThrowIfCancellationRequested();
+		}
+
+		return true;
+	}
+
+	private static bool ContainsOnlyWhitespace(
+		string source,
+		int start,
+		int end,
+		CancellationToken cancellationToken)
+	{
+		if (!cancellationToken.CanBeCanceled)
+			return source.AsSpan(start, end - start).IsWhiteSpace();
+
+		cancellationToken.ThrowIfCancellationRequested();
+		for (var index = start; index < end; index += CancellationCheckBatchSize)
+		{
+			var length = Math.Min(CancellationCheckBatchSize, end - index);
+			if (!source.AsSpan(index, length).IsWhiteSpace())
+				return false;
+			cancellationToken.ThrowIfCancellationRequested();
 		}
 
 		return true;
@@ -1223,10 +1939,26 @@ internal sealed class TreeSitterCompressionScope(
 		return contentEnd == line.Start;
 	}
 
-	private static bool ContainsOnlyBlankLineCharacters(string source, int start, int end)
+	private static bool ContainsOnlyBlankLineCharacters(
+		string source,
+		int start,
+		int end,
+		CancellationToken cancellationToken)
 	{
+		if (!cancellationToken.CanBeCanceled)
+		{
+			for (var index = start; index < end; index++)
+			{
+				if (source[index] is not (' ' or '\t' or '\r' or '\n'))
+					return false;
+			}
+
+			return true;
+		}
+
 		for (var index = start; index < end; index++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index - start);
 			if (source[index] is not (' ' or '\t' or '\r' or '\n'))
 				return false;
 		}
@@ -1263,14 +1995,16 @@ internal sealed class TreeSitterCompressionScope(
 		return false;
 	}
 
-	private static bool IsLeadingDocstring(Node docstring)
+	private static bool IsLeadingDocstring(Node docstring, CancellationToken cancellationToken)
 	{
 		var container = docstring.Parent;
 		if (container is null)
 			return false;
 
+		var childIndex = 0;
 		foreach (var child in container.Children)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, childIndex++);
 			if (!child.IsNamed || child.Type.Contains("comment", StringComparison.OrdinalIgnoreCase))
 				continue;
 			return child.StartIndex == docstring.StartIndex && child.EndIndex == docstring.EndIndex;
@@ -1279,14 +2013,16 @@ internal sealed class TreeSitterCompressionScope(
 		return false;
 	}
 
-	private static bool RequiresSuitePlaceholder(Node docstring)
+	private static bool RequiresSuitePlaceholder(Node docstring, CancellationToken cancellationToken)
 	{
 		var suite = docstring.Parent;
 		if (suite is null || !suite.Type.Equals("block", StringComparison.Ordinal))
 			return false;
 
+		var childIndex = 0;
 		foreach (var child in suite.Children)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, childIndex++);
 			if (!child.IsNamed || child.StartIndex == docstring.StartIndex && child.EndIndex == docstring.EndIndex)
 				continue;
 			if (!child.Type.Contains("comment", StringComparison.OrdinalIgnoreCase))
@@ -1300,14 +2036,17 @@ internal sealed class TreeSitterCompressionScope(
 		Node body,
 		string source,
 		out int start,
-		out bool hasLeadingDocstring)
+		out bool hasLeadingDocstring,
+		CancellationToken cancellationToken)
 	{
 		start = body.StartIndex;
 		hasLeadingDocstring = false;
 		Node? firstStatement = null;
 		Node? secondStatement = null;
+		var childIndex = 0;
 		foreach (var child in body.Children)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, childIndex++);
 			if (!child.IsNamed)
 				continue;
 			if (firstStatement is null)
@@ -1360,20 +2099,24 @@ internal sealed class TreeSitterCompressionScope(
 	private static IReadOnlyList<SourceRange>? ReadPreservedRanges(
 		LoadedLanguage language,
 		Node root,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		out int captureCount)
 	{
+		captureCount = 0;
 		if (language.Runtime.Preserves is null || language.PreservesCursor is null)
 			return Array.Empty<SourceRange>();
 
 		List<SourceRange>? ranges = null;
 		language.PreservesCursor.Execute(language.Runtime.Preserves, root);
+		var captureIndex = 0;
 		foreach (var capture in language.PreservesCursor.Captures)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, captureIndex++);
 			if (!capture.Name.Equals("preserve", StringComparison.Ordinal))
 				continue;
-			if (ranges?.Count >= TreeSitterCodeCompressor.MaximumPreservedRangesPerFile)
+			if (captureCount >= TreeSitterCodeCompressor.MaximumPreservedRangesPerFile)
 				return null;
+			captureCount++;
 			if (capture.Node.StartIndex < 0 || capture.Node.EndIndex <= capture.Node.StartIndex)
 				continue;
 			(ranges ??= []).Add(new SourceRange(capture.Node.StartIndex, capture.Node.EndIndex));
@@ -1382,9 +2125,18 @@ internal sealed class TreeSitterCompressionScope(
 			return null;
 		if (ranges is null)
 			return Array.Empty<SourceRange>();
-		if (ranges.Count < 2)
-			return ranges;
+		return ranges;
+	}
 
+	private static IReadOnlyList<SourceRange> MergePreservedRanges(
+		IReadOnlyList<SourceRange> sourceRanges,
+		CancellationToken cancellationToken)
+	{
+		if (sourceRanges.Count < 2)
+			return sourceRanges;
+
+		var ranges = sourceRanges as List<SourceRange> ?? [.. sourceRanges];
+		cancellationToken.ThrowIfCancellationRequested();
 		ranges.Sort(static (left, right) =>
 			left.Start != right.Start
 				? left.Start.CompareTo(right.Start)
@@ -1392,6 +2144,7 @@ internal sealed class TreeSitterCompressionScope(
 		var writeIndex = 0;
 		for (var readIndex = 1; readIndex < ranges.Count; readIndex++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, readIndex);
 			var current = ranges[writeIndex];
 			var next = ranges[readIndex];
 			if (next.Start <= current.End)
@@ -1403,10 +2156,107 @@ internal sealed class TreeSitterCompressionScope(
 			ranges[++writeIndex] = next;
 		}
 		ranges.RemoveRange(writeIndex + 1, ranges.Count - writeIndex - 1);
+		cancellationToken.ThrowIfCancellationRequested();
 		return ranges;
 	}
 
 	private readonly record struct SourceRange(int Start, int End);
+	private readonly record struct CommentCapture(Node Node, bool IsDocstring);
+
+	private struct DeferredCommentBuffer
+	{
+		private const int InlineCapacity = 8;
+		private CommentCapture _capture0;
+		private CommentCapture _capture1;
+		private CommentCapture _capture2;
+		private CommentCapture _capture3;
+		private CommentCapture _capture4;
+		private CommentCapture _capture5;
+		private CommentCapture _capture6;
+		private CommentCapture _capture7;
+		private CommentCapture[]? _spill;
+
+		public int Count { get; private set; }
+
+		public readonly CommentCapture this[int index] => index switch
+		{
+			0 => _capture0,
+			1 => _capture1,
+			2 => _capture2,
+			3 => _capture3,
+			4 => _capture4,
+			5 => _capture5,
+			6 => _capture6,
+			7 => _capture7,
+			_ when index >= InlineCapacity && index < Count => _spill![index - InlineCapacity],
+			_ => throw new ArgumentOutOfRangeException(nameof(index))
+		};
+
+		public void Add(CommentCapture capture)
+		{
+			if (Count < InlineCapacity)
+			{
+				SetInline(Count, capture);
+				Count++;
+				return;
+			}
+
+			var spillIndex = Count - InlineCapacity;
+			if (_spill is null)
+			{
+				_spill = ArrayPool<CommentCapture>.Shared.Rent(128);
+			}
+			else if (spillIndex == _spill.Length)
+			{
+				var expanded = ArrayPool<CommentCapture>.Shared.Rent(
+					Math.Min(
+						TreeSitterCodeCompressor.MaximumCommentCapturesPerFile - InlineCapacity,
+						_spill.Length * 2));
+				Array.Copy(_spill, expanded, spillIndex);
+				Array.Clear(_spill, 0, spillIndex);
+				ArrayPool<CommentCapture>.Shared.Return(_spill);
+				_spill = expanded;
+			}
+
+			_spill[spillIndex] = capture;
+			Count++;
+		}
+
+		public void Dispose()
+		{
+			_capture0 = default;
+			_capture1 = default;
+			_capture2 = default;
+			_capture3 = default;
+			_capture4 = default;
+			_capture5 = default;
+			_capture6 = default;
+			_capture7 = default;
+			if (_spill is not null)
+			{
+				Array.Clear(_spill, 0, Math.Max(0, Count - InlineCapacity));
+				ArrayPool<CommentCapture>.Shared.Return(_spill);
+				_spill = null;
+			}
+			Count = 0;
+		}
+
+		private void SetInline(int index, CommentCapture capture)
+		{
+			switch (index)
+			{
+				case 0: _capture0 = capture; break;
+				case 1: _capture1 = capture; break;
+				case 2: _capture2 = capture; break;
+				case 3: _capture3 = capture; break;
+				case 4: _capture4 = capture; break;
+				case 5: _capture5 = capture; break;
+				case 6: _capture6 = capture; break;
+				case 7: _capture7 = capture; break;
+				default: throw new ArgumentOutOfRangeException(nameof(index));
+			}
+		}
+	}
 
 	private readonly record struct CommentLineCollapseCandidate(
 		int EditIndex,
@@ -1421,7 +2271,8 @@ internal sealed class TreeSitterCompressionScope(
 	private static bool IsMisparsedCppClassBody(
 		CompressionLanguagePack pack,
 		Node node,
-		string source)
+		string source,
+		CancellationToken cancellationToken)
 	{
 		if (!pack.Id.Equals("cpp", StringComparison.Ordinal) ||
 		    node.Parent is not { Type: "function_definition" } function)
@@ -1429,13 +2280,22 @@ internal sealed class TreeSitterCompressionScope(
 			return false;
 		}
 
-		if (node.Children.Any(child => IsCppAccessLabel(child, source)))
-			return true;
+		var childIndex = 0;
+		foreach (var child in node.Children)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, childIndex++);
+			if (IsCppAccessLabel(child, source))
+				return true;
+		}
 
 		var declarator = function.GetChildForField("declarator");
 		return declarator is null ||
 		       declarator.EndIndex > node.StartIndex ||
-		       !ContainsNodeTypeBefore(declarator, "parameter_list", node.StartIndex);
+		       !ContainsNodeTypeBefore(
+			       declarator,
+			       "parameter_list",
+			       node.StartIndex,
+			       cancellationToken);
 	}
 
 	private static bool IsCppAccessLabel(Node node, string source)
@@ -1453,12 +2313,18 @@ internal sealed class TreeSitterCompressionScope(
 		       label.StartsWith("protected:", StringComparison.Ordinal);
 	}
 
-	private static bool ContainsNodeTypeBefore(Node root, string nodeType, int maximumEnd)
+	private static bool ContainsNodeTypeBefore(
+		Node root,
+		string nodeType,
+		int maximumEnd,
+		CancellationToken cancellationToken)
 	{
 		var stack = new Stack<Node>();
 		stack.Push(root);
+		var visitedNodes = 0;
 		while (stack.Count > 0)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, visitedNodes++);
 			var node = stack.Pop();
 			if (node.EndIndex <= maximumEnd && node.Type.Equals(nodeType, StringComparison.Ordinal))
 				return true;
@@ -1473,12 +2339,17 @@ internal sealed class TreeSitterCompressionScope(
 	/// Python comments before the first statement are extra nodes outside the block captured by the
 	/// query. Include only those complete lines, never preprocessor directives from other languages.
 	/// </summary>
-	private static int ExtendOverLeadingPythonComments(string source, Node body)
+	private static int ExtendOverLeadingPythonComments(
+		string source,
+		Node body,
+		CancellationToken cancellationToken)
 	{
 		var limit = body.Parent?.StartIndex ?? 0;
 		var start = body.StartIndex;
+		var scannedLines = 0;
 		while (true)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, scannedLines++);
 			var lineStart = source.LastIndexOf('\n', Math.Max(0, start - 1));
 			if (lineStart < 0 || lineStart <= limit)
 				return start;
@@ -1499,7 +2370,8 @@ internal sealed class TreeSitterCompressionScope(
 		CompressionLanguagePack pack,
 		string source,
 		int start,
-		int end)
+		int end,
+		CancellationToken cancellationToken)
 	{
 		return pack.BlockBodyStyle switch
 		{
@@ -1511,9 +2383,18 @@ internal sealed class TreeSitterCompressionScope(
 			BlockBodyStyle.IndentedStatement => new RawCompressionEdit(
 				start,
 				end,
-				IndentedStatementPlaceholder(pack.BlockPlaceholder, source, start, end),
+				IndentedStatementPlaceholder(
+					pack.BlockPlaceholder,
+					source,
+					start,
+					end,
+					cancellationToken),
 				CodeTransformKinds.Bodies),
-			BlockBodyStyle.RemoveCompleteLines => RemoveCompleteBodyLines(source, start, end),
+			BlockBodyStyle.RemoveCompleteLines => RemoveCompleteBodyLines(
+				source,
+				start,
+				end,
+				cancellationToken),
 			_ => throw new InvalidOperationException($"Unsupported block body style '{pack.BlockBodyStyle}'.")
 		};
 	}
@@ -1522,7 +2403,12 @@ internal sealed class TreeSitterCompressionScope(
 	/// Indentation-sensitive grammars need a valid statement at the original suite depth. A retained
 	/// leading declaration can move the edit, so the indentation is always derived from the edit.
 	/// </summary>
-	private static string IndentedStatementPlaceholder(string placeholder, string source, int start, int end)
+	private static string IndentedStatementPlaceholder(
+		string placeholder,
+		string source,
+		int start,
+		int end,
+		CancellationToken cancellationToken)
 	{
 
 		// An indented placeholder keeps an indentation-sensitive suite non-empty. Reusing the first
@@ -1533,7 +2419,10 @@ internal sealed class TreeSitterCompressionScope(
 		{
 			var scan = lineStart + 1;
 			while (scan < source.Length && (source[scan] == ' ' || source[scan] == '\t'))
+			{
+				ThrowIfCancellationRequestedPeriodically(cancellationToken, scan - lineStart - 1);
 				scan++;
+			}
 			if (scan > lineStart + 1)
 				indentation = source[(lineStart + 1)..scan];
 		}
@@ -1553,7 +2442,11 @@ internal sealed class TreeSitterCompressionScope(
 			!retainedEndsAtLineStart &&
 			lineStart >= 0 &&
 			start > lineStart + 1 &&
-			source.AsSpan((lineStart + 1)..start).IsWhiteSpace();
+			ContainsOnlyWhitespace(
+				source,
+				lineStart + 1,
+				start,
+				cancellationToken);
 		var leading = retainedEndsWithIndentation
 			? string.Empty
 			: retainedEndsAtLineStart
@@ -1562,16 +2455,23 @@ internal sealed class TreeSitterCompressionScope(
 		return $"{leading}{placeholder}{trailingNewline}";
 	}
 
-	private static RawCompressionEdit RemoveCompleteBodyLines(string source, int start, int end)
+	private static RawCompressionEdit RemoveCompleteBodyLines(
+		string source,
+		int start,
+		int end,
+		CancellationToken cancellationToken)
 	{
 		var expandedStart = start;
 		var lineStart = source.LastIndexOf('\n', Math.Max(0, start - 1)) + 1;
-		if (source.AsSpan(lineStart, start - lineStart).IsWhiteSpace())
+		if (ContainsOnlyWhitespace(source, lineStart, start, cancellationToken))
 			expandedStart = lineStart;
 
 		var expandedEnd = end;
 		while (expandedEnd < source.Length && source[expandedEnd] is ' ' or '\t')
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, expandedEnd - end);
 			expandedEnd++;
+		}
 		if (expandedEnd < source.Length && source[expandedEnd] == '\r')
 		{
 			expandedEnd++;
@@ -1599,16 +2499,26 @@ internal sealed class TreeSitterCompressionScope(
 		return nextLineFeed > 0 && source[nextLineFeed - 1] == '\r' ? "\r\n" : "\n";
 	}
 
-	private static List<CodeDeclaration>? ReadDeclarations(LoadedLanguage language, Node root, ContentTransformMap map)
+	private static List<CodeDeclaration>? ReadDeclarations(
+		LoadedLanguage language,
+		Node root,
+		ContentTransformMap map,
+		CancellationToken cancellationToken,
+		out int declarationCount)
 	{
 		var declarations = new List<CodeDeclaration>();
+		declarationCount = 0;
 		language.DeclarationsCursor.Execute(language.Runtime.Declarations, root);
+		var matchIndex = 0;
 		foreach (var match in language.DeclarationsCursor.Matches)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, matchIndex++);
 			Node? declaration = null;
 			string? name = null;
+			var captureIndex = 0;
 			foreach (var capture in match.Captures)
 			{
+				ThrowIfCancellationRequestedPeriodically(cancellationToken, captureIndex++);
 				if (capture.Name.Equals("declaration", StringComparison.Ordinal))
 					declaration = capture.Node;
 				else if (capture.Name.Equals("name", StringComparison.Ordinal))
@@ -1624,10 +2534,12 @@ internal sealed class TreeSitterCompressionScope(
 			if (!map.TryToSource(declaration.EndIndex, out var end))
 				end = start;
 			declarations.Add(new CodeDeclaration(declaration.Type, name ?? string.Empty, start, Math.Max(0, end - start)));
+			declarationCount++;
 		}
 		if (language.DeclarationsCursor.IsMatchLimitExceeded)
 			return null;
 
+		cancellationToken.ThrowIfCancellationRequested();
 		declarations.Sort(static (left, right) =>
 		{
 			var result = left.Start.CompareTo(right.Start);
@@ -1637,18 +2549,26 @@ internal sealed class TreeSitterCompressionScope(
 			result = string.CompareOrdinal(left.Kind, right.Kind);
 			return result != 0 ? result : string.CompareOrdinal(left.Name, right.Name);
 		});
+		cancellationToken.ThrowIfCancellationRequested();
 		return declarations;
 	}
 
-	private static List<CodeParseDefect>? ReadDefects(Node root, ContentTransformMap map)
+	private static List<CodeParseDefect>? ReadDefects(
+		Node root,
+		ContentTransformMap map,
+		CancellationToken cancellationToken,
+		out int defectCount,
+		out int visitedNodes)
 	{
 		var defects = new List<CodeParseDefect>();
 		using var cursor = new TreeCursor(root);
-		var visitedNodes = 0;
+		defectCount = 0;
+		visitedNodes = 0;
 		while (true)
 		{
 			if (++visitedNodes > TreeSitterCodeCompressor.MaximumVisitedSyntaxNodesPerFile)
 				return null;
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, visitedNodes);
 			var node = cursor.CurrentNode;
 			// See CodeParseDefect: HasError lies in both directions against the shipped grammars,
 			// and a MISSING node surfaces here only as a named node of zero width.
@@ -1661,6 +2581,7 @@ internal sealed class TreeSitterCompressionScope(
 					return null;
 				var kind = node.IsError ? "ERROR" : "MISSING";
 				defects.Add(new CodeParseDefect(kind, map.TryToSource(node.StartIndex, out var source) ? source : -1));
+				defectCount++;
 			}
 
 			if (cursor.GotoFirstChild())
@@ -1669,7 +2590,10 @@ internal sealed class TreeSitterCompressionScope(
 			while (!cursor.GotoNextSibling())
 			{
 				if (!cursor.GotoParent())
+				{
+					cancellationToken.ThrowIfCancellationRequested();
 					return defects;
+				}
 			}
 		}
 	}

@@ -75,20 +75,6 @@ public partial class MainWindow
 
         try
         {
-            // Check internet connection before starting
-            var hasInternet = await CheckInternetConnectionAsync(cancellationToken);
-            if (!hasInternet)
-            {
-                _viewModel.GitCloneInProgress = false;
-                _gitCloneWindow?.Close();
-                _gitCloneWindow = null;
-                _taskbarProgress.MarkGitCloneError();
-                await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
-                return;
-            }
-
-            stagingPath = _repoCacheService.CreateRepositoryStagingDirectory(url);
-
             // Track current operation for progress reporting
             string currentOperation = string.Empty;
 
@@ -120,49 +106,111 @@ public partial class MainWindow
             });
 
             GitCloneResult result;
-
-            // Check if Git is available
-            var gitAvailable = await _gitService.IsGitAvailableAsync(cancellationToken);
-
-            if (gitAvailable)
+            IRepositoryCacheSession? cacheSession;
+            await using (await _repoCacheService.AcquireRepositoryOperationAsync(url, cancellationToken))
             {
-                currentOperation = _viewModel.GitCloneProgressCloning;
-                _viewModel.GitCloneStatus = currentOperation;
-                _taskbarProgress.SetGitCloneIndeterminate();
-                result = await _gitService.CloneAsync(url, stagingPath, progress, cancellationToken);
+                cacheSession = await _repoCacheService.TryAcquireRepositorySessionAsync(
+                    url,
+                    cancellationToken: cancellationToken);
+                if (cacheSession is not null)
+                {
+                    result = new GitCloneResult(
+                        Success: true,
+                        LocalPath: cacheSession.RepositoryPath,
+                        SourceType: cacheSession.ContentKind == RepositoryCacheContentKind.Git
+                            ? ProjectSourceType.GitClone
+                            : ProjectSourceType.ZipDownload,
+                        DefaultBranch: cacheSession.Branch,
+                        RepositoryName: RepositoryUrlUtility.GetRepositoryName(cacheSession.RepositoryUrl),
+                        RepositoryUrl: cacheSession.RepositoryUrl,
+                        ErrorMessage: null);
+                }
+                else
+                {
+                    var hasInternet = await CheckInternetConnectionAsync(cancellationToken);
+                    if (!hasInternet)
+                    {
+                        _viewModel.GitCloneInProgress = false;
+                        _gitCloneWindow?.Close();
+                        _gitCloneWindow = null;
+                        _taskbarProgress.MarkGitCloneError();
+                        await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
+                        return;
+                    }
+
+                    stagingPath = _repoCacheService.CreateRepositoryStagingDirectory(url);
+                    var gitAvailable = await _gitService.IsGitAvailableAsync(cancellationToken);
+                    if (gitAvailable)
+                    {
+                        currentOperation = _viewModel.GitCloneProgressCloning;
+                        _viewModel.GitCloneStatus = currentOperation;
+                        _taskbarProgress.SetGitCloneIndeterminate();
+                        result = await _gitService.CloneAsync(url, stagingPath, progress, cancellationToken);
+                    }
+                    else
+                    {
+                        _viewModel.GitCloneStatus = _viewModel.GitErrorGitNotFound;
+                        await Task.Delay(1500, cancellationToken);
+                        currentOperation = _viewModel.GitCloneProgressDownloading;
+                        _viewModel.GitCloneStatus = currentOperation;
+                        _taskbarProgress.SetGitCloneIndeterminate();
+                        result = await _zipDownloadService.DownloadAndExtractAsync(
+                            url,
+                            stagingPath,
+                            progress,
+                            cancellationToken);
+                    }
+
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!result.Success)
+                    {
+                        await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
+                        _gitCloneWindow?.Close();
+                        _gitCloneWindow = null;
+                        _viewModel.GitCloneInProgress = false;
+                        _taskbarProgress.MarkGitCloneError();
+                        await ShowErrorAsync(_localization.Format(
+                            "Git.Error.CloneFailed",
+                            result.ErrorMessage ?? "Unknown error"));
+                        _toastService.Show(_localization["Toast.Git.CloneError"]);
+                        return;
+                    }
+
+                    var repositoryUrl = string.IsNullOrWhiteSpace(result.RepositoryUrl)
+                        ? url
+                        : result.RepositoryUrl;
+                    var publishedPath = _repoCacheService.PublishRepositoryDirectory(
+                        stagingPath,
+                        repositoryUrl);
+                    stagingPath = null;
+                    _repoCacheService.RecordIndexedRepository(
+                        repositoryUrl,
+                        publishedPath,
+                        result.DefaultBranch);
+                    cacheSession = await _repoCacheService.TryAcquireRepositorySessionAsync(
+                        repositoryUrl,
+                        result.DefaultBranch,
+                        cancellationToken);
+                    if (cacheSession is null)
+                        throw new IOException("Published repository session could not be acquired.");
+                    result = result with { LocalPath = cacheSession.RepositoryPath };
+                }
             }
-            else
+
+            try
             {
-                // Fallback to ZIP download
-                _viewModel.GitCloneStatus = _viewModel.GitErrorGitNotFound;
-                await Task.Delay(1500, cancellationToken);
-
-                currentOperation = _viewModel.GitCloneProgressDownloading;
-                _viewModel.GitCloneStatus = currentOperation;
-                _taskbarProgress.SetGitCloneIndeterminate();
-                result = await _zipDownloadService.DownloadAndExtractAsync(url, stagingPath, progress, cancellationToken);
+                await ApplySuccessfulGitCloneAsync(
+                    result,
+                    cacheSession.RepositoryPath,
+                    url,
+                    cancellationToken,
+                    cacheSession);
             }
-
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (!result.Success)
+            finally
             {
-                await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
-                _gitCloneWindow?.Close();
-                _gitCloneWindow = null;
-                _viewModel.GitCloneInProgress = false;
-                _taskbarProgress.MarkGitCloneError();
-                await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
-                _toastService.Show(_localization["Toast.Git.CloneError"]);
-                return;
+                if (!ReferenceEquals(_currentRepositorySession, cacheSession))
+                    cacheSession.Dispose();
             }
-
-            var cachePath = _repoCacheService.PublishRepositoryDirectory(
-                stagingPath,
-                string.IsNullOrWhiteSpace(result.RepositoryUrl) ? url : result.RepositoryUrl);
-            stagingPath = null;
-            result = result with { LocalPath = cachePath };
-            await ApplySuccessfulGitCloneAsync(result, cachePath, url, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -205,7 +253,8 @@ public partial class MainWindow
         GitCloneResult result,
         string cachePath,
         string requestedUrl,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IRepositoryCacheSession? preparedSession = null)
     {
         ArgumentNullException.ThrowIfNull(result);
         cancellationToken.ThrowIfCancellationRequested();
@@ -213,8 +262,17 @@ public partial class MainWindow
         _gitCloneWindow?.Close();
         _gitCloneWindow = null;
         _viewModel.GitCloneInProgress = false;
+
+        var opened = await TryOpenFolderAsync(
+            result.LocalPath,
+            fromDialog: false,
+            recordRecentFolder: false,
+            preparedSession);
+        if (!opened || !PathComparer.Default.Equals(_currentPath, result.LocalPath))
+            return;
+
         _viewModel.ProjectSourceType = result.SourceType;
-        _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
+        _viewModel.CurrentBranch = result.DefaultBranch ?? string.Empty;
         _currentProjectDisplayName = result.RepositoryName;
         _currentRepositoryUrl = string.IsNullOrWhiteSpace(result.RepositoryUrl)
             ? requestedUrl
@@ -226,10 +284,7 @@ public partial class MainWindow
             result.DefaultBranch,
             commitHash: null,
             cancellationToken);
-
-        var opened = await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
-        if (!opened || !PathComparer.Default.Equals(_currentPath, result.LocalPath))
-            return;
+        UpdateTitle();
 
         await RecordRecentRepositoryAsync(
             string.IsNullOrWhiteSpace(result.RepositoryUrl) ? requestedUrl : result.RepositoryUrl,
@@ -332,6 +387,9 @@ public partial class MainWindow
                 _currentRepositoryUrl,
                 _viewModel.CurrentBranch,
                 afterHash,
+                cancellationToken);
+            await Task.Run(
+                () => _repoCacheService.RefreshIndexedRepositorySize(_currentPath),
                 cancellationToken);
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
             {

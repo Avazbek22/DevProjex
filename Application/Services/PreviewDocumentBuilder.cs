@@ -80,7 +80,8 @@ public sealed class PreviewDocumentBuilder(
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
         if (orderedFiles.Count == 0)
         {
-			transformationContext?.Redaction?.BeginOutput(orderedFiles).Complete();
+			using var emptyScope = transformationContext?.BeginOutput(orderedFiles);
+			CompleteTransformation(emptyScope);
             return null;
 		}
 
@@ -102,8 +103,7 @@ public sealed class PreviewDocumentBuilder(
 			includeSourceCoordinateMaps,
             cancellationToken).ConfigureAwait(false);
 
-		redactionScope?.Complete();
-		transformationScope?.Compression?.Complete();
+		CompleteTransformation(transformationScope);
 		if (!anyWritten)
 			return null;
 
@@ -124,7 +124,8 @@ public sealed class PreviewDocumentBuilder(
 
         if (orderedFiles.Count == 0)
         {
-			transformationContext?.Redaction?.BeginOutput(orderedFiles).Complete();
+			using var emptyScope = transformationContext?.BeginOutput(orderedFiles);
+			CompleteTransformation(emptyScope);
             return CreateInMemory(normalizedTreeText);
 		}
 
@@ -146,14 +147,19 @@ public sealed class PreviewDocumentBuilder(
 			redactions,
 			includeSourceCoordinateMaps,
             cancellationToken).ConfigureAwait(false);
-		redactionScope?.Complete();
-		transformationScope?.Compression?.Complete();
+		CompleteTransformation(transformationScope);
 
         if (!wroteTree && !wroteContent)
             return CreateInMemory(string.Empty);
 
         return builder.BuildDocument(sections, redactions);
     }
+
+	private static void CompleteTransformation(ContentTransformationScope? scope)
+	{
+		scope?.Redaction?.Complete();
+		scope?.Compression?.Complete();
+	}
 
     private async Task<bool> AppendContentEntriesAsync(
         PreviewTextStorageBuilder builder,
