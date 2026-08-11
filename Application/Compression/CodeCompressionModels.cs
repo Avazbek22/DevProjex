@@ -116,7 +116,10 @@ public sealed record CodeCompressionPlan(
 			transformIdentity,
 			CancellationToken.None);
 
-	internal static CodeCompressionPlan CreateForAnalysis(
+	/// <summary>
+	/// Builds and validates a plan while observing cancellation during large edit collections.
+	/// </summary>
+	public static CodeCompressionPlan CreateForAnalysis(
 		string relativePath,
 		string languageId,
 		IReadOnlyList<CodeCompressionEdit> edits,
@@ -172,7 +175,10 @@ public sealed record CodeCompressionPlan(
 	public CodeCompressionResult Apply(string source)
 		=> ApplyForAnalysis(source, CancellationToken.None);
 
-	internal CodeCompressionResult ApplyForAnalysis(
+	/// <summary>
+	/// Applies the plan while observing cancellation during large map and splice operations.
+	/// </summary>
+	public CodeCompressionResult ApplyForAnalysis(
 		string source,
 		CancellationToken cancellationToken)
 	{

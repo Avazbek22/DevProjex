@@ -337,10 +337,10 @@ public sealed class RepoCacheService : IRepoCacheService
 		// Fast path: check if sanitization is needed using SIMD-optimized search
 		if (!span.ContainsAny(InvalidFileNameChars) && !ContainsControlChars(span))
 		{
-			var trimmed = name.Trim();
+			var trimmed = TrimUnsafeTrailingCharacters(name.Trim());
 			if (string.IsNullOrWhiteSpace(trimmed))
 				return "repo";
-			return trimmed.Length > 100 ? trimmed[..100] : trimmed;
+			return NormalizeReservedFileName(trimmed);
 		}
 
 		// Slow path: need to filter characters
@@ -351,14 +351,50 @@ public sealed class RepoCacheService : IRepoCacheService
 				sanitized.Append(c);
 		}
 
-		var result = sanitized.ToString().Trim();
+		var result = TrimUnsafeTrailingCharacters(sanitized.ToString().Trim());
 
 		// If result is empty or too long, use fallback
 		if (string.IsNullOrWhiteSpace(result))
 			return "repo";
 
-		// Limit length to avoid path too long issues (keep it reasonable)
-		return result.Length > 100 ? result[..100] : result;
+		return NormalizeReservedFileName(result);
+	}
+
+	private static string TrimUnsafeTrailingCharacters(string name) =>
+		name.TrimEnd(' ', '.');
+
+	private static string NormalizeReservedFileName(string name)
+	{
+		if (name.Length == 0)
+			return "repo";
+
+		var dotIndex = name.IndexOf('.');
+		var baseName = dotIndex >= 0 ? name.AsSpan(0, dotIndex) : name.AsSpan();
+		if (IsWindowsReservedFileName(baseName))
+		{
+			name = dotIndex >= 0
+				? string.Concat(name.AsSpan(0, dotIndex), "_repo", name.AsSpan(dotIndex))
+				: name + "_repo";
+		}
+
+		var bounded = name.Length > 100 ? name[..100] : name;
+		bounded = TrimUnsafeTrailingCharacters(bounded);
+		return bounded.Length == 0 ? "repo" : bounded;
+	}
+
+	private static bool IsWindowsReservedFileName(ReadOnlySpan<char> name)
+	{
+		if (name.Equals("CON", StringComparison.OrdinalIgnoreCase) ||
+		    name.Equals("PRN", StringComparison.OrdinalIgnoreCase) ||
+		    name.Equals("AUX", StringComparison.OrdinalIgnoreCase) ||
+		    name.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
+
+		return name.Length == 4 && name[3] is >= '1' and <= '9' &&
+		       (name[..3].Equals("COM", StringComparison.OrdinalIgnoreCase) ||
+		        name[..3].Equals("LPT", StringComparison.OrdinalIgnoreCase));
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
