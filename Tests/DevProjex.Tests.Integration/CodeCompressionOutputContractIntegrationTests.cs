@@ -40,6 +40,39 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	private const string MarkedBodyValue = "SessionMarkedBodyValue";
 	private const string AutomaticRetainedSecret = "AutomaticRetainedSecret123";
 	private const string AutomaticRemovedSecret = "AutomaticRemovedSecret123";
+	private const string FullyCommentedFileWithBlankSeparators = """
+		// Task 1
+		// Console.WriteLine(1);
+
+
+		// Task 2
+		// Console.WriteLine(2);
+
+		""";
+	private const string MixedFileWithCommentSurroundedByBlankLines = """
+		namespace CommentSpacing;
+
+		internal static class Values
+		{
+		    internal static string First => "first";
+
+
+		    // remove
+
+
+		    internal static string Second => "second";
+		}
+		""";
+	private const string MixedFileAfterCommentRemoval = """
+		namespace CommentSpacing;
+
+		internal static class Values
+		{
+		    internal static string First => "first";
+
+		    internal static string Second => "second";
+		}
+		""";
 
 	[Fact]
 	public async Task CompressionOnlyPreparationPreservesSelectionOrderAndSkipsUnchangedTempCopies()
@@ -815,6 +848,101 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			await File.ReadAllTextAsync(
 				workspace.SourceFile,
 				TestContext.Current.CancellationToken));
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task BlankLineCollapsedCommentsProduceIdenticalBytesAcrossAllOutputSurfaces(bool compress)
+	{
+		using var workspace = CompressionWorkspace.Create(MixedFileWithCommentSurroundedByBlankLines);
+		workspace.CreateExtraFile(
+			"FullyCommented.cs",
+			FullyCommentedFileWithBlankSeparators);
+
+		var firstContext = await workspace.BuildContextAsync(compress, stripComments: true);
+		var secondContext = await workspace.BuildContextAsync(compress, stripComments: true);
+		var folder = await workspace.ExportFolderAsync(compress, stripComments: true);
+		var folderMixed = await File.ReadAllTextAsync(
+			Path.Combine(folder.DestinationPath, "Widget.cs"),
+			TestContext.Current.CancellationToken);
+		var folderFullyCommented = await File.ReadAllTextAsync(
+			Path.Combine(folder.DestinationPath, "FullyCommented.cs"),
+			TestContext.Current.CancellationToken);
+		var zipPath = Path.Combine(workspace.DestinationParent, $"blank-lines-{compress}.zip");
+		await workspace.ExportZipAsync(zipPath, compress, stripComments: true);
+		using var archive = ZipFile.OpenRead(zipPath);
+		var mixedEntry = Assert.Single(archive.Entries, static candidate =>
+			candidate.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+		var fullyCommentedEntry = Assert.Single(archive.Entries, static candidate =>
+			candidate.FullName.EndsWith("FullyCommented.cs", StringComparison.Ordinal));
+		using var mixedReader = new StreamReader(mixedEntry.Open());
+		using var fullyCommentedReader = new StreamReader(fullyCommentedEntry.Open());
+		var zipMixed = await mixedReader.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var zipFullyCommented = await fullyCommentedReader.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(firstContext, secondContext);
+		Assert.EndsWith(MixedFileAfterCommentRemoval, firstContext, StringComparison.Ordinal);
+		Assert.Equal(MixedFileAfterCommentRemoval, folderMixed);
+		Assert.Equal(folderMixed, zipMixed);
+		Assert.Equal(string.Empty, folderFullyCommented);
+		Assert.Equal(folderFullyCommented, zipFullyCommented);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task BlankLineCollapsedCommentsPreserveUtf8BomAndLineEndings(bool useCrlf)
+	{
+		var newline = useCrlf ? "\r\n" : "\n";
+		var source = string.Join(
+			newline,
+			"var first = 1;",
+			"",
+			" ",
+			"// remove",
+			"\t",
+			"",
+			"var second = 2;",
+			"");
+		var expected = string.Join(
+			newline,
+			"var first = 1;",
+			"",
+			"var second = 2;",
+			"");
+		var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true, throwOnInvalidBytes: true);
+		using var workspace = CompressionWorkspace.Create(source);
+		await File.WriteAllTextAsync(
+			workspace.SourceFile,
+			source,
+			encoding,
+			TestContext.Current.CancellationToken);
+
+		var folder = await workspace.ExportFolderAsync(compress: false, stripComments: true);
+		var folderBytes = await File.ReadAllBytesAsync(
+			Path.Combine(folder.DestinationPath, "Widget.cs"),
+			TestContext.Current.CancellationToken);
+		var zip = await workspace.ExportZipAsync(
+			Path.Combine(workspace.DestinationParent, $"bom-comments-{useCrlf}.zip"),
+			compress: false,
+			stripComments: true);
+		byte[] zipBytes;
+		using (var archive = ZipFile.OpenRead(zip.DestinationPath))
+		{
+			var entry = Assert.Single(archive.Entries, static candidate =>
+				candidate.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+			await using var entryStream = entry.Open();
+			await using var buffer = new MemoryStream();
+			await entryStream.CopyToAsync(buffer, TestContext.Current.CancellationToken);
+			zipBytes = buffer.ToArray();
+		}
+
+		Assert.Equal(folderBytes, zipBytes);
+		Assert.True(folderBytes.AsSpan().StartsWith(encoding.GetPreamble()));
+		Assert.Equal(
+			expected,
+			encoding.GetString(folderBytes.AsSpan(encoding.GetPreamble().Length)));
 	}
 
 	[Fact]

@@ -552,6 +552,45 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Equal(1, detector.CallCount);
 	}
 
+	[Fact]
+	public async Task StripComments_KeepsLaterSecretOffsetsValidAfterBlankLineCollapse()
+	{
+		const string secret = "later-secret-value-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("blank-line-secret-project");
+		var path = temporary.CreateFile(
+			"blank-line-secret-project/State.cs",
+			"// removed header\n\n \n// removed details\n\t\n\n" +
+			$"internal static class State {{ public const string Token = \"{secret}\"; }}");
+		using var redactionSession = new SecretRedactionSession(new ExactValueDetector(secret));
+		using var compressionSession = CodeCompressionFactory.CreateSession();
+		var context = ContentTransformationContext.For(
+			new CodeCompressionContext(
+				sourceRoot,
+				compressionSession,
+				CodeTransformKinds.Comments),
+			new SecretRedactionContext(sourceRoot, redactionSession))!;
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		var snapshot = await preparer.AnalyzeAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		await using var prepared = await preparer.PrepareAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		var output = await File.ReadAllTextAsync(
+			prepared.GetFile(path).ContentPath,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, snapshot.DetectedCount);
+		Assert.Equal(1, snapshot.RedactedCount);
+		Assert.StartsWith("internal static class State", output, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[exact-value#", output, StringComparison.Ordinal);
+		Assert.DoesNotContain(secret, output, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData("page.html", "<!-- api_token = {0} -->\n<main>safe</main>\n", "<main>safe</main>\n")]
 	[InlineData("app.toml", "# api_token = {0}\nname = \"safe\"\n", "name = \"safe\"\n")]

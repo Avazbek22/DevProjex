@@ -186,6 +186,9 @@ SVG assets are deliberately excluded. XML CDATA, declarations, processing instru
 DOCTYPE content remain intact. YAML block scalars, strings, anchors, tags, and document markers
 remain intact. HTML comments are removed, but JavaScript and CSS comment text inside HTML
 `script` and `style` raw-text nodes remains intact.
+Blank and whitespace-only lines immediately adjacent to removed full-line comments collapse to
+at most one between retained content blocks and to none at file boundaries. Unrelated blank lines
+remain byte-for-byte unchanged; `--strip-comments` does not reformat the rest of the file.
 
 Compression and comment removal are independent and share one syntax analysis and one
 validated edit plan:

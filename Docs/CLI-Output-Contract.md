@@ -191,6 +191,9 @@ strings, interpolations, heredocs, attributes, annotations, and preprocessor dir
 remains unchanged. PHP text outside `<?php ... ?>` sections is never classified as a PHP
 comment. HTML comments are removed, including conditional comments, while content in HTML
 `script` and `style` raw-text nodes is not recursively parsed and remains byte-for-byte complete.
+Blank and whitespace-only lines adjacent to removed full-line comments are collapsed to at most
+one between retained content blocks and to none at document boundaries. Blank lines outside an
+affected comment site remain byte-for-byte unchanged; this option is not a general formatter.
 
 The mode matrix is deterministic: compression alone keeps documentation while shortening
 named implementations; comment removal alone keeps all implementation code without

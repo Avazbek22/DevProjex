@@ -728,6 +728,7 @@ internal sealed class TreeSitterCompressionScope(
 			if (commentsCursor is null)
 				return null;
 			var commentCount = 0;
+			List<CommentLineCollapseCandidate>? collapseCandidates = null;
 			foreach (var capture in commentsCursor.Captures)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -742,13 +743,23 @@ internal sealed class TreeSitterCompressionScope(
 						capture.Name.Equals("docstring", StringComparison.Ordinal),
 						bodyRanges,
 						source,
-						out var commentEdit))
+						out var commentEdit,
+						out var collapseBounds))
 				{
+					var editIndex = raw.Count;
 					raw.Add(commentEdit);
+					if (collapseBounds is { } bounds)
+						(collapseCandidates ??= []).Add(new CommentLineCollapseCandidate(editIndex, bounds));
 				}
 			}
 			if (commentsCursor.IsMatchLimitExceeded)
 				return null;
+
+			raw = CollapseBlankLinesAroundRemovedComments(
+				source,
+				raw,
+				preservedRanges,
+				collapseCandidates);
 		}
 
 		// Outermost wins: a lambda body inside a method body must not be spliced twice.
@@ -759,8 +770,12 @@ internal sealed class TreeSitterCompressionScope(
 		var edits = new List<CodeCompressionEdit>(raw.Count);
 		var reach = -1;
 		var preservedIndex = 0;
-		foreach (var (start, end, replacement, kinds) in raw)
+		foreach (var rawEdit in raw)
 		{
+			var start = rawEdit.Start;
+			var end = rawEdit.End;
+			var replacement = rawEdit.Replacement;
+			var kinds = rawEdit.Kinds;
 			if (start < reach)
 			{
 				if (edits.Count > 0 && end <= edits[^1].SourceEnd)
@@ -846,8 +861,10 @@ internal sealed class TreeSitterCompressionScope(
 		bool isDocstring,
 		IReadOnlySet<SourceRange>? capturedBodyRanges,
 		string source,
-		out RawCompressionEdit edit)
+		out RawCompressionEdit edit,
+		out SourceRange? collapseBounds)
 	{
+		collapseBounds = null;
 		if (isDocstring &&
 		    (!IsLeadingDocstring(node) || !IsSimpleStringStatement(node, source)))
 		{
@@ -888,12 +905,15 @@ internal sealed class TreeSitterCompressionScope(
 			? end - 1
 			: end;
 		var lineStart = source.LastIndexOf('\n', Math.Max(0, start - 1)) + 1;
+		var editableLineStart = lineStart == 0 && source.Length > 0 && source[0] == '\uFEFF'
+			? 1
+			: lineStart;
 		var nextLineFeed = source.IndexOf('\n', syntaxEnd);
 		var lineEnd = nextLineFeed >= 0 ? nextLineFeed : source.Length;
 		var contentEnd = lineEnd > lineStart && source[lineEnd - 1] == '\r'
 			? lineEnd - 1
 			: lineEnd;
-		var hasOnlyWhitespaceBefore = source.AsSpan(lineStart, start - lineStart).IsWhiteSpace();
+		var hasOnlyWhitespaceBefore = source.AsSpan(editableLineStart, start - editableLineStart).IsWhiteSpace();
 		var hasOnlyWhitespaceAfter = syntaxEnd <= contentEnd &&
 		                             source.AsSpan(syntaxEnd, contentEnd - syntaxEnd).IsWhiteSpace();
 		if (hasOnlyWhitespaceBefore && hasOnlyWhitespaceAfter)
@@ -901,8 +921,16 @@ internal sealed class TreeSitterCompressionScope(
 			// A body node can start at the first syntax token while its indentation belongs to the
 			// surrounding declaration. Keep that indentation when the body edit will absorb this
 			// comment; otherwise the two edits partially overlap and the body placeholder is lost.
-			var expandedStart = ClampToContainingBodyStart(node, lineStart, capturedBodyRanges);
+			var containingBody = FindContainingBodyRange(node, capturedBodyRanges);
+			var expandedStart = containingBody is { } body
+				? Math.Max(editableLineStart, body.Start)
+				: editableLineStart;
 			var expandedEnd = nextLineFeed >= 0 ? nextLineFeed + 1 : source.Length;
+			var documentStart = source.Length > 0 && source[0] == '\uFEFF' ? 1 : 0;
+			collapseBounds = expandedStart == editableLineStart &&
+			                 (containingBody is null || expandedEnd <= containingBody.Value.End)
+				? containingBody ?? new SourceRange(documentStart, source.Length)
+				: null;
 			edit = new RawCompressionEdit(
 				expandedStart,
 				expandedEnd,
@@ -927,22 +955,312 @@ internal sealed class TreeSitterCompressionScope(
 		return true;
 	}
 
-	private static int ClampToContainingBodyStart(
+	private static SourceRange? FindContainingBodyRange(
 		Node node,
-		int expandedStart,
 		IReadOnlySet<SourceRange>? capturedBodyRanges)
 	{
 		if (capturedBodyRanges is null)
-			return expandedStart;
+			return null;
 
 		for (var ancestor = node.Parent; ancestor is not null; ancestor = ancestor.Parent)
 		{
 			var range = new SourceRange(ancestor.StartIndex, ancestor.EndIndex);
 			if (capturedBodyRanges.Contains(range))
-				return Math.Max(expandedStart, range.Start);
+				return range;
 		}
 
-		return expandedStart;
+		return null;
+	}
+
+	private static List<RawCompressionEdit> CollapseBlankLinesAroundRemovedComments(
+		string source,
+		List<RawCompressionEdit> edits,
+		IReadOnlyList<SourceRange> preservedRanges,
+		List<CommentLineCollapseCandidate>? candidates)
+	{
+		if (candidates is null)
+			return edits;
+
+		var eligibleCount = 0;
+		for (var candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
+		{
+			var candidate = candidates[candidateIndex];
+			var edit = edits[candidate.EditIndex];
+			if (IsContainedInPreservedRange(edit.Start, edit.End, preservedRanges))
+				continue;
+
+			candidates[eligibleCount++] = candidate;
+		}
+
+		if (eligibleCount == 0)
+			return edits;
+		if (eligibleCount < candidates.Count)
+			candidates.RemoveRange(eligibleCount, candidates.Count - eligibleCount);
+
+		candidates.Sort((left, right) =>
+		{
+			var leftEdit = edits[left.EditIndex];
+			var rightEdit = edits[right.EditIndex];
+			return leftEdit.Start != rightEdit.Start
+				? leftEdit.Start.CompareTo(rightEdit.Start)
+				: leftEdit.End.CompareTo(rightEdit.End);
+		});
+		bool[]? replaced = null;
+		var collapsed = new List<RawCompressionEdit>();
+		for (var candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
+		{
+			var clusterFirstCandidateIndex = candidateIndex;
+			var first = candidates[candidateIndex];
+			var firstEdit = edits[first.EditIndex];
+			var bounds = first.Bounds;
+			var clusterStart = firstEdit.Start;
+			var clusterEnd = firstEdit.End;
+
+			while (candidateIndex + 1 < candidates.Count)
+			{
+				var next = candidates[candidateIndex + 1];
+				var nextEdit = edits[next.EditIndex];
+				if (next.Bounds != bounds ||
+				    nextEdit.Start < clusterEnd ||
+				    !ContainsOnlyBlankLineCharacters(source, clusterEnd, nextEdit.Start))
+				{
+					break;
+				}
+
+				candidateIndex++;
+				clusterEnd = nextEdit.End;
+			}
+
+			var collapsedCount = collapsed.Count;
+			AddCollapsedCommentClusterEdits(
+				source,
+				clusterStart,
+				clusterEnd,
+				bounds,
+				collapsed);
+			if (clusterFirstCandidateIndex == candidateIndex &&
+			    collapsed.Count == collapsedCount + 1 &&
+			    collapsed[^1].Start == firstEdit.Start &&
+			    collapsed[^1].End == firstEdit.End)
+			{
+				collapsed.RemoveAt(collapsed.Count - 1);
+				continue;
+			}
+
+			replaced ??= new bool[edits.Count];
+			for (var clusterIndex = clusterFirstCandidateIndex;
+			     clusterIndex <= candidateIndex;
+			     clusterIndex++)
+			{
+				replaced[candidates[clusterIndex].EditIndex] = true;
+			}
+		}
+
+		if (replaced is null)
+			return edits;
+
+		var writeIndex = 0;
+		for (var readIndex = 0; readIndex < edits.Count; readIndex++)
+		{
+			if (!replaced[readIndex])
+				edits[writeIndex++] = edits[readIndex];
+		}
+		if (writeIndex < edits.Count)
+			edits.RemoveRange(writeIndex, edits.Count - writeIndex);
+		edits.AddRange(collapsed);
+		return edits;
+	}
+
+	private static void AddCollapsedCommentClusterEdits(
+		string source,
+		int clusterStart,
+		int clusterEnd,
+		SourceRange bounds,
+		List<RawCompressionEdit> destination)
+	{
+		var prefixStart = clusterStart;
+		SourceRange? retainedPrefixBlank = null;
+		while (TryReadBlankLineBefore(source, prefixStart, bounds.Start, out var blank))
+		{
+			if (retainedPrefixBlank is null && IsEmptyBlankLine(source, blank))
+				retainedPrefixBlank = blank;
+			prefixStart = blank.Start;
+		}
+
+		var suffixEnd = clusterEnd;
+		SourceRange? retainedSuffixBlank = null;
+		while (TryReadBlankLineAfter(source, suffixEnd, bounds.End, out var blank))
+		{
+			if (retainedSuffixBlank is null && IsEmptyBlankLine(source, blank))
+				retainedSuffixBlank = blank;
+			suffixEnd = blank.End;
+		}
+
+		var hasContentBefore = prefixStart > bounds.Start;
+		var hasContentAfter = suffixEnd < bounds.End;
+		if (!hasContentBefore || !hasContentAfter)
+		{
+			AddCommentRemoval(destination, prefixStart, suffixEnd);
+			return;
+		}
+
+		// Keep an existing empty line only. Retaining indentation-only whitespace leaves an
+		// artifact, while creating a clean separator would make this a formatter.
+		var retainedBlank = retainedPrefixBlank ?? retainedSuffixBlank;
+		if (retainedBlank is { } blankLine)
+		{
+			AddCommentRemoval(destination, prefixStart, blankLine.Start);
+			AddCommentRemoval(destination, blankLine.End, suffixEnd);
+			return;
+		}
+
+		AddCommentRemoval(destination, prefixStart, suffixEnd);
+	}
+
+	private static void AddCommentRemoval(
+		List<RawCompressionEdit> destination,
+		int start,
+		int end)
+	{
+		if (end <= start)
+			return;
+
+		destination.Add(new RawCompressionEdit(
+			start,
+			end,
+			string.Empty,
+			CodeTransformKinds.Comments));
+	}
+
+	private static bool TryReadBlankLineBefore(
+		string source,
+		int end,
+		int lowerBound,
+		out SourceRange blank)
+	{
+		if (end <= lowerBound)
+		{
+			blank = default;
+			return false;
+		}
+
+		var contentEnd = end;
+		if (source[contentEnd - 1] == '\n')
+		{
+			contentEnd--;
+			if (contentEnd > lowerBound && source[contentEnd - 1] == '\r')
+				contentEnd--;
+		}
+
+		var previousLineFeed = contentEnd > lowerBound
+			? source.LastIndexOf('\n', contentEnd - 1)
+			: -1;
+		var start = previousLineFeed + 1;
+		if (start < lowerBound || !ContainsOnlyHorizontalWhitespace(source, start, contentEnd))
+		{
+			blank = default;
+			return false;
+		}
+
+		blank = new SourceRange(start, end);
+		return true;
+	}
+
+	private static bool TryReadBlankLineAfter(
+		string source,
+		int start,
+		int upperBound,
+		out SourceRange blank)
+	{
+		if (start >= upperBound)
+		{
+			blank = default;
+			return false;
+		}
+
+		var nextLineFeed = source.IndexOf('\n', start, upperBound - start);
+		if (nextLineFeed < 0 && upperBound < source.Length)
+		{
+			blank = default;
+			return false;
+		}
+
+		var end = nextLineFeed >= 0 ? nextLineFeed + 1 : upperBound;
+		var contentEnd = nextLineFeed >= 0 ? nextLineFeed : upperBound;
+		if (contentEnd > start && source[contentEnd - 1] == '\r')
+			contentEnd--;
+		if (!ContainsOnlyHorizontalWhitespace(source, start, contentEnd))
+		{
+			blank = default;
+			return false;
+		}
+
+		blank = new SourceRange(start, end);
+		return true;
+	}
+
+	private static bool ContainsOnlyHorizontalWhitespace(string source, int start, int end)
+	{
+		for (var index = start; index < end; index++)
+		{
+			if (source[index] is not (' ' or '\t'))
+				return false;
+		}
+
+		return true;
+	}
+
+	private static bool IsEmptyBlankLine(string source, SourceRange line)
+	{
+		var contentEnd = line.End;
+		if (contentEnd > line.Start && source[contentEnd - 1] == '\n')
+		{
+			contentEnd--;
+			if (contentEnd > line.Start && source[contentEnd - 1] == '\r')
+				contentEnd--;
+		}
+
+		return contentEnd == line.Start;
+	}
+
+	private static bool ContainsOnlyBlankLineCharacters(string source, int start, int end)
+	{
+		for (var index = start; index < end; index++)
+		{
+			if (source[index] is not (' ' or '\t' or '\r' or '\n'))
+				return false;
+		}
+
+		return true;
+	}
+
+	private static bool IsContainedInPreservedRange(
+		int start,
+		int end,
+		IReadOnlyList<SourceRange> preservedRanges)
+	{
+		var lower = 0;
+		var upper = preservedRanges.Count - 1;
+		while (lower <= upper)
+		{
+			var middle = lower + (upper - lower) / 2;
+			var range = preservedRanges[middle];
+			if (range.Start > start)
+			{
+				upper = middle - 1;
+				continue;
+			}
+
+			if (range.End <= start)
+			{
+				lower = middle + 1;
+				continue;
+			}
+
+			return end <= range.End;
+		}
+
+		return false;
 	}
 
 	private static bool IsLeadingDocstring(Node docstring)
@@ -1089,6 +1407,10 @@ internal sealed class TreeSitterCompressionScope(
 	}
 
 	private readonly record struct SourceRange(int Start, int End);
+
+	private readonly record struct CommentLineCollapseCandidate(
+		int EditIndex,
+		SourceRange Bounds);
 
 	private readonly record struct RawCompressionEdit(
 		int Start,

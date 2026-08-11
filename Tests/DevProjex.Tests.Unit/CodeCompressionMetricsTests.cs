@@ -110,6 +110,35 @@ public sealed class CodeCompressionMetricsTests
 		Assert.Equal(expected, actual);
 	}
 
+	[Fact]
+	public void MetricsFromBlankLineCollapsedCommentPlan_EqualMaterializedOutput()
+	{
+		const string source =
+			"int first = 1;\r\n" +
+			"\r\n" +
+			" \t\r\n" +
+			"// remove\n" +
+			"\t\r\n" +
+			"\n" +
+			"int second = 2;";
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Comments);
+		var analysis = scope.Analyze(
+			"sample.c",
+			"sample.c",
+			source,
+			TestContext.Current.CancellationToken);
+		var applied = analysis.GetResult(source).Text;
+		var expected = FileContentAnalyzer.ComputeMetrics(
+			applied,
+			Encoding.UTF8.GetByteCount(applied));
+
+		var actual = FileContentAnalyzer.ComputeTransformedMetrics(source, analysis.Plan);
+
+		Assert.Equal("int first = 1;\r\n\r\nint second = 2;", applied);
+		Assert.Equal(expected, actual);
+	}
+
 	private static void AddCase(
 		TheoryData<string, CodeCompressionPlan> cases,
 		string source,

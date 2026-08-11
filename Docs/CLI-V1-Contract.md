@@ -225,6 +225,9 @@ output keeps documentation, comments-only output keeps complete implementation c
 enabling both produces the declaration skeleton. Syntax edits share one parse, plan,
 application, reverse parse, and structural gate; Hide Secrets runs afterward. Unsupported
 files remain complete and source files are never modified.
+At each removed full-line comment site, adjacent blank and whitespace-only lines collapse to at
+most one between retained content blocks and to none at file boundaries. Blank lines unrelated
+to a removed comment remain byte-for-byte unchanged.
 
 `gitignore` mode reads regular `.gitignore` files reachable in the selected working
 tree. When the selected path is below its owning repository/worktree root, the
