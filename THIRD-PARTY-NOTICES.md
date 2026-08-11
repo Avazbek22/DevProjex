@@ -52,7 +52,7 @@ under the MIT License.
 - Bash grammar source: https://github.com/tree-sitter/tree-sitter-bash
 - CSS grammar source: https://github.com/tree-sitter/tree-sitter-css
 - HTML grammar source: https://github.com/tree-sitter/tree-sitter-html
-- TOML grammar source: https://github.com/tree-sitter-grammars/tree-sitter-toml
+- TOML grammar source: https://github.com/tree-sitter/tree-sitter-toml
 - Bash grammar revision in TreeSitter.DotNet 1.3.0: `a06c2e4415e9bc0346c6b86d401879ffb44058f7`
 - CSS grammar revision in TreeSitter.DotNet 1.3.0: `dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f`
 - HTML grammar revision in TreeSitter.DotNet 1.3.0: `73a3947324f6efddf9e17c0ea58d454843590cc0`
@@ -63,8 +63,10 @@ under the MIT License.
 - Scala grammar revision in TreeSitter.DotNet 1.3.0: `97aead18d97708190a51d4f551ea9b05b60641c9`
 - Kotlin grammar source: https://github.com/tree-sitter-grammars/tree-sitter-kotlin
 - Vendored Kotlin grammar: `v1.1.0`, revision `77dd60ea0a9003ce062c9728a513ffe1aaff8c82`
-- Kotlin native binaries are reproducibly built with Zig 0.16.0; provenance and SHA-256 hashes are
-  recorded in `Infrastructure/Grammars/vendored/vendored-grammars.lock.json`.
+- Vendored TOML grammar: revision `342d9be207c2dba869b9967124c679b5e6fd0ebe`, identical to
+  the source pinned by TreeSitter.DotNet 1.3.0.
+- Kotlin and TOML native binaries are reproducibly built with Zig 0.16.0; provenance and SHA-256
+  hashes are recorded in `Infrastructure/Grammars/vendored/vendored-grammars.lock.json`.
 
 Only the grammars listed above are shipped. The remaining grammars in the package are
 removed from every build output by `Directory.Build.targets`.

@@ -98,7 +98,7 @@ jobs:
 
       - name: Verify vendored grammar supply chain
         shell: pwsh
-        run: ./tools/grammars/build-kotlin.ps1 -VerifyOnly
+        run: ./tools/grammars/build-vendored-grammars.ps1 -VerifyOnly
 
       - name: Publish baseline (no grammars)
         shell: bash
@@ -208,7 +208,7 @@ jobs:
           echo "| ${{ matrix.rid }} | $baseline | $embedded | $delta (~${mib} MiB) |" >> "$GITHUB_STEP_SUMMARY"
           echo "GRAMMAR-DELIVERY-SIZE rid=${{ matrix.rid }} baseline=$baseline embedded=$embedded delta=$delta"
           # The eighteen-language payload, including four comments-only packs, stays below 30 MiB
-          # on Windows. Keep a tight absolute ceiling so further native growth is explicit.
+          # on every RID. Keep a tight absolute ceiling so further native growth is explicit.
           budget=$((30 * 1024 * 1024))
           if [ "$delta" -gt "$budget" ]; then
             echo "::error::Grammar payload for ${{ matrix.rid }} is $delta bytes, over the 30 MiB budget."

@@ -130,12 +130,10 @@ foreach (var library in libraries)
 		using var language = new Language(locator.Resolve(library), expectedGrammars[library]);
 		var loadMilliseconds = watch.Elapsed.TotalMilliseconds;
 		using var parser = new Parser(language);
-		var probeSource = library.Equals("tree-sitter-kotlin", StringComparison.Ordinal)
-			? "fun main() { println(\"grammar delivery\") }"
-			: "x";
+		var (probeSource, requireCleanParse) = ResolveProbe(library);
 		using var tree = parser.Parse(probeSource) ?? throw new InvalidOperationException("parser returned no tree");
-		if (library.Equals("tree-sitter-kotlin", StringComparison.Ordinal) && tree.RootNode.HasError)
-			throw new InvalidOperationException("Kotlin grammar could not parse the delivery fixture");
+		if (requireCleanParse && tree.RootNode.HasError)
+			throw new InvalidOperationException($"{library} could not parse its delivery fixture");
 		_ = tree.RootNode.Type;
 		watch.Stop();
 		loaded++;
@@ -157,6 +155,14 @@ Console.WriteLine(
 	$"GRAMMAR-DELIVERY rid={runtimeIdentifier} strategy={locator.StrategyName} " +
 	$"loaded={loaded}/{libraries.Count} result={result}");
 return result == "pass" ? 0 : 1;
+
+static (string Source, bool RequireCleanParse) ResolveProbe(string libraryBaseName) =>
+	libraryBaseName switch
+	{
+		"tree-sitter-kotlin" => ("fun main() { println(\"grammar delivery\") }", true),
+		"tree-sitter-toml" => ("title = \"grammar delivery\"\n[probe]\nenabled = true\n", true),
+		_ => ("x", false)
+	};
 
 static string? VerifyRecovery(EmbeddedGrammarLibraryLocator locator, string libraryBaseName)
 {

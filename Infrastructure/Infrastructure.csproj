@@ -41,13 +41,14 @@
     <DevProjexGrammar Include="tree-sitter-ruby" />
     <DevProjexGrammar Include="tree-sitter-rust" />
     <DevProjexGrammar Include="tree-sitter-scala" />
-    <DevProjexGrammar Include="tree-sitter-toml" />
     <DevProjexGrammar Include="tree-sitter-tsx" />
     <DevProjexGrammar Include="tree-sitter-typescript" />
 
-    <!-- Kotlin is absent from TreeSitter.DotNet 1.3.0. Its six pinned native binaries are built by
-         tools/grammars/build-kotlin.ps1 and verified against the adjacent supply-chain lock. -->
+    <!-- Kotlin is absent from TreeSitter.DotNet 1.3.0, while TOML is Windows-only there. Their
+         six-RID binaries are built by tools/grammars/build-vendored-grammars.ps1 and verified
+         against the adjacent supply-chain lock. A grammar must use one source on every RID. -->
     <DevProjexVendoredGrammar Include="tree-sitter-kotlin" />
+    <DevProjexVendoredGrammar Include="tree-sitter-toml" />
   </ItemGroup>
 
   <PropertyGroup>

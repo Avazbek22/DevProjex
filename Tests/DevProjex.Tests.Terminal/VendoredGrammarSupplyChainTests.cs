@@ -1,25 +1,49 @@
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using TreeSitter;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class VendoredGrammarSupplyChainTests
 {
-	private static readonly IReadOnlyDictionary<string, (string Path, string Format, ushort Architecture)> ExpectedBinaries =
-		new Dictionary<string, (string Path, string Format, ushort Architecture)>(StringComparer.Ordinal)
+	private static readonly IReadOnlyDictionary<string, GrammarContract> ExpectedGrammars =
+		new Dictionary<string, GrammarContract>(StringComparer.Ordinal)
 		{
-			["win-x64"] = ("win-x64/tree-sitter-kotlin.dll", "pe", 0x8664),
-			["win-arm64"] = ("win-arm64/tree-sitter-kotlin.dll", "pe", 0xAA64),
-			["linux-x64"] = ("linux-x64/libtree-sitter-kotlin.so", "elf", 62),
-			["linux-arm64"] = ("linux-arm64/libtree-sitter-kotlin.so", "elf", 183),
-			["osx-x64"] = ("osx-x64/libtree-sitter-kotlin.dylib", "macho", 7),
-			["osx-arm64"] = ("osx-arm64/libtree-sitter-kotlin.dylib", "macho", 12)
+			["tree-sitter-kotlin"] = new(
+				"tree_sitter_kotlin",
+				14,
+				"https://github.com/tree-sitter-grammars/tree-sitter-kotlin",
+				"v1.1.0",
+				"77dd60ea0a9003ce062c9728a513ffe1aaff8c82",
+				"https://codeload.github.com/tree-sitter-grammars/tree-sitter-kotlin/zip/refs/tags/v1.1.0",
+				"73c45375934dcb1a764a7c1c3b03059ec78d0755e0bf4874ddb06b4df4fbd091"),
+			["tree-sitter-toml"] = new(
+				"tree_sitter_toml",
+				13,
+				"https://github.com/tree-sitter/tree-sitter-toml",
+				null,
+				"342d9be207c2dba869b9967124c679b5e6fd0ebe",
+				"https://codeload.github.com/tree-sitter/tree-sitter-toml/zip/342d9be207c2dba869b9967124c679b5e6fd0ebe",
+				"ba4055ea8bff2c17d4eb5454ce965a52d073f246ce0a7d3d915d57c4746d676a")
+		};
+
+	private static readonly IReadOnlyDictionary<string, RidContract> ExpectedRids =
+		new Dictionary<string, RidContract>(StringComparer.Ordinal)
+		{
+			["win-x64"] = new(string.Empty, ".dll", "pe", "x64", 0x8664),
+			["win-arm64"] = new(string.Empty, ".dll", "pe", "arm64", 0xAA64),
+			["linux-x64"] = new("lib", ".so", "elf", "x64", 62),
+			["linux-arm64"] = new("lib", ".so", "elf", "arm64", 183),
+			["osx-x64"] = new("lib", ".dylib", "macho", "x64", 7),
+			["osx-arm64"] = new("lib", ".dylib", "macho", "arm64", 12)
 		};
 
 	[Fact]
-	public void KotlinVendoredBinariesMatchThePinnedSupplyChainManifest()
+	public void VendoredBinariesMatchThePinnedSupplyChainManifest()
 	{
 		var rootPath = PublishedApplicationLocator.FindRepositoryRoot();
 		var vendoredRoot = Path.Combine(rootPath, "Infrastructure", "Grammars", "vendored");
@@ -28,63 +52,212 @@ public sealed class VendoredGrammarSupplyChainTests
 			"vendored-grammars.lock.json")));
 		var root = manifest.RootElement;
 		Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
-		var grammar = Assert.Single(root.GetProperty("grammars").EnumerateArray());
-
-		Assert.Equal("tree-sitter-kotlin", grammar.GetProperty("name").GetString());
-		Assert.Equal("tree_sitter_kotlin", grammar.GetProperty("export").GetString());
-		Assert.Equal(14, grammar.GetProperty("abiVersion").GetInt32());
-		var source = grammar.GetProperty("source");
-		Assert.Equal(
-			"https://github.com/tree-sitter-grammars/tree-sitter-kotlin",
-			source.GetProperty("repository").GetString());
-		Assert.Equal("v1.1.0", source.GetProperty("tag").GetString());
-		Assert.Equal("77dd60ea0a9003ce062c9728a513ffe1aaff8c82", source.GetProperty("commit").GetString());
-		Assert.Equal(64, source.GetProperty("archiveSha256").GetString()!.Length);
-
-		var toolchain = grammar.GetProperty("toolchain");
-		Assert.Equal("zig", toolchain.GetProperty("name").GetString());
-		Assert.Equal("0.16.0", toolchain.GetProperty("version").GetString());
-		var flags = toolchain.GetProperty("compilerFlags")
+		var grammars = root.GetProperty("grammars")
 			.EnumerateArray()
-			.Select(static value => value.GetString())
-			.ToArray();
-		Assert.Contains("-O2", flags);
-		Assert.Contains("-DNDEBUG", flags);
-		Assert.Contains("-g0", flags);
-		Assert.Contains("-s", flags);
+			.ToDictionary(
+				static grammar => grammar.GetProperty("name").GetString()!,
+				StringComparer.Ordinal);
 
-		var binaries = grammar.GetProperty("binaries").EnumerateArray().ToArray();
-		Assert.Equal(ExpectedBinaries.Count, binaries.Length);
-		foreach (var binary in binaries)
+		Assert.Equal(
+			ExpectedGrammars.Keys.Order(StringComparer.Ordinal),
+			grammars.Keys.Order(StringComparer.Ordinal));
+
+		foreach (var (name, expectedGrammar) in ExpectedGrammars)
 		{
-			var rid = binary.GetProperty("rid").GetString()!;
-			var expected = ExpectedBinaries[rid];
-			Assert.Equal(expected.Path, binary.GetProperty("path").GetString());
-			Assert.Equal(expected.Format, binary.GetProperty("format").GetString());
+			var grammar = grammars[name];
+			Assert.Equal(expectedGrammar.Export, grammar.GetProperty("export").GetString());
+			var abiVersion = grammar.GetProperty("abiVersion").GetInt32();
+			Assert.Equal(expectedGrammar.AbiVersion, abiVersion);
+			Assert.InRange(abiVersion, 13, 15);
 
-			var fullPath = Path.Combine(vendoredRoot, expected.Path.Replace('/', Path.DirectorySeparatorChar));
-			var bytes = File.ReadAllBytes(fullPath);
-			Assert.Equal(binary.GetProperty("size").GetInt64(), bytes.LongLength);
+			var source = grammar.GetProperty("source");
+			Assert.Equal(expectedGrammar.Repository, source.GetProperty("repository").GetString());
+			if (expectedGrammar.Tag is null)
+				Assert.Equal(JsonValueKind.Null, source.GetProperty("tag").ValueKind);
+			else
+				Assert.Equal(expectedGrammar.Tag, source.GetProperty("tag").GetString());
+			Assert.Equal(expectedGrammar.Commit, source.GetProperty("commit").GetString());
+			Assert.Equal(expectedGrammar.ArchiveUrl, source.GetProperty("archiveUrl").GetString());
+			Assert.Equal(expectedGrammar.ArchiveSha256, source.GetProperty("archiveSha256").GetString());
+
+			var build = grammar.GetProperty("build");
+			Assert.Equal("cc", build.GetProperty("compiler").GetString());
 			Assert.Equal(
-				binary.GetProperty("sha256").GetString(),
-				Convert.ToHexStringLower(SHA256.HashData(bytes)));
-			AssertBinaryShape(bytes, expected.Format, expected.Architecture);
-			Assert.True(
-				bytes.AsSpan().IndexOf("tree_sitter_kotlin"u8) >= 0,
-				$"{rid}: export name is absent from the native symbol table.");
-			Assert.True(
-				bytes.AsSpan().IndexOf(".debug_"u8) < 0,
-				$"{rid}: stripped grammar still contains debug sections.");
+				["src/parser.c", "src/scanner.c"],
+				build.GetProperty("sourceFiles")
+					.EnumerateArray()
+					.Select(static value => value.GetString()!)
+					.ToArray());
+
+			var toolchain = grammar.GetProperty("toolchain");
+			Assert.Equal("zig", toolchain.GetProperty("name").GetString());
+			Assert.Equal("0.16.0", toolchain.GetProperty("version").GetString());
+			Assert.Equal(
+				"https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip",
+				toolchain.GetProperty("archiveUrl").GetString());
+			Assert.Equal(
+				"68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e",
+				toolchain.GetProperty("archiveSha256").GetString());
+			var flags = toolchain.GetProperty("compilerFlags")
+				.EnumerateArray()
+				.Select(static value => value.GetString()!)
+				.ToArray();
+			Assert.Equal(
+				["-shared", "-O2", "-DNDEBUG", "-fno-ident", "-fvisibility=hidden", "-g0", "-s"],
+				flags);
+			if (name.Equals("tree-sitter-toml", StringComparison.Ordinal))
+			{
+				var patch = Assert.Single(grammar.GetProperty("sourcePatches").EnumerateArray());
+				Assert.Equal("src/parser.c", patch.GetProperty("path").GetString());
+				Assert.Contains(
+					"visibility(\"default\")",
+					patch.GetProperty("newText").GetString(),
+					StringComparison.Ordinal);
+			}
+			else
+			{
+				Assert.False(grammar.TryGetProperty("sourcePatches", out _));
+			}
+
+			var binaries = grammar.GetProperty("binaries")
+				.EnumerateArray()
+				.ToDictionary(
+					static binary => binary.GetProperty("rid").GetString()!,
+					StringComparer.Ordinal);
+			Assert.Equal(
+				ExpectedRids.Keys.Order(StringComparer.Ordinal),
+				binaries.Keys.Order(StringComparer.Ordinal));
+
+			foreach (var (rid, expectedRid) in ExpectedRids)
+			{
+				var binary = binaries[rid];
+				var expectedPath = $"{rid}/{expectedRid.Prefix}{name}{expectedRid.Extension}";
+				Assert.Equal(expectedPath, binary.GetProperty("path").GetString());
+				Assert.Equal(expectedRid.Format, binary.GetProperty("format").GetString());
+				Assert.Equal(expectedRid.ArchitectureName, binary.GetProperty("architecture").GetString());
+
+				var fullPath = Path.Combine(
+					vendoredRoot,
+					expectedPath.Replace('/', Path.DirectorySeparatorChar));
+				var bytes = File.ReadAllBytes(fullPath);
+				Assert.Equal(binary.GetProperty("size").GetInt64(), bytes.LongLength);
+				Assert.Equal(
+					binary.GetProperty("sha256").GetString(),
+					Convert.ToHexStringLower(SHA256.HashData(bytes)));
+				AssertBinaryShape(bytes, expectedRid.Format, expectedRid.ArchitectureId);
+				Assert.True(
+					bytes.AsSpan().IndexOf(Encoding.ASCII.GetBytes(expectedGrammar.Export)) >= 0,
+					$"{name}/{rid}: export name is absent from the native symbol table.");
+				Assert.True(
+					bytes.AsSpan().IndexOf(".debug_"u8) < 0,
+					$"{name}/{rid}: stripped grammar still contains debug sections.");
+			}
 		}
 	}
 
 	[Fact]
-	public void VendoredGrammarUsesTheSameDeliveryAndExclusionContractAsPackageGrammars()
+	public void EveryPackageGrammarExistsForEveryShippingRid()
 	{
 		var rootPath = PublishedApplicationLocator.FindRepositoryRoot();
 		var project = XDocument.Load(Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
-		var vendored = Assert.Single(project.Descendants("DevProjexVendoredGrammar"));
-		Assert.Equal("tree-sitter-kotlin", vendored.Attribute("Include")?.Value);
+		var packageGrammars = project.Descendants("DevProjexGrammar")
+			.Select(static element => element.Attribute("Include")?.Value)
+			.Where(static value => !string.IsNullOrWhiteSpace(value))
+			.Cast<string>()
+			.ToArray();
+		var packageVersion = XDocument.Load(Path.Combine(rootPath, "Directory.Packages.props"))
+			.Descendants("TreeSitterDotNetVersion")
+			.Single()
+			.Value;
+		var packageRoot = ResolveNuGetPackageRoot(packageVersion);
+		var missing = new List<string>();
+
+		foreach (var grammarName in packageGrammars)
+		{
+			foreach (var (rid, expectedRid) in ExpectedRids)
+			{
+				var fileName = $"{expectedRid.Prefix}{grammarName}{expectedRid.Extension}";
+				var path = Path.Combine(packageRoot, "runtimes", rid, "native", fileName);
+				if (!File.Exists(path))
+					missing.Add($"{grammarName}/{rid}: {path}");
+			}
+		}
+
+		Assert.True(
+			missing.Count == 0,
+			"A package grammar is not available on every shipping RID. Move partial grammars " +
+			$"to the vendored pipeline:{Environment.NewLine}{string.Join(Environment.NewLine, missing)}");
+	}
+
+	[Fact]
+	public void VendoredTomlProducesTheSameAstAsThePinnedPackageBinaryOnWindows()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		var rid = RuntimeInformation.ProcessArchitecture switch
+		{
+			Architecture.X64 => "win-x64",
+			Architecture.Arm64 => "win-arm64",
+			var architecture => throw new PlatformNotSupportedException(
+				$"No shipped TOML parity binary for Windows {architecture}.")
+		};
+		var rootPath = PublishedApplicationLocator.FindRepositoryRoot();
+		var version = XDocument.Load(Path.Combine(rootPath, "Directory.Packages.props"))
+			.Descendants("TreeSitterDotNetVersion")
+			.Single()
+			.Value;
+		var packagePath = Path.Combine(
+			ResolveNuGetPackageRoot(version),
+			"runtimes",
+			rid,
+			"native",
+			"tree-sitter-toml.dll");
+		var vendoredPath = Path.Combine(
+			rootPath,
+			"Infrastructure",
+			"Grammars",
+			"vendored",
+			rid,
+			"tree-sitter-toml.dll");
+		const string source = """"
+			title = "AST parity"
+			ports = [8000, 8001]
+
+			[database]
+			enabled = true
+			multiline = """
+			retained
+			value
+			"""
+			"""";
+
+		using var packageLanguage = new Language(packagePath, "tree_sitter_toml");
+		using var vendoredLanguage = new Language(vendoredPath, "tree_sitter_toml");
+		using var packageParser = new Parser(packageLanguage);
+		using var vendoredParser = new Parser(vendoredLanguage);
+		using var packageTree = packageParser.Parse(source);
+		using var vendoredTree = vendoredParser.Parse(source);
+
+		Assert.NotNull(packageTree);
+		Assert.NotNull(vendoredTree);
+		Assert.False(packageTree.RootNode.HasError);
+		Assert.False(vendoredTree.RootNode.HasError);
+		Assert.Equal(packageTree.RootNode.ToString(), vendoredTree.RootNode.ToString());
+	}
+
+	[Fact]
+	public void VendoredGrammarsUseTheSameDeliveryAndExclusionContractAsPackageGrammars()
+	{
+		var rootPath = PublishedApplicationLocator.FindRepositoryRoot();
+		var project = XDocument.Load(Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var vendoredNames = project.Descendants("DevProjexVendoredGrammar")
+			.Select(static element => element.Attribute("Include")?.Value)
+			.Where(static value => value is not null)
+			.Cast<string>()
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(ExpectedGrammars.Keys.Order(StringComparer.Ordinal), vendoredNames);
 
 		var curated = Assert.Single(
 			project.Descendants("CuratedGrammarFile"),
@@ -100,6 +273,25 @@ public sealed class VendoredGrammarSupplyChainTests
 		Assert.Contains("Infrastructure/Grammars/vendored/**/*.dll binary", attributes, StringComparison.Ordinal);
 		Assert.Contains("Infrastructure/Grammars/vendored/**/*.so binary", attributes, StringComparison.Ordinal);
 		Assert.Contains("Infrastructure/Grammars/vendored/**/*.dylib binary", attributes, StringComparison.Ordinal);
+
+		var compatibilityWrapper = File.ReadAllText(Path.Combine(rootPath, "tools", "grammars", "build-kotlin.ps1"));
+		Assert.Contains("build-vendored-grammars.ps1", compatibilityWrapper, StringComparison.Ordinal);
+		var workflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "grammar-delivery.yml"));
+		Assert.Contains(
+			"./tools/grammars/build-vendored-grammars.ps1 -VerifyOnly",
+			workflow,
+			StringComparison.Ordinal);
+		foreach (var rid in ExpectedRids.Keys)
+			Assert.Contains($"rid: {rid}", workflow, StringComparison.Ordinal);
+	}
+
+	private static string ResolveNuGetPackageRoot(string version)
+	{
+		var configuredRoot = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+		var packagesRoot = string.IsNullOrWhiteSpace(configuredRoot)
+			? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages")
+			: configuredRoot;
+		return Path.Combine(packagesRoot, "treesitter.dotnet", version);
 	}
 
 	private static void AssertBinaryShape(ReadOnlySpan<byte> bytes, string format, ushort architecture)
@@ -126,4 +318,20 @@ public sealed class VendoredGrammarSupplyChainTests
 				throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown native binary format.");
 		}
 	}
+
+	private sealed record GrammarContract(
+		string Export,
+		int AbiVersion,
+		string Repository,
+		string? Tag,
+		string Commit,
+		string ArchiveUrl,
+		string ArchiveSha256);
+
+	private sealed record RidContract(
+		string Prefix,
+		string Extension,
+		string Format,
+		string ArchitectureName,
+		ushort ArchitectureId);
 }
