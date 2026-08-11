@@ -20,7 +20,9 @@ public sealed class VendoredGrammarSupplyChainTests
 				"v1.1.0",
 				"77dd60ea0a9003ce062c9728a513ffe1aaff8c82",
 				"https://codeload.github.com/tree-sitter-grammars/tree-sitter-kotlin/zip/refs/tags/v1.1.0",
-				"73c45375934dcb1a764a7c1c3b03059ec78d0755e0bf4874ddb06b4df4fbd091"),
+				"73c45375934dcb1a764a7c1c3b03059ec78d0755e0bf4874ddb06b4df4fbd091",
+				["src/parser.c", "src/scanner.c"],
+				["src"]),
 			["tree-sitter-toml"] = new(
 				"tree_sitter_toml",
 				13,
@@ -28,7 +30,29 @@ public sealed class VendoredGrammarSupplyChainTests
 				null,
 				"342d9be207c2dba869b9967124c679b5e6fd0ebe",
 				"https://codeload.github.com/tree-sitter/tree-sitter-toml/zip/342d9be207c2dba869b9967124c679b5e6fd0ebe",
-				"ba4055ea8bff2c17d4eb5454ce965a52d073f246ce0a7d3d915d57c4746d676a")
+				"ba4055ea8bff2c17d4eb5454ce965a52d073f246ce0a7d3d915d57c4746d676a",
+				["src/parser.c", "src/scanner.c"],
+				["src"]),
+			["tree-sitter-xml"] = new(
+				"tree_sitter_xml",
+				14,
+				"https://github.com/tree-sitter-grammars/tree-sitter-xml",
+				"v0.7.0",
+				"4b64dd3a03ec002258d6268d712fd93716d6ab57",
+				"https://codeload.github.com/tree-sitter-grammars/tree-sitter-xml/zip/refs/tags/v0.7.0",
+				"991d121cd1217b488aa1f831a1ed07041c126bf1bc4c9069a025c704014c6fb2",
+				["xml/src/parser.c", "xml/src/scanner.c"],
+				["xml/src"]),
+			["tree-sitter-yaml"] = new(
+				"tree_sitter_yaml",
+				14,
+				"https://github.com/tree-sitter-grammars/tree-sitter-yaml",
+				"v0.7.2",
+				"7708026449bed86239b1cd5bce6e3c34dbca6415",
+				"https://codeload.github.com/tree-sitter-grammars/tree-sitter-yaml/zip/refs/tags/v0.7.2",
+				"f995e22d02efba52b06d527376f51cfd31ec3029c8f70a8e1132281ae0c1e7fd",
+				["src/parser.c", "src/scanner.c"],
+				["src"])
 		};
 
 	private static readonly IReadOnlyDictionary<string, RidContract> ExpectedRids =
@@ -83,11 +107,15 @@ public sealed class VendoredGrammarSupplyChainTests
 			var build = grammar.GetProperty("build");
 			Assert.Equal("cc", build.GetProperty("compiler").GetString());
 			Assert.Equal(
-				["src/parser.c", "src/scanner.c"],
+				expectedGrammar.SourceFiles,
 				build.GetProperty("sourceFiles")
 					.EnumerateArray()
 					.Select(static value => value.GetString()!)
 					.ToArray());
+			var includeDirectories = build.TryGetProperty("includeDirectories", out var includes)
+				? includes.EnumerateArray().Select(static value => value.GetString()!).ToArray()
+				: ["src"];
+			Assert.Equal(expectedGrammar.IncludeDirectories, includeDirectories);
 
 			var toolchain = grammar.GetProperty("toolchain");
 			Assert.Equal("zig", toolchain.GetProperty("name").GetString());
@@ -111,6 +139,15 @@ public sealed class VendoredGrammarSupplyChainTests
 				Assert.Equal("src/parser.c", patch.GetProperty("path").GetString());
 				Assert.Contains(
 					"visibility(\"default\")",
+					patch.GetProperty("newText").GetString(),
+					StringComparison.Ordinal);
+			}
+			else if (name.Equals("tree-sitter-yaml", StringComparison.Ordinal))
+			{
+				var patch = Assert.Single(grammar.GetProperty("sourcePatches").EnumerateArray());
+				Assert.Equal("src/scanner.c", patch.GetProperty("path").GetString());
+				Assert.Contains(
+					"size + 2 * sizeof(int16_t) <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE",
 					patch.GetProperty("newText").GetString(),
 					StringComparison.Ordinal);
 			}
@@ -247,6 +284,47 @@ public sealed class VendoredGrammarSupplyChainTests
 	}
 
 	[Fact]
+	public void EveryVendoredGrammarLoadsAndParsesItsDeliveryFixtureOnWindows()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		var rid = RuntimeInformation.ProcessArchitecture switch
+		{
+			Architecture.X64 => "win-x64",
+			Architecture.Arm64 => "win-arm64",
+			var architecture => throw new PlatformNotSupportedException(
+				$"No shipped vendored grammar binary for Windows {architecture}.")
+		};
+		var rootPath = PublishedApplicationLocator.FindRepositoryRoot();
+		var fixtures = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["tree-sitter-kotlin"] = "fun main() { println(\"delivery\") }",
+			["tree-sitter-toml"] = "title = \"delivery\"\n[probe]\nenabled = true\n",
+			["tree-sitter-xml"] = "<?xml version=\"1.0\"?><root><!-- delivery --><![CDATA[kept]]></root>",
+			["tree-sitter-yaml"] = "---\nprobe: &probe\n  enabled: true # delivery\ncopy: *probe\n"
+		};
+
+		foreach (var (name, expected) in ExpectedGrammars)
+		{
+			var fileName = $"{name}.dll";
+			var path = Path.Combine(
+				rootPath,
+				"Infrastructure",
+				"Grammars",
+				"vendored",
+				rid,
+				fileName);
+			using var language = new Language(path, expected.Export);
+			using var parser = new Parser(language);
+			using var tree = parser.Parse(fixtures[name]);
+
+			Assert.NotNull(tree);
+			Assert.False(tree.RootNode.HasError, $"{name} rejected its delivery fixture.");
+		}
+	}
+
+	[Fact]
 	public void VendoredGrammarsUseTheSameDeliveryAndExclusionContractAsPackageGrammars()
 	{
 		var rootPath = PublishedApplicationLocator.FindRepositoryRoot();
@@ -326,7 +404,9 @@ public sealed class VendoredGrammarSupplyChainTests
 		string? Tag,
 		string Commit,
 		string ArchiveUrl,
-		string ArchiveSha256);
+		string ArchiveSha256,
+		IReadOnlyList<string> SourceFiles,
+		IReadOnlyList<string> IncludeDirectories);
 
 	private sealed record RidContract(
 		string Prefix,

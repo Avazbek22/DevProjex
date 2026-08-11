@@ -178,9 +178,11 @@ uses `= { }`, which would denote a lambda rather than a function body. Scala del
 `= { }` because braces denote a block expression there. Top-level Kotlin DSL calls and free lambdas
 are not captured.
 
-With `--strip-comments`, syntax-tree comments are removed in 18 language packs: the 14
-body-compression languages plus HTML, CSS, TOML, and Bash. The four additional packs are
-comments-only and remain on the unsupported fast path when only `--compress` is enabled.
+With `--strip-comments`, syntax-tree comments are removed in 20 language packs: the 14
+body-compression languages plus comments-only HTML, CSS, TOML, Bash, XML, and YAML packs.
+The six additional packs remain on the unsupported fast path when only `--compress` is enabled.
+XML-family project markup preserves CDATA, declarations, processing instructions, DOCTYPE
+content, and attributes; YAML preserves scalar content, anchors, tags, and document markers.
 Python leading module, class, and function docstrings are documentation for this
 mode and are removed too; a suite that would otherwise become empty retains `...`.
 The initial shebang remains, while directive comments such as `// eslint-disable`,

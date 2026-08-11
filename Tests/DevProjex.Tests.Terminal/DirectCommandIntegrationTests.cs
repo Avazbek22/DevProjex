@@ -313,6 +313,12 @@ public sealed class DirectCommandIntegrationTests
 		workspace.WriteFile(
 			"scripts/deploy.sh",
 			"#!/usr/bin/env bash\n# bash_remove\nname='# bash_string_keep'\n");
+		workspace.WriteFile(
+			"markup/view.axaml",
+			"<!-- xml_remove -->\n<Panel xmlns=\"https://github.com/avaloniaui\"><![CDATA[<!-- xml_cdata_keep -->]]></Panel>\n");
+		workspace.WriteFile(
+			"config/deployment.yaml",
+			"# yaml_remove\nname: \"api#yaml_string_keep\"\nscript: |\n  # yaml_scalar_keep\n");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await new TerminalApplication(
@@ -335,11 +341,16 @@ public sealed class DirectCommandIntegrationTests
 		Assert.DoesNotContain("css_remove", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("toml_remove", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("bash_remove", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("xml_remove", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("yaml_remove", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("raw_js_keep", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("css_string_keep", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("toml_string_keep", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("#!/usr/bin/env bash", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("bash_string_keep", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("xml_cdata_keep", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("yaml_string_keep", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("yaml_scalar_keep", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
 	}
 

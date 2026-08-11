@@ -161,6 +161,8 @@ static (string Source, bool RequireCleanParse) ResolveProbe(string libraryBaseNa
 	{
 		"tree-sitter-kotlin" => ("fun main() { println(\"grammar delivery\") }", true),
 		"tree-sitter-toml" => ("title = \"grammar delivery\"\n[probe]\nenabled = true\n", true),
+		"tree-sitter-xml" => ("<?xml version=\"1.0\"?><root><!-- grammar delivery --><![CDATA[kept]]></root>", true),
+		"tree-sitter-yaml" => ("---\nprobe: &probe\n  enabled: true # grammar delivery\ncopy: *probe\n", true),
 		_ => ("x", false)
 	};
 

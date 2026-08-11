@@ -177,10 +177,15 @@ heredocs, compiler directives, attributes, and annotations is not treated as a c
 Directive comments such as `// eslint-disable`, `// @ts-ignore`, and `# type: ignore` are
 removed because this output is intended for reading rather than compilation.
 Comment removal supports the 14 body-compression languages plus HTML (`.html`, `.htm`), CSS
-(`.css`), TOML (`.toml`), and Bash (`.sh`, `.bash`). These four additional packs are
-comments-only: enabling `--compress` alone keeps them on the unsupported fast path, while
-`--strip-comments` enables their syntax-aware processing. HTML comments are removed, but
-JavaScript and CSS comment text inside HTML `script` and `style` raw-text nodes remains intact.
+(`.css`), TOML (`.toml`), Bash (`.sh`, `.bash`), XML-family project files, and YAML (`.yml`,
+`.yaml`), for 20 language packs in total. The six additional packs are comments-only: enabling
+`--compress` alone keeps them on the unsupported fast path, while `--strip-comments` enables
+their syntax-aware processing. XML-family coverage includes `.xml`, `.xaml`, `.axaml`,
+`.csproj`, `.props`, `.targets`, `.vbproj`, `.fsproj`, `.nuspec`, `.config`, and `.resx`;
+SVG assets are deliberately excluded. XML CDATA, declarations, processing instructions, and
+DOCTYPE content remain intact. YAML block scalars, strings, anchors, tags, and document markers
+remain intact. HTML comments are removed, but JavaScript and CSS comment text inside HTML
+`script` and `style` raw-text nodes remains intact.
 
 Compression and comment removal are independent and share one syntax analysis and one
 validated edit plan:
@@ -192,7 +197,7 @@ validated edit plan:
 | Both | A bare declaration skeleton without comments or docstrings |
 
 When Hide Secrets is also enabled, syntax edits are applied first and secret detection runs
-over that exact transformed text. Unsupported languages such as XML, YAML, and Markdown remain
+over that exact transformed text. Unsupported languages such as Markdown remain
 byte-for-byte complete. Source files are never modified by any combination.
 
 Modern local profiles retain checked and unchecked states across roots, extensions,

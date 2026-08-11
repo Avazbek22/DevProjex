@@ -119,6 +119,8 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		"toml" => "# note\n[service]\nname = \"api#worker\"\n",
 		"tsx" => CodeCompressionFixtures.Tsx,
 		"typescript" => CodeCompressionFixtures.TypeScript,
+		"xml" => "<?xml version=\"1.0\"?>\n<!-- note -->\n<root><![CDATA[<!-- data -->]]></root>\n",
+		"yaml" => "---\n# note\nservice: api\n",
 		_ => throw new ArgumentOutOfRangeException(nameof(languageId), languageId, "No fixture for this language.")
 	};
 
@@ -126,9 +128,10 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 	{
 		"bash" or "toml" => "# comment\n",
 		"css" => "/* comment */\n",
-		"html" => "<!-- comment -->\n",
+		"html" or "xml" => "<!-- comment -->\n",
 		"python" or "ruby" => "# comment\n",
 		"php" => "<?php // comment\n?>",
+		"yaml" => "# comment\n",
 		_ => "// comment\n"
 	};
 

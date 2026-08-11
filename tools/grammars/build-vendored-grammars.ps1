@@ -229,6 +229,22 @@ try
             }
             $path
         })
+        $includeDirectories = if ($null -ne $grammar.build.PSObject.Properties['includeDirectories'])
+        {
+            @($grammar.build.includeDirectories)
+        }
+        else
+        {
+            @('src')
+        }
+        $includePaths = @($includeDirectories | ForEach-Object {
+            $path = Join-Path $sourceDirectory $_
+            if (-not (Test-Path -LiteralPath $path -PathType Container))
+            {
+                throw "Pinned $($grammar.name) include directory is missing: $path"
+            }
+            $path
+        })
 
         foreach ($binary in $grammar.binaries)
         {
@@ -243,10 +259,11 @@ try
             {
                 $arguments += @($binary.linkerFlags)
             }
-            $arguments += @(
-                '-I', (Join-Path $sourceDirectory 'src'),
-                '-o', $builtPath
-            ) + $sourceFiles
+            foreach ($includePath in $includePaths)
+            {
+                $arguments += @('-I', $includePath)
+            }
+            $arguments += @('-o', $builtPath) + $sourceFiles
 
             & $ZigPath @arguments
             if ($LASTEXITCODE -ne 0)

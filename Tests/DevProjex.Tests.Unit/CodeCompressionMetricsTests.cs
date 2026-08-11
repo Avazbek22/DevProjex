@@ -90,6 +90,8 @@ public sealed class CodeCompressionMetricsTests
 	[InlineData("site.css", "/* first */\r\n.card { color: red; /* trailing */ }\r\n")]
 	[InlineData("app.toml", "# first\r\nname = \"api#worker\" # trailing\r\n")]
 	[InlineData("deploy.sh", "#!/usr/bin/env bash\r\n# first\r\nvalue=1 # trailing")]
+	[InlineData("view.axaml", "<?xml version=\"1.0\"?>\r\n<!-- first -->\r\n<Root>Ready<!-- trailing --></Root>\r\n")]
+	[InlineData("deployment.yaml", "---\r\n# first\r\nname: \"api#worker\" # trailing\r\n")]
 	public void MetricsFromCommentOnlyLanguagePlan_EqualMaterializedOutput(
 		string path,
 		string source)

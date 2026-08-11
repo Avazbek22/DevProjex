@@ -48,7 +48,8 @@ under the MIT License.
 - Grammars shipped: tree-sitter-bash, tree-sitter-c, tree-sitter-c-sharp, tree-sitter-cpp,
   tree-sitter-css, tree-sitter-go, tree-sitter-html, tree-sitter-java, tree-sitter-javascript,
   tree-sitter-kotlin, tree-sitter-php, tree-sitter-python, tree-sitter-ruby, tree-sitter-rust,
-  tree-sitter-scala, tree-sitter-toml, tree-sitter-tsx, tree-sitter-typescript
+  tree-sitter-scala, tree-sitter-toml, tree-sitter-tsx, tree-sitter-typescript,
+  tree-sitter-xml, tree-sitter-yaml
 - Bash grammar source: https://github.com/tree-sitter/tree-sitter-bash
 - CSS grammar source: https://github.com/tree-sitter/tree-sitter-css
 - HTML grammar source: https://github.com/tree-sitter/tree-sitter-html
@@ -65,8 +66,13 @@ under the MIT License.
 - Vendored Kotlin grammar: `v1.1.0`, revision `77dd60ea0a9003ce062c9728a513ffe1aaff8c82`
 - Vendored TOML grammar: revision `342d9be207c2dba869b9967124c679b5e6fd0ebe`, identical to
   the source pinned by TreeSitter.DotNet 1.3.0.
-- Kotlin and TOML native binaries are reproducibly built with Zig 0.16.0; provenance and SHA-256
-  hashes are recorded in `Infrastructure/Grammars/vendored/vendored-grammars.lock.json`.
+- XML grammar source: https://github.com/tree-sitter-grammars/tree-sitter-xml
+- Vendored XML grammar: `v0.7.0`, revision `4b64dd3a03ec002258d6268d712fd93716d6ab57`.
+- YAML grammar source: https://github.com/tree-sitter-grammars/tree-sitter-yaml
+- Vendored YAML grammar: `v0.7.2`, revision `7708026449bed86239b1cd5bce6e3c34dbca6415`.
+- Kotlin, TOML, XML and YAML native binaries are reproducibly built with Zig 0.16.0;
+  provenance and SHA-256 hashes are recorded in
+  `Infrastructure/Grammars/vendored/vendored-grammars.lock.json`.
 
 Only the grammars listed above are shipped. The remaining grammars in the package are
 removed from every build output by `Directory.Build.targets`.
@@ -80,6 +86,9 @@ Copyright (c) 2016 Rob Rix
 Copyright (c) 2017 Josh Vera, GitHub
 Copyright (c) 2019 Max Brunsfeld, Amaan Qureshi, Christian Frøystad, Caleb White
 Copyright (c) 2024 Amaan Qureshi <amaanq12@gmail.com>
+Copyright (c) 2023 ObserverOfTime
+Copyright (c) 2019-2021 Ika
+Copyright (c) 2024 tree-sitter-grammars contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -48,8 +48,10 @@ public sealed class CompressionOptimizationBenchmarkTests
 		var baselinePlan = await BuildPlanAsync(root);
 		var goldenPlan = await BuildGoldenPlanAsync();
 		var commentsOnlyPlan = await BuildCommentsOnlyPlanAsync();
+		var structuredDataStressPlan = await BuildStructuredDataStressPlanAsync();
 		Assert.NotEmpty(baselinePlan.IncludedFiles);
 		Assert.NotEmpty(commentsOnlyPlan.IncludedFiles);
+		Assert.NotEmpty(structuredDataStressPlan.IncludedFiles);
 		var iterations = new List<BenchmarkIteration>(MeasuredRuns);
 		for (var index = 0; index < MeasuredRuns; index++)
 		{
@@ -57,6 +59,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 				index + 1,
 				baselinePlan,
 				commentsOnlyPlan,
+				structuredDataStressPlan,
 				goldenPlan,
 				TestContext.Current.CancellationToken));
 		}
@@ -76,6 +79,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 			ProjectRoot: root,
 			FileCount: baselinePlan.IncludedFiles.Count,
 			CommentsOnlyCorpusFileCount: commentsOnlyPlan.IncludedFiles.Count,
+			StructuredDataStressFileCount: structuredDataStressPlan.IncludedFiles.Count,
 			Runs: iterations,
 			Medians: BuildMedians(iterations));
 
@@ -93,6 +97,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 		int index,
 		ProjectContextPlan plan,
 		ProjectContextPlan commentsOnlyPlan,
+		ProjectContextPlan structuredDataStressPlan,
 		ProjectContextPlan goldenPlan,
 		CancellationToken cancellationToken)
 	{
@@ -119,7 +124,13 @@ public sealed class CompressionOptimizationBenchmarkTests
 			["commentsOnlyCorpusComments"] = await RunScenarioAsync(
 				commentsOnlyPlan, compress: false, stripComments: true, hideSecrets: false, cancellationToken),
 			["commentsOnlyCorpusBoth"] = await RunScenarioAsync(
-				commentsOnlyPlan, compress: true, stripComments: true, hideSecrets: false, cancellationToken)
+				commentsOnlyPlan, compress: true, stripComments: true, hideSecrets: false, cancellationToken),
+			["structuredDataCompression"] = await RunScenarioAsync(
+				structuredDataStressPlan, compress: true, stripComments: false, hideSecrets: false, cancellationToken),
+			["structuredDataComments"] = await RunScenarioAsync(
+				structuredDataStressPlan, compress: false, stripComments: true, hideSecrets: false, cancellationToken),
+			["structuredDataBoth"] = await RunScenarioAsync(
+				structuredDataStressPlan, compress: true, stripComments: true, hideSecrets: false, cancellationToken)
 		};
 		var toggle = await RunToggleScenarioAsync(plan, cancellationToken);
 		var golden = await BuildGoldenAsync(goldenPlan, cancellationToken);
@@ -603,7 +614,13 @@ public sealed class CompressionOptimizationBenchmarkTests
 			["config/app-{0}.toml"] =
 				"# service configuration\n[service]\nname = \"api#worker\" # deployment name\nendpoint = \"https://example.test/v1#health\"\n# retry policy\nretries = 4\n",
 			["scripts/deploy-{0}.sh"] =
-				"#!/usr/bin/env bash\n# Fail on the first deployment error.\nset -euo pipefail\nlabel=\"release#stable\" # visible release channel\ncat <<'EOF'\n# heredoc content is data\nEOF\nprintf '%s\\n' \"$label\"\n"
+				"#!/usr/bin/env bash\n# Fail on the first deployment error.\nset -euo pipefail\nlabel=\"release#stable\" # visible release channel\ncat <<'EOF'\n# heredoc content is data\nEOF\nprintf '%s\\n' \"$label\"\n",
+			["markup/view-{0}.axaml"] =
+				"<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- design-time note -->\n<UserControl xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" x:Class=\"Bench.View\">\n  <TextBlock x:Name=\"Title\" Text=\"{Binding Title}\" /><!-- binding note -->\n</UserControl>\n",
+			["projects/library-{0}.csproj"] =
+				"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <!-- build contract -->\n  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>\n  <ItemGroup><!-- pinned package --><PackageReference Include=\"Example\" Version=\"1.0.0\" /></ItemGroup>\n</Project>\n",
+			["config/deployment-{0}.yaml"] =
+				"---\n# deployment metadata\nservice: &service\n  name: api # public name\n  image: \"registry/app#stable\"\n  script: |\n    echo \"# block scalar data\"\n    printf '%s\\n' done\nreplica: *service\n...\n"
 		};
 		var timestamp = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
 		for (var copy = 0; copy < 8; copy++)
@@ -623,6 +640,66 @@ public sealed class CompressionOptimizationBenchmarkTests
 					TestContext.Current.CancellationToken);
 				File.SetLastWriteTimeUtc(path, timestamp);
 			}
+		}
+
+		return await BuildPlanAsync(root);
+	}
+
+	private static async Task<ProjectContextPlan> BuildStructuredDataStressPlanAsync()
+	{
+		var root = Path.Combine(
+			Path.GetTempPath(),
+			"DevProjex.CompressionOptimization.StructuredDataStressCorpus");
+		if (Directory.Exists(root))
+			Directory.Delete(root, recursive: true);
+		Directory.CreateDirectory(root);
+
+		var largeXml = new StringBuilder("<?xml version=\"1.0\"?>\n<catalog>\n");
+		for (var index = 0; index < 6_000; index++)
+		{
+			largeXml.Append("  <!-- generated item ")
+				.Append(index)
+				.Append(" -->\n  <item id=\"")
+				.Append(index)
+				.Append("\"><![CDATA[value <!-- retained --> # ")
+				.Append(index)
+				.Append("]]></item>\n");
+		}
+		largeXml.Append("</catalog>\n");
+
+		var deepYaml = new StringBuilder("---\n");
+		for (var depth = 0; depth < 256; depth++)
+		{
+			deepYaml.Append(' ', depth * 2)
+				.Append("level_")
+				.Append(depth)
+				.Append(": # nested mapping\n");
+		}
+		deepYaml.Append(' ', 512)
+			.Append("payload: |\n")
+			.Append(' ', 514)
+			.Append("# block scalar content is data\n")
+			.Append(' ', 514)
+			.Append("done\n...\n");
+
+		var files = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["large/catalog.xml"] = largeXml.ToString(),
+			["deep/config.yaml"] = deepYaml.ToString(),
+			["limits/over-cap.xml"] =
+				"<!-- oversized comment -->\n<root>" + new string('x', 2 * 1024 * 1024) + "</root>\n"
+		};
+		var timestamp = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+		foreach (var (relativePath, content) in files)
+		{
+			var path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+			await File.WriteAllTextAsync(
+				path,
+				content,
+				new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+				TestContext.Current.CancellationToken);
+			File.SetLastWriteTimeUtc(path, timestamp);
 		}
 
 		return await BuildPlanAsync(root);
@@ -686,6 +763,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 		string ProjectRoot,
 		int FileCount,
 		int CommentsOnlyCorpusFileCount,
+		int StructuredDataStressFileCount,
 		IReadOnlyList<BenchmarkIteration> Runs,
 		IReadOnlyDictionary<string, BenchmarkMedian> Medians);
 

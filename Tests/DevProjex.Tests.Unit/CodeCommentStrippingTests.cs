@@ -1,4 +1,5 @@
 using DevProjex.Application.Compression;
+using DevProjex.Infrastructure.Compression;
 
 namespace DevProjex.Tests.Unit;
 
@@ -95,6 +96,16 @@ public sealed class CodeCommentStrippingTests
 			"sample.ts",
 			"/** doc_marker */\nconst value: number = 1; // line_marker\n/* block_marker */\nconst text: string = \"// string_marker\";\n",
 			"const value: number = 1;\nconst text: string = \"// string_marker\";\n"
+		},
+		{
+			"sample.xml",
+			"<?xml version=\"1.0\"?>\n<!-- doc_marker -->\n<!DOCTYPE root>\n<?probe keep?>\n<root state=\"ready\">\n  <![CDATA[<!-- cdata_marker -->]]>\n  <!-- line_marker -->\n  <child>value</child><!-- tail_marker -->\n</root>\n",
+			"<?xml version=\"1.0\"?>\n<!DOCTYPE root>\n<?probe keep?>\n<root state=\"ready\">\n  <![CDATA[<!-- cdata_marker -->]]>\n  <child>value</child>\n</root>\n"
+		},
+		{
+			"sample.yaml",
+			"---\n# doc_marker\ndefaults: &defaults\n  image: \"repo#stable\" # line_marker\n  script: |\n    # scalar_marker\n    echo done\nservice:\n  <<: *defaults\n  tagged: !custom value # tail_marker\n...\n",
+			"---\ndefaults: &defaults\n  image: \"repo#stable\"\n  script: |\n    # scalar_marker\n    echo done\nservice:\n  <<: *defaults\n  tagged: !custom value\n...\n"
 		}
 	};
 
@@ -509,6 +520,19 @@ public sealed class CodeCommentStrippingTests
 	[InlineData("app.toml")]
 	[InlineData("deploy.sh")]
 	[InlineData("deploy.bash")]
+	[InlineData("document.xml")]
+	[InlineData("view.xaml")]
+	[InlineData("view.axaml")]
+	[InlineData("project.csproj")]
+	[InlineData("build.props")]
+	[InlineData("build.targets")]
+	[InlineData("project.vbproj")]
+	[InlineData("project.fsproj")]
+	[InlineData("package.nuspec")]
+	[InlineData("app.config")]
+	[InlineData("resources.resx")]
+	[InlineData("deployment.yml")]
+	[InlineData("deployment.yaml")]
 	public void EveryCommentOnlyExtensionSupportsCommentsButNotBodies(string path)
 	{
 		using var compressor = CodeCompressionTestHarness.CreateCompressor();
@@ -521,16 +545,147 @@ public sealed class CodeCommentStrippingTests
 	}
 
 	[Theory]
+	[InlineData("project.csproj", "<Project><!-- remove --></Project>")]
+	[InlineData("deployment.yaml", "# remove\nservice: api\n")]
+	public void StructuredDataPacksStayLazyAndUnsupportedInBodiesOnlyMode(
+		string path,
+		string source)
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Bodies);
+
+		var analysis = scope.Analyze(
+			path,
+			path,
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedUnsupportedLanguage, analysis.Plan.Outcome);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.MaterializedWorkers);
+	}
+
+	[Theory]
+	[InlineData("oversized.xml")]
+	[InlineData("oversized.yaml")]
+	public void OversizedStructuredDataRejectsBeforeLoadingItsRuntime(string path)
+	{
+		var source = new string('x', TreeSitterCodeCompressor.MaximumParsableCharacters + 1);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Comments);
+
+		var analysis = scope.Analyze(
+			path,
+			path,
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedTooLarge, analysis.Plan.Outcome);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.MaterializedWorkers);
+	}
+
+	[Theory]
 	[InlineData("comments.html", "<!-- first -->\r\n<!-- second -->")]
 	[InlineData("comments.css", "/* first */\r\n/* second */")]
 	[InlineData("comments.toml", "# first\r\n# second")]
 	[InlineData("comments.sh", "# first\r\n# second")]
+	[InlineData("comments.yaml", "# first\r\n# second")]
 	public void CommentOnlyFile_CanBecomeEmptyAcrossNewFormats(string path, string source)
 	{
 		var result = Transform(path, source, CodeTransformKinds.Comments);
 
 		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
 		Assert.Equal(string.Empty, result.Text);
+	}
+
+	[Fact]
+	public void XmlCommentOnlyDocument_RemainsCompleteWhenRemovalWouldInvalidateTheDocument()
+	{
+		const string source = "<!-- first -->\r\n<!-- second -->";
+
+		var result = Transform("comments.xml", source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedGateRejected, result.Plan.Outcome);
+		Assert.Equal(source, result.Text);
+	}
+
+	[Theory]
+	[InlineData(
+		"MainWindow.axaml",
+		"<Window xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" x:Class=\"App.MainWindow\">\r\n  <!-- layout -->\r\n  <TextBlock x:Name=\"Title\" Text=\"{Binding Title}\" /><!-- binding -->\r\n</Window>\r\n",
+		"<Window xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" x:Class=\"App.MainWindow\">\r\n  <TextBlock x:Name=\"Title\" Text=\"{Binding Title}\" />\r\n</Window>\r\n")]
+	[InlineData(
+		"Sample.csproj",
+		"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <!-- build contract -->\n  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>\n  <!-- <PackageReference Include=\"Disabled\" /> -->\n</Project>\n",
+		"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>\n</Project>\n")]
+	public void XmlFamily_RemovesOnlyCommentsAndPreservesMarkupByteForByte(
+		string path,
+		string source,
+		string expected)
+	{
+		var result = Transform(path, source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
+		Assert.Equal(expected, result.Text);
+	}
+
+	[Fact]
+	public void YamlNestedCollectionsAndBlockScalarsRemainStructurallyValid()
+	{
+		const string source =
+			"---\r\n" +
+			"items:\r\n" +
+			"  # first item\r\n" +
+			"  - name: api # display name\r\n" +
+			"    settings:\r\n" +
+			"      # nested mapping\r\n" +
+			"      enabled: true\r\n" +
+			"      script: >\r\n" +
+			"        # scalar content\r\n" +
+			"        echo done\r\n";
+
+		var result = Transform("deployment.yml", source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
+		Assert.Equal(
+			"---\r\n" +
+			"items:\r\n" +
+			"  - name: api\r\n" +
+			"    settings:\r\n" +
+			"      enabled: true\r\n" +
+			"      script: >\r\n" +
+			"        # scalar content\r\n" +
+			"        echo done\r\n",
+			result.Text);
+	}
+
+	[Fact]
+	public void DeeplyNestedYamlDoesNotOverflowExternalScannerSerialization()
+	{
+		var source = new StringBuilder("---\n");
+		for (var depth = 0; depth < 256; depth++)
+		{
+			source.Append(' ', depth * 2)
+				.Append("level_")
+				.Append(depth)
+				.Append(": # nested mapping\n");
+		}
+		source.Append(' ', 512).Append("value: safe\n");
+
+		var result = Transform("deep.yaml", source.ToString(), CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
+		Assert.DoesNotContain("# nested mapping", result.Text, StringComparison.Ordinal);
+		Assert.Contains("value: safe", result.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SvgRemainsOutsideTheXmlCommentsOnlyContract()
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+
+		Assert.False(compressor.IsSupported("asset.svg", CodeTransformKinds.Comments));
 	}
 
 	[Fact]

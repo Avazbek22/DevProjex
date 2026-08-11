@@ -207,11 +207,11 @@ jobs:
           mib=$(( delta / 1048576 ))
           echo "| ${{ matrix.rid }} | $baseline | $embedded | $delta (~${mib} MiB) |" >> "$GITHUB_STEP_SUMMARY"
           echo "GRAMMAR-DELIVERY-SIZE rid=${{ matrix.rid }} baseline=$baseline embedded=$embedded delta=$delta"
-          # The eighteen-language payload, including four comments-only packs, stays below 30 MiB
+          # The twenty-language payload, including six comments-only packs, stays below 32 MiB
           # on every RID. Keep a tight absolute ceiling so further native growth is explicit.
-          budget=$((30 * 1024 * 1024))
+          budget=$((32 * 1024 * 1024))
           if [ "$delta" -gt "$budget" ]; then
-            echo "::error::Grammar payload for ${{ matrix.rid }} is $delta bytes, over the 30 MiB budget."
+            echo "::error::Grammar payload for ${{ matrix.rid }} is $delta bytes, over the 32 MiB budget."
             exit 1
           fi
 

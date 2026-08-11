@@ -11,6 +11,8 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 	{
 		const string commentMarker = "strip-comments-ui-marker";
 		const string cssCommentMarker = "strip-comments-css-ui-marker";
+		const string xmlCommentMarker = "strip-comments-xml-ui-marker";
+		const string yamlCommentMarker = "strip-comments-yaml-ui-marker";
 		using var project = UiTestProject.CreateDefault();
 		var sourcePath = Path.Combine(project.RootPath, "src", "AppHost", "Program.cs");
 		var originalSource = await File.ReadAllTextAsync(
@@ -25,6 +27,16 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 		await File.WriteAllTextAsync(
 			cssPath,
 			$"/* {cssCommentMarker} */{Environment.NewLine}.app {{ color: red; }}{Environment.NewLine}",
+			TestContext.Current.CancellationToken);
+		var xmlPath = Path.Combine(project.RootPath, "src", "AppHost", "View.axaml");
+		await File.WriteAllTextAsync(
+			xmlPath,
+			$"<!-- {xmlCommentMarker} -->{Environment.NewLine}<Panel xmlns=\"https://github.com/avaloniaui\" />{Environment.NewLine}",
+			TestContext.Current.CancellationToken);
+		var yamlPath = Path.Combine(project.RootPath, "src", "AppHost", "deployment.yaml");
+		await File.WriteAllTextAsync(
+			yamlPath,
+			$"# {yamlCommentMarker}{Environment.NewLine}service: app{Environment.NewLine}",
 			TestContext.Current.CancellationToken);
 		var sourceBytes = await File.ReadAllBytesAsync(
 			sourcePath,
@@ -69,7 +81,7 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 				"comment-removal prewarm to publish its exact snapshot after Apply");
 			var snapshot = Assert.IsType<CodeCompressionSnapshot>(GetCompressionSnapshot(window));
 			Assert.Equal(0, snapshot.BodyTransformedFiles);
-			Assert.True(snapshot.CommentTransformedFiles >= 2);
+			Assert.True(snapshot.CommentTransformedFiles >= 4);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() =>
@@ -77,6 +89,8 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
 					var preview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
 					return !preview.Contains(commentMarker, StringComparison.Ordinal) &&
 					       !preview.Contains(cssCommentMarker, StringComparison.Ordinal) &&
+					       !preview.Contains(xmlCommentMarker, StringComparison.Ordinal) &&
+					       !preview.Contains(yamlCommentMarker, StringComparison.Ordinal) &&
 					       preview.Contains("return \"app-value-1\";", StringComparison.Ordinal);
 				},
 				"comment removal to update Preview while preserving implementation code");

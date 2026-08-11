@@ -555,6 +555,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	[Theory]
 	[InlineData("page.html", "<!-- api_token = {0} -->\n<main>safe</main>\n", "<main>safe</main>\n")]
 	[InlineData("app.toml", "# api_token = {0}\nname = \"safe\"\n", "name = \"safe\"\n")]
+	[InlineData("view.axaml", "<!-- api_token = {0} -->\n<Panel>safe</Panel>\n", "<Panel>safe</Panel>\n")]
+	[InlineData("deployment.yaml", "# api_token = {0}\nname: safe\n", "name: safe\n")]
 	public async Task StripComments_RemovesCommentSecretsFromNewLanguagePacksBeforeDetection(
 		string fileName,
 		string sourceTemplate,

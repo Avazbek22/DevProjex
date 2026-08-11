@@ -18,7 +18,7 @@ public sealed class CodeCompressionQueryContractTests
 	private static readonly string[] ExpectedLanguageIds =
 	[
 		"bash", "c", "cpp", "csharp", "css", "go", "html", "java", "javascript", "kotlin",
-		"php", "python", "ruby", "rust", "scala", "toml", "tsx", "typescript"
+		"php", "python", "ruby", "rust", "scala", "toml", "tsx", "typescript", "xml", "yaml"
 	];
 
 	[Fact]
@@ -94,6 +94,8 @@ public sealed class CodeCompressionQueryContractTests
 		Assert.DoesNotContain("css", bodyLanguages);
 		Assert.DoesNotContain("html", bodyLanguages);
 		Assert.DoesNotContain("toml", bodyLanguages);
+		Assert.DoesNotContain("xml", bodyLanguages);
+		Assert.DoesNotContain("yaml", bodyLanguages);
 	}
 
 	[Fact]
@@ -130,7 +132,9 @@ public sealed class CodeCompressionQueryContractTests
 			["scala"] = 2,
 			["toml"] = 1,
 			["tsx"] = 8,
-			["typescript"] = 8
+			["typescript"] = 8,
+			["xml"] = 1,
+			["yaml"] = 1
 		};
 
 		Assert.Equal(

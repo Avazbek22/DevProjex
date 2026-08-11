@@ -833,6 +833,12 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		workspace.CreateExtraFile(
 			"deploy.sh",
 			"#!/usr/bin/env bash\n# remove\nname='# keep' # trailing\n");
+		workspace.CreateExtraFile(
+			"view.axaml",
+			"<!-- remove -->\n<Panel xmlns=\"https://github.com/avaloniaui\"><![CDATA[<!-- keep cdata -->]]></Panel>\n");
+		workspace.CreateExtraFile(
+			"deployment.yaml",
+			"# remove\nname: \"api#keep\" # trailing\nscript: |\n  # keep scalar\n");
 
 		using var session = CodeCompressionFactory.CreateSession();
 		await using var prepared = await new SecretRedactionOutputPreparer(new FileContentAnalyzer())
@@ -878,6 +884,8 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		Assert.Contains("/* keep */", firstContext, StringComparison.Ordinal);
 		Assert.Contains("api#keep", firstContext, StringComparison.Ordinal);
 		Assert.Contains("#!/usr/bin/env bash", firstContext, StringComparison.Ordinal);
+		Assert.Contains("keep cdata", firstContext, StringComparison.Ordinal);
+		Assert.Contains("keep scalar", firstContext, StringComparison.Ordinal);
 	}
 
 	[Fact]
