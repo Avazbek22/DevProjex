@@ -400,6 +400,14 @@ public sealed class GitRepositoryService : IGitRepositoryService
     {
         try
         {
+            if (RepositoryCacheLayout.IsManaged(repositoryPath))
+            {
+                return await SwitchManagedWorktreeBranchAsync(
+                    repositoryPath,
+                    branchName,
+                    cancellationToken);
+            }
+
             // Note: progress status is set by caller to show localized message
 
             // OPTIMISTIC PATH: Try to checkout existing local branch
@@ -514,10 +522,26 @@ public sealed class GitRepositoryService : IGitRepositoryService
             // 1. We only need the latest state (read-only viewer)
             // 2. This is a cached copy, not user's repo
             // 3. Reduces bandwidth usage significantly
-            var fetchResult = await RunGitCommandAsync(
-                repositoryPath,
-                $"fetch origin \"{currentBranch}\" --depth 1",
-                cancellationToken);
+            GitCommandResult fetchResult;
+            if (RepositoryCacheLayout.IsManaged(repositoryPath))
+            {
+                await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(
+                    RepositoryCacheLayout.GetBaseOperationLockPath(
+                        RepositoryCacheLayout.GetContainer(repositoryPath),
+                        repositoryPath),
+                    cancellationToken);
+                fetchResult = await RunGitCommandAsync(
+                    repositoryPath,
+                    $"fetch origin \"{currentBranch}\" --depth 1",
+                    cancellationToken);
+            }
+            else
+            {
+                fetchResult = await RunGitCommandAsync(
+                    repositoryPath,
+                    $"fetch origin \"{currentBranch}\" --depth 1",
+                    cancellationToken);
+            }
 
             if (fetchResult.ExitCode != 0)
                 return false;  // Network error or branch doesn't exist
@@ -591,7 +615,20 @@ public sealed class GitRepositoryService : IGitRepositoryService
             {
                 var branch = result.Output.Trim();
                 // "HEAD" means detached state
-                return string.IsNullOrEmpty(branch) || branch == "HEAD" ? null : branch;
+                if (!string.IsNullOrEmpty(branch) && branch != "HEAD")
+                    return branch;
+
+                if (RepositoryCacheLayout.IsManaged(repositoryPath))
+                {
+                    var configured = await RunGitCommandAsync(
+                        repositoryPath,
+                        "config --worktree --get devprojex.branch",
+                        cancellationToken);
+                    if (configured.ExitCode == 0 && !string.IsNullOrWhiteSpace(configured.Output))
+                        return configured.Output.Trim();
+                }
+
+                return null;
             }
         }
         catch
@@ -600,6 +637,56 @@ public sealed class GitRepositoryService : IGitRepositoryService
         }
 
         return null;
+    }
+
+    private static async Task<bool> SwitchManagedWorktreeBranchAsync(
+        string repositoryPath,
+        string branchName,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+            return false;
+
+        var container = RepositoryCacheLayout.GetContainer(repositoryPath);
+        var basePath = Path.Combine(container, RepositoryCacheLayout.BaseDirectoryName);
+        if (!Directory.Exists(basePath))
+            basePath = repositoryPath;
+
+        await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(
+            RepositoryCacheLayout.GetBaseOperationLockPath(container, basePath),
+            cancellationToken);
+
+        var revision = $"refs/remotes/origin/{branchName}";
+        var verify = await RunGitCommandAsync(
+            repositoryPath,
+            $"rev-parse --verify --quiet \"{revision}\"",
+            cancellationToken);
+        if (verify.ExitCode != 0)
+        {
+            var setBranches = await RunGitCommandAsync(
+                repositoryPath,
+                $"remote set-branches --add origin \"{branchName}\"",
+                cancellationToken);
+            var fetch = await RunGitCommandAsync(
+                repositoryPath,
+                $"fetch origin \"{branchName}\" --depth 1",
+                cancellationToken);
+            if (setBranches.ExitCode != 0 || fetch.ExitCode != 0)
+                return false;
+        }
+
+        var checkout = await RunGitCommandAsync(
+            repositoryPath,
+            $"checkout --detach \"{revision}\"",
+            cancellationToken);
+        if (checkout.ExitCode != 0)
+            return false;
+
+        var config = await RunGitCommandAsync(
+            repositoryPath,
+            $"config --worktree devprojex.branch \"{branchName}\"",
+            cancellationToken);
+        return config.ExitCode == 0;
     }
 
     /// <summary>
