@@ -855,10 +855,13 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	[InlineData(true)]
 	public async Task BlankLineCollapsedCommentsProduceIdenticalBytesAcrossAllOutputSurfaces(bool compress)
 	{
-		using var workspace = CompressionWorkspace.Create(MixedFileWithCommentSurroundedByBlankLines);
+		var mixedSource = MixedFileWithCommentSurroundedByBlankLines.ReplaceLineEndings("\n");
+		var fullyCommentedSource = FullyCommentedFileWithBlankSeparators.ReplaceLineEndings("\n");
+		var expectedMixed = MixedFileAfterCommentRemoval.ReplaceLineEndings("\n");
+		using var workspace = CompressionWorkspace.Create(mixedSource);
 		workspace.CreateExtraFile(
 			"FullyCommented.cs",
-			FullyCommentedFileWithBlankSeparators);
+			fullyCommentedSource);
 
 		var firstContext = await workspace.BuildContextAsync(compress, stripComments: true);
 		var secondContext = await workspace.BuildContextAsync(compress, stripComments: true);
@@ -882,8 +885,8 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		var zipFullyCommented = await fullyCommentedReader.ReadToEndAsync(TestContext.Current.CancellationToken);
 
 		Assert.Equal(firstContext, secondContext);
-		Assert.EndsWith(MixedFileAfterCommentRemoval, firstContext, StringComparison.Ordinal);
-		Assert.Equal(MixedFileAfterCommentRemoval, folderMixed);
+		Assert.EndsWith(expectedMixed, firstContext, StringComparison.Ordinal);
+		Assert.Equal(expectedMixed, folderMixed);
 		Assert.Equal(folderMixed, zipMixed);
 		Assert.Equal(string.Empty, folderFullyCommented);
 		Assert.Equal(folderFullyCommented, zipFullyCommented);
