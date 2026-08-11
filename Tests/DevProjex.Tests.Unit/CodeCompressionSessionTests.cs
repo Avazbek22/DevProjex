@@ -1501,18 +1501,27 @@ public sealed class CodeCompressionSessionTests
 				ContentFingerprint.Compute(content));
 		}
 
-		public ValueTask<BudgetedContentReadResult> ReadFactWithBudgetAsync(
+		public async ValueTask<BudgetedContentReadResult> ReadFactWithBudgetAsync(
 			string path,
 			long maximumReadBytes,
 			WeightedByteBudget byteBudget,
 			SemaphoreSlim decodeScratchGate,
-			CancellationToken cancellationToken = default) =>
-			ReadTestFactWithBudgetAsync(
+			CancellationToken cancellationToken = default)
+		{
+			if (path.EndsWith("failure.cs", StringComparison.Ordinal))
+			{
+				await analysisStarted.WaitAsync(cancellationToken);
+				FailureObserved.TrySetResult();
+				throw new InvalidOperationException(primaryMessage);
+			}
+
+			return await ReadTestFactWithBudgetAsync(
 				() => ReadFactAsync(path, maximumReadBytes, cancellationToken),
 				128 + "same-content".Length * sizeof(char),
 				byteBudget,
 				decodeScratchGate,
 				cancellationToken);
+		}
 
 		public ValueTask<IdentifiedFileContentMetricsResult> GetClassifiedMetricsWithIdentityAsync(
 			string path,
