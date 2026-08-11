@@ -11,6 +11,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The native compression adapter needs cancellable plan internals without widening the public API. -->
+    <InternalsVisibleTo Include="Infrastructure" />
     <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
   </ItemGroup>
 </Project>

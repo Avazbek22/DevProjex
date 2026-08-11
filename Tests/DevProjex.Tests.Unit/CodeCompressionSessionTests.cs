@@ -365,6 +365,32 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public async Task Prewarm_WorkerFailureCancelsBlockedProducersAndPreservesPrimaryException()
+	{
+		const string primaryMessage = "analysis failed after the channel filled";
+		var analyzer = new PipelineFillFileContentAnalyzer(requiredReads: 4);
+		using var compressor = new PipelineFillFailureCompressor(analyzer.RequiredReadsReached.Task, primaryMessage);
+		using var session = new CodeCompressionSession(compressor);
+		var paths = Enumerable.Range(0, 6)
+			.Select(index => $"C:/project/file-{index}.cs")
+			.ToArray();
+
+		var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+			new CodeCompressionPrewarmer(analyzer).WarmAsync(
+				new CodeCompressionContext("C:/project", session),
+				paths,
+				TestContext.Current.CancellationToken).WaitAsync(
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(primaryMessage, exception.Message);
+		Assert.True(analyzer.ReadFactCalls >= 4);
+		Assert.Equal(0, compressor.ActiveAnalyses);
+		Assert.Equal(0, session.Diagnostics.CacheEntries);
+		Assert.Same(CodeCompressionSnapshot.Empty, session.Snapshot);
+	}
+
+	[Fact]
 	public async Task Prewarm_PublishesExactCompressionFactsBeforeAnyOutputIsBuilt()
 	{
 		const string source = "prefix-1234567890-suffix";
@@ -455,6 +481,54 @@ public sealed class CodeCompressionSessionTests
 
 		Assert.Equal(1, compressor.AnalysisCount);
 		Assert.Equal(1, session.Diagnostics.PrewarmReuses);
+	}
+
+	[Fact]
+	public async Task CanceledPrewarmWaiter_DoesNotDiscardGenerationOwnedSharedResult()
+	{
+		using var compressor = new BlockingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		using var canceledScope = session.BeginOutput("project", ["sample.cs"]);
+		using var survivingScope = session.BeginOutput("project", ["sample.cs"]);
+		using var callerCancellation = new CancellationTokenSource();
+		var testCancellation = TestContext.Current.CancellationToken;
+
+		var canceledWaiter = StartBlockingOperation(
+			() => canceledScope.Warm(
+				"sample.cs",
+				"sample.cs",
+				"same-content",
+				callerCancellation.Token),
+			testCancellation);
+		await compressor.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), testCancellation);
+		callerCancellation.Cancel();
+		var survivingWaiter = StartBlockingOperation(
+			() => survivingScope.Warm(
+				"sample.cs",
+				"sample.cs",
+				"same-content",
+				testCancellation),
+			testCancellation);
+
+		try
+		{
+			Assert.True(
+				SpinWait.SpinUntil(
+					() => session.Diagnostics.PrewarmRequests == 2,
+					TimeSpan.FromSeconds(5)),
+				"The surviving waiter did not reach the shared prewarm operation.");
+		}
+		finally
+		{
+			compressor.Release();
+		}
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledWaiter);
+		Assert.True(await survivingWaiter);
+
+		Assert.Equal(1, compressor.AnalysisCount);
+		Assert.Equal(1, session.Diagnostics.AnalysisExecutions);
+		Assert.Equal(1, session.Diagnostics.CacheEntries);
 	}
 
 	[Fact]
@@ -1243,6 +1317,98 @@ public sealed class CodeCompressionSessionTests
 			{
 				if (Volatile.Read(ref owner._activeAnalyses) != 0)
 					Interlocked.Exchange(ref owner._disposedWhileAnalyzing, 1);
+			}
+		}
+	}
+
+	private sealed class PipelineFillFileContentAnalyzer(int requiredReads) : IFileContentAnalyzer
+	{
+		private int _readFactCalls;
+
+		public TaskCompletionSource RequiredReadsReached { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public int ReadFactCalls => Volatile.Read(ref _readFactCalls);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			FileContentClassification.Text;
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(true);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			var calls = Interlocked.Increment(ref _readFactCalls);
+			if (calls >= requiredReads)
+				RequiredReadsReached.TrySetResult();
+
+			const string content = "pipeline-content";
+			return ValueTask.FromResult(new ContentReadFact(
+				content,
+				FileContentClassification.Text,
+				new TextFileMetrics(content.Length, 1, content.Length, false, false),
+				ContentFingerprint.Compute(content)));
+		}
+	}
+
+	private sealed class PipelineFillFailureCompressor(
+		Task requiredReadsReached,
+		string primaryMessage) : ICodeCompressor, IDisposable
+	{
+		private readonly Task _requiredReadsReached = requiredReadsReached;
+		private readonly string _primaryMessage = primaryMessage;
+		private int _activeAnalyses;
+
+		public string TransformIdentity => "pipeline-fill-failure:v1";
+		public int ActiveAnalyses => Volatile.Read(ref _activeAnalyses);
+		public bool IsSupported(string relativePath) => true;
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
+		public void Dispose()
+		{
+		}
+
+		private sealed class Scope(PipelineFillFailureCompressor owner) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken)
+			{
+				Interlocked.Increment(ref owner._activeAnalyses);
+				try
+				{
+					owner._requiredReadsReached.Wait(cancellationToken);
+					throw new InvalidOperationException(owner._primaryMessage);
+				}
+				finally
+				{
+					Interlocked.Decrement(ref owner._activeAnalyses);
+				}
+			}
+
+			public void Dispose()
+			{
 			}
 		}
 	}

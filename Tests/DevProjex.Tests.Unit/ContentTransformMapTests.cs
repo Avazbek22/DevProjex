@@ -274,6 +274,43 @@ public sealed class ContentTransformMapTests
 	}
 
 	[Fact]
+	public void CreateForAnalysis_ObservesCancellationDuringLargeEditScan()
+	{
+		const int sourceLength = 4096;
+		using var cancellation = new CancellationTokenSource();
+		var edits = CreateAlternatingRemovalEdits(sourceLength);
+		var cancelingEdits = new CancelingEditList(edits, cancellation, cancelAtIndex: 1023);
+
+		Assert.ThrowsAny<OperationCanceledException>(() => CodeCompressionPlan.CreateForAnalysis(
+			"a.cs",
+			"csharp",
+			cancelingEdits,
+			sourceLength,
+			"test-v1",
+			cancellation.Token));
+	}
+
+	[Fact]
+	public void ApplyForAnalysis_ObservesCancellationDuringLargeMapBuild()
+	{
+		const int sourceLength = 4096;
+		using var cancellation = new CancellationTokenSource();
+		var edits = CreateAlternatingRemovalEdits(sourceLength);
+		var cancelingEdits = new CancelingEditList(edits, cancellation, cancelAtIndex: 1023);
+		var plan = new CodeCompressionPlan(
+			"a.cs",
+			"csharp",
+			CodeCompressionOutcome.Compressed,
+			cancelingEdits,
+			sourceLength,
+			sourceLength - edits.Length,
+			"test-v1");
+
+		Assert.ThrowsAny<OperationCanceledException>(() =>
+			plan.ApplyForAnalysis(new string('x', sourceLength), cancellation.Token));
+	}
+
+	[Fact]
 	public void UnchangedPlan_AppliesAsAnExactCopyWithAnIdentityMap()
 	{
 		var plan = CodeCompressionPlan.Unchanged(
@@ -288,5 +325,33 @@ public sealed class ContentTransformMapTests
 		Assert.Equal(Source, result.Text);
 		Assert.True(result.Map.IsIdentity);
 		Assert.Equal(0, plan.SavedCharacters);
+	}
+
+	private static CodeCompressionEdit[] CreateAlternatingRemovalEdits(int sourceLength) =>
+		Enumerable.Range(0, sourceLength / 2)
+			.Select(static index => new CodeCompressionEdit(index * 2, 1, string.Empty))
+			.ToArray();
+
+	private sealed class CancelingEditList(
+		IReadOnlyList<CodeCompressionEdit> inner,
+		CancellationTokenSource cancellation,
+		int cancelAtIndex) : IReadOnlyList<CodeCompressionEdit>
+	{
+		public int Count => inner.Count;
+
+		public CodeCompressionEdit this[int index]
+		{
+			get
+			{
+				if (index == cancelAtIndex)
+					cancellation.Cancel();
+				return inner[index];
+			}
+		}
+
+		public IEnumerator<CodeCompressionEdit> GetEnumerator() => inner.GetEnumerator();
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+			GetEnumerator();
 	}
 }

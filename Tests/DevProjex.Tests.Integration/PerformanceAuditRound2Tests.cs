@@ -16,14 +16,33 @@ public sealed class PerformanceAuditRound2Tests
 	private const int DefaultUnsupportedShardBytes = 16 * 1024;
 	private const int DefaultCommentHeavyFiles = 60;
 	private const int DefaultCommentsPerFile = 6_000;
+	private const int DefaultConfigHeavyFiles = 500;
+	private const int DefaultConfigCommentsPerFile = 20;
 	private const int DefaultMixedCopiesPerLanguage = 4;
 	private const int DefaultSessionCreationIterations = 32;
+	private const int DefaultInstrumentationDirectPasses = 100;
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		WriteIndented = true,
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase
 	};
+	private static readonly TreeSitterAnalysisPhase[] ReportedAnalysisPhases =
+	[
+		TreeSitterAnalysisPhase.OriginalParse,
+		TreeSitterAnalysisPhase.PreserveQuery,
+		TreeSitterAnalysisPhase.BodyQuery,
+		TreeSitterAnalysisPhase.CommentQuery,
+		TreeSitterAnalysisPhase.OriginalDeclarations,
+		TreeSitterAnalysisPhase.OriginalDefectWalk,
+		TreeSitterAnalysisPhase.EditShaping,
+		TreeSitterAnalysisPhase.PlanBuild,
+		TreeSitterAnalysisPhase.PlanApply,
+		TreeSitterAnalysisPhase.ReverseParse,
+		TreeSitterAnalysisPhase.ReverseDeclarations,
+		TreeSitterAnalysisPhase.ReverseDefectWalk,
+		TreeSitterAnalysisPhase.StructureGate
+	];
 
 	[Fact(Timeout = 1_800_000)]
 	public async Task NewTransformationLayer_RecordsRoundTwoPerformanceProfile()
@@ -49,7 +68,7 @@ public sealed class PerformanceAuditRound2Tests
 		}
 
 		var report = new PerformanceAuditReport(
-			SchemaVersion: 1,
+			SchemaVersion: 2,
 			Stage: settings.Stage,
 			CreatedAtUtc: DateTimeOffset.UtcNow,
 			Machine: new AuditMachine(
@@ -65,16 +84,26 @@ public sealed class PerformanceAuditRound2Tests
 				UnsupportedShardCount: corpora.UnsupportedShards.Count,
 				CommentHeavyFiles: corpora.CommentHeavyFiles.Count,
 				CommentsPerFile: settings.CommentsPerFile,
+				ConfigHeavyFiles: corpora.ConfigHeavyFiles.Count,
+				ConfigCommentsPerFile: settings.ConfigCommentsPerFile,
 				MixedLanguageFiles: corpora.MixedLanguageFiles.Count,
 				MixedLanguageCount: MixedLanguageTemplates.Count,
+				DevProjexFiles: corpora.DevProjexFiles.Count,
 				SessionCreationIterations: settings.SessionCreationIterations,
+				InstrumentationDirectPasses: settings.InstrumentationDirectPasses,
 				Notes:
 				[
 					"All corpora are generated before measured phases.",
 					"The unsupported corpus uses small shards because per-file stream buffers are the measured allocation risk.",
-					"Comment-heavy XML runs Comments, an immediate warm repeat, Both, then Comments again to expose retained-byte LRU pressure.",
+					"Pathological comment-heavy XML defaults to 60 files x 6000 comments; realistic config-heavy XML defaults to 500 x 20.",
+					"Both XML corpora run Comments, an immediate warm repeat, Both, then Comments again to expose retained-byte LRU pressure.",
 					"Embedded cold means a unique materialization directory inside the current process.",
 					"Streaming metrics is the non-materializing product control for unsupported content.",
+					"Instrumentation overhead preserves the end-to-end fresh-session pair and adds a preloaded direct-engine pair; both alternate off/on order by run.",
+					"DirectOff/DirectOn measure only Analyze hot-path overhead; LifecycleOff/LifecycleOn include Begin, Capture, profile projection and Dispose.",
+					"SetupOff/SetupOn isolate the fixed zero-file collector and snapshot cost for per-analysis normalization.",
+					"Direct plan fingerprints include exact UTF-16 replacement bytes, and exact applied outputs are compared outside timed regions.",
+					"Analyze phase share is relative to the sum of the 13 required phase totals, not wall-clock time.",
 					"ProcessLifetimePeakWorkingSetBytes is an OS process-lifetime high-water mark, not a phase-local peak."
 				]),
 			Runs: runs,
@@ -104,6 +133,10 @@ public sealed class PerformanceAuditRound2Tests
 			corpora.CommentHeavyRoot,
 			corpora.CommentHeavyFiles,
 			cancellationToken);
+		var configHeavy = await MeasureCommentHeavyAsync(
+			corpora.ConfigHeavyRoot,
+			corpora.ConfigHeavyFiles,
+			cancellationToken);
 		var modeSwitch = await MeasureModeSwitchAsync(
 			corpora.MixedLanguageRoot,
 			corpora.MixedLanguageFiles,
@@ -117,7 +150,425 @@ public sealed class PerformanceAuditRound2Tests
 			corpora.MixedLanguageRoot,
 			corpora.MixedLanguageFiles,
 			cancellationToken);
-		return new AuditRun(index, giantUnsupported, commentHeavy, modeSwitch, startup, embeddedDelivery);
+		var devProjex = await MeasureColdModeMatrixAsync(
+			corpora.DevProjexRoot,
+			corpora.DevProjexFiles,
+			cancellationToken);
+		var instrumentationOverhead = await MeasureInstrumentationOverheadAsync(
+			corpora.MixedLanguageRoot,
+			corpora.MixedLanguageFiles,
+			index,
+			settings.InstrumentationDirectPasses,
+			cancellationToken);
+		return new AuditRun(
+			index,
+			giantUnsupported,
+			commentHeavy,
+			configHeavy,
+			modeSwitch,
+			startup,
+			embeddedDelivery,
+			devProjex,
+			instrumentationOverhead);
+	}
+
+	private static async Task<InstrumentationOverheadRun> MeasureInstrumentationOverheadAsync(
+		string root,
+		IReadOnlyList<string> paths,
+		int runIndex,
+		int directPasses,
+		CancellationToken cancellationToken)
+	{
+		var instrumentedFirst = runIndex % 2 == 0;
+		PhaseMeasurement off;
+		PhaseMeasurement on;
+		string order;
+		if (instrumentedFirst)
+		{
+			var enabled = await MeasureInstrumentationVariantAsync(root, paths, enabled: true, cancellationToken);
+			var disabled = await MeasureInstrumentationVariantAsync(root, paths, enabled: false, cancellationToken);
+			off = disabled;
+			on = enabled;
+			order = "on-off";
+		}
+		else
+		{
+			off = await MeasureInstrumentationVariantAsync(root, paths, enabled: false, cancellationToken);
+			on = await MeasureInstrumentationVariantAsync(root, paths, enabled: true, cancellationToken);
+			order = "off-on";
+		}
+
+		var direct = await MeasureDirectInstrumentationOverheadAsync(
+			root,
+			paths,
+			runIndex,
+			directPasses,
+			cancellationToken);
+		return new InstrumentationOverheadRun(
+			order,
+			off,
+			on,
+			direct.Order,
+			direct.Off,
+			direct.On,
+			direct.LifecycleOrder,
+			direct.LifecycleOff,
+			direct.LifecycleOn,
+			direct.SetupOrder,
+			direct.SetupOff,
+			direct.SetupOn,
+			directPasses);
+	}
+
+	private static async Task<DirectInstrumentationRun> MeasureDirectInstrumentationOverheadAsync(
+		string root,
+		IReadOnlyList<string> paths,
+		int runIndex,
+		int passes,
+		CancellationToken cancellationToken)
+	{
+		var inputs = paths.Select(path => new InstrumentationInput(
+			path,
+			Path.GetRelativePath(root, path),
+			File.ReadAllText(path))).ToArray();
+		using var engine = new TreeSitterCodeCompressor(CodeCompressionFactory.CreateLocator());
+		using (var warmScope = engine.CreateScope(
+			       root,
+			       CodeTransformKinds.Bodies | CodeTransformKinds.Comments))
+		{
+			foreach (var input in inputs)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				warmScope.Analyze(input.FullPath, input.RelativePath, input.Content, cancellationToken);
+			}
+		}
+		WarmDirectInstrumentationPaths(engine, root, inputs, cancellationToken);
+		PhaseMeasurement setupOff;
+		PhaseMeasurement setupOn;
+		string setupOrder;
+		if (runIndex % 2 == 0)
+		{
+			setupOn = await MeasureDiagnosticsLifecycleSetupAsync(engine, enabled: true, cancellationToken);
+			setupOff = await MeasureDiagnosticsLifecycleSetupAsync(engine, enabled: false, cancellationToken);
+			setupOrder = "on-off";
+		}
+		else
+		{
+			setupOff = await MeasureDiagnosticsLifecycleSetupAsync(engine, enabled: false, cancellationToken);
+			setupOn = await MeasureDiagnosticsLifecycleSetupAsync(engine, enabled: true, cancellationToken);
+			setupOrder = "off-on";
+		}
+
+		MeasuredResult<long> off;
+		MeasuredResult<long> on;
+		string order;
+		if (runIndex % 2 == 0)
+		{
+			on = await MeasureDirectInstrumentationVariantAsync(
+				engine, root, inputs, passes, enabled: true, cancellationToken);
+			off = await MeasureDirectInstrumentationVariantAsync(
+				engine, root, inputs, passes, enabled: false, cancellationToken);
+			order = "on-off";
+		}
+		else
+		{
+			off = await MeasureDirectInstrumentationVariantAsync(
+				engine, root, inputs, passes, enabled: false, cancellationToken);
+			on = await MeasureDirectInstrumentationVariantAsync(
+				engine, root, inputs, passes, enabled: true, cancellationToken);
+			order = "off-on";
+		}
+		AssertEquivalentDirectOutput(off, on);
+
+		MeasuredResult<long> lifecycleOff;
+		MeasuredResult<long> lifecycleOn;
+		string lifecycleOrder;
+		if (runIndex % 2 == 0)
+		{
+			lifecycleOn = await MeasureDirectInstrumentationLifecycleVariantAsync(
+				engine, root, inputs, passes, enabled: true, cancellationToken);
+			lifecycleOff = await MeasureDirectInstrumentationLifecycleVariantAsync(
+				engine, root, inputs, passes, enabled: false, cancellationToken);
+			lifecycleOrder = "on-off";
+		}
+		else
+		{
+			lifecycleOff = await MeasureDirectInstrumentationLifecycleVariantAsync(
+				engine, root, inputs, passes, enabled: false, cancellationToken);
+			lifecycleOn = await MeasureDirectInstrumentationLifecycleVariantAsync(
+				engine, root, inputs, passes, enabled: true, cancellationToken);
+			lifecycleOrder = "off-on";
+		}
+		AssertEquivalentDirectOutput(lifecycleOff, lifecycleOn);
+		VerifyExactDirectOutput(engine, root, inputs, cancellationToken);
+
+		return new DirectInstrumentationRun(
+			order,
+			off.Measurement,
+			on.Measurement,
+			lifecycleOrder,
+			lifecycleOff.Measurement,
+			lifecycleOn.Measurement,
+			setupOrder,
+			setupOff,
+			setupOn);
+	}
+
+	private static async Task<MeasuredResult<long>> MeasureDirectInstrumentationVariantAsync(
+		TreeSitterCodeCompressor engine,
+		string root,
+		IReadOnlyList<InstrumentationInput> inputs,
+		int passes,
+		bool enabled,
+		CancellationToken cancellationToken) =>
+		await MeasurePhaseAsync(
+			token => Task.FromResult(RunDirectAnalysisPasses(engine, root, inputs, passes, token)),
+			compression: null,
+			cancellationToken,
+			enabled ? engine : null);
+
+	private static async Task<MeasuredResult<long>> MeasureDirectInstrumentationLifecycleVariantAsync(
+		TreeSitterCodeCompressor engine,
+		string root,
+		IReadOnlyList<InstrumentationInput> inputs,
+		int passes,
+		bool enabled,
+		CancellationToken cancellationToken)
+	{
+		AnalysisProfile? profile = null;
+		var measured = await MeasurePhaseAsync(
+			token =>
+			{
+				TreeSitterAnalysisDiagnosticsSession? diagnostics = null;
+				try
+				{
+					if (enabled)
+						diagnostics = engine.BeginAnalysisDiagnostics();
+					var fingerprint = RunDirectAnalysisPasses(engine, root, inputs, passes, token);
+					if (diagnostics is not null)
+						profile = ToAnalysisProfile(diagnostics.Capture());
+					return Task.FromResult(fingerprint);
+				}
+				finally
+				{
+					diagnostics?.Dispose();
+				}
+			},
+			compression: null,
+			cancellationToken);
+		return new MeasuredResult<long>(
+			measured.Value,
+			measured.Measurement with { Analysis = profile });
+	}
+
+	private static async Task<PhaseMeasurement> MeasureDiagnosticsLifecycleSetupAsync(
+		TreeSitterCodeCompressor engine,
+		bool enabled,
+		CancellationToken cancellationToken)
+	{
+		AnalysisProfile? profile = null;
+		var measured = await MeasurePhaseAsync(
+			_ =>
+			{
+				using var diagnostics = enabled ? engine.BeginAnalysisDiagnostics() : null;
+				if (diagnostics is not null)
+					profile = ToAnalysisProfile(diagnostics.Capture());
+				return Task.FromResult(0L);
+			},
+			compression: null,
+			cancellationToken);
+		return measured.Measurement with { Analysis = profile };
+	}
+
+	private static void WarmDirectInstrumentationPaths(
+		TreeSitterCodeCompressor engine,
+		string root,
+		IReadOnlyList<InstrumentationInput> inputs,
+		CancellationToken cancellationToken)
+	{
+		RunDirectAnalysisPasses(engine, root, inputs, passes: 1, cancellationToken);
+		using var diagnostics = engine.BeginAnalysisDiagnostics();
+		RunDirectAnalysisPasses(engine, root, inputs, passes: 1, cancellationToken);
+		GC.KeepAlive(ToAnalysisProfile(diagnostics.Capture()));
+	}
+
+	private static long RunDirectAnalysisPasses(
+		TreeSitterCodeCompressor engine,
+		string root,
+		IReadOnlyList<InstrumentationInput> inputs,
+		int passes,
+		CancellationToken cancellationToken)
+	{
+		var fingerprint = 1469598103934665603UL;
+		using var scope = engine.CreateScope(
+			root,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		for (var pass = 0; pass < passes; pass++)
+		{
+			foreach (var input in inputs)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var analysis = scope.Analyze(
+					input.FullPath,
+					input.RelativePath,
+					input.Content,
+					cancellationToken);
+				fingerprint = MixPlanFingerprint(fingerprint, analysis.Plan);
+			}
+		}
+		return unchecked((long)fingerprint);
+	}
+
+	private static void AssertEquivalentDirectOutput(
+		MeasuredResult<long> off,
+		MeasuredResult<long> on)
+	{
+		if (off.Value != on.Value)
+		{
+			throw new InvalidOperationException(
+				$"Instrumentation changed the plan fingerprint: {off.Value} != {on.Value}.");
+		}
+	}
+
+	private static void VerifyExactDirectOutput(
+		TreeSitterCodeCompressor engine,
+		string root,
+		IReadOnlyList<InstrumentationInput> inputs,
+		CancellationToken cancellationToken)
+	{
+		var off = CaptureDirectOutput(engine, root, inputs, enabled: false, cancellationToken);
+		var on = CaptureDirectOutput(engine, root, inputs, enabled: true, cancellationToken);
+		if (off.Count != on.Count)
+			throw new InvalidOperationException("Instrumentation changed the number of transformed files.");
+
+		for (var index = 0; index < off.Count; index++)
+		{
+			if (!off[index].RelativePath.Equals(on[index].RelativePath, StringComparison.Ordinal) ||
+			    !off[index].Text.Equals(on[index].Text, StringComparison.Ordinal) ||
+			    off[index].PlanFingerprint != on[index].PlanFingerprint)
+			{
+				throw new InvalidOperationException(
+					$"Instrumentation changed exact output for '{off[index].RelativePath}'.");
+			}
+		}
+	}
+
+	private static IReadOnlyList<DirectOutputSnapshot> CaptureDirectOutput(
+		TreeSitterCodeCompressor engine,
+		string root,
+		IReadOnlyList<InstrumentationInput> inputs,
+		bool enabled,
+		CancellationToken cancellationToken)
+	{
+		using var diagnostics = enabled ? engine.BeginAnalysisDiagnostics() : null;
+		using var scope = engine.CreateScope(
+			root,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		var output = new DirectOutputSnapshot[inputs.Count];
+		for (var index = 0; index < inputs.Count; index++)
+		{
+			var input = inputs[index];
+			var analysis = scope.Analyze(
+				input.FullPath,
+				input.RelativePath,
+				input.Content,
+				cancellationToken);
+			output[index] = new DirectOutputSnapshot(
+				input.RelativePath,
+				analysis.GetResult(input.Content).Text,
+				MixPlanFingerprint(1469598103934665603UL, analysis.Plan));
+		}
+		return output;
+	}
+
+	private static ulong MixPlanFingerprint(ulong fingerprint, CodeCompressionPlan plan)
+	{
+		fingerprint = Mix(fingerprint, plan.RelativePath);
+		fingerprint = Mix(fingerprint, plan.LanguageId);
+		fingerprint = Mix(fingerprint, (int)plan.Outcome);
+		fingerprint = Mix(fingerprint, plan.SourceLength);
+		fingerprint = Mix(fingerprint, plan.TransformedLength);
+		fingerprint = Mix(fingerprint, plan.TransformIdentity);
+		fingerprint = Mix(fingerprint, plan.Edits.Count);
+		foreach (var edit in plan.Edits)
+		{
+			fingerprint = Mix(fingerprint, edit.SourceStart);
+			fingerprint = Mix(fingerprint, edit.SourceLength);
+			fingerprint = Mix(fingerprint, edit.Replacement);
+			fingerprint = Mix(fingerprint, (int)edit.Kinds);
+		}
+		return fingerprint;
+	}
+
+	private static ulong Mix(ulong fingerprint, int value)
+	{
+		var serialized = unchecked((uint)value);
+		for (var shift = 0; shift < 32; shift += 8)
+			fingerprint = (fingerprint ^ (byte)(serialized >> shift)) * 1099511628211UL;
+		return fingerprint;
+	}
+
+	private static ulong Mix(ulong fingerprint, string value)
+	{
+		fingerprint = Mix(fingerprint, value.Length);
+		foreach (var character in value)
+		{
+			fingerprint = (fingerprint ^ (byte)character) * 1099511628211UL;
+			fingerprint = (fingerprint ^ (byte)(character >> 8)) * 1099511628211UL;
+		}
+		return fingerprint;
+	}
+
+	private static async Task<PhaseMeasurement> MeasureInstrumentationVariantAsync(
+		string root,
+		IReadOnlyList<string> paths,
+		bool enabled,
+		CancellationToken cancellationToken)
+	{
+		using var fixture = CreateCompressionFixture();
+		var context = new CodeCompressionContext(
+			root,
+			fixture.Session,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		var measured = await MeasureWarmupAsync(
+			new FileContentAnalyzer(),
+			context,
+			paths,
+			fixture.Session,
+			cancellationToken,
+			enabled ? fixture.Engine : null);
+		return measured.Measurement;
+	}
+
+	private static async Task<ColdModeMatrixRun> MeasureColdModeMatrixAsync(
+		string root,
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken) =>
+		new(
+			Bodies: await MeasureColdModeAsync(root, paths, CodeTransformKinds.Bodies, cancellationToken),
+			Comments: await MeasureColdModeAsync(root, paths, CodeTransformKinds.Comments, cancellationToken),
+			Both: await MeasureColdModeAsync(
+				root,
+				paths,
+				CodeTransformKinds.Bodies | CodeTransformKinds.Comments,
+				cancellationToken));
+
+	private static async Task<ModePhase> MeasureColdModeAsync(
+		string root,
+		IReadOnlyList<string> paths,
+		CodeTransformKinds kinds,
+		CancellationToken cancellationToken)
+	{
+		using var fixture = CreateCompressionFixture();
+		var context = new CodeCompressionContext(root, fixture.Session, kinds);
+		var measured = await MeasureWarmupAsync(
+			new FileContentAnalyzer(),
+			context,
+			paths,
+			fixture.Session,
+			cancellationToken,
+			fixture.Engine);
+		return new ModePhase(measured.Measurement, fixture.Session.Diagnostics);
 	}
 
 	private static async Task<GiantUnsupportedRun> MeasureGiantUnsupportedAsync(
@@ -145,7 +596,8 @@ public sealed class PerformanceAuditRound2Tests
 			compression: null,
 			cancellationToken);
 
-		using var compression = CodeCompressionFactory.CreateSession();
+		using var fixture = CreateCompressionFixture();
+		var compression = fixture.Session;
 		var context = new CodeCompressionContext(
 			corpora.UnsupportedRoot,
 			compression,
@@ -158,7 +610,8 @@ public sealed class PerformanceAuditRound2Tests
 				return result.WarmedFiles;
 			},
 			compression,
-			cancellationToken);
+			cancellationToken,
+			fixture.Engine);
 
 		return new GiantUnsupportedRun(
 			SingleOversizedStreaming: singleStreaming.Measurement,
@@ -173,24 +626,29 @@ public sealed class PerformanceAuditRound2Tests
 		CancellationToken cancellationToken)
 	{
 		var analyzer = new FileContentAnalyzer();
-		using var compression = CodeCompressionFactory.CreateSession();
+		using var fixture = CreateCompressionFixture();
+		var compression = fixture.Session;
 		var commentsContext = new CodeCompressionContext(root, compression, CodeTransformKinds.Comments);
-		var cold = await MeasureWarmupAsync(analyzer, commentsContext, paths, compression, cancellationToken);
+		var cold = await MeasureWarmupAsync(
+			analyzer, commentsContext, paths, compression, cancellationToken, fixture.Engine);
 		var afterCold = compression.Diagnostics;
-		var warm = await MeasureWarmupAsync(analyzer, commentsContext, paths, compression, cancellationToken);
+		var warm = await MeasureWarmupAsync(
+			analyzer, commentsContext, paths, compression, cancellationToken, fixture.Engine);
 		var afterWarm = compression.Diagnostics;
 		var bothContext = new CodeCompressionContext(
 			root,
 			compression,
 			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
-		var both = await MeasureWarmupAsync(analyzer, bothContext, paths, compression, cancellationToken);
+		var both = await MeasureWarmupAsync(
+			analyzer, bothContext, paths, compression, cancellationToken, fixture.Engine);
 		var afterBoth = compression.Diagnostics;
 		var commentsAfterBoth = await MeasureWarmupAsync(
 			analyzer,
 			commentsContext,
 			paths,
 			compression,
-			cancellationToken);
+			cancellationToken,
+			fixture.Engine);
 		return new CommentHeavyRun(
 			Cold: cold.Measurement,
 			Warm: warm.Measurement,
@@ -208,20 +666,22 @@ public sealed class PerformanceAuditRound2Tests
 		CancellationToken cancellationToken)
 	{
 		var analyzer = new FileContentAnalyzer();
-		using var compression = CodeCompressionFactory.CreateSession();
+		using var fixture = CreateCompressionFixture();
+		var compression = fixture.Session;
 		var comments = await MeasureModeAsync(
-			analyzer, compression, root, paths, CodeTransformKinds.Comments, cancellationToken);
+			analyzer, compression, root, paths, CodeTransformKinds.Comments, cancellationToken, fixture.Engine);
 		var bodies = await MeasureModeAsync(
-			analyzer, compression, root, paths, CodeTransformKinds.Bodies, cancellationToken);
+			analyzer, compression, root, paths, CodeTransformKinds.Bodies, cancellationToken, fixture.Engine);
 		var both = await MeasureModeAsync(
 			analyzer,
 			compression,
 			root,
 			paths,
 			CodeTransformKinds.Bodies | CodeTransformKinds.Comments,
-			cancellationToken);
+			cancellationToken,
+			fixture.Engine);
 		var commentsAgain = await MeasureModeAsync(
-			analyzer, compression, root, paths, CodeTransformKinds.Comments, cancellationToken);
+			analyzer, compression, root, paths, CodeTransformKinds.Comments, cancellationToken, fixture.Engine);
 		return new ModeSwitchRun(comments, bodies, both, commentsAgain);
 	}
 
@@ -231,10 +691,11 @@ public sealed class PerformanceAuditRound2Tests
 		string root,
 		IReadOnlyList<string> paths,
 		CodeTransformKinds kinds,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		TreeSitterCodeCompressor engine)
 	{
 		var context = new CodeCompressionContext(root, compression, kinds);
-		var measured = await MeasureWarmupAsync(analyzer, context, paths, compression, cancellationToken);
+		var measured = await MeasureWarmupAsync(analyzer, context, paths, compression, cancellationToken, engine);
 		return new ModePhase(measured.Measurement, compression.Diagnostics);
 	}
 
@@ -243,7 +704,8 @@ public sealed class PerformanceAuditRound2Tests
 		CodeCompressionContext context,
 		IReadOnlyList<string> paths,
 		CodeCompressionSession compression,
-		CancellationToken cancellationToken) =>
+		CancellationToken cancellationToken,
+		TreeSitterCodeCompressor? engine = null) =>
 		MeasurePhaseAsync(
 			async token =>
 			{
@@ -251,7 +713,8 @@ public sealed class PerformanceAuditRound2Tests
 				return result.WarmedFiles;
 			},
 			compression,
-			cancellationToken);
+			cancellationToken,
+			engine);
 
 	private static async Task<SessionStartupRun> MeasureSessionStartupAsync(
 		int iterations,
@@ -287,15 +750,16 @@ public sealed class PerformanceAuditRound2Tests
 			typeof(CodeCompressionFactory).Assembly,
 			CodeCompressionFactory.EmbeddedResourcePrefix,
 			grammarRoot);
-		using var compression = new CodeCompressionSession(new TreeSitterCodeCompressor(locator));
+		var engine = new TreeSitterCodeCompressor(locator);
+		using var compression = new CodeCompressionSession(engine);
 		var context = new CodeCompressionContext(
 			corpusRoot,
 			compression,
 			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
 		var analyzer = new FileContentAnalyzer();
-		var cold = await MeasureWarmupAsync(analyzer, context, paths, compression, cancellationToken);
+		var cold = await MeasureWarmupAsync(analyzer, context, paths, compression, cancellationToken, engine);
 		var afterCold = compression.Diagnostics;
-		var warm = await MeasureWarmupAsync(analyzer, context, paths, compression, cancellationToken);
+		var warm = await MeasureWarmupAsync(analyzer, context, paths, compression, cancellationToken, engine);
 		var files = Directory.Exists(grammarRoot)
 			? Directory.EnumerateFiles(grammarRoot, "*", SearchOption.AllDirectories).ToArray()
 			: [];
@@ -312,8 +776,10 @@ public sealed class PerformanceAuditRound2Tests
 	private static async Task<MeasuredResult<long>> MeasurePhaseAsync(
 		Func<CancellationToken, Task<long>> operation,
 		CodeCompressionSession? compression,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		TreeSitterCodeCompressor? engine = null)
 	{
+		using var analysisDiagnostics = engine?.BeginAnalysisDiagnostics();
 		using var contentMeasurement = ContentPipelineDiagnostics.BeginMeasurement();
 		var compressionBefore = compression?.Diagnostics;
 		var process = Process.GetCurrentProcess();
@@ -345,8 +811,90 @@ public sealed class PerformanceAuditRound2Tests
 				FullFileReadBytes: content.FullFileReadBytes,
 				ContentFingerprintComputations: content.ContentFingerprintComputations,
 				PlanApplications: content.PlanApplications,
-				Compression: Difference(compressionBefore, compression?.Diagnostics)));
+				Compression: Difference(compressionBefore, compression?.Diagnostics),
+				Analysis: analysisDiagnostics is null
+					? null
+					: ToAnalysisProfile(analysisDiagnostics.Capture())));
 	}
+
+	private static CompressionFixture CreateCompressionFixture() =>
+		new(new TreeSitterCodeCompressor(CodeCompressionFactory.CreateLocator()));
+
+	private static AnalysisProfile ToAnalysisProfile(TreeSitterAnalysisDiagnosticsSnapshot snapshot)
+	{
+		var phasesByKind = snapshot.Phases.ToDictionary(static phase => phase.Phase);
+		var requiredTotalMilliseconds = ReportedAnalysisPhases.Sum(phase => phasesByKind[phase].TotalMilliseconds);
+		var phases = new Dictionary<string, AnalysisPhaseProfile>(StringComparer.Ordinal);
+		foreach (var phase in ReportedAnalysisPhases)
+		{
+			var value = phasesByKind[phase];
+			phases.Add(
+				PhaseName(phase),
+				new AnalysisPhaseProfile(
+					value.Count,
+					value.TotalMilliseconds,
+					value.MeanMilliseconds,
+					value.P50Milliseconds,
+					value.P95Milliseconds,
+					value.P99Milliseconds,
+					value.MaximumMilliseconds,
+					requiredTotalMilliseconds == 0
+						? 0
+						: value.TotalMilliseconds * 100d / requiredTotalMilliseconds,
+					value.Top.Select(static sample => new AnalysisPhaseTopFile(
+						sample.RelativePath,
+						sample.SourceCharacters,
+						sample.ElapsedMilliseconds)).ToArray()));
+		}
+
+		return new AnalysisProfile(
+			snapshot.CompletedFiles,
+			snapshot.CancelledFiles,
+			ToAnalysisWork(snapshot.Work),
+			phases,
+			snapshot.SlowestFiles.Select(file => new AnalysisFileProfile(
+				file.RelativePath,
+				file.SourceCharacters,
+				file.TotalMilliseconds,
+				file.Phases.ToDictionary(
+					static phase => PhaseName(phase.Phase),
+					static phase => phase.ElapsedMilliseconds,
+					StringComparer.Ordinal),
+				ToAnalysisWork(file.Work))).ToArray());
+	}
+
+	private static AnalysisWork ToAnalysisWork(TreeSitterAnalysisWorkSnapshot work) =>
+		new(
+			work.PreserveCaptures,
+			work.BodyCaptures,
+			work.CommentCaptures,
+			work.OriginalDeclarations,
+			work.OriginalDefects,
+			work.OriginalVisitedNodes,
+			work.RawEdits,
+			work.FinalEdits,
+			work.ReverseDeclarations,
+			work.ReverseDefects,
+			work.ReverseVisitedNodes);
+
+	private static string PhaseName(TreeSitterAnalysisPhase phase) =>
+		phase switch
+		{
+			TreeSitterAnalysisPhase.OriginalParse => "originalParse",
+			TreeSitterAnalysisPhase.PreserveQuery => "preserveQuery",
+			TreeSitterAnalysisPhase.BodyQuery => "bodyQuery",
+			TreeSitterAnalysisPhase.CommentQuery => "commentQuery",
+			TreeSitterAnalysisPhase.OriginalDeclarations => "originalDeclarations",
+			TreeSitterAnalysisPhase.OriginalDefectWalk => "originalDefectWalk",
+			TreeSitterAnalysisPhase.EditShaping => "editShaping",
+			TreeSitterAnalysisPhase.PlanBuild => "planBuild",
+			TreeSitterAnalysisPhase.PlanApply => "planApply",
+			TreeSitterAnalysisPhase.ReverseParse => "reverseParse",
+			TreeSitterAnalysisPhase.ReverseDeclarations => "reverseDeclarations",
+			TreeSitterAnalysisPhase.ReverseDefectWalk => "reverseDefectWalk",
+			TreeSitterAnalysisPhase.StructureGate => "structureGate",
+			_ => throw new ArgumentOutOfRangeException(nameof(phase), phase, null)
+		};
 
 	private static CompressionWork Difference(
 		CodeCompressionDiagnosticsSnapshot? before,
@@ -393,6 +941,15 @@ public sealed class PerformanceAuditRound2Tests
 			File.WriteAllText(path, commentHeavySource, Utf8WithoutBom);
 			commentHeavyFiles.Add(path);
 		}
+		var configHeavyRoot = workspace.CreateDirectory("config-heavy");
+		var configHeavySource = BuildCommentHeavyXml(settings.ConfigCommentsPerFile);
+		var configHeavyFiles = new List<string>(settings.ConfigHeavyFiles);
+		for (var index = 0; index < settings.ConfigHeavyFiles; index++)
+		{
+			var path = Path.Combine(configHeavyRoot, $"config-{index:D4}.xml");
+			File.WriteAllText(path, configHeavySource, Utf8WithoutBom);
+			configHeavyFiles.Add(path);
+		}
 
 		var mixedRoot = workspace.CreateDirectory("mixed-20-formats");
 		var mixedFiles = new List<string>(MixedLanguageTemplates.Count * settings.MixedCopiesPerLanguage);
@@ -409,15 +966,52 @@ public sealed class PerformanceAuditRound2Tests
 		}
 		unsupportedShards.Sort(PathComparer.Default);
 		commentHeavyFiles.Sort(PathComparer.Default);
+		configHeavyFiles.Sort(PathComparer.Default);
 		mixedFiles.Sort(PathComparer.Default);
+		var devProjexRoot = FindRepositoryRoot();
+		var devProjexFiles = EnumerateDevProjexCorpus(devProjexRoot);
 		return new AuditCorpora(
 			unsupportedRoot,
 			oversizedPath,
 			unsupportedShards,
 			commentHeavyRoot,
 			commentHeavyFiles,
+			configHeavyRoot,
+			configHeavyFiles,
 			mixedRoot,
-			mixedFiles);
+			mixedFiles,
+			devProjexRoot,
+			devProjexFiles);
+	}
+
+	private static IReadOnlyList<string> EnumerateDevProjexCorpus(string repositoryRoot)
+	{
+		using var compression = CodeCompressionFactory.CreateSession();
+		return Directory.EnumerateFiles(repositoryRoot, "*", SearchOption.AllDirectories)
+			.Where(path => !IsGeneratedRepositoryPath(repositoryRoot, path))
+			.Where(path => compression.IsSupported(
+				Path.GetRelativePath(repositoryRoot, path),
+				CodeTransformKinds.Bodies | CodeTransformKinds.Comments))
+			.Order(PathComparer.Default)
+			.ToArray();
+	}
+
+	private static bool IsGeneratedRepositoryPath(string repositoryRoot, string path)
+	{
+		var relative = Path.GetRelativePath(repositoryRoot, path);
+		foreach (var segment in relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+		{
+			if (segment.Equals(".git", StringComparison.OrdinalIgnoreCase) ||
+			    segment.Equals(".idea", StringComparison.OrdinalIgnoreCase) ||
+			    segment.Equals("artifacts", StringComparison.OrdinalIgnoreCase) ||
+			    segment.Equals("bin", StringComparison.OrdinalIgnoreCase) ||
+			    segment.Equals("obj", StringComparison.OrdinalIgnoreCase) ||
+			    segment.Equals("TestResults", StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static void WriteRepeatedAsciiFile(string path, long length)
@@ -489,6 +1083,10 @@ public sealed class PerformanceAuditRound2Tests
 			Add(measurements, "comments.warm", run.CommentHeavy.Warm);
 			Add(measurements, "comments.both", run.CommentHeavy.Both);
 			Add(measurements, "comments.commentsAfterBoth", run.CommentHeavy.CommentsAfterBoth);
+			Add(measurements, "configComments.cold", run.ConfigHeavy.Cold);
+			Add(measurements, "configComments.warm", run.ConfigHeavy.Warm);
+			Add(measurements, "configComments.both", run.ConfigHeavy.Both);
+			Add(measurements, "configComments.commentsAfterBoth", run.ConfigHeavy.CommentsAfterBoth);
 			Add(measurements, "modes.comments", run.ModeSwitch.Comments.Measurement);
 			Add(measurements, "modes.bodies", run.ModeSwitch.Bodies.Measurement);
 			Add(measurements, "modes.both", run.ModeSwitch.Both.Measurement);
@@ -496,6 +1094,17 @@ public sealed class PerformanceAuditRound2Tests
 			Add(measurements, "startup.createSessions", run.SessionStartup.CreateSessions);
 			Add(measurements, "embedded.cold", run.EmbeddedDelivery.Cold);
 			Add(measurements, "embedded.warm", run.EmbeddedDelivery.Warm);
+			Add(measurements, "devProjex.bodies", run.DevProjex.Bodies.Measurement);
+			Add(measurements, "devProjex.comments", run.DevProjex.Comments.Measurement);
+			Add(measurements, "devProjex.both", run.DevProjex.Both.Measurement);
+			Add(measurements, "instrumentation.off", run.InstrumentationOverhead.Off);
+			Add(measurements, "instrumentation.on", run.InstrumentationOverhead.On);
+			Add(measurements, "instrumentation.directOff", run.InstrumentationOverhead.DirectOff);
+			Add(measurements, "instrumentation.directOn", run.InstrumentationOverhead.DirectOn);
+			Add(measurements, "instrumentation.lifecycleOff", run.InstrumentationOverhead.LifecycleOff);
+			Add(measurements, "instrumentation.lifecycleOn", run.InstrumentationOverhead.LifecycleOn);
+			Add(measurements, "instrumentation.setupOff", run.InstrumentationOverhead.SetupOff);
+			Add(measurements, "instrumentation.setupOn", run.InstrumentationOverhead.SetupOn);
 		}
 		return measurements.ToDictionary(
 			static pair => pair.Key,
@@ -547,8 +1156,11 @@ public sealed class PerformanceAuditRound2Tests
 		int UnsupportedShardBytes,
 		int CommentHeavyFiles,
 		int CommentsPerFile,
+		int ConfigHeavyFiles,
+		int ConfigCommentsPerFile,
 		int MixedCopiesPerLanguage,
-		int SessionCreationIterations)
+		int SessionCreationIterations,
+		int InstrumentationDirectPasses)
 	{
 		public static AuditSettings ReadFromEnvironment() => new(
 			Stage: NormalizeStage(Environment.GetEnvironmentVariable("DEVPROJEX_PERFORMANCE_AUDIT_ROUND2_STAGE")),
@@ -565,12 +1177,21 @@ public sealed class PerformanceAuditRound2Tests
 			CommentsPerFile: ReadPositiveInt(
 				"DEVPROJEX_PERFORMANCE_AUDIT_COMMENTS_PER_FILE",
 				DefaultCommentsPerFile),
+			ConfigHeavyFiles: ReadPositiveInt(
+				"DEVPROJEX_PERFORMANCE_AUDIT_CONFIG_FILES",
+				DefaultConfigHeavyFiles),
+			ConfigCommentsPerFile: ReadPositiveInt(
+				"DEVPROJEX_PERFORMANCE_AUDIT_CONFIG_COMMENTS_PER_FILE",
+				DefaultConfigCommentsPerFile),
 			MixedCopiesPerLanguage: ReadPositiveInt(
 				"DEVPROJEX_PERFORMANCE_AUDIT_MIXED_COPIES",
 				DefaultMixedCopiesPerLanguage),
 			SessionCreationIterations: ReadPositiveInt(
 				"DEVPROJEX_PERFORMANCE_AUDIT_SESSION_ITERATIONS",
-				DefaultSessionCreationIterations));
+				DefaultSessionCreationIterations),
+			InstrumentationDirectPasses: ReadPositiveInt(
+				"DEVPROJEX_PERFORMANCE_AUDIT_INSTRUMENTATION_PASSES",
+				DefaultInstrumentationDirectPasses));
 	}
 
 	private static int ReadPositiveInt(string name, int fallback)
@@ -604,8 +1225,12 @@ public sealed class PerformanceAuditRound2Tests
 		IReadOnlyList<string> UnsupportedShards,
 		string CommentHeavyRoot,
 		IReadOnlyList<string> CommentHeavyFiles,
+		string ConfigHeavyRoot,
+		IReadOnlyList<string> ConfigHeavyFiles,
 		string MixedLanguageRoot,
-		IReadOnlyList<string> MixedLanguageFiles);
+		IReadOnlyList<string> MixedLanguageFiles,
+		string DevProjexRoot,
+		IReadOnlyList<string> DevProjexFiles);
 
 	private sealed record PerformanceAuditReport(
 		int SchemaVersion,
@@ -630,18 +1255,25 @@ public sealed class PerformanceAuditRound2Tests
 		int UnsupportedShardCount,
 		int CommentHeavyFiles,
 		int CommentsPerFile,
+		int ConfigHeavyFiles,
+		int ConfigCommentsPerFile,
 		int MixedLanguageFiles,
 		int MixedLanguageCount,
+		int DevProjexFiles,
 		int SessionCreationIterations,
+		int InstrumentationDirectPasses,
 		IReadOnlyList<string> Notes);
 
 	private sealed record AuditRun(
 		int Index,
 		GiantUnsupportedRun GiantUnsupported,
 		CommentHeavyRun CommentHeavy,
+		CommentHeavyRun ConfigHeavy,
 		ModeSwitchRun ModeSwitch,
 		SessionStartupRun SessionStartup,
-		EmbeddedDeliveryRun EmbeddedDelivery);
+		EmbeddedDeliveryRun EmbeddedDelivery,
+		ColdModeMatrixRun DevProjex,
+		InstrumentationOverheadRun InstrumentationOverhead);
 
 	private sealed record GiantUnsupportedRun(
 		PhaseMeasurement SingleOversizedStreaming,
@@ -664,6 +1296,47 @@ public sealed class PerformanceAuditRound2Tests
 		ModePhase Bodies,
 		ModePhase Both,
 		ModePhase CommentsAgain);
+
+	private sealed record ColdModeMatrixRun(
+		ModePhase Bodies,
+		ModePhase Comments,
+		ModePhase Both);
+
+	private sealed record InstrumentationOverheadRun(
+		string Order,
+		PhaseMeasurement Off,
+		PhaseMeasurement On,
+		string DirectOrder,
+		PhaseMeasurement DirectOff,
+		PhaseMeasurement DirectOn,
+		string LifecycleOrder,
+		PhaseMeasurement LifecycleOff,
+		PhaseMeasurement LifecycleOn,
+		string SetupOrder,
+		PhaseMeasurement SetupOff,
+		PhaseMeasurement SetupOn,
+		int DirectPasses);
+
+	private sealed record DirectInstrumentationRun(
+		string Order,
+		PhaseMeasurement Off,
+		PhaseMeasurement On,
+		string LifecycleOrder,
+		PhaseMeasurement LifecycleOff,
+		PhaseMeasurement LifecycleOn,
+		string SetupOrder,
+		PhaseMeasurement SetupOff,
+		PhaseMeasurement SetupOn);
+
+	private sealed record InstrumentationInput(
+		string FullPath,
+		string RelativePath,
+		string Content);
+
+	private sealed record DirectOutputSnapshot(
+		string RelativePath,
+		string Text,
+		ulong PlanFingerprint);
 
 	private sealed record ModePhase(
 		PhaseMeasurement Measurement,
@@ -697,7 +1370,51 @@ public sealed class PerformanceAuditRound2Tests
 		long FullFileReadBytes,
 		long ContentFingerprintComputations,
 		long PlanApplications,
-		CompressionWork Compression);
+		CompressionWork Compression,
+		AnalysisProfile? Analysis);
+
+	private sealed record AnalysisProfile(
+		long CompletedFiles,
+		long CancelledFiles,
+		AnalysisWork Work,
+		IReadOnlyDictionary<string, AnalysisPhaseProfile> Phases,
+		IReadOnlyList<AnalysisFileProfile> SlowestFiles);
+
+	private sealed record AnalysisPhaseProfile(
+		long Count,
+		double TotalMilliseconds,
+		double MeanMilliseconds,
+		double P50Milliseconds,
+		double P95Milliseconds,
+		double P99Milliseconds,
+		double MaximumMilliseconds,
+		double SharePercent,
+		IReadOnlyList<AnalysisPhaseTopFile> Top);
+
+	private sealed record AnalysisPhaseTopFile(
+		string RelativePath,
+		int SourceCharacters,
+		double ElapsedMilliseconds);
+
+	private sealed record AnalysisFileProfile(
+		string RelativePath,
+		int SourceCharacters,
+		double TotalMilliseconds,
+		IReadOnlyDictionary<string, double> Phases,
+		AnalysisWork Work);
+
+	private sealed record AnalysisWork(
+		long PreserveCaptures,
+		long BodyCaptures,
+		long CommentCaptures,
+		long OriginalDeclarations,
+		long OriginalDefects,
+		long OriginalVisitedNodes,
+		long RawEdits,
+		long FinalEdits,
+		long ReverseDeclarations,
+		long ReverseDefects,
+		long ReverseVisitedNodes);
 
 	private sealed record CompressionWork(
 		long HashComputations = 0,
@@ -709,6 +1426,19 @@ public sealed class PerformanceAuditRound2Tests
 		long PrewarmAnalyses = 0,
 		long PrewarmReuses = 0,
 		long UnsupportedFastPaths = 0);
+
+	private sealed class CompressionFixture : IDisposable
+	{
+		public CompressionFixture(TreeSitterCodeCompressor engine)
+		{
+			Engine = engine;
+			Session = new CodeCompressionSession(engine);
+		}
+
+		public TreeSitterCodeCompressor Engine { get; }
+		public CodeCompressionSession Session { get; }
+		public void Dispose() => Session.Dispose();
+	}
 
 	private sealed record BenchmarkMedian(
 		double ElapsedMilliseconds,

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 
 namespace DevProjex.Application.Compression;
@@ -48,8 +49,8 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 {
 	private const long MaximumReadBytes = 10L * 1024 * 1024;
 	private const long MaximumInFlightBytes = 32L * 1024 * 1024;
+	private const long UnknownLengthInFlightBytes = 64L * 1024;
 	private const long MaximumRetainedReadFactBytes = 64L * 1024 * 1024;
-	private const int ByteBudgetUnit = 64 * 1024;
 	private const int MaximumIoParallelism = 4;
 
 	public Task<CodeCompressionWarmupResult> WarmAsync(
@@ -100,21 +101,24 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 			SingleWriter = false,
 			AllowSynchronousContinuations = false
 		});
-		using var byteBudget = new WeightedByteBudget(MaximumInFlightBytes, ByteBudgetUnit);
+		using var pipelineCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var pipelineToken = pipelineCancellation.Token;
+		using var byteBudget = new WeightedByteBudget(MaximumInFlightBytes);
 		var warmed = 0;
 		var skipped = 0;
 		var failed = 0;
 		var processed = 0;
 		var nextIndex = -1;
 
+		ExceptionDispatchInfo? primaryPipelineFailure = null;
 		var workers = Enumerable.Range(0, parserWorkers)
-			.Select(_ => AnalyzeAsync())
+			.Select(_ => RunAnalysisWorkerAsync())
 			.ToArray();
 		var producerCount = Math.Min(
 			Math.Min(MaximumIoParallelism, Math.Max(1, Environment.ProcessorCount)),
 			candidates.Count);
 		var producers = Enumerable.Range(0, producerCount)
-			.Select(_ => Task.Run(ProduceAsync, cancellationToken))
+			.Select(_ => Task.Run(RunProducerAsync, CancellationToken.None))
 			.ToArray();
 		try
 		{
@@ -122,18 +126,20 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 			channel.Writer.TryComplete();
 			await Task.WhenAll(workers).ConfigureAwait(false);
 		}
-		catch
+		catch (Exception exception)
 		{
+			var observedFailure = ExceptionDispatchInfo.Capture(exception);
+			pipelineCancellation.Cancel();
 			channel.Writer.TryComplete();
-			try
-			{
-				await Task.WhenAll(workers).ConfigureAwait(false);
-			}
-			catch
-			{
-				// Preserve the producer/coordination failure that initiated pipeline teardown.
-			}
-			throw;
+			await ObserveCompletionAsync(producers).ConfigureAwait(false);
+			await ObserveCompletionAsync(workers).ConfigureAwait(false);
+			while (channel.Reader.TryRead(out var abandoned))
+				abandoned.Lease.Dispose();
+
+			cancellationToken.ThrowIfCancellationRequested();
+			Volatile.Read(ref primaryPipelineFailure)?.Throw();
+			observedFailure.Throw();
+			throw new UnreachableException();
 		}
 
 		cancellationToken.ThrowIfCancellationRequested();
@@ -152,11 +158,24 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 				new Dictionary<string, ContentReadFact>(retainedFacts, PathComparer.Default),
 				retainedBytes));
 
+		async Task RunProducerAsync()
+		{
+			try
+			{
+				await ProduceAsync().ConfigureAwait(false);
+			}
+			catch (Exception exception)
+			{
+				RecordPipelineFailure(exception);
+				throw;
+			}
+		}
+
 		async Task ProduceAsync()
 		{
 			while (true)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
+				pipelineToken.ThrowIfCancellationRequested();
 				var index = Interlocked.Increment(ref nextIndex);
 				if (index >= candidates.Count)
 					return;
@@ -175,9 +194,9 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 					if (!context.IsSupported(relativePath))
 					{
 						var metricsResult = await contentAnalyzer
-							.GetClassifiedMetricsAsync(path, cancellationToken)
+							.GetClassifiedMetricsAsync(path, pipelineToken)
 							.ConfigureAwait(false);
-						cancellationToken.ThrowIfCancellationRequested();
+						pipelineToken.ThrowIfCancellationRequested();
 						if (metricsResult.Classification != FileContentClassification.Text ||
 						    metricsResult.Metrics is not { IsEstimated: false } metrics)
 						{
@@ -200,12 +219,12 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 						continue;
 					}
 
-					lease = await byteBudget.AcquireAsync(EstimateInFlightBytes(path), cancellationToken)
+					lease = await byteBudget.AcquireAsync(EstimateInFlightBytes(path), pipelineToken)
 						.ConfigureAwait(false);
 					var fact = await contentAnalyzer
-						.ReadFactAsync(path, MaximumReadBytes, cancellationToken)
+						.ReadFactAsync(path, MaximumReadBytes, pipelineToken)
 						.ConfigureAwait(false);
-					cancellationToken.ThrowIfCancellationRequested();
+					pipelineToken.ThrowIfCancellationRequested();
 					if (!fact.IsMaterializedText || fact.Fingerprint is not { } fingerprint)
 					{
 						Increment(WarmFileOutcome.Skipped, ref warmed, ref skipped, ref failed);
@@ -224,7 +243,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 
 					await channel.Writer.WriteAsync(
 						new WarmWorkItem(path, relativePath, fact, fingerprint, lease),
-						cancellationToken).ConfigureAwait(false);
+						pipelineToken).ConfigureAwait(false);
 					lease = null;
 				}
 				catch (OperationCanceledException)
@@ -244,9 +263,22 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 			}
 		}
 
+		async Task RunAnalysisWorkerAsync()
+		{
+			try
+			{
+				await AnalyzeAsync().ConfigureAwait(false);
+			}
+			catch (Exception exception)
+			{
+				RecordPipelineFailure(exception);
+				throw;
+			}
+		}
+
 		async Task AnalyzeAsync()
 		{
-			await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+			await foreach (var item in channel.Reader.ReadAllAsync(pipelineToken).ConfigureAwait(false))
 			{
 				using (item.Lease)
 				{
@@ -257,7 +289,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 							item.RelativePath,
 							item.Fact.Content!,
 							item.Fingerprint,
-							cancellationToken);
+							pipelineToken);
 						Increment(
 							recorded ? WarmFileOutcome.Warmed : WarmFileOutcome.Skipped,
 							ref warmed,
@@ -278,6 +310,34 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 						ReportProgress(progress, ref processed, candidates.Count);
 					}
 				}
+			}
+		}
+
+		void RecordPipelineFailure(Exception exception)
+		{
+			if (exception is OperationCanceledException &&
+			    (cancellationToken.IsCancellationRequested || pipelineToken.IsCancellationRequested))
+			{
+				return;
+			}
+
+			var captured = ExceptionDispatchInfo.Capture(exception);
+			if (Interlocked.CompareExchange(ref primaryPipelineFailure, captured, null) is not null)
+				return;
+
+			channel.Writer.TryComplete();
+			pipelineCancellation.Cancel();
+		}
+
+		static async Task ObserveCompletionAsync(Task[] tasks)
+		{
+			try
+			{
+				await Task.WhenAll(tasks).ConfigureAwait(false);
+			}
+			catch
+			{
+				// The primary failure is rethrown after both pipeline sides have released their resources.
 			}
 		}
 	}
@@ -312,10 +372,13 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		return retained;
 	}
 
-	private static long EstimateInFlightBytes(string path) =>
-		TryGetLength(path, out var length)
-			? Math.Clamp(length * sizeof(char) + 128, 1, MaximumInFlightBytes)
-			: ByteBudgetUnit;
+	private static long EstimateInFlightBytes(string path)
+	{
+		if (!TryGetLength(path, out var length))
+			return UnknownLengthInFlightBytes;
+		var boundedLength = Math.Min(length, MaximumInFlightBytes);
+		return Math.Min(MaximumInFlightBytes, boundedLength * sizeof(char) + 128);
+	}
 
 	private static string BuildRelativePath(string projectRoot, string fullPath)
 	{
@@ -387,56 +450,4 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		Failed
 	}
 
-	private sealed class WeightedByteBudget : IDisposable
-	{
-		private readonly SemaphoreSlim _units;
-		private readonly SemaphoreSlim _acquisitionGate = new(1, 1);
-		private readonly int _unitBytes;
-		private readonly int _maximumUnits;
-
-		public WeightedByteBudget(long maximumBytes, int unitBytes)
-		{
-			_unitBytes = unitBytes;
-			_maximumUnits = checked((int)Math.Max(1, maximumBytes / unitBytes));
-			_units = new SemaphoreSlim(_maximumUnits, _maximumUnits);
-		}
-
-		public async ValueTask<Lease> AcquireAsync(long bytes, CancellationToken cancellationToken)
-		{
-			var requested = Math.Min(
-				_maximumUnits,
-				Math.Max(1, checked((int)((bytes + _unitBytes - 1) / _unitBytes))));
-			var acquired = 0;
-			await _acquisitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-			try
-			{
-				for (; acquired < requested; acquired++)
-					await _units.WaitAsync(cancellationToken).ConfigureAwait(false);
-				return new Lease(this, requested);
-			}
-			catch
-			{
-				if (acquired > 0)
-					_units.Release(acquired);
-				throw;
-			}
-			finally
-			{
-				_acquisitionGate.Release();
-			}
-		}
-
-		public void Dispose()
-		{
-			_acquisitionGate.Dispose();
-			_units.Dispose();
-		}
-
-		public sealed class Lease(WeightedByteBudget owner, int units) : IDisposable
-		{
-			private WeightedByteBudget? _owner = owner;
-
-			public void Dispose() => Interlocked.Exchange(ref _owner, null)?._units.Release(units);
-		}
-	}
 }

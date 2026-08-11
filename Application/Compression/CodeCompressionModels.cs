@@ -107,16 +107,42 @@ public sealed record CodeCompressionPlan(
 		string languageId,
 		IReadOnlyList<CodeCompressionEdit> edits,
 		int sourceLength,
-		string transformIdentity)
+		string transformIdentity) =>
+		CreateForAnalysis(
+			relativePath,
+			languageId,
+			edits,
+			sourceLength,
+			transformIdentity,
+			CancellationToken.None);
+
+	internal static CodeCompressionPlan CreateForAnalysis(
+		string relativePath,
+		string languageId,
+		IReadOnlyList<CodeCompressionEdit> edits,
+		int sourceLength,
+		string transformIdentity,
+		CancellationToken cancellationToken)
 	{
-		var ordered = edits
-			.Where(static edit => edit.Replacement.Length < edit.SourceLength)
-			.OrderBy(static edit => edit.SourceStart)
-			.ToArray();
+		cancellationToken.ThrowIfCancellationRequested();
+		var beneficial = new List<CodeCompressionEdit>(edits.Count);
+		for (var index = 0; index < edits.Count; index++)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
+			var edit = edits[index];
+			if (edit.Replacement.Length < edit.SourceLength)
+				beneficial.Add(edit);
+		}
+		cancellationToken.ThrowIfCancellationRequested();
+		beneficial.Sort(static (left, right) => left.SourceStart.CompareTo(right.SourceStart));
+		cancellationToken.ThrowIfCancellationRequested();
+		var ordered = beneficial.ToArray();
 		var transformedLength = sourceLength;
 		var previousEnd = 0;
-		foreach (var edit in ordered)
+		for (var index = 0; index < ordered.Length; index++)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
+			var edit = ordered[index];
 			if (edit.SourceStart < 0 || edit.SourceLength < 0 || edit.SourceEnd > sourceLength)
 				throw new ArgumentOutOfRangeException(nameof(edits), $"Edit [{edit.SourceStart}, {edit.SourceEnd}) leaves the file of {sourceLength} characters.");
 			if (edit.SourceStart < previousEnd)
@@ -124,6 +150,7 @@ public sealed record CodeCompressionPlan(
 			previousEnd = edit.SourceEnd;
 			transformedLength += edit.Replacement.Length - edit.SourceLength;
 		}
+		cancellationToken.ThrowIfCancellationRequested();
 
 		if (ordered.Length == 0 || transformedLength >= sourceLength)
 			return Unchanged(relativePath, languageId, CodeCompressionOutcome.UnchangedNoBenefit, sourceLength, transformIdentity);
@@ -143,14 +170,23 @@ public sealed record CodeCompressionPlan(
 	/// the two texts in both directions.
 	/// </summary>
 	public CodeCompressionResult Apply(string source)
+		=> ApplyForAnalysis(source, CancellationToken.None);
+
+	internal CodeCompressionResult ApplyForAnalysis(
+		string source,
+		CancellationToken cancellationToken)
 	{
 		ContentPipelineDiagnostics.RecordPlanApply();
 		ArgumentNullException.ThrowIfNull(source);
+		cancellationToken.ThrowIfCancellationRequested();
 		if (source.Length != SourceLength)
 			throw new ArgumentException($"The plan was built for {SourceLength} characters but the text has {source.Length}.", nameof(source));
 		return !HasEdits
 			? new CodeCompressionResult(source, ContentTransformMap.Identity)
-			: ApplyCore(source, ContentTransformMap.Create(Edits, SourceLength));
+			: ApplyCore(
+				source,
+				ContentTransformMap.CreateForAnalysis(Edits, SourceLength, cancellationToken),
+				cancellationToken);
 	}
 
 	internal CodeCompressionResult Apply(string source, ContentTransformMap map)
@@ -162,7 +198,7 @@ public sealed record CodeCompressionPlan(
 			throw new ArgumentException($"The plan was built for {SourceLength} characters but the text has {source.Length}.", nameof(source));
 		return !HasEdits
 			? new CodeCompressionResult(source, ContentTransformMap.Identity)
-			: ApplyCore(source, map);
+			: ApplyCore(source, map, CancellationToken.None);
 	}
 
 	public CodeCompressionResult Apply(ReadOnlySpan<char> source)
@@ -175,17 +211,22 @@ public sealed record CodeCompressionPlan(
 		return ApplyCore(source);
 	}
 
-	private CodeCompressionResult ApplyCore(string source, ContentTransformMap map)
+	private CodeCompressionResult ApplyCore(
+		string source,
+		ContentTransformMap map,
+		CancellationToken cancellationToken)
 	{
 		var text = string.Create(
 			TransformedLength,
-			(Source: source, Edits),
+			(Source: source, Edits, CancellationToken: cancellationToken),
 			static (destination, state) =>
 			{
 				var sourceCursor = 0;
 				var destinationCursor = 0;
-				foreach (var edit in state.Edits)
+				for (var index = 0; index < state.Edits.Count; index++)
 				{
+					ThrowIfCancellationRequestedPeriodically(state.CancellationToken, index);
+					var edit = state.Edits[index];
 					var retained = state.Source.AsSpan(sourceCursor, edit.SourceStart - sourceCursor);
 					retained.CopyTo(destination[destinationCursor..]);
 					destinationCursor += retained.Length;
@@ -196,6 +237,7 @@ public sealed record CodeCompressionPlan(
 
 				state.Source.AsSpan(sourceCursor).CopyTo(destination[destinationCursor..]);
 			});
+		cancellationToken.ThrowIfCancellationRequested();
 		return new CodeCompressionResult(text, map);
 	}
 
@@ -212,6 +254,14 @@ public sealed record CodeCompressionPlan(
 
 		builder.Append(source[cursor..]);
 		return new CodeCompressionResult(builder.ToString(), ContentTransformMap.Create(Edits, SourceLength));
+	}
+
+	private static void ThrowIfCancellationRequestedPeriodically(
+		CancellationToken cancellationToken,
+		int iteration)
+	{
+		if (cancellationToken.CanBeCanceled && iteration != 0 && (iteration & 1023) == 0)
+			cancellationToken.ThrowIfCancellationRequested();
 	}
 }
 

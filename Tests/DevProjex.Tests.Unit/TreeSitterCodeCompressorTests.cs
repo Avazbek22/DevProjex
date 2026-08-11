@@ -18,6 +18,22 @@ public sealed class TreeSitterCodeCompressorTests
 		return data;
 	}
 
+	public static TheoryData<int> AnalysisPhases()
+	{
+		var data = new TheoryData<int>();
+		foreach (var phase in Enum.GetValues<TreeSitterAnalysisPhase>())
+			data.Add((int)phase);
+		return data;
+	}
+
+	public static TheoryData<int> AnalysisCheckpoints()
+	{
+		var data = new TheoryData<int>();
+		foreach (var checkpoint in Enum.GetValues<TreeSitterAnalysisCheckpoint>())
+			data.Add((int)checkpoint);
+		return data;
+	}
+
 	private static (CodeCompressionPlan Plan, string Text) Compress(string relativePath, string source)
 	{
 		using var compressor = CodeCompressionTestHarness.CreateCompressor();
@@ -517,6 +533,144 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
+	public void AlreadyCanceledAnalysis_IsRejectedBeforeUnsupportedAndOversizedFastPaths()
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath());
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		Assert.ThrowsAny<OperationCanceledException>(() =>
+			scope.Analyze("notes.txt", "notes.txt", "plain text", cancellation.Token));
+		Assert.ThrowsAny<OperationCanceledException>(() =>
+			scope.Analyze(
+				"huge.cs",
+				"huge.cs",
+				new string('a', TreeSitterCodeCompressor.MaximumParsableCharacters + 1),
+				cancellation.Token));
+	}
+
+	[Theory]
+	[MemberData(nameof(AnalysisPhases))]
+	public void CancellationAtEveryAnalysisPhase_ReleasesNativeStateAndDoesNotCacheOrPublish(
+		int phaseValue)
+	{
+		var phase = (TreeSitterAnalysisPhase)phaseValue;
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var observer = new CancelAtAnalysisPhaseObserver();
+		var compressor = new TreeSitterCodeCompressor(
+			CodeCompressionTestHarness.CreateLocator(),
+			[harness.Pack],
+			analysisPhaseObserver: observer);
+		using var session = new CodeCompressionSession(compressor);
+		var publishedSnapshots = 0;
+		session.SnapshotPublished += (_, _) => publishedSnapshots++;
+		const string source = """
+			// Documentation.
+			public sealed class Widget
+			{
+			    public int Value { get; } = 42;
+
+			    public void Run()
+			    {
+			        Console.WriteLine(Value);
+			    }
+			}
+			""";
+		var context = new CodeCompressionContext(
+			Path.GetTempPath(),
+			session,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		using var cancellation = new CancellationTokenSource();
+		observer.Arm(phase, cancellation);
+
+		using (var canceledScope = context.BeginOutput(["Widget.cs"]))
+		{
+			Assert.ThrowsAny<OperationCanceledException>(() => canceledScope.Transform(
+				"Widget.cs",
+				"Widget.cs",
+				source,
+				cancellation.Token));
+		}
+
+		Assert.True(observer.WasReached, $"Cancellation boundary {phase} was not reached.");
+		Assert.Equal(0, session.Diagnostics.CacheEntries);
+		Assert.Equal(0, publishedSnapshots);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.LeasedWorkers);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.GlobalActiveWorkers);
+
+		observer.Disarm();
+		using var retryScope = context.BeginOutput(["Widget.cs"]);
+		var retry = retryScope.Transform(
+			"Widget.cs",
+			"Widget.cs",
+			source,
+			TestContext.Current.CancellationToken);
+		var snapshot = retryScope.Complete();
+
+		Assert.NotEqual(source, retry.Text);
+		Assert.Equal(1, snapshot.CompressedFiles);
+		Assert.Equal(1, session.Diagnostics.CacheEntries);
+		Assert.Equal(1, publishedSnapshots);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.LeasedWorkers);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.GlobalActiveWorkers);
+	}
+
+	[Theory]
+	[MemberData(nameof(AnalysisCheckpoints))]
+	public void CancellationInsideEditShapingLoop_ReleasesNativeStateAndDoesNotPublish(
+		int checkpointValue)
+	{
+		var checkpoint = (TreeSitterAnalysisCheckpoint)checkpointValue;
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		using var cancellation = new CancellationTokenSource();
+		var observer = new CancelAtAnalysisCheckpointObserver(checkpoint, cancellation);
+		using var compressor = new TreeSitterCodeCompressor(
+			CodeCompressionTestHarness.CreateLocator(),
+			[harness.Pack],
+			analysisPhaseObserver: observer);
+		using var session = new CodeCompressionSession(compressor);
+		var publishedSnapshots = 0;
+		session.SnapshotPublished += (_, _) => publishedSnapshots++;
+		var source = SourceForCheckpoint(checkpoint);
+		var context = new CodeCompressionContext(
+			Path.GetTempPath(),
+			session,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+
+		using (var canceledScope = context.BeginOutput(["Widget.cs"]))
+		{
+			Assert.ThrowsAny<OperationCanceledException>(() => canceledScope.Transform(
+				"Widget.cs",
+				"Widget.cs",
+				source,
+				cancellation.Token));
+		}
+
+		Assert.True(observer.WasReached, $"Edit-shaping checkpoint {checkpoint} was not reached.");
+		Assert.Equal(1024, observer.Iteration);
+		Assert.Equal(0, session.Diagnostics.CacheEntries);
+		Assert.Equal(0, publishedSnapshots);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.LeasedWorkers);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.GlobalActiveWorkers);
+
+		observer.Disarm();
+		using var retryScope = context.BeginOutput(["Widget.cs"]);
+		var retry = retryScope.Transform(
+			"Widget.cs",
+			"Widget.cs",
+			source,
+			TestContext.Current.CancellationToken);
+		_ = retryScope.Complete();
+
+		Assert.NotEqual(source, retry.Text);
+		Assert.Equal(1, session.Diagnostics.CacheEntries);
+		Assert.Equal(1, publishedSnapshots);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.LeasedWorkers);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.GlobalActiveWorkers);
+	}
+
+	[Fact]
 	public void OversizedAmbiguousHeader_IsRejectedBeforeCppEvidenceScan()
 	{
 		var huge = "namespace sample { class Widget {}; }" +
@@ -553,6 +707,7 @@ public sealed class TreeSitterCodeCompressorTests
 		source.Append('}');
 		Assert.True(source.Length < TreeSitterCodeCompressor.MaximumParsableCharacters);
 		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var diagnostics = compressor.BeginAnalysisDiagnostics();
 		using var scope = compressor.CreateScope(Path.GetTempPath());
 		var stopwatch = Stopwatch.StartNew();
 
@@ -565,6 +720,14 @@ public sealed class TreeSitterCodeCompressorTests
 
 		Assert.Equal(CodeCompressionOutcome.UnchangedGateRejected, analysis.Plan.Outcome);
 		Assert.Empty(analysis.Plan.Edits);
+		var diagnosticSnapshot = diagnostics.Capture();
+		Assert.Equal(1, diagnosticSnapshot.CompletedFiles);
+		Assert.Equal(
+			1,
+			diagnosticSnapshot.Phases.Single(
+				static phase => phase.Phase == TreeSitterAnalysisPhase.EditShaping).Count);
+		Assert.True(diagnosticSnapshot.Work.RawEdits > TreeSitterCodeCompressor.MaximumEditsPerFile);
+		Assert.Equal(TreeSitterCodeCompressor.MaximumEditsPerFile, diagnosticSnapshot.Work.FinalEdits);
 		Assert.True(
 			stopwatch.Elapsed < TimeSpan.FromSeconds(20),
 			$"Complexity gate took {stopwatch.Elapsed.TotalMilliseconds:F0} ms.");
@@ -1089,5 +1252,91 @@ public sealed class TreeSitterCodeCompressorTests
 				throw new IOException("Injected transient grammar access failure.");
 			return inner.Resolve(libraryBaseName);
 		}
+	}
+
+	private sealed class CancelAtAnalysisPhaseObserver : ITreeSitterAnalysisPhaseObserver
+	{
+		private TreeSitterAnalysisPhase? _target;
+		private CancellationTokenSource? _cancellation;
+
+		public bool WasReached { get; private set; }
+
+		public void Arm(TreeSitterAnalysisPhase target, CancellationTokenSource cancellation)
+		{
+			_target = target;
+			_cancellation = cancellation;
+			WasReached = false;
+		}
+
+		public void Disarm()
+		{
+			_target = null;
+			_cancellation = null;
+		}
+
+		public void OnPhaseCompleted(TreeSitterAnalysisPhase phase)
+		{
+			if (phase != _target)
+				return;
+
+			WasReached = true;
+			_cancellation!.Cancel();
+		}
+	}
+
+	private sealed class CancelAtAnalysisCheckpointObserver(
+		TreeSitterAnalysisCheckpoint target,
+		CancellationTokenSource cancellation) :
+		ITreeSitterAnalysisPhaseObserver,
+		ITreeSitterAnalysisCheckpointObserver
+	{
+		private bool _armed = true;
+
+		public bool WasReached { get; private set; }
+		public int Iteration { get; private set; }
+
+		public void Disarm() => _armed = false;
+
+		public void OnPhaseCompleted(TreeSitterAnalysisPhase phase)
+		{
+		}
+
+		public void OnCheckpoint(TreeSitterAnalysisCheckpoint checkpoint, int iteration)
+		{
+			if (!_armed || checkpoint != target)
+				return;
+
+			WasReached = true;
+			Iteration = iteration;
+			cancellation.Cancel();
+		}
+	}
+
+	private static string SourceForCheckpoint(TreeSitterAnalysisCheckpoint checkpoint)
+	{
+		if (checkpoint == TreeSitterAnalysisCheckpoint.TrailingWhitespaceScan)
+		{
+			return "class Widget { void Run() {\nCall();" +
+			       new string(' ', 2048) +
+			       "// note\n} }\n";
+		}
+
+		var source = new StringBuilder();
+		if (checkpoint == TreeSitterAnalysisCheckpoint.ContainingBodyAncestorWalk)
+		{
+			source.Append("class Widget { void Run() {\n");
+			for (var index = 0; index < 1100; index++)
+				source.Append("{ ");
+			source.Append("\n// note\n");
+			for (var index = 0; index < 1100; index++)
+				source.Append("} ");
+			source.Append("\n} }\n");
+			return source.ToString();
+		}
+
+		for (var index = 0; index < 1025; index++)
+			source.Append("// note ").Append(index).Append("\n\n");
+		source.Append("class Widget { void Run() { System.Console.WriteLine(1); } }\n");
+		return source.ToString();
 	}
 }
