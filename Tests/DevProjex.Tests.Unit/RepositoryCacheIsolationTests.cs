@@ -223,8 +223,15 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 		using (new FileStream(lockedPath, FileMode.Open, FileAccess.Read, FileShare.None))
 		{
 			service.DeleteRepositoryDirectory(repositoryPath);
-			Assert.True(Directory.Exists(repositoryPath) || Directory.Exists(
-				RepositoryCacheLayout.GetTrashRoot(_cacheRoot)));
+			if (OperatingSystem.IsWindows())
+			{
+				Assert.True(Directory.Exists(repositoryPath) || Directory.Exists(
+					RepositoryCacheLayout.GetTrashRoot(_cacheRoot)));
+			}
+			else
+			{
+				Assert.False(Directory.Exists(repositoryPath));
+			}
 		}
 
 		service.CollectGarbage();
