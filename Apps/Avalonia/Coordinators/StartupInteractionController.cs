@@ -48,9 +48,13 @@ internal sealed class StartupInteractionController(
 		var gitMode = applicationIntent?.GitMode ?? ResolveLegacyMode(selectionSpec.GitMode);
 		var exclusionMode = applicationIntent?.Exclusions ?? ResolveLegacyMode(selectionSpec.Exclusions);
 		var hideSecretsMode = applicationIntent?.HideSecrets ?? ResolveLegacyMode(selectionSpec.HideSecrets);
+		var compressCodeMode = applicationIntent?.CompressCode ?? ResolveLegacyMode(selectionSpec.CompressCode);
+		var stripCommentsMode = applicationIntent?.StripComments ?? ResolveLegacyMode(selectionSpec.StripComments);
 		var applyGitMode = gitMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyExclusions = exclusionMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyHideSecrets = hideSecretsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+		var applyCompressCode = compressCodeMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+		var applyStripComments = stripCommentsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
         var selectedExtensions = extensionMode != ProjectSelectionApplicationMode.ApplyResolvedValue ||
 		                         selectionSpec.Extensions is null
             ? null
@@ -73,7 +77,9 @@ internal sealed class StartupInteractionController(
 				{
 					GitMode = applyGitMode ? selectionSpec.GitMode : null,
 					Exclusions = applyExclusions ? selectionSpec.Exclusions : null,
-					HideSecrets = null
+					HideSecrets = null,
+					CompressCode = null,
+					StripComments = null
 				},
                 inheritedIgnoreOptions);
         }
@@ -87,6 +93,10 @@ internal sealed class StartupInteractionController(
 				extensionMode == ProjectSelectionApplicationMode.ResetToDefaults);
 		if (applyHideSecrets)
 			selection.ApplyHideSecretsOverride(selectionSpec.HideSecrets);
+		if (applyCompressCode)
+			selection.ApplyCompressCodeOverride(selectionSpec.CompressCode);
+		if (applyStripComments)
+			selection.ApplyStripCommentsOverride(selectionSpec.StripComments);
 
 		if (pathSelectionChanged)
 		{

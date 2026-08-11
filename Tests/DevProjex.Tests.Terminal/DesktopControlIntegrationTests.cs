@@ -192,7 +192,7 @@ public sealed class DesktopControlIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var paths = new DesktopControlPaths(() => workspace.Path);
-		var handler = new FirstRequestDelayHandler();
+		var handler = new FirstRequestBlockingHandler();
 		await using var server = await DesktopControlServer.StartAsync(
 			handler,
 			paths: paths,
@@ -200,13 +200,25 @@ public sealed class DesktopControlIntegrationTests
 		var client = new DesktopControlClient(new DesktopInstanceRegistry(paths));
 		var registration = Assert.Single(await client.ListAsync(TestContext.Current.CancellationToken));
 
-		var exception = await Assert.ThrowsAsync<DesktopControlException>(() =>
-			client.SendAsync(
-				registration,
-				"status",
-				new { },
-				TimeSpan.FromMilliseconds(30),
-				TestContext.Current.CancellationToken));
+		var timedOutSend = client.SendAsync(
+			registration,
+			"status",
+			new { },
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		await handler.FirstRequestStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		DesktopControlException exception;
+		try
+		{
+			exception = await Assert.ThrowsAsync<DesktopControlException>(() => timedOutSend);
+		}
+		finally
+		{
+			handler.ReleaseFirstRequest.TrySetResult();
+		}
 		Assert.Equal("DPX-DESKTOP-TIMEOUT", exception.Code);
 
 		await handler.FirstRequestCompleted.Task.WaitAsync(
@@ -765,9 +777,13 @@ public sealed class DesktopControlIntegrationTests
 		}
 	}
 
-	private sealed class FirstRequestDelayHandler : IDesktopInteractionHandler
+	private sealed class FirstRequestBlockingHandler : IDesktopInteractionHandler
 	{
 		private int _requestCount;
+		public TaskCompletionSource FirstRequestStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource ReleaseFirstRequest { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public TaskCompletionSource FirstRequestCompleted { get; } =
 			new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -777,8 +793,15 @@ public sealed class DesktopControlIntegrationTests
 		{
 			if (Interlocked.Increment(ref _requestCount) == 1)
 			{
-				await Task.Delay(100, cancellationToken);
-				FirstRequestCompleted.TrySetResult();
+				FirstRequestStarted.TrySetResult();
+				try
+				{
+					await ReleaseFirstRequest.Task.WaitAsync(cancellationToken);
+				}
+				finally
+				{
+					FirstRequestCompleted.TrySetResult();
+				}
 			}
 
 			return new DesktopInteractionResult(true);

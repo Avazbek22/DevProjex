@@ -1008,16 +1008,19 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
 		HookAllOptionListeners(coordinator, viewModel);
 		Assert.True(coordinator.ApplyCompressCodeOverride(false));
+		Assert.True(coordinator.ApplyStripCommentsOverride(false));
 		changedOptions.Clear();
 
 		Assert.True(coordinator.ApplyHideSecretsOverride(true));
 		Assert.True(coordinator.ApplyCompressCodeOverride(true));
+		Assert.True(coordinator.ApplyStripCommentsOverride(true));
 
 		Assert.Equal(
-			[IgnoreOptionId.HideSecrets, IgnoreOptionId.CompressCode],
+			[IgnoreOptionId.HideSecrets, IgnoreOptionId.CompressCode, IgnoreOptionId.StripComments],
 			changedOptions);
 		Assert.False(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.HideSecrets));
 		Assert.True(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.CompressCode));
+		Assert.True(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.StripComments));
 		Assert.True(MainWindow.RequiresCompressionRefresh(changedOptionId: null));
 	}
 

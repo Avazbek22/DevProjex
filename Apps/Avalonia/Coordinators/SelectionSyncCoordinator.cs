@@ -493,7 +493,9 @@ public sealed partial class SelectionSyncCoordinator(
 	    SecretScanState secretScanState = SecretScanState.Disabled,
 	    int? secretMatchesCount = null,
 	    int? compressedFilesCount = null,
-	    int? uncompressedFilesCount = null)
+	    int? uncompressedFilesCount = null,
+	    int? commentStrippedFilesCount = null,
+	    int? commentUnchangedFilesCount = null)
     {
         if (viewModel.IgnoreOptions.Count == 0)
             return;
@@ -507,6 +509,8 @@ public sealed partial class SelectionSyncCoordinator(
 			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
 		var compressCodeIsChecked = viewModel.IgnoreOptions.Any(static option =>
 			option.Id == IgnoreOptionId.CompressCode && option.IsChecked);
+		var stripCommentsIsChecked = viewModel.IgnoreOptions.Any(static option =>
+			option.Id == IgnoreOptionId.StripComments && option.IsChecked);
         var counts = _ignoreOptionCounts;
         var availability = new IgnoreOptionsAvailability(
             IncludeGitIgnore: visibleIds.Contains(IgnoreOptionId.UseGitIgnore),
@@ -530,6 +534,8 @@ public sealed partial class SelectionSyncCoordinator(
 			SecretMatchesCount: hideSecretsIsChecked ? secretMatchesCount : null,
 			CompressedFilesCount: compressCodeIsChecked ? compressedFilesCount : null,
 			UncompressedFilesCount: compressCodeIsChecked ? uncompressedFilesCount : null,
+			CommentStrippedFilesCount: stripCommentsIsChecked ? commentStrippedFilesCount : null,
+			CommentUnchangedFilesCount: stripCommentsIsChecked ? commentUnchangedFilesCount : null,
             ShowAdvancedCounts: showAdvancedCounts);
         var localizedDescriptors = ignoreOptionsService.GetOptions(availability);
         var descriptorsById = localizedDescriptors.ToDictionary(static descriptor => descriptor.Id);

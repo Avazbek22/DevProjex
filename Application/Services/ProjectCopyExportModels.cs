@@ -46,6 +46,7 @@ public sealed record ProjectCopyExportRequest(
 	ProjectCopyConflictPolicy ConflictPolicy = ProjectCopyConflictPolicy.Fail,
 	bool RedactSecrets = false,
 	bool CompressCode = false,
+	bool StripComments = false,
 	ProjectCopyNoticeText? NoticeText = null);
 
 /// <summary>

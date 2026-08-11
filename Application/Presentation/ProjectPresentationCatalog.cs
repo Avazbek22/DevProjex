@@ -133,7 +133,13 @@ public static class ProjectPresentationCatalog
 			IgnoreOptionId.CompressCode,
 			"compress-code",
 			"Settings.Ignore.CompressCode",
-			1)
+			1),
+		new(
+			null,
+			IgnoreOptionId.StripComments,
+			"strip-comments",
+			"Settings.Ignore.StripComments",
+			2)
 	];
 
 	/// <summary>

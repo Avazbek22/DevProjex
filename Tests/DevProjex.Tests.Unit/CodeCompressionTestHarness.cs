@@ -24,9 +24,10 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		Language = language;
 		Fixture = fixture;
 		Parser = new Parser(language);
-		Bodies = new Query(language, pack.BodiesQuery);
+		Bodies = pack.BodiesQuery is null ? null : new Query(language, pack.BodiesQuery);
 		Declarations = new Query(language, pack.DeclarationsQuery);
 		Preserves = pack.PreservesQuery is null ? null : new Query(language, pack.PreservesQuery);
+		Comments = pack.CommentsQuery is null ? null : new Query(language, pack.CommentsQuery);
 	}
 
 	public CompressionLanguagePack Pack { get; }
@@ -35,11 +36,13 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 
 	public Parser Parser { get; }
 
-	public Query Bodies { get; }
+	public Query? Bodies { get; }
 
 	public Query Declarations { get; }
 
 	public Query? Preserves { get; }
+
+	public Query? Comments { get; }
 
 	public string Fixture { get; }
 
@@ -55,6 +58,8 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 	public static CompressionLanguagePack PackWithOverlappingBodyQuery(string languageId)
 	{
 		var pack = Packs.Single(candidate => candidate.Id.Equals(languageId, StringComparison.Ordinal));
+		if (pack.BodiesQuery is null)
+			throw new InvalidOperationException($"Language pack '{languageId}' has no body query.");
 		return pack with
 		{
 			BodiesQuery = pack.BodiesQuery + "\n(class_declaration body: (declaration_list) @body)\n",
@@ -76,8 +81,11 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 	}
 
 	public int CountCaptures(Query query)
+		=> CountCaptures(query, Fixture);
+
+	public int CountCaptures(Query query, string source)
 	{
-		using var tree = Parser.Parse(Fixture)!;
+		using var tree = Parser.Parse(source)!;
 		using var cursor = query.Execute(tree.RootNode);
 		return cursor.Captures.Count();
 	}
@@ -93,10 +101,13 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 
 	public static string FixtureFor(string languageId) => languageId switch
 	{
+		"bash" => "#!/usr/bin/env bash\n# note\nbuild() { printf '%s\\n' \"ready#now\"; }\n",
 		"c" => CodeCompressionFixtures.C,
 		"csharp" => CodeCompressionFixtures.CSharp,
 		"cpp" => CodeCompressionFixtures.Cpp,
+		"css" => "/* note */\n.card { content: \"/* literal */\"; color: red; }\n",
 		"go" => CodeCompressionFixtures.Go,
+		"html" => "<!doctype html>\n<!-- note -->\n<main>Ready</main>\n",
 		"java" => CodeCompressionFixtures.Java,
 		"javascript" => CodeCompressionFixtures.JavaScript,
 		"kotlin" => CodeCompressionFixtures.Kotlin,
@@ -105,16 +116,31 @@ internal sealed class CodeCompressionTestHarness : IDisposable
 		"ruby" => CodeCompressionFixtures.Ruby,
 		"rust" => CodeCompressionFixtures.Rust,
 		"scala" => CodeCompressionFixtures.Scala,
+		"toml" => "# note\n[service]\nname = \"api#worker\"\n",
 		"tsx" => CodeCompressionFixtures.Tsx,
 		"typescript" => CodeCompressionFixtures.TypeScript,
+		"xml" => "<?xml version=\"1.0\"?>\n<!-- note -->\n<root><![CDATA[<!-- data -->]]></root>\n",
+		"yaml" => "---\n# note\nservice: api\n",
 		_ => throw new ArgumentOutOfRangeException(nameof(languageId), languageId, "No fixture for this language.")
+	};
+
+	public static string CommentFixtureFor(string languageId) => languageId switch
+	{
+		"bash" or "toml" => "# comment\n",
+		"css" => "/* comment */\n",
+		"html" or "xml" => "<!-- comment -->\n",
+		"python" or "ruby" => "# comment\n",
+		"php" => "<?php // comment\n?>",
+		"yaml" => "# comment\n",
+		_ => "// comment\n"
 	};
 
 	public void Dispose()
 	{
+		Comments?.Dispose();
 		Preserves?.Dispose();
 		Declarations.Dispose();
-		Bodies.Dispose();
+		Bodies?.Dispose();
 		Parser.Dispose();
 		Language.Dispose();
 	}

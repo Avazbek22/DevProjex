@@ -23,10 +23,28 @@ public interface ICodeCompressor
 	bool IsSupported(string relativePath);
 
 	/// <summary>
+	/// True when the language pack can apply at least one requested edit family. The default keeps
+	/// existing test and third-party implementations source-compatible; data-driven compressors
+	/// should override this to preserve unsupported-language fast paths per mode.
+	/// </summary>
+	bool IsSupported(string relativePath, CodeTransformKinds kinds) => IsSupported(relativePath);
+
+	/// <summary>
 	/// Loads whatever the selection needs and nothing else. Grammars are expensive to materialize
 	/// and load, so nothing is touched until a language actually appears in the selection.
 	/// </summary>
 	ICodeCompressionScope CreateScope(string projectRoot);
+
+	/// <summary>
+	/// Creates one parse operation for the requested edit families. Implementations that only
+	/// support the original body-compression contract keep working for that mode and fail loudly
+	/// rather than silently applying body edits to a comments-only request.
+	/// </summary>
+	ICodeCompressionScope CreateScope(string projectRoot, CodeTransformKinds kinds) =>
+		kinds == CodeTransformKinds.Bodies
+			? CreateScope(projectRoot)
+			: throw new NotSupportedException(
+				$"The compressor does not support transformation mode '{kinds}'.");
 }
 
 /// <summary>Optional native-runtime facts used by bounded orchestration and developer diagnostics.</summary>

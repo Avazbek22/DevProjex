@@ -96,6 +96,7 @@ public sealed class ExportProjectCommandHandler(
 				: ProjectCopyConflictPolicy.Fail,
 			RedactSecrets: plan.Selection.HideSecrets == true,
 			CompressCode: plan.Selection.CompressCode == true,
+			StripComments: plan.Selection.StripComments == true,
 			NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(services.Localization));
 		var result = await new ProgressRenderer(environment, request.Output, services.Localization)
 			.RunProjectExportAsync(progress =>

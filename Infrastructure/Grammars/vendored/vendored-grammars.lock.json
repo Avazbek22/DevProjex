@@ -12,6 +12,13 @@
         "archiveUrl": "https://codeload.github.com/tree-sitter-grammars/tree-sitter-kotlin/zip/refs/tags/v1.1.0",
         "archiveSha256": "73c45375934dcb1a764a7c1c3b03059ec78d0755e0bf4874ddb06b4df4fbd091"
       },
+      "build": {
+        "compiler": "cc",
+        "sourceFiles": [
+          "src/parser.c",
+          "src/scanner.c"
+        ]
+      },
       "toolchain": {
         "name": "zig",
         "version": "0.16.0",
@@ -88,6 +95,316 @@
           "architecture": "arm64",
           "size": 3483496,
           "sha256": "3b009b3d3f7f8038926da8d352995ffea1eb4a0d47bab8f2e28ba8193293fbfd"
+        }
+      ]
+    },
+    {
+      "name": "tree-sitter-toml",
+      "export": "tree_sitter_toml",
+      "abiVersion": 13,
+      "source": {
+        "repository": "https://github.com/tree-sitter/tree-sitter-toml",
+        "tag": null,
+        "commit": "342d9be207c2dba869b9967124c679b5e6fd0ebe",
+        "archiveUrl": "https://codeload.github.com/tree-sitter/tree-sitter-toml/zip/342d9be207c2dba869b9967124c679b5e6fd0ebe",
+        "archiveSha256": "ba4055ea8bff2c17d4eb5454ce965a52d073f246ce0a7d3d915d57c4746d676a"
+      },
+      "build": {
+        "compiler": "cc",
+        "sourceFiles": [
+          "src/parser.c",
+          "src/scanner.c"
+        ]
+      },
+      "sourcePatches": [
+        {
+          "path": "src/parser.c",
+          "description": "Export the legacy generated language entry point with hidden-by-default visibility.",
+          "oldText": "#ifdef _WIN32\n#define extern __declspec(dllexport)\n#endif",
+          "newText": "#ifdef _WIN32\n#define extern __declspec(dllexport)\n#elif defined(__GNUC__) || defined(__clang__)\n#define extern __attribute__((visibility(\"default\")))\n#endif"
+        }
+      ],
+      "toolchain": {
+        "name": "zig",
+        "version": "0.16.0",
+        "archiveUrl": "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip",
+        "archiveSha256": "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e",
+        "compilerFlags": [
+          "-shared",
+          "-O2",
+          "-DNDEBUG",
+          "-fno-ident",
+          "-fvisibility=hidden",
+          "-g0",
+          "-s"
+        ],
+        "postProcessing": "Zero Mach-O LC_UUID after stripping debug symbols to make cross-build hashes reproducible."
+      },
+      "binaries": [
+        {
+          "rid": "win-x64",
+          "target": "x86_64-windows-gnu",
+          "path": "win-x64/tree-sitter-toml.dll",
+          "format": "pe",
+          "architecture": "x64",
+          "size": 96256,
+          "sha256": "aed8e04d69e8a48bce54f175330c58f6838de0265f2fc7dd67851c1255b70356"
+        },
+        {
+          "rid": "win-arm64",
+          "target": "aarch64-windows-gnu",
+          "path": "win-arm64/tree-sitter-toml.dll",
+          "format": "pe",
+          "architecture": "arm64",
+          "size": 37888,
+          "sha256": "14486b9211d7bbde2d7101b8e8c39f158837fb8e7f16907633020c6d09946d9c"
+        },
+        {
+          "rid": "linux-x64",
+          "target": "x86_64-linux-gnu",
+          "path": "linux-x64/libtree-sitter-toml.so",
+          "format": "elf",
+          "architecture": "x64",
+          "size": 29184,
+          "sha256": "2278c8e0a218aac616cb033e341f17ff5a195ce17bdad737023f3d99874e56a2"
+        },
+        {
+          "rid": "linux-arm64",
+          "target": "aarch64-linux-gnu",
+          "path": "linux-arm64/libtree-sitter-toml.so",
+          "format": "elf",
+          "architecture": "arm64",
+          "size": 27888,
+          "sha256": "f20c93734fbf722e984e4d937e9f1eb137f82d4a00d752b30204e0fc99a20bf3"
+        },
+        {
+          "rid": "osx-x64",
+          "target": "x86_64-macos",
+          "linkerFlags": [
+            "-Wl,-install_name,@rpath/libtree-sitter-toml.dylib"
+          ],
+          "path": "osx-x64/libtree-sitter-toml.dylib",
+          "format": "macho",
+          "architecture": "x64",
+          "size": 37980,
+          "sha256": "b4c4264a9a6e2dc5dfd6507c80e7093df88da8395b018b8b87a264d6891744f1"
+        },
+        {
+          "rid": "osx-arm64",
+          "target": "aarch64-macos",
+          "linkerFlags": [
+            "-Wl,-install_name,@rpath/libtree-sitter-toml.dylib"
+          ],
+          "path": "osx-arm64/libtree-sitter-toml.dylib",
+          "format": "macho",
+          "architecture": "arm64",
+          "size": 66936,
+          "sha256": "a5dd47595aecf95c4f9a751fc6287a0c5382de57cfad2cef372b7950a6bc057f"
+        }
+      ]
+    },
+    {
+      "name": "tree-sitter-xml",
+      "export": "tree_sitter_xml",
+      "abiVersion": 14,
+      "source": {
+        "repository": "https://github.com/tree-sitter-grammars/tree-sitter-xml",
+        "tag": "v0.7.0",
+        "commit": "4b64dd3a03ec002258d6268d712fd93716d6ab57",
+        "archiveUrl": "https://codeload.github.com/tree-sitter-grammars/tree-sitter-xml/zip/refs/tags/v0.7.0",
+        "archiveSha256": "991d121cd1217b488aa1f831a1ed07041c126bf1bc4c9069a025c704014c6fb2"
+      },
+      "build": {
+        "compiler": "cc",
+        "sourceFiles": [
+          "xml/src/parser.c",
+          "xml/src/scanner.c"
+        ],
+        "includeDirectories": [
+          "xml/src"
+        ]
+      },
+      "toolchain": {
+        "name": "zig",
+        "version": "0.16.0",
+        "archiveUrl": "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip",
+        "archiveSha256": "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e",
+        "compilerFlags": [
+          "-shared",
+          "-O2",
+          "-DNDEBUG",
+          "-fno-ident",
+          "-fvisibility=hidden",
+          "-g0",
+          "-s"
+        ],
+        "postProcessing": "Zero Mach-O LC_UUID after stripping debug symbols to make cross-build hashes reproducible."
+      },
+      "binaries": [
+        {
+          "rid": "win-x64",
+          "target": "x86_64-windows-gnu",
+          "path": "win-x64/tree-sitter-xml.dll",
+          "format": "pe",
+          "architecture": "x64",
+          "size": 116224,
+          "sha256": "468b037857b0f72cbd0a80f715c8a1996dbdc34b0c36c85a1c0b7dd011290d83"
+        },
+        {
+          "rid": "win-arm64",
+          "target": "aarch64-windows-gnu",
+          "path": "win-arm64/tree-sitter-xml.dll",
+          "format": "pe",
+          "architecture": "arm64",
+          "size": 59392,
+          "sha256": "461f022ee81e313bf17ff9ce5100c236156ac74b3d130b9ec58267bf10cd229c"
+        },
+        {
+          "rid": "linux-x64",
+          "target": "x86_64-linux-gnu",
+          "path": "linux-x64/libtree-sitter-xml.so",
+          "format": "elf",
+          "architecture": "x64",
+          "size": 52552,
+          "sha256": "ed6f59c1558013751264f0fbb2f878ebd217f9613720e9360fda9a36d83e2e85"
+        },
+        {
+          "rid": "linux-arm64",
+          "target": "aarch64-linux-gnu",
+          "path": "linux-arm64/libtree-sitter-xml.so",
+          "format": "elf",
+          "architecture": "arm64",
+          "size": 52728,
+          "sha256": "56f5c4ab646f3913a898ca488c55ec8084c3930889e28f3ab4552f923a46ad95"
+        },
+        {
+          "rid": "osx-x64",
+          "target": "x86_64-macos",
+          "linkerFlags": [
+            "-Wl,-install_name,@rpath/libtree-sitter-xml.dylib"
+          ],
+          "path": "osx-x64/libtree-sitter-xml.dylib",
+          "format": "macho",
+          "architecture": "x64",
+          "size": 59502,
+          "sha256": "c769e01aebf8cf5d16da9fa6854876629dc0b731dee74b0d8f35d386a5137c6f"
+        },
+        {
+          "rid": "osx-arm64",
+          "target": "aarch64-macos",
+          "linkerFlags": [
+            "-Wl,-install_name,@rpath/libtree-sitter-xml.dylib"
+          ],
+          "path": "osx-arm64/libtree-sitter-xml.dylib",
+          "format": "macho",
+          "architecture": "arm64",
+          "size": 84648,
+          "sha256": "18dc96239baa3e7893aa2dc5b13ba43f22c4b7386906ad0737ed9d8dafacba00"
+        }
+      ]
+    },
+    {
+      "name": "tree-sitter-yaml",
+      "export": "tree_sitter_yaml",
+      "abiVersion": 14,
+      "source": {
+        "repository": "https://github.com/tree-sitter-grammars/tree-sitter-yaml",
+        "tag": "v0.7.2",
+        "commit": "7708026449bed86239b1cd5bce6e3c34dbca6415",
+        "archiveUrl": "https://codeload.github.com/tree-sitter-grammars/tree-sitter-yaml/zip/refs/tags/v0.7.2",
+        "archiveSha256": "f995e22d02efba52b06d527376f51cfd31ec3029c8f70a8e1132281ae0c1e7fd"
+      },
+      "build": {
+        "compiler": "cc",
+        "sourceFiles": [
+          "src/parser.c",
+          "src/scanner.c"
+        ]
+      },
+      "sourcePatches": [
+        {
+          "path": "src/scanner.c",
+          "description": "Require space for the complete indentation entry before serializing it.",
+          "oldText": "for (; typ_itr != typ_end && size < TREE_SITTER_SERIALIZATION_BUFFER_SIZE; ++typ_itr, ++len_itr) {",
+          "newText": "for (; typ_itr != typ_end && size + 2 * sizeof(int16_t) <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE; ++typ_itr, ++len_itr) {"
+        }
+      ],
+      "toolchain": {
+        "name": "zig",
+        "version": "0.16.0",
+        "archiveUrl": "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip",
+        "archiveSha256": "68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e",
+        "compilerFlags": [
+          "-shared",
+          "-O2",
+          "-DNDEBUG",
+          "-fno-ident",
+          "-fvisibility=hidden",
+          "-g0",
+          "-s"
+        ],
+        "postProcessing": "Zero Mach-O LC_UUID after stripping debug symbols to make cross-build hashes reproducible."
+      },
+      "binaries": [
+        {
+          "rid": "win-x64",
+          "target": "x86_64-windows-gnu",
+          "path": "win-x64/tree-sitter-yaml.dll",
+          "format": "pe",
+          "architecture": "x64",
+          "size": 262144,
+          "sha256": "8edda7570628a9e387de5568a4ec0020c62791b7b7b310691795c1af51d1bb79"
+        },
+        {
+          "rid": "win-arm64",
+          "target": "aarch64-windows-gnu",
+          "path": "win-arm64/tree-sitter-yaml.dll",
+          "format": "pe",
+          "architecture": "arm64",
+          "size": 203264,
+          "sha256": "76489c5c1b1a37379c70e61569ca61f6c8b9fdec42c439879c21b7cff904955f"
+        },
+        {
+          "rid": "linux-x64",
+          "target": "x86_64-linux-gnu",
+          "path": "linux-x64/libtree-sitter-yaml.so",
+          "format": "elf",
+          "architecture": "x64",
+          "size": 200088,
+          "sha256": "973bcdf0b8f66d6867917a8369435f6e243e5037eaf255865ed0bd35583e5976"
+        },
+        {
+          "rid": "linux-arm64",
+          "target": "aarch64-linux-gnu",
+          "path": "linux-arm64/libtree-sitter-yaml.so",
+          "format": "elf",
+          "architecture": "arm64",
+          "size": 200816,
+          "sha256": "8bf8acadcda3bec89e8a2a67a96cef09bf8e8c9b32cf693b08e128208bed0bbd"
+        },
+        {
+          "rid": "osx-x64",
+          "target": "x86_64-macos",
+          "linkerFlags": [
+            "-Wl,-install_name,@rpath/libtree-sitter-yaml.dylib"
+          ],
+          "path": "osx-x64/libtree-sitter-yaml.dylib",
+          "format": "macho",
+          "architecture": "x64",
+          "size": 198825,
+          "sha256": "1efaafaee254e298e6070413c93e3a813a857c22bd5182600bd9aff378c8715b"
+        },
+        {
+          "rid": "osx-arm64",
+          "target": "aarch64-macos",
+          "linkerFlags": [
+            "-Wl,-install_name,@rpath/libtree-sitter-yaml.dylib"
+          ],
+          "path": "osx-arm64/libtree-sitter-yaml.dylib",
+          "format": "macho",
+          "architecture": "arm64",
+          "size": 232312,
+          "sha256": "14d11d6ec41cf41f79e5f8851534374ced551203c5988874c0670fd5cdaa5db4"
         }
       ]
     }

@@ -115,6 +115,9 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	public string FormatCompressCodeLabel(int? compressedFiles, int? uncompressedFiles)
 		=> localization["Settings.Ignore.CompressCode"];
 
+	public string FormatStripCommentsLabel(int? strippedFiles, int? unchangedFiles)
+		=> localization["Settings.Ignore.StripComments"];
+
 	private void AppendContentTransformationOptions(
 		List<IgnoreOptionDescriptor> options,
 		IgnoreOptionsAvailability availability)
@@ -131,6 +134,10 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 					FormatHideSecretsLabel(SecretScanState.Completed, matchedCount, redactionCount),
 				IgnoreOptionId.CompressCode =>
 					FormatCompressCodeLabel(availability.CompressedFilesCount, availability.UncompressedFilesCount),
+				IgnoreOptionId.StripComments =>
+					FormatStripCommentsLabel(
+						availability.CommentStrippedFilesCount,
+						availability.CommentUnchangedFilesCount),
 				_ => localization[descriptor.LabelKey]
 			};
 			options.Add(new IgnoreOptionDescriptor(descriptor.LegacyOptionId, label, false));

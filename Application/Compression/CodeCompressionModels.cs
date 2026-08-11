@@ -2,6 +2,31 @@ using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Compression;
 
+[Flags]
+public enum CodeTransformKinds
+{
+	None = 0,
+	Bodies = 1,
+	Comments = 2
+}
+
+public static class CodeTransformIdentity
+{
+	public static CodeTransformKinds Resolve(bool compressBodies, bool stripComments) =>
+		(compressBodies ? CodeTransformKinds.Bodies : CodeTransformKinds.None) |
+		(stripComments ? CodeTransformKinds.Comments : CodeTransformKinds.None);
+
+	public static string Create(string engineIdentity, CodeTransformKinds kinds) =>
+		kinds switch
+		{
+			CodeTransformKinds.Bodies => engineIdentity + "+bodies",
+			CodeTransformKinds.Comments => engineIdentity + "+comments",
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments =>
+				engineIdentity + "+bodies+comments",
+			_ => throw new ArgumentOutOfRangeException(nameof(kinds), kinds, null)
+		};
+}
+
 /// <summary>
 /// Why a file looks the way it does in the output. Every value except
 /// <see cref="Compressed"/> means the original bytes were kept, and each is surfaced to the user
@@ -24,6 +49,8 @@ public enum CodeCompressionOutcome
 /// </summary>
 public sealed record CodeCompressionEdit(int SourceStart, int SourceLength, string Replacement)
 {
+	public CodeTransformKinds Kinds { get; init; } = CodeTransformKinds.Bodies;
+
 	public int SourceEnd => SourceStart + SourceLength;
 }
 
@@ -44,6 +71,10 @@ public sealed record CodeCompressionPlan(
 	string TransformIdentity)
 {
 	public bool HasEdits => Edits.Count > 0;
+
+	public CodeTransformKinds AffectedKinds => Edits.Aggregate(
+		CodeTransformKinds.None,
+		static (kinds, edit) => kinds | edit.Kinds);
 
 	/// <summary>Characters saved. Never negative: a plan that does not shrink is not applied.</summary>
 	public int SavedCharacters => SourceLength - TransformedLength;

@@ -91,8 +91,11 @@ public static class CodeStructureGate
 		// expects them gone and the gate accepts wholesale deletion. Requiring the innermost
 		// declaration around an edit to be one that legitimately OWNS an executable body is what
 		// keeps "leaf bodies only" a property of the gate rather than a property of the query.
-		var owners = ResolveInnermostOwners(originalDeclarations, orderedEdits);
-		for (var editIndex = 0; editIndex < orderedEdits.Count; editIndex++)
+		var bodyEdits = orderedEdits
+			.Where(static edit => (edit.Kinds & CodeTransformKinds.Bodies) != 0)
+			.ToArray();
+		var owners = ResolveInnermostOwners(originalDeclarations, bodyEdits);
+		for (var editIndex = 0; editIndex < bodyEdits.Length; editIndex++)
 		{
 			// No owner at all means the edit is not inside any declaration - a whole-file splice
 			// passes every other check, because "everything was excised" is trivially consistent.

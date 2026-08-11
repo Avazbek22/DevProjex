@@ -1,0 +1,16 @@
+{
+  "id": "css",
+  "displayName": "CSS",
+  "extensions": [
+    ".css"
+  ],
+  "library": "tree-sitter-css",
+  "export": "tree_sitter_css",
+  "queryVersion": 1,
+  "transformCapabilities": [
+    "comments"
+  ],
+  "blockPlaceholder": "",
+  "containerNodeTypes": [],
+  "executableOwnerKinds": []
+}

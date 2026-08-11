@@ -56,11 +56,14 @@ When Hide Secrets is enabled, analysis adds a top-level `redaction` object with
 `matchedCount`, `redactedCount`, and a non-safety `notice`. Zero means the pinned
 rules matched nothing; it never means that the project is safe.
 
-When code compression is enabled, analysis content metrics are calculated from
-the transformed text and the document adds a top-level `compression` object with
-`compressedFiles`, `unchangedFiles`, `sourceCharacters`, and
-`transformedCharacters`. Inventory and source byte size still describe the selected
-project files, not a materialized export container.
+When code compression or comment removal is enabled, analysis content metrics are
+calculated from the transformed text and the document adds a top-level `compression`
+object with `compressedFiles`, `unchangedFiles`, `bodyTransformedFiles`,
+`commentTransformedFiles`, `sourceCharacters`, and `transformedCharacters`.
+`compressedFiles` remains the total number of files changed by either syntax
+transformation. Inventory and source byte size still describe the selected project
+files, not a materialized export container. Machine selection output exposes the
+independent `compressCode` and `stripComments` Booleans.
 
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
@@ -174,6 +177,30 @@ and multiline expression bodies are compressed to block-form declarations. Kotli
 uses `= { }`, which would denote a lambda rather than a function body. Scala deliberately retains
 `= { }` because braces denote a block expression there. Top-level Kotlin DSL calls and free lambdas
 are not captured.
+
+With `--strip-comments`, syntax-tree comments are removed in 20 language packs: the 14
+body-compression languages plus comments-only HTML, CSS, TOML, Bash, XML, and YAML packs.
+The six additional packs remain on the unsupported fast path when only `--compress` is enabled.
+XML-family project markup preserves CDATA, declarations, processing instructions, DOCTYPE
+content, and attributes; YAML preserves scalar content, anchors, tags, and document markers.
+Python leading module, class, and function docstrings are documentation for this
+mode and are removed too; a suite that would otherwise become empty retains `...`.
+The initial shebang remains, while directive comments such as `// eslint-disable`,
+`// @ts-ignore`, and `# type: ignore` are deliberately removed. Comment-like text in
+strings, interpolations, heredocs, attributes, annotations, and preprocessor directives
+remains unchanged. PHP text outside `<?php ... ?>` sections is never classified as a PHP
+comment. HTML comments are removed, including conditional comments, while content in HTML
+`script` and `style` raw-text nodes is not recursively parsed and remains byte-for-byte complete.
+Blank and whitespace-only lines adjacent to removed full-line comments are collapsed to at most
+one between retained content blocks and to none at document boundaries. Blank lines outside an
+affected comment site remain byte-for-byte unchanged; this option is not a general formatter.
+
+The mode matrix is deterministic: compression alone keeps documentation while shortening
+named implementations; comment removal alone keeps all implementation code without
+comments or docstrings; both produce a bare declaration skeleton. Both syntax edit
+families are merged into one plan, applied once, and validated once. Hide Secrets, when
+enabled, runs afterward over those exact transformed bytes. Unsupported files remain
+byte-for-byte complete, and no source file is modified.
 
 ## Errors
 

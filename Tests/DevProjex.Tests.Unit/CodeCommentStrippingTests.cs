@@ -1,0 +1,737 @@
+using DevProjex.Application.Compression;
+using DevProjex.Infrastructure.Compression;
+
+namespace DevProjex.Tests.Unit;
+
+public sealed class CodeCommentStrippingTests
+{
+	public static TheoryData<string, string, string> LanguageCases => new()
+	{
+		{
+			"sample.sh",
+			"#!/usr/bin/env bash\n# doc_marker\nvalue=1 # line_marker\ntext='# string_marker'\ncat <<'EOF'\n# heredoc_marker\nEOF\n",
+			"#!/usr/bin/env bash\nvalue=1\ntext='# string_marker'\ncat <<'EOF'\n# heredoc_marker\nEOF\n"
+		},
+		{
+			"sample.c",
+			"/** doc_marker */\nint value = 1; // line_marker\n/* block_marker */\nconst char *text = \"// string_marker\";\n",
+			"int value = 1;\nconst char *text = \"// string_marker\";\n"
+		},
+		{
+			"sample.cpp",
+			"/** doc_marker */\nconstexpr int value = 1; // line_marker\n/* block_marker */\nconst char *text = \"// string_marker\";\n",
+			"constexpr int value = 1;\nconst char *text = \"// string_marker\";\n"
+		},
+		{
+			"Sample.cs",
+			"/// doc_marker\ninternal static class Sample\n{\n    /* block_marker */\n    private const string Text = \"// string_marker\"; // line_marker\n}\n",
+			"internal static class Sample\n{\n    private const string Text = \"// string_marker\";\n}\n"
+		},
+		{
+			"sample.css",
+			"/* doc_marker */\n.card { content: \"/* string_marker */\"; color: red; /* line_marker */ }\n.hero { background: url(\"/img/*asset*/.png\"); }\n",
+			".card { content: \"/* string_marker */\"; color: red;  }\n.hero { background: url(\"/img/*asset*/.png\"); }\n"
+		},
+		{
+			"sample.go",
+			"package sample\n\n// doc_marker\nconst Value = 1 // line_marker\n/* block_marker */\nconst Text = \"// string_marker\"\n",
+			"package sample\n\nconst Value = 1\nconst Text = \"// string_marker\"\n"
+		},
+		{
+			"Sample.java",
+			"/** doc_marker */\nfinal class Sample {\n    /* block_marker */\n    static final String TEXT = \"// string_marker\"; // line_marker\n}\n",
+			"final class Sample {\n    static final String TEXT = \"// string_marker\";\n}\n"
+		},
+		{
+			"sample.html",
+			"<!-- doc_marker -->\n<!--[if IE]>legacy<![endif]-->\n<main>Ready<!-- line_marker --></main>\n<script>// raw_js_marker\nwindow.ready = true;</script>\n<style>/* raw_css_marker */ .card { color: red; }</style>\n",
+			"<main>Ready</main>\n<script>// raw_js_marker\nwindow.ready = true;</script>\n<style>/* raw_css_marker */ .card { color: red; }</style>\n"
+		},
+		{
+			"sample.js",
+			"/** doc_marker */\nconst value = 1; // line_marker\n/* block_marker */\nconst text = \"// string_marker\";\n",
+			"const value = 1;\nconst text = \"// string_marker\";\n"
+		},
+		{
+			"Sample.kt",
+			"/** doc_marker */\nconst val value = 1 // line_marker\n/* block_marker */\nconst val text = \"// string_marker\"\n",
+			"const val value = 1\nconst val text = \"// string_marker\"\n"
+		},
+		{
+			"sample.php",
+			"<p><!-- html_marker --></p>\n<?php\n/** doc_marker */\n$value = 1; # line_marker\n/* block_marker */\n$text = '// string_marker';\n?>\n",
+			"<p><!-- html_marker --></p>\n<?php\n$value = 1;\n$text = '// string_marker';\n?>\n"
+		},
+		{
+			"sample.py",
+			"\"\"\"doc_marker\"\"\"\nvalue = 1  # line_marker\n# pragma_marker\ntext = \"# string_marker\"\n",
+			"value = 1\ntext = \"# string_marker\"\n"
+		},
+		{
+			"sample.rb",
+			"# doc_marker\nVALUE = 1 # line_marker\n=begin\nblock_marker\n=end\nTEXT = '# string_marker'\n",
+			"VALUE = 1\nTEXT = '# string_marker'\n"
+		},
+		{
+			"sample.rs",
+			"//! doc_marker\nconst VALUE: i32 = 1; // line_marker\n/* block_marker */\nconst TEXT: &str = \"// string_marker\";\n",
+			"const VALUE: i32 = 1;\nconst TEXT: &str = \"// string_marker\";\n"
+		},
+		{
+			"Sample.scala",
+			"/** doc_marker */\nval value = 1 // line_marker\n/* block_marker */\nval text = \"// string_marker\"\n",
+			"val value = 1\nval text = \"// string_marker\"\n"
+		},
+		{
+			"sample.toml",
+			"# doc_marker\n[service]\nname = \"api#string_marker\" # line_marker\nendpoint = 'https://example.test/#fragment'\n",
+			"[service]\nname = \"api#string_marker\"\nendpoint = 'https://example.test/#fragment'\n"
+		},
+		{
+			"sample.tsx",
+			"/** doc_marker */\nconst value = 1; // line_marker\n/* block_marker */\nconst text = \"// string_marker\";\nconst element = <span>{text}</span>;\n",
+			"const value = 1;\nconst text = \"// string_marker\";\nconst element = <span>{text}</span>;\n"
+		},
+		{
+			"sample.ts",
+			"/** doc_marker */\nconst value: number = 1; // line_marker\n/* block_marker */\nconst text: string = \"// string_marker\";\n",
+			"const value: number = 1;\nconst text: string = \"// string_marker\";\n"
+		},
+		{
+			"sample.xml",
+			"<?xml version=\"1.0\"?>\n<!-- doc_marker -->\n<!DOCTYPE root>\n<?probe keep?>\n<root state=\"ready\">\n  <![CDATA[<!-- cdata_marker -->]]>\n  <!-- line_marker -->\n  <child>value</child><!-- tail_marker -->\n</root>\n",
+			"<?xml version=\"1.0\"?>\n<!DOCTYPE root>\n<?probe keep?>\n<root state=\"ready\">\n  <![CDATA[<!-- cdata_marker -->]]>\n  <child>value</child>\n</root>\n"
+		},
+		{
+			"sample.yaml",
+			"---\n# doc_marker\ndefaults: &defaults\n  image: \"repo#stable\" # line_marker\n  script: |\n    # scalar_marker\n    echo done\nservice:\n  <<: *defaults\n  tagged: !custom value # tail_marker\n...\n",
+			"---\ndefaults: &defaults\n  image: \"repo#stable\"\n  script: |\n    # scalar_marker\n    echo done\nservice:\n  <<: *defaults\n  tagged: !custom value\n...\n"
+		}
+	};
+
+	[Fact]
+	public void ModeMatrix_ProducesDocumentationImplementationAndSkeletonContracts()
+	{
+		const string source =
+			"/// Calculates.\r\n" +
+			"internal static class Sample\r\n" +
+			"{\r\n" +
+			"    internal static int Add(int left, int right)\r\n" +
+			"    {\r\n" +
+			"        // Sum values.\r\n" +
+			"        return left + right; // result\r\n" +
+			"    }\r\n" +
+			"}\r\n";
+
+		var bodies = Transform("Sample.cs", source, CodeTransformKinds.Bodies);
+		var comments = Transform("Sample.cs", source, CodeTransformKinds.Comments);
+		var both = Transform(
+			"Sample.cs",
+			source,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+
+		Assert.Equal(
+			"/// Calculates.\r\ninternal static class Sample\r\n{\r\n    internal static int Add(int left, int right)\r\n    { }\r\n}\r\n",
+			bodies.Text);
+		Assert.Equal(
+			"internal static class Sample\r\n{\r\n    internal static int Add(int left, int right)\r\n    {\r\n        return left + right;\r\n    }\r\n}\r\n",
+			comments.Text);
+		Assert.Equal(
+			"internal static class Sample\r\n{\r\n    internal static int Add(int left, int right)\r\n    { }\r\n}\r\n",
+			both.Text);
+		Assert.Equal(CodeTransformKinds.Bodies, bodies.Plan.AffectedKinds);
+		Assert.Equal(CodeTransformKinds.Comments, comments.Plan.AffectedKinds);
+		Assert.Equal(CodeTransformKinds.Bodies | CodeTransformKinds.Comments, both.Plan.AffectedKinds);
+	}
+
+	[Fact]
+	public void CommentOnly_CleansCompleteTrailingAndInlineCommentsWithoutChangingLineEndings()
+	{
+		const string source =
+			"internal static class Sample\r\n" +
+			"{\r\n" +
+			"    internal static void Run()\r\n" +
+			"    {\r\n" +
+			"        // first\r\n" +
+			"        // second\r\n" +
+			"        int left /* inline */ = 1; // tail\r\n" +
+			"        Use(left); /* no-final-newline */";
+
+		var result = Transform("Sample.cs", source, CodeTransformKinds.Comments);
+
+		Assert.Equal(
+			"internal static class Sample\r\n" +
+			"{\r\n" +
+			"    internal static void Run()\r\n" +
+			"    {\r\n" +
+			"        int left  = 1;\r\n" +
+			"        Use(left);",
+			result.Text);
+		Assert.DoesNotContain(" \r\n", result.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void TrailingMultilineBlockCommentDoesNotLeaveWhitespaceBehind()
+	{
+		const string source =
+			"internal static class Sample\n" +
+			"{\n" +
+			"    internal static void Run()\n" +
+			"    {\n" +
+			"        Call(); /* first\n" +
+			"                  second */\n" +
+			"        Next();\n" +
+			"    }\n" +
+			"}\n";
+
+		var result = Transform("Sample.cs", source, CodeTransformKinds.Comments);
+
+		Assert.Equal(
+			"internal static class Sample\n" +
+			"{\n" +
+			"    internal static void Run()\n" +
+			"    {\n" +
+			"        Call();\n" +
+			"        Next();\n" +
+			"    }\n" +
+			"}\n",
+			result.Text);
+	}
+
+	[Fact]
+	public void Python_StripsLeadingDocstringsAndKeepsSuitesValid()
+	{
+		var source = """"
+			#!/usr/bin/env python3
+			"""Module docs."""
+
+			def only_docs():
+			    """Function docs."""
+
+			def work():
+			    """Work docs."""
+			    value = "# not a comment"
+			    return value
+
+			"not a docstring"
+			"""".ReplaceLineEndings("\n");
+
+		var result = Transform("sample.py", source, CodeTransformKinds.Comments);
+
+		Assert.StartsWith("#!/usr/bin/env python3\n", result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Module docs", result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Function docs", result.Text, StringComparison.Ordinal);
+		Assert.Contains("def only_docs():\n    ...", result.Text, StringComparison.Ordinal);
+		Assert.Contains("value = \"# not a comment\"", result.Text, StringComparison.Ordinal);
+		Assert.Contains("\"not a docstring\"", result.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void PythonModeMatrixGivesDocumentationImplementationAndBareSkeleton()
+	{
+		const string source =
+			"def work():\n" +
+			"    \"\"\"Work docs.\"\"\"\n" +
+			"    value = 42\n" +
+			"    return value\n";
+
+		var bodies = Transform("sample.py", source, CodeTransformKinds.Bodies);
+		var comments = Transform("sample.py", source, CodeTransformKinds.Comments);
+		var both = Transform(
+			"sample.py",
+			source,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+
+		Assert.Equal("def work():\n    \"\"\"Work docs.\"\"\"\n    ...\n", bodies.Text);
+		Assert.Equal("def work():\n    value = 42\n    return value\n", comments.Text);
+		Assert.Equal("def work():\n    ...\n", both.Text);
+		Assert.Equal(CodeTransformKinds.Bodies | CodeTransformKinds.Comments, both.Plan.AffectedKinds);
+	}
+
+	[Fact]
+	public void Python_FStringIsCodeAndACommentOnlyFileCanBecomeEmpty()
+	{
+		const string source = """
+			def value(name):
+			    f"hello {name}"
+			    return name  # remove
+			""";
+
+		var code = Transform("sample.py", source, CodeTransformKinds.Comments);
+		var comments = Transform("comments.py", "# first\r\n# second", CodeTransformKinds.Comments);
+
+		Assert.Contains("f\"hello {name}\"", code.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("# remove", code.Text, StringComparison.Ordinal);
+		Assert.Equal(string.Empty, comments.Text);
+	}
+
+	[Theory]
+	[InlineData("tool.py", "#!/usr/bin/env python3\n# remove\nvalue = 1\n")]
+	[InlineData("tool.rb", "#!/usr/bin/env ruby\n# remove\nVALUE = 1\n")]
+	[InlineData("tool.js", "#!/usr/bin/env node\n// remove\nconst value = 1;\n")]
+	public void ShebangAtOffsetZero_IsNeverRemoved(string path, string source)
+	{
+		var result = Transform(path, source, CodeTransformKinds.Comments);
+
+		Assert.StartsWith("#!", result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("remove", result.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void DirectivesAttributesAndAnnotationsAreNotComments()
+	{
+		var csharp = Transform(
+			"Sample.cs",
+			"#region Keep\n#if DEBUG\ninternal class Sample { }\n#endif\n#endregion\n// remove\n",
+			CodeTransformKinds.Comments);
+		var rust = Transform(
+			"sample.rs",
+			"#![allow(dead_code)]\n#[derive(Debug)]\nstruct Sample;\n// remove\n",
+			CodeTransformKinds.Comments);
+		var php = Transform(
+			"sample.php",
+			"<?php #[Attribute] class Sample {} // remove\n",
+			CodeTransformKinds.Comments);
+		var kotlin = Transform(
+			"Sample.kt",
+			"// remove\n@Deprecated(\"old\")\nclass Sample { }\n",
+			CodeTransformKinds.Comments);
+
+		Assert.Contains("#region Keep", csharp.Text, StringComparison.Ordinal);
+		Assert.Contains("#if DEBUG", csharp.Text, StringComparison.Ordinal);
+		Assert.Contains("#![allow(dead_code)]", rust.Text, StringComparison.Ordinal);
+		Assert.Contains("#[derive(Debug)]", rust.Text, StringComparison.Ordinal);
+		Assert.Contains("#[Attribute]", php.Text, StringComparison.Ordinal);
+		Assert.Contains("@Deprecated", kotlin.Text, StringComparison.Ordinal);
+		Assert.Equal(CodeCompressionOutcome.Compressed, kotlin.Plan.Outcome);
+		Assert.DoesNotContain("remove", csharp.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("remove", rust.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("remove", php.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("remove", kotlin.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ToolingPragmaCommentsAreRemovedWithoutTouchingTheFollowingCode()
+	{
+		const string typeScriptSource =
+			"// eslint-disable-next-line no-console\n" +
+			"console.log('kept');\n" +
+			"// @ts-ignore\n" +
+			"const value: number = 'kept';\n";
+		const string pythonSource =
+			"value = unknown()  # type: ignore[name-defined]\n";
+
+		var typeScript = Transform("sample.ts", typeScriptSource, CodeTransformKinds.Comments);
+		var python = Transform("sample.py", pythonSource, CodeTransformKinds.Comments);
+
+		Assert.Equal("console.log('kept');\nconst value: number = 'kept';\n", typeScript.Text);
+		Assert.Equal("value = unknown()\n", python.Text);
+	}
+
+	[Theory]
+	[InlineData(
+		"sample.rb",
+		"TEXT = <<~DOC\n// string_marker\n#{1 + 1} # interpolation_marker\nDOC\n# remove_marker\n",
+		"TEXT = <<~DOC\n// string_marker\n#{1 + 1} # interpolation_marker\nDOC\n")]
+	[InlineData(
+		"sample.php",
+		"<?php\n$text = <<<TXT\n// string_marker\n# string_marker\nTXT;\n// remove_marker\n",
+		"<?php\n$text = <<<TXT\n// string_marker\n# string_marker\nTXT;\n")]
+	[InlineData(
+		"sample.php",
+		"<?php\n$text = <<<'TXT'\n# string_marker\nTXT;\n// remove_marker\n",
+		"<?php\n$text = <<<'TXT'\n# string_marker\nTXT;\n")]
+	[InlineData(
+		"sample.js",
+		"const text = `/* string_marker ${value} */`; // remove_marker\n",
+		"const text = `/* string_marker ${value} */`;\n")]
+	public void HeredocTemplateAndInterpolationContentIsNotCommentSyntax(
+		string path,
+		string source,
+		string expected)
+	{
+		var result = Transform(path, source, CodeTransformKinds.Comments);
+
+		Assert.Equal(expected, result.Text);
+	}
+
+	[Fact]
+	public void PreservedMember_RemainsByteForByteIncludingItsComment()
+	{
+		const string source = """
+			// remove this
+			internal sealed class Sample
+			{
+			    private readonly string _value = /* retained with field */ "value";
+
+			    public string Value
+			    {
+			        get { /* retained with property */ return _value; }
+			    }
+			}
+			""";
+
+		var result = Transform("Sample.cs", source, CodeTransformKinds.Comments);
+
+		Assert.DoesNotContain("remove this", result.Text, StringComparison.Ordinal);
+		Assert.Contains("/* retained with field */", result.Text, StringComparison.Ordinal);
+		Assert.Contains("/* retained with property */", result.Text, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(
+		"sample.py",
+		"# remove_marker\nclass Sample:\n    def __init__(self):\n        # retained_marker\n        self.value = 1\n")]
+	[InlineData(
+		"sample.rb",
+		"# remove_marker\nclass Sample\n  def initialize\n    # retained_marker\n    @value = 1\n  end\nend\n")]
+	[InlineData(
+		"sample.php",
+		"<?php\n// remove_marker\nclass Sample {\n    public function __construct() {\n        // retained_marker\n        $this->value = 1;\n    }\n}\n")]
+	[InlineData(
+		"sample.js",
+		"// remove_marker\nclass Sample {\n    handler = () => {\n        // retained_marker\n        return 1;\n    };\n}\n")]
+	[InlineData(
+		"Sample.kt",
+		"// remove_marker\nclass Sample {\n    val handler = {\n        // retained_marker\n        1\n    }\n}\n")]
+	[InlineData(
+		"Sample.scala",
+		"// remove_marker\nobject Sample {\n  val handler = () => {\n    // retained_marker\n    1\n  }\n}\n")]
+	public void PreservedStateKeepsNestedCommentsAcrossLanguageModels(
+		string path,
+		string source)
+	{
+		var result = Transform(path, source, CodeTransformKinds.Comments);
+
+		Assert.DoesNotContain("remove_marker", result.Text, StringComparison.Ordinal);
+		Assert.Contains("retained_marker", result.Text, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[MemberData(nameof(LanguageCases))]
+	public void EveryLanguage_ProducesTheExactCommentFreeText(
+		string path,
+		string source,
+		string expected)
+	{
+		var result = Transform(path, source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
+		Assert.Equal(expected, result.Text);
+	}
+
+	[Fact]
+	public void SessionCache_IsolatedByModeAndReusesThePreviousCombination()
+	{
+		const string source = """
+			// docs
+			internal static class Sample
+			{
+			    internal static int Run()
+			    {
+			        // implementation
+			        return 42;
+			    }
+			}
+			""";
+		var fullPath = Path.Combine(Path.GetTempPath(), "mode-cache.cs");
+		using var session = new CodeCompressionSession(CodeCompressionTestHarness.CreateCompressor());
+
+		var comments = Transform(session, fullPath, source, CodeTransformKinds.Comments);
+		var afterComments = session.Diagnostics;
+		var bodies = Transform(session, fullPath, source, CodeTransformKinds.Bodies);
+		var afterBodies = session.Diagnostics;
+		var both = Transform(
+			session,
+			fullPath,
+			source,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		var afterBoth = session.Diagnostics;
+		var commentsAgain = Transform(session, fullPath, source, CodeTransformKinds.Comments);
+		var afterReuse = session.Diagnostics;
+
+		Assert.NotEqual(comments, bodies);
+		Assert.NotEqual(comments, both);
+		Assert.NotEqual(bodies, both);
+		Assert.Equal(comments, commentsAgain);
+		Assert.Equal(afterComments.AnalysisExecutions + 1, afterBodies.AnalysisExecutions);
+		Assert.Equal(afterBodies.AnalysisExecutions + 1, afterBoth.AnalysisExecutions);
+		Assert.Equal(afterBoth.AnalysisExecutions, afterReuse.AnalysisExecutions);
+		Assert.True(afterReuse.CacheHits > afterBoth.CacheHits);
+	}
+
+	[Fact]
+	public void UnsupportedLanguageRemainsByteForByteWithItsNormalOutcome()
+	{
+		const string source = "<!-- documentation -->\n# Markdown heading\n";
+
+		var result = Transform("README.md", source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedUnsupportedLanguage, result.Plan.Outcome);
+		Assert.Equal(source, result.Text);
+		Assert.Empty(result.Plan.Edits);
+	}
+
+	[Fact]
+	public void CommentOnlyLanguages_AreModeAwareBeforeAnyRuntimeIsLoaded()
+	{
+		const string source = ".card { color: red; /* remove */ }\n";
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+
+		Assert.False(compressor.IsSupported("site.css"));
+		Assert.False(compressor.IsSupported("site.css", CodeTransformKinds.Bodies));
+		Assert.True(compressor.IsSupported("site.css", CodeTransformKinds.Comments));
+		Assert.True(compressor.IsSupported(
+			"site.css",
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments));
+
+		using (var bodiesScope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Bodies))
+		{
+			var bodyAnalysis = bodiesScope.Analyze(
+				"site.css",
+				"site.css",
+				source,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(CodeCompressionOutcome.UnchangedUnsupportedLanguage, bodyAnalysis.Plan.Outcome);
+		}
+
+		Assert.Equal(0, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.MaterializedWorkers);
+
+		using var bothScope = compressor.CreateScope(
+			Path.GetTempPath(),
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		var bothAnalysis = bothScope.Analyze(
+			"site.css",
+			"site.css",
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, bothAnalysis.Plan.Outcome);
+		Assert.Equal(CodeTransformKinds.Comments, bothAnalysis.Plan.AffectedKinds);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(1, compressor.RuntimeDiagnostics.MaterializedWorkers);
+	}
+
+	[Theory]
+	[InlineData("page.html")]
+	[InlineData("page.htm")]
+	[InlineData("site.css")]
+	[InlineData("app.toml")]
+	[InlineData("deploy.sh")]
+	[InlineData("deploy.bash")]
+	[InlineData("document.xml")]
+	[InlineData("view.xaml")]
+	[InlineData("view.axaml")]
+	[InlineData("project.csproj")]
+	[InlineData("build.props")]
+	[InlineData("build.targets")]
+	[InlineData("project.vbproj")]
+	[InlineData("project.fsproj")]
+	[InlineData("package.nuspec")]
+	[InlineData("app.config")]
+	[InlineData("resources.resx")]
+	[InlineData("deployment.yml")]
+	[InlineData("deployment.yaml")]
+	public void EveryCommentOnlyExtensionSupportsCommentsButNotBodies(string path)
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+
+		Assert.False(compressor.IsSupported(path, CodeTransformKinds.Bodies));
+		Assert.True(compressor.IsSupported(path, CodeTransformKinds.Comments));
+		Assert.True(compressor.IsSupported(
+			path,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments));
+	}
+
+	[Theory]
+	[InlineData("project.csproj", "<Project><!-- remove --></Project>")]
+	[InlineData("deployment.yaml", "# remove\nservice: api\n")]
+	public void StructuredDataPacksStayLazyAndUnsupportedInBodiesOnlyMode(
+		string path,
+		string source)
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Bodies);
+
+		var analysis = scope.Analyze(
+			path,
+			path,
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedUnsupportedLanguage, analysis.Plan.Outcome);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.MaterializedWorkers);
+	}
+
+	[Theory]
+	[InlineData("oversized.xml")]
+	[InlineData("oversized.yaml")]
+	public void OversizedStructuredDataRejectsBeforeLoadingItsRuntime(string path)
+	{
+		var source = new string('x', TreeSitterCodeCompressor.MaximumParsableCharacters + 1);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Comments);
+
+		var analysis = scope.Analyze(
+			path,
+			path,
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedTooLarge, analysis.Plan.Outcome);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.CompiledQuerySets);
+		Assert.Equal(0, compressor.RuntimeDiagnostics.MaterializedWorkers);
+	}
+
+	[Theory]
+	[InlineData("comments.html", "<!-- first -->\r\n<!-- second -->")]
+	[InlineData("comments.css", "/* first */\r\n/* second */")]
+	[InlineData("comments.toml", "# first\r\n# second")]
+	[InlineData("comments.sh", "# first\r\n# second")]
+	[InlineData("comments.yaml", "# first\r\n# second")]
+	public void CommentOnlyFile_CanBecomeEmptyAcrossNewFormats(string path, string source)
+	{
+		var result = Transform(path, source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
+		Assert.Equal(string.Empty, result.Text);
+	}
+
+	[Fact]
+	public void XmlCommentOnlyDocument_RemainsCompleteWhenRemovalWouldInvalidateTheDocument()
+	{
+		const string source = "<!-- first -->\r\n<!-- second -->";
+
+		var result = Transform("comments.xml", source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedGateRejected, result.Plan.Outcome);
+		Assert.Equal(source, result.Text);
+	}
+
+	[Theory]
+	[InlineData(
+		"MainWindow.axaml",
+		"<Window xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" x:Class=\"App.MainWindow\">\r\n  <!-- layout -->\r\n  <TextBlock x:Name=\"Title\" Text=\"{Binding Title}\" /><!-- binding -->\r\n</Window>\r\n",
+		"<Window xmlns=\"https://github.com/avaloniaui\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" x:Class=\"App.MainWindow\">\r\n  <TextBlock x:Name=\"Title\" Text=\"{Binding Title}\" />\r\n</Window>\r\n")]
+	[InlineData(
+		"Sample.csproj",
+		"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <!-- build contract -->\n  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>\n  <!-- <PackageReference Include=\"Disabled\" /> -->\n</Project>\n",
+		"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>\n</Project>\n")]
+	public void XmlFamily_RemovesOnlyCommentsAndPreservesMarkupByteForByte(
+		string path,
+		string source,
+		string expected)
+	{
+		var result = Transform(path, source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
+		Assert.Equal(expected, result.Text);
+	}
+
+	[Fact]
+	public void YamlNestedCollectionsAndBlockScalarsRemainStructurallyValid()
+	{
+		const string source =
+			"---\r\n" +
+			"items:\r\n" +
+			"  # first item\r\n" +
+			"  - name: api # display name\r\n" +
+			"    settings:\r\n" +
+			"      # nested mapping\r\n" +
+			"      enabled: true\r\n" +
+			"      script: >\r\n" +
+			"        # scalar content\r\n" +
+			"        echo done\r\n";
+
+		var result = Transform("deployment.yml", source, CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
+		Assert.Equal(
+			"---\r\n" +
+			"items:\r\n" +
+			"  - name: api\r\n" +
+			"    settings:\r\n" +
+			"      enabled: true\r\n" +
+			"      script: >\r\n" +
+			"        # scalar content\r\n" +
+			"        echo done\r\n",
+			result.Text);
+	}
+
+	[Fact]
+	public void DeeplyNestedYamlDoesNotOverflowExternalScannerSerialization()
+	{
+		var source = new StringBuilder("---\n");
+		for (var depth = 0; depth < 256; depth++)
+		{
+			source.Append(' ', depth * 2)
+				.Append("level_")
+				.Append(depth)
+				.Append(": # nested mapping\n");
+		}
+		source.Append(' ', 512).Append("value: safe\n");
+
+		var result = Transform("deep.yaml", source.ToString(), CodeTransformKinds.Comments);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, result.Plan.Outcome);
+		Assert.DoesNotContain("# nested mapping", result.Text, StringComparison.Ordinal);
+		Assert.Contains("value: safe", result.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SvgRemainsOutsideTheXmlCommentsOnlyContract()
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+
+		Assert.False(compressor.IsSupported("asset.svg", CodeTransformKinds.Comments));
+	}
+
+	[Fact]
+	public void CommentOnlyLanguage_CacheIsIsolatedByRequestedModeAndReused()
+	{
+		const string source = "/* remove */\n.card { color: red; }\n";
+		var fullPath = Path.Combine(Path.GetTempPath(), "mode-cache.css");
+		using var session = new CodeCompressionSession(CodeCompressionTestHarness.CreateCompressor());
+
+		var comments = Transform(session, fullPath, source, CodeTransformKinds.Comments);
+		var afterComments = session.Diagnostics;
+		var both = Transform(
+			session,
+			fullPath,
+			source,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+		var afterBoth = session.Diagnostics;
+		var commentsAgain = Transform(session, fullPath, source, CodeTransformKinds.Comments);
+		var afterReuse = session.Diagnostics;
+
+		Assert.Equal(comments, both);
+		Assert.Equal(comments, commentsAgain);
+		Assert.Equal(afterComments.AnalysisExecutions + 1, afterBoth.AnalysisExecutions);
+		Assert.Equal(afterBoth.AnalysisExecutions, afterReuse.AnalysisExecutions);
+		Assert.True(afterReuse.CacheHits > afterBoth.CacheHits);
+	}
+
+	private static (CodeCompressionPlan Plan, string Text) Transform(
+		string path,
+		string source,
+		CodeTransformKinds kinds)
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), kinds);
+		var analysis = scope.Analyze(path, path, source, TestContext.Current.CancellationToken);
+		return (analysis.Plan, analysis.GetResult(source).Text);
+	}
+
+	private static string Transform(
+		CodeCompressionSession session,
+		string fullPath,
+		string source,
+		CodeTransformKinds kinds)
+	{
+		using var scope = new CodeCompressionContext(Path.GetTempPath(), session, kinds)
+			.BeginOutput([fullPath]);
+		return scope.Transform(fullPath, Path.GetFileName(fullPath), source, TestContext.Current.CancellationToken).Text;
+	}
+}

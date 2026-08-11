@@ -4,7 +4,7 @@
   "extensions": [".java"],
   "library": "tree-sitter-java",
   "export": "tree_sitter_java",
-  "queryVersion": 5,
+  "queryVersion": 6,
   "blockPlaceholder": "{ }",
   "containerNodeTypes": ["program", "class_body", "interface_body", "enum_body", "record_declaration_body"],
   "executableOwnerKinds": ["method_declaration", "constructor_declaration", "compact_constructor_declaration"]

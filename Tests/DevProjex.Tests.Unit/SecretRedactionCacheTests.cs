@@ -330,14 +330,16 @@ public sealed class SecretRedactionCacheTests
 
 	private sealed class CountingDetector : ISecretDetector
 	{
-		public int CallCount { get; private set; }
+		private int _callCount;
+
+		public int CallCount => Volatile.Read(ref _callCount);
 
 		public IReadOnlyList<DetectedSecret> Detect(
 			string repositoryRelativePath,
 			string content,
 			CancellationToken cancellationToken = default)
 		{
-			CallCount++;
+			Interlocked.Increment(ref _callCount);
 			cancellationToken.ThrowIfCancellationRequested();
 			var start = content.IndexOf(Secret, StringComparison.Ordinal);
 			return start < 0

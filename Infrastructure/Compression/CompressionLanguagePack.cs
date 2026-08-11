@@ -1,3 +1,5 @@
+using DevProjex.Application.Compression;
+
 namespace DevProjex.Infrastructure.Compression;
 
 internal enum ExpressionBodyStyle
@@ -26,15 +28,17 @@ internal sealed record CompressionLanguagePack(
 	string Library,
 	string Export,
 	int QueryVersion,
+	CodeTransformKinds TransformCapabilities,
 	string BlockPlaceholder,
 	BlockBodyStyle BlockBodyStyle,
 	bool PreserveLeadingDocstring,
 	ExpressionBodyStyle ExpressionBodyStyle,
 	IReadOnlySet<string> ContainerNodeTypes,
 	IReadOnlySet<string> ExecutableOwnerKinds,
-	string BodiesQuery,
+	string? BodiesQuery,
 	string DeclarationsQuery,
-	string? PreservesQuery)
+	string? PreservesQuery,
+	string? CommentsQuery)
 {
 	/// <summary>
 	/// Goes into the cache key. A grammar or query change must change this string, or plans built
@@ -49,6 +53,7 @@ internal sealed record CompressionLanguagePack(
 		string Library,
 		string Export,
 		int QueryVersion,
+		string[]? TransformCapabilities,
 		string BlockPlaceholder,
 		string? BlockBodyStyle,
 		bool PreserveLeadingDocstring,
@@ -79,6 +84,13 @@ internal sealed record CompressionLanguagePack(
 			var directory = resource[..^"language.json".Length];
 			var manifest = JsonSerializer.Deserialize<Manifest>(ReadText(assembly, resource), ManifestOptions)
 				?? throw new InvalidOperationException($"Language manifest '{resource}' is empty.");
+			var capabilities = ParseTransformCapabilities(manifest.TransformCapabilities, resource);
+			var bodiesQuery = TryReadText(assembly, directory + "bodies.scm");
+			var commentsQuery = TryReadText(assembly, directory + "comments.scm");
+			if ((capabilities & CodeTransformKinds.Bodies) != 0 && bodiesQuery is null)
+				throw new InvalidOperationException($"Body-capable language pack '{resource}' has no bodies.scm.");
+			if ((capabilities & CodeTransformKinds.Comments) != 0 && commentsQuery is null)
+				throw new InvalidOperationException($"Comment-capable language pack '{resource}' has no comments.scm.");
 
 			packs.Add(new CompressionLanguagePack(
 				manifest.Id,
@@ -87,18 +99,44 @@ internal sealed record CompressionLanguagePack(
 				manifest.Library,
 				manifest.Export,
 				manifest.QueryVersion,
+				capabilities,
 				manifest.BlockPlaceholder,
 				ParseBlockBodyStyle(manifest.BlockBodyStyle, resource),
 				manifest.PreserveLeadingDocstring,
 				ParseExpressionBodyStyle(manifest.ExpressionBodyStyle, resource),
 				manifest.ContainerNodeTypes.ToHashSet(StringComparer.Ordinal),
 				manifest.ExecutableOwnerKinds.ToHashSet(StringComparer.Ordinal),
-				ReadText(assembly, directory + "bodies.scm"),
+				bodiesQuery,
 				ReadText(assembly, directory + "declarations.scm"),
-				TryReadText(assembly, directory + "preserve.scm")));
+				TryReadText(assembly, directory + "preserve.scm"),
+				commentsQuery));
 		}
 
 		return packs.OrderBy(static pack => pack.Id, StringComparer.Ordinal).ToArray();
+	}
+
+	private static CodeTransformKinds ParseTransformCapabilities(
+		IReadOnlyList<string>? values,
+		string resource)
+	{
+		if (values is null)
+			return CodeTransformKinds.Bodies | CodeTransformKinds.Comments;
+		if (values.Count == 0)
+			throw new InvalidOperationException($"Language manifest '{resource}' has no transform capabilities.");
+
+		var capabilities = CodeTransformKinds.None;
+		foreach (var value in values)
+		{
+			capabilities |= value switch
+			{
+				"bodies" => CodeTransformKinds.Bodies,
+				"comments" => CodeTransformKinds.Comments,
+				_ => throw new InvalidOperationException(
+					$"Language manifest '{resource}' has unsupported transform capability '{value}'.")
+			};
+		}
+
+		return capabilities;
 	}
 
 	private static BlockBodyStyle ParseBlockBodyStyle(string? value, string resource) =>

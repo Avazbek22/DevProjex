@@ -212,6 +212,8 @@ public sealed class ContentTransformMapTests
 		Assert.True(result.Map.TryToTransformed(edit.SourceStart, out var start));
 		Assert.True(result.Map.TryToTransformed(edit.SourceEnd, out var end));
 		Assert.Equal(start, end);
+		Assert.True(result.Map.TryToSource(start, out var source));
+		Assert.Equal(edit.SourceEnd, source);
 	}
 
 	[Fact]

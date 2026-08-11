@@ -4,7 +4,7 @@
   "extensions": [".go"],
   "library": "tree-sitter-go",
   "export": "tree_sitter_go",
-  "queryVersion": 4,
+  "queryVersion": 5,
   "blockPlaceholder": "{ }",
   "containerNodeTypes": ["source_file"],
   "executableOwnerKinds": ["function_declaration", "method_declaration"]

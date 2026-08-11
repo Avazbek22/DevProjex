@@ -8,6 +8,8 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.CompressCode"] = "Compress code",
+				["Settings.Ignore.StripComments"] = "Strip comments",
 				["Settings.Ignore.SmartIgnore"] = "Smart Ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
@@ -21,13 +23,17 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 	[Theory]
 	// Counts include every content transformation: they are always offered, because whether they
 	// would change anything cannot be known without reading the selected content.
-	[InlineData(false, false, 6)]
-	[InlineData(true, false, 7)]
-	[InlineData(false, true, 7)]
-	[InlineData(true, true, 8)]
-	public void GetOptions_RespectsAvailabilityFlags(bool includeGitIgnore, bool includeSmartIgnore, int expectedCount)
+	[InlineData(false, false)]
+	[InlineData(true, false)]
+	[InlineData(false, true)]
+	[InlineData(true, true)]
+	public void GetOptions_RespectsAvailabilityFlags(bool includeGitIgnore, bool includeSmartIgnore)
 	{
 		var service = CreateService();
+		var expectedCount = 4 +
+		                    IgnoreOptionOrder.Count +
+		                    (includeGitIgnore ? 1 : 0) +
+		                    (includeSmartIgnore ? 1 : 0);
 
 		var options = service.GetOptions(new IgnoreOptionsAvailability(includeGitIgnore, includeSmartIgnore));
 

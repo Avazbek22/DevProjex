@@ -145,6 +145,7 @@ internal sealed class MetricsPipeline(
         if (compression is null)
         {
             viewModel.SetCompressionPreparationStatus(isActive: false);
+			viewModel.SetCommentStripPreparationStatus(isActive: false);
             return Task.CompletedTask;
         }
 
@@ -153,9 +154,18 @@ internal sealed class MetricsPipeline(
             ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
             : GetOrBuildAllOrderedFilePaths(currentTree);
         var prewarmCts = ReplaceCancellationSource(ref _compressionPrewarmCts);
-        viewModel.SetCompressionPreparationStatus(isActive: true);
+		var compressBodies = (compression.Kinds & CodeTransformKinds.Bodies) != 0;
+		var stripComments = (compression.Kinds & CodeTransformKinds.Comments) != 0;
+        viewModel.SetCompressionPreparationStatus(compressBodies);
+		viewModel.SetCommentStripPreparationStatus(stripComments);
+		var progressText = compression.Kinds switch
+		{
+			CodeTransformKinds.Bodies => localization["Settings.Compression.Status.Scanning"],
+			CodeTransformKinds.Comments => localization["Settings.Comments.Status.Scanning"],
+			_ => localization["Settings.ContentTransform.Status.Scanning"]
+		};
         var statusOperationId = statusOperations.Begin(
-            localization["Settings.Compression.Status.Scanning"],
+			progressText,
             indeterminate: false,
             operationType: StatusOperationType.CompressionPreparation,
             cancelAction: CancelCompressionPrewarm,
@@ -367,7 +377,7 @@ internal sealed class MetricsPipeline(
     private string ResolveTransformIdentity()
     {
         var context = transformationContextProvider?.Invoke();
-        return context?.Compression is { } compression ? compression.Session.TransformIdentity : string.Empty;
+		return context?.Compression is { } compression ? compression.TransformIdentity : string.Empty;
     }
 
     /// <summary>Switches the effective variant while retaining already measured raw/compressed data.</summary>
@@ -454,8 +464,8 @@ internal sealed class MetricsPipeline(
                     metrics.TrailingNewlineLineBreaks),
                 HasMetrics: true);
 
-    private bool IsCompressible(string filePath) =>
-        transformationContextProvider?.Invoke()?.Compression?.Session.IsSupported(filePath) == true;
+	private bool IsCompressible(string filePath) =>
+		transformationContextProvider?.Invoke()?.Compression?.IsSupported(filePath) == true;
 
     private string ResolveTransformationProjectRoot() =>
         transformationContextProvider?.Invoke()?.Compression?.ProjectRoot ?? string.Empty;
@@ -613,15 +623,28 @@ internal sealed class MetricsPipeline(
                     if (string.Equals(
                             snapshot.SelectionKey,
                             expectedSelectionKey,
-                            StringComparison.Ordinal))
+							StringComparison.Ordinal) &&
+					    snapshot.TransformIdentity.Equals(
+						    compression.TransformIdentity,
+						    StringComparison.Ordinal))
                     {
-                        viewModel.SetCompressionStatus(
-                            snapshot.CompressedFiles,
-                            snapshot.TotalFiles,
-                            snapshot.SourceCharacters,
-                            snapshot.TransformedCharacters);
+						if ((compression.Kinds & CodeTransformKinds.Bodies) != 0)
+						{
+							viewModel.SetCompressionStatus(
+								snapshot.BodyTransformedFiles,
+								snapshot.TotalFiles,
+								snapshot.SourceCharacters,
+								snapshot.TransformedCharacters);
+						}
+						if ((compression.Kinds & CodeTransformKinds.Comments) != 0)
+						{
+							viewModel.SetCommentStripStatus(
+								snapshot.CommentTransformedFiles,
+								snapshot.TotalFiles);
+						}
                     }
                     viewModel.SetCompressionPreparationStatus(isActive: false);
+					viewModel.SetCommentStripPreparationStatus(isActive: false);
                     statusOperations.Complete(statusOperationId);
                 });
             }

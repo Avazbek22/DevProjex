@@ -20,9 +20,15 @@ public sealed class AnalyzeCommandHandler(
 					request.Selection,
 					cancellationToken: cancellationToken))
 			.ConfigureAwait(false);
+		var transformKinds = CodeTransformIdentity.Resolve(
+			plan.Selection.CompressCode == true,
+			plan.Selection.StripComments == true);
 		var transformationContext = ContentTransformationContext.For(
-			plan.Selection.CompressCode == true
-				? new CodeCompressionContext(plan.SourceRoot, services.CodeCompressionSession)
+			transformKinds != CodeTransformKinds.None
+				? new CodeCompressionContext(
+					plan.SourceRoot,
+					services.CodeCompressionSession,
+					transformKinds)
 				: null,
 			plan.Selection.HideSecrets == true
 				? new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession)
@@ -59,7 +65,9 @@ public sealed class AnalyzeCommandHandler(
 						compression.CompressedFiles,
 						compression.UnchangedFiles,
 						compression.SourceCharacters,
-						compression.TransformedCharacters)
+						compression.TransformedCharacters,
+						compression.BodyTransformedFiles,
+						compression.CommentTransformedFiles)
 					: null
 			};
 		}
@@ -207,15 +215,26 @@ internal static class AnalysisTextFormatter
 		}
 		if (plan.Compression is { } compression)
 		{
-			var value = compression.CompressedFiles == 0
+			var value = compression.BodyTransformedFiles == 0
 				? localization["Settings.Compression.Status.NothingToCompress"]
 				: localization.Format(
 					"Settings.Compression.Status.Applied",
-					compression.CompressedFiles,
+					compression.BodyTransformedFiles,
 					compression.CompressedFiles + compression.UnchangedFiles,
 					CodeCompressionSnapshot.EstimateTokens(compression.SourceCharacters),
 					CodeCompressionSnapshot.EstimateTokens(compression.TransformedCharacters));
-			rows.Add(new AnalysisTextRow(localization["Settings.Ignore.CompressCode"], value));
+			if (plan.Selection.CompressCode == true)
+				rows.Add(new AnalysisTextRow(localization["Settings.Ignore.CompressCode"], value));
+			if (plan.Selection.StripComments == true)
+			{
+				var commentValue = compression.CommentTransformedFiles == 0
+					? localization["Settings.Comments.Status.NothingToStrip"]
+					: localization.Format(
+						"Settings.Comments.Status.Applied",
+						compression.CommentTransformedFiles,
+						compression.CompressedFiles + compression.UnchangedFiles);
+				rows.Add(new AnalysisTextRow(localization["Settings.Ignore.StripComments"], commentValue));
+			}
 		}
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Fingerprint"],

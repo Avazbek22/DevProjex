@@ -163,7 +163,12 @@ public sealed class ContentTransformMap
 
 		if (offset == regionStart)
 		{
-			mapped = toStarts[index];
+			// A deletion has no transformed character representing its source start. The character
+			// now visible at this boundary originally followed the deleted range, so reverse mapping
+			// must select the source end. Forward mapping of both source boundaries remains unchanged.
+			mapped = fromLengths[index] == 0
+				? toStarts[index] + toLengths[index]
+				: toStarts[index];
 			return true;
 		}
 

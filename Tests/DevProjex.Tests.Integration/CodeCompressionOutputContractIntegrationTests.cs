@@ -40,6 +40,39 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	private const string MarkedBodyValue = "SessionMarkedBodyValue";
 	private const string AutomaticRetainedSecret = "AutomaticRetainedSecret123";
 	private const string AutomaticRemovedSecret = "AutomaticRemovedSecret123";
+	private const string FullyCommentedFileWithBlankSeparators = """
+		// Task 1
+		// Console.WriteLine(1);
+
+
+		// Task 2
+		// Console.WriteLine(2);
+
+		""";
+	private const string MixedFileWithCommentSurroundedByBlankLines = """
+		namespace CommentSpacing;
+
+		internal static class Values
+		{
+		    internal static string First => "first";
+
+
+		    // remove
+
+
+		    internal static string Second => "second";
+		}
+		""";
+	private const string MixedFileAfterCommentRemoval = """
+		namespace CommentSpacing;
+
+		internal static class Values
+		{
+		    internal static string First => "first";
+
+		    internal static string Second => "second";
+		}
+		""";
 
 	[Fact]
 	public async Task CompressionOnlyPreparationPreservesSelectionOrderAndSkipsUnchangedTempCopies()
@@ -769,6 +802,223 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		Assert.Equal(folderText, zipText);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task CommentRemovalProducesDeterministicBytesAcrossContextFolderAndZip(bool compress)
+	{
+		var source = """
+			// file documentation to remove
+			public sealed class Commented
+			{
+			    public string Read() // trailing comment to remove
+			    {
+			        var marker = "// string marker remains";
+			        return marker; /* block comment to remove */
+			    }
+			}
+			""".ReplaceLineEndings("\n");
+		using var workspace = CompressionWorkspace.Create(source);
+
+		var firstContext = await workspace.BuildContextAsync(compress, stripComments: true);
+		var secondContext = await workspace.BuildContextAsync(compress, stripComments: true);
+		var folder = await workspace.ExportFolderAsync(compress, stripComments: true);
+		var folderText = await File.ReadAllTextAsync(
+			Path.Combine(folder.DestinationPath, "Widget.cs"),
+			TestContext.Current.CancellationToken);
+		var zipPath = Path.Combine(
+			workspace.DestinationParent,
+			compress ? "comments-compressed.zip" : "comments-only.zip");
+		await workspace.ExportZipAsync(zipPath, compress, stripComments: true);
+		using var archive = ZipFile.OpenRead(zipPath);
+		var entry = Assert.Single(archive.Entries, static candidate =>
+			candidate.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+		using var reader = new StreamReader(entry.Open());
+		var zipText = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(firstContext, secondContext);
+		Assert.EndsWith(folderText, firstContext, StringComparison.Ordinal);
+		Assert.Equal(folderText, zipText);
+		Assert.DoesNotContain("comment to remove", folderText, StringComparison.Ordinal);
+		Assert.Contains("public string Read()", folderText, StringComparison.Ordinal);
+		Assert.Equal(!compress, folderText.Contains("return marker;", StringComparison.Ordinal));
+		Assert.Equal(!compress, folderText.Contains("// string marker remains", StringComparison.Ordinal));
+		Assert.Equal(
+			source,
+			await File.ReadAllTextAsync(
+				workspace.SourceFile,
+				TestContext.Current.CancellationToken));
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task BlankLineCollapsedCommentsProduceIdenticalBytesAcrossAllOutputSurfaces(bool compress)
+	{
+		var mixedSource = MixedFileWithCommentSurroundedByBlankLines.ReplaceLineEndings("\n");
+		var fullyCommentedSource = FullyCommentedFileWithBlankSeparators.ReplaceLineEndings("\n");
+		var expectedMixed = MixedFileAfterCommentRemoval.ReplaceLineEndings("\n");
+		using var workspace = CompressionWorkspace.Create(mixedSource);
+		workspace.CreateExtraFile(
+			"FullyCommented.cs",
+			fullyCommentedSource);
+
+		var firstContext = await workspace.BuildContextAsync(compress, stripComments: true);
+		var secondContext = await workspace.BuildContextAsync(compress, stripComments: true);
+		var folder = await workspace.ExportFolderAsync(compress, stripComments: true);
+		var folderMixed = await File.ReadAllTextAsync(
+			Path.Combine(folder.DestinationPath, "Widget.cs"),
+			TestContext.Current.CancellationToken);
+		var folderFullyCommented = await File.ReadAllTextAsync(
+			Path.Combine(folder.DestinationPath, "FullyCommented.cs"),
+			TestContext.Current.CancellationToken);
+		var zipPath = Path.Combine(workspace.DestinationParent, $"blank-lines-{compress}.zip");
+		await workspace.ExportZipAsync(zipPath, compress, stripComments: true);
+		using var archive = ZipFile.OpenRead(zipPath);
+		var mixedEntry = Assert.Single(archive.Entries, static candidate =>
+			candidate.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+		var fullyCommentedEntry = Assert.Single(archive.Entries, static candidate =>
+			candidate.FullName.EndsWith("FullyCommented.cs", StringComparison.Ordinal));
+		using var mixedReader = new StreamReader(mixedEntry.Open());
+		using var fullyCommentedReader = new StreamReader(fullyCommentedEntry.Open());
+		var zipMixed = await mixedReader.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var zipFullyCommented = await fullyCommentedReader.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(firstContext, secondContext);
+		Assert.EndsWith(expectedMixed, firstContext, StringComparison.Ordinal);
+		Assert.Equal(expectedMixed, folderMixed);
+		Assert.Equal(folderMixed, zipMixed);
+		Assert.Equal(string.Empty, folderFullyCommented);
+		Assert.Equal(folderFullyCommented, zipFullyCommented);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task BlankLineCollapsedCommentsPreserveUtf8BomAndLineEndings(bool useCrlf)
+	{
+		var newline = useCrlf ? "\r\n" : "\n";
+		var source = string.Join(
+			newline,
+			"var first = 1;",
+			"",
+			" ",
+			"// remove",
+			"\t",
+			"",
+			"var second = 2;",
+			"");
+		var expected = string.Join(
+			newline,
+			"var first = 1;",
+			"",
+			"var second = 2;",
+			"");
+		var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true, throwOnInvalidBytes: true);
+		using var workspace = CompressionWorkspace.Create(source);
+		await File.WriteAllTextAsync(
+			workspace.SourceFile,
+			source,
+			encoding,
+			TestContext.Current.CancellationToken);
+
+		var folder = await workspace.ExportFolderAsync(compress: false, stripComments: true);
+		var folderBytes = await File.ReadAllBytesAsync(
+			Path.Combine(folder.DestinationPath, "Widget.cs"),
+			TestContext.Current.CancellationToken);
+		var zip = await workspace.ExportZipAsync(
+			Path.Combine(workspace.DestinationParent, $"bom-comments-{useCrlf}.zip"),
+			compress: false,
+			stripComments: true);
+		byte[] zipBytes;
+		using (var archive = ZipFile.OpenRead(zip.DestinationPath))
+		{
+			var entry = Assert.Single(archive.Entries, static candidate =>
+				candidate.FullName.EndsWith("Widget.cs", StringComparison.Ordinal));
+			await using var entryStream = entry.Open();
+			await using var buffer = new MemoryStream();
+			await entryStream.CopyToAsync(buffer, TestContext.Current.CancellationToken);
+			zipBytes = buffer.ToArray();
+		}
+
+		Assert.Equal(folderBytes, zipBytes);
+		Assert.True(folderBytes.AsSpan().StartsWith(encoding.GetPreamble()));
+		Assert.Equal(
+			expected,
+			encoding.GetString(folderBytes.AsSpan(encoding.GetPreamble().Length)));
+	}
+
+	[Fact]
+	public async Task CommentOnlyLanguagesProduceIdenticalBytesAcrossContextFolderAndZip()
+	{
+		using var workspace = CompressionWorkspace.Create("// remove\ninternal sealed class Widget { }\n");
+		workspace.CreateExtraFile(
+			"page.html",
+			"<!-- remove -->\n<main>Ready</main>\n<script>// keep raw\nwindow.ready = true;</script>\n");
+		workspace.CreateExtraFile(
+			"site.css",
+			"/* remove */\n.card { content: \"/* keep */\"; color: red; }\n");
+		workspace.CreateExtraFile(
+			"app.toml",
+			"# remove\nname = \"api#keep\" # trailing\n");
+		workspace.CreateExtraFile(
+			"deploy.sh",
+			"#!/usr/bin/env bash\n# remove\nname='# keep' # trailing\n");
+		workspace.CreateExtraFile(
+			"view.axaml",
+			"<!-- remove -->\n<Panel xmlns=\"https://github.com/avaloniaui\"><![CDATA[<!-- keep cdata -->]]></Panel>\n");
+		workspace.CreateExtraFile(
+			"deployment.yaml",
+			"# remove\nname: \"api#keep\" # trailing\nscript: |\n  # keep scalar\n");
+
+		using var session = CodeCompressionFactory.CreateSession();
+		await using var prepared = await new SecretRedactionOutputPreparer(new FileContentAnalyzer())
+			.PrepareAsync(
+				new ContentTransformationContext(
+					new CodeCompressionContext(
+						workspace.SourceRoot,
+						session,
+						CodeTransformKinds.Comments),
+					null),
+				workspace.Files,
+				TestContext.Current.CancellationToken);
+		var snapshot = Assert.IsType<CodeCompressionSnapshot>(prepared.CompressionSnapshot);
+		Assert.Equal(workspace.Files.Count, snapshot.CommentTransformedFiles);
+
+		var firstContext = await workspace.BuildContextAsync(compress: false, stripComments: true);
+		var secondContext = await workspace.BuildContextAsync(compress: false, stripComments: true);
+		var folder = await workspace.ExportFolderAsync(compress: false, stripComments: true);
+		var zipPath = Path.Combine(workspace.DestinationParent, "comments-only-formats.zip");
+		await workspace.ExportZipAsync(zipPath, compress: false, stripComments: true);
+		using var archive = ZipFile.OpenRead(zipPath);
+
+		Assert.Equal(firstContext, secondContext);
+		foreach (var sourcePath in workspace.Files)
+		{
+			var relativePath = Path.GetRelativePath(workspace.SourceRoot, sourcePath);
+			var folderText = await File.ReadAllTextAsync(
+				Path.Combine(folder.DestinationPath, relativePath),
+				TestContext.Current.CancellationToken);
+			var archivePath = relativePath.Replace('\\', '/');
+			var entry = Assert.Single(archive.Entries, candidate =>
+				candidate.FullName.EndsWith(archivePath, StringComparison.Ordinal));
+			using var reader = new StreamReader(entry.Open());
+			var zipText = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+			Assert.Equal(folderText, zipText);
+			Assert.DoesNotContain("remove", folderText, StringComparison.Ordinal);
+		}
+		Assert.Contains("internal sealed class Widget", firstContext, StringComparison.Ordinal);
+		Assert.Contains("<main>Ready</main>", firstContext, StringComparison.Ordinal);
+		Assert.Contains(".card", firstContext, StringComparison.Ordinal);
+		Assert.Contains("// keep raw", firstContext, StringComparison.Ordinal);
+		Assert.Contains("/* keep */", firstContext, StringComparison.Ordinal);
+		Assert.Contains("api#keep", firstContext, StringComparison.Ordinal);
+		Assert.Contains("#!/usr/bin/env bash", firstContext, StringComparison.Ordinal);
+		Assert.Contains("keep cdata", firstContext, StringComparison.Ordinal);
+		Assert.Contains("keep scalar", firstContext, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task FolderCopy_WithCompression_PreservesUtf16BigEndianEncodingAndBom()
 	{
@@ -985,12 +1235,15 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 
 	private sealed class CompressionWorkspace : IDisposable
 	{
+		private readonly List<string> _files;
+
 		private CompressionWorkspace(string root, string sourceRoot, string destinationParent, string sourceFile)
 		{
 			Root = root;
 			SourceRoot = sourceRoot;
 			DestinationParent = destinationParent;
 			SourceFile = sourceFile;
+			_files = [sourceFile];
 		}
 
 		public string Root { get; }
@@ -1000,6 +1253,8 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		public string DestinationParent { get; }
 
 		public string SourceFile { get; }
+
+		public IReadOnlyList<string> Files => _files;
 
 		public static CompressionWorkspace Create(string source)
 		{
@@ -1013,16 +1268,19 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 			return new CompressionWorkspace(root, sourceRoot, destinationParent, sourceFile);
 		}
 
-		public async Task<string> BuildContextAsync(bool compress)
+		public async Task<string> BuildContextAsync(bool compress, bool stripComments = false)
 		{
 			var analyzer = new FileContentAnalyzer();
 			using var session = CodeCompressionFactory.CreateSession();
-			var context = compress
-				? new ContentTransformationContext(new CodeCompressionContext(SourceRoot, session), null)
+			var kinds = CodeTransformIdentity.Resolve(compress, stripComments);
+			var context = kinds != CodeTransformKinds.None
+				? new ContentTransformationContext(
+					new CodeCompressionContext(SourceRoot, session, kinds),
+					null)
 				: null;
 			var builder = new PreviewDocumentBuilder(analyzer);
 			var document = await builder.BuildContentDocumentAsync(
-				[SourceFile],
+				_files,
 				TestContext.Current.CancellationToken,
 				displayPathMapper: null,
 				includeOmissionMarkers: false,
@@ -1048,7 +1306,9 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 		public string CreateExtraFile(string name, string content)
 		{
 			var path = Path.Combine(SourceRoot, name);
+			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 			File.WriteAllText(path, content);
+			_files.Add(path);
 			return path;
 		}
 
@@ -1098,19 +1358,30 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 				return new TransformedContent(document.GetFullText(), document.Redactions.Count);
 		}
 
-		public Task<ProjectCopyExportResult> ExportFolderAsync(bool compress) =>
+		public Task<ProjectCopyExportResult> ExportFolderAsync(
+			bool compress,
+			bool stripComments = false) =>
 			ExportAsync(
-				Path.Combine(DestinationParent, compress ? "compressed" : "plain"),
+				Path.Combine(
+					DestinationParent,
+					stripComments
+						? compress ? "comments-compressed" : "comments-only"
+						: compress ? "compressed" : "plain"),
 				ProjectCopyExportFormat.Folder,
-				compress);
+				compress,
+				stripComments);
 
-		public Task<ProjectCopyExportResult> ExportZipAsync(string destination, bool compress) =>
-			ExportAsync(destination, ProjectCopyExportFormat.Zip, compress);
+		public Task<ProjectCopyExportResult> ExportZipAsync(
+			string destination,
+			bool compress,
+			bool stripComments = false) =>
+			ExportAsync(destination, ProjectCopyExportFormat.Zip, compress, stripComments);
 
 		private async Task<ProjectCopyExportResult> ExportAsync(
 			string destination,
 			ProjectCopyExportFormat format,
-			bool compress)
+			bool compress,
+			bool stripComments)
 		{
 			using var session = CodeCompressionFactory.CreateSession();
 			var service = new ProjectCopyExportService(
@@ -1130,6 +1401,7 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 					ProjectCopyConflictPolicy.Fail,
 					RedactSecrets: false,
 					CompressCode: compress,
+					StripComments: stripComments,
 					NoticeText: new ProjectCopyNoticeText("redaction notice", "compression notice")),
 				progress: null,
 				TestContext.Current.CancellationToken);
@@ -1137,7 +1409,13 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 
 		private TreeNodeDescriptor BuildTree() =>
 			new("Sample", SourceRoot, true, false, "folder",
-				[new TreeNodeDescriptor("Widget.cs", SourceFile, false, false, "file", [])]);
+				_files.Select(path => new TreeNodeDescriptor(
+					Path.GetFileName(path),
+					path,
+					false,
+					false,
+					"file",
+					[])).ToArray());
 
 		public void Dispose()
 		{

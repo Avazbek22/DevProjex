@@ -7,7 +7,7 @@
   ],
   "library": "tree-sitter-python",
   "export": "tree_sitter_python",
-  "queryVersion": 3,
+  "queryVersion": 4,
   "blockPlaceholder": "...",
   "blockBodyStyle": "indented-statement",
   "preserveLeadingDocstring": true,

@@ -77,6 +77,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private long? _compressionSourceCharacters;
 	private long? _compressionTransformedCharacters;
 	private bool _compressionPreparationActive;
+	private int? _commentStrippedFilesCount;
+	private int? _commentStripTotalFilesCount;
+	private bool _commentStripPreparationActive;
     private bool _isDarkTheme = true;
     private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
@@ -1438,6 +1441,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	public string SettingsSecretsTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsNotice { get; private set; } = string.Empty;
 	public string SettingsCompressionNotice { get; private set; } = string.Empty;
+	public string SettingsCommentStripNotice { get; private set; } = string.Empty;
 	public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretAlwaysHideFormat { get; private set; } = string.Empty;
@@ -1597,6 +1601,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
 		UpdateSettingsSecretsNotice();
 		UpdateSettingsCompressionNotice();
+		UpdateSettingsCommentStripNotice();
 		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
 		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
 		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Always"];
@@ -1976,6 +1981,28 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		UpdateSettingsCompressionNotice();
 	}
 
+	internal void SetCommentStripStatus(int? strippedFiles, int? totalFiles)
+	{
+		if (_commentStrippedFilesCount == strippedFiles &&
+		    _commentStripTotalFilesCount == totalFiles)
+		{
+			return;
+		}
+
+		_commentStrippedFilesCount = strippedFiles;
+		_commentStripTotalFilesCount = totalFiles;
+		UpdateSettingsCommentStripNotice();
+	}
+
+	internal void SetCommentStripPreparationStatus(bool isActive)
+	{
+		if (_commentStripPreparationActive == isActive)
+			return;
+
+		_commentStripPreparationActive = isActive;
+		UpdateSettingsCommentStripNotice();
+	}
+
 	private void UpdateSettingsSecretsNotice()
 	{
 		var secrets = _contentProcessingScanState switch
@@ -2088,6 +2115,30 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		UpdateContentProcessingOptionStatuses();
 	}
 
+	private void UpdateSettingsCommentStripNotice()
+	{
+		var notice = _commentStripPreparationActive
+			? _localization["Settings.Comments.Status.Scanning"]
+			: (_commentStrippedFilesCount, _commentStripTotalFilesCount) switch
+			{
+				(0, 0) => _localization["Settings.Comments.Status.NothingToStrip"],
+				({ } stripped, { } total) => _localization.Format(
+					"Settings.Comments.Status.Applied",
+					stripped,
+					total),
+				_ => string.Empty
+			};
+		if (string.Equals(SettingsCommentStripNotice, notice, StringComparison.Ordinal))
+		{
+			UpdateContentProcessingOptionStatuses();
+			return;
+		}
+
+		SettingsCommentStripNotice = notice;
+		RaisePropertyChanged(nameof(SettingsCommentStripNotice));
+		UpdateContentProcessingOptionStatuses();
+	}
+
 	private void UpdateContentProcessingOptionStatuses()
 	{
 		foreach (var option in IgnoreOptions)
@@ -2102,6 +2153,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			{
 				IgnoreOptionId.HideSecrets => SettingsSecretsNotice,
 				IgnoreOptionId.CompressCode when option.IsChecked => SettingsCompressionNotice,
+				IgnoreOptionId.StripComments when option.IsChecked => SettingsCommentStripNotice,
 				_ => string.Empty
 			};
 		}
