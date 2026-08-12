@@ -1048,6 +1048,52 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.Equal(1, contentTransformationChanges);
 	}
 
+	[Fact]
+	public void ContentTransformationFastPath_AcceptsCodeAndHideSecretsDraftsTogether()
+	{
+		const string path = @"C:\Project";
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
+		HookAllOptionListeners(coordinator, viewModel);
+		coordinator.AcceptCurrentSelectionsAsApplied(path);
+		var revisionBefore = coordinator.CurrentSelectionRevision;
+		var scansBefore = scanner.TotalScanCount;
+
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		Assert.True(coordinator.ApplyCompressCodeOverride(false));
+		Assert.True(coordinator.TryAcceptContentTransformationOnlyChangeAsApplied(path));
+
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.CompressCode).IsChecked);
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
+		Assert.Equal(scansBefore, scanner.TotalScanCount);
+	}
+
+	[Fact]
+	public void ContentTransformationFastPath_RejectsHiddenStructuralDraftState()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => path);
+		ApplySelectionRefreshSnapshot(coordinator, CreateReversibleSelectionRefreshSnapshot());
+		HookAllOptionListeners(coordinator, viewModel);
+		coordinator.AcceptCurrentSelectionsAsApplied(path);
+
+		GetPrivateSession(coordinator).Extensions.OptionStates[".temporarily-hidden"] = false;
+		Assert.True(coordinator.ApplyCompressCodeOverride(false));
+
+		Assert.False(coordinator.TryAcceptContentTransformationOnlyChangeAsApplied(path));
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+	}
+
 	[AvaloniaFact]
 	public void ContentTransformationCallback_IdentifiesTheChangedPipelineStage()
 	{
@@ -1218,6 +1264,107 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		{
 			releaseScan.Set();
 		}
+	}
+
+	[AvaloniaFact]
+	public async Task CancelledStructuralRefresh_PreservesAppliedHideSecretsAndTransformationDraft()
+	{
+		const string path = @"C:\Project";
+		using var scanStarted = new ManualResetEventSlim();
+		using var releaseScan = new ManualResetEventSlim();
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			BeforeRootSelectionSnapshot = cancellationToken =>
+			{
+				scanStarted.Set();
+				WaitHandle.WaitAny(
+					[cancellationToken.WaitHandle, releaseScan.WaitHandle],
+					TimeSpan.FromSeconds(3));
+				cancellationToken.ThrowIfCancellationRequested();
+			}
+		};
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
+		HookAllOptionListeners(coordinator, viewModel);
+		coordinator.AcceptCurrentSelectionsAsApplied(path);
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		Assert.True(coordinator.ApplyCompressCodeOverride(false));
+		Assert.True(coordinator.TryAcceptContentTransformationOnlyChangeAsApplied(path));
+
+		try
+		{
+			viewModel.IgnoreOptions.Single(
+				static option => option.Id == IgnoreOptionId.HiddenFiles).IsChecked = false;
+			Assert.True(await Task.Run(
+				() => scanStarted.Wait(TimeSpan.FromSeconds(2)),
+				TestContext.Current.CancellationToken));
+			viewModel.IgnoreOptions.Single(
+				static option => option.Id == IgnoreOptionId.StripComments).IsChecked = false;
+
+			Assert.True(coordinator.CancelPendingRefreshes());
+			releaseScan.Set();
+			await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+			Assert.True(viewModel.IgnoreOptions.Single(
+				static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+			Assert.False(viewModel.IgnoreOptions.Single(
+				static option => option.Id == IgnoreOptionId.CompressCode).IsChecked);
+			Assert.False(viewModel.IgnoreOptions.Single(
+				static option => option.Id == IgnoreOptionId.StripComments).IsChecked);
+		}
+		finally
+		{
+			releaseScan.Set();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task FailedStructuralRefresh_PreservesAppliedHideSecretsAndTransformationDraft()
+	{
+		const string path = @"C:\Project";
+		using var scanStarted = new ManualResetEventSlim();
+		using var releaseScan = new ManualResetEventSlim();
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			BeforeRootSelectionSnapshot = _ =>
+			{
+				scanStarted.Set();
+				if (!releaseScan.Wait(TimeSpan.FromSeconds(3)))
+					throw new TimeoutException("The controlled selection scan was not released.");
+				throw new IOException("controlled refresh failure");
+			}
+		};
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
+		HookAllOptionListeners(coordinator, viewModel);
+		coordinator.AcceptCurrentSelectionsAsApplied(path);
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		Assert.True(coordinator.TryAcceptHideSecretsOnlyChangeAsApplied(path));
+
+		viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HiddenFiles).IsChecked = false;
+		Assert.True(await Task.Run(
+			() => scanStarted.Wait(TimeSpan.FromSeconds(2)),
+			TestContext.Current.CancellationToken));
+		viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.StripBlankLines).IsChecked = false;
+		releaseScan.Set();
+
+		await Assert.ThrowsAsync<IOException>(async () =>
+			await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken));
+
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.StripBlankLines).IsChecked);
 	}
 
 	[AvaloniaFact]

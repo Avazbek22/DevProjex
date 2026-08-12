@@ -550,7 +550,8 @@ public partial class MainWindow
 
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
-        if (!_viewModel.TryBeginApplySettings())
+        var activeOperationType = _statusOperations.GetActiveSnapshot().OperationType;
+        if (!_viewModel.TryBeginApplySettings(activeOperationType))
             return;
 
         var applyTask = ApplySettingsAsync();
@@ -597,6 +598,14 @@ public partial class MainWindow
                     // Accepting that sole change here avoids cancelling and restarting its active scan.
                     if (_selectionCoordinator.TryAcceptHideSecretsOnlyChangeAsApplied(_currentPath))
                     {
+                        _projectProfiles.PersistIfNeeded(_currentPath);
+                        return;
+                    }
+
+                    if (_currentTree is { } currentTree &&
+                        _selectionCoordinator.TryAcceptContentTransformationOnlyChangeAsApplied(_currentPath))
+                    {
+                        await ApplyContentTransformationSettingsAsync(currentTree, cancellationToken);
                         _projectProfiles.PersistIfNeeded(_currentPath);
                         return;
                     }

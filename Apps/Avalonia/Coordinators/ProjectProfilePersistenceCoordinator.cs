@@ -53,12 +53,20 @@ public sealed class ProjectProfilePersistenceCoordinator(
 
     private ProjectSelectionProfile CaptureCurrentProfile()
     {
+        var applied = selectionCoordinator.SnapshotAppliedSelectionForPersistence();
         return ProjectSelectionProfileBuilder.Create(
-            visibleExtensions: viewModel.Extensions.Select(static option => new SelectionOption(option.Name, option.IsChecked)),
-            visibleIgnoreOptions: viewModel.IgnoreOptions.Select(static option => new IgnoreSelectionOption(option.Id, option.IsChecked)),
-            cachedExtensionStates: selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
-            cachedIgnoreOptionStates: selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
-            selectedIgnoreOptions: selectionCoordinator.GetSelectedIgnoreOptionIds(),
+            visibleExtensions: viewModel.Extensions.Select(option => new SelectionOption(
+                option.Name,
+                applied?.ExtensionOptionStates.GetValueOrDefault(option.Name) ?? option.IsChecked)),
+            visibleIgnoreOptions: viewModel.IgnoreOptions.Select(option => new IgnoreSelectionOption(
+                option.Id,
+                applied?.IgnoreOptionStates.GetValueOrDefault(option.Id) ?? option.IsChecked)),
+            cachedExtensionStates: applied?.ExtensionOptionStates ??
+                                   selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
+            cachedIgnoreOptionStates: applied?.IgnoreOptionStates ??
+                                      selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
+            selectedIgnoreOptions: applied?.SelectedIgnoreOptions ??
+                                   selectionCoordinator.GetSelectedIgnoreOptionIds(),
             extensionComparer: StringComparer.OrdinalIgnoreCase,
             markedSecrets: secretRedactionSession.GetMarkedSecrets());
     }

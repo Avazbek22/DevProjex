@@ -1,9 +1,89 @@
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Unit;
 
 public sealed class ProjectProfilePersistenceCoordinatorTests
 {
+	[Fact]
+	public void Persist_UsesAppliedSelectionsWhileSavingCurrentMarkedSecrets()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".md", false));
+			viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+				IgnoreOptionId.HiddenFiles,
+				"hidden files",
+				true));
+			viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+				IgnoreOptionId.HideSecrets,
+				"hide secrets",
+				false));
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+			viewModel.Extensions[0].IsChecked = false;
+			viewModel.Extensions[1].IsChecked = true;
+			viewModel.IgnoreOptions[0].IsChecked = false;
+			using var secretSession = new SecretRedactionSession(new EmptySecretDetector());
+			Assert.True(secretSession.AddMarkedSecret(new MarkedSecretProfileEntry(
+				"00112233445566778899aabbccddeeff",
+				"TOKEN",
+				16)));
+			var store = new RetryProfileStore(projectPath, failures: 0);
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession);
+
+			persistence.PersistIfNeeded(projectPath);
+
+			var saved = store.SavedProfiles[Path.GetFullPath(projectPath)];
+			Assert.Equal([".cs"], saved.SelectedExtensions.ToArray());
+			Assert.Contains(IgnoreOptionId.HiddenFiles, saved.SelectedIgnoreOptions);
+			Assert.Single(saved.MarkedSecrets!);
+		}
+	}
+
+	[Fact]
+	public void Persist_AfterEnsuringHideSecrets_MergesImmediateAppliedOptionWithoutDrafts()
+	{
+		const string projectPath = @"C:\Project";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".md", false));
+			viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+				IgnoreOptionId.HideSecrets,
+				"hide secrets",
+				false));
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+			viewModel.Extensions[0].IsChecked = false;
+			viewModel.Extensions[1].IsChecked = true;
+			Assert.True(selectionCoordinator.ApplyHideSecretsOverride(true));
+			Assert.False(selectionCoordinator.ApplyHideSecretsOverride(true));
+			selectionCoordinator.AcceptHideSecretsOverrideAsApplied(projectPath);
+			var store = new RetryProfileStore(projectPath, failures: 0);
+			using var secretSession = new SecretRedactionSession(new EmptySecretDetector());
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession);
+
+			persistence.PersistIfNeeded(projectPath);
+
+			var saved = store.SavedProfiles[Path.GetFullPath(projectPath)];
+			Assert.Equal([".cs"], saved.SelectedExtensions.ToArray());
+			Assert.Contains(IgnoreOptionId.HideSecrets, saved.SelectedIgnoreOptions);
+		}
+	}
+
 	[Fact]
 	public void PendingWrites_AreRetriedPerProjectWithoutCrossProjectReplacement()
 	{
@@ -34,6 +114,33 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 		SelectedRootFolders: [],
 		SelectedExtensions: [extension],
 		SelectedIgnoreOptions: []);
+
+	private static (MainWindowViewModel ViewModel, SelectionSyncCoordinator Coordinator)
+		CreateSelectionCoordinator(string projectPath)
+	{
+		var catalog = new StubLocalizationCatalog(
+			new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+			{
+				[AppLanguage.En] = new Dictionary<string, string>()
+			});
+		var localization = new LocalizationService(catalog, AppLanguage.En);
+		var viewModel = new MainWindowViewModel(localization, new HelpContentProvider());
+		var coordinator = new SelectionSyncCoordinator(
+			viewModel,
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(new StubFileSystemScanner())),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			_ => new IgnoreRules(
+				false,
+				false,
+				false,
+				false,
+				new HashSet<string>(),
+				new HashSet<string>()),
+			_ => false,
+			() => projectPath);
+		return (viewModel, coordinator);
+	}
 
 	private sealed class RetryProfileStore(string failingPath, int failures) : IProjectProfileStore
 	{
@@ -68,5 +175,13 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 			SavedProfiles.TryGetValue(Path.GetFullPath(localProjectPath), out profile!);
 
 		public void ClearAllProfiles() => SavedProfiles.Clear();
+	}
+
+	private sealed class EmptySecretDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
 	}
 }

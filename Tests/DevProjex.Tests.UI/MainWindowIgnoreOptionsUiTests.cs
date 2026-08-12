@@ -2184,6 +2184,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.False(commentsOption.IsChecked);
 			Assert.False(commentsOption.HasStatus);
 			commentsOption.IsChecked = true;
+			viewModel.SetAppliedContentTransformationState(
+				compressCode: true,
+				stripComments: true,
+				stripBlankLines: false);
 			viewModel.SetCommentStripPreparationStatus(isActive: true);
 			Assert.Equal("Removing comments…", commentsOption.StatusText);
 			viewModel.SetCommentStripStatus(strippedFiles: 7, totalFiles: 11);
@@ -2197,6 +2201,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.False(blankLinesOption.IsChecked);
 			Assert.False(blankLinesOption.HasStatus);
 			blankLinesOption.IsChecked = true;
+			viewModel.SetAppliedContentTransformationState(
+				compressCode: true,
+				stripComments: true,
+				stripBlankLines: true);
 			viewModel.SetBlankLineStripPreparationStatus(isActive: true);
 			Assert.Equal("Removing blank lines…", blankLinesOption.StatusText);
 			viewModel.SetBlankLineStripStatus(strippedFiles: 5, totalFiles: 11);

@@ -15,6 +15,20 @@ internal sealed class TreeSelectionSnapshotCache
 
     public void Invalidate() => _selectionVersion = unchecked(_selectionVersion + 1);
 
+	public void ResetForTreeReplacement()
+	{
+		Invalidate();
+		_snapshotVersion = -1;
+		_snapshotRoot = null;
+		_snapshot = null;
+		_normalizedVersion = -1;
+		_normalizedTreeRoot = null;
+		_normalizedSnapshot = null;
+		_orderedFilesVersion = -1;
+		_orderedFilesTreeRoot = null;
+		_orderedFiles = null;
+	}
+
 	/// <summary>
 	/// Identifies one published selection state. A projection built in the background carries the
 	/// version it was built from, and <see cref="StoreProjection"/> drops results whose version is

@@ -869,6 +869,25 @@ internal static class UiTestDriver
 	public static object GetCurrentTreeInventoryIdentity(MainWindow window) =>
 		GetRequiredPrivateFieldValue(window, "_currentTreeInventory");
 
+	public static long GetRetainedReadFactBytes(MainWindow window) =>
+		GetRequiredPrivateField<MetricsPipeline>(window, "_metrics").RetainedReadFactBytes;
+
+	public static (bool CompressCode, bool StripComments, bool StripBlankLines)
+		GetAppliedContentTransformationState(MainWindow window) =>
+		(
+			GetRequiredPrivateField<bool>(window, "_appliedCompressCodeEnabled"),
+			GetRequiredPrivateField<bool>(window, "_appliedStripCommentsEnabled"),
+			GetRequiredPrivateField<bool>(window, "_appliedStripBlankLinesEnabled")
+		);
+
+	public static HashSet<string> GetCheckedTreePaths(MainWindow window)
+	{
+		var selected = new HashSet<string>(PathComparer.Default);
+		foreach (var root in GetViewModel(window).TreeNodes)
+			root.CollectCheckedPaths(selected);
+		return selected;
+	}
+
     public static ContextDiagnostic? GetAppliedGitReadinessDiagnostic(
         MainWindow window,
         string projectPath) =>

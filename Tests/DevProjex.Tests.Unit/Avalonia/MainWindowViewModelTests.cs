@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Unit.Avalonia;
 
+using DevProjex.Application.Secrets;
 using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
@@ -307,6 +308,87 @@ public sealed class MainWindowViewModelTests
 
         Assert.True(viewModel.CanApplySettings);
         Assert.False(viewModel.TryBeginApplySettings());
+    }
+
+    [Theory]
+    [InlineData(StatusOperationType.LoadProject)]
+    [InlineData(StatusOperationType.RefreshProject)]
+    [InlineData(StatusOperationType.GitPullUpdates)]
+    [InlineData(StatusOperationType.GitSwitchBranch)]
+    [InlineData(StatusOperationType.PreviewBuild)]
+    [InlineData(StatusOperationType.ProjectCopyExport)]
+    public void ApplySettingsGate_RejectsNonReplaceableBackendWorkWithoutWaitingForVisualDelay(
+        StatusOperationType activeOperationType)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.SetPendingFilterSettingsChanges(true);
+
+        Assert.True(viewModel.CanApplySettings);
+        Assert.False(viewModel.TryBeginApplySettings(activeOperationType));
+        Assert.True(viewModel.CanApplySettings);
+    }
+
+    [Theory]
+    [InlineData(StatusOperationType.None)]
+    [InlineData(StatusOperationType.MetricsCalculation)]
+    [InlineData(StatusOperationType.SelectionRefresh)]
+    [InlineData(StatusOperationType.CompressionPreparation)]
+    [InlineData(StatusOperationType.SecretAnalysis)]
+    public void ApplySettingsGate_AllowsReplaceableBackendWork(StatusOperationType activeOperationType)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.SetPendingFilterSettingsChanges(true);
+
+        Assert.True(viewModel.TryBeginApplySettings(activeOperationType));
+        Assert.False(viewModel.TryBeginApplySettings(activeOperationType));
+
+        viewModel.CompleteApplySettings();
+    }
+
+    [Fact]
+    public void ContentTransformationStatuses_FollowAppliedStateInsteadOfDraftCheckboxes()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Settings.Compression.Status.Applied"] = "Compressed {0}/{1}. {2}/{3}",
+            ["Settings.Comments.Status.Applied"] = "Comments {0}/{1}",
+            ["Settings.BlankLines.Status.Applied"] = "Blank lines {0}/{1}"
+        });
+        var compression = new IgnoreOptionViewModel(IgnoreOptionId.CompressCode, "compress", true);
+        var comments = new IgnoreOptionViewModel(IgnoreOptionId.StripComments, "comments", true);
+        var blankLines = new IgnoreOptionViewModel(IgnoreOptionId.StripBlankLines, "blank lines", true);
+        viewModel.IgnoreOptions.Add(compression);
+        viewModel.IgnoreOptions.Add(comments);
+        viewModel.IgnoreOptions.Add(blankLines);
+        viewModel.SetCompressionStatus(2, 5, 100, 80);
+        viewModel.SetCommentStripStatus(3, 5);
+        viewModel.SetBlankLineStripStatus(4, 5);
+        viewModel.SetAppliedContentTransformationState(
+            compressCode: true,
+            stripComments: true,
+            stripBlankLines: true);
+
+        var appliedStatuses = viewModel.ContentProcessingOptions
+            .ToDictionary(static option => option.Id, static option => option.StatusText);
+        compression.IsChecked = false;
+        comments.IsChecked = false;
+        blankLines.IsChecked = false;
+        viewModel.SetContentProcessingStatus(SecretScanState.Pending);
+
+        Assert.Equal(appliedStatuses[IgnoreOptionId.CompressCode], compression.StatusText);
+        Assert.Equal(appliedStatuses[IgnoreOptionId.StripComments], comments.StatusText);
+        Assert.Equal(appliedStatuses[IgnoreOptionId.StripBlankLines], blankLines.StatusText);
+
+        viewModel.SetAppliedContentTransformationState(
+            compressCode: false,
+            stripComments: false,
+            stripBlankLines: false);
+
+        Assert.Equal(string.Empty, compression.StatusText);
+        Assert.Equal(string.Empty, comments.StatusText);
+        Assert.Equal(string.Empty, blankLines.StatusText);
     }
 
     [Fact]

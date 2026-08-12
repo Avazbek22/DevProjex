@@ -7,6 +7,40 @@ namespace DevProjex.Tests.UI;
 [Collection("AvaloniaUI")]
 public sealed class MainWindowApplySettingsMemoryCleanupUiTests
 {
+	[AvaloniaFact]
+	public async Task ApplySettings_ContentTransformationsOnly_UsesSequencedFastPath()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var profileStore = new RecordingProjectProfileStore();
+		var (window, sessionMetrics) = await CreateMeasuredWindowAsync(
+			project,
+			services => services with { ProjectProfileStore = profileStore });
+		try
+		{
+			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+			await UiTestDriver.WaitForMemoryCleanupIdleAsync(window);
+			var treeIdentity = UiTestDriver.GetCurrentTreeIdentity(window);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.CompressCode);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.StripComments);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.StripBlankLines);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await WaitForApplyCleanupCountAsync(window, sessionMetrics, expectedCount: 1);
+
+			Assert.Same(treeIdentity, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Equal((true, true, true), UiTestDriver.GetAppliedContentTransformationState(window));
+			Assert.Equal(0, UiTestDriver.GetRetainedReadFactBytes(window));
+			Assert.True(profileStore.TryLoadProfile(project.RootPath, out var savedProfile));
+			Assert.Contains(IgnoreOptionId.CompressCode, savedProfile.SelectedIgnoreOptions);
+			Assert.Contains(IgnoreOptionId.StripComments, savedProfile.SelectedIgnoreOptions);
+			Assert.Contains(IgnoreOptionId.StripBlankLines, savedProfile.SelectedIgnoreOptions);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task ApplySettings_DisablingLastTransformationSchedulesCleanup()
     {
@@ -18,6 +52,7 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
             await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             await UiTestDriver.WaitForMemoryCleanupIdleAsync(window);
             Assert.Equal(0, CountApplyCleanupRequests(sessionMetrics));
+			var treeIdentity = UiTestDriver.GetCurrentTreeIdentity(window);
 
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(
                 window,
@@ -27,6 +62,9 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
             await UiTestDriver.ClickApplySettingsAsync(window);
             await WaitForApplyCleanupCountAsync(window, sessionMetrics, expectedCount: 1);
             await UiTestDriver.WaitForMemoryCleanupIdleAsync(window);
+			Assert.Same(treeIdentity, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Equal((true, false, false), UiTestDriver.GetAppliedContentTransformationState(window));
+			Assert.Equal(0, UiTestDriver.GetRetainedReadFactBytes(window));
 
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(
                 window,
@@ -35,6 +73,9 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
 
             await UiTestDriver.ClickApplySettingsAsync(window);
             await WaitForApplyCleanupCountAsync(window, sessionMetrics, expectedCount: 2);
+			Assert.Same(treeIdentity, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Equal((false, false, false), UiTestDriver.GetAppliedContentTransformationState(window));
+			Assert.Equal(0, UiTestDriver.GetRetainedReadFactBytes(window));
         }
         finally
         {
@@ -280,4 +321,33 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
         private IFileContentAnalyzer Inner =>
             _inner ?? throw new InvalidOperationException("The analyzer is not attached.");
     }
+
+	private sealed class RecordingProjectProfileStore : IProjectProfileStore
+	{
+		private readonly Dictionary<string, ProjectSelectionProfile> _profiles =
+			new(PathComparer.Default);
+
+		public bool EnsureStorageExists() => true;
+
+		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile) =>
+			_profiles.TryGetValue(Path.GetFullPath(localProjectPath), out profile!);
+
+		public bool TrySaveProfile(
+			string localProjectPath,
+			ProjectSelectionProfile profile,
+			DateTimeOffset updatedUtc)
+		{
+			_profiles[Path.GetFullPath(localProjectPath)] =
+				ProjectSelectionProfileBuilder.Clone(profile);
+			return true;
+		}
+
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
+			TrySaveProfile(localProjectPath, profile, DateTimeOffset.UtcNow);
+
+		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
+			_ = TrySaveProfile(localProjectPath, profile);
+
+		public void ClearAllProfiles() => _profiles.Clear();
+	}
 }

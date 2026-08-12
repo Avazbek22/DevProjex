@@ -87,7 +87,7 @@ public sealed partial class SelectionSyncCoordinator(
         ProjectTreeInventorySnapshot? inventory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
-        _appliedSelectionState = AppliedSelectionState.Capture(projectPath, viewModel);
+        _appliedSelectionState = CaptureAppliedSelectionState(projectPath);
         _appliedGitReadiness = ProjectContextGitReadiness.Evaluate(
             GitFilteringModeResolver.Resolve(_session.IgnoreOptions.OptionStateCache),
             inventory);
@@ -101,15 +101,68 @@ public sealed partial class SelectionSyncCoordinator(
             !appliedState.MatchesExceptIgnoreOption(
                 projectPath,
                 viewModel,
+                SnapshotExtensionOptionStatesForPersistence(),
+                SnapshotIgnoreOptionStatesForPersistence(),
                 IgnoreOptionId.HideSecrets))
         {
             return false;
         }
 
-        _appliedSelectionState = AppliedSelectionState.Capture(projectPath!, viewModel);
+        _appliedSelectionState = CaptureAppliedSelectionState(projectPath!);
+        SynchronizeStableContentTransformationStates();
         viewModel.SetPendingFilterSettingsChanges(false);
         return true;
     }
+
+    internal bool TryAcceptContentTransformationOnlyChangeAsApplied(string? projectPath)
+    {
+        if (_appliedSelectionState is not { } appliedState ||
+            appliedState.Matches(projectPath, viewModel) ||
+            !appliedState.MatchesExceptContentTransformations(
+                projectPath,
+                viewModel,
+                SnapshotExtensionOptionStatesForPersistence(),
+                SnapshotIgnoreOptionStatesForPersistence()) ||
+            !HasDraftCodeTransformationChange(appliedState))
+        {
+            return false;
+        }
+
+        _appliedSelectionState = CaptureAppliedSelectionState(projectPath!);
+        SynchronizeStableContentTransformationStates();
+        viewModel.SetPendingFilterSettingsChanges(false);
+        return true;
+    }
+
+    internal void AcceptHideSecretsOverrideAsApplied(string? projectPath)
+    {
+        if (_appliedSelectionState is not { } appliedState ||
+            !appliedState.IsForProject(projectPath))
+        {
+            return;
+        }
+
+        var isChecked = viewModel.IgnoreOptions.FirstOrDefault(
+            static option => option.Id == IgnoreOptionId.HideSecrets)?.IsChecked == true;
+        _appliedSelectionState = appliedState.WithIgnoreOption(IgnoreOptionId.HideSecrets, isChecked);
+        SynchronizeStableContentTransformationStates();
+        RequestPendingApplyEvaluation();
+    }
+
+    internal AppliedSelectionPersistenceSnapshot? SnapshotAppliedSelectionForPersistence() =>
+        _appliedSelectionState?.CreatePersistenceSnapshot();
+
+    private AppliedSelectionState CaptureAppliedSelectionState(string projectPath) =>
+        AppliedSelectionState.Capture(
+            projectPath,
+            viewModel,
+            SnapshotExtensionOptionStatesForPersistence(),
+            SnapshotIgnoreOptionStatesForPersistence());
+
+    private bool HasDraftCodeTransformationChange(AppliedSelectionState appliedState) =>
+        appliedState.HasDifferentIgnoreOption(viewModel.IgnoreOptions, IgnoreOptionId.CompressCode) ||
+        appliedState.HasDifferentIgnoreOption(viewModel.IgnoreOptions, IgnoreOptionId.StripComments) ||
+        appliedState.HasDifferentIgnoreOption(viewModel.IgnoreOptions, IgnoreOptionId.StripBlankLines);
 
     public ContextDiagnostic? GetAppliedGitReadinessDiagnostic(
         string projectPath,
@@ -1709,6 +1762,9 @@ public sealed partial class SelectionSyncCoordinator(
         bool retainPreviousSnapshot,
         bool scanRootsAreAuthoritative)
     {
+        if (_stableSelectionSnapshot is not null)
+            snapshot = RetainCurrentContentTransformationStates(snapshot);
+
         // A full/live selection snapshot is the authoritative count-driven ignore state.
         // Invalidate older standalone availability refreshes so they cannot overwrite it.
         Interlocked.Increment(ref _ignoreOptionsVersion);
@@ -1897,8 +1953,10 @@ public sealed partial class SelectionSyncCoordinator(
     private bool CurrentIgnoreSelectionMatches(SelectionRefreshRollbackSnapshot snapshot)
     {
         return viewModel.AllIgnoreChecked == snapshot.AllIgnoreChecked &&
-               IgnoreOptionCheckStatesMatch(viewModel.IgnoreOptions, snapshot.IgnoreOptions) &&
-               DictionaryStatesMatch(
+               IgnoreOptionCheckStatesMatchExceptContentTransformations(
+                   viewModel.IgnoreOptions,
+                   snapshot.IgnoreOptions) &&
+               IgnoreDictionaryStatesMatchExceptContentTransformations(
                    _session.IgnoreOptions.OptionStateCache,
                    snapshot.IgnoreOptionStateCache) &&
                _session.IgnoreOptions.IsInitialized == snapshot.IgnoreOptionsInitialized &&
@@ -1922,13 +1980,17 @@ public sealed partial class SelectionSyncCoordinator(
             _session.IgnoreOptions.IsInitialized != reversibleSnapshot.IgnoreOptionsInitialized ||
             _session.IgnoreOptions.AllPreference != reversibleSnapshot.IgnoreAllPreference ||
             _session.IgnoreOptionStateCacheIsComplete != reversibleSnapshot.IgnoreOptionStateCacheIsComplete ||
-            _session.IgnoreOptions.OptionStateCache.Count != stableSnapshot.IgnoreOptionStateCache.Count)
+            CountStructuralIgnoreStates(_session.IgnoreOptions.OptionStateCache) !=
+            CountStructuralIgnoreStates(stableSnapshot.IgnoreOptionStateCache))
         {
             return false;
         }
 
         foreach (var option in viewModel.IgnoreOptions)
         {
+            if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
+                continue;
+
             var stableState = stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(option.Id);
             if (!reversibleSnapshot.IgnoreOptionStateCache.TryGetValue(
                     option.Id,
@@ -1953,6 +2015,9 @@ public sealed partial class SelectionSyncCoordinator(
 
         foreach (var (optionId, isChecked) in _session.IgnoreOptions.OptionStateCache)
         {
+            if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(optionId))
+                continue;
+
             var stableState = stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(optionId);
             if (!reversibleSnapshot.IgnoreOptionStateCache.TryGetValue(
                     optionId,
@@ -1978,7 +2043,8 @@ public sealed partial class SelectionSyncCoordinator(
     private SelectionRefreshRollbackSnapshot RestoreStableSelectionSnapshot(
         SelectionRefreshRollbackSnapshot snapshot)
     {
-        snapshot = RetainUnknownSelectionStates(snapshot);
+        snapshot = RetainCurrentContentTransformationStates(
+            RetainUnknownSelectionStates(snapshot));
 
         _suppressExtensionAllCheck = true;
         _suppressIgnoreAllCheck = true;
@@ -2046,6 +2112,97 @@ public sealed partial class SelectionSyncCoordinator(
         };
     }
 
+    private SelectionRefreshSnapshot RetainCurrentContentTransformationStates(
+        SelectionRefreshSnapshot snapshot)
+    {
+        var states = SnapshotCurrentContentTransformationStates();
+        var options = OverlayContentTransformationStates(snapshot.IgnoreOptions, states);
+        var stateCache = OverlayContentTransformationStates(snapshot.IgnoreOptionStateCache, states);
+        var selectedOptions = new HashSet<IgnoreOptionId>(snapshot.EffectiveIgnoreOptions);
+        foreach (var (optionId, isChecked) in states)
+        {
+            if (isChecked)
+                selectedOptions.Add(optionId);
+            else
+                selectedOptions.Remove(optionId);
+        }
+
+        return snapshot with
+        {
+            IgnoreOptions = options,
+            IgnoreOptionStateCache = stateCache,
+            SelectedIgnoreOptions = selectedOptions
+        };
+    }
+
+    private SelectionRefreshRollbackSnapshot RetainCurrentContentTransformationStates(
+        SelectionRefreshRollbackSnapshot snapshot)
+    {
+        var states = SnapshotCurrentContentTransformationStates();
+        return snapshot with
+        {
+            IgnoreOptions = OverlayContentTransformationStates(snapshot.IgnoreOptions, states),
+            IgnoreOptionStateCache = OverlayContentTransformationStates(
+                snapshot.IgnoreOptionStateCache,
+                states)
+        };
+    }
+
+    private Dictionary<IgnoreOptionId, bool> SnapshotCurrentContentTransformationStates()
+    {
+        var states = new Dictionary<IgnoreOptionId, bool>(
+            ProjectPresentationCatalog.ContentTransformationOptionIds.Count);
+        foreach (var optionId in ProjectPresentationCatalog.ContentTransformationOptionIds)
+        {
+            var option = viewModel.IgnoreOptions.FirstOrDefault(candidate => candidate.Id == optionId);
+            states[optionId] = option?.IsChecked ??
+                               _session.IgnoreOptions.OptionStateCache.GetValueOrDefault(optionId);
+        }
+
+        return states;
+    }
+
+    private void SynchronizeStableContentTransformationStates()
+    {
+        if (_stableSelectionSnapshot is { } snapshot)
+            _stableSelectionSnapshot = RetainCurrentContentTransformationStates(snapshot);
+    }
+
+    private static IReadOnlyList<ResolvedIgnoreOptionState> OverlayContentTransformationStates(
+        IReadOnlyList<ResolvedIgnoreOptionState> options,
+        IReadOnlyDictionary<IgnoreOptionId, bool> states)
+    {
+        ResolvedIgnoreOptionState[]? updated = null;
+        for (var index = 0; index < options.Count; index++)
+        {
+            var option = options[index];
+            if (!states.TryGetValue(option.Id, out var isChecked) || option.IsChecked == isChecked)
+                continue;
+
+            updated ??= options.ToArray();
+            updated[index] = option with { IsChecked = isChecked };
+        }
+
+        return updated ?? options;
+    }
+
+    private static IReadOnlyDictionary<IgnoreOptionId, bool> OverlayContentTransformationStates(
+        IReadOnlyDictionary<IgnoreOptionId, bool> stateCache,
+        IReadOnlyDictionary<IgnoreOptionId, bool> states)
+    {
+        Dictionary<IgnoreOptionId, bool>? updated = null;
+        foreach (var (optionId, isChecked) in states)
+        {
+            if (stateCache.TryGetValue(optionId, out var cached) && cached == isChecked)
+                continue;
+
+            updated ??= new Dictionary<IgnoreOptionId, bool>(stateCache);
+            updated[optionId] = isChecked;
+        }
+
+        return updated ?? stateCache;
+    }
+
     private static bool ExtensionPreferencesAreCompatible(
         SelectionRefreshRollbackSnapshot stableSnapshot,
         SelectionRefreshRollbackSnapshot reversibleSnapshot) =>
@@ -2061,7 +2218,7 @@ public sealed partial class SelectionSyncCoordinator(
         stableSnapshot.IgnoreOptionsInitialized == reversibleSnapshot.IgnoreOptionsInitialized &&
         stableSnapshot.IgnoreAllPreference == reversibleSnapshot.IgnoreAllPreference &&
         stableSnapshot.IgnoreOptionStateCacheIsComplete == reversibleSnapshot.IgnoreOptionStateCacheIsComplete &&
-        DictionaryStatesAreCompatible(
+        IgnoreDictionaryStatesAreCompatibleExceptContentTransformations(
             stableSnapshot.IgnoreOptionStateCache,
             reversibleSnapshot.IgnoreOptionStateCache);
 
@@ -2288,6 +2445,70 @@ public sealed partial class SelectionSyncCoordinator(
         }
 
         return true;
+    }
+
+    private static bool IgnoreOptionCheckStatesMatchExceptContentTransformations(
+        IReadOnlyList<IgnoreOptionViewModel> current,
+        IReadOnlyList<ResolvedIgnoreOptionState> candidate)
+    {
+        if (!IgnoreOptionIdentitiesMatch(current, candidate))
+            return false;
+
+        for (var index = 0; index < candidate.Count; index++)
+        {
+            if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(candidate[index].Id))
+                continue;
+            if (current[index].IsChecked != candidate[index].IsChecked)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool IgnoreDictionaryStatesMatchExceptContentTransformations(
+        IReadOnlyDictionary<IgnoreOptionId, bool> current,
+        IReadOnlyDictionary<IgnoreOptionId, bool> candidate)
+    {
+        if (CountStructuralIgnoreStates(current) != CountStructuralIgnoreStates(candidate))
+            return false;
+
+        foreach (var (optionId, isChecked) in candidate)
+        {
+            if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(optionId))
+                continue;
+            if (!current.TryGetValue(optionId, out var currentState) || currentState != isChecked)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool IgnoreDictionaryStatesAreCompatibleExceptContentTransformations(
+        IReadOnlyDictionary<IgnoreOptionId, bool> left,
+        IReadOnlyDictionary<IgnoreOptionId, bool> right)
+    {
+        foreach (var (optionId, leftState) in left)
+        {
+            if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(optionId))
+                continue;
+            if (right.TryGetValue(optionId, out var rightState) && leftState != rightState)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static int CountStructuralIgnoreStates(
+        IReadOnlyDictionary<IgnoreOptionId, bool> states)
+    {
+        var count = 0;
+        foreach (var optionId in states.Keys)
+        {
+            if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(optionId))
+                count++;
+        }
+
+        return count;
     }
 
     private static bool DictionaryStatesMatch<TKey>(

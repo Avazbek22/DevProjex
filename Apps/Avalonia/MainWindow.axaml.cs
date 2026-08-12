@@ -1310,6 +1310,10 @@ public partial class MainWindow : Window
 		_appliedCompressCodeEnabled = false;
 		_appliedStripCommentsEnabled = false;
 		_appliedStripBlankLinesEnabled = false;
+		_viewModel.SetAppliedContentTransformationState(
+			compressCode: false,
+			stripComments: false,
+			stripBlankLines: false);
 		_viewModel.SetCompressionPreparationStatus(isActive: false);
 		_viewModel.SetCommentStripPreparationStatus(isActive: false);
 		_viewModel.SetBlankLineStripPreparationStatus(isActive: false);
