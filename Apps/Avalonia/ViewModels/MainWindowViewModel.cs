@@ -59,7 +59,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _nameFilter = string.Empty;
 
     private FontFamily? _selectedFontFamily;
-    private FontFamily? _pendingFontFamily;
 
     private double _treeFontSize = DefaultTreeFontSize;
     private double _previewFontSize = DefaultPreviewFontSize;
@@ -1202,18 +1201,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(TreeIconSize));
             RaisePropertyChanged(nameof(TreeTextMargin));
-        }
-    }
-
-    // Staged tree font selection; Apply commits it to SelectedFontFamily.
-    public FontFamily? PendingFontFamily
-    {
-        get => _pendingFontFamily;
-        set
-        {
-            if (_pendingFontFamily == value) return;
-            _pendingFontFamily = value;
-            RaisePropertyChanged();
         }
     }
 

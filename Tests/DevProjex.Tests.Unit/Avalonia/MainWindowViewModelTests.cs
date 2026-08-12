@@ -1610,27 +1610,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void PendingFontFamily_Changes()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.PendingFontFamily = "Consolas";
-
-        Assert.Equal("Consolas", viewModel.PendingFontFamily);
-    }
-
-    [Fact]
-    public void PendingFontFamily_CanBeCleared()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.PendingFontFamily = "Consolas";
-
-        viewModel.PendingFontFamily = null;
-
-        Assert.Null(viewModel.PendingFontFamily);
-    }
-
-    [Fact]
     public void EffectToggle_SwitchesBackgroundTransparencySlider()
     {
         var viewModel = CreateViewModel();

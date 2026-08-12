@@ -1216,15 +1216,19 @@ public partial class MainWindow
                     _viewModel.SelectedPreviewContentMode,
                     _viewModel.IsAnyPreviewVisible);
             }
-            else if (args.PropertyName is nameof(MainWindowViewModel.PreviewFontSize)
-                     or nameof(MainWindowViewModel.SelectedFontFamily))
+            else if (args.PropertyName == nameof(MainWindowViewModel.PreviewFontSize))
             {
                 Dispatcher.Post(
                     _previewSurfaceController.RefreshStickyPath,
                     DispatcherPriority.Render);
             }
-            else if (args.PropertyName == nameof(MainWindowViewModel.PendingFontFamily))
+            else if (args.PropertyName == nameof(MainWindowViewModel.SelectedFontFamily))
+            {
                 RefreshTreeFontMenu();
+                Dispatcher.Post(
+                    _previewSurfaceController.RefreshStickyPath,
+                    DispatcherPriority.Render);
+            }
             else if (args.PropertyName is nameof(MainWindowViewModel.TreeItemSpacing)
                      or nameof(MainWindowViewModel.TreeItemPadding)
                      or nameof(MainWindowViewModel.TreeIconSize)

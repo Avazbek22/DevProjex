@@ -153,7 +153,6 @@ public partial class MainWindow : Window
     {
         _viewModel.FontFamilies.Add(FontFamily.Default);
         _viewModel.SelectedFontFamily = FontFamily.Default;
-        _viewModel.PendingFontFamily = FontFamily.Default;
     }
 
     private void ScheduleOptionalFontCatalogLoad()

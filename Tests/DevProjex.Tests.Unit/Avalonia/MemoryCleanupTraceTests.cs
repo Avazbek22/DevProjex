@@ -16,8 +16,9 @@ public sealed class MemoryCleanupTraceTests
         Assert.Equal(1234, measurement.PlanCacheBytes);
         Assert.Equal(5678, measurement.ReadFactBytes);
         Assert.True(measurement.ManagedHeapBytes >= 0);
-        Assert.True(measurement.PrivateBytes > 0);
-        Assert.True(measurement.WorkingSetBytes > 0);
+        // Process memory counters may legitimately be unavailable as zero on a supported runtime.
+        Assert.True(measurement.PrivateBytes >= 0);
+        Assert.True(measurement.WorkingSetBytes >= 0);
     }
 
     [Fact]

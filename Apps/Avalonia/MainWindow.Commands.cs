@@ -581,14 +581,6 @@ public partial class MainWindow
 
             try
             {
-                // Font family follows WinForms behavior: applied only on Apply
-                var pending = _viewModel.PendingFontFamily;
-                if (pending is not null &&
-                    !string.Equals(_viewModel.SelectedFontFamily?.Name, pending.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    _viewModel.SelectedFontFamily = pending;
-                }
-
                 // Apply must observe the latest converged section state. A user can click Apply
                 // while an earlier ignore refresh is still finishing; rebuilding the tree first
                 // would capture stale root-folder availability and keep newly revealed folders hidden.

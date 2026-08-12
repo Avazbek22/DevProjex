@@ -381,7 +381,7 @@ public partial class MainWindow
         var displayName = GetTreeFontDisplayName(fontFamily);
         var item = new MenuItem
         {
-            Header = CreateCheckedMenuHeader(IsPendingTreeFont(fontFamily), displayName),
+            Header = CreateCheckedMenuHeader(IsSelectedTreeFont(fontFamily), displayName),
             Tag = fontFamily,
             MinHeight = TreeFontMenuItemHeight
         };
@@ -395,12 +395,12 @@ public partial class MainWindow
         if (sender is not MenuItem { Tag: FontFamily fontFamily })
             return;
 
-        _viewModel.PendingFontFamily = fontFamily;
+        _viewModel.SelectedFontFamily = fontFamily;
         e.Handled = true;
     }
 
-    private bool IsPendingTreeFont(FontFamily fontFamily)
-        => AreSameTreeFont(_viewModel.PendingFontFamily, fontFamily);
+    private bool IsSelectedTreeFont(FontFamily fontFamily)
+        => AreSameTreeFont(_viewModel.SelectedFontFamily, fontFamily);
 
     private string GetTreeFontDisplayName(FontFamily fontFamily)
     {

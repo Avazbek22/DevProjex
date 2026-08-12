@@ -991,13 +991,14 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
     [AvaloniaFact]
-    public async Task ViewTreeFontMenu_UsesDynamicItemsWithPendingCheck()
+    public async Task ViewTreeFontMenu_AppliesSelectionImmediatelyAndUpdatesCheck()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
 
         try
         {
             var viewModel = UiTestDriver.GetViewModel(window);
+            var projectTree = UiTestDriver.GetRequiredControl<ProjectTreeView>(window, "ProjectTree");
             var defaultFont = FontFamily.Default;
             var customFont = new FontFamily("Consolas");
 
@@ -1005,7 +1006,6 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             viewModel.FontFamilies.Add(defaultFont);
             viewModel.FontFamilies.Add(customFont);
             viewModel.SelectedFontFamily = defaultFont;
-            viewModel.PendingFontFamily = defaultFont;
 
             InvokeRefreshTreeFontMenu(window);
 
@@ -1019,11 +1019,11 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Assert.StartsWith("   ", initialItems[1].Header?.ToString());
 
             await UiTestDriver.RaiseMenuItemClickAsync(initialItems[1]);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 1);
 
-            Assert.Equal(customFont.Name, viewModel.PendingFontFamily?.Name);
-            Assert.Equal(defaultFont.Name, viewModel.SelectedFontFamily?.Name);
+            Assert.Equal(customFont.Name, viewModel.SelectedFontFamily?.Name);
+            Assert.Equal(customFont.Name, projectTree.FontFamily.Name);
 
-            InvokeRefreshTreeFontMenu(window);
             var refreshedItems = fontMenu.Items.OfType<MenuItem>().ToArray();
             Assert.StartsWith("   ", refreshedItems[0].Header?.ToString());
             Assert.StartsWith("✓ ", refreshedItems[1].Header?.ToString());
