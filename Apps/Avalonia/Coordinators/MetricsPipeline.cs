@@ -139,7 +139,8 @@ internal sealed class MetricsPipeline(
         BuildTreeResult currentTree,
         CancellationToken cancellationToken,
         StatusOperationPresentation presentation =
-            StatusOperationPresentation.ExtendedDelay)
+            StatusOperationPresentation.ExtendedDelay,
+        MemoryCleanupReason? cleanupAfterCompletion = null)
     {
         var compression = transformationContextProvider?.Invoke()?.Compression;
         if (compression is null)
@@ -147,6 +148,7 @@ internal sealed class MetricsPipeline(
 			viewModel.SetCompressionPreparationStatus(isActive: false);
 			viewModel.SetCommentStripPreparationStatus(isActive: false);
 			viewModel.SetBlankLineStripPreparationStatus(isActive: false);
+            ScheduleMemoryCleanup(cleanupAfterCompletion);
             return Task.CompletedTask;
         }
 
@@ -193,7 +195,8 @@ internal sealed class MetricsPipeline(
             prewarmCts,
             cancellationToken,
             statusOperationId,
-            progress);
+            progress,
+            cleanupAfterCompletion);
     }
 
     public void ScheduleRecalculate()
@@ -588,12 +591,14 @@ internal sealed class MetricsPipeline(
         CancellationTokenSource prewarmCts,
         CancellationToken cancellationToken,
         long statusOperationId,
-        IProgress<CodeCompressionWarmupProgress> progress)
+        IProgress<CodeCompressionWarmupProgress> progress,
+        MemoryCleanupReason? cleanupAfterCompletion)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             prewarmCts.Token,
             cancellationToken);
 		CodeCompressionWarmupResult? warmupResult = null;
+        var completed = false;
         try
         {
             // WarmAsync performs candidate indexing and file-length probes before its first
@@ -607,6 +612,8 @@ internal sealed class MetricsPipeline(
                         progress),
                     linkedCts.Token)
                 .ConfigureAwait(false);
+            linkedCts.Token.ThrowIfCancellationRequested();
+            completed = true;
         }
         catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
         {
@@ -658,6 +665,9 @@ internal sealed class MetricsPipeline(
 					viewModel.SetBlankLineStripPreparationStatus(isActive: false);
                     statusOperations.Complete(statusOperationId);
                 });
+
+                if (completed)
+                    ScheduleMemoryCleanup(cleanupAfterCompletion);
             }
             DisposeIfCurrent(ref _compressionPrewarmCts, prewarmCts);
         }

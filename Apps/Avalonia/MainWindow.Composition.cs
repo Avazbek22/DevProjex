@@ -118,7 +118,7 @@ public partial class MainWindow
 		_metrics.CancelCompressionPrewarm();
 		_codeCompressionSnapshot = null;
 		RelabelIgnoreOptionsWithCurrentCounts();
-		if (CreateCodeCompressionContext() is null || _currentTree is null)
+		if (_currentTree is null)
 			return;
 
 		ObserveDetachedTask(
@@ -137,7 +137,11 @@ public partial class MainWindow
 			return;
 
 		await _metrics
-			.PrewarmCompressionAsync(currentTree, CancellationToken.None)
+			.PrewarmCompressionAsync(
+				currentTree,
+				CancellationToken.None,
+				cleanupAfterCompletion:
+					MemoryCleanupReason.ApplySettingsWorkCompleted)
 			.ConfigureAwait(false);
 	}
 
@@ -290,6 +294,7 @@ public partial class MainWindow
 		CancellationTokenSource countCts)
 	{
 		long operationId = 0;
+		var terminalCompletion = false;
 		try
 		{
 			if (request.Presentation != StatusOperationPresentation.Immediate)
@@ -333,10 +338,13 @@ public partial class MainWindow
 				return;
 			}
 
-			await Dispatcher.UIThread.InvokeAsync(() =>
+			terminalCompletion = await Dispatcher.UIThread.InvokeAsync(() =>
 			{
-				if (refreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
-					TryApplySecretRedactionSnapshot(snapshot);
+				if (refreshVersion != Volatile.Read(ref _secretRedactionCountRefreshVersion))
+					return false;
+
+				TryApplySecretRedactionSnapshot(snapshot);
+				return true;
 			});
 		}
 		catch (OperationCanceledException) when (countCts.IsCancellationRequested)
@@ -363,14 +371,15 @@ public partial class MainWindow
 				return;
 			}
 
-			await Dispatcher.UIThread.InvokeAsync(() =>
+			terminalCompletion = await Dispatcher.UIThread.InvokeAsync(() =>
 			{
-				if (refreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
-				{
-					_secretRedactionScanState = SecretScanState.Failed;
-					_viewModel.SetContentProcessingStatus(SecretScanState.Failed);
-					RelabelIgnoreOptionsWithCurrentCounts();
-				}
+				if (refreshVersion != Volatile.Read(ref _secretRedactionCountRefreshVersion))
+					return false;
+
+				_secretRedactionScanState = SecretScanState.Failed;
+				_viewModel.SetContentProcessingStatus(SecretScanState.Failed);
+				RelabelIgnoreOptionsWithCurrentCounts();
+				return true;
 			});
 		}
 		finally
@@ -379,7 +388,17 @@ public partial class MainWindow
 				await Dispatcher.UIThread.InvokeAsync(() => _statusOperations.Complete(operationId));
 			DisposeIfCurrent(ref _secretRedactionCountCts, countCts);
 			if (refreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
-				Interlocked.CompareExchange(ref _activeSecretDiscoveryRequest, null, request);
+			{
+				var removedRequest = Interlocked.CompareExchange(
+					ref _activeSecretDiscoveryRequest,
+					null,
+					request);
+				if (terminalCompletion && ReferenceEquals(removedRequest, request))
+				{
+					ScheduleBackgroundMemoryCleanup(
+						MemoryCleanupReason.ApplySettingsWorkCompleted);
+				}
+			}
 		}
 	}
 

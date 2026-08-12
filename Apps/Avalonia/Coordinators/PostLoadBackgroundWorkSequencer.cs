@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Services;
+
 namespace DevProjex.Avalonia.Coordinators;
 
 // INITIAL PROJECT LOAD UX CONTRACT:
@@ -34,6 +36,8 @@ internal static class PostLoadBackgroundWorkSequencer
         Func<CancellationToken, Task> prepareCompressionAsync,
         Func<CancellationToken, Task> initializeMetricsAsync,
         Action scheduleSecretAnalysis,
+        MemoryCleanupReason? cleanupAfterCompletion,
+        Action<MemoryCleanupReason>? scheduleMemoryCleanup,
         CancellationToken cancellationToken)
     {
         await visualReadyTask.WaitAsync(cancellationToken);
@@ -46,5 +50,7 @@ internal static class PostLoadBackgroundWorkSequencer
         cancellationToken.ThrowIfCancellationRequested();
 
         scheduleSecretAnalysis();
+        if (cleanupAfterCompletion is { } reason)
+            scheduleMemoryCleanup?.Invoke(reason);
     }
 }

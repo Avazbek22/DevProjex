@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Services;
+
 namespace DevProjex.Avalonia.Coordinators;
 
 internal interface IRefreshTreePipelineHost
@@ -24,5 +26,6 @@ internal interface IRefreshTreePipelineHost
         TreeNodeViewModel root,
         bool interactiveFilter,
         bool usedInMemoryFilter,
+        MemoryCleanupReason? postLoadCleanupReason,
         CancellationToken cancellationToken);
 }

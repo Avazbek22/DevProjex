@@ -32,10 +32,12 @@ internal static class UiTestDriver
         bool waitForStatusIdle = true,
         ProjectSourceType projectSourceType = ProjectSourceType.LocalFolder,
         string? managedClonePath = null,
-        string? repositoryUrl = null)
+        string? repositoryUrl = null,
+        SessionMetricsOptions? sessionMetrics = null)
     {
         var options = new DesktopStartupOptions(
-            new DesktopOpenRequest(project.RootPath, Language: AppLanguage.En));
+            new DesktopOpenRequest(project.RootPath, Language: AppLanguage.En),
+            sessionMetrics);
         var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);
 
@@ -908,6 +910,20 @@ internal static class UiTestDriver
                   !metrics.IsBackgroundActive &&
                   !GetViewModel(window).StatusBusy,
             "initial metrics baseline to finish",
+            timeout);
+    }
+
+    public static async Task WaitForMemoryCleanupIdleAsync(
+        MainWindow window,
+        TimeSpan? timeout = null)
+    {
+        var coordinator = GetRequiredPrivateField<MemoryCleanupCoordinator>(
+            window,
+            "_memoryCleanup");
+        await WaitForConditionAsync(
+            window,
+            () => !coordinator.IsCleanupPendingOrRunning,
+            "deferred memory cleanup to become idle",
             timeout);
     }
 

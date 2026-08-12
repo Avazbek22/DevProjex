@@ -2055,6 +2055,7 @@ public sealed class MainWindowCoordinatorRefactorTests
             TreeNodeViewModel root,
             bool interactiveFilter,
             bool usedInMemoryFilter,
+            MemoryCleanupReason? postLoadCleanupReason,
             CancellationToken cancellationToken)
         {
             _ = interactiveFilter;

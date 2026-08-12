@@ -600,7 +600,9 @@ public partial class MainWindow
                         _currentPath,
                         cancellationToken);
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
-                    refreshOutcome = await RefreshTreeAsync(cancellationToken: cancellationToken);
+                    refreshOutcome = await RefreshTreeAsync(
+                        cancellationToken: cancellationToken,
+                        postLoadCleanupReason: MemoryCleanupReason.ApplySettingsWorkCompleted);
 
                     // A checkbox can change while a large tree is being materialized. In that
                     // case the pipeline discards the obsolete graph and Apply converges again

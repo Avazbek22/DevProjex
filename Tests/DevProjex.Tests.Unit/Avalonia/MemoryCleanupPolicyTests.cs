@@ -43,6 +43,10 @@ public sealed class MemoryCleanupPolicyTests
         (int)MemoryCleanupReason.PreviewRebuildCompleted,
         450,
         (int)MemoryCleanupCollectionMode.Background)]
+    [InlineData(
+        (int)MemoryCleanupReason.ApplySettingsWorkCompleted,
+        450,
+        (int)MemoryCleanupCollectionMode.Background)]
     public void CreateDeferredPlan_ReturnsReasonSpecificContract(
         int reasonRaw,
         int expectedDelayMilliseconds,
@@ -141,6 +145,7 @@ public sealed class MemoryCleanupPolicyTests
 
     [Theory]
     [InlineData((int)MemoryCleanupReason.PreviewRebuildCompleted)]
+    [InlineData((int)MemoryCleanupReason.ApplySettingsWorkCompleted)]
     public void CreateDeferredPlan_NonDetachingWorkUsesBackgroundCleanup(
         int reasonRaw)
     {

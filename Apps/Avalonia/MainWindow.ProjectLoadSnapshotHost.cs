@@ -113,6 +113,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             snapshot.TreeRoot,
             interactiveFilter: false,
             usedInMemoryFilter: false,
+            postLoadCleanupReason: null,
             cancellationToken);
     }
 

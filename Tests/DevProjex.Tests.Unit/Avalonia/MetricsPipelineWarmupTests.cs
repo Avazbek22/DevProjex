@@ -219,6 +219,164 @@ public sealed class MetricsPipelineWarmupTests
 	}
 
 	[AvaloniaFact]
+	public async Task CompressionPrewarm_CompletedStandalonePassSchedulesApplyCleanupOnce()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile("Program.cs", "internal class Program { void Run() { } }");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var scheduled = new List<MemoryCleanupReason>();
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			new FileContentAnalyzer(),
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			scheduleMemoryCleanup: scheduled.Add,
+			transformationContextProvider: () => ContentTransformationContext.For(
+				new CodeCompressionContext(temp.Path, compressionSession),
+				redaction: null));
+
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			cleanupAfterCompletion: MemoryCleanupReason.ApplySettingsWorkCompleted);
+
+		Assert.Equal(
+			[MemoryCleanupReason.ApplySettingsWorkCompleted],
+			scheduled);
+		Assert.False(viewModel.StatusBusy);
+	}
+
+	[AvaloniaFact]
+	public async Task CompressionPrewarm_SupersededPassSchedulesOnlyForLatestCompletion()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile("Program.cs", "internal class Program { void Run() { } }");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		var analyzer = new FirstPrewarmReadCancellationAnalyzer(new FileContentAnalyzer());
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		var scheduled = new List<MemoryCleanupReason>();
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			scheduleMemoryCleanup: scheduled.Add,
+			transformationContextProvider: () => ContentTransformationContext.For(
+				new CodeCompressionContext(temp.Path, compressionSession),
+				redaction: null));
+
+		var superseded = pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			cleanupAfterCompletion: MemoryCleanupReason.ApplySettingsWorkCompleted);
+		await analyzer.FirstReadStarted.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+		Assert.Empty(scheduled);
+
+		var latest = pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			cleanupAfterCompletion: MemoryCleanupReason.ApplySettingsWorkCompleted);
+		await Task.WhenAll(superseded, latest).WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(analyzer.FirstReadWasCanceled);
+		Assert.Equal(
+			[MemoryCleanupReason.ApplySettingsWorkCompleted],
+			scheduled);
+	}
+
+	[AvaloniaFact]
+	public async Task CompressionPrewarm_AllTransformationsDisabledSchedulesCleanupWithoutReading()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile("Program.cs", "internal class Program { }");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
+		var scheduled = new List<MemoryCleanupReason>();
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			analyzer,
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			scheduleMemoryCleanup: scheduled.Add,
+			transformationContextProvider: static () => null);
+
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			cleanupAfterCompletion: MemoryCleanupReason.ApplySettingsWorkCompleted);
+
+		Assert.Equal(
+			[MemoryCleanupReason.ApplySettingsWorkCompleted],
+			scheduled);
+		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
+	}
+
+	[AvaloniaFact]
 	public async Task PostLoadMetrics_ReusesThePrewarmReadFactWithoutReopeningTheFile()
 	{
 		using var temp = new TemporaryDirectory();
@@ -867,6 +1025,49 @@ public sealed class MetricsPipelineWarmupTests
         Assert.True(pipeline.HasStatusMetricsSnapshot);
     }
 
+	[AvaloniaFact]
+	public async Task Recalculate_WithoutTransformationChangeSchedulesNoMemoryCleanup()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile("Program.cs", "Console.WriteLine(\"ready\");");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(treeRoot, parent: null, icon: null));
+		var scheduled = new List<MemoryCleanupReason>();
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			new FileContentAnalyzer(),
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			scheduleMemoryCleanup: scheduled.Add);
+
+		pipeline.Recalculate();
+		await WaitUntilAsync(
+			() => pipeline.HasStatusMetricsSnapshot,
+			TimeSpan.FromSeconds(5));
+
+		Assert.Empty(scheduled);
+	}
+
     [AvaloniaFact]
     public async Task CancelAndDiscard_ObsoleteWarmupCannotRepopulateMetricsCache()
     {
@@ -1243,6 +1444,100 @@ public sealed class MetricsPipelineWarmupTests
 			{
 			}
 		}
+	}
+
+	private sealed class FirstPrewarmReadCancellationAnalyzer(
+		IFileContentAnalyzer inner) : IFileContentAnalyzer, IPrewarmFileContentAnalyzer
+	{
+		private readonly TaskCompletionSource _firstReadStarted =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private int _prewarmReadCount;
+		private int _firstReadWasCanceled;
+
+		public Task FirstReadStarted => _firstReadStarted.Task;
+		public bool FirstReadWasCanceled => Volatile.Read(ref _firstReadWasCanceled) != 0;
+
+		public async ValueTask<BudgetedContentReadResult> ReadFactWithBudgetAsync(
+			string path,
+			long maximumReadBytes,
+			WeightedByteBudget byteBudget,
+			SemaphoreSlim decodeScratchGate,
+			CancellationToken cancellationToken = default)
+		{
+			if (Interlocked.Increment(ref _prewarmReadCount) == 1)
+			{
+				_firstReadStarted.TrySetResult();
+				try
+				{
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				}
+				catch (OperationCanceledException)
+				{
+					Interlocked.Exchange(ref _firstReadWasCanceled, 1);
+					throw;
+				}
+			}
+
+			return await ((IPrewarmFileContentAnalyzer)inner).ReadFactWithBudgetAsync(
+				path,
+				maximumReadBytes,
+				byteBudget,
+				decodeScratchGate,
+				cancellationToken);
+		}
+
+		public ValueTask<IdentifiedFileContentMetricsResult> GetClassifiedMetricsWithIdentityAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			((IPrewarmFileContentAnalyzer)inner).GetClassifiedMetricsWithIdentityAsync(
+				path,
+				cancellationToken);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			inner.ClassifyWithoutReading(path);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetClassifiedMetricsAsync(path, cancellationToken);
+
+		public ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.OpenCompleteSnapshotAsync(path, cancellationToken);
+
+		public ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken = default) =>
+			inner.OpenCompleteTextBufferAsync(path, maximumBytes, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
 	}
 
 	private sealed class CommentsOnlyCssCompressor : ICodeCompressor

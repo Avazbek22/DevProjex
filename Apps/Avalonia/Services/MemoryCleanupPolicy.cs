@@ -13,7 +13,8 @@ internal enum MemoryCleanupReason
     PreviewRebuildCompleted = 8,
     SelectionProjectionNarrowed = 9,
     TreeCollapseCompleted = 10,
-    FilterApplied = 11
+    FilterApplied = 11,
+    ApplySettingsWorkCompleted = 12
 }
 
 internal enum MemoryCleanupCollectionMode
@@ -118,6 +119,14 @@ internal static class MemoryCleanupPolicy
                 CollectionMode: MemoryCleanupCollectionMode.Aggressive),
 
             MemoryCleanupReason.PreviewRebuildCompleted => new(
+                Delay: GeneralDeferredDelay,
+                WaitForUiSettled: true,
+                CollectionMode: MemoryCleanupCollectionMode.Background),
+
+            // Apply remains part of the interactive editing loop. A non-blocking Gen2 pass plus
+            // the coordinator's fragmentation-gated LOH policy is sufficient; transition paths
+            // alone opt into an immediate blocking compacting pass and working-set trim.
+            MemoryCleanupReason.ApplySettingsWorkCompleted => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: true,
                 CollectionMode: MemoryCleanupCollectionMode.Background),

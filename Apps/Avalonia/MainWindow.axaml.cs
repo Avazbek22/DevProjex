@@ -397,10 +397,14 @@ public partial class MainWindow : Window
 			// Tree-sitter for a Hide Secrets toggle stalls the checkbox without changing its result.
 			var compressionEnabled = CreateCodeCompressionContext() is not null;
 			_metrics.CancelCompressionPrewarm();
-			if (compressionEnabled && _currentTree is not null)
+			if (_currentTree is not null)
 			{
 				ObserveDetachedTask(
-					_metrics.PrewarmCompressionAsync(_currentTree, CancellationToken.None),
+					_metrics.PrewarmCompressionAsync(
+						_currentTree,
+						CancellationToken.None,
+						cleanupAfterCompletion:
+							MemoryCleanupReason.ApplySettingsWorkCompleted),
 					"PrewarmCodeCompression");
 			}
 
@@ -1338,8 +1342,12 @@ public partial class MainWindow : Window
 
     private Task<TreeRefreshOutcome> RefreshTreeAsync(
         bool interactiveFilter = false,
-        CancellationToken cancellationToken = default) =>
-        _refreshPipeline.RefreshTreeAsync(interactiveFilter, cancellationToken);
+        CancellationToken cancellationToken = default,
+        MemoryCleanupReason? postLoadCleanupReason = null) =>
+        _refreshPipeline.RefreshTreeAsync(
+            interactiveFilter,
+            cancellationToken,
+            postLoadCleanupReason);
 
     private TreeNodeViewModel BuildTreeViewModel(TreeNodeDescriptor descriptor, TreeNodeViewModel? parent)
     {
@@ -1433,7 +1441,10 @@ public partial class MainWindow : Window
         return realizedChildren;
     }
 
-    private void StartPostLoadBackgroundWork(BuildTreeResult currentTree, CancellationToken cancellationToken)
+    private void StartPostLoadBackgroundWork(
+        BuildTreeResult currentTree,
+        CancellationToken cancellationToken,
+        MemoryCleanupReason? cleanupAfterCompletion)
     {
         // Preserve the initial-load choreography defined by PostLoadBackgroundWorkSequencer:
         // tree first, settings reveal second, background content work only after visual settle.
@@ -1490,6 +1501,8 @@ public partial class MainWindow : Window
                     statusPresentation),
                 initializeMetricsAsync,
 				() => ScheduleSecretRedactionCountRefresh(statusPresentation),
+                cleanupAfterCompletion,
+                ScheduleBackgroundMemoryCleanup,
                 cancellationToken),
             "RunPostLoadBackgroundWork");
     }
