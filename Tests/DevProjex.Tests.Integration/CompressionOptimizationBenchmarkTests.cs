@@ -126,7 +126,7 @@ public sealed class CompressionOptimizationBenchmarkTests
 			["compressionAndSecrets"] = await RunScenarioAsync(
 				plan, compress: true, stripComments: false, hideSecrets: true, cancellationToken),
 			["all"] = await RunScenarioAsync(
-				plan, compress: true, stripComments: true, hideSecrets: true, cancellationToken),
+				plan, compress: true, stripComments: true, hideSecrets: true, cancellationToken, stripBlankLines: true),
 			["commentsOnlyCorpusCompression"] = await RunScenarioAsync(
 				commentsOnlyPlan, compress: true, stripComments: false, hideSecrets: false, cancellationToken),
 			["commentsOnlyCorpusComments"] = await RunScenarioAsync(
@@ -141,6 +141,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 				structuredDataStressPlan, compress: true, stripComments: false, hideSecrets: false, cancellationToken),
 			["structuredDataComments"] = await RunScenarioAsync(
 				structuredDataStressPlan, compress: false, stripComments: true, hideSecrets: false, cancellationToken),
+			["structuredDataBlankLines"] = await RunScenarioAsync(
+				structuredDataStressPlan, compress: false, stripComments: false, hideSecrets: false, cancellationToken, stripBlankLines: true),
 			["structuredDataBoth"] = await RunScenarioAsync(
 				structuredDataStressPlan, compress: true, stripComments: true, hideSecrets: false, cancellationToken)
 		};

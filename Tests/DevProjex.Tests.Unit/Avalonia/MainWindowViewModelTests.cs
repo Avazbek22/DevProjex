@@ -16,6 +16,67 @@ public sealed class MainWindowViewModelTests
         return new MainWindowViewModel(localization, helpContentProvider);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ContentStripNotice_UsesNothingToStripForEveryKnownZeroTotalAndKeepsScanningPriority(
+        bool blankLines)
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Settings.Comments.Status.Scanning"] = "Scanning comments",
+            ["Settings.Comments.Status.NothingToStrip"] = "No comments",
+            ["Settings.Comments.Status.Applied"] = "Comments {0}/{1}",
+            ["Settings.BlankLines.Status.Scanning"] = "Scanning blank lines",
+            ["Settings.BlankLines.Status.NothingToStrip"] = "No blank lines",
+            ["Settings.BlankLines.Status.Applied"] = "Blank lines {0}/{1}"
+        });
+        var expectedNothing = blankLines ? "No blank lines" : "No comments";
+        var expectedApplied = blankLines ? "Blank lines 5/150" : "Comments 5/150";
+        var expectedScanning = blankLines ? "Scanning blank lines" : "Scanning comments";
+
+        Assert.Equal(string.Empty, GetNotice(viewModel, blankLines));
+
+        SetStatus(viewModel, blankLines, 0, 150);
+        Assert.Equal(expectedNothing, GetNotice(viewModel, blankLines));
+
+        SetStatus(viewModel, blankLines, 0, 0);
+        Assert.Equal(expectedNothing, GetNotice(viewModel, blankLines));
+
+        SetStatus(viewModel, blankLines, 5, 150);
+        Assert.Equal(expectedApplied, GetNotice(viewModel, blankLines));
+
+        SetPreparationStatus(viewModel, blankLines, isActive: true);
+        SetStatus(viewModel, blankLines, 0, 150);
+        Assert.Equal(expectedScanning, GetNotice(viewModel, blankLines));
+
+        SetPreparationStatus(viewModel, blankLines, isActive: false);
+        Assert.Equal(expectedNothing, GetNotice(viewModel, blankLines));
+    }
+
+    private static string GetNotice(MainWindowViewModel viewModel, bool blankLines) =>
+        blankLines ? viewModel.SettingsBlankLineStripNotice : viewModel.SettingsCommentStripNotice;
+
+    private static void SetStatus(
+        MainWindowViewModel viewModel,
+        bool blankLines,
+        int? strippedFiles,
+        int? totalFiles)
+    {
+        if (blankLines)
+            viewModel.SetBlankLineStripStatus(strippedFiles, totalFiles);
+        else
+            viewModel.SetCommentStripStatus(strippedFiles, totalFiles);
+    }
+
+    private static void SetPreparationStatus(MainWindowViewModel viewModel, bool blankLines, bool isActive)
+    {
+        if (blankLines)
+            viewModel.SetBlankLineStripPreparationStatus(isActive);
+        else
+            viewModel.SetCommentStripPreparationStatus(isActive);
+    }
+
     [Fact]
     public void Constructor_Defaults_ShowBackgroundTransparencyForTransparentEffect()
     {

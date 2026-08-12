@@ -37,6 +37,41 @@ public sealed class CodeBlankLineStrippingTests
 	}
 
 	[Theory]
+	[MemberData(nameof(LineContinuationCases))]
+	public void BlankLineAfterTrailingBackslash_IsPreservedConservatively(
+		string caseName,
+		string path,
+		string source,
+		string expected,
+		bool expectNoBenefit)
+	{
+		var result = Transform(path, source, CodeTransformKinds.BlankLines);
+
+		Assert.Equal(expected, result.Text);
+		if (expectNoBenefit)
+		{
+			// Python and Ruby inputs in this matrix are intentionally malformed. The shared guard
+			// preserves their bytes before the structural gate has any reason to intervene.
+			Assert.Equal(CodeCompressionOutcome.UnchangedNoBenefit, result.Plan.Outcome);
+			Assert.Empty(result.Plan.Edits);
+		}
+		Assert.False(string.IsNullOrWhiteSpace(caseName));
+	}
+
+	[Fact]
+	public void AlreadyCanceledLargeBlankOnlyFile_ThrowsOperationCanceledException()
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.BlankLines);
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+		var source = new string('\n', 128 * 1024);
+
+		Assert.ThrowsAny<OperationCanceledException>(() =>
+			scope.Analyze("blank.js", "blank.js", source, cancellation.Token));
+	}
+
+	[Theory]
 	[MemberData(nameof(ProtectedLeafCases))]
 	public void MultilineLeafTokens_KeepTheirBlankLinesByteForByte(
 		string path,
@@ -372,6 +407,80 @@ public sealed class CodeBlankLineStrippingTests
 			"<main>\n  first\n\n  second\n</main>\n"
 		}
 	};
+
+	public static TheoryData<string, string, string, string, bool> LineContinuationCases()
+	{
+		const char backslash = '\\';
+		var cases = new (string Name, string Path, string Source, string Expected, bool ExpectNoBenefit)[]
+		{
+			(
+				"bash-heredoc",
+				"sample.sh",
+				$"printf '%s\\n' one {backslash}\n\ntwo\ncat <<'EOF'\nfirst\n\nsecond\nEOF\n\nprintf 'done\\n'\n",
+				$"printf '%s\\n' one {backslash}\n\ntwo\ncat <<'EOF'\nfirst\n\nsecond\nEOF\nprintf 'done\\n'\n",
+				false),
+			(
+				"c-preprocessor",
+				"sample.c",
+				$"#define FIRST value {backslash}\n\n#define SECOND 42\n",
+				$"#define FIRST value {backslash}\n\n#define SECOND 42\n",
+				false),
+			(
+				"cpp-preprocessor",
+				"sample.cpp",
+				$"#define FIRST value {backslash}\n\n#define SECOND 42\n",
+				$"#define FIRST value {backslash}\n\n#define SECOND 42\n",
+				false),
+			(
+				"python-malformed",
+				"sample.py",
+				$"x = 1 + {backslash}\n\n2\n",
+				$"x = 1 + {backslash}\n\n2\n",
+				true),
+			(
+				"ruby-malformed",
+				"sample.rb",
+				$"x = 1 + {backslash}\n\n2\n",
+				$"x = 1 + {backslash}\n\n2\n",
+				true),
+			(
+				"csharp-comment",
+				"Sample.cs",
+				$"// note {backslash}\n\nclass Sample {{ }}\n",
+				$"// note {backslash}\n\nclass Sample {{ }}\n",
+				false),
+			(
+				"bash-escaped-backslash",
+				"sample.sh",
+				$"echo one {backslash}{backslash}\n\necho two\n",
+				$"echo one {backslash}{backslash}\n\necho two\n",
+				false),
+			(
+				"leading-blank-line",
+				"sample.sh",
+				"\necho value\n",
+				"echo value\n",
+				false),
+			(
+				"three-blank-lines",
+				"sample.sh",
+				$"echo one {backslash}\n\n\n\necho two\n",
+				$"echo one {backslash}\n\necho two\n",
+				false)
+		};
+		var data = new TheoryData<string, string, string, string, bool>();
+		foreach (var item in cases)
+		{
+			data.Add($"{item.Name}-lf", item.Path, item.Source, item.Expected, item.ExpectNoBenefit);
+			data.Add(
+				$"{item.Name}-crlf",
+				item.Path,
+				item.Source.Replace("\n", "\r\n", StringComparison.Ordinal),
+				item.Expected.Replace("\n", "\r\n", StringComparison.Ordinal),
+				item.ExpectNoBenefit);
+		}
+		return data;
+	}
 
 	private static (CodeCompressionPlan Plan, string Text) Transform(
 		string path,

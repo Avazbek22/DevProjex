@@ -2148,7 +2148,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			? _localization["Settings.Comments.Status.Scanning"]
 			: (_commentStrippedFilesCount, _commentStripTotalFilesCount) switch
 			{
-				(0, 0) => _localization["Settings.Comments.Status.NothingToStrip"],
+				(0, not null) => _localization["Settings.Comments.Status.NothingToStrip"],
 				({ } stripped, { } total) => _localization.Format(
 					"Settings.Comments.Status.Applied",
 					stripped,
@@ -2172,7 +2172,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			? _localization["Settings.BlankLines.Status.Scanning"]
 			: (_blankLineStrippedFilesCount, _blankLineStripTotalFilesCount) switch
 			{
-				(0, 0) => _localization["Settings.BlankLines.Status.NothingToStrip"],
+				(0, not null) => _localization["Settings.BlankLines.Status.NothingToStrip"],
 				({ } stripped, { } total) => _localization.Format(
 					"Settings.BlankLines.Status.Applied",
 					stripped,

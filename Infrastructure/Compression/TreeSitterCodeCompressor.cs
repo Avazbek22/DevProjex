@@ -72,6 +72,8 @@ public sealed class TreeSitterCodeCompressor :
 	internal const int MaximumBodyCapturesPerFile = 20_000;
 	internal const int MaximumCommentCapturesPerFile = 20_000;
 	internal const int MaximumPreservedRangesPerFile = 20_000;
+	// Keep pathological blank-line collections bounded while leaving room for outer body edits to absorb them.
+	internal const int MaximumRawEditsPerFile = 100_000;
 	internal const int MaximumEditsPerFile = 10_000;
 	internal const int MaximumDeclarationsPerFile = 25_000;
 	internal const int MaximumDefectsPerFile = 4_096;
@@ -1263,11 +1265,24 @@ internal sealed class TreeSitterCompressionScope(
 			if ((transformKinds & CodeTransformKinds.BlankLines) != 0 &&
 			    originalInspection is { Defects: not null })
 			{
-				AppendBlankLineEdits(
-					source,
-					protectedMultilineLeaves,
-					raw,
-					cancellationToken);
+				if (!TryAppendBlankLineEdits(
+					    source,
+					    protectedMultilineLeaves,
+					    raw,
+					    cancellationToken))
+				{
+					CompleteEditShapingPhase(
+						diagnostics,
+						observer,
+						phaseStartedAt,
+						relativePath,
+						source.Length,
+						raw.Count,
+						finalEditCount: 0,
+						ref timing,
+						cancellationToken);
+					return null;
+				}
 			}
 
 			// Outermost wins: a lambda body inside a method body must not be spliced twice.
@@ -1354,16 +1369,18 @@ internal sealed class TreeSitterCompressionScope(
 		}
 	}
 
-	private static void AppendBlankLineEdits(
+	private static bool TryAppendBlankLineEdits(
 		string source,
 		IReadOnlyList<SourceRange> protectedRanges,
 		List<RawCompressionEdit> edits,
 		CancellationToken cancellationToken)
 	{
 		var lineStart = 0;
+		var lineIndex = 0;
 		var protectedIndex = 0;
 		while (lineStart < source.Length)
 		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, lineIndex++);
 			var cursor = lineStart;
 			var isBlank = true;
 			while (cursor < source.Length && source[cursor] is not ('\r' or '\n'))
@@ -1395,17 +1412,37 @@ internal sealed class TreeSitterCompressionScope(
 				protectedIndex < protectedRanges.Count &&
 				protectedRanges[protectedIndex].Start < lineEnd &&
 				lineStart < protectedRanges[protectedIndex].End;
-			if (isBlank && lineEnd > lineStart && !overlapsProtectedRange)
-				AddBlankLineRemoval(edits, lineStart, lineEnd);
+			if (isBlank &&
+			    lineEnd > lineStart &&
+			    !overlapsProtectedRange &&
+			    !PreviousPhysicalLineEndsWithBackslash(source, lineStart) &&
+			    !TryAddBlankLineRemoval(edits, lineStart, lineEnd))
+			{
+				return false;
+			}
 
 			if (lineEnd == cursor)
 				break;
 			lineStart = lineEnd;
 		}
 		cancellationToken.ThrowIfCancellationRequested();
+		return true;
 	}
 
-	private static void AddBlankLineRemoval(
+	private static bool PreviousPhysicalLineEndsWithBackslash(string source, int lineStart)
+	{
+		if (lineStart == 0)
+			return false;
+
+		var cursor = lineStart;
+		if (cursor > 0 && source[cursor - 1] == '\n')
+			cursor--;
+		if (cursor > 0 && source[cursor - 1] == '\r')
+			cursor--;
+		return cursor > 0 && source[cursor - 1] == '\\';
+	}
+
+	private static bool TryAddBlankLineRemoval(
 		List<RawCompressionEdit> edits,
 		int start,
 		int end)
@@ -1415,14 +1452,17 @@ internal sealed class TreeSitterCompressionScope(
 		    previous.End == start)
 		{
 			edits[^1] = previous with { End = end };
-			return;
+			return true;
 		}
+		if (edits.Count >= TreeSitterCodeCompressor.MaximumRawEditsPerFile)
+			return false;
 
 		edits.Add(new RawCompressionEdit(
 			start,
 			end,
 			string.Empty,
 			CodeTransformKinds.BlankLines));
+		return true;
 	}
 
 	private static void CompleteEditShapingPhase(
@@ -2720,6 +2760,8 @@ internal sealed class TreeSitterCompressionScope(
 			var node = cursor.CurrentNode;
 			if (collectProtectedMultilineLeaves && IsProtectedMultilineLeaf(node))
 			{
+				if ((protectedRanges?.Count ?? 0) >= TreeSitterCodeCompressor.MaximumPreservedRangesPerFile)
+					return null;
 				(protectedRanges ??= []).Add(new SourceRange(node.StartIndex, node.EndIndex));
 			}
 			// See CodeParseDefect: HasError lies in both directions against the shipped grammars,
