@@ -139,7 +139,13 @@ public static class ProjectPresentationCatalog
 			IgnoreOptionId.StripComments,
 			"strip-comments",
 			"Settings.Ignore.StripComments",
-			2)
+			2),
+		new(
+			null,
+			IgnoreOptionId.StripBlankLines,
+			"strip-blank-lines",
+			"Settings.Ignore.StripBlankLines",
+			3)
 	];
 
 	/// <summary>

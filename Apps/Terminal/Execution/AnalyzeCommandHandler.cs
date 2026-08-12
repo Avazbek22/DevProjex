@@ -22,7 +22,8 @@ public sealed class AnalyzeCommandHandler(
 			.ConfigureAwait(false);
 		var transformKinds = CodeTransformIdentity.Resolve(
 			plan.Selection.CompressCode == true,
-			plan.Selection.StripComments == true);
+			plan.Selection.StripComments == true,
+			plan.Selection.StripBlankLines == true);
 		var transformationContext = ContentTransformationContext.For(
 			transformKinds != CodeTransformKinds.None
 				? new CodeCompressionContext(
@@ -67,7 +68,8 @@ public sealed class AnalyzeCommandHandler(
 						compression.SourceCharacters,
 						compression.TransformedCharacters,
 						compression.BodyTransformedFiles,
-						compression.CommentTransformedFiles)
+						compression.CommentTransformedFiles,
+						compression.BlankLineTransformedFiles)
 					: null
 			};
 		}
@@ -234,6 +236,18 @@ internal static class AnalysisTextFormatter
 						compression.CommentTransformedFiles,
 						compression.CompressedFiles + compression.UnchangedFiles);
 				rows.Add(new AnalysisTextRow(localization["Settings.Ignore.StripComments"], commentValue));
+			}
+			if (plan.Selection.StripBlankLines == true)
+			{
+				var blankLineValue = compression.BlankLineTransformedFiles == 0
+					? localization["Settings.BlankLines.Status.NothingToStrip"]
+					: localization.Format(
+						"Settings.BlankLines.Status.Applied",
+						compression.BlankLineTransformedFiles,
+						compression.CompressedFiles + compression.UnchangedFiles);
+				rows.Add(new AnalysisTextRow(
+					localization["Settings.Ignore.StripBlankLines"],
+					blankLineValue));
 			}
 		}
 		rows.Add(new AnalysisTextRow(

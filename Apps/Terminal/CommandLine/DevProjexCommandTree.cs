@@ -1143,7 +1143,8 @@ public sealed class DevProjexCommandTree
 		result.GetResult(selection.Exclusions) is { Implicit: false } ||
 		result.GetResult(selection.HideSecrets) is { Implicit: false } ||
 		result.GetResult(selection.CompressCode) is { Implicit: false } ||
-		result.GetResult(selection.StripComments) is { Implicit: false };
+		result.GetResult(selection.StripComments) is { Implicit: false } ||
+		result.GetResult(selection.StripBlankLines) is { Implicit: false };
 
 	private int? ValidateDesktopOpenGitReadiness(
 		TerminalServices services,

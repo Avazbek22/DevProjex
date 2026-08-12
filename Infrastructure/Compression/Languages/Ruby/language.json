@@ -9,6 +9,7 @@
   "library": "tree-sitter-ruby",
   "export": "tree_sitter_ruby",
   "queryVersion": 2,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
   "blockPlaceholder": "",
   "blockBodyStyle": "remove-complete-lines",
   "preserveLeadingDocstring": false,

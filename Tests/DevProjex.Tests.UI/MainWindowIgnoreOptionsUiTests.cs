@@ -2178,6 +2178,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal("Removing comments…", commentsOption.StatusText);
 			viewModel.SetCommentStripPreparationStatus(isActive: false);
 			Assert.Equal("Removed comments from 7 of 11 files.", commentsOption.StatusText);
+
+			var blankLinesOption = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static candidate => candidate.Id == IgnoreOptionId.StripBlankLines);
+			Assert.False(blankLinesOption.IsChecked);
+			Assert.False(blankLinesOption.HasStatus);
+			blankLinesOption.IsChecked = true;
+			viewModel.SetBlankLineStripPreparationStatus(isActive: true);
+			Assert.Equal("Removing blank lines…", blankLinesOption.StatusText);
+			viewModel.SetBlankLineStripStatus(strippedFiles: 5, totalFiles: 11);
+			Assert.Equal("Removing blank lines…", blankLinesOption.StatusText);
+			viewModel.SetBlankLineStripPreparationStatus(isActive: false);
+			Assert.Equal("Removed blank lines from 5 of 11 files.", blankLinesOption.StatusText);
 		}
 		finally
 		{

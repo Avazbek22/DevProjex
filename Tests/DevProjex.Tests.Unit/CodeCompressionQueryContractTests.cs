@@ -77,7 +77,7 @@ public sealed class CodeCompressionQueryContractTests
 	}
 
 	[Fact]
-	public void TransformCapabilitiesDistinguishBodyAndCommentLanguageSets()
+	public void TransformCapabilitiesDistinguishBodyCommentAndBlankLineLanguageSets()
 	{
 		var bodyLanguages = CodeCompressionTestHarness.LanguagePacks
 			.Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.Bodies) != 0)
@@ -87,15 +87,23 @@ public sealed class CodeCompressionQueryContractTests
 			.Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.Comments) != 0)
 			.Select(static pack => pack.Id)
 			.ToArray();
+		var blankLineLanguages = CodeCompressionTestHarness.LanguagePacks
+			.Where(static pack => (pack.TransformCapabilities & CodeTransformKinds.BlankLines) != 0)
+			.Select(static pack => pack.Id)
+			.ToArray();
 
 		Assert.Equal(14, bodyLanguages.Length);
 		Assert.Equal(ExpectedLanguageIds, commentLanguages);
+		Assert.Equal(ExpectedLanguageIds, blankLineLanguages);
 		Assert.DoesNotContain("bash", bodyLanguages);
 		Assert.DoesNotContain("css", bodyLanguages);
 		Assert.DoesNotContain("html", bodyLanguages);
 		Assert.DoesNotContain("toml", bodyLanguages);
 		Assert.DoesNotContain("xml", bodyLanguages);
 		Assert.DoesNotContain("yaml", bodyLanguages);
+		Assert.All(
+			CodeCompressionTestHarness.LanguagePacks,
+			static pack => Assert.NotEqual(CodeTransformKinds.None, pack.TransformCapabilities));
 	}
 
 	[Fact]

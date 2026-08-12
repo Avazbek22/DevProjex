@@ -9,7 +9,8 @@
   "export": "tree_sitter_bash",
   "queryVersion": 1,
   "transformCapabilities": [
-    "comments"
+    "comments",
+    "blankLines"
   ],
   "blockPlaceholder": "",
   "containerNodeTypes": [],

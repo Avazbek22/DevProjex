@@ -9,7 +9,8 @@
   "export": "tree_sitter_yaml",
   "queryVersion": 1,
   "transformCapabilities": [
-    "comments"
+    "comments",
+    "blankLines"
   ],
   "blockPlaceholder": "",
   "containerNodeTypes": [],

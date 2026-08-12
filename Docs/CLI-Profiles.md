@@ -51,6 +51,10 @@ Comment removal is stored as the independent `stripComments` Boolean. It remains
 the built-in `standard` profile, and profiles created before the field existed load it as
 `false`.
 
+Blank-line removal is stored as the independent `stripBlankLines` Boolean. It remains off
+in the built-in `standard` profile, and profiles created before the field existed load it
+as `false`.
+
 ## Schema v1
 
 ```json
@@ -65,6 +69,7 @@ the built-in `standard` profile, and profiles created before the field existed l
     "hideSecrets": false,
     "compressCode": false,
     "stripComments": false,
+    "stripBlankLines": false,
     "exclusions": [
       "smart-ignore",
       "hidden-folders",
@@ -85,6 +90,7 @@ Semantics:
 - `hideSecrets` independently enables the content transformation;
 - `compressCode` independently enables syntax-aware code compression;
 - `stripComments` independently removes syntax-tree comments and Python docstrings from output;
+- `stripBlankLines` independently removes unprotected whitespace-only source lines from output;
 - Exclusions contain only known path-filter tokens.
 
 Profiles written by current DevProjex versions keep `hideSecrets` separate. For

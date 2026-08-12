@@ -85,6 +85,7 @@ selection. `open` additionally accepts `auto`:
 --hide-secrets [<true|false>]
 --compress [<true|false>]
 --strip-comments [<true|false>]
+--strip-blank-lines [<true|false>]
 ```
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
@@ -190,14 +191,29 @@ Blank and whitespace-only lines immediately adjacent to removed full-line commen
 at most one between retained content blocks and to none at file boundaries. Unrelated blank lines
 remain byte-for-byte unchanged; `--strip-comments` does not reformat the rest of the file.
 
-Compression and comment removal are independent and share one syntax analysis and one
-validated edit plan:
+`--strip-blank-lines` is the fourth independent content transformation and is off in the
+`standard` profile. It removes every whitespace-only source line, including leading and
+trailing runs, while preserving the final newline of the last content line. A blank line
+inside a multiline syntax-tree leaf remains byte-for-byte complete. This protects multiline
+strings, raw and template literals, heredocs, YAML block scalars, and multiline comments when
+comment removal is disabled. The same grammar-only rule applies to all 20 packs. In XML and
+HTML, whitespace inside text nodes is character data and therefore remains; blank separators
+between separate markup nodes may still be removed. No language-specific text heuristics are
+used.
+
+Compression, comment removal, and blank-line removal are independent and share one syntax
+analysis and one validated edit plan:
 
 | Enabled transformations | Result |
 |---|---|
+| None | Original file bytes |
 | `--compress` | Signatures and declarative state; comments and docstrings remain |
 | `--strip-comments` | Complete implementation code without comments or docstrings |
-| Both | A bare declaration skeleton without comments or docstrings |
+| `--strip-blank-lines` | Complete code and comments without unprotected blank lines |
+| `--compress --strip-comments` | A bare declaration skeleton without comments or docstrings |
+| `--compress --strip-blank-lines` | Declaration skeleton with comments and no unprotected blank lines |
+| `--strip-comments --strip-blank-lines` | Complete implementation without comments or unprotected blank lines |
+| All three | Bare declaration skeleton without comments, docstrings, or unprotected blank lines |
 
 When Hide Secrets is also enabled, syntax edits are applied first and secret detection runs
 over that exact transformed text. Unsupported languages such as Markdown remain

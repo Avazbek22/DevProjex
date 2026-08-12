@@ -131,6 +131,7 @@ internal sealed record CompressionLanguagePack(
 			{
 				"bodies" => CodeTransformKinds.Bodies,
 				"comments" => CodeTransformKinds.Comments,
+				"blankLines" => CodeTransformKinds.BlankLines,
 				_ => throw new InvalidOperationException(
 					$"Language manifest '{resource}' has unsupported transform capability '{value}'.")
 			};

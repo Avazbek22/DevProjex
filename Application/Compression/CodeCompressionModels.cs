@@ -7,22 +7,34 @@ public enum CodeTransformKinds
 {
 	None = 0,
 	Bodies = 1,
-	Comments = 2
+	Comments = 2,
+	BlankLines = 4
 }
 
 public static class CodeTransformIdentity
 {
-	public static CodeTransformKinds Resolve(bool compressBodies, bool stripComments) =>
+	public static CodeTransformKinds Resolve(
+		bool compressBodies,
+		bool stripComments,
+		bool stripBlankLines = false) =>
 		(compressBodies ? CodeTransformKinds.Bodies : CodeTransformKinds.None) |
-		(stripComments ? CodeTransformKinds.Comments : CodeTransformKinds.None);
+		(stripComments ? CodeTransformKinds.Comments : CodeTransformKinds.None) |
+		(stripBlankLines ? CodeTransformKinds.BlankLines : CodeTransformKinds.None);
 
 	public static string Create(string engineIdentity, CodeTransformKinds kinds) =>
 		kinds switch
 		{
 			CodeTransformKinds.Bodies => engineIdentity + "+bodies",
 			CodeTransformKinds.Comments => engineIdentity + "+comments",
+			CodeTransformKinds.BlankLines => engineIdentity + "+blank-lines",
 			CodeTransformKinds.Bodies | CodeTransformKinds.Comments =>
 				engineIdentity + "+bodies+comments",
+			CodeTransformKinds.Bodies | CodeTransformKinds.BlankLines =>
+				engineIdentity + "+bodies+blank-lines",
+			CodeTransformKinds.Comments | CodeTransformKinds.BlankLines =>
+				engineIdentity + "+comments+blank-lines",
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments | CodeTransformKinds.BlankLines =>
+				engineIdentity + "+bodies+comments+blank-lines",
 			_ => throw new ArgumentOutOfRangeException(nameof(kinds), kinds, null)
 		};
 }

@@ -10,6 +10,7 @@ public sealed class IgnoreOptionsServiceAvailabilityTests
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.StripComments"] = "Strip comments",
+				["Settings.Ignore.StripBlankLines"] = "Strip blank lines",
 				["Settings.Ignore.SmartIgnore"] = "Smart Ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",

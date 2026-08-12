@@ -146,6 +146,7 @@ remains a usage error instead of silently selecting a later command.
 --hide-secrets [<true|false>]
 --compress [<true|false>]
 --strip-comments [<true|false>]
+--strip-blank-lines [<true|false>]
 ```
 
 Exclusion tokens are:
@@ -228,6 +229,14 @@ files remain complete and source files are never modified.
 At each removed full-line comment site, adjacent blank and whitespace-only lines collapse to at
 most one between retained content blocks and to none at file boundaries. Blank lines unrelated
 to a removed comment remain byte-for-byte unchanged.
+
+`--strip-blank-lines` is an independent, additive content transformation and is off in the
+`standard` profile. It removes whitespace-only source lines in all 20 language packs. Lines
+inside multiline leaf tokens remain byte-for-byte complete, including multiline strings,
+raw/template literals, heredocs, YAML block scalars, and multiline comments when comments are
+not removed. XML and HTML whitespace inside text nodes is character data and remains. The three
+syntax transformations support all eight flag combinations and share one parse, merged plan,
+application, reverse parse, and structural gate.
 
 `gitignore` mode reads regular `.gitignore` files reachable in the selected working
 tree. When the selected path is below its owning repository/worktree root, the
@@ -560,6 +569,7 @@ that prevents an accepted option from becoming a no-op.
 | analyze/context/project/open | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | analyze/context/project/open | `--compress` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open | `--strip-comments` | profile content-transformation state | independently removes syntax-tree comments and Python docstrings without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
+| analyze/context/project/open | `--strip-blank-lines` | profile content-transformation state | independently removes unprotected whitespace-only source lines without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | `analyze` | `--format` | `text` | selects the canonical text serializer or analysis JSON | none | document on stdout or in the selected file; invalid value exits `2` | parser, serializer, handler, process |
 | `analyze` | `-o`, `--output` | `-` | selects stdout or an exact new report file | existing/unsafe file is rejected; no force or dry-run | document or real absolute path on stdout; conflict exits `4` | handler, destination, process |
 | `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |

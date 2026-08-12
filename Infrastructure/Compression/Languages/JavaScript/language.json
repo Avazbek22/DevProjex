@@ -5,6 +5,7 @@
   "library": "tree-sitter-javascript",
   "export": "tree_sitter_javascript",
   "queryVersion": 8,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
   "blockPlaceholder": "{ }",
   "expressionBodyStyle": "inline",
   "containerNodeTypes": ["program", "class_body"],

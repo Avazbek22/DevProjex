@@ -80,6 +80,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private int? _commentStrippedFilesCount;
 	private int? _commentStripTotalFilesCount;
 	private bool _commentStripPreparationActive;
+	private int? _blankLineStrippedFilesCount;
+	private int? _blankLineStripTotalFilesCount;
+	private bool _blankLineStripPreparationActive;
     private bool _isDarkTheme = true;
     private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
@@ -1442,6 +1445,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	public string SettingsSecretsNotice { get; private set; } = string.Empty;
 	public string SettingsCompressionNotice { get; private set; } = string.Empty;
 	public string SettingsCommentStripNotice { get; private set; } = string.Empty;
+	public string SettingsBlankLineStripNotice { get; private set; } = string.Empty;
 	public string PreviewSecretRedactedTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretAlwaysHideFormat { get; private set; } = string.Empty;
@@ -1602,6 +1606,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		UpdateSettingsSecretsNotice();
 		UpdateSettingsCompressionNotice();
 		UpdateSettingsCommentStripNotice();
+		UpdateSettingsBlankLineStripNotice();
 		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
 		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
 		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Always"];
@@ -2003,6 +2008,28 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		UpdateSettingsCommentStripNotice();
 	}
 
+	internal void SetBlankLineStripStatus(int? strippedFiles, int? totalFiles)
+	{
+		if (_blankLineStrippedFilesCount == strippedFiles &&
+		    _blankLineStripTotalFilesCount == totalFiles)
+		{
+			return;
+		}
+
+		_blankLineStrippedFilesCount = strippedFiles;
+		_blankLineStripTotalFilesCount = totalFiles;
+		UpdateSettingsBlankLineStripNotice();
+	}
+
+	internal void SetBlankLineStripPreparationStatus(bool isActive)
+	{
+		if (_blankLineStripPreparationActive == isActive)
+			return;
+
+		_blankLineStripPreparationActive = isActive;
+		UpdateSettingsBlankLineStripNotice();
+	}
+
 	private void UpdateSettingsSecretsNotice()
 	{
 		var secrets = _contentProcessingScanState switch
@@ -2121,7 +2148,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			? _localization["Settings.Comments.Status.Scanning"]
 			: (_commentStrippedFilesCount, _commentStripTotalFilesCount) switch
 			{
-				(0, 0) => _localization["Settings.Comments.Status.NothingToStrip"],
+				(0, not null) => _localization["Settings.Comments.Status.NothingToStrip"],
 				({ } stripped, { } total) => _localization.Format(
 					"Settings.Comments.Status.Applied",
 					stripped,
@@ -2136,6 +2163,30 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
 		SettingsCommentStripNotice = notice;
 		RaisePropertyChanged(nameof(SettingsCommentStripNotice));
+		UpdateContentProcessingOptionStatuses();
+	}
+
+	private void UpdateSettingsBlankLineStripNotice()
+	{
+		var notice = _blankLineStripPreparationActive
+			? _localization["Settings.BlankLines.Status.Scanning"]
+			: (_blankLineStrippedFilesCount, _blankLineStripTotalFilesCount) switch
+			{
+				(0, not null) => _localization["Settings.BlankLines.Status.NothingToStrip"],
+				({ } stripped, { } total) => _localization.Format(
+					"Settings.BlankLines.Status.Applied",
+					stripped,
+					total),
+				_ => string.Empty
+			};
+		if (string.Equals(SettingsBlankLineStripNotice, notice, StringComparison.Ordinal))
+		{
+			UpdateContentProcessingOptionStatuses();
+			return;
+		}
+
+		SettingsBlankLineStripNotice = notice;
+		RaisePropertyChanged(nameof(SettingsBlankLineStripNotice));
 		UpdateContentProcessingOptionStatuses();
 	}
 
@@ -2154,6 +2205,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 				IgnoreOptionId.HideSecrets => SettingsSecretsNotice,
 				IgnoreOptionId.CompressCode when option.IsChecked => SettingsCompressionNotice,
 				IgnoreOptionId.StripComments when option.IsChecked => SettingsCommentStripNotice,
+				IgnoreOptionId.StripBlankLines when option.IsChecked => SettingsBlankLineStripNotice,
 				_ => string.Empty
 			};
 		}

@@ -207,6 +207,7 @@ public sealed class PortableProjectProfileService
 			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
 			CompressCode: document.Selection.CompressCode ?? false,
 			StripComments: document.Selection.StripComments ?? false,
+			StripBlankLines: document.Selection.StripBlankLines ?? false,
 			ProfileSource: new ProjectProfileReference(ProjectProfileSourceKind.Portable, fullPath));
 	}
 
@@ -236,7 +237,8 @@ public sealed class PortableProjectProfileService
 					.ToArray(),
 				HideSecrets = selection.HideSecrets == true,
 				CompressCode = selection.CompressCode == true,
-				StripComments = selection.StripComments == true
+				StripComments = selection.StripComments == true,
+				StripBlankLines = selection.StripBlankLines == true
 			}
 		};
 	}
@@ -308,6 +310,7 @@ public sealed class PortableProjectProfileService
 		public bool? HideSecrets { get; set; }
 		public bool? CompressCode { get; set; }
 		public bool? StripComments { get; set; }
+		public bool? StripBlankLines { get; set; }
 
 		[JsonExtensionData]
 		public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }

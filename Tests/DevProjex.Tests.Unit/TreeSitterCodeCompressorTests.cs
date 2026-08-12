@@ -42,6 +42,17 @@ public sealed class TreeSitterCodeCompressorTests
 		return (plan, plan.Apply(source).Text);
 	}
 
+	private static (string Source, string Expected) BuildPythonProtectedLeafBudgetSource(int literalCount)
+	{
+		var prefix = new StringBuilder(literalCount * 20);
+		for (var index = 0; index < literalCount; index++)
+			prefix.Append("x = \"\"\"\n\nvalue\"\"\"\n");
+		var protectedContent = prefix.ToString();
+		return (
+			protectedContent + "\ntail = 1\n",
+			protectedContent + "tail = 1\n");
+	}
+
 	[Fact]
 	public void ShippedLanguageCatalog_MatchesTheCapabilityAwareProductContract()
 	{
@@ -731,6 +742,133 @@ public sealed class TreeSitterCodeCompressorTests
 		Assert.True(
 			stopwatch.Elapsed < TimeSpan.FromSeconds(20),
 			$"Complexity gate took {stopwatch.Elapsed.TotalMilliseconds:F0} ms.");
+	}
+
+	[Fact]
+	public void GeneratedBlankLinesBeyondRawEditBudget_AreRejectedBeforeSortWithinBoundedTime()
+	{
+		var source = string.Concat(Enumerable.Repeat(";\n\n", TreeSitterCodeCompressor.MaximumRawEditsPerFile + 1));
+		Assert.True(source.Length < TreeSitterCodeCompressor.MaximumParsableCharacters);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var diagnostics = compressor.BeginAnalysisDiagnostics();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.BlankLines);
+		var stopwatch = Stopwatch.StartNew();
+
+		var analysis = scope.Analyze(
+			"generated.js",
+			"generated.js",
+			source,
+			TestContext.Current.CancellationToken);
+		stopwatch.Stop();
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedGateRejected, analysis.Plan.Outcome);
+		Assert.Same(source, analysis.GetResult(source).Text);
+		var snapshot = diagnostics.Capture();
+		Assert.Equal(TreeSitterCodeCompressor.MaximumRawEditsPerFile, snapshot.Work.RawEdits);
+		Assert.Equal(0, snapshot.Work.FinalEdits);
+		Assert.True(
+			stopwatch.Elapsed < TimeSpan.FromSeconds(20),
+			$"Raw edit cap took {stopwatch.Elapsed.TotalMilliseconds:F0} ms.");
+	}
+
+	[Fact]
+	public void RawBlankEditsJustBelowBudget_AreAbsorbedByOneBodyEdit()
+	{
+		var blankRemovalCount = TreeSitterCodeCompressor.MaximumRawEditsPerFile - 2;
+		var source = new StringBuilder("function work() {\n");
+		for (var index = 0; index < blankRemovalCount; index++)
+			source.Append(";\n\n");
+		source.Append("}\n");
+		Assert.True(source.Length < TreeSitterCodeCompressor.MaximumParsableCharacters);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var diagnostics = compressor.BeginAnalysisDiagnostics();
+		using var scope = compressor.CreateScope(
+			Path.GetTempPath(),
+			CodeTransformKinds.Bodies | CodeTransformKinds.BlankLines);
+
+		var analysis = scope.Analyze(
+			"generated.js",
+			"generated.js",
+			source.ToString(),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
+		Assert.Equal("function work() { }\n", analysis.GetResult(source.ToString()).Text);
+		var snapshot = diagnostics.Capture();
+		Assert.Equal(TreeSitterCodeCompressor.MaximumRawEditsPerFile - 1, snapshot.Work.RawEdits);
+		Assert.Equal(1, snapshot.Work.FinalEdits);
+		Assert.Equal(
+			CodeTransformKinds.Bodies | CodeTransformKinds.BlankLines,
+			analysis.Plan.Edits.Single().Kinds);
+	}
+
+	[Fact]
+	public void MaximumSizeFileOfBlankLines_RemainsOneMergedEdit()
+	{
+		var source = new string('\n', TreeSitterCodeCompressor.MaximumParsableCharacters);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var diagnostics = compressor.BeginAnalysisDiagnostics();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.BlankLines);
+
+		var analysis = scope.Analyze(
+			"blank.js",
+			"blank.js",
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
+		Assert.Equal(string.Empty, analysis.GetResult(source).Text);
+		var snapshot = diagnostics.Capture();
+		Assert.Equal(1, snapshot.Work.RawEdits);
+		Assert.Equal(1, snapshot.Work.FinalEdits);
+	}
+
+	[Fact]
+	public void ProtectedMultilineLeavesAtBudget_RemainProtected()
+	{
+		var (source, expected) = BuildPythonProtectedLeafBudgetSource(
+			TreeSitterCodeCompressor.MaximumPreservedRangesPerFile);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var diagnostics = compressor.BeginAnalysisDiagnostics();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.BlankLines);
+
+		var analysis = scope.Analyze(
+			"generated.py",
+			"generated.py",
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
+		Assert.Equal(expected, analysis.GetResult(source).Text);
+		var snapshot = diagnostics.Capture();
+		Assert.Equal(1, snapshot.Work.RawEdits);
+		Assert.Equal(1, snapshot.Work.FinalEdits);
+	}
+
+	[Fact]
+	public void ProtectedMultilineLeavesBeyondBudget_FailClosed()
+	{
+		var (source, _) = BuildPythonProtectedLeafBudgetSource(
+			TreeSitterCodeCompressor.MaximumPreservedRangesPerFile + 1);
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var diagnostics = compressor.BeginAnalysisDiagnostics();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.BlankLines);
+
+		var analysis = scope.Analyze(
+			"generated.py",
+			"generated.py",
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CodeCompressionOutcome.UnchangedNoBenefit, analysis.Plan.Outcome);
+		Assert.Same(source, analysis.GetResult(source).Text);
+		var snapshot = diagnostics.Capture();
+		Assert.Equal(0, snapshot.Work.RawEdits);
+		Assert.Equal(0, snapshot.Work.FinalEdits);
+		Assert.InRange(
+			snapshot.Work.OriginalVisitedNodes,
+			1,
+			TreeSitterCodeCompressor.MaximumVisitedSyntaxNodesPerFile - 1);
 	}
 
 	[Fact]

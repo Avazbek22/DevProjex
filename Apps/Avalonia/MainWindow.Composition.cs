@@ -96,6 +96,8 @@ public partial class MainWindow
 			_codeCompressionSnapshot?.BodyTransformedFiles,
 			_codeCompressionSnapshot?.UnchangedFiles,
 			_codeCompressionSnapshot?.CommentTransformedFiles,
+			_codeCompressionSnapshot?.UnchangedFiles,
+			_codeCompressionSnapshot?.BlankLineTransformedFiles,
 			_codeCompressionSnapshot?.UnchangedFiles);
 		_viewModel.SetCompressionStatus(
 			_codeCompressionSnapshot?.BodyTransformedFiles,
@@ -104,6 +106,9 @@ public partial class MainWindow
 			_codeCompressionSnapshot?.TransformedCharacters);
 		_viewModel.SetCommentStripStatus(
 			_codeCompressionSnapshot?.CommentTransformedFiles,
+			_codeCompressionSnapshot?.TotalFiles);
+		_viewModel.SetBlankLineStripStatus(
+			_codeCompressionSnapshot?.BlankLineTransformedFiles,
 			_codeCompressionSnapshot?.TotalFiles);
 	}
 
@@ -164,7 +169,8 @@ public partial class MainWindow
 
 		var kinds = CodeTransformIdentity.Resolve(
 			_appliedCompressCodeEnabled,
-			_appliedStripCommentsEnabled);
+			_appliedStripCommentsEnabled,
+			_appliedStripBlankLinesEnabled);
 		return kinds == CodeTransformKinds.None
 			? null
 			: new CodeCompressionContext(_currentPath, _codeCompressionSession, kinds);
@@ -739,6 +745,7 @@ public partial class MainWindow
 	private SecretScanState _secretRedactionScanState = SecretScanState.Disabled;
 	private bool _appliedCompressCodeEnabled;
 	private bool _appliedStripCommentsEnabled;
+	private bool _appliedStripBlankLinesEnabled;
 
     public MainWindow(
         DesktopStartupOptions startupOptions,

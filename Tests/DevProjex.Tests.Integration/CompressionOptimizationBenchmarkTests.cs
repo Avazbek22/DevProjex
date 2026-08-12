@@ -109,26 +109,40 @@ public sealed class CompressionOptimizationBenchmarkTests
 				plan, compress: true, stripComments: false, hideSecrets: false, cancellationToken),
 			["comments"] = await RunScenarioAsync(
 				plan, compress: false, stripComments: true, hideSecrets: false, cancellationToken),
+			["blankLines"] = await RunScenarioAsync(
+				plan, compress: false, stripComments: false, hideSecrets: false, cancellationToken, stripBlankLines: true),
 			["secrets"] = await RunScenarioAsync(
 				plan, compress: false, stripComments: false, hideSecrets: true, cancellationToken),
 			["compressionAndComments"] = await RunScenarioAsync(
 				plan, compress: true, stripComments: true, hideSecrets: false, cancellationToken),
+			["compressionAndBlankLines"] = await RunScenarioAsync(
+				plan, compress: true, stripComments: false, hideSecrets: false, cancellationToken, stripBlankLines: true),
+			["commentsAndBlankLines"] = await RunScenarioAsync(
+				plan, compress: false, stripComments: true, hideSecrets: false, cancellationToken, stripBlankLines: true),
+			["allSyntaxTransforms"] = await RunScenarioAsync(
+				plan, compress: true, stripComments: true, hideSecrets: false, cancellationToken, stripBlankLines: true),
 			["commentsAndSecrets"] = await RunScenarioAsync(
 				plan, compress: false, stripComments: true, hideSecrets: true, cancellationToken),
 			["compressionAndSecrets"] = await RunScenarioAsync(
 				plan, compress: true, stripComments: false, hideSecrets: true, cancellationToken),
 			["all"] = await RunScenarioAsync(
-				plan, compress: true, stripComments: true, hideSecrets: true, cancellationToken),
+				plan, compress: true, stripComments: true, hideSecrets: true, cancellationToken, stripBlankLines: true),
 			["commentsOnlyCorpusCompression"] = await RunScenarioAsync(
 				commentsOnlyPlan, compress: true, stripComments: false, hideSecrets: false, cancellationToken),
 			["commentsOnlyCorpusComments"] = await RunScenarioAsync(
 				commentsOnlyPlan, compress: false, stripComments: true, hideSecrets: false, cancellationToken),
+			["commentsOnlyCorpusBlankLines"] = await RunScenarioAsync(
+				commentsOnlyPlan, compress: false, stripComments: false, hideSecrets: false, cancellationToken, stripBlankLines: true),
+			["commentsOnlyCorpusCommentsAndBlankLines"] = await RunScenarioAsync(
+				commentsOnlyPlan, compress: false, stripComments: true, hideSecrets: false, cancellationToken, stripBlankLines: true),
 			["commentsOnlyCorpusBoth"] = await RunScenarioAsync(
 				commentsOnlyPlan, compress: true, stripComments: true, hideSecrets: false, cancellationToken),
 			["structuredDataCompression"] = await RunScenarioAsync(
 				structuredDataStressPlan, compress: true, stripComments: false, hideSecrets: false, cancellationToken),
 			["structuredDataComments"] = await RunScenarioAsync(
 				structuredDataStressPlan, compress: false, stripComments: true, hideSecrets: false, cancellationToken),
+			["structuredDataBlankLines"] = await RunScenarioAsync(
+				structuredDataStressPlan, compress: false, stripComments: false, hideSecrets: false, cancellationToken, stripBlankLines: true),
 			["structuredDataBoth"] = await RunScenarioAsync(
 				structuredDataStressPlan, compress: true, stripComments: true, hideSecrets: false, cancellationToken)
 		};
@@ -142,9 +156,10 @@ public sealed class CompressionOptimizationBenchmarkTests
 		bool compress,
 		bool stripComments,
 		bool hideSecrets,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool stripBlankLines = false)
 	{
-		var transformKinds = CodeTransformIdentity.Resolve(compress, stripComments);
+		var transformKinds = CodeTransformIdentity.Resolve(compress, stripComments, stripBlankLines);
 		var coldPreview = await MeasurePhaseAsync(
 			async token =>
 			{

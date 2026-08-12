@@ -24,4 +24,6 @@ public sealed record IgnoreOptionsAvailability(
 	int? CompressedFilesCount = null,
 	int? UncompressedFilesCount = null,
 	int? CommentStrippedFilesCount = null,
-	int? CommentUnchangedFilesCount = null);
+	int? CommentUnchangedFilesCount = null,
+	int? BlankLineStrippedFilesCount = null,
+	int? BlankLineUnchangedFilesCount = null);

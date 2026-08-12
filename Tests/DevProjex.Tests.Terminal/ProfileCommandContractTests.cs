@@ -26,6 +26,7 @@ public sealed class ProfileCommandContractTests
 		Assert.Equal(JsonValueKind.Null, selection.GetProperty("extensions").ValueKind);
 		Assert.False(selection.GetProperty("compressCode").GetBoolean());
 		Assert.False(selection.GetProperty("stripComments").GetBoolean());
+		Assert.False(selection.GetProperty("stripBlankLines").GetBoolean());
 	}
 
 	[Fact]
@@ -98,7 +99,8 @@ public sealed class ProfileCommandContractTests
 			    "gitMode": "none",
 			    "exclusions": [],
 			    "compressCode": true,
-			    "stripComments": true
+			    "stripComments": true,
+			    "stripBlankLines": true
 			  }
 			}
 			""");
@@ -116,6 +118,7 @@ public sealed class ProfileCommandContractTests
 		Assert.Empty(selection.GetProperty("exclusions").EnumerateArray());
 		Assert.True(selection.GetProperty("compressCode").GetBoolean());
 		Assert.True(selection.GetProperty("stripComments").GetBoolean());
+		Assert.True(selection.GetProperty("stripBlankLines").GetBoolean());
 		Assert.Equal([".cs"], selection.GetProperty("extensions")
 			.EnumerateArray().Select(static value => value.GetString()));
 		Assert.Equal(["src"], selection.GetProperty("selectedPaths")

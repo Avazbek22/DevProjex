@@ -539,9 +539,13 @@ public sealed class CodeCommentStrippingTests
 
 		Assert.False(compressor.IsSupported(path, CodeTransformKinds.Bodies));
 		Assert.True(compressor.IsSupported(path, CodeTransformKinds.Comments));
+		Assert.True(compressor.IsSupported(path, CodeTransformKinds.BlankLines));
 		Assert.True(compressor.IsSupported(
 			path,
 			CodeTransformKinds.Bodies | CodeTransformKinds.Comments));
+		Assert.True(compressor.IsSupported(
+			path,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments | CodeTransformKinds.BlankLines));
 	}
 
 	[Theory]

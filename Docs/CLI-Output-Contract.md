@@ -56,14 +56,15 @@ When Hide Secrets is enabled, analysis adds a top-level `redaction` object with
 `matchedCount`, `redactedCount`, and a non-safety `notice`. Zero means the pinned
 rules matched nothing; it never means that the project is safe.
 
-When code compression or comment removal is enabled, analysis content metrics are
+When code compression, comment removal, or blank-line removal is enabled, analysis content metrics are
 calculated from the transformed text and the document adds a top-level `compression`
 object with `compressedFiles`, `unchangedFiles`, `bodyTransformedFiles`,
-`commentTransformedFiles`, `sourceCharacters`, and `transformedCharacters`.
-`compressedFiles` remains the total number of files changed by either syntax
+`commentTransformedFiles`, `blankLineTransformedFiles`, `sourceCharacters`, and
+`transformedCharacters`.
+`compressedFiles` remains the total number of files changed by any syntax
 transformation. Inventory and source byte size still describe the selected project
 files, not a materialized export container. Machine selection output exposes the
-independent `compressCode` and `stripComments` Booleans.
+independent `compressCode`, `stripComments`, and `stripBlankLines` Booleans.
 
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
@@ -195,10 +196,17 @@ Blank and whitespace-only lines adjacent to removed full-line comments are colla
 one between retained content blocks and to none at document boundaries. Blank lines outside an
 affected comment site remain byte-for-byte unchanged; this option is not a general formatter.
 
-The mode matrix is deterministic: compression alone keeps documentation while shortening
-named implementations; comment removal alone keeps all implementation code without
-comments or docstrings; both produce a bare declaration skeleton. Both syntax edit
-families are merged into one plan, applied once, and validated once. Hide Secrets, when
+With `--strip-blank-lines`, every whitespace-only source line outside a protected multiline
+syntax-tree leaf is deleted. Protected leaves include multiline strings, raw and template
+literals, heredocs, YAML block scalars, and multiline comments when comments remain enabled.
+The rule is grammar-driven and identical for all 20 packs. XML and HTML whitespace inside
+text nodes is character data and remains unchanged. Leading and trailing blank runs are removed,
+while the final newline of the last content line remains. The option does not affect document
+separators or path headers added after per-file transformation.
+
+The complete three-flag mode matrix is deterministic: each of the eight combinations applies
+only the selected edit families. Body, comment, and blank-line edits are merged into one plan,
+applied once, and validated once; outer edits absorb contained edits. Hide Secrets, when
 enabled, runs afterward over those exact transformed bytes. Unsupported files remain
 byte-for-byte complete, and no source file is modified.
 

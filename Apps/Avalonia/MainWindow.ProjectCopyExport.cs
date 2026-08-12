@@ -113,6 +113,7 @@ public partial class MainWindow
 			RedactSecrets: CreateSecretRedactionContext() is not null,
 			CompressCode: _appliedCompressCodeEnabled,
 			StripComments: _appliedStripCommentsEnabled,
+			StripBlankLines: _appliedStripBlankLinesEnabled,
 			NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(_localization));
         var cancellation = new CancellationTokenSource();
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

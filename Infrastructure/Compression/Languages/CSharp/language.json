@@ -8,6 +8,7 @@
   "library": "tree-sitter-c-sharp",
   "export": "tree_sitter_c_sharp",
   "queryVersion": 9,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
   "blockPlaceholder": "{ }",
   "expressionBodyStyle": "declaration",
   "containerNodeTypes": [

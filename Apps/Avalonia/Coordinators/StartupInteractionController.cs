@@ -50,11 +50,13 @@ internal sealed class StartupInteractionController(
 		var hideSecretsMode = applicationIntent?.HideSecrets ?? ResolveLegacyMode(selectionSpec.HideSecrets);
 		var compressCodeMode = applicationIntent?.CompressCode ?? ResolveLegacyMode(selectionSpec.CompressCode);
 		var stripCommentsMode = applicationIntent?.StripComments ?? ResolveLegacyMode(selectionSpec.StripComments);
+		var stripBlankLinesMode = applicationIntent?.StripBlankLines ?? ResolveLegacyMode(selectionSpec.StripBlankLines);
 		var applyGitMode = gitMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyExclusions = exclusionMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyHideSecrets = hideSecretsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyCompressCode = compressCodeMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyStripComments = stripCommentsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+		var applyStripBlankLines = stripBlankLinesMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
         var selectedExtensions = extensionMode != ProjectSelectionApplicationMode.ApplyResolvedValue ||
 		                         selectionSpec.Extensions is null
             ? null
@@ -79,7 +81,8 @@ internal sealed class StartupInteractionController(
 					Exclusions = applyExclusions ? selectionSpec.Exclusions : null,
 					HideSecrets = null,
 					CompressCode = null,
-					StripComments = null
+					StripComments = null,
+					StripBlankLines = null
 				},
                 inheritedIgnoreOptions);
         }
@@ -97,6 +100,8 @@ internal sealed class StartupInteractionController(
 			selection.ApplyCompressCodeOverride(selectionSpec.CompressCode);
 		if (applyStripComments)
 			selection.ApplyStripCommentsOverride(selectionSpec.StripComments);
+		if (applyStripBlankLines)
+			selection.ApplyStripBlankLinesOverride(selectionSpec.StripBlankLines);
 
 		if (pathSelectionChanged)
 		{
