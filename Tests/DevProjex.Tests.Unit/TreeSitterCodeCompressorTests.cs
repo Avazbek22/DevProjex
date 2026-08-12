@@ -710,6 +710,109 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
+	public void TrustedPlanFactory_MatchesDefensiveFactoryAcrossSeededEditSets()
+	{
+		const int sourceLength = 4096;
+		var source = new string('x', sourceLength);
+		var random = new Random(0x5EED);
+		for (var iteration = 0; iteration < 128; iteration++)
+		{
+			var edits = new List<CodeCompressionEdit>();
+			var cursor = random.Next(0, 8);
+			var count = random.Next(0, 96);
+			for (var index = 0; index < count && cursor < sourceLength - 16; index++)
+			{
+				cursor += random.Next(0, 8);
+				var length = random.Next(2, 16);
+				var replacementLength = random.Next(0, length);
+				var kinds = (CodeTransformKinds)random.Next(1, 8);
+				edits.Add(new CodeCompressionEdit(cursor, length, new string('y', replacementLength))
+				{
+					Kinds = kinds
+				});
+				cursor += length;
+			}
+
+			var trusted = TreeSitterCompressionScope.CreatePlanFromOrderedValidatedEdits(
+				"sample.cs",
+				"csharp",
+				[.. edits],
+				sourceLength,
+				"test-v1",
+				TestContext.Current.CancellationToken);
+			var defensive = CodeCompressionPlan.CreateForAnalysis(
+				"sample.cs",
+				"csharp",
+				edits.AsEnumerable().Reverse().ToArray(),
+				sourceLength,
+				"test-v1",
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(defensive.Outcome, trusted.Outcome);
+			Assert.Equal(defensive.TransformedLength, trusted.TransformedLength);
+			Assert.Equal(defensive.Edits, trusted.Edits);
+			Assert.Equal(defensive.AffectedKinds, trusted.AffectedKinds);
+			Assert.Equal(defensive.Apply(source).Text, trusted.Apply(source).Text);
+		}
+	}
+
+	[Fact]
+	public void TrustedPlanFactory_RejectsBrokenOrderingOverlapAndBounds()
+	{
+		Assert.Throws<ArgumentException>(() => CreateTrustedPlan(
+			[new CodeCompressionEdit(10, 2, ""), new CodeCompressionEdit(2, 2, "")]));
+		Assert.Throws<ArgumentException>(() => CreateTrustedPlan(
+			[new CodeCompressionEdit(2, 4, ""), new CodeCompressionEdit(4, 3, "")]));
+		Assert.Throws<ArgumentOutOfRangeException>(() => CreateTrustedPlan(
+			[new CodeCompressionEdit(15, 2, "")]));
+
+		return;
+
+		static CodeCompressionPlan CreateTrustedPlan(List<CodeCompressionEdit> edits) =>
+			TreeSitterCompressionScope.CreatePlanFromOrderedValidatedEdits(
+				"sample.cs",
+				"csharp",
+				edits,
+				sourceLength: 16,
+				"test-v1",
+				CancellationToken.None);
+	}
+
+	[Fact]
+	public void ProtectedLeafNormalization_UsesLinearPathAndFallsBackWhenNeeded()
+	{
+		var empty = Array.Empty<TreeSitterCompressionScope.SourceRange>();
+		var single = new List<TreeSitterCompressionScope.SourceRange> { new(2, 4) };
+		var ordered = new List<TreeSitterCompressionScope.SourceRange>
+		{
+			new(0, 3),
+			new(3, 8),
+			new(12, 16)
+		};
+		var unordered = new List<TreeSitterCompressionScope.SourceRange>
+		{
+			new(10, 14),
+			new(0, 4),
+			new(3, 8)
+		};
+
+		Assert.Same(empty, TreeSitterCompressionScope.NormalizeProtectedMultilineLeaves(
+			empty,
+			CancellationToken.None));
+		Assert.Same(single, TreeSitterCompressionScope.NormalizeProtectedMultilineLeaves(
+			single,
+			CancellationToken.None));
+		Assert.Same(ordered, TreeSitterCompressionScope.NormalizeProtectedMultilineLeaves(
+			ordered,
+			CancellationToken.None));
+		Assert.Equal(
+			[new TreeSitterCompressionScope.SourceRange(0, 8), new(10, 14)],
+			TreeSitterCompressionScope.NormalizeProtectedMultilineLeaves(
+				unordered,
+				CancellationToken.None));
+	}
+
+	[Fact]
 	public void GeneratedFileBeyondEditBudget_IsReturnedUnchangedWithinBoundedTime()
 	{
 		var source = new StringBuilder("class Generated {\n");

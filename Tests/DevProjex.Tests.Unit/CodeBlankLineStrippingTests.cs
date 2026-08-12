@@ -1,4 +1,5 @@
 using DevProjex.Application.Compression;
+using DevProjex.Infrastructure.Compression;
 
 namespace DevProjex.Tests.Unit;
 
@@ -34,6 +35,52 @@ public sealed class CodeBlankLineStrippingTests
 		var result = Transform("sample.js", source, CodeTransformKinds.BlankLines);
 
 		Assert.Equal(expected, result.Text);
+	}
+
+	[Theory]
+	[InlineData("\u00A0")]
+	[InlineData("\u3000")]
+	public void UnicodeWhitespaceOnlyLines_RemainBlank(string whitespace)
+	{
+		var result = Transform(
+			"sample.js",
+			$"const first = 1;\n{whitespace}\nconst second = 2;\n",
+			CodeTransformKinds.BlankLines);
+
+		Assert.Equal("const first = 1;\nconst second = 2;\n", result.Text);
+	}
+
+	[Fact]
+	public void MixedLineEndings_AreRemovedWithoutChangingContentLineEndings()
+	{
+		const string source = "first();\r\n\rsecond();\n\r\nthird();\r";
+
+		var result = Transform("sample.js", source, CodeTransformKinds.BlankLines);
+
+		Assert.Equal("first();\r\nsecond();\nthird();\r", result.Text);
+	}
+
+	[Fact]
+	public void MultiMillionCharacterLine_CompletesAndObservesCancellation()
+	{
+		var source = new string('x', 3_000_001);
+		var edits = new List<TreeSitterCompressionScope.RawCompressionEdit>();
+
+		Assert.True(TreeSitterCompressionScope.TryAppendBlankLineEdits(
+			source,
+			[],
+			edits,
+			CancellationToken.None));
+		Assert.Empty(edits);
+
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+		Assert.ThrowsAny<OperationCanceledException>(() =>
+			TreeSitterCompressionScope.TryAppendBlankLineEdits(
+				source,
+				[],
+				[],
+				cancellation.Token));
 	}
 
 	[Theory]
@@ -290,6 +337,51 @@ public sealed class CodeBlankLineStrippingTests
 		Assert.Equal(1, session.Snapshot.BlankLineTransformedFiles);
 	}
 
+	[Theory]
+	[MemberData(nameof(ActiveModeCases))]
+	public void TrustedPlanPath_MatchesDefensivePlanForEveryActiveMode(
+		CodeTransformKinds kinds)
+	{
+		const string source =
+			"// remove\r\n" +
+			"internal static class Sample\r\n" +
+			"{\r\n" +
+			"\r\n" +
+			"    internal static void Run()\r\n" +
+			"    {\r\n" +
+			"\r\n" +
+			"        Call();\r\n" +
+			"\r\n" +
+			"    }\r\n" +
+			"}\r\n";
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var scope = compressor.CreateScope(Path.GetTempPath(), kinds);
+
+		var trusted = scope.Analyze(
+			"Sample.cs",
+			"Sample.cs",
+			source,
+			TestContext.Current.CancellationToken).Plan;
+		var defensive = CodeCompressionPlan.CreateForAnalysis(
+			trusted.RelativePath,
+			trusted.LanguageId,
+			trusted.Edits.Reverse().ToArray(),
+			trusted.SourceLength,
+			trusted.TransformIdentity,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(defensive.Outcome, trusted.Outcome);
+		Assert.Equal(defensive.TransformedLength, trusted.TransformedLength);
+		Assert.Equal(defensive.Edits, trusted.Edits);
+		Assert.Equal(defensive.AffectedKinds, trusted.AffectedKinds);
+		Assert.Equal(
+			trusted.Edits.Aggregate(
+				CodeTransformKinds.None,
+				static (affected, edit) => affected | edit.Kinds),
+			trusted.AffectedKinds);
+		Assert.Equal(defensive.Apply(source).Text, trusted.Apply(source).Text);
+	}
+
 	private const string ModeMatrixSource =
 		"// note\n" +
 		"class Sample\n" +
@@ -311,6 +403,17 @@ public sealed class CodeBlankLineStrippingTests
 		CodeTransformKinds.Comments | CodeTransformKinds.BlankLines,
 		CodeTransformKinds.Bodies | CodeTransformKinds.Comments | CodeTransformKinds.BlankLines
 	];
+
+	public static TheoryData<CodeTransformKinds> ActiveModeCases => new()
+	{
+		CodeTransformKinds.Bodies,
+		CodeTransformKinds.Comments,
+		CodeTransformKinds.BlankLines,
+		CodeTransformKinds.Bodies | CodeTransformKinds.Comments,
+		CodeTransformKinds.Bodies | CodeTransformKinds.BlankLines,
+		CodeTransformKinds.Comments | CodeTransformKinds.BlankLines,
+		CodeTransformKinds.Bodies | CodeTransformKinds.Comments | CodeTransformKinds.BlankLines
+	};
 
 	public static TheoryData<CodeTransformKinds, string> ModeMatrixCases => new()
 	{

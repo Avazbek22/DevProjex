@@ -68,11 +68,30 @@ public static class CodeStructureGate
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		var orderedEdits = edits.Count <= 1
+		var orderedEdits = IsOrderedBySourceStart(edits, cancellationToken)
 			? edits
 			: edits.OrderBy(static edit => edit.SourceStart).ToArray();
 		cancellationToken.ThrowIfCancellationRequested();
+		return EvaluateOrdered(
+			originalDeclarations,
+			compressedDeclarations,
+			originalDefects,
+			compressedDefects,
+			orderedEdits,
+			executableOwnerKinds,
+			cancellationToken);
+	}
 
+	internal static CodeStructureGateVerdict EvaluateOrdered(
+		IReadOnlyList<CodeDeclaration> originalDeclarations,
+		IReadOnlyList<CodeDeclaration> compressedDeclarations,
+		IReadOnlyList<CodeParseDefect> originalDefects,
+		IReadOnlyList<CodeParseDefect> compressedDefects,
+		IReadOnlyList<CodeCompressionEdit> orderedEdits,
+		IReadOnlySet<string> executableOwnerKinds,
+		CancellationToken cancellationToken = default)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
 		// An edit that only partially overlaps a declaration means the query captured something
 		// that is not a leaf body. Splicing it would cut a declaration in half.
 		for (var declarationIndex = 0; declarationIndex < originalDeclarations.Count; declarationIndex++)
@@ -209,6 +228,19 @@ public static class CodeStructureGate
 
 		cancellationToken.ThrowIfCancellationRequested();
 		return CodeStructureGateVerdict.Accepted;
+	}
+
+	private static bool IsOrderedBySourceStart(
+		IReadOnlyList<CodeCompressionEdit> edits,
+		CancellationToken cancellationToken)
+	{
+		for (var index = 1; index < edits.Count; index++)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
+			if (edits[index].SourceStart < edits[index - 1].SourceStart)
+				return false;
+		}
+		return true;
 	}
 
 	/// <summary>
