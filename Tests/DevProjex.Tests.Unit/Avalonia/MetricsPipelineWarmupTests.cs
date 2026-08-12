@@ -125,7 +125,10 @@ public sealed class MetricsPipelineWarmupTests
 			currentTree,
 			visualReady.Task,
 			TestContext.Current.CancellationToken);
-		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			retainReadFactsForNextMetricsPass: true);
 
 		Assert.Equal(1, compressor.AnalysisCount);
 		Assert.Contains(observedProgressValues, static value => value == 100);
@@ -265,6 +268,7 @@ public sealed class MetricsPipelineWarmupTests
 			[MemoryCleanupReason.ApplySettingsWorkCompleted],
 			scheduled);
 		Assert.False(viewModel.StatusBusy);
+		Assert.Equal(0, pipeline.RetainedReadFactBytes);
 	}
 
 	[AvaloniaFact]
@@ -327,6 +331,7 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Equal(
 			[MemoryCleanupReason.ApplySettingsWorkCompleted],
 			scheduled);
+		Assert.Equal(0, pipeline.RetainedReadFactBytes);
 	}
 
 	[AvaloniaFact]
@@ -345,6 +350,11 @@ public sealed class MetricsPipelineWarmupTests
 		var viewModel = CreateViewModel();
 		var analyzer = new CountingFileContentAnalyzer(new FileContentAnalyzer());
 		var scheduled = new List<MemoryCleanupReason>();
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		ContentTransformationContext? transformation = ContentTransformationContext.For(
+			new CodeCompressionContext(temp.Path, compressionSession),
+			redaction: null);
 		var status = new StatusOperationCoordinator(
 			viewModel,
 			isBackgroundMetricsActive: () => false,
@@ -362,7 +372,15 @@ public sealed class MetricsPipelineWarmupTests
 			exportPathPresentationProvider: () => null,
 			boundsWidthProvider: () => 1400,
 			scheduleMemoryCleanup: scheduled.Add,
-			transformationContextProvider: static () => null);
+			transformationContextProvider: () => transformation);
+
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			retainReadFactsForNextMetricsPass: true);
+		Assert.True(pipeline.RetainedReadFactBytes > 0);
+		var readsBeforeDisable = analyzer.GetClassifiedReadCallCount(textFile);
+		transformation = null;
 
 		await pipeline.PrewarmCompressionAsync(
 			currentTree,
@@ -372,8 +390,9 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Equal(
 			[MemoryCleanupReason.ApplySettingsWorkCompleted],
 			scheduled);
-		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.Equal(readsBeforeDisable, analyzer.GetClassifiedReadCallCount(textFile));
 		Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
+		Assert.Equal(0, pipeline.RetainedReadFactBytes);
 	}
 
 	[AvaloniaFact]
@@ -418,8 +437,12 @@ public sealed class MetricsPipelineWarmupTests
 			boundsWidthProvider: () => 1400,
 			transformationContextProvider: () => transformation);
 
-		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			retainReadFactsForNextMetricsPass: true);
 		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
+		Assert.True(pipeline.RetainedReadFactBytes > 0);
 
 		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
 			currentTree,
@@ -428,6 +451,55 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
 		Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
 		Assert.True(pipeline.HasCompleteBaseline);
+		Assert.Equal(0, pipeline.RetainedReadFactBytes);
+	}
+
+	[AvaloniaFact]
+	public async Task PostLoadReadFacts_UserCancellationBeforeMetrics_ReleasesSnapshot()
+	{
+		using var temp = new TemporaryDirectory();
+		var textFile = temp.CreateFile("Program.cs", "internal class Program { void Run() { } }");
+		var treeRoot = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Program.cs", textFile, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(treeRoot, false, false, [textFile]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var compressor = new CountingCodeCompressor();
+		using var compressionSession = new CodeCompressionSession(compressor);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			new FileContentAnalyzer(),
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			transformationContextProvider: () => ContentTransformationContext.For(
+				new CodeCompressionContext(temp.Path, compressionSession),
+				redaction: null));
+
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			retainReadFactsForNextMetricsPass: true);
+		Assert.True(pipeline.RetainedReadFactBytes > 0);
+
+		pipeline.CancelByUser();
+
+		Assert.Equal(0, pipeline.RetainedReadFactBytes);
 	}
 
 	[AvaloniaFact]
@@ -473,7 +545,10 @@ public sealed class MetricsPipelineWarmupTests
 			boundsWidthProvider: () => 1400,
 			transformationContextProvider: () => transformation);
 
-		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			retainReadFactsForNextMetricsPass: true);
 		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
 
 		const string changedSource =
@@ -499,6 +574,7 @@ public sealed class MetricsPipelineWarmupTests
 			new PreviewSelectionRange(1, 0, 1, 1),
 			out var actualMetrics));
 		Assert.Equal(expectedMetrics, actualMetrics);
+		Assert.Equal(0, pipeline.RetainedReadFactBytes);
 	}
 
 	[AvaloniaFact]
@@ -543,7 +619,10 @@ public sealed class MetricsPipelineWarmupTests
 			boundsWidthProvider: () => 1400,
 			transformationContextProvider: () => transformation);
 
-		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			retainReadFactsForNextMetricsPass: true);
 		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
 		File.Delete(textFile);
 
@@ -554,6 +633,7 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Equal(2, analyzer.GetClassifiedReadCallCount(textFile));
 		Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
 		Assert.True(pipeline.HasCompleteBaseline);
+		Assert.Equal(0, pipeline.RetainedReadFactBytes);
 	}
 
 	[AvaloniaFact]
@@ -598,7 +678,10 @@ public sealed class MetricsPipelineWarmupTests
 			boundsWidthProvider: () => 1400,
 			transformationContextProvider: () => transformation);
 
-		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			retainReadFactsForNextMetricsPass: true);
 		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
 		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
 		Assert.Equal(
@@ -612,6 +695,7 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
 		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
 		Assert.True(pipeline.HasCompleteBaseline);
+		Assert.Equal(0, pipeline.RetainedReadFactBytes);
 	}
 
 	[AvaloniaFact]
@@ -659,7 +743,10 @@ public sealed class MetricsPipelineWarmupTests
 			boundsWidthProvider: () => 1400,
 			transformationContextProvider: () => transformation);
 
-		await pipeline.PrewarmCompressionAsync(currentTree, TestContext.Current.CancellationToken);
+		await pipeline.PrewarmCompressionAsync(
+			currentTree,
+			TestContext.Current.CancellationToken,
+			retainReadFactsForNextMetricsPass: true);
 		Assert.Equal(0, analyzer.GetClassifiedReadCallCount(textFile));
 		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
 
@@ -676,6 +763,7 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Equal(1, analyzer.GetClassifiedReadCallCount(textFile));
 		Assert.Equal(1, analyzer.GetMetricsCallCount(textFile));
 		Assert.True(pipeline.HasCompleteBaseline);
+		Assert.Equal(0, pipeline.RetainedReadFactBytes);
 	}
 
 	[AvaloniaFact]

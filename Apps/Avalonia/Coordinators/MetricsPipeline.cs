@@ -129,19 +129,29 @@ internal sealed class MetricsPipeline(
 
     public bool HasStatusMetricsSnapshot => _hasStatusMetricsSnapshot;
 
+	internal long RetainedReadFactBytes =>
+		Volatile.Read(ref _postLoadReadFacts)?.RetainedBytes ?? 0;
+
     public void CancelCompressionPrewarm()
     {
         _compressionPrewarmCts?.Cancel();
-		Volatile.Write(ref _postLoadReadFacts, null);
+		ReleasePostLoadReadFacts();
     }
+
+	internal void ReleasePostLoadReadFacts() =>
+		Interlocked.Exchange(ref _postLoadReadFacts, null);
 
     public Task PrewarmCompressionAsync(
         BuildTreeResult currentTree,
         CancellationToken cancellationToken,
         StatusOperationPresentation presentation =
             StatusOperationPresentation.ExtendedDelay,
-        MemoryCleanupReason? cleanupAfterCompletion = null)
+        MemoryCleanupReason? cleanupAfterCompletion = null,
+        bool retainReadFactsForNextMetricsPass = false)
     {
+		// Only the explicitly sequenced post-load path guarantees a following metrics consumer.
+		// Standalone refreshes release their decoded content when prewarm completes.
+		ReleasePostLoadReadFacts();
         var compression = transformationContextProvider?.Invoke()?.Compression;
         if (compression is null)
         {
@@ -196,7 +206,8 @@ internal sealed class MetricsPipeline(
             cancellationToken,
             statusOperationId,
             progress,
-            cleanupAfterCompletion);
+            cleanupAfterCompletion,
+            retainReadFactsForNextMetricsPass);
     }
 
     public void ScheduleRecalculate()
@@ -360,6 +371,7 @@ internal sealed class MetricsPipeline(
         _metricsCalculationCts?.Cancel();
         _recalculateMetricsCts?.Cancel();
         _compressionPrewarmCts?.Cancel();
+		ReleasePostLoadReadFacts();
     }
 
     public void CancelAndDiscardBackgroundCalculation()
@@ -576,6 +588,7 @@ internal sealed class MetricsPipeline(
         CancelAndDispose(ref _metricsCalculationCts);
         CancelAndDispose(ref _recalculateMetricsCts);
         CancelAndDispose(ref _compressionPrewarmCts);
+		ReleasePostLoadReadFacts();
 
         if (_metricsDebounceTimer is not null)
         {
@@ -592,7 +605,8 @@ internal sealed class MetricsPipeline(
         CancellationToken cancellationToken,
         long statusOperationId,
         IProgress<CodeCompressionWarmupProgress> progress,
-        MemoryCleanupReason? cleanupAfterCompletion)
+        MemoryCleanupReason? cleanupAfterCompletion,
+        bool retainReadFactsForNextMetricsPass)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             prewarmCts.Token,
@@ -624,7 +638,11 @@ internal sealed class MetricsPipeline(
                     Volatile.Read(ref _compressionPrewarmCts),
                     prewarmCts))
             {
-				Volatile.Write(ref _postLoadReadFacts, warmupResult?.ReadFacts);
+				Volatile.Write(
+					ref _postLoadReadFacts,
+					completed && retainReadFactsForNextMetricsPass
+						? warmupResult?.ReadFacts
+						: null);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     var snapshot = compression.Session.Snapshot;

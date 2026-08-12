@@ -143,6 +143,16 @@ public sealed class TreeSitterCodeCompressor :
 			diagnostics.GlobalRetainedWorkerCapacity);
 	}
 
+	public void ReleaseIdleAnalysisWorkers()
+	{
+		LanguageWorkerPool[] pools;
+		lock (_lifetimeSync)
+			pools = _languagePools.Values.ToArray();
+
+		foreach (var pool in pools)
+			pool.ReleaseIdleWorkers();
+	}
+
 	internal IReadOnlyList<CompressionLanguagePack> Packs => _packs;
 
 	internal CodeCompressionRuntimeDiagnostics RuntimeDiagnostics
@@ -2956,8 +2966,8 @@ internal readonly record struct CodeCompressionRuntimeDiagnostics(
 	int GlobalRetainedWorkerCapacity);
 
 /// <summary>
-/// Bounded process-lifetime parser pool. Grammar verification and materialization happen once;
-/// native parser state is never entered concurrently.
+/// Bounded parser pool. Grammar verification and immutable query runtime materialization happen
+/// once; idle native parser workers may be released between preparation passes.
 /// </summary>
 internal sealed class LanguageWorkerPool : IDisposable
 {
@@ -3010,6 +3020,27 @@ internal sealed class LanguageWorkerPool : IDisposable
 					_leasedWorkers);
 			}
 		}
+	}
+
+	internal void ReleaseIdleWorkers()
+	{
+		List<LoadedLanguage>? workers = null;
+		lock (_sync)
+		{
+			while (_available.TryTake(out var worker))
+			{
+				workers ??= [];
+				workers.Add(worker);
+			}
+			_materializedWorkers -= workers?.Count ?? 0;
+		}
+
+		if (workers is null)
+			return;
+
+		foreach (var worker in workers)
+			worker.Dispose();
+		_workerBudget.ReleaseRetained(workers.Count);
 	}
 
 	public LanguageWorkerLease Rent(CancellationToken cancellationToken) =>

@@ -1079,7 +1079,10 @@ public partial class MainWindow
                   !_workspacePresentation.IsTreePaneAnimating &&
                   !_searchFilterController.IsAnimating &&
                   !_previewWorkspaceController.IsModeSwitchInProgress,
-            SettingsPanelAnimationDuration);
+            SettingsPanelAnimationDuration,
+            () => new MemoryCleanupRetentionSnapshot(
+                _codeCompressionSession.Diagnostics.RetainedCacheBytes,
+                _metrics.RetainedReadFactBytes));
         _treeViewport = new TreeViewportController(
             _viewModel,
             new TreeViewportControls(

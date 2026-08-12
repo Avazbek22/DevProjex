@@ -156,6 +156,36 @@ public sealed class MemoryCleanupPolicyTests
             plan.CollectionMode);
     }
 
+    [Fact]
+    public void CreateDeferredPlan_EveryReasonHasAnExplicitEscalationPolicy()
+    {
+        var expected = new Dictionary<MemoryCleanupReason, MemoryCleanupEscalationMode>
+        {
+            [MemoryCleanupReason.InitialProjectLoad] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.ProjectSwitchPostLoad] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.RefreshProject] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.GitPullUpdate] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.GitBranchSwitch] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.SearchClose] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.FilterClose] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.PreviewClose] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.PreviewRebuildCompleted] = MemoryCleanupEscalationMode.Compacting,
+            [MemoryCleanupReason.SelectionProjectionNarrowed] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.TreeCollapseCompleted] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.FilterApplied] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.ApplySettingsWorkCompleted] = MemoryCleanupEscalationMode.Compacting
+        };
+        var reasons = Enum.GetValues<MemoryCleanupReason>();
+
+        Assert.Equal(reasons.Length, expected.Count);
+        foreach (var reason in reasons)
+        {
+            Assert.Equal(
+                expected[reason],
+                CreatePlan(reason).EscalationMode);
+        }
+    }
+
     [Theory]
     [InlineData(127, 100, false)]
     [InlineData(128, 31, false)]

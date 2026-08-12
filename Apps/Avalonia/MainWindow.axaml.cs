@@ -1493,18 +1493,43 @@ public partial class MainWindow : Window
         // and metrics phases must continue that feedback immediately once the reveal gate opens.
         // Interactive option changes keep the delayed presentation to avoid flashing on fast work.
         ObserveDetachedTask(
-            PostLoadBackgroundWorkSequencer.RunAsync(
+            RunPostLoadBackgroundWorkAsync(
                 postLoadVisualReadyTask,
+                currentTree,
+                statusPresentation,
+                initializeMetricsAsync,
+                cleanupAfterCompletion,
+                cancellationToken),
+            "RunPostLoadBackgroundWork");
+    }
+
+    private async Task RunPostLoadBackgroundWorkAsync(
+        Task visualReadyTask,
+        BuildTreeResult currentTree,
+        StatusOperationPresentation statusPresentation,
+        Func<CancellationToken, Task> initializeMetricsAsync,
+        MemoryCleanupReason? cleanupAfterCompletion,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await PostLoadBackgroundWorkSequencer.RunAsync(
+                visualReadyTask,
                 token => _metrics.PrewarmCompressionAsync(
                     currentTree,
                     token,
-                    statusPresentation),
+                    statusPresentation,
+                    retainReadFactsForNextMetricsPass: true),
                 initializeMetricsAsync,
 				() => ScheduleSecretRedactionCountRefresh(statusPresentation),
                 cleanupAfterCompletion,
                 ScheduleBackgroundMemoryCleanup,
-                cancellationToken),
-            "RunPostLoadBackgroundWork");
+                cancellationToken);
+        }
+        finally
+        {
+            _metrics.ReleasePostLoadReadFacts();
+        }
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
