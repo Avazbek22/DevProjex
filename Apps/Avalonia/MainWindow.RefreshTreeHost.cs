@@ -89,6 +89,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
         TreeNodeViewModel root,
         bool interactiveFilter,
         bool usedInMemoryFilter,
+        MemoryCleanupReason? postLoadCleanupReason,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -165,7 +166,10 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
         if (!interactiveFilter)
         {
-            StartPostLoadBackgroundWork(result.Tree, cancellationToken);
+            StartPostLoadBackgroundWork(
+                result.Tree,
+                cancellationToken,
+                postLoadCleanupReason);
         }
         else
         {

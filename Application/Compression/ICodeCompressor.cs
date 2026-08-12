@@ -62,6 +62,14 @@ public interface ICodeCompressionRuntimeDiagnosticsProvider
 	int AnalysisWorkerCapacity { get; }
 
 	CodeCompressionRuntimeDiagnosticSnapshot CaptureRuntimeDiagnostics();
+
+	/// <summary>
+	/// Releases idle parser workers after a bounded preparation pass. Immutable language/query
+	/// runtimes remain available; implementations without retained native workers need no action.
+	/// </summary>
+	void ReleaseIdleAnalysisWorkers()
+	{
+	}
 }
 
 public readonly record struct CodeCompressionRuntimeDiagnosticSnapshot(

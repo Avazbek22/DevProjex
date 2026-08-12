@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
@@ -57,6 +58,8 @@ public sealed class PostLoadBackgroundWorkSequencerTests
                 sequence.Enqueue("metrics-end");
             },
             () => sequence.Enqueue("secrets"),
+            cleanupAfterCompletion: null,
+            scheduleMemoryCleanup: null,
             TestContext.Current.CancellationToken);
 
         await Task.Delay(25, TestContext.Current.CancellationToken);
@@ -100,6 +103,8 @@ public sealed class PostLoadBackgroundWorkSequencerTests
                 return Task.CompletedTask;
             },
             () => Interlocked.Increment(ref phaseCount),
+            cleanupAfterCompletion: null,
+            scheduleMemoryCleanup: null,
             cancellation.Token);
 
         cancellation.Cancel();
@@ -115,6 +120,7 @@ public sealed class PostLoadBackgroundWorkSequencerTests
         var compressionStarted = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var laterPhaseCount = 0;
+        var cleanupCount = 0;
 
         var runTask = PostLoadBackgroundWorkSequencer.RunAsync(
             Task.CompletedTask,
@@ -129,6 +135,8 @@ public sealed class PostLoadBackgroundWorkSequencerTests
                 return Task.CompletedTask;
             },
             () => Interlocked.Increment(ref laterPhaseCount),
+            MemoryCleanupReason.ApplySettingsWorkCompleted,
+            _ => Interlocked.Increment(ref cleanupCount),
             cancellation.Token);
 
         await compressionStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
@@ -136,6 +144,56 @@ public sealed class PostLoadBackgroundWorkSequencerTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await runTask);
         Assert.Equal(0, Volatile.Read(ref laterPhaseCount));
+        Assert.Equal(0, Volatile.Read(ref cleanupCount));
+    }
+
+    [Fact]
+    public async Task RunAsync_SettingsApplySchedulesCleanupAfterEveryPhaseCompletes()
+    {
+        var sequence = new List<string>();
+
+        await PostLoadBackgroundWorkSequencer.RunAsync(
+            Task.CompletedTask,
+            _ =>
+            {
+                sequence.Add("compression");
+                return Task.CompletedTask;
+            },
+            _ =>
+            {
+                sequence.Add("metrics");
+                return Task.CompletedTask;
+            },
+            () => sequence.Add("secrets"),
+            MemoryCleanupReason.ApplySettingsWorkCompleted,
+            reason => sequence.Add($"cleanup:{reason}"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [
+                "compression",
+                "metrics",
+                "secrets",
+                $"cleanup:{MemoryCleanupReason.ApplySettingsWorkCompleted}"
+            ],
+            sequence);
+    }
+
+    [Fact]
+    public async Task RunAsync_ProjectLifecycleWithoutApplyReasonSchedulesNoApplyCleanup()
+    {
+        var scheduled = new List<MemoryCleanupReason>();
+
+        await PostLoadBackgroundWorkSequencer.RunAsync(
+            Task.CompletedTask,
+            _ => Task.CompletedTask,
+            _ => Task.CompletedTask,
+            static () => { },
+            cleanupAfterCompletion: null,
+            scheduled.Add,
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(scheduled);
     }
 
     private static async Task WaitForAsync(Func<bool> condition)

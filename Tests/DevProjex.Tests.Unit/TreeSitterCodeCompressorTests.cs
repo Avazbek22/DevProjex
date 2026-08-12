@@ -1156,6 +1156,48 @@ public sealed class TreeSitterCodeCompressorTests
 	}
 
 	[Fact]
+	public async Task PrewarmCompletion_ReleasesIdleWorkersAndNextPrewarmRematerializesThem()
+	{
+		using var temp = new TemporaryDirectory();
+		var firstPath = temp.CreateFile("First.cs", CodeCompressionFixtures.CSharp);
+		var secondPath = temp.CreateFile("Second.cs", CodeCompressionFixtures.CSharp);
+		using var harness = CodeCompressionTestHarness.For("csharp");
+		var locator = new CountingGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());
+		using var compressor = new TreeSitterCodeCompressor(locator, [harness.Pack]);
+		using var session = new CodeCompressionSession(compressor);
+		var context = new CodeCompressionContext(temp.Path, session);
+		var prewarmer = new CodeCompressionPrewarmer(new FileContentAnalyzer());
+
+		var first = await prewarmer.WarmAsync(
+			context,
+			[firstPath],
+			TestContext.Current.CancellationToken);
+		var afterFirst = compressor.RuntimeDiagnostics;
+
+		Assert.Equal(1, first.WarmedFiles);
+		Assert.Equal(1, afterFirst.CompiledQuerySets);
+		Assert.Equal(0, afterFirst.MaterializedWorkers);
+		Assert.Equal(0, afterFirst.AvailableWorkers);
+		Assert.Equal(0, afterFirst.LeasedWorkers);
+		Assert.Equal(0, afterFirst.GlobalRetainedWorkers);
+
+		var second = await prewarmer.WarmAsync(
+			context,
+			[secondPath],
+			TestContext.Current.CancellationToken);
+		var afterSecond = compressor.RuntimeDiagnostics;
+
+		Assert.Equal(1, second.WarmedFiles);
+		Assert.Equal(1, locator.ResolveCount);
+		Assert.Equal(1, afterSecond.CompiledQuerySets);
+		Assert.Equal(0, afterSecond.MaterializedWorkers);
+		Assert.Equal(0, afterSecond.AvailableWorkers);
+		Assert.Equal(0, afterSecond.LeasedWorkers);
+		Assert.Equal(0, afterSecond.GlobalRetainedWorkers);
+		Assert.Equal(2, session.Diagnostics.PrewarmAnalyses);
+	}
+
+	[Fact]
 	public void FullLanguageCatalogLoadsOnlyTheGrammarUsedByTheProject()
 	{
 		var locator = new CountingGrammarLibraryLocator(CodeCompressionTestHarness.CreateLocator());

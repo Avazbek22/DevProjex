@@ -120,6 +120,61 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void AcceptHideSecretsOnlyChange_PreservesTreeDependentGitReadiness()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => projectPath);
+		var snapshot = WithGitMode(
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets),
+			useGitIgnore: false,
+			trackedOnly: true);
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: true,
+			discoveredGitTrackedPathIndexes:
+			[
+				new GitTrackedPathIndex(projectPath, []),
+				GitTrackedPathIndex.Unavailable(@"C:\Project\nested")
+			]);
+
+		ApplySelectionRefreshSnapshot(coordinator, snapshot);
+		HookAllOptionListeners(coordinator, viewModel);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath, inventory);
+		var appliedGitReadiness = coordinator.AppliedGitReadiness;
+
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+		Assert.True(coordinator.TryAcceptHideSecretsOnlyChangeAsApplied(projectPath));
+
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+		Assert.Same(appliedGitReadiness, coordinator.AppliedGitReadiness);
+		Assert.False(coordinator.TryAcceptHideSecretsOnlyChangeAsApplied(projectPath));
+	}
+
+	[Fact]
+	public void AcceptHideSecretsOnlyChange_RejectsAdditionalTransformationChange()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => projectPath);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
+		HookAllOptionListeners(coordinator, viewModel);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		Assert.True(coordinator.ApplyCompressCodeOverride(false));
+
+		Assert.False(coordinator.TryAcceptHideSecretsOnlyChangeAsApplied(projectPath));
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+	}
+
+	[Fact]
 	public void PendingApplyState_IgnoresMasterCheckboxChangesWithoutAnEffectiveSelectionChange()
 	{
 		const string projectPath = @"C:\Project";

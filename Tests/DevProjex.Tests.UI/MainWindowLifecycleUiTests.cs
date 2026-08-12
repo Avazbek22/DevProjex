@@ -113,7 +113,6 @@ public sealed class MainWindowLifecycleUiTests
 				"optional font catalog to load at application idle");
 
 			Assert.Equal(FontFamily.Default, viewModel.SelectedFontFamily);
-			Assert.Equal(FontFamily.Default, viewModel.PendingFontFamily);
 		}
 		finally
 		{

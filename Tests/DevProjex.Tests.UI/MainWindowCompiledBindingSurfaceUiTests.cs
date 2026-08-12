@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Avalonia.Controls.Presenters;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Controls;
@@ -140,20 +141,60 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
         {
             var viewModel = UiTestDriver.GetViewModel(window);
             var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+            Assert.True(applyButton.IsEnabled);
             Assert.DoesNotContain("apply-attention", applyButton.Classes);
 
             viewModel.SetPendingFilterSettingsChanges(true);
             await UiTestDriver.WaitForConditionAsync(
                 window,
-                () => applyButton.Classes.Contains("apply-attention"),
+                () => applyButton.IsEnabled && applyButton.Classes.Contains("apply-attention"),
                 "Apply settings attention class to attach for pending filter changes");
 
             viewModel.SetPendingFilterSettingsChanges(false);
             await UiTestDriver.WaitForConditionAsync(
                 window,
-                () => !applyButton.Classes.Contains("apply-attention") &&
+                () => applyButton.IsEnabled &&
+                      !applyButton.Classes.Contains("apply-attention") &&
                       Math.Abs(applyButton.Opacity - 1) < 0.01,
                 "Apply settings attention class and animated opacity to reset when selections are clean");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ApplySettingsButton_BackendGateRejectsCleanAndRapidDuplicateRequestsWithoutDisablingUi()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+            var previousApplyTask = window.LatestApplySettingsTask;
+
+            Assert.True(applyButton.IsEnabled);
+            await UiTestDriver.RaiseButtonClickAsync(applyButton);
+            Assert.Same(previousApplyTask, window.LatestApplySettingsTask);
+
+            viewModel.SetPendingFilterSettingsChanges(true);
+            Task? firstApplyTask = null;
+            await window.Dispatcher.InvokeAsync(() =>
+            {
+                applyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                firstApplyTask = window.LatestApplySettingsTask;
+
+                Assert.NotSame(previousApplyTask, firstApplyTask);
+                Assert.True(applyButton.IsEnabled);
+
+                applyButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.Same(firstApplyTask, window.LatestApplySettingsTask);
+            });
+
+            Assert.NotNull(firstApplyTask);
+            await firstApplyTask.WaitAsync(TimeSpan.FromSeconds(30));
         }
         finally
         {

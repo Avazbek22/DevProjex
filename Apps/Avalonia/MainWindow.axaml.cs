@@ -153,7 +153,6 @@ public partial class MainWindow : Window
     {
         _viewModel.FontFamilies.Add(FontFamily.Default);
         _viewModel.SelectedFontFamily = FontFamily.Default;
-        _viewModel.PendingFontFamily = FontFamily.Default;
     }
 
     private void ScheduleOptionalFontCatalogLoad()
@@ -397,10 +396,14 @@ public partial class MainWindow : Window
 			// Tree-sitter for a Hide Secrets toggle stalls the checkbox without changing its result.
 			var compressionEnabled = CreateCodeCompressionContext() is not null;
 			_metrics.CancelCompressionPrewarm();
-			if (compressionEnabled && _currentTree is not null)
+			if (_currentTree is not null)
 			{
 				ObserveDetachedTask(
-					_metrics.PrewarmCompressionAsync(_currentTree, CancellationToken.None),
+					_metrics.PrewarmCompressionAsync(
+						_currentTree,
+						CancellationToken.None,
+						cleanupAfterCompletion:
+							MemoryCleanupReason.ApplySettingsWorkCompleted),
 					"PrewarmCodeCompression");
 			}
 
@@ -1338,8 +1341,12 @@ public partial class MainWindow : Window
 
     private Task<TreeRefreshOutcome> RefreshTreeAsync(
         bool interactiveFilter = false,
-        CancellationToken cancellationToken = default) =>
-        _refreshPipeline.RefreshTreeAsync(interactiveFilter, cancellationToken);
+        CancellationToken cancellationToken = default,
+        MemoryCleanupReason? postLoadCleanupReason = null) =>
+        _refreshPipeline.RefreshTreeAsync(
+            interactiveFilter,
+            cancellationToken,
+            postLoadCleanupReason);
 
     private TreeNodeViewModel BuildTreeViewModel(TreeNodeDescriptor descriptor, TreeNodeViewModel? parent)
     {
@@ -1433,7 +1440,10 @@ public partial class MainWindow : Window
         return realizedChildren;
     }
 
-    private void StartPostLoadBackgroundWork(BuildTreeResult currentTree, CancellationToken cancellationToken)
+    private void StartPostLoadBackgroundWork(
+        BuildTreeResult currentTree,
+        CancellationToken cancellationToken,
+        MemoryCleanupReason? cleanupAfterCompletion)
     {
         // Preserve the initial-load choreography defined by PostLoadBackgroundWorkSequencer:
         // tree first, settings reveal second, background content work only after visual settle.
@@ -1482,16 +1492,43 @@ public partial class MainWindow : Window
         // and metrics phases must continue that feedback immediately once the reveal gate opens.
         // Interactive option changes keep the delayed presentation to avoid flashing on fast work.
         ObserveDetachedTask(
-            PostLoadBackgroundWorkSequencer.RunAsync(
+            RunPostLoadBackgroundWorkAsync(
                 postLoadVisualReadyTask,
+                currentTree,
+                statusPresentation,
+                initializeMetricsAsync,
+                cleanupAfterCompletion,
+                cancellationToken),
+            "RunPostLoadBackgroundWork");
+    }
+
+    private async Task RunPostLoadBackgroundWorkAsync(
+        Task visualReadyTask,
+        BuildTreeResult currentTree,
+        StatusOperationPresentation statusPresentation,
+        Func<CancellationToken, Task> initializeMetricsAsync,
+        MemoryCleanupReason? cleanupAfterCompletion,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await PostLoadBackgroundWorkSequencer.RunAsync(
+                visualReadyTask,
                 token => _metrics.PrewarmCompressionAsync(
                     currentTree,
                     token,
-                    statusPresentation),
+                    statusPresentation,
+                    retainReadFactsForNextMetricsPass: true),
                 initializeMetricsAsync,
 				() => ScheduleSecretRedactionCountRefresh(statusPresentation),
-                cancellationToken),
-            "RunPostLoadBackgroundWork");
+                cleanupAfterCompletion,
+                ScheduleBackgroundMemoryCleanup,
+                cancellationToken);
+        }
+        finally
+        {
+            _metrics.ReleasePostLoadReadFacts();
+        }
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING

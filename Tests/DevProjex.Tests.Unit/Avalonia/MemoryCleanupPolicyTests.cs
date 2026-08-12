@@ -43,6 +43,10 @@ public sealed class MemoryCleanupPolicyTests
         (int)MemoryCleanupReason.PreviewRebuildCompleted,
         450,
         (int)MemoryCleanupCollectionMode.Background)]
+    [InlineData(
+        (int)MemoryCleanupReason.ApplySettingsWorkCompleted,
+        450,
+        (int)MemoryCleanupCollectionMode.Background)]
     public void CreateDeferredPlan_ReturnsReasonSpecificContract(
         int reasonRaw,
         int expectedDelayMilliseconds,
@@ -141,6 +145,7 @@ public sealed class MemoryCleanupPolicyTests
 
     [Theory]
     [InlineData((int)MemoryCleanupReason.PreviewRebuildCompleted)]
+    [InlineData((int)MemoryCleanupReason.ApplySettingsWorkCompleted)]
     public void CreateDeferredPlan_NonDetachingWorkUsesBackgroundCleanup(
         int reasonRaw)
     {
@@ -149,6 +154,36 @@ public sealed class MemoryCleanupPolicyTests
         Assert.Equal(
             MemoryCleanupCollectionMode.Background,
             plan.CollectionMode);
+    }
+
+    [Fact]
+    public void CreateDeferredPlan_EveryReasonHasAnExplicitEscalationPolicy()
+    {
+        var expected = new Dictionary<MemoryCleanupReason, MemoryCleanupEscalationMode>
+        {
+            [MemoryCleanupReason.InitialProjectLoad] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.ProjectSwitchPostLoad] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.RefreshProject] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.GitPullUpdate] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.GitBranchSwitch] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.SearchClose] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.FilterClose] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.PreviewClose] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.PreviewRebuildCompleted] = MemoryCleanupEscalationMode.Compacting,
+            [MemoryCleanupReason.SelectionProjectionNarrowed] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.TreeCollapseCompleted] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.FilterApplied] = MemoryCleanupEscalationMode.Aggressive,
+            [MemoryCleanupReason.ApplySettingsWorkCompleted] = MemoryCleanupEscalationMode.Compacting
+        };
+        var reasons = Enum.GetValues<MemoryCleanupReason>();
+
+        Assert.Equal(reasons.Length, expected.Count);
+        foreach (var reason in reasons)
+        {
+            Assert.Equal(
+                expected[reason],
+                CreatePlan(reason).EscalationMode);
+        }
     }
 
     [Theory]

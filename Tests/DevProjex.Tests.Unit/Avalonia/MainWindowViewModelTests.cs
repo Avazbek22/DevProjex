@@ -287,6 +287,29 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void ApplySettingsGate_RejectsCleanAndDuplicateRequestsWithoutChangingUiAvailability()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.SetPendingFilterSettingsChanges(true);
+
+        Assert.True(viewModel.TryBeginApplySettings());
+        Assert.True(viewModel.CanApplySettings);
+        Assert.False(viewModel.TryBeginApplySettings());
+
+        viewModel.CompleteApplySettings();
+
+        Assert.True(viewModel.CanApplySettings);
+        Assert.True(viewModel.TryBeginApplySettings());
+
+        viewModel.SetPendingFilterSettingsChanges(false);
+        viewModel.CompleteApplySettings();
+
+        Assert.True(viewModel.CanApplySettings);
+        Assert.False(viewModel.TryBeginApplySettings());
+    }
+
+    [Fact]
     public void StatusPresentation_CanStayHiddenWhileOperationRemainsLogicallyBusy()
     {
         var viewModel = CreateViewModel();
@@ -1607,27 +1630,6 @@ public sealed class MainWindowViewModelTests
         viewModel.SelectedFontFamily = null;
 
         Assert.Null(viewModel.SelectedFontFamily);
-    }
-
-    [Fact]
-    public void PendingFontFamily_Changes()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.PendingFontFamily = "Consolas";
-
-        Assert.Equal("Consolas", viewModel.PendingFontFamily);
-    }
-
-    [Fact]
-    public void PendingFontFamily_CanBeCleared()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.PendingFontFamily = "Consolas";
-
-        viewModel.PendingFontFamily = null;
-
-        Assert.Null(viewModel.PendingFontFamily);
     }
 
     [Fact]

@@ -9,7 +9,8 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
 
     public async Task<TreeRefreshOutcome> RefreshTreeAsync(
         bool interactiveFilter = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        MemoryCleanupReason? postLoadCleanupReason = null)
     {
         var input = host.CaptureTreeRefreshInput();
         if (input is null)
@@ -78,6 +79,7 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
                 root,
                 interactiveFilter,
                 usedInMemoryFilter,
+                postLoadCleanupReason,
                 cancellationToken);
             return TreeRefreshOutcome.Applied;
         }

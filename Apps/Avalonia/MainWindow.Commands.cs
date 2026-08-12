@@ -550,6 +550,9 @@ public partial class MainWindow
 
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.TryBeginApplySettings())
+            return;
+
         var applyTask = ApplySettingsAsync();
         _latestApplySettingsTask = applyTask;
         await applyTask;
@@ -559,9 +562,6 @@ public partial class MainWindow
 
     private async Task ApplySettingsAsync()
     {
-        if (!_viewModel.CanApplySettings)
-            return;
-
         var applyCts = ReplaceCancellationSource(ref _applySettingsCts);
         var cancellationToken = applyCts.Token;
         void CancelApply()
@@ -581,14 +581,6 @@ public partial class MainWindow
 
             try
             {
-                // Font family follows WinForms behavior: applied only on Apply
-                var pending = _viewModel.PendingFontFamily;
-                if (pending is not null &&
-                    !string.Equals(_viewModel.SelectedFontFamily?.Name, pending.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    _viewModel.SelectedFontFamily = pending;
-                }
-
                 // Apply must observe the latest converged section state. A user can click Apply
                 // while an earlier ignore refresh is still finishing; rebuilding the tree first
                 // would capture stale root-folder availability and keep newly revealed folders hidden.
@@ -600,7 +592,18 @@ public partial class MainWindow
                         _currentPath,
                         cancellationToken);
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
-                    refreshOutcome = await RefreshTreeAsync(cancellationToken: cancellationToken);
+
+                    // Hide Secrets updates content immediately and does not affect the tree.
+                    // Accepting that sole change here avoids cancelling and restarting its active scan.
+                    if (_selectionCoordinator.TryAcceptHideSecretsOnlyChangeAsApplied(_currentPath))
+                    {
+                        _projectProfiles.PersistIfNeeded(_currentPath);
+                        return;
+                    }
+
+                    refreshOutcome = await RefreshTreeAsync(
+                        cancellationToken: cancellationToken,
+                        postLoadCleanupReason: MemoryCleanupReason.ApplySettingsWorkCompleted);
 
                     // A checkbox can change while a large tree is being materialized. In that
                     // case the pipeline discards the obsolete graph and Apply converges again
@@ -621,6 +624,7 @@ public partial class MainWindow
         finally
         {
             DisposeIfCurrent(ref _applySettingsCts, applyCts);
+            _viewModel.CompleteApplySettings();
         }
     }
 }

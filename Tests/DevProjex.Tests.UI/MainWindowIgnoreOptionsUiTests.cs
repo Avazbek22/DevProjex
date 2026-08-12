@@ -1480,8 +1480,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.UseGitIgnore,
                 visible: false);
-            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
-            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
 
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
@@ -1598,8 +1601,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.DotFolders,
                 visible: true);
-            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
-            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
 
             for (var cycle = 0; cycle < 2; cycle++)
             {
@@ -1679,8 +1685,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.DotFolders,
                 visible: true);
-            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
-            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
 
             for (var cycle = 0; cycle < 3; cycle++)
             {
@@ -1746,8 +1755,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.SmartIgnore,
                 visible: true,
                 isChecked: true);
-            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
-            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
 
             blockingScanner.EnableBlocking();
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
@@ -2475,6 +2487,65 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.DoesNotContain(
 				window.GetVisualDescendants().OfType<TextBlock>(),
 				static text => text.IsVisible && text.Text == "Searching for secrets…");
+		}
+		finally
+		{
+			analyzer.Release();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task EnablingHideSecrets_ImmediateApplyKeepsTheActiveScanAndTree()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var analyzer = new BlockingSecretScanContentAnalyzer();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = analyzer.Attach(services.FileContentAnalyzer)
+			},
+			waitForStatusIdle: false);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			var tree = UiTestDriver.GetCurrentTreeIdentity(window);
+			var inventory = UiTestDriver.GetCurrentTreeInventoryIdentity(window);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await analyzer.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
+			Assert.True(viewModel.HasPendingFilterSettingsChanges);
+
+			var applyButton = UiTestDriver.GetRequiredApplySettingsButton(window);
+			var previousApplyTask = window.LatestApplySettingsTask;
+			Assert.True(applyButton.IsEnabled);
+			await UiTestDriver.RaiseButtonClickAsync(applyButton);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !ReferenceEquals(window.LatestApplySettingsTask, previousApplyTask),
+				"the immediate Apply request to start");
+			await window.LatestApplySettingsTask.WaitAsync(TestContext.Current.CancellationToken);
+
+			Assert.False(viewModel.HasPendingFilterSettingsChanges);
+			Assert.Same(tree, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Same(inventory, UiTestDriver.GetCurrentTreeInventoryIdentity(window));
+			Assert.Equal(0, analyzer.CancellationCount);
+
+			analyzer.Release();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 1.",
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
+				"the original secret scan to complete");
+
+			Assert.Equal(2, analyzer.ReadAttempts);
+			Assert.Equal(0, analyzer.CancellationCount);
+			Assert.Same(tree, UiTestDriver.GetCurrentTreeIdentity(window));
 		}
 		finally
 		{

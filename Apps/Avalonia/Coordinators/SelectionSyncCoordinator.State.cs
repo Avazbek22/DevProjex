@@ -41,6 +41,21 @@ public sealed partial class SelectionSyncCoordinator
                    MatchesSelectedIgnoreOptions(viewModel.IgnoreOptions);
         }
 
+        public bool MatchesExceptIgnoreOption(
+            string? currentProjectPath,
+            MainWindowViewModel viewModel,
+            IgnoreOptionId ignoredOption)
+        {
+            if (string.IsNullOrWhiteSpace(currentProjectPath) ||
+                !PathComparer.Default.Equals(projectPath, currentProjectPath))
+            {
+                return false;
+            }
+
+            return MatchesSelectedExtensions(viewModel.Extensions) &&
+                   MatchesSelectedIgnoreOptionsExcept(viewModel.IgnoreOptions, ignoredOption);
+        }
+
         private bool MatchesSelectedExtensions(IReadOnlyCollection<SelectionOptionViewModel> options)
         {
             var selectedCount = 0;
@@ -71,6 +86,28 @@ public sealed partial class SelectionSyncCoordinator
             }
 
             return selectedCount == selectedIgnoreOptions.Count;
+        }
+
+        private bool MatchesSelectedIgnoreOptionsExcept(
+            IReadOnlyCollection<IgnoreOptionViewModel> options,
+            IgnoreOptionId ignoredOption)
+        {
+            var selectedCount = 0;
+            foreach (var option in options)
+            {
+                if (!option.IsChecked || option.Id == ignoredOption)
+                    continue;
+
+                selectedCount++;
+                if (!selectedIgnoreOptions.Contains(option.Id))
+                    return false;
+            }
+
+            var expectedCount = selectedIgnoreOptions.Count;
+            if (selectedIgnoreOptions.Contains(ignoredOption))
+                expectedCount--;
+
+            return selectedCount == expectedCount;
         }
     }
 }

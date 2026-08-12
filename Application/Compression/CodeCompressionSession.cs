@@ -158,6 +158,9 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 	public int AnalysisWorkerCapacity =>
 		(compressor as ICodeCompressionRuntimeDiagnosticsProvider)?.AnalysisWorkerCapacity ?? 1;
 
+	internal void ReleaseIdleAnalysisWorkers() =>
+		(compressor as ICodeCompressionRuntimeDiagnosticsProvider)?.ReleaseIdleAnalysisWorkers();
+
 	public CodeCompressionDiagnosticsSnapshot Diagnostics
 	{
 		get
@@ -879,6 +882,7 @@ public sealed class CodeCompressionScope : IDisposable
 	private long _sourceCharacters;
 	private long _transformedCharacters;
 	private int _completed;
+	private int _disposed;
 
 	internal CodeCompressionScope(
 		CodeCompressionSession session,
@@ -1164,7 +1168,21 @@ public sealed class CodeCompressionScope : IDisposable
 		return snapshot;
 	}
 
-	public void Dispose() => inner.Dispose();
+	public void Dispose()
+	{
+		if (Interlocked.Exchange(ref _disposed, 1) != 0)
+			return;
+
+		try
+		{
+			inner.Dispose();
+		}
+		finally
+		{
+			if (mode == CodeCompressionScopeMode.Prewarm)
+				session.ReleaseIdleAnalysisWorkers();
+		}
+	}
 
 	private readonly record struct DiagnosticOrderKey(int Order, string RelativePath);
 

@@ -129,24 +129,36 @@ internal sealed class MetricsPipeline(
 
     public bool HasStatusMetricsSnapshot => _hasStatusMetricsSnapshot;
 
+	internal long RetainedReadFactBytes =>
+		Volatile.Read(ref _postLoadReadFacts)?.RetainedBytes ?? 0;
+
     public void CancelCompressionPrewarm()
     {
         _compressionPrewarmCts?.Cancel();
-		Volatile.Write(ref _postLoadReadFacts, null);
+		ReleasePostLoadReadFacts();
     }
+
+	internal void ReleasePostLoadReadFacts() =>
+		Interlocked.Exchange(ref _postLoadReadFacts, null);
 
     public Task PrewarmCompressionAsync(
         BuildTreeResult currentTree,
         CancellationToken cancellationToken,
         StatusOperationPresentation presentation =
-            StatusOperationPresentation.ExtendedDelay)
+            StatusOperationPresentation.ExtendedDelay,
+        MemoryCleanupReason? cleanupAfterCompletion = null,
+        bool retainReadFactsForNextMetricsPass = false)
     {
+		// Only the explicitly sequenced post-load path guarantees a following metrics consumer.
+		// Standalone refreshes release their decoded content when prewarm completes.
+		ReleasePostLoadReadFacts();
         var compression = transformationContextProvider?.Invoke()?.Compression;
         if (compression is null)
         {
 			viewModel.SetCompressionPreparationStatus(isActive: false);
 			viewModel.SetCommentStripPreparationStatus(isActive: false);
 			viewModel.SetBlankLineStripPreparationStatus(isActive: false);
+            ScheduleMemoryCleanup(cleanupAfterCompletion);
             return Task.CompletedTask;
         }
 
@@ -193,7 +205,9 @@ internal sealed class MetricsPipeline(
             prewarmCts,
             cancellationToken,
             statusOperationId,
-            progress);
+            progress,
+            cleanupAfterCompletion,
+            retainReadFactsForNextMetricsPass);
     }
 
     public void ScheduleRecalculate()
@@ -357,6 +371,7 @@ internal sealed class MetricsPipeline(
         _metricsCalculationCts?.Cancel();
         _recalculateMetricsCts?.Cancel();
         _compressionPrewarmCts?.Cancel();
+		ReleasePostLoadReadFacts();
     }
 
     public void CancelAndDiscardBackgroundCalculation()
@@ -573,6 +588,7 @@ internal sealed class MetricsPipeline(
         CancelAndDispose(ref _metricsCalculationCts);
         CancelAndDispose(ref _recalculateMetricsCts);
         CancelAndDispose(ref _compressionPrewarmCts);
+		ReleasePostLoadReadFacts();
 
         if (_metricsDebounceTimer is not null)
         {
@@ -588,12 +604,15 @@ internal sealed class MetricsPipeline(
         CancellationTokenSource prewarmCts,
         CancellationToken cancellationToken,
         long statusOperationId,
-        IProgress<CodeCompressionWarmupProgress> progress)
+        IProgress<CodeCompressionWarmupProgress> progress,
+        MemoryCleanupReason? cleanupAfterCompletion,
+        bool retainReadFactsForNextMetricsPass)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             prewarmCts.Token,
             cancellationToken);
 		CodeCompressionWarmupResult? warmupResult = null;
+        var completed = false;
         try
         {
             // WarmAsync performs candidate indexing and file-length probes before its first
@@ -607,6 +626,8 @@ internal sealed class MetricsPipeline(
                         progress),
                     linkedCts.Token)
                 .ConfigureAwait(false);
+            linkedCts.Token.ThrowIfCancellationRequested();
+            completed = true;
         }
         catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
         {
@@ -617,7 +638,11 @@ internal sealed class MetricsPipeline(
                     Volatile.Read(ref _compressionPrewarmCts),
                     prewarmCts))
             {
-				Volatile.Write(ref _postLoadReadFacts, warmupResult?.ReadFacts);
+				Volatile.Write(
+					ref _postLoadReadFacts,
+					completed && retainReadFactsForNextMetricsPass
+						? warmupResult?.ReadFacts
+						: null);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     var snapshot = compression.Session.Snapshot;
@@ -658,6 +683,9 @@ internal sealed class MetricsPipeline(
 					viewModel.SetBlankLineStripPreparationStatus(isActive: false);
                     statusOperations.Complete(statusOperationId);
                 });
+
+                if (completed)
+                    ScheduleMemoryCleanup(cleanupAfterCompletion);
             }
             DisposeIfCurrent(ref _compressionPrewarmCts, prewarmCts);
         }

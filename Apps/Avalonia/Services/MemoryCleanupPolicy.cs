@@ -13,20 +13,30 @@ internal enum MemoryCleanupReason
     PreviewRebuildCompleted = 8,
     SelectionProjectionNarrowed = 9,
     TreeCollapseCompleted = 10,
-    FilterApplied = 11
+    FilterApplied = 11,
+    ApplySettingsWorkCompleted = 12
 }
 
 internal enum MemoryCleanupCollectionMode
 {
     None = 0,
     Background = 1,
+    Compacting = 2,
+    Aggressive = 3
+}
+
+internal enum MemoryCleanupEscalationMode
+{
+    None = 0,
+    Compacting = 1,
     Aggressive = 2
 }
 
 internal readonly record struct MemoryCleanupPlan(
     TimeSpan Delay,
     bool WaitForUiSettled,
-    MemoryCleanupCollectionMode CollectionMode);
+    MemoryCleanupCollectionMode CollectionMode,
+    MemoryCleanupEscalationMode EscalationMode);
 
 internal readonly record struct MemoryCleanupSnapshot(
     long ManagedHeapBytes,
@@ -69,63 +79,81 @@ internal static class MemoryCleanupPolicy
             MemoryCleanupReason.InitialProjectLoad => new(
                 Delay: settingsPanelAnimationDuration + InitialLoadExtraDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
 
             MemoryCleanupReason.ProjectSwitchPostLoad => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
 
             MemoryCleanupReason.RefreshProject => new(
                 Delay: settingsPanelAnimationDuration + RefreshExtraDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
             MemoryCleanupReason.GitPullUpdate => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
             MemoryCleanupReason.GitBranchSwitch => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
             MemoryCleanupReason.SelectionProjectionNarrowed => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
             MemoryCleanupReason.TreeCollapseCompleted => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
 
             MemoryCleanupReason.SearchClose => new(
                 Delay: ReleasedGraphCleanupDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
 
             MemoryCleanupReason.FilterClose => new(
                 Delay: ReleasedGraphCleanupDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
 
             MemoryCleanupReason.FilterApplied => new(
                 Delay: ReleasedGraphCleanupDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
 
             MemoryCleanupReason.PreviewClose => new(
                 Delay: PreviewDeferredDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Aggressive),
+                CollectionMode: MemoryCleanupCollectionMode.Aggressive,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive),
 
             MemoryCleanupReason.PreviewRebuildCompleted => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Background),
+                CollectionMode: MemoryCleanupCollectionMode.Background,
+                EscalationMode: MemoryCleanupEscalationMode.Compacting),
 
-            _ => new(
+            // Apply remains part of the interactive editing loop. One fragmentation-gated
+            // compacting pass can decommit released regions without the second full collection
+            // and working-set trim reserved for project transitions.
+            MemoryCleanupReason.ApplySettingsWorkCompleted => new(
                 Delay: GeneralDeferredDelay,
                 WaitForUiSettled: true,
-                CollectionMode: MemoryCleanupCollectionMode.Background)
+                CollectionMode: MemoryCleanupCollectionMode.Background,
+                EscalationMode: MemoryCleanupEscalationMode.Compacting),
+
+            _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null)
         };
     }
 
