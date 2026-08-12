@@ -332,6 +332,8 @@ internal sealed class TreeSitterCompressionScope(
 {
 	private const int CancellationCheckBatchMask = 1023;
 	private const int CancellationCheckBatchSize = CancellationCheckBatchMask + 1;
+	private const int LineScanChunkCharacters = 64 * 1024;
+	private static readonly SearchValues<char> LineBreakCharacters = SearchValues.Create("\r\n");
 	private int _disposed;
 
 	public CodeCompressionAnalysis Analyze(
@@ -452,7 +454,7 @@ internal sealed class TreeSitterCompressionScope(
 			phaseStartedAt = StartMeasuredPhase();
 			try
 			{
-				plan = CodeCompressionPlan.CreateForAnalysis(
+				plan = CreatePlanFromOrderedValidatedEdits(
 					relativePath,
 					pack.Id,
 					edits,
@@ -649,6 +651,69 @@ internal sealed class TreeSitterCompressionScope(
 			: new CodeCompressionAnalysis(
 				plan.ToUnchanged(CodeCompressionOutcome.UnchangedGateRejected),
 				null);
+	}
+
+	internal static CodeCompressionPlan CreatePlanFromOrderedValidatedEdits(
+		string relativePath,
+		string languageId,
+		List<CodeCompressionEdit> edits,
+		int sourceLength,
+		string transformIdentity,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		var transformedLength = sourceLength;
+		var previousEnd = 0;
+		var writeIndex = 0;
+		for (var readIndex = 0; readIndex < edits.Count; readIndex++)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, readIndex);
+			var edit = edits[readIndex];
+			if (edit.Replacement.Length >= edit.SourceLength)
+				continue;
+			if (edit.SourceStart < 0 ||
+			    edit.SourceLength < 0 ||
+			    edit.SourceStart > sourceLength - edit.SourceLength)
+			{
+				throw new ArgumentOutOfRangeException(
+					nameof(edits),
+					$"Edit [{edit.SourceStart}, {edit.SourceEnd}) leaves the file of {sourceLength} characters.");
+			}
+			if (edit.SourceStart < previousEnd)
+			{
+				throw new ArgumentException(
+					$"Edit [{edit.SourceStart}, {edit.SourceEnd}) is unordered or overlaps the previous one ending at {previousEnd}.",
+					nameof(edits));
+			}
+
+			if (writeIndex != readIndex)
+				edits[writeIndex] = edit;
+			writeIndex++;
+			previousEnd = edit.SourceEnd;
+			transformedLength += edit.Replacement.Length - edit.SourceLength;
+		}
+		cancellationToken.ThrowIfCancellationRequested();
+		if (writeIndex < edits.Count)
+			edits.RemoveRange(writeIndex, edits.Count - writeIndex);
+
+		if (edits.Count == 0 || transformedLength >= sourceLength)
+		{
+			return CodeCompressionPlan.Unchanged(
+				relativePath,
+				languageId,
+				CodeCompressionOutcome.UnchangedNoBenefit,
+				sourceLength,
+				transformIdentity);
+		}
+
+		return new CodeCompressionPlan(
+			relativePath,
+			languageId,
+			CodeCompressionOutcome.Compressed,
+			edits.AsReadOnly(),
+			sourceLength,
+			transformedLength,
+			transformIdentity);
 	}
 
 	private long StartMeasuredPhase() => analysisDiagnostics?.StartPhase() ?? 0;
@@ -1203,7 +1268,7 @@ internal sealed class TreeSitterCompressionScope(
 				if (defects is null)
 					protectedMultilineLeaves = Array.Empty<SourceRange>();
 				else
-					protectedMultilineLeaves = MergePreservedRanges(
+					protectedMultilineLeaves = NormalizeProtectedMultilineLeaves(
 						protectedMultilineLeaves,
 						cancellationToken);
 			}
@@ -1369,27 +1434,21 @@ internal sealed class TreeSitterCompressionScope(
 		}
 	}
 
-	private static bool TryAppendBlankLineEdits(
+	internal static bool TryAppendBlankLineEdits(
 		string source,
 		IReadOnlyList<SourceRange> protectedRanges,
 		List<RawCompressionEdit> edits,
 		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var lineStart = 0;
 		var lineIndex = 0;
 		var protectedIndex = 0;
 		while (lineStart < source.Length)
 		{
 			ThrowIfCancellationRequestedPeriodically(cancellationToken, lineIndex++);
-			var cursor = lineStart;
-			var isBlank = true;
-			while (cursor < source.Length && source[cursor] is not ('\r' or '\n'))
-			{
-				ThrowIfCancellationRequestedPeriodically(cancellationToken, cursor - lineStart);
-				if (!char.IsWhiteSpace(source[cursor]))
-					isBlank = false;
-				cursor++;
-			}
+			var cursor = FindLineBreak(source, lineStart, cancellationToken);
+			var isBlank = IsBlankLine(source.AsSpan(lineStart, cursor - lineStart), cancellationToken);
 
 			var lineEnd = cursor;
 			if (lineEnd < source.Length && source[lineEnd] == '\r')
@@ -1426,6 +1485,42 @@ internal sealed class TreeSitterCompressionScope(
 			lineStart = lineEnd;
 		}
 		cancellationToken.ThrowIfCancellationRequested();
+		return true;
+	}
+
+	private static int FindLineBreak(
+		string source,
+		int start,
+		CancellationToken cancellationToken)
+	{
+		var cursor = start;
+		while (cursor < source.Length)
+		{
+			var chunkLength = Math.Min(LineScanChunkCharacters, source.Length - cursor);
+			var relative = source.AsSpan(cursor, chunkLength).IndexOfAny(LineBreakCharacters);
+			if (relative >= 0)
+				return cursor + relative;
+			cursor += chunkLength;
+			if (cancellationToken.CanBeCanceled)
+				cancellationToken.ThrowIfCancellationRequested();
+		}
+		return source.Length;
+	}
+
+	private static bool IsBlankLine(
+		ReadOnlySpan<char> line,
+		CancellationToken cancellationToken)
+	{
+		var cursor = 0;
+		while (cursor < line.Length)
+		{
+			var chunkLength = Math.Min(LineScanChunkCharacters, line.Length - cursor);
+			if (!line.Slice(cursor, chunkLength).Trim().IsEmpty)
+				return false;
+			cursor += chunkLength;
+			if (cancellationToken.CanBeCanceled)
+				cancellationToken.ThrowIfCancellationRequested();
+		}
 		return true;
 	}
 
@@ -2329,7 +2424,27 @@ internal sealed class TreeSitterCompressionScope(
 		return ranges;
 	}
 
-	private readonly record struct SourceRange(int Start, int End);
+	internal static IReadOnlyList<SourceRange> NormalizeProtectedMultilineLeaves(
+		IReadOnlyList<SourceRange> ranges,
+		CancellationToken cancellationToken)
+	{
+		if (ranges.Count < 2)
+			return ranges;
+
+		var previousEnd = ranges[0].End;
+		for (var index = 1; index < ranges.Count; index++)
+		{
+			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
+			var range = ranges[index];
+			if (range.Start < previousEnd)
+				return MergePreservedRanges(ranges, cancellationToken);
+			previousEnd = range.End;
+		}
+		cancellationToken.ThrowIfCancellationRequested();
+		return ranges;
+	}
+
+	internal readonly record struct SourceRange(int Start, int End);
 	private readonly record struct CommentCapture(Node Node, bool IsDocstring);
 
 	private struct DeferredCommentBuffer
@@ -2431,7 +2546,7 @@ internal sealed class TreeSitterCompressionScope(
 		int EditIndex,
 		SourceRange Bounds);
 
-	private readonly record struct RawCompressionEdit(
+	internal readonly record struct RawCompressionEdit(
 		int Start,
 		int End,
 		string Replacement,

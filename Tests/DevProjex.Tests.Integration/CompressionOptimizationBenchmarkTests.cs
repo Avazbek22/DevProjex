@@ -49,9 +49,13 @@ public sealed class CompressionOptimizationBenchmarkTests
 		var goldenPlan = await BuildGoldenPlanAsync();
 		var commentsOnlyPlan = await BuildCommentsOnlyPlanAsync();
 		var structuredDataStressPlan = await BuildStructuredDataStressPlanAsync();
+		var pathologicalBlankPlan = await BuildPathologicalBlankPlanAsync();
+		var appliedBlankPlan = await BuildAppliedBlankPlanAsync();
 		Assert.NotEmpty(baselinePlan.IncludedFiles);
 		Assert.NotEmpty(commentsOnlyPlan.IncludedFiles);
 		Assert.NotEmpty(structuredDataStressPlan.IncludedFiles);
+		Assert.NotEmpty(pathologicalBlankPlan.IncludedFiles);
+		Assert.NotEmpty(appliedBlankPlan.IncludedFiles);
 		var iterations = new List<BenchmarkIteration>(MeasuredRuns);
 		for (var index = 0; index < MeasuredRuns; index++)
 		{
@@ -60,6 +64,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 				baselinePlan,
 				commentsOnlyPlan,
 				structuredDataStressPlan,
+				pathologicalBlankPlan,
+				appliedBlankPlan,
 				goldenPlan,
 				TestContext.Current.CancellationToken));
 		}
@@ -80,6 +86,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 			FileCount: baselinePlan.IncludedFiles.Count,
 			CommentsOnlyCorpusFileCount: commentsOnlyPlan.IncludedFiles.Count,
 			StructuredDataStressFileCount: structuredDataStressPlan.IncludedFiles.Count,
+			PathologicalBlankFileCount: pathologicalBlankPlan.IncludedFiles.Count,
+			AppliedBlankFileCount: appliedBlankPlan.IncludedFiles.Count,
 			Runs: iterations,
 			Medians: BuildMedians(iterations));
 
@@ -98,6 +106,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 		ProjectContextPlan plan,
 		ProjectContextPlan commentsOnlyPlan,
 		ProjectContextPlan structuredDataStressPlan,
+		ProjectContextPlan pathologicalBlankPlan,
+		ProjectContextPlan appliedBlankPlan,
 		ProjectContextPlan goldenPlan,
 		CancellationToken cancellationToken)
 	{
@@ -144,7 +154,15 @@ public sealed class CompressionOptimizationBenchmarkTests
 			["structuredDataBlankLines"] = await RunScenarioAsync(
 				structuredDataStressPlan, compress: false, stripComments: false, hideSecrets: false, cancellationToken, stripBlankLines: true),
 			["structuredDataBoth"] = await RunScenarioAsync(
-				structuredDataStressPlan, compress: true, stripComments: true, hideSecrets: false, cancellationToken)
+				structuredDataStressPlan, compress: true, stripComments: true, hideSecrets: false, cancellationToken),
+			["pathologicalBlankLines"] = await RunScenarioAsync(
+				pathologicalBlankPlan, compress: false, stripComments: false, hideSecrets: false, cancellationToken, stripBlankLines: true),
+			["pathologicalCommentsAndBlankLines"] = await RunScenarioAsync(
+				pathologicalBlankPlan, compress: false, stripComments: true, hideSecrets: false, cancellationToken, stripBlankLines: true),
+			["appliedBlankLines"] = await RunScenarioAsync(
+				appliedBlankPlan, compress: false, stripComments: false, hideSecrets: false, cancellationToken, stripBlankLines: true),
+			["appliedCommentsAndBlankLines"] = await RunScenarioAsync(
+				appliedBlankPlan, compress: false, stripComments: true, hideSecrets: false, cancellationToken, stripBlankLines: true)
 		};
 		var toggle = await RunToggleScenarioAsync(plan, cancellationToken);
 		var golden = await BuildGoldenAsync(goldenPlan, cancellationToken);
@@ -160,24 +178,42 @@ public sealed class CompressionOptimizationBenchmarkTests
 		bool stripBlankLines = false)
 	{
 		var transformKinds = CodeTransformIdentity.Resolve(compress, stripComments, stripBlankLines);
+		BenchmarkAnalysisProfile? coldAnalysis = null;
 		var coldPreview = await MeasurePhaseAsync(
 			async token =>
 			{
-				using var coldCompression = CodeCompressionFactory.CreateSession();
+				using var coldFixture = CreateCompressionFixture();
+				using var diagnostics = transformKinds == CodeTransformKinds.None
+					? null
+					: coldFixture.Engine.BeginAnalysisDiagnostics();
 				using var coldSecrets = new SecretRedactionSession(CreateSmartSecretsDetector());
-				return await BuildContentPreviewAsync(
-					plan,
-					transformKinds == CodeTransformKinds.None ? null : coldCompression,
-					transformKinds,
-					hideSecrets ? coldSecrets : null,
-					token);
+				try
+				{
+					return await BuildContentPreviewAsync(
+						plan,
+						transformKinds == CodeTransformKinds.None ? null : coldFixture.Session,
+						transformKinds,
+						hideSecrets ? coldSecrets : null,
+						token);
+				}
+				finally
+				{
+					if (diagnostics is not null)
+						coldAnalysis = ToAnalysisProfile(diagnostics.Capture());
+				}
 			},
 			compression: null,
 			secrets: null,
 			cancellationToken);
+		if (coldAnalysis is not null)
+			coldPreview = coldPreview with
+			{
+				Measurement = coldPreview.Measurement with { Analysis = coldAnalysis }
+			};
 
 		var analyzer = new FileContentAnalyzer();
-		using var compression = CodeCompressionFactory.CreateSession();
+		using var fixture = CreateCompressionFixture();
+		var compression = fixture.Session;
 		using var secrets = new SecretRedactionSession(CreateSmartSecretsDetector());
 		var compressionContext = transformKinds != CodeTransformKinds.None
 			? new CodeCompressionContext(plan.SourceRoot, compression, transformKinds)
@@ -201,7 +237,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 			},
 			compression,
 			secrets,
-			cancellationToken);
+			cancellationToken,
+			fixture.Engine);
 
 		var metrics = await MeasurePhaseAsync(
 			token => MeasureMetricsAsync(
@@ -458,8 +495,10 @@ public sealed class CompressionOptimizationBenchmarkTests
 		Func<CancellationToken, Task<T>> operation,
 		CodeCompressionSession? compression,
 		SecretRedactionSession? secrets,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		TreeSitterCodeCompressor? engine = null)
 	{
+		using var analysisDiagnostics = engine?.BeginAnalysisDiagnostics();
 		using var contentMeasurement = ContentPipelineDiagnostics.BeginMeasurement();
 		var compressionBefore = compression?.Diagnostics;
 		var secretsBefore = secrets?.GetCacheDiagnostics();
@@ -491,8 +530,32 @@ public sealed class CompressionOptimizationBenchmarkTests
 				content.ContentFingerprintComputations,
 				content.PlanApplications,
 				Difference(compressionBefore, compressionAfter),
-				Difference(secretsBefore, secretsAfter)));
+				Difference(secretsBefore, secretsAfter),
+				analysisDiagnostics is null
+					? null
+					: ToAnalysisProfile(analysisDiagnostics.Capture())));
 	}
+
+	private static BenchmarkAnalysisProfile ToAnalysisProfile(
+		TreeSitterAnalysisDiagnosticsSnapshot snapshot) =>
+		new(
+			snapshot.CompletedFiles,
+			snapshot.Work.RawEdits,
+			snapshot.Work.FinalEdits,
+			snapshot.Phases
+				.Where(static phase => phase.Phase is >= TreeSitterAnalysisPhase.OriginalParse)
+				.ToDictionary(
+					static phase => ToCamelCase(phase.Phase.ToString()),
+					static phase => new BenchmarkAnalysisPhase(
+						phase.Count,
+						phase.TotalMilliseconds,
+						phase.P50Milliseconds,
+						phase.P95Milliseconds,
+						phase.P99Milliseconds),
+					StringComparer.Ordinal));
+
+	private static string ToCamelCase(string value) =>
+		value.Length == 0 ? value : char.ToLowerInvariant(value[0]) + value[1..];
 
 	private static CompressionWork Difference(
 		CodeCompressionDiagnosticsSnapshot? before,
@@ -720,6 +783,43 @@ public sealed class CompressionOptimizationBenchmarkTests
 		return await BuildPlanAsync(root);
 	}
 
+	private static Task<ProjectContextPlan> BuildPathologicalBlankPlanAsync()
+		=> BuildBlankHeavyPlanAsync(
+			"DevProjex.CompressionOptimization.PathologicalBlankCorpus",
+			TreeSitterCodeCompressor.MaximumRawEditsPerFile - 1);
+
+	private static Task<ProjectContextPlan> BuildAppliedBlankPlanAsync()
+		=> BuildBlankHeavyPlanAsync(
+			"DevProjex.CompressionOptimization.AppliedBlankCorpus",
+			9_000);
+
+	private static async Task<ProjectContextPlan> BuildBlankHeavyPlanAsync(
+		string directoryName,
+		int blankLineCount)
+	{
+		var root = Path.Combine(
+			Path.GetTempPath(),
+			directoryName);
+		if (Directory.Exists(root))
+			Directory.Delete(root, recursive: true);
+		Directory.CreateDirectory(root);
+
+		var path = Path.Combine(root, "generated.js");
+		var source = string.Concat(Enumerable.Repeat(
+			";\n\n",
+			blankLineCount));
+		await File.WriteAllTextAsync(
+			path,
+			source,
+			new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+			TestContext.Current.CancellationToken);
+		File.SetLastWriteTimeUtc(path, new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+		return await BuildPlanAsync(root);
+	}
+
+	private static CompressionFixture CreateCompressionFixture() =>
+		new(new TreeSitterCodeCompressor(CodeCompressionFactory.CreateLocator()));
+
 	private static SmartSecretsDetector CreateSmartSecretsDetector() =>
 		new(
 			new GitleaksSecretDetector(),
@@ -779,6 +879,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 		int FileCount,
 		int CommentsOnlyCorpusFileCount,
 		int StructuredDataStressFileCount,
+		int PathologicalBlankFileCount,
+		int AppliedBlankFileCount,
 		IReadOnlyList<BenchmarkIteration> Runs,
 		IReadOnlyDictionary<string, BenchmarkMedian> Medians);
 
@@ -858,7 +960,8 @@ public sealed class CompressionOptimizationBenchmarkTests
 		long ContentFingerprintComputations,
 		long PlanApplications,
 		CompressionWork Compression,
-		SecretWork Secrets)
+		SecretWork Secrets,
+		BenchmarkAnalysisProfile? Analysis)
 	{
 		public static PhaseMeasurement Combine(params PhaseMeasurement[] values) => new(
 			values.Sum(static value => value.ElapsedMilliseconds),
@@ -873,7 +976,36 @@ public sealed class CompressionOptimizationBenchmarkTests
 			values.Sum(static value => value.ContentFingerprintComputations),
 			values.Sum(static value => value.PlanApplications),
 			CompressionWork.Combine(values.Select(static value => value.Compression)),
-			SecretWork.Combine(values.Select(static value => value.Secrets)));
+			SecretWork.Combine(values.Select(static value => value.Secrets)),
+			Analysis: null);
+	}
+
+	private sealed record BenchmarkAnalysisProfile(
+		long CompletedFiles,
+		long RawEdits,
+		long FinalEdits,
+		IReadOnlyDictionary<string, BenchmarkAnalysisPhase> Phases);
+
+	private sealed record BenchmarkAnalysisPhase(
+		long Count,
+		double TotalMilliseconds,
+		double P50Milliseconds,
+		double P95Milliseconds,
+		double P99Milliseconds);
+
+	private sealed class CompressionFixture : IDisposable
+	{
+		public CompressionFixture(TreeSitterCodeCompressor engine)
+		{
+			Engine = engine;
+			Session = new CodeCompressionSession(engine);
+		}
+
+		public TreeSitterCodeCompressor Engine { get; }
+
+		public CodeCompressionSession Session { get; }
+
+		public void Dispose() => Session.Dispose();
 	}
 
 	private sealed record CompressionWork(

@@ -274,6 +274,49 @@ public sealed class ContentTransformMapTests
 	}
 
 	[Fact]
+	public void DirectEditMap_MatchesBruteForceReferenceAtEveryBoundary()
+	{
+		const int sourceLength = 24;
+		var cases = new CodeCompressionEdit[][]
+		{
+			[],
+			[new CodeCompressionEdit(0, 3, "x")],
+			[new CodeCompressionEdit(22, 2, string.Empty)],
+			[
+				new CodeCompressionEdit(0, 2, string.Empty),
+				new CodeCompressionEdit(4, 3, "x"),
+				new CodeCompressionEdit(10, 5, string.Empty),
+				new CodeCompressionEdit(20, 4, "z")
+			]
+		};
+
+		foreach (var edits in cases)
+		{
+			var map = ContentTransformMap.Create(edits, sourceLength);
+			var transformedLength = sourceLength + edits.Sum(
+				static edit => edit.Replacement.Length - edit.SourceLength);
+			for (var offset = -1; offset <= sourceLength + 1; offset++)
+			{
+				var expected = TryMapSourceReference(edits, sourceLength, offset, out var expectedOffset);
+				var actual = map.TryToTransformed(offset, out var actualOffset);
+				Assert.Equal(expected, actual);
+				Assert.Equal(expectedOffset, actualOffset);
+			}
+			for (var offset = -1; offset <= transformedLength + 1; offset++)
+			{
+				var expected = TryMapTransformedReference(
+					edits,
+					transformedLength,
+					offset,
+					out var expectedOffset);
+				var actual = map.TryToSource(offset, out var actualOffset);
+				Assert.Equal(expected, actual);
+				Assert.Equal(expectedOffset, actualOffset);
+			}
+		}
+	}
+
+	[Fact]
 	public void CreateForAnalysis_ObservesCancellationDuringLargeEditScan()
 	{
 		const int sourceLength = 4096;
@@ -331,6 +374,68 @@ public sealed class ContentTransformMapTests
 		Enumerable.Range(0, sourceLength / 2)
 			.Select(static index => new CodeCompressionEdit(index * 2, 1, string.Empty))
 			.ToArray();
+
+	private static bool TryMapSourceReference(
+		IReadOnlyList<CodeCompressionEdit> edits,
+		int sourceLength,
+		int offset,
+		out int mapped)
+	{
+		mapped = -1;
+		if (offset < 0 || edits.Count > 0 && offset > sourceLength)
+			return false;
+		var delta = 0;
+		foreach (var edit in edits)
+		{
+			if (offset < edit.SourceStart)
+			{
+				mapped = offset + delta;
+				return true;
+			}
+			if (offset == edit.SourceStart)
+			{
+				mapped = edit.SourceStart + delta;
+				return true;
+			}
+			if (offset < edit.SourceEnd)
+				return false;
+			delta += edit.Replacement.Length - edit.SourceLength;
+		}
+		mapped = offset + delta;
+		return true;
+	}
+
+	private static bool TryMapTransformedReference(
+		IReadOnlyList<CodeCompressionEdit> edits,
+		int transformedLength,
+		int offset,
+		out int mapped)
+	{
+		mapped = -1;
+		if (offset < 0 || edits.Count > 0 && offset > transformedLength)
+			return false;
+		var delta = 0;
+		foreach (var edit in edits)
+		{
+			var start = edit.SourceStart + delta;
+			var end = start + edit.Replacement.Length;
+			if (offset < start)
+			{
+				mapped = offset - delta;
+				return true;
+			}
+			if (offset == start)
+			{
+				mapped = edit.Replacement.Length == 0 ? edit.SourceEnd : edit.SourceStart;
+				return true;
+			}
+			if (offset < end)
+				return false;
+			delta += edit.Replacement.Length - edit.SourceLength;
+		}
+		mapped = offset - delta;
+		return true;
+	}
 
 	private sealed class CancelingEditList(
 		IReadOnlyList<CodeCompressionEdit> inner,

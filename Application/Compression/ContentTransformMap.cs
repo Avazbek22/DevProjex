@@ -65,20 +65,46 @@ public sealed class ContentTransformMap
 		int sourceLength,
 		CancellationToken cancellationToken)
 	{
+		ArgumentOutOfRangeException.ThrowIfNegative(sourceLength);
 		cancellationToken.ThrowIfCancellationRequested();
-		var ranges = new ContentTransformRange[edits.Count];
+		if (edits.Count == 0)
+			return Identity;
+
+		var sourceStarts = new int[edits.Count];
+		var sourceLengths = new int[edits.Count];
+		var transformedStarts = new int[edits.Count];
+		var transformedLengths = new int[edits.Count];
+		var delta = 0;
+		var previousEnd = 0;
 		for (var index = 0; index < edits.Count; index++)
 		{
 			ThrowIfCancellationRequestedPeriodically(cancellationToken, index);
 			var edit = edits[index];
-			ranges[index] = new ContentTransformRange(
-				edit.SourceStart,
-				edit.SourceLength,
-				edit.Replacement.Length);
+			if (edit.SourceStart < previousEnd ||
+			    edit.SourceLength < 0 ||
+			    edit.SourceStart > sourceLength - edit.SourceLength)
+			{
+				throw new ArgumentException(
+					"Transform edits must be ordered, non-overlapping, and inside the source text.",
+					nameof(edits));
+			}
+
+			sourceStarts[index] = edit.SourceStart;
+			sourceLengths[index] = edit.SourceLength;
+			transformedStarts[index] = checked(edit.SourceStart + delta);
+			transformedLengths[index] = edit.Replacement.Length;
+			delta = checked(delta + edit.Replacement.Length - edit.SourceLength);
+			previousEnd = checked(edit.SourceStart + edit.SourceLength);
 		}
 		cancellationToken.ThrowIfCancellationRequested();
 
-		return Create(ranges, sourceLength, cancellationToken);
+		return new ContentTransformMap(
+			sourceStarts,
+			sourceLengths,
+			transformedStarts,
+			transformedLengths,
+			sourceLength,
+			sourceLength + delta);
 	}
 
 	/// <summary>
