@@ -94,6 +94,23 @@ public sealed partial class SelectionSyncCoordinator(
         viewModel.SetPendingFilterSettingsChanges(false);
     }
 
+    internal bool TryAcceptHideSecretsOnlyChangeAsApplied(string? projectPath)
+    {
+        if (_appliedSelectionState is not { } appliedState ||
+            appliedState.Matches(projectPath, viewModel) ||
+            !appliedState.MatchesExceptIgnoreOption(
+                projectPath,
+                viewModel,
+                IgnoreOptionId.HideSecrets))
+        {
+            return false;
+        }
+
+        _appliedSelectionState = AppliedSelectionState.Capture(projectPath!, viewModel);
+        viewModel.SetPendingFilterSettingsChanges(false);
+        return true;
+    }
+
     public ContextDiagnostic? GetAppliedGitReadinessDiagnostic(
         string projectPath,
         GitFilteringMode? requiredMode = null)

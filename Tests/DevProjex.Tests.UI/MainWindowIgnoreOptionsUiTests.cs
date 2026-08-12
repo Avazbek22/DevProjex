@@ -2495,6 +2495,65 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		}
 	}
 
+	[AvaloniaFact]
+	public async Task EnablingHideSecrets_ImmediateApplyKeepsTheActiveScanAndTree()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var analyzer = new BlockingSecretScanContentAnalyzer();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = analyzer.Attach(services.FileContentAnalyzer)
+			},
+			waitForStatusIdle: false);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			var tree = UiTestDriver.GetCurrentTreeIdentity(window);
+			var inventory = UiTestDriver.GetCurrentTreeInventoryIdentity(window);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await analyzer.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
+			Assert.True(viewModel.HasPendingFilterSettingsChanges);
+
+			var applyButton = UiTestDriver.GetRequiredApplySettingsButton(window);
+			var previousApplyTask = window.LatestApplySettingsTask;
+			Assert.True(applyButton.IsEnabled);
+			await UiTestDriver.RaiseButtonClickAsync(applyButton);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !ReferenceEquals(window.LatestApplySettingsTask, previousApplyTask),
+				"the immediate Apply request to start");
+			await window.LatestApplySettingsTask.WaitAsync(TestContext.Current.CancellationToken);
+
+			Assert.False(viewModel.HasPendingFilterSettingsChanges);
+			Assert.Same(tree, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Same(inventory, UiTestDriver.GetCurrentTreeInventoryIdentity(window));
+			Assert.Equal(0, analyzer.CancellationCount);
+
+			analyzer.Release();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 1.",
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
+				"the original secret scan to complete");
+
+			Assert.Equal(2, analyzer.ReadAttempts);
+			Assert.Equal(0, analyzer.CancellationCount);
+			Assert.Same(tree, UiTestDriver.GetCurrentTreeIdentity(window));
+		}
+		finally
+		{
+			analyzer.Release();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	private sealed class FailingSecretScanContentAnalyzer(
 		IFileContentAnalyzer inner,
 		string? failingFileName = null) : IFileContentAnalyzer

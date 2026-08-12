@@ -592,6 +592,15 @@ public partial class MainWindow
                         _currentPath,
                         cancellationToken);
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
+
+                    // Hide Secrets updates content immediately and does not affect the tree.
+                    // Accepting that sole change here avoids cancelling and restarting its active scan.
+                    if (_selectionCoordinator.TryAcceptHideSecretsOnlyChangeAsApplied(_currentPath))
+                    {
+                        _projectProfiles.PersistIfNeeded(_currentPath);
+                        return;
+                    }
+
                     refreshOutcome = await RefreshTreeAsync(
                         cancellationToken: cancellationToken,
                         postLoadCleanupReason: MemoryCleanupReason.ApplySettingsWorkCompleted);
