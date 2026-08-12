@@ -1,4 +1,5 @@
 using DevProjex.Avalonia.Collections;
+using DevProjex.Avalonia.Coordinators;
 using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
@@ -82,6 +83,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private int? _blankLineStrippedFilesCount;
 	private int? _blankLineStripTotalFilesCount;
 	private bool _blankLineStripPreparationActive;
+	private bool _appliedCompressCodeEnabled;
+	private bool _appliedStripCommentsEnabled;
+	private bool _appliedStripBlankLinesEnabled;
     private bool _isDarkTheme = true;
     private ThemeSelectionMode _selectedThemeMode = ThemeSelectionMode.System;
     private bool _isCompactMode;
@@ -463,16 +467,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
     }
 
-    internal bool TryBeginApplySettings()
+    internal bool TryBeginApplySettings(StatusOperationType activeOperationType = StatusOperationType.None)
     {
-        if (!HasPendingFilterSettingsChanges || !CanStartApplySettings ||
+        if (!HasPendingFilterSettingsChanges || !CanStartApplySettingsWork(activeOperationType) ||
             Interlocked.CompareExchange(ref _applySettingsInProgress, 1, 0) != 0)
         {
             return false;
         }
 
         // Recheck after acquiring the gate so a concurrent availability change cannot start stale work.
-        if (!HasPendingFilterSettingsChanges || !CanStartApplySettings)
+        if (!HasPendingFilterSettingsChanges || !CanStartApplySettingsWork(activeOperationType))
         {
             Interlocked.Exchange(ref _applySettingsInProgress, 0);
             return false;
@@ -485,6 +489,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool CanStartApplySettings =>
         _isProjectLoaded && !_applySettingsBusyDelayElapsed && !_isProjectCopyExportInProgress;
+
+    private bool CanStartApplySettingsWork(StatusOperationType activeOperationType) =>
+        _isProjectLoaded &&
+        !_isProjectCopyExportInProgress &&
+        activeOperationType is StatusOperationType.None or
+            StatusOperationType.MetricsCalculation or
+            StatusOperationType.SelectionRefresh or
+            StatusOperationType.CompressionPreparation or
+            StatusOperationType.SecretAnalysis;
 
     private void UpdateApplySettingsBusyState(bool isBusy)
     {
@@ -2041,6 +2054,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		UpdateSettingsBlankLineStripNotice();
 	}
 
+	internal void SetAppliedContentTransformationState(
+		bool compressCode,
+		bool stripComments,
+		bool stripBlankLines)
+	{
+		if (_appliedCompressCodeEnabled == compressCode &&
+		    _appliedStripCommentsEnabled == stripComments &&
+		    _appliedStripBlankLinesEnabled == stripBlankLines)
+		{
+			return;
+		}
+
+		_appliedCompressCodeEnabled = compressCode;
+		_appliedStripCommentsEnabled = stripComments;
+		_appliedStripBlankLinesEnabled = stripBlankLines;
+		UpdateContentProcessingOptionStatuses();
+	}
+
 	private void UpdateSettingsSecretsNotice()
 	{
 		var secrets = _contentProcessingScanState switch
@@ -2214,9 +2245,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			option.StatusText = option.Id switch
 			{
 				IgnoreOptionId.HideSecrets => SettingsSecretsNotice,
-				IgnoreOptionId.CompressCode when option.IsChecked => SettingsCompressionNotice,
-				IgnoreOptionId.StripComments when option.IsChecked => SettingsCommentStripNotice,
-				IgnoreOptionId.StripBlankLines when option.IsChecked => SettingsBlankLineStripNotice,
+				IgnoreOptionId.CompressCode when _appliedCompressCodeEnabled => SettingsCompressionNotice,
+				IgnoreOptionId.StripComments when _appliedStripCommentsEnabled => SettingsCommentStripNotice,
+				IgnoreOptionId.StripBlankLines when _appliedStripBlankLinesEnabled => SettingsBlankLineStripNotice,
 				_ => string.Empty
 			};
 		}

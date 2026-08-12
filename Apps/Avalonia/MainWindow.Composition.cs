@@ -145,6 +145,32 @@ public partial class MainWindow
 			.ConfigureAwait(false);
 	}
 
+	private async Task ApplyContentTransformationSettingsAsync(
+		BuildTreeResult currentTree,
+		CancellationToken cancellationToken)
+	{
+		CaptureAppliedContentTransformationState();
+		_metrics.CancelAndDiscardBackgroundCalculation();
+		_viewModel.StatusMetricsVisible = false;
+		_codeCompressionSnapshot = null;
+		InvalidatePreviewCache();
+		InvalidateSecretRedactionCount(scheduleRefreshImmediately: false);
+		RelabelIgnoreOptionsWithCurrentCounts();
+		SchedulePreviewRefresh(immediate: true);
+
+		await RunPostLoadBackgroundWorkAsync(
+			Task.CompletedTask,
+			currentTree,
+			StatusOperationPresentation.ExtendedDelay,
+			token => _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+				currentTree,
+				Task.CompletedTask,
+				token,
+				StatusOperationPresentation.ExtendedDelay),
+			MemoryCleanupReason.ApplySettingsWorkCompleted,
+			cancellationToken);
+	}
+
 	private SecretRedactionSnapshot? GetCachedSecretRedactionSnapshotForCurrentSelection()
 	{
 		if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
@@ -178,6 +204,25 @@ public partial class MainWindow
 		return kinds == CodeTransformKinds.None
 			? null
 			: new CodeCompressionContext(_currentPath, _codeCompressionSession, kinds);
+	}
+
+	private void CaptureAppliedContentTransformationState()
+	{
+		var selectedOptions = _selectionCoordinator.GetSelectedIgnoreOptionIds();
+		_appliedCompressCodeEnabled = selectedOptions.Contains(IgnoreOptionId.CompressCode);
+		_appliedStripCommentsEnabled = selectedOptions.Contains(IgnoreOptionId.StripComments);
+		_appliedStripBlankLinesEnabled = selectedOptions.Contains(IgnoreOptionId.StripBlankLines);
+		if (!_appliedCompressCodeEnabled &&
+		    !_appliedStripCommentsEnabled &&
+		    !_appliedStripBlankLinesEnabled)
+		{
+			_codeCompressionSnapshot = null;
+		}
+
+		_viewModel.SetAppliedContentTransformationState(
+			_appliedCompressCodeEnabled,
+			_appliedStripCommentsEnabled,
+			_appliedStripBlankLinesEnabled);
 	}
 
 	/// <summary>
@@ -750,6 +795,7 @@ public partial class MainWindow
 	private long _compressionSelectionRefreshVersion;
 	private int _treeSelectionChangeBatchDepth;
 	private bool _treeSelectionChangedDuringBatch;
+	private int _suppressTreeSelectionChanges;
 	private ContentTransformationContext? _publishedTransformationContext;
 	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
 	private static readonly TimeSpan SecretDiscoveryInteractiveDebounce =
@@ -1032,7 +1078,12 @@ public partial class MainWindow
 			ShowErrorAsync,
 			CreateContentTransformationContext,
 			() => ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets),
-			() => _selectionCoordinator.ApplyHideSecretsOverride(true),
+			() =>
+			{
+				var changed = _selectionCoordinator.ApplyHideSecretsOverride(true);
+				_selectionCoordinator.AcceptHideSecretsOverrideAsApplied(_currentPath);
+				return changed;
+			},
 			() => _projectProfiles.PersistIfNeeded(_currentPath));
         _previewWorkspaceController = new PreviewWorkspaceController(
             this,

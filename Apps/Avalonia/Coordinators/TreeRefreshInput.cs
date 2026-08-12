@@ -8,4 +8,5 @@ internal sealed record TreeRefreshInput(
     ProjectTreeInventorySnapshot? TreeInventory = null,
     ProjectTreeInventoryReuseScope? TreeInventoryScope = null,
     long? SelectionRevision = null,
-    BuildTreeResult? InteractiveFilterBaseTree = null);
+    BuildTreeResult? InteractiveFilterBaseTree = null,
+    IReadOnlySet<string>? CheckedPaths = null);

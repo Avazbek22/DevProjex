@@ -7,7 +7,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 {
     MainWindowViewModel IRefreshTreePipelineHost.ViewModel => _viewModel;
 
-    TreeRefreshInput? IRefreshTreePipelineHost.CaptureTreeRefreshInput()
+    TreeRefreshInput? IRefreshTreePipelineHost.CaptureTreeRefreshInput(bool preserveCheckedPaths)
     {
         if (string.IsNullOrWhiteSpace(_currentPath))
             return null;
@@ -43,7 +43,10 @@ public partial class MainWindow : IRefreshTreePipelineHost
             reusableInventory?.Snapshot,
             reusableInventory?.Scope,
             _selectionCoordinator.CurrentSelectionRevision,
-            _filterBaseTree);
+            _filterBaseTree,
+            preserveCheckedPaths
+                ? new HashSet<string>(GetCheckedPaths(), PathComparer.Default)
+                : null);
     }
 
     void IRefreshTreePipelineHost.BeforeFullTreeRefresh()
@@ -97,6 +100,8 @@ public partial class MainWindow : IRefreshTreePipelineHost
         if (!PathComparer.Default.Equals(_currentPath, input.CurrentPath))
             return;
 
+		_treeSelectionSnapshotCache.ResetForTreeReplacement();
+
         // Swap trees only after the new root is fully materialized.
         // This prevents losing the previously visible project on cancellation.
         _searchFilterController.ClearSearchState();
@@ -115,19 +120,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 			// the applied transformation state; until then it is a draft with no effect on
 			// produced content, the preview, or the measured counters. Name-filter publications
 			// deliberately keep the previously applied state.
-			_appliedCompressCodeEnabled = _selectionCoordinator
-				.GetSelectedIgnoreOptionIds()
-				.Contains(IgnoreOptionId.CompressCode);
-			_appliedStripCommentsEnabled = _selectionCoordinator
-				.GetSelectedIgnoreOptionIds()
-				.Contains(IgnoreOptionId.StripComments);
-			_appliedStripBlankLinesEnabled = _selectionCoordinator
-				.GetSelectedIgnoreOptionIds()
-				.Contains(IgnoreOptionId.StripBlankLines);
-			if (!_appliedCompressCodeEnabled &&
-			    !_appliedStripCommentsEnabled &&
-			    !_appliedStripBlankLinesEnabled)
-				_codeCompressionSnapshot = null;
+			CaptureAppliedContentTransformationState();
 		}
 		// Keep tree publication visually pure. Initial/full refresh work must remain pending until
 		// StartPostLoadBackgroundWork releases it after the settings reveal and layout-settle gate.
@@ -154,6 +147,14 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
         _viewModel.TreeNodes.Add(root);
         root.IsExpanded = true;
+		if (input.CheckedPaths is { Count: > 0 })
+		{
+			ApplyTreeSelectionWithoutPublishing(() =>
+			{
+				foreach (var path in input.CheckedPaths)
+					FindTreeNodeByPath(root, path)?.IsChecked = true;
+			});
+		}
 
         if (!interactiveFilter)
             _selectionCoordinator.AcceptCurrentSelectionsAsApplied(input.CurrentPath, result.Inventory);
@@ -181,6 +182,36 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
         SchedulePreviewRefresh(immediate: true);
     }
+
+	private static TreeNodeViewModel? FindTreeNodeByPath(
+		TreeNodeViewModel root,
+		string path)
+	{
+		if (PathComparer.Default.Equals(root.FullPath, path))
+			return root;
+		if (!PathUtility.IsPathInside(path, root.FullPath))
+			return null;
+
+		var current = root;
+		while (true)
+		{
+			TreeNodeViewModel? next = null;
+			foreach (var child in current.Children)
+			{
+				if (PathComparer.Default.Equals(child.FullPath, path))
+					return child;
+				if (PathUtility.IsPathInside(path, child.FullPath))
+				{
+					next = child;
+					break;
+				}
+			}
+
+			if (next is null)
+				return null;
+			current = next;
+		}
+	}
 
     private void ReapplyActiveTreeQueryPresentation() =>
         _searchFilterController.ReapplyActiveTreeQueryPresentation();

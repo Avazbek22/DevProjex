@@ -9,6 +9,9 @@ public partial class MainWindow
 
 	private void OnTreeNodeCheckedChanged(TreeNodeViewModel _)
     {
+		if (_suppressTreeSelectionChanges > 0)
+			return;
+
 		if (_treeSelectionChangeBatchDepth > 0)
 		{
 			_treeSelectionChangedDuringBatch = true;
@@ -16,6 +19,20 @@ public partial class MainWindow
 		}
 
 		PublishTreeSelectionChange();
+	}
+
+	private void ApplyTreeSelectionWithoutPublishing(Action applyChanges)
+	{
+		ArgumentNullException.ThrowIfNull(applyChanges);
+		_suppressTreeSelectionChanges++;
+		try
+		{
+			applyChanges();
+		}
+		finally
+		{
+			_suppressTreeSelectionChanges--;
+		}
 	}
 
 	private void ApplyTreeSelectionBatch(Action applyChanges)

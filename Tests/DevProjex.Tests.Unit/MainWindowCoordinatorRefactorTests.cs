@@ -1993,7 +1993,7 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public BuildTreeSnapshotResult? LastAppliedResult { get; private set; }
 
-        public TreeRefreshInput? CaptureTreeRefreshInput()
+        public TreeRefreshInput? CaptureTreeRefreshInput(bool preserveCheckedPaths)
         {
             return new TreeRefreshInput(
                 CurrentPath,

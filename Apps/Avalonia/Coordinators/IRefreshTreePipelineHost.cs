@@ -6,7 +6,7 @@ internal interface IRefreshTreePipelineHost
 {
     MainWindowViewModel ViewModel { get; }
 
-    TreeRefreshInput? CaptureTreeRefreshInput();
+    TreeRefreshInput? CaptureTreeRefreshInput(bool preserveCheckedPaths);
 
     void BeforeFullTreeRefresh();
 
