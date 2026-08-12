@@ -42,6 +42,7 @@ public static class IgnoreOptionRefreshPlanner
 			IgnoreOptionId.HideSecrets => IgnoreOptionRefreshImpact.None,
 			IgnoreOptionId.CompressCode => IgnoreOptionRefreshImpact.None,
 			IgnoreOptionId.StripComments => IgnoreOptionRefreshImpact.None,
+			IgnoreOptionId.StripBlankLines => IgnoreOptionRefreshImpact.None,
             _ => IgnoreOptionRefreshImpact.RootStructure
         };
     }

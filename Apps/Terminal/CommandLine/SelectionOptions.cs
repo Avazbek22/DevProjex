@@ -14,6 +14,7 @@ internal sealed class SelectionOptions
 	public Option<bool> HideSecrets { get; }
 	public Option<bool> CompressCode { get; }
 	public Option<bool> StripComments { get; }
+	public Option<bool> StripBlankLines { get; }
 
 	public SelectionOptions(
 		LocalizationService localization,
@@ -56,6 +57,10 @@ internal sealed class SelectionOptions
 		{
 			Description = localization["Terminal.Option.StripComments"]
 		};
+		StripBlankLines = new Option<bool>("--strip-blank-lines")
+		{
+			Description = localization["Terminal.Option.StripBlankLines"]
+		};
 	}
 
 	public void AddTo(Command command)
@@ -69,6 +74,7 @@ internal sealed class SelectionOptions
 		command.Options.Add(HideSecrets);
 		command.Options.Add(CompressCode);
 		command.Options.Add(StripComments);
+		command.Options.Add(StripBlankLines);
 	}
 
 	public async Task<ProjectSelectionSpec> ResolveAsync(
@@ -94,6 +100,9 @@ internal sealed class SelectionOptions
 		bool? stripComments = parseResult.GetResult(StripComments) is { Implicit: false }
 			? parseResult.GetValue(StripComments)
 			: null;
+		bool? stripBlankLines = parseResult.GetResult(StripBlankLines) is { Implicit: false }
+			? parseResult.GetValue(StripBlankLines)
+			: null;
 		var overrides = new ProjectSelectionSpec(
 			Roots: GetExplicitValues(parseResult, Roots),
 			Extensions: GetExplicitValues(parseResult, Extensions),
@@ -103,6 +112,7 @@ internal sealed class SelectionOptions
 			HideSecrets: hideSecrets,
 			CompressCode: compressCode,
 			StripComments: stripComments,
+			StripBlankLines: stripBlankLines,
 			ProfileSource: profile);
 
 		return await services.SelectionResolver

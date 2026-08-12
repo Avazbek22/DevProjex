@@ -177,6 +177,8 @@ public sealed class ProfileCommandHandler(
 			.AppendLine((selection.CompressCode == true).ToString(CultureInfo.InvariantCulture));
 		output.Append(services.Localization["Settings.Ignore.StripComments"]).Append(": ")
 			.AppendLine((selection.StripComments == true).ToString(CultureInfo.InvariantCulture));
+		output.Append(services.Localization["Settings.Ignore.StripBlankLines"]).Append(": ")
+			.AppendLine((selection.StripBlankLines == true).ToString(CultureInfo.InvariantCulture));
 		return output.ToString().TrimEnd('\r', '\n');
 	}
 
@@ -209,7 +211,8 @@ public sealed class ProfileCommandHandler(
 						.ToArray(),
 					hideSecrets = selection.HideSecrets == true,
 					compressCode = selection.CompressCode == true,
-					stripComments = selection.StripComments == true
+					stripComments = selection.StripComments == true,
+					stripBlankLines = selection.StripBlankLines == true
 				}
 			},
 			new JsonSerializerOptions

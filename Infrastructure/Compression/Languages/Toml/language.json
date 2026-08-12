@@ -8,7 +8,8 @@
   "export": "tree_sitter_toml",
   "queryVersion": 1,
   "transformCapabilities": [
-    "comments"
+    "comments",
+    "blankLines"
   ],
   "blockPlaceholder": "",
   "containerNodeTypes": [],

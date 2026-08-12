@@ -8,6 +8,7 @@
   "library": "tree-sitter-python",
   "export": "tree_sitter_python",
   "queryVersion": 4,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
   "blockPlaceholder": "...",
   "blockBodyStyle": "indented-statement",
   "preserveLeadingDocstring": true,

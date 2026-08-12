@@ -8,6 +8,7 @@
   "library": "tree-sitter-kotlin",
   "export": "tree_sitter_kotlin",
   "queryVersion": 3,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
   "blockPlaceholder": "{ }",
   "blockBodyStyle": "inline",
   "preserveLeadingDocstring": false,

@@ -170,7 +170,8 @@ public sealed class ProjectContextDocumentService(
 	{
 		var kinds = CodeTransformIdentity.Resolve(
 			plan.Selection.CompressCode == true,
-			plan.Selection.StripComments == true);
+			plan.Selection.StripComments == true,
+			plan.Selection.StripBlankLines == true);
 		return ContentTransformationContext.For(
 			codeCompressionSession is not null && kinds != CodeTransformKinds.None
 				? new CodeCompressionContext(plan.SourceRoot, codeCompressionSession, kinds)

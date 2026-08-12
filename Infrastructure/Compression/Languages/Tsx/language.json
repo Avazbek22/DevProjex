@@ -5,6 +5,7 @@
   "library": "tree-sitter-tsx",
   "export": "tree_sitter_tsx",
   "queryVersion": 8,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
   "blockPlaceholder": "{ }",
   "expressionBodyStyle": "inline",
   "containerNodeTypes": ["program", "class_body", "interface_body"],

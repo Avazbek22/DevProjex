@@ -31,6 +31,22 @@ public sealed class DirectCommandIntegrationTests
 		}
 		""";
 
+	private const string BlankLineSource = """"
+		namespace Sample;
+
+		public sealed class BlankLineWidget
+		{
+
+			private const string Text = """
+		first
+
+		second
+		""";
+
+			public string Value => Text;
+		}
+		"""";
+
 	private const string RubyCompressibleSource = """
 		class Service
 		  def initialize(root)
@@ -226,6 +242,42 @@ public sealed class DirectCommandIntegrationTests
 	}
 
 	[Fact]
+	public async Task AnalyzeWithStripBlankLinesReportsIndependentModeAndCounters()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/BlankLineWidget.cs", BlankLineSource);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+			[
+				"analyze", workspace.Path,
+				"--format", "json",
+				"--strip-blank-lines",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--language", "en"
+			],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var root = document.RootElement;
+		var selection = root.GetProperty("selection");
+		Assert.False(selection.GetProperty("compressCode").GetBoolean());
+		Assert.False(selection.GetProperty("stripComments").GetBoolean());
+		Assert.True(selection.GetProperty("stripBlankLines").GetBoolean());
+		var compression = root.GetProperty("compression");
+		Assert.Equal(1, compression.GetProperty("compressedFiles").GetInt32());
+		Assert.Equal(0, compression.GetProperty("bodyTransformedFiles").GetInt32());
+		Assert.Equal(0, compression.GetProperty("commentTransformedFiles").GetInt32());
+		Assert.Equal(1, compression.GetProperty("blankLineTransformedFiles").GetInt32());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task AnalyzeTextKeepsBodyAndCommentFileCountersIndependent()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -354,6 +406,37 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Fact]
+	public async Task ContextExportWithStripBlankLinesPreservesMultilineLeafContent()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/BlankLineWidget.cs", BlankLineSource);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+			[
+				"export", "context", workspace.Path,
+				"--view", "content",
+				"--format", "markdown",
+				"--strip-blank-lines",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", "-"
+			],
+				TestContext.Current.CancellationToken);
+
+		var output = environment.StandardOutput.ReplaceLineEndings("\n");
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain("namespace Sample;\n\npublic sealed", output, StringComparison.Ordinal);
+		Assert.DoesNotContain("BlankLineWidget\n{\n\n", output, StringComparison.Ordinal);
+		Assert.Contains("first\n\nsecond", output, StringComparison.Ordinal);
+		Assert.Contains("public string Value => Text;", output, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Theory]
 	[InlineData("src/service.rb", RubyCompressibleSource, "@root = root", "ruby_direct_cli_marker")]
 	[InlineData("src/Service.php", PhpCompressibleSource, "$this->root = trim($root);", "$php_direct_cli_marker")]
@@ -472,6 +555,48 @@ public sealed class DirectCommandIntegrationTests
 		Assert.DoesNotContain("must disappear", exported, StringComparison.Ordinal);
 		Assert.Contains("return marker;", exported, StringComparison.Ordinal);
 		Assert.Contains("// string content must remain", exported, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	public async Task ProjectExportWithStripBlankLinesWritesTheSameTransformedBytes(string kind)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/BlankLineWidget.cs", BlankLineSource);
+		var destination = kind == "zip"
+			? Path.Combine(workspace.Path, "blank-lines.zip")
+			: Path.Combine(workspace.Path, "blank-lines");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunProjectExportAsync(
+			project,
+			destination,
+			kind,
+			environment,
+			stripBlankLines: true);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		string exported;
+		if (kind == "zip")
+		{
+			using var archive = System.IO.Compression.ZipFile.OpenRead(destination);
+			var entry = Assert.Single(archive.Entries, static candidate =>
+				candidate.FullName.EndsWith("BlankLineWidget.cs", StringComparison.Ordinal));
+			using var reader = new StreamReader(entry.Open());
+			exported = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+		}
+		else
+		{
+			exported = await File.ReadAllTextAsync(
+				Path.Combine(destination, "src", "BlankLineWidget.cs"),
+				TestContext.Current.CancellationToken);
+		}
+
+		exported = exported.ReplaceLineEndings("\n");
+		Assert.DoesNotContain("namespace Sample;\n\npublic sealed", exported, StringComparison.Ordinal);
+		Assert.Contains("first\n\nsecond", exported, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -792,7 +917,8 @@ public sealed class DirectCommandIntegrationTests
 		string kind,
 		TestTerminalEnvironment environment,
 		bool compress = false,
-		bool stripComments = false)
+		bool stripComments = false,
+		bool stripBlankLines = false)
 	{
 		var arguments = new List<string>
 		{
@@ -807,6 +933,8 @@ public sealed class DirectCommandIntegrationTests
 			arguments.Add("--compress");
 		if (stripComments)
 			arguments.Add("--strip-comments");
+		if (stripBlankLines)
+			arguments.Add("--strip-blank-lines");
 		return new TerminalApplication(environment, new TerminalServiceFactory())
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
 	}

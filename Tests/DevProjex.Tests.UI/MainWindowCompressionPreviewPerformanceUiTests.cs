@@ -7,6 +7,108 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowCompressionPreviewPerformanceUiTests
 {
 	[AvaloniaFact]
+	public async Task StripBlankLinesCheckbox_IsDraftUntilApplyAndRestoresFullSourceWhenDisabled()
+	{
+		const string marker = "strip-blank-lines-ui-marker";
+		using var project = UiTestProject.CreateDefault();
+		var sourcePath = Path.Combine(project.RootPath, "src", "AppHost", "Program.cs");
+		var originalSource = await File.ReadAllTextAsync(
+			sourcePath,
+			TestContext.Current.CancellationToken);
+		var adjacentBlankLine = marker + Environment.NewLine + Environment.NewLine;
+		await File.WriteAllTextAsync(
+			sourcePath,
+			$"// {marker}{Environment.NewLine}{Environment.NewLine}{Environment.NewLine}{originalSource}",
+			TestContext.Current.CancellationToken);
+		var sourceBytes = await File.ReadAllBytesAsync(
+			sourcePath,
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var option = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static candidate => candidate.Id == IgnoreOptionId.StripBlankLines);
+			Assert.False(option.IsChecked);
+			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var sourceMetrics));
+			Assert.Contains(
+				adjacentBlankLine,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+			var diagnosticsBeforeDraft = UiTestDriver.GetCodeCompressionDiagnostics(window);
+
+			var checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(
+				window,
+				IgnoreOptionId.StripBlankLines);
+			await UiTestDriver.ClickAsync(window, checkBox);
+			Assert.Contains(
+				adjacentBlankLine,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+			Assert.Equal(
+				diagnosticsBeforeDraft.AnalysisExecutions,
+				UiTestDriver.GetCodeCompressionDiagnostics(window).AnalysisExecutions);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.SettingsBlankLineStripNotice.StartsWith(
+					"Removed blank lines from ",
+					StringComparison.Ordinal),
+				"blank-line prewarm to publish its exact snapshot after Apply");
+			var snapshot = Assert.IsType<CodeCompressionSnapshot>(GetCompressionSnapshot(window));
+			Assert.Equal(0, snapshot.BodyTransformedFiles);
+			Assert.Equal(0, snapshot.CommentTransformedFiles);
+			Assert.True(snapshot.BlankLineTransformedFiles >= 1);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var preview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+					return preview.Contains(marker, StringComparison.Ordinal) &&
+					       !preview.Contains(adjacentBlankLine, StringComparison.Ordinal) &&
+					       preview.Contains("return \"app-value-1\";", StringComparison.Ordinal);
+				},
+				"blank-line removal to update Preview without changing source code");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+					UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var strippedMetrics) &&
+					strippedMetrics.Chars < sourceMetrics.Chars,
+				"blank-line removal to publish metrics for the transformed text");
+
+			checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(
+				window,
+				IgnoreOptionId.StripBlankLines);
+			await UiTestDriver.ClickAsync(window, checkBox);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+					!option.IsChecked &&
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+						adjacentBlankLine,
+						StringComparison.Ordinal) &&
+					UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var restoredMetrics) &&
+					restoredMetrics == sourceMetrics,
+				"disabling blank-line removal to restore the original Preview and metrics");
+
+			Assert.Equal(
+				sourceBytes,
+				await File.ReadAllBytesAsync(sourcePath, TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task StripCommentsCheckbox_IsDraftUntilApplyAndRestoresFullSourceWhenDisabled()
 	{
 		const string commentMarker = "strip-comments-ui-marker";

@@ -14,6 +14,8 @@ public sealed class HelpReleaseRegressionTests
 		Assert.Contains("Default: text.", help, StringComparison.Ordinal);
 		Assert.Contains("--root <PATH>", help, StringComparison.Ordinal);
 		Assert.Contains("Repeatable.", help, StringComparison.Ordinal);
+		Assert.Contains("--strip-blank-lines", help, StringComparison.Ordinal);
+		Assert.Contains("Remove blank lines from supported source files.", help, StringComparison.Ordinal);
 		Assert.Contains("--language <en|ru|de|fr|it|es|pt|pt-pt|kk|tg|uz>", help, StringComparison.Ordinal);
 	}
 

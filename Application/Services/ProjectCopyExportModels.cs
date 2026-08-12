@@ -47,6 +47,7 @@ public sealed record ProjectCopyExportRequest(
 	bool RedactSecrets = false,
 	bool CompressCode = false,
 	bool StripComments = false,
+	bool StripBlankLines = false,
 	ProjectCopyNoticeText? NoticeText = null);
 
 /// <summary>

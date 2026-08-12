@@ -8,6 +8,35 @@ namespace DevProjex.Tests.Unit;
 public sealed class TreeSitterAnalysisDiagnosticsTests
 {
 	[Fact]
+	public void BlankLineCollection_RemainsInsideTheExistingEditShapingPhaseSchema()
+	{
+		using var compressor = CodeCompressionTestHarness.CreateCompressor();
+		using var diagnostics = compressor.BeginAnalysisDiagnostics(topCapacity: 3);
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.BlankLines);
+		const string source = "internal sealed class Sample\n{\n\n    internal int Value => 42;\n}\n";
+
+		var analysis = scope.Analyze(
+			"Sample.cs",
+			"Sample.cs",
+			source,
+			TestContext.Current.CancellationToken);
+		var snapshot = diagnostics.Capture();
+
+		Assert.Equal("internal sealed class Sample\n{\n    internal int Value => 42;\n}\n", analysis.GetResult(source).Text);
+		Assert.Equal(13, TreeSitterFileAnalysisTiming.ReportedPhases.Length);
+		Assert.All(
+			TreeSitterFileAnalysisTiming.ReportedPhases,
+			phase => Assert.Equal(1, snapshot.Phases.Single(item => item.Phase == phase).Count));
+		Assert.Equal(1, snapshot.Phases.Single(
+			static phase => phase.Phase == TreeSitterAnalysisPhase.EditShaping).Count);
+		var file = Assert.Single(snapshot.SlowestFiles);
+		Assert.True(file.Work.RawEdits > 0);
+		Assert.True(file.Work.FinalEdits > 0);
+		Assert.True(file.Work.OriginalVisitedNodes > 0);
+		Assert.Equal(0, file.Work.PreserveCaptures);
+	}
+
+	[Fact]
 	public void Analyze_ReportsAllRequiredPhasesAndPerFileWork()
 	{
 		using var compressor = CodeCompressionTestHarness.CreateCompressor();

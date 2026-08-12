@@ -45,6 +45,7 @@ public sealed class MachineSchemaContractTests
 		Assert.False(selectionPayload.GetProperty("hideSecrets").GetBoolean());
 		Assert.False(selectionPayload.GetProperty("compressCode").GetBoolean());
 		Assert.False(selectionPayload.GetProperty("stripComments").GetBoolean());
+		Assert.False(selectionPayload.GetProperty("stripBlankLines").GetBoolean());
 		Assert.DoesNotContain(
 			"hide-secrets",
 			selectionPayload.GetProperty("exclusions")

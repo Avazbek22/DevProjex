@@ -11,6 +11,9 @@ public sealed partial class SelectionSyncCoordinator
 	internal bool ApplyStripCommentsOverride(bool? enabled) =>
 		ApplyContentTransformationOverride(IgnoreOptionId.StripComments, enabled);
 
+	internal bool ApplyStripBlankLinesOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.StripBlankLines, enabled);
+
 	private bool ApplyContentTransformationOverride(IgnoreOptionId optionId, bool? enabled)
 	{
 		if (enabled is null)

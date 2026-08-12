@@ -227,6 +227,66 @@ public sealed class PortableProjectProfileServiceTests
 	}
 
 	[Fact]
+	public async Task StripBlankLinesRoundTripsAsAnIndependentContentTransformation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var destination = Path.Combine(workspace.Path, "portable.json");
+		var service = new PortableProjectProfileService();
+
+		await service.SaveAsync(
+			sourceRoot,
+			destination,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				StripBlankLines: true),
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		using (var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+		       destination,
+		       TestContext.Current.CancellationToken)))
+		{
+			Assert.True(document.RootElement
+				.GetProperty("selection")
+				.GetProperty("stripBlankLines")
+				.GetBoolean());
+		}
+
+		var loaded = await service.LoadAsync(destination, TestContext.Current.CancellationToken);
+		Assert.True(loaded.StripBlankLines);
+		Assert.False(loaded.CompressCode);
+		Assert.False(loaded.StripComments);
+	}
+
+	[Fact]
+	public async Task ProfileWithoutStripBlankLinesLoadsWithBlankLineRemovalDisabled()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = Path.Combine(workspace.Path, "profile.json");
+		await File.WriteAllTextAsync(
+			path,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""",
+			TestContext.Current.CancellationToken);
+
+		var selection = await new PortableProjectProfileService().LoadAsync(
+			path,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(selection.StripBlankLines);
+	}
+
+	[Fact]
 	public async Task LoadAsyncMigratesLegacyHideSecretsExclusion()
 	{
 		using var workspace = new TemporaryDirectory();

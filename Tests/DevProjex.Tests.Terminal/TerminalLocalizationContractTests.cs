@@ -105,6 +105,7 @@ public sealed partial class TerminalLocalizationContractTests
 		var labelKeys = ProjectPresentationCatalog.GitFiltering
 			.Select(static descriptor => descriptor.LabelKey)
 			.Concat(ProjectPresentationCatalog.Exclusions.Select(static descriptor => descriptor.LabelKey))
+			.Concat(ProjectPresentationCatalog.ContentTransformations.Select(static descriptor => descriptor.LabelKey))
 			.Concat(ProjectPresentationCatalog.PreviewModes.Select(static descriptor => descriptor.LabelKey))
 			.Concat(FileContentClassificationCatalog.All.Select(static descriptor => descriptor.LabelKey))
 			.Distinct(StringComparer.Ordinal)
@@ -219,12 +220,19 @@ public sealed partial class TerminalLocalizationContractTests
 			Assert.Contains("{0}", catalog["Settings.Secrets.Status.SizeLimit"], StringComparison.Ordinal);
 			Assert.Contains("{1}", catalog["Settings.Secrets.Status.SizeLimit"], StringComparison.Ordinal);
 			Assert.Contains("{0}", catalog["Settings.Secrets.Status.FailedFiles"], StringComparison.Ordinal);
+			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.Ignore.StripBlankLines"]));
+			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.BlankLines.Status.Scanning"]));
+			Assert.Contains("{0}", catalog["Settings.BlankLines.Status.Applied"], StringComparison.Ordinal);
+			Assert.Contains("{1}", catalog["Settings.BlankLines.Status.Applied"], StringComparison.Ordinal);
+			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.BlankLines.Status.NothingToStrip"]));
+			Assert.False(string.IsNullOrWhiteSpace(catalog["Settings.BlankLines.Status.Failed"]));
 			Assert.Equal(3, catalog["Preview.Secret.Redacted.Tooltip"].Split('\n').Length);
 			Assert.Equal(4, catalog["Preview.Secret.Kept.Tooltip"].Split('\n').Length);
 		}
 
 		Assert.Equal("Content processing:", catalogs["en"]["Settings.Secrets.Title"]);
 		Assert.Equal("Обработка содержимого:", catalogs["ru"]["Settings.Secrets.Title"]);
+		Assert.Equal("Убирать пустые строки", catalogs["ru"]["Settings.Ignore.StripBlankLines"]);
 		Assert.Equal("DevProjex не нашёл секреты", catalogs["ru"]["Settings.Ignore.HideSecrets.NoMatches"]);
 		Assert.Equal("Найдено: {0}. Скрыто: {1}.", catalogs["ru"]["Settings.Secrets.Status.Applied"]);
 		Assert.Equal("Не удалось завершить анализ.", catalogs["ru"]["Settings.Secrets.Status.Failed"]);

@@ -75,6 +75,7 @@ Works with any language, repository, or project structure.
 * **Hide Secrets** — replaces detected credential values in place while keeping the file and surrounding code. [Details](Docs/HideSecrets.md)
 * **Code compression** — keeps declarations and state while shortening named implementations across 14 languages
 * **Strip comments** — removes comments and documentation comments across 20 language packs without modifying source files
+* **Strip blank lines** — removes whitespace-only source lines across the same 20 syntax-aware language packs while preserving multiline literals and markup text
 * File tree with checkboxes, search, and name filters
 * Two Git-aware modes: follow `.gitignore`, or show only tracked files
 

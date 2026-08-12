@@ -14,5 +14,6 @@ public enum IgnoreOptionId
 	TrackedGitFilesOnly,
 	HideSecrets,
 	CompressCode,
-	StripComments
+	StripComments,
+	StripBlankLines
 }

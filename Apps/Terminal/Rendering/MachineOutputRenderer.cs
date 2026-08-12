@@ -50,6 +50,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 				hideSecrets = plan.Selection.HideSecrets == true,
 				compressCode = plan.Selection.CompressCode == true,
 				stripComments = plan.Selection.StripComments == true,
+				stripBlankLines = plan.Selection.StripBlankLines == true,
 				roots = plan.SelectedRoots,
 				extensions = plan.SelectedExtensions,
 				selectedPaths = plan.Selection.SelectedPaths ?? []
@@ -99,7 +100,8 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 					["sourceCharacters"] = compression.SourceCharacters,
 					["transformedCharacters"] = compression.TransformedCharacters,
 					["bodyTransformedFiles"] = compression.BodyTransformedFiles,
-					["commentTransformedFiles"] = compression.CommentTransformedFiles
+					["commentTransformedFiles"] = compression.CommentTransformedFiles,
+					["blankLineTransformedFiles"] = compression.BlankLineTransformedFiles
 				};
 			}
 			json = root.ToJsonString(JsonOptions);

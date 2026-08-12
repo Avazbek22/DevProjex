@@ -144,8 +144,9 @@ internal sealed class MetricsPipeline(
         var compression = transformationContextProvider?.Invoke()?.Compression;
         if (compression is null)
         {
-            viewModel.SetCompressionPreparationStatus(isActive: false);
+			viewModel.SetCompressionPreparationStatus(isActive: false);
 			viewModel.SetCommentStripPreparationStatus(isActive: false);
+			viewModel.SetBlankLineStripPreparationStatus(isActive: false);
             return Task.CompletedTask;
         }
 
@@ -156,12 +157,15 @@ internal sealed class MetricsPipeline(
         var prewarmCts = ReplaceCancellationSource(ref _compressionPrewarmCts);
 		var compressBodies = (compression.Kinds & CodeTransformKinds.Bodies) != 0;
 		var stripComments = (compression.Kinds & CodeTransformKinds.Comments) != 0;
-        viewModel.SetCompressionPreparationStatus(compressBodies);
+		var stripBlankLines = (compression.Kinds & CodeTransformKinds.BlankLines) != 0;
+		viewModel.SetCompressionPreparationStatus(compressBodies);
 		viewModel.SetCommentStripPreparationStatus(stripComments);
+		viewModel.SetBlankLineStripPreparationStatus(stripBlankLines);
 		var progressText = compression.Kinds switch
 		{
 			CodeTransformKinds.Bodies => localization["Settings.Compression.Status.Scanning"],
 			CodeTransformKinds.Comments => localization["Settings.Comments.Status.Scanning"],
+			CodeTransformKinds.BlankLines => localization["Settings.BlankLines.Status.Scanning"],
 			_ => localization["Settings.ContentTransform.Status.Scanning"]
 		};
         var statusOperationId = statusOperations.Begin(
@@ -642,9 +646,16 @@ internal sealed class MetricsPipeline(
 								snapshot.CommentTransformedFiles,
 								snapshot.TotalFiles);
 						}
+						if ((compression.Kinds & CodeTransformKinds.BlankLines) != 0)
+						{
+							viewModel.SetBlankLineStripStatus(
+								snapshot.BlankLineTransformedFiles,
+								snapshot.TotalFiles);
+						}
                     }
                     viewModel.SetCompressionPreparationStatus(isActive: false);
 					viewModel.SetCommentStripPreparationStatus(isActive: false);
+					viewModel.SetBlankLineStripPreparationStatus(isActive: false);
                     statusOperations.Complete(statusOperationId);
                 });
             }

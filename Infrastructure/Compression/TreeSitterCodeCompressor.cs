@@ -304,7 +304,10 @@ public sealed class TreeSitterCodeCompressor :
 	private static void ValidateTransformKinds(CodeTransformKinds kinds)
 	{
 		if (kinds is CodeTransformKinds.None ||
-		    (kinds & ~(CodeTransformKinds.Bodies | CodeTransformKinds.Comments)) != 0)
+		    (kinds & ~(
+			    CodeTransformKinds.Bodies |
+			    CodeTransformKinds.Comments |
+			    CodeTransformKinds.BlankLines)) != 0)
 		{
 			throw new ArgumentOutOfRangeException(nameof(kinds), kinds, null);
 		}
@@ -439,7 +442,8 @@ internal sealed class TreeSitterCompressionScope(
 				analysisPhaseObserver,
 				analysisDiagnostics,
 				relativePath,
-				ref timing);
+				ref timing,
+				out var originalInspection);
 			cancellationToken.ThrowIfCancellationRequested();
 			if (edits is null)
 				return Refused(relativePath, pack.Id, CodeCompressionOutcome.UnchangedGateRejected, source.Length);
@@ -492,22 +496,29 @@ internal sealed class TreeSitterCompressionScope(
 				source.Length,
 				ref timing,
 				cancellationToken);
-			phaseStartedAt = StartMeasuredPhase();
-			originalDefects = ReadDefects(
-				original.RootNode,
-				ContentTransformMap.Identity,
-				cancellationToken,
-				out var originalDefectCount,
-				out var originalVisitedNodes);
-			timing.OriginalDefects = originalDefectCount;
-			timing.OriginalVisitedNodes = originalVisitedNodes;
-			CompleteMeasuredPhase(
-				TreeSitterAnalysisPhase.OriginalDefectWalk,
-				phaseStartedAt,
-				relativePath,
-				source.Length,
-				ref timing,
-				cancellationToken);
+			if (originalInspection is { } inspection)
+			{
+				originalDefects = inspection.Defects;
+			}
+			else
+			{
+				phaseStartedAt = StartMeasuredPhase();
+				originalDefects = ReadDefects(
+					original.RootNode,
+					ContentTransformMap.Identity,
+					cancellationToken,
+					out var originalDefectCount,
+					out var originalVisitedNodes);
+				timing.OriginalDefects = originalDefectCount;
+				timing.OriginalVisitedNodes = originalVisitedNodes;
+				CompleteMeasuredPhase(
+					TreeSitterAnalysisPhase.OriginalDefectWalk,
+					phaseStartedAt,
+					relativePath,
+					source.Length,
+					ref timing,
+					cancellationToken);
+			}
 		}
 		finally
 		{
@@ -1006,14 +1017,19 @@ internal sealed class TreeSitterCompressionScope(
 		ITreeSitterAnalysisPhaseObserver? observer,
 		TreeSitterAnalysisDiagnosticsSession? diagnostics,
 		string relativePath,
-		ref TreeSitterFileAnalysisTiming timing)
+		ref TreeSitterFileAnalysisTiming timing,
+		out OriginalTreeInspection? originalInspection)
 	{
+		originalInspection = null;
 		var phaseStartedAt = diagnostics?.StartPhase() ?? 0;
-		var preservedRanges = ReadPreservedRanges(
-			language,
-			tree.RootNode,
-			cancellationToken,
-			out var preserveCaptureCount);
+		var preserveCaptureCount = 0;
+		var preservedRanges = (transformKinds & (CodeTransformKinds.Bodies | CodeTransformKinds.Comments)) != 0
+			? ReadPreservedRanges(
+				language,
+				tree.RootNode,
+				cancellationToken,
+				out preserveCaptureCount)
+			: [];
 		timing.PreserveCaptures = preserveCaptureCount;
 		CompleteMeasuredPhase(
 			diagnostics,
@@ -1158,6 +1174,38 @@ internal sealed class TreeSitterCompressionScope(
 			if (!commentQueryValid)
 				return null;
 
+			IReadOnlyList<SourceRange> protectedMultilineLeaves = Array.Empty<SourceRange>();
+			if ((transformKinds & CodeTransformKinds.BlankLines) != 0)
+			{
+				phaseStartedAt = diagnostics?.StartPhase() ?? 0;
+				var defects = ReadDefects(
+					tree.RootNode,
+					ContentTransformMap.Identity,
+					cancellationToken,
+					out var originalDefectCount,
+					out var originalVisitedNodes,
+					out protectedMultilineLeaves,
+					collectProtectedMultilineLeaves: true);
+				timing.OriginalDefects = originalDefectCount;
+				timing.OriginalVisitedNodes = originalVisitedNodes;
+				originalInspection = new OriginalTreeInspection(defects);
+				CompleteMeasuredPhase(
+					diagnostics,
+					observer,
+					TreeSitterAnalysisPhase.OriginalDefectWalk,
+					phaseStartedAt,
+					relativePath,
+					source.Length,
+					ref timing,
+					cancellationToken);
+				if (defects is null)
+					protectedMultilineLeaves = Array.Empty<SourceRange>();
+				else
+					protectedMultilineLeaves = MergePreservedRanges(
+						protectedMultilineLeaves,
+						cancellationToken);
+			}
+
 			phaseStartedAt = diagnostics?.StartPhase() ?? 0;
 			preservedRanges = MergePreservedRanges(preservedRanges, cancellationToken);
 			if (deferCommentShaping)
@@ -1212,6 +1260,15 @@ internal sealed class TreeSitterCompressionScope(
 					cancellationToken,
 					observer);
 			}
+			if ((transformKinds & CodeTransformKinds.BlankLines) != 0 &&
+			    originalInspection is { Defects: not null })
+			{
+				AppendBlankLineEdits(
+					source,
+					protectedMultilineLeaves,
+					raw,
+					cancellationToken);
+			}
 
 			// Outermost wins: a lambda body inside a method body must not be spliced twice.
 			cancellationToken.ThrowIfCancellationRequested();
@@ -1239,7 +1296,8 @@ internal sealed class TreeSitterCompressionScope(
 				}
 				while (preservedIndex < preservedRanges.Count && preservedRanges[preservedIndex].End <= start)
 					preservedIndex++;
-				if (preservedIndex < preservedRanges.Count &&
+				if ((kinds & ~CodeTransformKinds.BlankLines) != CodeTransformKinds.None &&
+				    preservedIndex < preservedRanges.Count &&
 				    preservedRanges[preservedIndex].Start <= start &&
 				    end <= preservedRanges[preservedIndex].End)
 				{
@@ -1294,6 +1352,77 @@ internal sealed class TreeSitterCompressionScope(
 		{
 			deferredComments.Dispose();
 		}
+	}
+
+	private static void AppendBlankLineEdits(
+		string source,
+		IReadOnlyList<SourceRange> protectedRanges,
+		List<RawCompressionEdit> edits,
+		CancellationToken cancellationToken)
+	{
+		var lineStart = 0;
+		var protectedIndex = 0;
+		while (lineStart < source.Length)
+		{
+			var cursor = lineStart;
+			var isBlank = true;
+			while (cursor < source.Length && source[cursor] is not ('\r' or '\n'))
+			{
+				ThrowIfCancellationRequestedPeriodically(cancellationToken, cursor - lineStart);
+				if (!char.IsWhiteSpace(source[cursor]))
+					isBlank = false;
+				cursor++;
+			}
+
+			var lineEnd = cursor;
+			if (lineEnd < source.Length && source[lineEnd] == '\r')
+			{
+				lineEnd++;
+				if (lineEnd < source.Length && source[lineEnd] == '\n')
+					lineEnd++;
+			}
+			else if (lineEnd < source.Length)
+			{
+				lineEnd++;
+			}
+
+			while (protectedIndex < protectedRanges.Count &&
+			       protectedRanges[protectedIndex].End <= lineStart)
+			{
+				protectedIndex++;
+			}
+			var overlapsProtectedRange =
+				protectedIndex < protectedRanges.Count &&
+				protectedRanges[protectedIndex].Start < lineEnd &&
+				lineStart < protectedRanges[protectedIndex].End;
+			if (isBlank && lineEnd > lineStart && !overlapsProtectedRange)
+				AddBlankLineRemoval(edits, lineStart, lineEnd);
+
+			if (lineEnd == cursor)
+				break;
+			lineStart = lineEnd;
+		}
+		cancellationToken.ThrowIfCancellationRequested();
+	}
+
+	private static void AddBlankLineRemoval(
+		List<RawCompressionEdit> edits,
+		int start,
+		int end)
+	{
+		if (edits.Count > 0 &&
+		    edits[^1] is { Kinds: CodeTransformKinds.BlankLines } previous &&
+		    previous.End == start)
+		{
+			edits[^1] = previous with { End = end };
+			return;
+		}
+
+		edits.Add(new RawCompressionEdit(
+			start,
+			end,
+			string.Empty,
+			CodeTransformKinds.BlankLines));
 	}
 
 	private static void CompleteEditShapingPhase(
@@ -2559,17 +2688,40 @@ internal sealed class TreeSitterCompressionScope(
 		CancellationToken cancellationToken,
 		out int defectCount,
 		out int visitedNodes)
+		=> ReadDefects(
+			root,
+			map,
+			cancellationToken,
+			out defectCount,
+			out visitedNodes,
+			out _,
+			collectProtectedMultilineLeaves: false);
+
+	private static List<CodeParseDefect>? ReadDefects(
+		Node root,
+		ContentTransformMap map,
+		CancellationToken cancellationToken,
+		out int defectCount,
+		out int visitedNodes,
+		out IReadOnlyList<SourceRange> protectedMultilineLeaves,
+		bool collectProtectedMultilineLeaves)
 	{
 		var defects = new List<CodeParseDefect>();
+		List<SourceRange>? protectedRanges = null;
 		using var cursor = new TreeCursor(root);
 		defectCount = 0;
 		visitedNodes = 0;
+		protectedMultilineLeaves = Array.Empty<SourceRange>();
 		while (true)
 		{
 			if (++visitedNodes > TreeSitterCodeCompressor.MaximumVisitedSyntaxNodesPerFile)
 				return null;
 			ThrowIfCancellationRequestedPeriodically(cancellationToken, visitedNodes);
 			var node = cursor.CurrentNode;
+			if (collectProtectedMultilineLeaves && IsProtectedMultilineLeaf(node))
+			{
+				(protectedRanges ??= []).Add(new SourceRange(node.StartIndex, node.EndIndex));
+			}
 			// See CodeParseDefect: HasError lies in both directions against the shipped grammars,
 			// and a MISSING node surfaces here only as a named node of zero width.
 			var isDefect = node.IsError ||
@@ -2592,11 +2744,33 @@ internal sealed class TreeSitterCompressionScope(
 				if (!cursor.GotoParent())
 				{
 					cancellationToken.ThrowIfCancellationRequested();
+					protectedMultilineLeaves = protectedRanges is null
+						? Array.Empty<SourceRange>()
+						: protectedRanges;
 					return defects;
 				}
 			}
 		}
 	}
+
+	private static bool IsProtectedMultilineLeaf(Node node)
+	{
+		if (node.StartPosition.Row == node.EndPosition.Row || node.EndIndex <= node.StartIndex)
+			return false;
+		if (node.FirstChild is null)
+			return true;
+
+		// Some external-scanner tokens expose an anonymous prefix marker but keep their payload in
+		// the owning named node. Treat that shape as a semantic leaf only when every child ends on
+		// the opening row; paired delimiters spanning the node (for example an empty block) remain
+		// structural and therefore do not protect whitespace between them.
+		return node.IsNamed &&
+		       node.FirstNamedChild is null &&
+		       node.LastChild is { } lastChild &&
+		       lastChild.EndPosition.Row == node.StartPosition.Row;
+	}
+
+	private readonly record struct OriginalTreeInspection(List<CodeParseDefect>? Defects);
 
 	private static bool IsLanguageRuntimeFailure(Exception exception) =>
 		exception is DllNotFoundException or

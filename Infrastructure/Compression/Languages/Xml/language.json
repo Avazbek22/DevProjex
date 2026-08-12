@@ -18,7 +18,8 @@
   "export": "tree_sitter_xml",
   "queryVersion": 1,
   "transformCapabilities": [
-    "comments"
+    "comments",
+    "blankLines"
   ],
   "blockPlaceholder": "",
   "containerNodeTypes": [],

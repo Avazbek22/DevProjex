@@ -29,7 +29,8 @@ public sealed record CodeCompressionSnapshot(
 	int AdditionalUnchangedFiles = 0,
 	int BodyTransformedFiles = 0,
 	int CommentTransformedFiles = 0,
-	string TransformIdentity = "")
+	string TransformIdentity = "",
+	int BlankLineTransformedFiles = 0)
 {
 	public static CodeCompressionSnapshot Empty { get; } = new(string.Empty, 0, 0, 0, 0, []);
 
@@ -84,10 +85,24 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		CodeTransformIdentity.Create(compressor.TransformIdentity, CodeTransformKinds.Bodies);
 	private readonly string _commentsTransformIdentity =
 		CodeTransformIdentity.Create(compressor.TransformIdentity, CodeTransformKinds.Comments);
+	private readonly string _blankLinesTransformIdentity =
+		CodeTransformIdentity.Create(compressor.TransformIdentity, CodeTransformKinds.BlankLines);
 	private readonly string _combinedTransformIdentity =
 		CodeTransformIdentity.Create(
 			compressor.TransformIdentity,
 			CodeTransformKinds.Bodies | CodeTransformKinds.Comments);
+	private readonly string _bodiesBlankLinesTransformIdentity =
+		CodeTransformIdentity.Create(
+			compressor.TransformIdentity,
+			CodeTransformKinds.Bodies | CodeTransformKinds.BlankLines);
+	private readonly string _commentsBlankLinesTransformIdentity =
+		CodeTransformIdentity.Create(
+			compressor.TransformIdentity,
+			CodeTransformKinds.Comments | CodeTransformKinds.BlankLines);
+	private readonly string _allTransformIdentity =
+		CodeTransformIdentity.Create(
+			compressor.TransformIdentity,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments | CodeTransformKinds.BlankLines);
 	private CodeCompressionSnapshot _snapshot = CodeCompressionSnapshot.Empty;
 	private CancellationTokenSource _generationCts = new();
 	private long _generation;
@@ -124,7 +139,14 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		{
 			CodeTransformKinds.Bodies => _bodiesTransformIdentity,
 			CodeTransformKinds.Comments => _commentsTransformIdentity,
+			CodeTransformKinds.BlankLines => _blankLinesTransformIdentity,
 			CodeTransformKinds.Bodies | CodeTransformKinds.Comments => _combinedTransformIdentity,
+			CodeTransformKinds.Bodies | CodeTransformKinds.BlankLines =>
+				_bodiesBlankLinesTransformIdentity,
+			CodeTransformKinds.Comments | CodeTransformKinds.BlankLines =>
+				_commentsBlankLinesTransformIdentity,
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments | CodeTransformKinds.BlankLines =>
+				_allTransformIdentity,
 			_ => throw new ArgumentOutOfRangeException(nameof(kinds), kinds, null)
 		};
 
@@ -852,6 +874,7 @@ public sealed class CodeCompressionScope : IDisposable
 	private int _compressed;
 	private int _bodyTransformed;
 	private int _commentTransformed;
+	private int _blankLineTransformed;
 	private int _unchangedFiles;
 	private long _sourceCharacters;
 	private long _transformedCharacters;
@@ -1077,6 +1100,8 @@ public sealed class CodeCompressionScope : IDisposable
 				Interlocked.Increment(ref _bodyTransformed);
 			if ((plan.AffectedKinds & CodeTransformKinds.Comments) != 0)
 				Interlocked.Increment(ref _commentTransformed);
+			if ((plan.AffectedKinds & CodeTransformKinds.BlankLines) != 0)
+				Interlocked.Increment(ref _blankLineTransformed);
 			Interlocked.Add(ref _transformedCharacters, plan.TransformedLength);
 			return;
 		}
@@ -1133,7 +1158,8 @@ public sealed class CodeCompressionScope : IDisposable
 			Math.Max(0, unchangedFiles - unchanged.Length),
 			Volatile.Read(ref _bodyTransformed),
 			Volatile.Read(ref _commentTransformed),
-			transformIdentity);
+			transformIdentity,
+			Volatile.Read(ref _blankLineTransformed));
 		session.Publish(snapshot, generation);
 		return snapshot;
 	}

@@ -37,6 +37,7 @@ public sealed class ProjectSelectionResolver(
 			// Compression has no legacy exclusion form, so it resolves as a plain override.
 			CompressCode = overrides.CompressCode ?? baseline.CompressCode,
 			StripComments = overrides.StripComments ?? baseline.StripComments,
+			StripBlankLines = overrides.StripBlankLines ?? baseline.StripBlankLines,
 			ProfileSource = profile
 		};
 		var applyProfileValues = profile.Kind != ProjectProfileSourceKind.Local;
@@ -70,7 +71,11 @@ public sealed class ProjectSelectionResolver(
 				StripComments: ResolveApplicationMode(
 					overrides.StripComments is not null,
 					applyProfileValues,
-					resolved.StripComments))
+					resolved.StripComments),
+				StripBlankLines: ResolveApplicationMode(
+					overrides.StripBlankLines is not null,
+					applyProfileValues,
+					resolved.StripBlankLines))
 		};
 
 		if (baseline.LocalProfileState is { } localState)
@@ -84,8 +89,9 @@ public sealed class ProjectSelectionResolver(
 					IgnoreOptionsOverridden = overrides.GitMode is not null ||
 					                          overrides.Exclusions is not null ||
 					                          overrides.HideSecrets is not null ||
-					                          overrides.CompressCode is not null ||
-					                          overrides.StripComments is not null
+						                          overrides.CompressCode is not null ||
+						                          overrides.StripComments is not null ||
+						                          overrides.StripBlankLines is not null
 				}
 			};
 		}

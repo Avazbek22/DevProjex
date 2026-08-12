@@ -5,6 +5,7 @@
   "library": "tree-sitter-rust",
   "export": "tree_sitter_rust",
   "queryVersion": 5,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
   "blockPlaceholder": "{ }",
   "containerNodeTypes": ["source_file", "declaration_list"],
   "executableOwnerKinds": ["function_item"]

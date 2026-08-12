@@ -8,6 +8,7 @@
   "library": "tree-sitter-php",
   "export": "tree_sitter_php",
   "queryVersion": 2,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
   "blockPlaceholder": "{ }",
   "preserveLeadingDocstring": false,
   "containerNodeTypes": [

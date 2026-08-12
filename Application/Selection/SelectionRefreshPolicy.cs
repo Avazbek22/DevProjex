@@ -111,7 +111,8 @@ public static class SelectionRefreshPolicy
             and not IgnoreOptionId.SmartIgnore
             and not IgnoreOptionId.HideSecrets
 			and not IgnoreOptionId.CompressCode
-			and not IgnoreOptionId.StripComments;
+			and not IgnoreOptionId.StripComments
+			and not IgnoreOptionId.StripBlankLines;
 
     private static bool HasPreparedSelectionForPath(string? preparedSelectionPath, string path)
     {

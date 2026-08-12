@@ -1009,18 +1009,26 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		HookAllOptionListeners(coordinator, viewModel);
 		Assert.True(coordinator.ApplyCompressCodeOverride(false));
 		Assert.True(coordinator.ApplyStripCommentsOverride(false));
+		Assert.True(coordinator.ApplyStripBlankLinesOverride(false));
 		changedOptions.Clear();
 
 		Assert.True(coordinator.ApplyHideSecretsOverride(true));
 		Assert.True(coordinator.ApplyCompressCodeOverride(true));
 		Assert.True(coordinator.ApplyStripCommentsOverride(true));
+		Assert.True(coordinator.ApplyStripBlankLinesOverride(true));
 
 		Assert.Equal(
-			[IgnoreOptionId.HideSecrets, IgnoreOptionId.CompressCode, IgnoreOptionId.StripComments],
+			[
+				IgnoreOptionId.HideSecrets,
+				IgnoreOptionId.CompressCode,
+				IgnoreOptionId.StripComments,
+				IgnoreOptionId.StripBlankLines
+			],
 			changedOptions);
 		Assert.False(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.HideSecrets));
 		Assert.True(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.CompressCode));
 		Assert.True(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.StripComments));
+		Assert.True(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.StripBlankLines));
 		Assert.True(MainWindow.RequiresCompressionRefresh(changedOptionId: null));
 	}
 

@@ -118,6 +118,9 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	public string FormatStripCommentsLabel(int? strippedFiles, int? unchangedFiles)
 		=> localization["Settings.Ignore.StripComments"];
 
+	public string FormatStripBlankLinesLabel(int? strippedFiles, int? unchangedFiles)
+		=> localization["Settings.Ignore.StripBlankLines"];
+
 	private void AppendContentTransformationOptions(
 		List<IgnoreOptionDescriptor> options,
 		IgnoreOptionsAvailability availability)
@@ -138,6 +141,10 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 					FormatStripCommentsLabel(
 						availability.CommentStrippedFilesCount,
 						availability.CommentUnchangedFilesCount),
+				IgnoreOptionId.StripBlankLines =>
+					FormatStripBlankLinesLabel(
+						availability.BlankLineStrippedFilesCount,
+						availability.BlankLineUnchangedFilesCount),
 				_ => localization[descriptor.LabelKey]
 			};
 			options.Add(new IgnoreOptionDescriptor(descriptor.LegacyOptionId, label, false));

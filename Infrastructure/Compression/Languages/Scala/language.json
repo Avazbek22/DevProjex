@@ -8,6 +8,7 @@
   "library": "tree-sitter-scala",
   "export": "tree_sitter_scala",
   "queryVersion": 2,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
   "blockPlaceholder": "{ }",
   "blockBodyStyle": "inline",
   "preserveLeadingDocstring": false,

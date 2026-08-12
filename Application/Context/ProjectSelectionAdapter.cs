@@ -27,6 +27,8 @@ public static class ProjectSelectionAdapter
 			options.Add(IgnoreOptionId.CompressCode);
 		if (selection.StripComments is true)
 			options.Add(IgnoreOptionId.StripComments);
+		if (selection.StripBlankLines is true)
+			options.Add(IgnoreOptionId.StripBlankLines);
 
 		return options.OrderBy(static option => (int)option).ToArray();
 	}
@@ -65,6 +67,7 @@ public static class ProjectSelectionAdapter
 			HideSecrets: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets),
 			CompressCode: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.CompressCode),
 			StripComments: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.StripComments),
+			StripBlankLines: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.StripBlankLines),
 			ProfileSource: source);
 	}
 
