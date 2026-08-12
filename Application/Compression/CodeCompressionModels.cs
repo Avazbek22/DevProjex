@@ -82,11 +82,11 @@ public sealed record CodeCompressionPlan(
 	int TransformedLength,
 	string TransformIdentity)
 {
+	private readonly CodeTransformKinds _affectedKinds = AggregateAffectedKinds(Edits);
+
 	public bool HasEdits => Edits.Count > 0;
 
-	public CodeTransformKinds AffectedKinds => Edits.Aggregate(
-		CodeTransformKinds.None,
-		static (kinds, edit) => kinds | edit.Kinds);
+	public CodeTransformKinds AffectedKinds => _affectedKinds;
 
 	/// <summary>Characters saved. Never negative: a plan that does not shrink is not applied.</summary>
 	public int SavedCharacters => SourceLength - TransformedLength;
@@ -101,7 +101,23 @@ public sealed record CodeCompressionPlan(
 
 	/// <summary>Same file, no edits, carrying the reason it was left alone.</summary>
 	public CodeCompressionPlan ToUnchanged(CodeCompressionOutcome outcome) =>
-		this with { Outcome = outcome, Edits = [], TransformedLength = SourceLength };
+		new(
+			RelativePath,
+			LanguageId,
+			outcome,
+			[],
+			SourceLength,
+			SourceLength,
+			TransformIdentity);
+
+	private static CodeTransformKinds AggregateAffectedKinds(
+		IReadOnlyList<CodeCompressionEdit> edits)
+	{
+		var kinds = CodeTransformKinds.None;
+		for (var index = 0; index < edits.Count; index++)
+			kinds |= edits[index].Kinds;
+		return kinds;
+	}
 
 	/// <summary>
 	/// Builds a plan from edits, rejecting anything that could corrupt the splice. Edits are sorted

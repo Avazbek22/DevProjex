@@ -257,4 +257,53 @@ public sealed class CodeStructureGateTests
 
 		Assert.Equal(CodeStructureGateVerdict.Accepted, verdict);
 	}
+
+	[Fact]
+	public void OrderedGatePath_MatchesDefensivePathForAcceptedAndRejectedInputs()
+	{
+		var trailingComment = new CodeCompressionEdit(120, 10, string.Empty)
+		{
+			Kinds = CodeTransformKinds.Comments
+		};
+		var ordered = new[] { BodyEdit, trailingComment };
+		var defensiveAccepted = CodeStructureGate.Evaluate(
+			[Method, LocalFunction],
+			[Method],
+			[],
+			[],
+			ordered.Reverse().ToArray(),
+			OwnerKinds,
+			TestContext.Current.CancellationToken);
+		var orderedAccepted = CodeStructureGate.EvaluateOrdered(
+			[Method, LocalFunction],
+			[Method],
+			[],
+			[],
+			ordered,
+			OwnerKinds,
+			TestContext.Current.CancellationToken);
+
+		var straddling = new[] { new CodeCompressionEdit(80, 60, "{ /* … */ }") };
+		var defensiveRejected = CodeStructureGate.Evaluate(
+			[Method],
+			[Method],
+			[],
+			[],
+			straddling,
+			OwnerKinds,
+			TestContext.Current.CancellationToken);
+		var orderedRejected = CodeStructureGate.EvaluateOrdered(
+			[Method],
+			[Method],
+			[],
+			[],
+			straddling,
+			OwnerKinds,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(defensiveAccepted, orderedAccepted);
+		Assert.Equal(CodeStructureGateVerdict.Accepted, orderedAccepted);
+		Assert.Equal(defensiveRejected, orderedRejected);
+		Assert.Equal(CodeStructureGateVerdict.RejectedEditCrossesDeclaration, orderedRejected);
+	}
 }
