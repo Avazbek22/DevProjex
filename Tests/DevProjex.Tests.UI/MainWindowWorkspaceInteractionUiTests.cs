@@ -605,6 +605,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                 },
                 "initial settings pane to become visually available before applying settings");
 
+            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
             var applyButton = UiTestDriver.GetRequiredApplySettingsButton(window);
             await UiTestDriver.RaiseButtonClickAsync(applyButton);
             await UiTestDriver.WaitForConditionAsync(

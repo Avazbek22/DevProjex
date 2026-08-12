@@ -287,6 +287,29 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void ApplySettingsGate_RejectsCleanAndDuplicateRequestsWithoutChangingUiAvailability()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.SetPendingFilterSettingsChanges(true);
+
+        Assert.True(viewModel.TryBeginApplySettings());
+        Assert.True(viewModel.CanApplySettings);
+        Assert.False(viewModel.TryBeginApplySettings());
+
+        viewModel.CompleteApplySettings();
+
+        Assert.True(viewModel.CanApplySettings);
+        Assert.True(viewModel.TryBeginApplySettings());
+
+        viewModel.SetPendingFilterSettingsChanges(false);
+        viewModel.CompleteApplySettings();
+
+        Assert.True(viewModel.CanApplySettings);
+        Assert.False(viewModel.TryBeginApplySettings());
+    }
+
+    [Fact]
     public void StatusPresentation_CanStayHiddenWhileOperationRemainsLogicallyBusy()
     {
         var viewModel = CreateViewModel();

@@ -132,6 +132,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _statusPresentationReady = true;
     private bool _applySettingsBusyDelayElapsed;
     private CancellationTokenSource? _applySettingsBusyDelayCts;
+    private int _applySettingsInProgress;
     private bool _hasPendingFilterSettingsChanges;
     private bool _statusMetricsVisible;
     private bool _statusPreviewSelectionVisible;
@@ -445,7 +446,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool AreFilterSettingsEnabled => _isProjectLoaded && !_isProjectCopyExportInProgress;
 
-    public bool CanApplySettings => _isProjectLoaded && !_applySettingsBusyDelayElapsed && !_isProjectCopyExportInProgress;
+    public bool CanApplySettings => CanStartApplySettings;
 
     public bool HasPendingFilterSettingsChanges => _hasPendingFilterSettingsChanges;
 
@@ -461,6 +462,29 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HasPendingFilterSettingsChanges));
         RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
     }
+
+    internal bool TryBeginApplySettings()
+    {
+        if (!HasPendingFilterSettingsChanges || !CanStartApplySettings ||
+            Interlocked.CompareExchange(ref _applySettingsInProgress, 1, 0) != 0)
+        {
+            return false;
+        }
+
+        // Recheck after acquiring the gate so a concurrent availability change cannot start stale work.
+        if (!HasPendingFilterSettingsChanges || !CanStartApplySettings)
+        {
+            Interlocked.Exchange(ref _applySettingsInProgress, 0);
+            return false;
+        }
+
+        return true;
+    }
+
+    internal void CompleteApplySettings() => Interlocked.Exchange(ref _applySettingsInProgress, 0);
+
+    private bool CanStartApplySettings =>
+        _isProjectLoaded && !_applySettingsBusyDelayElapsed && !_isProjectCopyExportInProgress;
 
     private void UpdateApplySettingsBusyState(bool isBusy)
     {

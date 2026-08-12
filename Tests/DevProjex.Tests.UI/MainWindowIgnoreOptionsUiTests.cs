@@ -1480,8 +1480,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.UseGitIgnore,
                 visible: false);
-            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
-            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
 
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
@@ -1598,8 +1601,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.DotFolders,
                 visible: true);
-            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
-            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
 
             for (var cycle = 0; cycle < 2; cycle++)
             {
@@ -1679,8 +1685,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 window,
                 IgnoreOptionId.DotFolders,
                 visible: true);
-            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
-            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
 
             for (var cycle = 0; cycle < 3; cycle++)
             {
@@ -1746,8 +1755,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.SmartIgnore,
                 visible: true,
                 isChecked: true);
-            await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFolders, isChecked: true);
-            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(
+                window,
+                IgnoreOptionId.DotFolders,
+                visible: true,
+                isChecked: true);
 
             blockingScanner.EnableBlocking();
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);

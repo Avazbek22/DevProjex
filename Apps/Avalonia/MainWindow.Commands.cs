@@ -550,6 +550,9 @@ public partial class MainWindow
 
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
+        if (!_viewModel.TryBeginApplySettings())
+            return;
+
         var applyTask = ApplySettingsAsync();
         _latestApplySettingsTask = applyTask;
         await applyTask;
@@ -559,9 +562,6 @@ public partial class MainWindow
 
     private async Task ApplySettingsAsync()
     {
-        if (!_viewModel.CanApplySettings)
-            return;
-
         var applyCts = ReplaceCancellationSource(ref _applySettingsCts);
         var cancellationToken = applyCts.Token;
         void CancelApply()
@@ -615,6 +615,7 @@ public partial class MainWindow
         finally
         {
             DisposeIfCurrent(ref _applySettingsCts, applyCts);
+            _viewModel.CompleteApplySettings();
         }
     }
 }
