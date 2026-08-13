@@ -1,5 +1,4 @@
 using System.Globalization;
-using Avalonia.Media.TextFormatting;
 using DevProjex.Avalonia.Services;
 using DevProjex.Application.Secrets;
 
@@ -1528,10 +1527,8 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         var x = Math.Max(0, point.X - LeftPadding);
         var lineText = GetLineText(lineNumber);
-        using var textLayout = BuildSelectionTextLayout(lineText, typeface);
-        var textLine = textLayout.TextLines[0];
-        var lineWidth = textLine.WidthIncludingTrailingWhitespace;
-        var column = ResolveColumnFromDistance(textLine, lineText.Length, x);
+        var lineWidth = ResolveDistanceFromColumn(lineText, lineText.Length, typeface);
+        var column = ResolveColumnFromDistance(lineText, x, typeface);
         return new SelectionHitResult(
             new SelectionPosition(lineNumber, column),
             x > lineWidth + 1.0
@@ -1544,8 +1541,23 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (string.IsNullOrEmpty(lineText) || distance <= 0)
             return 0;
 
-        using var textLayout = BuildSelectionTextLayout(lineText, typeface);
-        return ResolveColumnFromDistance(textLayout.TextLines[0], lineText.Length, distance);
+        var fullWidth = ResolveDistanceFromColumn(lineText, lineText.Length, typeface);
+        if (distance >= fullWidth)
+            return lineText.Length;
+
+        var low = 0;
+        var high = lineText.Length;
+        while (low < high)
+        {
+            var mid = (low + high) / 2;
+            var midpoint = ResolveCharacterMidpoint(lineText, mid, typeface);
+            if (distance < midpoint)
+                high = mid;
+            else
+                low = mid + 1;
+        }
+
+        return low;
     }
 
     private double ResolveDistanceFromColumn(string lineText, int column, Typeface typeface)
@@ -1554,30 +1566,15 @@ public sealed class VirtualizedPreviewTextControl : Control
             return 0;
 
         var clampedColumn = Math.Clamp(column, 0, lineText.Length);
-        using var textLayout = BuildSelectionTextLayout(lineText, typeface);
-        return textLayout.TextLines[0].GetDistanceFromCharacterHit(new CharacterHit(clampedColumn));
+        // Hit-testing must use the same text geometry as DrawText, including trailing code whitespace.
+        return BuildFormattedText(lineText[..clampedColumn], typeface).WidthIncludingTrailingWhitespace;
     }
 
-    private static int ResolveColumnFromDistance(TextLine textLine, int textLength, double distance)
+    private double ResolveCharacterMidpoint(string lineText, int column, Typeface typeface)
     {
-        if (distance >= textLine.WidthIncludingTrailingWhitespace)
-            return textLength;
-
-        var characterHit = textLine.GetCharacterHitFromDistance(distance);
-        return Math.Clamp(
-            characterHit.FirstCharacterIndex + characterHit.TrailingLength,
-            0,
-            textLength);
-    }
-
-    private TextLayout BuildSelectionTextLayout(string lineText, Typeface typeface)
-    {
-        return new TextLayout(
-            lineText,
-            typeface,
-            TextFontSize,
-            TextBrush ?? Brushes.White,
-            textWrapping: TextWrapping.NoWrap);
+        var left = ResolveDistanceFromColumn(lineText, column, typeface);
+        var right = ResolveDistanceFromColumn(lineText, column + 1, typeface);
+        return left + ((right - left) / 2.0);
     }
 
     private double ResolveMinimumSelectionWidth()

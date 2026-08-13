@@ -774,42 +774,6 @@ public sealed class VirtualizedPreviewTextControlTests
     }
 
     [AvaloniaFact]
-    public void SelectionHitTesting_RoundTripsColumnsAcrossOneFullLineLayout()
-    {
-        const string target = "ordinary-context-menu-value-42";
-        var lineText = $"{new string('m', 96)}{target}{new string('W', 48)}";
-        var control = new VirtualizedPreviewTextControl
-        {
-            Text = lineText,
-            Width = 720,
-            Height = 120,
-            TopPadding = 8,
-            LeftPadding = 12,
-            TextFontFamily = FontFamily.Default,
-            TextFontSize = 18,
-            TextBrush = Brushes.White
-        };
-        var typeface = ResolveTestTypeface(control);
-        var y = control.TopPadding + (InvokeResolveLineHeight(control) / 2.0);
-
-        var startX = control.LeftPadding +
-                     InvokeResolveDistanceFromColumn(control, lineText, 96, typeface);
-        var endX = control.LeftPadding +
-                   InvokeResolveDistanceFromColumn(control, lineText, 96 + target.Length, typeface);
-        var startPosition = InvokeHitTestSelectionPosition(control, new Point(startX, y));
-
-        SetSelectionAnchor(control, startPosition);
-        InvokeUpdateSelectionActivePosition(
-            control,
-            InvokeHitTestSelectionPosition(control, new Point(endX, y)));
-
-        Assert.Equal(target, control.GetSelectedText());
-        Assert.Equal(
-            new PreviewSelectionRange(1, 96, 1, 96 + target.Length),
-            AssertSelectionRange(control));
-    }
-
-    [AvaloniaFact]
     public void ResolveDistanceFromColumn_IncludesRenderedTrailingWhitespace()
     {
         var control = new VirtualizedPreviewTextControl

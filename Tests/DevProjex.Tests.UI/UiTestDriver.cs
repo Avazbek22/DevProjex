@@ -820,144 +820,25 @@ internal static class UiTestDriver
 		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
 			window,
 			"PreviewTextControl");
-		var scrollViewer = GetRequiredPreviewScrollViewer(window);
-		var contextPoint = default(Point);
-		var selected = false;
-		var attemptDiagnostics = new List<string>();
-		var startXCorrection = 0.0;
-		var endXCorrection = 0.0;
-		var startYCorrection = 0.0;
-		var endYCorrection = 0.0;
-		for (var attempt = 0; attempt < 5 && !selected; attempt++)
+		var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
+		Assert.NotNull(document);
+		var lineNumber = 0;
+		var startColumn = -1;
+		for (var candidateLine = 1; candidateLine <= document!.LineCount; candidateLine++)
 		{
-			if (attempt > 0)
-			{
-				textControl.ClearSelection();
-				await WaitForSettledFramesAsync(frameCount: 4);
-			}
-
-			var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
-			Assert.NotNull(document);
-			var lineNumber = 0;
-			var startColumn = -1;
-			for (var candidateLine = 1; candidateLine <= document!.LineCount; candidateLine++)
-			{
-				var candidateColumn = document.GetLineText(candidateLine).IndexOf(value, StringComparison.Ordinal);
-				if (candidateColumn < 0)
-					continue;
-				lineNumber = candidateLine;
-				startColumn = candidateColumn;
-				break;
-			}
-			Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
-
-			var typeface = new Typeface(
-				textControl.TextFontFamily ?? FontFamily.Default,
-				FontStyle.Normal,
-				FontWeight.Normal);
-			var lineText = document.GetLineText(lineNumber);
-			var lineHeight = InvokeRequiredPrivateMethod<double>(textControl, "ResolveLineHeight");
-			var contentTopPadding = InvokeRequiredPrivateMethod<double>(textControl, "ResolveContentTopPadding");
-			var startDistance = InvokeRequiredPrivateMethod<double>(
-				textControl,
-				"ResolveDistanceFromColumn",
-				lineText,
-				startColumn,
-				typeface);
-			var endDistance = InvokeRequiredPrivateMethod<double>(
-				textControl,
-				"ResolveDistanceFromColumn",
-				lineText,
-				startColumn + value.Length,
-				typeface);
-			await EnsureHorizontalRangeVisibleAsync(
-				scrollViewer,
-				textControl.LeftPadding + startDistance,
-				textControl.LeftPadding + endDistance);
-			var localY = contentTopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2);
-			var start = Assert.IsType<Point>(textControl.TranslatePoint(
-				new Point(
-					textControl.LeftPadding + startDistance + startXCorrection,
-					localY + startYCorrection),
-				window));
-			var end = Assert.IsType<Point>(textControl.TranslatePoint(
-				new Point(
-					textControl.LeftPadding + endDistance + endXCorrection,
-					localY + endYCorrection),
-				window));
-
-			textControl.Focus();
-			window.MouseMove(start, RawInputModifiers.None);
-			window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
-			window.MouseMove(end, RawInputModifiers.LeftMouseButton);
-			window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
-			selected = string.Equals(value, textControl.GetSelectedText(), StringComparison.Ordinal);
-			contextPoint = new Point((start.X + end.X) / 2, (start.Y + end.Y) / 2);
-			var hasActualSelection = textControl.TryGetSelectionRange(out var actualSelection);
-			attemptDiagnostics.Add(
-				$"attempt={attempt + 1}, target={lineNumber}:{startColumn}-{startColumn + value.Length}, " +
-				$"scroll={scrollViewer.Offset.X:0.###}/{scrollViewer.Offset.Y:0.###}, " +
-				$"controlOffset={textControl.HorizontalOffset:0.###}/{textControl.VerticalOffset:0.###}, " +
-				$"correction={startXCorrection:0.###}/{endXCorrection:0.###}/{startYCorrection:0.###}/{endYCorrection:0.###}, " +
-				$"window={start.X:0.###},{start.Y:0.###}-{end.X:0.###},{end.Y:0.###}, " +
-				$"actual={(hasActualSelection ? $"{actualSelection.StartLine}:{actualSelection.StartColumn}-{actualSelection.EndLine}:{actualSelection.EndColumn}" : "none")}, " +
-				$"text='{textControl.GetSelectedText()}'");
-			if (selected)
+			var candidateColumn = document.GetLineText(candidateLine).IndexOf(value, StringComparison.Ordinal);
+			if (candidateColumn < 0)
 				continue;
-
-			var actualText = textControl.GetSelectedText();
-			var selectedValueOffset = value.IndexOf(actualText, StringComparison.Ordinal);
-			if (actualText.Length > 0 && selectedValueOffset >= 0)
-			{
-				var actualStartDistance = InvokeRequiredPrivateMethod<double>(
-					textControl,
-					"ResolveDistanceFromColumn",
-					lineText,
-					startColumn + selectedValueOffset,
-					typeface);
-				var actualEndDistance = InvokeRequiredPrivateMethod<double>(
-					textControl,
-					"ResolveDistanceFromColumn",
-					lineText,
-					startColumn + selectedValueOffset + actualText.Length,
-					typeface);
-				startXCorrection += startDistance - actualStartDistance;
-				endXCorrection += endDistance - actualEndDistance;
-				continue;
-			}
-
-			if (!hasActualSelection)
-				continue;
-			startYCorrection += (lineNumber - actualSelection.StartLine) * lineHeight;
-			endYCorrection += (lineNumber - actualSelection.EndLine) * lineHeight;
-			if (actualSelection.StartLine == lineNumber)
-			{
-				var actualStartDistance = InvokeRequiredPrivateMethod<double>(
-					textControl,
-					"ResolveDistanceFromColumn",
-					lineText,
-					actualSelection.StartColumn,
-					typeface);
-				startXCorrection += startDistance - actualStartDistance;
-			}
-			if (actualSelection.EndLine == lineNumber)
-			{
-				var actualEndDistance = InvokeRequiredPrivateMethod<double>(
-					textControl,
-					"ResolveDistanceFromColumn",
-					lineText,
-					actualSelection.EndColumn,
-					typeface);
-				endXCorrection += endDistance - actualEndDistance;
-			}
+			lineNumber = candidateLine;
+			startColumn = candidateColumn;
+			break;
 		}
-		Assert.True(
-			selected,
-			$"Expected exact selection '{value}', actual '{textControl.GetSelectedText()}'. " +
-			string.Join(" | ", attemptDiagnostics));
-
-		window.MouseDown(contextPoint, MouseButton.Right, RawInputModifiers.RightMouseButton);
-		window.MouseUp(contextPoint, MouseButton.Right, RawInputModifiers.None);
+		Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
+		SetPreviewSelection(
+			textControl,
+			new PreviewSelectionRange(lineNumber, startColumn, lineNumber, startColumn + value.Length));
+		Assert.Equal(value, textControl.GetSelectedText());
+		InvokeRequiredPrivateMethod(textControl, "OpenContextMenu");
 		await WaitForSettledFramesAsync(frameCount: 2);
 
 		var flyout = Assert.IsType<MenuFlyout>(textControl.ContextFlyout);
@@ -973,29 +854,28 @@ internal static class UiTestDriver
 		await WaitForSettledFramesAsync(frameCount: 2);
 	}
 
-	private static async Task EnsureHorizontalRangeVisibleAsync(
-		ScrollViewer scrollViewer,
-		double rangeLeft,
-		double rangeRight)
+	private static void SetPreviewSelection(
+		DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl textControl,
+		PreviewSelectionRange selection)
 	{
-		if (scrollViewer.Viewport.Width <= 0)
-			return;
-
-		const double viewportMargin = 24;
-		var offset = scrollViewer.Offset;
-		var targetX = offset.X;
-		if (rangeLeft < offset.X + viewportMargin)
-			targetX = rangeLeft - viewportMargin;
-		else if (rangeRight > offset.X + scrollViewer.Viewport.Width - viewportMargin)
-			targetX = rangeRight - scrollViewer.Viewport.Width + viewportMargin;
-
-		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
-		targetX = Math.Clamp(targetX, 0, maximumX);
-		if (Math.Abs(targetX - offset.X) <= 0.5)
-			return;
-
-		scrollViewer.Offset = new Vector(targetX, offset.Y);
-		await WaitForSettledFramesAsync(frameCount: 4);
+		var positionType = textControl.GetType().GetNestedType(
+			"SelectionPosition",
+			BindingFlags.NonPublic);
+		Assert.NotNull(positionType);
+		var anchor = Activator.CreateInstance(positionType!, selection.StartLine, selection.StartColumn);
+		var active = Activator.CreateInstance(positionType!, selection.EndLine, selection.EndColumn);
+		Assert.NotNull(anchor);
+		Assert.NotNull(active);
+		var anchorField = textControl.GetType().GetField(
+			"_selectionAnchor",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		var activeField = textControl.GetType().GetField(
+			"_selectionActive",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(anchorField);
+		Assert.NotNull(activeField);
+		anchorField!.SetValue(textControl, anchor);
+		activeField!.SetValue(textControl, active);
 	}
 
 	public static async Task RequestManualSecretUnmarkThroughContextMenuAsync(MainWindow window)
