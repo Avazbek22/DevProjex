@@ -822,7 +822,13 @@ internal static class UiTestDriver
 			"PreviewTextControl");
 		var contextPoint = default(Point);
 		var selected = false;
-		for (var attempt = 0; attempt < 3 && !selected; attempt++)
+		var startXCorrection = 0.0;
+		var endXCorrection = 0.0;
+		var startYCorrection = 0.0;
+		var endYCorrection = 0.0;
+		var previousLineNumber = 0;
+		var previousStartColumn = -1;
+		for (var attempt = 0; attempt < 5 && !selected; attempt++)
 		{
 			if (attempt > 0)
 			{
@@ -844,6 +850,16 @@ internal static class UiTestDriver
 				break;
 			}
 			Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
+			if (previousLineNumber != 0 &&
+			    (previousLineNumber != lineNumber || previousStartColumn != startColumn))
+			{
+				startXCorrection = 0;
+				endXCorrection = 0;
+				startYCorrection = 0;
+				endYCorrection = 0;
+			}
+			previousLineNumber = lineNumber;
+			previousStartColumn = startColumn;
 
 			var typeface = new Typeface(
 				textControl.TextFontFamily ?? FontFamily.Default,
@@ -866,10 +882,14 @@ internal static class UiTestDriver
 				typeface);
 			var localY = contentTopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2);
 			var start = Assert.IsType<Point>(textControl.TranslatePoint(
-				new Point(textControl.LeftPadding + startDistance, localY),
+				new Point(
+					textControl.LeftPadding + startDistance + startXCorrection,
+					localY + startYCorrection),
 				window));
 			var end = Assert.IsType<Point>(textControl.TranslatePoint(
-				new Point(textControl.LeftPadding + endDistance, localY),
+				new Point(
+					textControl.LeftPadding + endDistance + endXCorrection,
+					localY + endYCorrection),
 				window));
 
 			textControl.Focus();
@@ -879,6 +899,31 @@ internal static class UiTestDriver
 			window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
 			selected = string.Equals(value, textControl.GetSelectedText(), StringComparison.Ordinal);
 			contextPoint = new Point((start.X + end.X) / 2, (start.Y + end.Y) / 2);
+			if (selected || !textControl.TryGetSelectionRange(out var actualSelection))
+				continue;
+
+			startYCorrection += (lineNumber - actualSelection.StartLine) * lineHeight;
+			endYCorrection += (lineNumber - actualSelection.EndLine) * lineHeight;
+			if (actualSelection.StartLine == lineNumber)
+			{
+				var actualStartDistance = InvokeRequiredPrivateMethod<double>(
+					textControl,
+					"ResolveDistanceFromColumn",
+					lineText,
+					actualSelection.StartColumn,
+					typeface);
+				startXCorrection += startDistance - actualStartDistance;
+			}
+			if (actualSelection.EndLine == lineNumber)
+			{
+				var actualEndDistance = InvokeRequiredPrivateMethod<double>(
+					textControl,
+					"ResolveDistanceFromColumn",
+					lineText,
+					actualSelection.EndColumn,
+					typeface);
+				endXCorrection += endDistance - actualEndDistance;
+			}
 		}
 		Assert.Equal(value, textControl.GetSelectedText());
 
