@@ -884,14 +884,14 @@ internal static class UiTestDriver
 		var lineHeight = InvokeRequiredPrivateMethod<double>(textControl, "ResolveLineHeight");
 		var contentTopPadding = InvokeRequiredPrivateMethod<double>(textControl, "ResolveContentTopPadding");
 		var localY = contentTopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2);
-		var startOffset = await FindHorizontalOffsetForColumnAsync(
+		var startTarget = await FindHorizontalTargetForColumnAsync(
 			window,
 			textControl,
 			scrollViewer,
 			localY,
 			lineNumber,
 			startColumn);
-		var endOffset = await FindHorizontalOffsetForColumnAsync(
+		var endTarget = await FindHorizontalTargetForColumnAsync(
 			window,
 			textControl,
 			scrollViewer,
@@ -900,14 +900,14 @@ internal static class UiTestDriver
 			startColumn + value.Length);
 
 		textControl.ClearSelection();
-		await SetHorizontalOffsetAsync(scrollViewer, startOffset);
-		var start = ResolveSafeViewportPoint(window, textControl, scrollViewer, localY);
+		await SetHorizontalOffsetAsync(scrollViewer, startTarget.HorizontalOffset);
+		var start = ResolveViewportPoint(window, textControl, startTarget.ContentX, localY);
 		textControl.Focus();
 		window.MouseMove(start, RawInputModifiers.None);
 		window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
 		window.MouseUp(start, MouseButton.Left, RawInputModifiers.None);
-		await SetHorizontalOffsetAsync(scrollViewer, endOffset);
-		var end = ResolveSafeViewportPoint(window, textControl, scrollViewer, localY);
+		await SetHorizontalOffsetAsync(scrollViewer, endTarget.HorizontalOffset);
+		var end = ResolveViewportPoint(window, textControl, endTarget.ContentX, localY);
 		window.MouseMove(end, RawInputModifiers.Shift);
 		window.MouseDown(
 			end,
@@ -919,10 +919,10 @@ internal static class UiTestDriver
 			selected,
 			$"Expected exact pointer selection '{value}', actual '{textControl.GetSelectedText()}'. " +
 			$"target={lineNumber}:{startColumn}-{startColumn + value.Length}, " +
-			$"offsets={startOffset:0.###}/{endOffset:0.###}.");
+			$"offsets={startTarget.HorizontalOffset:0.###}/{endTarget.HorizontalOffset:0.###}.");
 
 		await WaitForSettledFramesAsync(frameCount: 2);
-		var currentEnd = ResolveSafeViewportPoint(window, textControl, scrollViewer, localY);
+		var currentEnd = ResolveViewportPoint(window, textControl, endTarget.ContentX, localY);
 		var contextPoint = new Point(currentEnd.X - 12, currentEnd.Y);
 		window.MouseDown(contextPoint, MouseButton.Right, RawInputModifiers.RightMouseButton);
 		window.MouseUp(contextPoint, MouseButton.Right, RawInputModifiers.None);
@@ -942,7 +942,7 @@ internal static class UiTestDriver
 		await WaitForSettledFramesAsync(frameCount: 2);
 	}
 
-	private static async Task<double> FindHorizontalOffsetForColumnAsync(
+	private static async Task<PointerViewportTarget> FindHorizontalTargetForColumnAsync(
 		MainWindow window,
 		DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl textControl,
 		ScrollViewer scrollViewer,
@@ -951,14 +951,16 @@ internal static class UiTestDriver
 		int targetColumn)
 	{
 		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
-		var low = 0.0;
-		var high = maximumX;
+		var low = 8.0;
+		var high = Math.Max(low, scrollViewer.Extent.Width - 32);
+		var preferredViewportX = Math.Max(8, Math.Min(72, scrollViewer.Viewport.Width - 32));
 		var diagnostics = new List<string>();
 		for (var attempt = 0; attempt < 24 && low <= high; attempt++)
 		{
-			var candidate = (low + high) / 2;
-			await SetHorizontalOffsetAsync(scrollViewer, candidate);
-			var point = ResolveSafeViewportPoint(window, textControl, scrollViewer, localY);
+			var contentX = (low + high) / 2;
+			var horizontalOffset = Math.Clamp(contentX - preferredViewportX, 0, maximumX);
+			await SetHorizontalOffsetAsync(scrollViewer, horizontalOffset);
+			var point = ResolveViewportPoint(window, textControl, contentX, localY);
 			var probeEnd = new Point(point.X + 24, point.Y);
 			textControl.ClearSelection();
 			window.MouseMove(point, RawInputModifiers.None);
@@ -967,18 +969,18 @@ internal static class UiTestDriver
 			window.MouseUp(probeEnd, MouseButton.Left, RawInputModifiers.None);
 			if (!textControl.TryGetSelectionRange(out var actual) || actual.StartLine != targetLine)
 			{
-				diagnostics.Add($"{candidate:0.###}:none");
-				high = candidate - 0.25;
+				diagnostics.Add($"{contentX:0.###}:none");
+				high = contentX - 0.25;
 				continue;
 			}
 
-			diagnostics.Add($"{candidate:0.###}:{actual.StartLine}:{actual.StartColumn}");
+			diagnostics.Add($"{contentX:0.###}:{actual.StartLine}:{actual.StartColumn}");
 			if (actual.StartColumn == targetColumn)
-				return candidate;
+				return new PointerViewportTarget(horizontalOffset, contentX);
 			if (actual.StartColumn < targetColumn)
-				low = candidate + 0.25;
+				low = contentX + 0.25;
 			else
-				high = candidate - 0.25;
+				high = contentX - 0.25;
 		}
 
 		throw new XunitException(
@@ -986,15 +988,14 @@ internal static class UiTestDriver
 			string.Join(", ", diagnostics));
 	}
 
-	private static Point ResolveSafeViewportPoint(
+	private static Point ResolveViewportPoint(
 		MainWindow window,
 		DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl textControl,
-		ScrollViewer scrollViewer,
+		double contentX,
 		double localY)
 	{
-		var viewportX = Math.Max(8, Math.Min(72, scrollViewer.Viewport.Width - 32));
 		return Assert.IsType<Point>(textControl.TranslatePoint(
-			new Point(scrollViewer.Offset.X + viewportX, localY),
+			new Point(contentX, localY),
 			window));
 	}
 
@@ -1003,6 +1004,8 @@ internal static class UiTestDriver
 		scrollViewer.Offset = new Vector(offset, scrollViewer.Offset.Y);
 		await WaitForSettledFramesAsync(frameCount: 2);
 	}
+
+	private readonly record struct PointerViewportTarget(double HorizontalOffset, double ContentX);
 
 	public static async Task RequestManualSecretUnmarkThroughContextMenuAsync(MainWindow window)
 	{
