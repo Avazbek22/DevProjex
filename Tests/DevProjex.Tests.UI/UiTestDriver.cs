@@ -820,8 +820,10 @@ internal static class UiTestDriver
 		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
 			window,
 			"PreviewTextControl");
+		var scrollViewer = GetRequiredPreviewScrollViewer(window);
 		var contextPoint = default(Point);
 		var selected = false;
+		var attemptDiagnostics = new List<string>();
 		var startXCorrection = 0.0;
 		var endXCorrection = 0.0;
 		var startYCorrection = 0.0;
@@ -887,6 +889,15 @@ internal static class UiTestDriver
 			window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
 			selected = string.Equals(value, textControl.GetSelectedText(), StringComparison.Ordinal);
 			contextPoint = new Point((start.X + end.X) / 2, (start.Y + end.Y) / 2);
+			var hasActualSelection = textControl.TryGetSelectionRange(out var actualSelection);
+			attemptDiagnostics.Add(
+				$"attempt={attempt + 1}, target={lineNumber}:{startColumn}-{startColumn + value.Length}, " +
+				$"scroll={scrollViewer.Offset.X:0.###}/{scrollViewer.Offset.Y:0.###}, " +
+				$"controlOffset={textControl.HorizontalOffset:0.###}/{textControl.VerticalOffset:0.###}, " +
+				$"correction={startXCorrection:0.###}/{endXCorrection:0.###}/{startYCorrection:0.###}/{endYCorrection:0.###}, " +
+				$"window={start.X:0.###},{start.Y:0.###}-{end.X:0.###},{end.Y:0.###}, " +
+				$"actual={(hasActualSelection ? $"{actualSelection.StartLine}:{actualSelection.StartColumn}-{actualSelection.EndLine}:{actualSelection.EndColumn}" : "none")}, " +
+				$"text='{textControl.GetSelectedText()}'");
 			if (selected)
 				continue;
 
@@ -911,7 +922,7 @@ internal static class UiTestDriver
 				continue;
 			}
 
-			if (!textControl.TryGetSelectionRange(out var actualSelection))
+			if (!hasActualSelection)
 				continue;
 			startYCorrection += (lineNumber - actualSelection.StartLine) * lineHeight;
 			endYCorrection += (lineNumber - actualSelection.EndLine) * lineHeight;
@@ -936,7 +947,10 @@ internal static class UiTestDriver
 				endXCorrection += endDistance - actualEndDistance;
 			}
 		}
-		Assert.Equal(value, textControl.GetSelectedText());
+		Assert.True(
+			selected,
+			$"Expected exact selection '{value}', actual '{textControl.GetSelectedText()}'. " +
+			string.Join(" | ", attemptDiagnostics));
 
 		window.MouseDown(contextPoint, MouseButton.Right, RawInputModifiers.RightMouseButton);
 		window.MouseUp(contextPoint, MouseButton.Right, RawInputModifiers.None);
