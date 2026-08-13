@@ -31,6 +31,11 @@ public sealed class PreviewManualSecretUnmarkRequestedEventArgs(
 	public bool AlsoDetected { get; } = alsoDetected;
 }
 
+internal sealed class PreviewManualSecretMarkRejectedEventArgs(string message) : EventArgs
+{
+	public string Message { get; } = message;
+}
+
 /// <summary>
 /// Draws only visible preview text lines for large payloads.
 /// Rendering stays virtualized while the underlying document can be either in-memory
@@ -44,6 +49,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	public event EventHandler<PreviewRedactionToggleRequestedEventArgs>? RedactionToggleRequested;
 	public event EventHandler<PreviewManualSecretMarkRequestedEventArgs>? ManualSecretMarkRequested;
 	public event EventHandler<PreviewManualSecretUnmarkRequestedEventArgs>? ManualSecretUnmarkRequested;
+	internal event EventHandler<PreviewManualSecretMarkRejectedEventArgs>? ManualSecretMarkRejected;
 
     public static readonly StyledProperty<string> TextProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(Text), string.Empty);
@@ -205,6 +211,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private TextBlock? _redactionToolTipText;
 	private MarkedSecretValue? _contextMarkedSecret;
 	private PreviewSelectionRange _contextSelectionRange;
+	private string? _contextSecretMarkRejectionMessage;
 	private PreviewRedactionSpan? _contextManualRedaction;
     private static Cursor? _previewTextCursor;
     private static Cursor? _previewMenuCursor;
@@ -2062,7 +2069,13 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private void RaiseManualSecretMarkRequested(bool persistent)
 	{
 		if (_contextMarkedSecret is null || _contextSelectionRange.IsCollapsed)
+		{
+			ManualSecretMarkRejected?.Invoke(
+				this,
+				new PreviewManualSecretMarkRejectedEventArgs(
+					_contextSecretMarkRejectionMessage ?? SecretSelectionContentOnly));
 			return;
+		}
 		ManualSecretMarkRequested?.Invoke(
 			this,
 			new PreviewManualSecretMarkRequestedEventArgs(
@@ -2112,6 +2125,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		_hideSecretHereMenuItem.IsVisible = !removeVisible && HasSelection;
 		_contextMarkedSecret = null;
 		_contextSelectionRange = default;
+		_contextSecretMarkRejectionMessage = null;
 		if (removeVisible || !HasSelection)
 			return;
 
@@ -2144,6 +2158,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var reason = !isValid
 			? GetValidationMessage(validationError)
 			: SecretSelectionContentOnly;
+		_contextSecretMarkRejectionMessage = enabled ? null : reason;
 		ToolTip.SetTip(_alwaysHideSecretMenuItem, enabled ? null : reason);
 		ToolTip.SetTip(_hideSecretHereMenuItem, enabled ? null : reason);
 	}

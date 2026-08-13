@@ -22,9 +22,11 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 
 	private readonly Func<string> _appDataPathProvider;
 	private readonly object _sync = new();
+	private readonly ReaderWriterLockSlim _keyLifetime = new(LockRecursionPolicy.NoRecursion);
 	private readonly TimeSpan? _lockTimeout;
 	private readonly TimeSpan _transientRetryCooldown;
 	private readonly TimeProvider _timeProvider;
+	private readonly Action<byte[]>? _sensitiveBufferClearedObserver;
 	private byte[]? _key;
 	private Task<PersistentSecretIdentityAvailability>? _initializationTask;
 	private DateTimeOffset _retryNotBeforeUtc;
@@ -44,13 +46,15 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 		Func<string> appDataPathProvider,
 		TimeSpan? lockTimeout,
 		TimeSpan transientRetryCooldown,
-		TimeProvider? timeProvider = null)
+		TimeProvider? timeProvider = null,
+		Action<byte[]>? sensitiveBufferClearedObserver = null)
 	{
 		_appDataPathProvider = appDataPathProvider ?? throw new ArgumentNullException(nameof(appDataPathProvider));
 		ArgumentOutOfRangeException.ThrowIfLessThan(transientRetryCooldown, TimeSpan.Zero);
 		_lockTimeout = lockTimeout;
 		_transientRetryCooldown = transientRetryCooldown;
 		_timeProvider = timeProvider ?? TimeProvider.System;
+		_sensitiveBufferClearedObserver = sensitiveBufferClearedObserver;
 	}
 
 	public bool IsAvailable
@@ -111,17 +115,27 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 
 	public bool TryComputeDigest(ReadOnlySpan<char> normalizedValue, Span<byte> destination)
 	{
-		lock (_sync)
+		_keyLifetime.EnterReadLock();
+		try
 		{
-			ObjectDisposedException.ThrowIf(
-				_state == PersistentSecretIdentityProviderState.Disposed,
-				this);
-			if (_state != PersistentSecretIdentityProviderState.Ready ||
-			    _key is not { Length: KeyByteLength } key ||
-			    destination.Length < PersistentSecretIdentity.V2DigestByteLength)
+			var key = Volatile.Read(ref _key);
+			if (key is not { Length: KeyByteLength })
 			{
-				return false;
+				lock (_sync)
+				{
+					ObjectDisposedException.ThrowIf(
+						_state == PersistentSecretIdentityProviderState.Disposed,
+						this);
+					if (_state != PersistentSecretIdentityProviderState.Ready ||
+					    _key is not { Length: KeyByteLength } initializedKey)
+					{
+						return false;
+					}
+					key = initializedKey;
+				}
 			}
+			if (destination.Length < PersistentSecretIdentity.V2DigestByteLength)
+				return false;
 
 			var maximumByteCount = Encoding.UTF8.GetMaxByteCount(normalizedValue.Length);
 			byte[]? rented = null;
@@ -141,38 +155,60 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 					ArrayPool<byte>.Shared.Return(rented, clearArray: true);
 			}
 		}
+		finally
+		{
+			_keyLifetime.ExitReadLock();
+		}
 	}
 
 	public void Dispose()
 	{
-		lock (_sync)
+		_keyLifetime.EnterWriteLock();
+		try
 		{
-			if (_state == PersistentSecretIdentityProviderState.Disposed)
-				return;
-			_state = PersistentSecretIdentityProviderState.Disposed;
-			if (_key is not null)
-				CryptographicOperations.ZeroMemory(_key);
-			_key = null;
+			byte[]? key;
+			lock (_sync)
+			{
+				if (_state == PersistentSecretIdentityProviderState.Disposed)
+					return;
+				_state = PersistentSecretIdentityProviderState.Disposed;
+				key = Interlocked.Exchange(ref _key, null);
+			}
+			ClearSensitiveBuffer(key);
+		}
+		finally
+		{
+			_keyLifetime.ExitWriteLock();
 		}
 	}
 
 	private PersistentSecretIdentityAvailability InitializeAndPublish()
 	{
-		var result = TryLoadOrCreateKey();
+		KeyInitializationResult result;
+		try
+		{
+			result = TryLoadOrCreateKey();
+		}
+		catch (Exception exception) when (!IsFatal(exception))
+		{
+			result = exception is CryptographicException
+				? KeyInitializationResult.Permanent()
+				: KeyInitializationResult.Transient();
+		}
 		lock (_sync)
 		{
 			_initializationTask = null;
 			if (_state == PersistentSecretIdentityProviderState.Disposed)
 			{
-				result.DisposeKey();
+				result.DisposeKey(ClearSensitiveBuffer);
 				return PersistentSecretIdentityAvailability.PermanentlyUnavailable;
 			}
 
 			switch (result.Status)
 			{
-				case KeyInitializationStatus.Ready:
-					_key = result.Key;
+			case KeyInitializationStatus.Ready:
 					_state = PersistentSecretIdentityProviderState.Ready;
+					Volatile.Write(ref _key, result.Key);
 					return PersistentSecretIdentityAvailability.Ready;
 				case KeyInitializationStatus.TransientFault:
 					_state = PersistentSecretIdentityProviderState.TransientFault;
@@ -184,6 +220,9 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			}
 		}
 	}
+
+	private static bool IsFatal(Exception exception) => exception is
+		OutOfMemoryException or StackOverflowException or AccessViolationException;
 
 	private KeyInitializationResult TryLoadOrCreateKey()
 	{
@@ -211,7 +250,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			? CrossProcessFileLock.TryAcquire(fileSet, timeout, out heldLock)
 			: CrossProcessFileLock.TryAcquire(fileSet, out heldLock);
 
-	private static KeyInitializationResult LoadRecoverOrCreate(JsonStoreFileSet fileSet)
+	private KeyInitializationResult LoadRecoverOrCreate(JsonStoreFileSet fileSet)
 	{
 		var primary = ReadKeyFile(fileSet.PrimaryPath);
 		if (primary.Status == KeyFileStatus.TransientFault)
@@ -219,10 +258,11 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 		var backup = ReadKeyFile(fileSet.BackupPath);
 		if (backup.Status == KeyFileStatus.TransientFault)
 		{
-			primary.DisposeKey();
+			primary.DisposeSensitiveData(ClearSensitiveBuffer);
 			return KeyInitializationResult.Transient();
 		}
 
+		byte[]? createdEnvelope = null;
 		try
 		{
 			if (primary.IsReady)
@@ -233,7 +273,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 				}
 				var envelope = primary.IsEnvelope
 					? primary.SerializedEnvelope!
-					: CreateEnvelope(ProtectForStorage(primary.Key!));
+					: createdEnvelope = CreateEnvelope(ProtectForStorage(primary.Key!));
 				if (!backup.IsReady || !backup.IsEnvelope || primary.IsLegacy)
 				{
 					if (!WriteAtomic(fileSet.BackupPath, envelope))
@@ -248,7 +288,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			{
 				var envelope = backup.IsEnvelope
 					? backup.SerializedEnvelope!
-					: CreateEnvelope(ProtectForStorage(backup.Key!));
+					: createdEnvelope = CreateEnvelope(ProtectForStorage(backup.Key!));
 				if (!WriteAtomic(fileSet.PrimaryPath, envelope) ||
 				    (!backup.IsEnvelope && !WriteAtomic(fileSet.BackupPath, envelope)))
 				{
@@ -263,29 +303,30 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			var key = RandomNumberGenerator.GetBytes(KeyByteLength);
 			try
 			{
-				var envelope = CreateEnvelope(ProtectForStorage(key));
-				if (!WriteAtomic(fileSet.BackupPath, envelope) ||
-				    !WriteAtomic(fileSet.PrimaryPath, envelope))
+				createdEnvelope = CreateEnvelope(ProtectForStorage(key));
+				if (!WriteAtomic(fileSet.BackupPath, createdEnvelope) ||
+				    !WriteAtomic(fileSet.PrimaryPath, createdEnvelope))
 				{
-					CryptographicOperations.ZeroMemory(key);
+					ClearSensitiveBuffer(key);
 					return KeyInitializationResult.Transient();
 				}
 				return KeyInitializationResult.Ready(key);
 			}
 			catch
 			{
-				CryptographicOperations.ZeroMemory(key);
+				ClearSensitiveBuffer(key);
 				throw;
 			}
 		}
 		finally
 		{
-			primary.DisposeKey();
-			backup.DisposeKey();
+			ClearSensitiveBuffer(createdEnvelope);
+			primary.DisposeSensitiveData(ClearSensitiveBuffer);
+			backup.DisposeSensitiveData(ClearSensitiveBuffer);
 		}
 	}
 
-	private static KeyFileReadResult ReadKeyFile(string path)
+	private KeyFileReadResult ReadKeyFile(string path)
 	{
 		if (!File.Exists(path))
 			return KeyFileReadResult.Missing();
@@ -296,7 +337,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
 			if (stream.Length is <= 0 or > MaximumKeyFileBytes)
 				return KeyFileReadResult.Permanent();
-			var bytes = new byte[checked((int)stream.Length)];
+			byte[]? bytes = new byte[checked((int)stream.Length)];
 			stream.ReadExactly(bytes);
 			try
 			{
@@ -306,27 +347,48 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 						return KeyFileReadResult.Permanent();
 					try
 					{
-						var key = UnprotectFromStorage(payload);
-						return key is { Length: KeyByteLength }
-							? KeyFileReadResult.Envelope(key, bytes.ToArray())
-							: KeyFileReadResult.Permanent();
+						var key = OperatingSystem.IsWindows()
+							? UnprotectWindows(payload)
+							: payload;
+						if (!OperatingSystem.IsWindows())
+							payload = [];
+						if (key is { Length: KeyByteLength })
+						{
+							var serializedEnvelope = bytes;
+							bytes = null;
+							return KeyFileReadResult.Envelope(key, serializedEnvelope);
+						}
+						ClearSensitiveBuffer(key);
+						return KeyFileReadResult.Permanent();
 					}
 					finally
 					{
-						CryptographicOperations.ZeroMemory(payload);
+						ClearSensitiveBuffer(payload);
 					}
 				}
 
-				var legacyKey = OperatingSystem.IsWindows()
-					? UnprotectWindows(bytes)
-					: bytes.Length == KeyByteLength ? bytes.ToArray() : null;
-				return legacyKey is { Length: KeyByteLength }
-					? KeyFileReadResult.Legacy(legacyKey)
-					: KeyFileReadResult.Permanent();
+				byte[]? legacyKey;
+				if (OperatingSystem.IsWindows())
+				{
+					legacyKey = UnprotectWindows(bytes);
+				}
+				else if (bytes.Length == KeyByteLength)
+				{
+					legacyKey = bytes;
+					bytes = null;
+				}
+				else
+				{
+					legacyKey = null;
+				}
+				if (legacyKey is { Length: KeyByteLength })
+					return KeyFileReadResult.Legacy(legacyKey);
+				ClearSensitiveBuffer(legacyKey);
+				return KeyFileReadResult.Permanent();
 			}
 			finally
 			{
-				CryptographicOperations.ZeroMemory(bytes);
+				ClearSensitiveBuffer(bytes);
 			}
 		}
 		catch (CryptographicException)
@@ -340,7 +402,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 		}
 	}
 
-	private static byte[] CreateEnvelope(byte[] payload)
+	private byte[] CreateEnvelope(byte[] payload)
 	{
 		try
 		{
@@ -358,7 +420,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 		}
 		finally
 		{
-			CryptographicOperations.ZeroMemory(payload);
+			ClearSensitiveBuffer(payload);
 		}
 	}
 
@@ -382,18 +444,25 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 
 		var payloadSpan = envelope.AsSpan(EnvelopeHeaderLength, payloadLength);
 		Span<byte> checksum = stackalloc byte[EnvelopeChecksumLength];
-		SHA256.HashData(payloadSpan, checksum);
-		if (!CryptographicOperations.FixedTimeEquals(
-			    checksum,
-			    envelope.AsSpan(EnvelopeHeaderLength + payloadLength, EnvelopeChecksumLength)))
+		try
 		{
-			return false;
+			SHA256.HashData(payloadSpan, checksum);
+			if (!CryptographicOperations.FixedTimeEquals(
+				    checksum,
+				    envelope.AsSpan(EnvelopeHeaderLength + payloadLength, EnvelopeChecksumLength)))
+			{
+				return false;
+			}
+			payload = payloadSpan.ToArray();
+			return true;
 		}
-		payload = payloadSpan.ToArray();
-		return true;
+		finally
+		{
+			CryptographicOperations.ZeroMemory(checksum);
+		}
 	}
 
-	private static bool WriteAtomic(string path, byte[] envelope)
+	private bool WriteAtomic(string path, byte[] envelope)
 	{
 		var directory = Path.GetDirectoryName(path);
 		if (string.IsNullOrWhiteSpace(directory))
@@ -424,11 +493,11 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 				{
 					return false;
 				}
-				CryptographicOperations.ZeroMemory(validationPayload);
+				ClearSensitiveBuffer(validationPayload);
 			}
 			finally
 			{
-				CryptographicOperations.ZeroMemory(persisted);
+				ClearSensitiveBuffer(persisted);
 			}
 			File.Move(tempPath, path, overwrite: true);
 			if (!OperatingSystem.IsWindows())
@@ -460,11 +529,16 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 	private static bool KeysEqual(byte[] first, byte[] second) =>
 		first.Length == second.Length && CryptographicOperations.FixedTimeEquals(first, second);
 
+	private void ClearSensitiveBuffer(byte[]? buffer)
+	{
+		if (buffer is null)
+			return;
+		CryptographicOperations.ZeroMemory(buffer);
+		_sensitiveBufferClearedObserver?.Invoke(buffer);
+	}
+
 	private static byte[] ProtectForStorage(byte[] key) =>
 		OperatingSystem.IsWindows() ? ProtectWindows(key)! : key.ToArray();
-
-	private static byte[]? UnprotectFromStorage(byte[] payload) =>
-		OperatingSystem.IsWindows() ? UnprotectWindows(payload) : payload.ToArray();
 
 	private static byte[]? ProtectWindows(byte[] value) => TransformWindows(value, protect: true);
 	private static byte[]? UnprotectWindows(byte[] value) => TransformWindows(value, protect: false);
@@ -506,7 +580,10 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			finally
 			{
 				if (output.Data != IntPtr.Zero)
+				{
+					Marshal.Copy(new byte[output.Size], 0, output.Data, output.Size);
 					LocalFree(output.Data);
+				}
 			}
 		}
 		finally
@@ -523,7 +600,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 	{
 		public KeyFileStatus Status { get; } = status;
 		public byte[]? Key { get; private set; } = key;
-		public byte[]? SerializedEnvelope { get; } = serializedEnvelope;
+		public byte[]? SerializedEnvelope { get; private set; } = serializedEnvelope;
 		public bool IsReady => Status is KeyFileStatus.Envelope or KeyFileStatus.Legacy;
 		public bool IsEnvelope => Status == KeyFileStatus.Envelope;
 		public bool IsLegacy => Status == KeyFileStatus.Legacy;
@@ -535,11 +612,14 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			return value;
 		}
 
-		public void DisposeKey()
+		public void DisposeSensitiveData(Action<byte[]> clear)
 		{
 			if (Key is not null)
-				CryptographicOperations.ZeroMemory(Key);
+				clear(Key);
 			Key = null;
+			if (SerializedEnvelope is not null)
+				clear(SerializedEnvelope);
+			SerializedEnvelope = null;
 		}
 
 		public static KeyFileReadResult Missing() => new(KeyFileStatus.Missing);
@@ -555,10 +635,10 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 		public KeyInitializationStatus Status { get; } = status;
 		public byte[]? Key { get; } = key;
 
-		public void DisposeKey()
+		public void DisposeKey(Action<byte[]> clear)
 		{
 			if (Key is not null)
-				CryptographicOperations.ZeroMemory(Key);
+				clear(Key);
 		}
 
 		public static KeyInitializationResult Ready(byte[] key) => new(KeyInitializationStatus.Ready, key);

@@ -19,7 +19,7 @@ public sealed class PersistentSecretMarkOverlayTests
 		var mark = Mark(FirstSecret);
 		var delta = PersistentSecretMarkDelta.Add(mark);
 
-		Assert.True(session.StagePersistentMarkDelta(project, delta));
+		Assert.True(session.StagePersistentMarkDelta(project, delta).Staged);
 		await session.RefreshPersistentMarksAsync(project, TestContext.Current.CancellationToken);
 		await session.RefreshPersistentMarksAsync(project, TestContext.Current.CancellationToken);
 
@@ -39,8 +39,8 @@ public sealed class PersistentSecretMarkOverlayTests
 		var firstDelta = PersistentSecretMarkDelta.Add(first);
 		var secondDelta = PersistentSecretMarkDelta.Add(second);
 
-		Assert.True(session.StagePersistentMarkDelta(project, firstDelta));
-		Assert.True(session.StagePersistentMarkDelta(project, secondDelta));
+		Assert.True(session.StagePersistentMarkDelta(project, firstDelta).Staged);
+		Assert.True(session.StagePersistentMarkDelta(project, secondDelta).Staged);
 		session.AcknowledgePersistentMarkDelta(
 			project,
 			secondDelta.OperationId,
@@ -86,7 +86,7 @@ public sealed class PersistentSecretMarkOverlayTests
 		session.ReplacePersistentMarks(project, store.Snapshot);
 		var remove = PersistentSecretMarkDelta.Remove(new PersistentSecretMarkId(mark.H, mark.Length));
 
-		Assert.True(session.StagePersistentMarkDelta(project, remove));
+		Assert.True(session.StagePersistentMarkDelta(project, remove).Staged);
 		await session.RefreshPersistentMarksAsync(project, TestContext.Current.CancellationToken);
 		Assert.Contains(FirstSecret, Redact(session, project, path), StringComparison.Ordinal);
 
@@ -111,12 +111,51 @@ public sealed class PersistentSecretMarkOverlayTests
 			new PersistentSecretMarkId(oldMark.H, oldMark.Length),
 			newMark);
 
-		Assert.True(session.StagePersistentMarkDelta(project, replace));
+		Assert.True(session.StagePersistentMarkDelta(project, replace).Staged);
 		await session.RefreshPersistentMarksAsync(project, TestContext.Current.CancellationToken);
 		var output = Redact(session, project, path);
 
 		Assert.Contains(FirstSecret, output, StringComparison.Ordinal);
 		Assert.DoesNotContain(SecondSecret, output, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void RemoveStagedAfterDurableDisappeared_IsStillCompletedAndLeavesNoPhantom(
+		bool writeSucceeded)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var mark = Mark(FirstSecret);
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		session.ReplacePersistentMarks(project, new PersistentSecretMarksSnapshot(1, [mark]));
+		var remove = PersistentSecretMarkDelta.Remove(
+			new PersistentSecretMarkId(mark.H, mark.Length),
+			observedRevision: 2);
+		session.ReplacePersistentMarks(project, new PersistentSecretMarksSnapshot(2, []));
+
+		var staged = session.StagePersistentMarkDelta(project, remove);
+
+		Assert.True(staged.Staged);
+		Assert.False(staged.EffectiveChanged);
+		Assert.Equal(1, session.PendingPersistentMarkCount);
+		if (writeSucceeded)
+		{
+			session.AcknowledgePersistentMarkDelta(
+				project,
+				remove.OperationId,
+				new PersistentSecretMarksSnapshot(3, []));
+			session.ReplacePersistentMarks(project, new PersistentSecretMarksSnapshot(2, [mark]));
+		}
+		else
+		{
+			Assert.False(session.RollbackPendingPersistentMarkDelta(project, remove.OperationId));
+			session.ReplacePersistentMarks(project, new PersistentSecretMarksSnapshot(1, [mark]));
+		}
+
+		Assert.Equal(0, session.PendingPersistentMarkCount);
+		Assert.Empty(session.GetMarkedSecrets());
 	}
 
 	[Fact]
@@ -136,6 +175,88 @@ public sealed class PersistentSecretMarkOverlayTests
 
 		Assert.Empty(session.GetMarkedSecrets());
 		Assert.DoesNotContain(FirstSecret, Redact(session, project, path), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void PendingRemove_IsDiscardedWhenDurableStateHasAdvanced()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var path = workspace.CreateFile("project/config.env", $"TOKEN={FirstSecret}\n");
+		var mark = Mark(FirstSecret);
+		var identity = new PersistentSecretMarkId(mark.H, mark.Length);
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		session.ReplacePersistentMarks(project, Snapshot(10, [mark], (identity, 10)));
+		var remove = PersistentSecretMarkDelta.Remove(identity, observedRevision: 10);
+
+		Assert.True(session.StagePersistentMarkDelta(project, remove).EffectiveChanged);
+		Assert.Contains(FirstSecret, Redact(session, project, path), StringComparison.Ordinal);
+
+		session.ReplacePersistentMarks(project, Snapshot(11, [mark], (identity, 11)));
+
+		Assert.Equal(0, session.PendingPersistentMarkCount);
+		Assert.DoesNotContain(FirstSecret, Redact(session, project, path), StringComparison.Ordinal);
+		session.AcknowledgePersistentMarkDelta(project, remove.OperationId, Snapshot(11, [mark], (identity, 11)));
+		Assert.Equal(0, session.PendingPersistentMarkCount);
+		Assert.DoesNotContain(FirstSecret, Redact(session, project, path), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SameSnapshotRevision_WithNewerPerStateRevisionReevaluatesPendingOverlay()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var path = workspace.CreateFile("project/config.env", $"TOKEN={FirstSecret}\n");
+		var mark = Mark(FirstSecret);
+		var identity = new PersistentSecretMarkId(mark.H, mark.Length);
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		session.ReplacePersistentMarks(project, new PersistentSecretMarksSnapshot(11, [mark]));
+		var remove = PersistentSecretMarkDelta.Remove(identity, observedRevision: 10);
+		Assert.True(session.StagePersistentMarkDelta(project, remove).EffectiveChanged);
+
+		session.ReplacePersistentMarks(project, Snapshot(11, [mark], (identity, 11)));
+
+		Assert.Equal(0, session.PendingPersistentMarkCount);
+		Assert.DoesNotContain(FirstSecret, Redact(session, project, path), StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void PendingReplace_IsDiscardedWhenEitherDurableStateHasAdvanced(bool targetAdvanced)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var path = workspace.CreateFile(
+			"project/config.env",
+			$"OLD={FirstSecret}\nNEW={SecondSecret}\n");
+		var oldMark = Mark(FirstSecret);
+		var newMark = Mark(SecondSecret);
+		var oldIdentity = new PersistentSecretMarkId(oldMark.H, oldMark.Length);
+		var newIdentity = new PersistentSecretMarkId(newMark.H, newMark.Length);
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		session.ReplacePersistentMarks(project, Snapshot(
+			10,
+			[oldMark],
+			(oldIdentity, 10),
+			(newIdentity, 10)));
+		var replace = PersistentSecretMarkDelta.Replace(oldIdentity, newMark, observedRevision: 10);
+		Assert.True(session.StagePersistentMarkDelta(project, replace).EffectiveChanged);
+
+		var refreshedRevisions = targetAdvanced
+			? new[] { (oldIdentity, 10L), (newIdentity, 11L) }
+			: new[] { (oldIdentity, 11L), (newIdentity, 10L) };
+		session.ReplacePersistentMarks(
+			project,
+			new PersistentSecretMarksSnapshot(
+				11,
+				[oldMark],
+				refreshedRevisions.ToDictionary(static item => item.Item1, static item => item.Item2)));
+
+		var output = Redact(session, project, path);
+		Assert.Equal(0, session.PendingPersistentMarkCount);
+		Assert.DoesNotContain(FirstSecret, output, StringComparison.Ordinal);
+		Assert.Contains(SecondSecret, output, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -191,6 +312,17 @@ public sealed class PersistentSecretMarkOverlayTests
 		var value = Value(secret);
 		return new MarkedSecretProfileEntry(value.Hash, "TOKEN", value.Length);
 	}
+
+	private static PersistentSecretMarksSnapshot Snapshot(
+		long revision,
+		IReadOnlyCollection<MarkedSecretProfileEntry> marks,
+		params (PersistentSecretMarkId Identity, long AppliedRevision)[] stateRevisions) =>
+		new(
+			revision,
+			marks,
+			stateRevisions.ToDictionary(
+				static state => state.Identity,
+				static state => state.AppliedRevision));
 
 	private static MarkedSecretValue Value(string secret)
 	{

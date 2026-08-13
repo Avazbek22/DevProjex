@@ -397,8 +397,11 @@ public sealed class PersistentSecretMarkStoreTests
 
 		Assert.True(removed.Succeeded);
 		Assert.Empty(removed.Snapshot!.Marks);
+		var identity = new PersistentSecretMarkId(mark.H, mark.Length);
+		Assert.Equal(2, removed.Snapshot.StateAppliedRevisions![identity]);
 		Assert.True(retried.Succeeded);
 		Assert.Empty(retried.Snapshot!.Marks);
+		Assert.Equal(2, retried.Snapshot.StateAppliedRevisions![identity]);
 		Assert.Equal(removed.Snapshot.Revision, retried.Snapshot.Revision);
 	}
 
@@ -481,7 +484,11 @@ public sealed class PersistentSecretMarkStoreTests
 
 		Assert.True(migrated.Succeeded);
 		Assert.Empty(migrated.Snapshot!.Marks);
-		Assert.Equal(migrated.Snapshot, loadedAgain.Snapshot);
+		Assert.Equal(migrated.Snapshot.Revision, loadedAgain.Snapshot!.Revision);
+		Assert.Equal(migrated.Snapshot.Marks, loadedAgain.Snapshot.Marks);
+		Assert.Equal(
+			migrated.Snapshot.StateAppliedRevisions!.OrderBy(static pair => pair.Key.Hash),
+			loadedAgain.Snapshot.StateAppliedRevisions!.OrderBy(static pair => pair.Key.Hash));
 		Assert.Equal(firstBytes, secondBytes);
 		Assert.Contains("\"schemaVersion\": 2", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);
 		Assert.Contains("\"appliedRevision\"", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);

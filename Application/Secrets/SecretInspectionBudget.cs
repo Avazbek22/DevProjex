@@ -35,6 +35,7 @@ public sealed class SecretFileInspectionBudget
 {
 	private readonly long _startedTimestamp;
 	private readonly TimeSpan _maximumDuration;
+	private readonly TimeSpan _maximumRuleInitializationDuration;
 	private readonly CancellationToken _lifetimeToken;
 	private int _findingCount;
 	private long _matcherWorkUnits;
@@ -48,11 +49,16 @@ public sealed class SecretFileInspectionBudget
 
 	internal SecretFileInspectionBudget(
 		TimeSpan maximumDuration,
-		CancellationToken lifetimeToken = default)
+		CancellationToken lifetimeToken = default,
+		TimeSpan? maximumRuleInitializationDuration = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfLessThan(maximumDuration, TimeSpan.Zero);
+		if (maximumRuleInitializationDuration is { } initializationDuration)
+			ArgumentOutOfRangeException.ThrowIfLessThan(initializationDuration, TimeSpan.Zero);
 		_startedTimestamp = Stopwatch.GetTimestamp();
 		_maximumDuration = maximumDuration;
+		_maximumRuleInitializationDuration = maximumRuleInitializationDuration ??
+		                                     SecretInspectionLimits.MaximumRuleInitializationTimePerFile;
 		_lifetimeToken = lifetimeToken;
 	}
 
@@ -76,16 +82,19 @@ public sealed class SecretFileInspectionBudget
 	{
 		ArgumentNullException.ThrowIfNull(initialize);
 		var started = Stopwatch.GetTimestamp();
+		var completed = false;
 		try
 		{
-			return initialize();
+			var result = initialize();
+			completed = true;
+			return result;
 		}
 		finally
 		{
 			var elapsed = Math.Max(0, Stopwatch.GetTimestamp() - started);
 			Interlocked.Add(ref _excludedInitializationTimestampTicks, elapsed);
 			var total = Interlocked.Add(ref _ruleInitializationTimestampTicks, elapsed);
-			if (Stopwatch.GetElapsedTime(0, total) > SecretInspectionLimits.MaximumRuleInitializationTimePerFile)
+			if (completed && Stopwatch.GetElapsedTime(0, total) > _maximumRuleInitializationDuration)
 				throw SecretInspectionBudgetExceededException.RuleInitializationDeadline();
 		}
 	}

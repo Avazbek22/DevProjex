@@ -19,6 +19,10 @@ public enum PersistentSecretMarkDeltaKind
 	Replace = 2
 }
 
+public readonly record struct PersistentMarkStageResult(
+	bool Staged,
+	bool EffectiveChanged);
+
 public sealed record PersistentSecretMarkDelta(
 	Guid OperationId,
 	long IssuedUtcTicks,
@@ -94,9 +98,13 @@ public sealed record PersistentSecretMarkDelta(
 
 public sealed record PersistentSecretMarksSnapshot(
 	long Revision,
-	IReadOnlyCollection<MarkedSecretProfileEntry> Marks)
+	IReadOnlyCollection<MarkedSecretProfileEntry> Marks,
+	IReadOnlyDictionary<PersistentSecretMarkId, long>? StateAppliedRevisions = null)
 {
-	public static PersistentSecretMarksSnapshot Empty { get; } = new(0, []);
+	public static PersistentSecretMarksSnapshot Empty { get; } = new(
+		0,
+		[],
+		new Dictionary<PersistentSecretMarkId, long>());
 }
 
 public sealed record PersistentSecretMarksLoadResult(

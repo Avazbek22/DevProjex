@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Diagnostics;
 
 namespace DevProjex.Application.Secrets;
 
@@ -12,9 +13,10 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 	// The marker is one SHA-256 hex digest. A small allowance rejects attacker-controlled temp
 	// files before ReadAllText can allocate from an arbitrary length.
 	private const long MaximumOwnerMarkerBytes = 128;
-	// Cleanup is startup best effort. Bounding one pass keeps a polluted shared temp root from
-	// delaying application work; later starts continue where the previous pass stopped.
-	private const int MaximumDirectoriesPerScavenge = 256;
+	// Cleanup runs in the background. A deletion cap bounds destructive work while rejected live,
+	// young, or foreign entries do not prevent reachable stale output from being reclaimed.
+	private const int MaximumDirectoriesRemovedPerScavenge = 64;
+	private static readonly TimeSpan MaximumScavengeDuration = TimeSpan.FromSeconds(5);
 	private const int MaximumDirectoryCreationAttempts = 16;
 	// A full day avoids touching output from a suspended process while still reclaiming crash
 	// residue automatically on a later application start.
@@ -114,17 +116,18 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 		var age = minimumAge ?? MinimumScavengeAge;
 		ArgumentOutOfRangeException.ThrowIfLessThan(age, TimeSpan.Zero);
 		var removed = 0;
+		var elapsed = Stopwatch.StartNew();
 		try
 		{
 			if (!Directory.Exists(tempRoot))
 				return 0;
-			var inspected = 0;
 			foreach (var directory in Directory.EnumerateDirectories(
 				         tempRoot,
 				         $"{DirectoryPrefix}*",
 				         SearchOption.TopDirectoryOnly))
 			{
-				if (inspected++ >= MaximumDirectoriesPerScavenge)
+				if (removed >= MaximumDirectoriesRemovedPerScavenge ||
+				    elapsed.Elapsed >= MaximumScavengeDuration)
 					break;
 				if (!IsOwnedStaleDirectory(directory, utcNow, age) ||
 				    !TryAcquireLease(directory, out var lease))

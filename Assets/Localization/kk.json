@@ -205,6 +205,7 @@
   "Preview.Secret.Mark.Validation.TooLong": "512 таңбадан артық таңдамаңыз.",
   "Preview.Secret.Mark.Validation.Multiline": "Көпжолды мәндерге қолдау көрсетілмейді.",
   "Preview.Secret.Mark.Validation.ContentOnly": "Файл мазмұнындағы мәнді таңдаңыз.",
+  "Error.Secret.MarkApplyFailed": "Құпия белгісін қолдану мүмкін болмады. Алдын ала қарауды жаңартып, қайталап көріңіз.",
   "Toast.Secret.HiddenCount": "{0} жерде жасырылды",
   "Toast.Secret.MarkRemoved": "Белгі алынып тасталды.",
   "Toast.Secret.MarkRemovedStillDetected": "Белгі алынып тасталды. Детектор бұл мәнді әлі де жасырады.",

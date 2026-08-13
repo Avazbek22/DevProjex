@@ -22,6 +22,35 @@ public sealed class SecretInspectionBudgetTests
 	}
 
 	[Fact]
+	public void RuleInitializationFailure_IsNotMaskedByTheInitializationBudget()
+	{
+		var budget = new SecretFileInspectionBudget(
+			TimeSpan.FromSeconds(1),
+			maximumRuleInitializationDuration: TimeSpan.Zero);
+		var primary = new InvalidOperationException("Rule initialization failed.");
+
+		var thrown = Assert.Throws<InvalidOperationException>(() =>
+			budget.RunRuleInitialization<int>(() => throw primary));
+
+		Assert.Same(primary, thrown);
+	}
+
+	[Fact]
+	public void SuccessfulRuleInitialization_StillEnforcesItsOwnBudget()
+	{
+		var budget = new SecretFileInspectionBudget(
+			TimeSpan.FromSeconds(1),
+			maximumRuleInitializationDuration: TimeSpan.Zero);
+
+		var exception = Assert.Throws<SecretInspectionBudgetExceededException>(() =>
+			budget.RunRuleInitialization(static () => true));
+
+		Assert.Equal(
+			nameof(SecretInspectionLimits.MaximumRuleInitializationTimePerFile),
+			exception.LimitName);
+	}
+
+	[Fact]
 	public void StructuredDetector_StopsBeforePublishingMoreThanPerFileLimit()
 	{
 		var content = string.Concat(

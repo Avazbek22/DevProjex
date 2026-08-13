@@ -1,5 +1,6 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Context;
 using DevProjex.Application.Compression;
@@ -808,6 +809,116 @@ internal static class UiTestDriver
 		return (relativePath, sourceOffset);
 	}
 
+	public static async Task RequestSecretMarkThroughContextMenuAsync(
+		MainWindow window,
+		string value,
+		bool persistent = false,
+		int clickCount = 1)
+	{
+		Assert.True(clickCount > 0);
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
+		Assert.NotNull(document);
+
+		var lineNumber = 0;
+		var startColumn = -1;
+		for (var candidateLine = 1; candidateLine <= document!.LineCount; candidateLine++)
+		{
+			var candidateColumn = document.GetLineText(candidateLine).IndexOf(value, StringComparison.Ordinal);
+			if (candidateColumn < 0)
+				continue;
+			lineNumber = candidateLine;
+			startColumn = candidateColumn;
+			break;
+		}
+		Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
+
+		var typeface = new Typeface(
+			textControl.TextFontFamily ?? FontFamily.Default,
+			FontStyle.Normal,
+			FontWeight.Normal);
+		var lineText = document.GetLineText(lineNumber);
+		var origin = Assert.IsType<Point>(textControl.TranslatePoint(default, window));
+		var lineHeight = InvokeRequiredPrivateMethod<double>(textControl, "ResolveLineHeight");
+		var startDistance = InvokeRequiredPrivateMethod<double>(
+			textControl,
+			"ResolveDistanceFromColumn",
+			lineText,
+			startColumn,
+			typeface);
+		var endDistance = InvokeRequiredPrivateMethod<double>(
+			textControl,
+			"ResolveDistanceFromColumn",
+			lineText,
+			startColumn + value.Length,
+			typeface);
+		var y = origin.Y + textControl.TopPadding + ((lineNumber - 1) * lineHeight) -
+		        textControl.VerticalOffset + (lineHeight / 2);
+		var start = new Point(
+			origin.X + textControl.LeftPadding + startDistance - textControl.HorizontalOffset,
+			y);
+		var end = new Point(
+			origin.X + textControl.LeftPadding + endDistance - textControl.HorizontalOffset,
+			y);
+
+		textControl.Focus();
+		window.MouseMove(start, RawInputModifiers.None);
+		window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+		window.MouseMove(end, RawInputModifiers.LeftMouseButton);
+		window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
+		Assert.Equal(value, textControl.GetSelectedText());
+
+		var contextPoint = new Point((start.X + end.X) / 2, y);
+		window.MouseDown(contextPoint, MouseButton.Right, RawInputModifiers.RightMouseButton);
+		window.MouseUp(contextPoint, MouseButton.Right, RawInputModifiers.None);
+		await WaitForSettledFramesAsync(frameCount: 2);
+
+		var flyout = Assert.IsType<MenuFlyout>(textControl.ContextFlyout);
+		Assert.True(flyout.IsOpen);
+		var menuItem = GetRequiredPrivateField<MenuItem>(
+			textControl,
+			persistent ? "_alwaysHideSecretMenuItem" : "_hideSecretHereMenuItem");
+		Assert.True(menuItem.IsVisible);
+		Assert.True(menuItem.IsEnabled);
+		for (var click = 0; click < clickCount; click++)
+			await RaiseMenuItemClickAsync(menuItem);
+		flyout.Hide();
+		await WaitForSettledFramesAsync(frameCount: 2);
+	}
+
+	public static async Task RequestManualSecretUnmarkThroughContextMenuAsync(MainWindow window)
+	{
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var redaction = Assert.Single((textControl.Document ?? GetViewModel(window).PreviewDocument)!.Redactions);
+		InvokeRequiredPrivateMethod(textControl, "EnsureContextMenu");
+		var contextField = textControl.GetType().GetField(
+			"_contextManualRedaction",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(contextField);
+		contextField!.SetValue(textControl, redaction);
+		InvokeRequiredPrivateMethod(textControl, "PrepareManualSecretMenuItems");
+		await WaitForSettledFramesAsync(frameCount: 2);
+		var remove = GetRequiredPrivateField<MenuItem>(textControl, "_removeSecretMarkMenuItem");
+		Assert.True(remove.IsVisible);
+		Assert.True(remove.IsEnabled);
+		await RaiseMenuItemClickAsync(remove);
+	}
+
+	public static IReadOnlyList<string> GetToastMessages(MainWindow window) =>
+		GetRequiredPrivateField<DevProjex.Avalonia.Services.ToastService>(window, "_toastService")
+			.Items
+			.Select(static toast => toast.Message)
+			.ToArray();
+
+	public static string GetWindowAppDataPath(MainWindow window) =>
+		WindowAppDataPaths.TryGetValue(window, out var path)
+			? path
+			: throw new XunitException("The window app-data path is not tracked.");
+
 	public static void OverridePreviewErrorHandler(
 		MainWindow window,
 		Func<string, Task> handler)
@@ -850,6 +961,21 @@ internal static class UiTestDriver
 		scope.Complete();
 		return result.Text;
 	}
+
+	public static SecretRedactionSession GetSecretRedactionSession(MainWindow window) =>
+		GetRequiredPrivateField<SecretRedactionSession>(window, "_secretRedactionSession");
+
+	public static int GetPendingPersistentMarkCount(SecretRedactionSession session)
+	{
+		var property = typeof(SecretRedactionSession).GetProperty(
+			"PendingPersistentMarkCount",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(property);
+		return Assert.IsType<int>(property!.GetValue(session));
+	}
+
+	public static CodeCompressionSession GetCodeCompressionSession(MainWindow window) =>
+		GetRequiredPrivateField<CodeCompressionSession>(window, "_codeCompressionSession");
 
     public static string ComputeVisibleStickyHeaderCopyPayload(MainWindow window)
     {
@@ -1595,6 +1721,39 @@ internal static class UiTestDriver
         var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<T>(field?.GetValue(window));
     }
+
+	private static T GetRequiredPrivateField<T>(object instance, string fieldName)
+	{
+		var field = instance.GetType().GetField(
+			fieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<T>(field!.GetValue(instance));
+	}
+
+	private static T InvokeRequiredPrivateMethod<T>(
+		object instance,
+		string methodName,
+		params object?[] arguments)
+	{
+		var method = instance.GetType().GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		return Assert.IsType<T>(method!.Invoke(instance, arguments));
+	}
+
+	private static void InvokeRequiredPrivateMethod(
+		object instance,
+		string methodName,
+		params object?[] arguments)
+	{
+		var method = instance.GetType().GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(instance, arguments);
+	}
 
 	private static object GetRequiredPrivateFieldValue(MainWindow window, string fieldName)
 	{

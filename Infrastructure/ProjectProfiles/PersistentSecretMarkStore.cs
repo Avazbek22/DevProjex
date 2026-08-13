@@ -652,7 +652,13 @@ internal sealed class PersistentSecretMarkStore(
 			.Where(static state => !state.Removed)
 			.Select(static state => new MarkedSecretProfileEntry(state.Hash, state.Key, state.Length))
 			.ToArray();
-		return new PersistentSecretMarksSnapshot(project.AppliedRevision, marks);
+		var stateAppliedRevisions = project.States.ToDictionary(
+			static state => new PersistentSecretMarkId(state.Hash, state.Length),
+			static state => state.AppliedRevision);
+		return new PersistentSecretMarksSnapshot(
+			project.AppliedRevision,
+			marks,
+			stateAppliedRevisions);
 	}
 
 	private static PersistentSecretMarkDb CreateDefaultDatabase() => new()

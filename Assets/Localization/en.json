@@ -205,6 +205,7 @@
   "Preview.Secret.Mark.Validation.TooLong": "Select no more than 512 characters.",
   "Preview.Secret.Mark.Validation.Multiline": "Multiline values are not supported.",
   "Preview.Secret.Mark.Validation.ContentOnly": "Select a value inside file content.",
+  "Error.Secret.MarkApplyFailed": "The secret mark could not be applied. Refresh Preview and try again.",
   "Toast.Secret.HiddenCount": "Hidden in {0} places",
   "Toast.Secret.MarkRemoved": "Mark removed.",
   "Toast.Secret.MarkRemovedStillDetected": "Mark removed. The detector still hides this value.",

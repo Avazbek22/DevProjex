@@ -23,6 +23,7 @@ public sealed class SecretRedactionSession : IDisposable
 	private readonly object _sync = new();
 	private readonly HashSet<string> _keptOccurrenceIds = new(StringComparer.Ordinal);
 	private readonly Dictionary<PersistentSecretMarkId, MarkedSecretProfileEntry> _durablePersistentMarks = [];
+	private readonly Dictionary<PersistentSecretMarkId, long> _durablePersistentMarkAppliedRevisions = [];
 	private readonly Dictionary<PersistentSecretMarkId, MarkedSecretProfileEntry> _persistentMarks = [];
 	private readonly Dictionary<Guid, PersistentSecretMarkDelta> _pendingPersistentMarkDeltas = [];
 	private readonly List<Guid> _pendingPersistentMarkOrder = [];
@@ -140,6 +141,7 @@ public sealed class SecretRedactionSession : IDisposable
 			loaded.Snapshot.Marks,
 			normalizedProjectRoot,
 			loaded.Snapshot.Revision,
+			loaded.Snapshot.StateAppliedRevisions,
 			expectedGeneration);
 	}
 
@@ -235,6 +237,7 @@ public sealed class SecretRedactionSession : IDisposable
 		{
 			marksChanged |= _persistentMarks.Count > 0;
 			_durablePersistentMarks.Clear();
+			_durablePersistentMarkAppliedRevisions.Clear();
 			_persistentMarks.Clear();
 			_pendingPersistentMarkDeltas.Clear();
 			_pendingPersistentMarkOrder.Clear();
@@ -257,7 +260,7 @@ public sealed class SecretRedactionSession : IDisposable
 	}
 
 	public void ReplaceMarkedSecrets(IEnumerable<MarkedSecretProfileEntry>? marks)
-		=> ReplaceMarkedSecretsCore(marks, null, -1, expectedGeneration: null);
+		=> ReplaceMarkedSecretsCore(marks, null, -1, null, expectedGeneration: null);
 
 	public void ReplacePersistentMarks(
 		string projectRoot,
@@ -269,6 +272,7 @@ public sealed class SecretRedactionSession : IDisposable
 			snapshot.Marks,
 			Path.GetFullPath(projectRoot),
 			snapshot.Revision,
+			snapshot.StateAppliedRevisions,
 			expectedGeneration: null);
 	}
 
@@ -276,6 +280,7 @@ public sealed class SecretRedactionSession : IDisposable
 		IEnumerable<MarkedSecretProfileEntry>? marks,
 		string? projectPath,
 		long storeRevision,
+		IReadOnlyDictionary<PersistentSecretMarkId, long>? stateAppliedRevisions,
 		long? expectedGeneration)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
@@ -290,6 +295,7 @@ public sealed class SecretRedactionSession : IDisposable
 			.GroupBy(static mark => new PersistentSecretMarkId(mark.H.ToLowerInvariant(), mark.Length))
 			.Select(static group => group.First())
 			.ToDictionary(static mark => new PersistentSecretMarkId(mark.H.ToLowerInvariant(), mark.Length));
+		var replacementAppliedRevisions = NormalizeAppliedRevisions(stateAppliedRevisions);
 
 		lock (_sync)
 		{
@@ -311,6 +317,11 @@ public sealed class SecretRedactionSession : IDisposable
 			var identityChanged =
 				!PathComparer.Default.Equals(_persistentMarksProjectPath, projectPath) ||
 				_persistentMarksStoreRevision != storeRevision;
+			var stateRevisionsChanged =
+				_durablePersistentMarkAppliedRevisions.Count != replacementAppliedRevisions.Count ||
+				_durablePersistentMarkAppliedRevisions.Any(pair =>
+					!replacementAppliedRevisions.TryGetValue(pair.Key, out var revision) ||
+					revision != pair.Value);
 			if (!PathComparer.Default.Equals(_persistentMarksProjectPath, projectPath))
 			{
 				_pendingPersistentMarkDeltas.Clear();
@@ -319,7 +330,8 @@ public sealed class SecretRedactionSession : IDisposable
 			}
 			if (_durablePersistentMarks.Count == replacement.Count &&
 			    _durablePersistentMarks.All(pair => replacement.TryGetValue(pair.Key, out var value) && value == pair.Value) &&
-			    !identityChanged)
+			    !identityChanged &&
+			    !stateRevisionsChanged)
 			{
 				return;
 			}
@@ -330,6 +342,9 @@ public sealed class SecretRedactionSession : IDisposable
 			_durablePersistentMarks.Clear();
 			foreach (var (identity, mark) in replacement)
 				_durablePersistentMarks.Add(identity, mark);
+			_durablePersistentMarkAppliedRevisions.Clear();
+			foreach (var (identity, appliedRevision) in replacementAppliedRevisions)
+				_durablePersistentMarkAppliedRevisions.Add(identity, appliedRevision);
 			_persistentMarksProjectPath = projectPath;
 			_persistentMarksStoreRevision = storeRevision;
 			marksChanged |= RebuildEffectivePersistentMarksLocked();
@@ -367,7 +382,7 @@ public sealed class SecretRedactionSession : IDisposable
 		return changed;
 	}
 
-	public bool StagePersistentMarkDelta(
+	public PersistentMarkStageResult StagePersistentMarkDelta(
 		string projectRoot,
 		PersistentSecretMarkDelta delta)
 	{
@@ -387,7 +402,7 @@ public sealed class SecretRedactionSession : IDisposable
 			{
 				if (existing != delta)
 					throw new InvalidOperationException("A persistent mark operation ID cannot identify different deltas.");
-				return false;
+				return new PersistentMarkStageResult(false, false);
 			}
 
 			_pendingPersistentMarkDeltas.Add(delta.OperationId, delta);
@@ -406,7 +421,7 @@ public sealed class SecretRedactionSession : IDisposable
 		}
 		if (changed)
 			OverridesChanged?.Invoke(this, EventArgs.Empty);
-		return changed;
+		return new PersistentMarkStageResult(true, changed);
 	}
 
 	public void AcknowledgePersistentMarkDelta(
@@ -431,6 +446,12 @@ public sealed class SecretRedactionSession : IDisposable
 				_durablePersistentMarks.Clear();
 				foreach (var (identity, mark) in replacement)
 					_durablePersistentMarks.Add(identity, mark);
+				_durablePersistentMarkAppliedRevisions.Clear();
+				foreach (var (identity, appliedRevision) in NormalizeAppliedRevisions(
+					         snapshot.StateAppliedRevisions))
+				{
+					_durablePersistentMarkAppliedRevisions.Add(identity, appliedRevision);
+				}
 				_persistentMarksStoreRevision = snapshot.Revision;
 			}
 			changed = RebuildEffectivePersistentMarksLocked();
@@ -544,7 +565,7 @@ public sealed class SecretRedactionSession : IDisposable
 		return EnsurePersistentIdentityReadyAsync(marks, cancellationToken);
 	}
 
-	public bool TryPromoteSessionMarkToPendingPersistentMark(
+	public PersistentMarkStageResult TryPromoteSessionMarkToPendingPersistentMark(
 		string projectRoot,
 		string relativePath,
 		int sourceOffset,
@@ -573,12 +594,12 @@ public sealed class SecretRedactionSession : IDisposable
 			if (!PathComparer.Default.Equals(_persistentMarksProjectPath, normalizedProjectRoot) ||
 			    !_sessionMarks.Remove(anchor))
 			{
-				return false;
+				return new PersistentMarkStageResult(false, false);
 			}
 			if (!_pendingPersistentMarkDeltas.TryAdd(delta.OperationId, delta))
 			{
 				_sessionMarks.Add(anchor);
-				return false;
+				return new PersistentMarkStageResult(false, false);
 			}
 			_pendingPersistentMarkOrder.Add(delta.OperationId);
 			try
@@ -594,7 +615,16 @@ public sealed class SecretRedactionSession : IDisposable
 			AdvanceMarkedSecretsRevisionLocked();
 		}
 		OverridesChanged?.Invoke(this, EventArgs.Empty);
-		return true;
+		return new PersistentMarkStageResult(true, true);
+	}
+
+	internal int PendingPersistentMarkCount
+	{
+		get
+		{
+			lock (_sync)
+				return _pendingPersistentMarkDeltas.Count;
+		}
 	}
 
 	private static bool TryNormalizePersistentMark(
@@ -682,13 +712,24 @@ public sealed class SecretRedactionSession : IDisposable
 	{
 		var effective = new Dictionary<PersistentSecretMarkId, MarkedSecretProfileEntry>(
 			_durablePersistentMarks);
+		List<Guid>? staleOperations = null;
 		foreach (var operationId in _pendingPersistentMarkOrder)
 		{
 			if (!_pendingPersistentMarkDeltas.TryGetValue(operationId, out var delta))
 				continue;
+			if (IsPendingDeltaStaleLocked(delta))
+			{
+				(staleOperations ??= []).Add(operationId);
+				continue;
+			}
 			ApplyPendingDelta(effective, delta);
 			if (effective.Count > SecretInspectionLimits.MaximumPersistentMarksPerProject)
 				throw SecretInspectionBudgetExceededException.PersistentMarks();
+		}
+		if (staleOperations is not null)
+		{
+			foreach (var operationId in staleOperations)
+				RemovePendingDeltaLocked(operationId);
 		}
 
 		if (_persistentMarks.Count == effective.Count &&
@@ -701,6 +742,40 @@ public sealed class SecretRedactionSession : IDisposable
 		foreach (var (identity, mark) in effective)
 			_persistentMarks.Add(identity, mark);
 		return true;
+	}
+
+	private bool IsPendingDeltaStaleLocked(PersistentSecretMarkDelta delta)
+	{
+		if (delta.Kind == PersistentSecretMarkDeltaKind.Add)
+			return false;
+		var sourceId = NormalizeMarkId(delta.MarkId);
+		if (GetDurableAppliedRevisionLocked(sourceId) > delta.ObservedRevision)
+			return true;
+		if (delta.Kind != PersistentSecretMarkDeltaKind.Replace)
+			return false;
+		var target = delta.Mark!;
+		return GetDurableAppliedRevisionLocked(
+			new PersistentSecretMarkId(target.H.ToLowerInvariant(), target.Length)) > delta.ObservedRevision;
+	}
+
+	private long GetDurableAppliedRevisionLocked(PersistentSecretMarkId identity) =>
+		_durablePersistentMarkAppliedRevisions.GetValueOrDefault(identity);
+
+	private static PersistentSecretMarkId NormalizeMarkId(PersistentSecretMarkId identity) =>
+		new(identity.Hash.ToLowerInvariant(), identity.Length);
+
+	private static Dictionary<PersistentSecretMarkId, long> NormalizeAppliedRevisions(
+		IReadOnlyDictionary<PersistentSecretMarkId, long>? revisions)
+	{
+		var normalized = new Dictionary<PersistentSecretMarkId, long>();
+		if (revisions is null)
+			return normalized;
+		foreach (var (identity, appliedRevision) in revisions)
+		{
+			if (appliedRevision > 0 && IsValidPersistentMarkId(identity))
+				normalized[NormalizeMarkId(identity)] = appliedRevision;
+		}
+		return normalized;
 	}
 
 	private static void ApplyPendingDelta(
@@ -794,6 +869,7 @@ public sealed class SecretRedactionSession : IDisposable
 				latest.Marks,
 				normalizedProjectRoot,
 				latest.Revision,
+				latest.StateAppliedRevisions,
 				expectedGeneration);
 		}
 	}
@@ -972,7 +1048,10 @@ public sealed class SecretRedactionSession : IDisposable
 						(persistentMarkLength is null || identity.Length == persistentMarkLength))
 					.ToArray();
 				foreach (var identity in identities)
+				{
 					persistentRemoved |= _durablePersistentMarks.Remove(identity);
+					_durablePersistentMarkAppliedRevisions.Remove(identity);
+				}
 			}
 			if (!string.IsNullOrWhiteSpace(sessionMarkId))
 			{
@@ -1138,6 +1217,7 @@ public sealed class SecretRedactionSession : IDisposable
 			_activeProjectRoot = null;
 			_keptOccurrenceIds.Clear();
 			_durablePersistentMarks.Clear();
+			_durablePersistentMarkAppliedRevisions.Clear();
 			_persistentMarks.Clear();
 			_pendingPersistentMarkDeltas.Clear();
 			_pendingPersistentMarkOrder.Clear();
@@ -1163,6 +1243,7 @@ public sealed class SecretRedactionSession : IDisposable
 			_activeProjectRoot = null;
 			_keptOccurrenceIds.Clear();
 			_durablePersistentMarks.Clear();
+			_durablePersistentMarkAppliedRevisions.Clear();
 			_persistentMarks.Clear();
 			_pendingPersistentMarkDeltas.Clear();
 			_pendingPersistentMarkOrder.Clear();

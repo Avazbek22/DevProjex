@@ -1051,7 +1051,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		using var session = new SecretRedactionSession(new NoFindingsDetector(), store);
 		session.ReplacePersistentMarks(sourceRoot, store.Snapshot);
 		var delta = PersistentSecretMarkDelta.Add(mark);
-		Assert.True(session.StagePersistentMarkDelta(sourceRoot, delta));
+		Assert.True(session.StagePersistentMarkDelta(sourceRoot, delta).Staged);
 		var analyzer = new FileContentAnalyzer();
 		var context = new SecretRedactionContext(sourceRoot, session);
 		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
@@ -1093,6 +1093,79 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.DoesNotContain(manualValue, ReadZipText(archive, "src/config.cs"), StringComparison.Ordinal);
 		Assert.True(store.LoadCount >= 4);
 		Assert.Equal(mark, Assert.Single(session.GetMarkedSecrets()));
+	}
+
+	[Fact]
+	public async Task StalePendingRemove_NewerDurableAddRemainsRedactedAcrossOutputSurfaces()
+	{
+		const string manualValue = "ordinary-value-not-recognized-by-detector-89";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("stale-remove-project");
+		var exportRoot = temporary.CreateDirectory("stale-remove-exports");
+		var sourcePath = temporary.CreateFile(
+			"stale-remove-project/src/config.cs",
+			$"const string value = \"{manualValue}\";\n");
+		using var workspace = new Workspace(
+			temporary,
+			sourceRoot,
+			exportRoot,
+			sourcePath,
+			ownsTemporary: false);
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(manualValue, out var normalized, out _));
+		var mark = new MarkedSecretProfileEntry(normalized.Hash, "value", normalized.Length);
+		var identity = new PersistentSecretMarkId(mark.H, mark.Length);
+		var initial = new PersistentSecretMarksSnapshot(
+			10,
+			[mark],
+			new Dictionary<PersistentSecretMarkId, long> { [identity] = 10 });
+		var refreshed = new PersistentSecretMarksSnapshot(
+			11,
+			[mark],
+			new Dictionary<PersistentSecretMarkId, long> { [identity] = 11 });
+		var store = new StaleSnapshotMarkStore(refreshed);
+		using var session = new SecretRedactionSession(new NoFindingsDetector(), store);
+		session.ReplacePersistentMarks(sourceRoot, initial);
+		var remove = PersistentSecretMarkDelta.Remove(identity, observedRevision: 10);
+		Assert.True(session.StagePersistentMarkDelta(sourceRoot, remove).EffectiveChanged);
+		var analyzer = new FileContentAnalyzer();
+		var context = new SecretRedactionContext(sourceRoot, session);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+
+		using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: false,
+			transformationContext: context);
+		var clipboard = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
+		var selectedContent = await new SelectedContentExportService(analyzer).BuildAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			context);
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder);
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip);
+
+		Assert.All(
+			new[] { clipboard, selectedContent }.Concat(contextDocuments.Values),
+			output => Assert.DoesNotContain(manualValue, output, StringComparison.Ordinal));
+		Assert.DoesNotContain(
+			manualValue,
+			File.ReadAllText(Path.Combine(folder.DestinationPath, "src", "config.cs")),
+			StringComparison.Ordinal);
+		using var archive = ZipFile.OpenRead(zip.DestinationPath);
+		Assert.DoesNotContain(manualValue, ReadZipText(archive, "src/config.cs"), StringComparison.Ordinal);
 	}
 
 	[Fact]

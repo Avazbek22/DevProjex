@@ -199,6 +199,43 @@ public sealed class PersistentSecretIdentityTests
 	}
 
 	[Fact]
+	public async Task KeyFileCreateReadAndRecovery_ClearEveryReleasedSensitiveBuffer()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		var cleared = new System.Collections.Concurrent.ConcurrentBag<byte[]>();
+		using (var created = new PersistentSecretIdentityProvider(
+			       () => appData,
+			       lockTimeout: null,
+			       TimeSpan.Zero,
+			       sensitiveBufferClearedObserver: cleared.Add))
+		{
+			Assert.Equal(
+				PersistentSecretIdentityAvailability.Ready,
+				await created.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		}
+
+		var keyPath = Path.Combine(appData, "DevProjex", "secret-mark-hmac.key");
+		File.WriteAllBytes(keyPath, [1, 2, 3]);
+		using (var recovered = new PersistentSecretIdentityProvider(
+			       () => appData,
+			       lockTimeout: null,
+			       TimeSpan.Zero,
+			       sensitiveBufferClearedObserver: cleared.Add))
+		{
+			Assert.Equal(
+				PersistentSecretIdentityAvailability.Ready,
+				await recovered.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		}
+
+		Assert.NotEmpty(cleared);
+		Assert.Contains(cleared, static buffer => buffer.Length == 32);
+		Assert.Contains(cleared, static buffer => buffer.Length > 32);
+		Assert.All(cleared, static buffer =>
+			Assert.All(buffer, static value => Assert.Equal(0, value)));
+	}
+
+	[Fact]
 	public async Task BothInstallationKeyCopiesCorrupt_FailsClosedWithoutGeneratingAReplacement()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -307,6 +344,31 @@ public sealed class PersistentSecretIdentityTests
 	}
 
 	[Fact]
+	public async Task UnexpectedNonFatalInitializationFailure_ExitsInitializingAndCanRetry()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		var pathAvailable = false;
+		using var provider = new PersistentSecretIdentityProvider(
+			() => pathAvailable
+				? appData
+				: throw new System.Security.SecurityException("ACL lookup is temporarily unavailable."),
+			TimeSpan.FromMilliseconds(30),
+			TimeSpan.Zero);
+
+		var first = await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(PersistentSecretIdentityAvailability.TemporarilyUnavailable, first);
+		Assert.Equal(PersistentSecretIdentityProviderState.TransientFault, provider.State);
+		pathAvailable = true;
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.Ready,
+			await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(PersistentSecretIdentityProviderState.Ready, provider.State);
+		Assert.Equal(2, provider.InitializationAttemptCount);
+	}
+
+	[Fact]
 	public async Task ConcurrentFirstUse_PerformsOneInitialization()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -323,6 +385,49 @@ public sealed class PersistentSecretIdentityTests
 
 		Assert.All(results, static result => Assert.Equal(PersistentSecretIdentityAvailability.Ready, result));
 		Assert.Equal(1, provider.InitializationAttemptCount);
+	}
+
+	[Fact]
+	public async Task ConcurrentDigestAndDispose_NeverObserveClearedKeyMaterial()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		var provider = new PersistentSecretIdentityProvider(() => appData);
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.Ready,
+			await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		var candidate = new string('s', MarkedSecretValueNormalizer.MaximumLength);
+		var expected = new byte[PersistentSecretIdentity.V2DigestByteLength];
+		Assert.True(provider.TryComputeDigest(candidate, expected));
+		using var ready = new CountdownEvent(8);
+		using var start = new ManualResetEventSlim();
+		var mismatches = 0;
+		var disposed = 0;
+		var workers = Enumerable.Range(0, 8)
+			.Select(_ => Task.Factory.StartNew(
+				() => RunDigestUntilDisposed(
+					provider,
+					candidate,
+					expected,
+					ready,
+					start,
+					ref mismatches,
+					ref disposed),
+				CancellationToken.None,
+				TaskCreationOptions.LongRunning,
+				TaskScheduler.Default))
+			.ToArray();
+		Assert.True(ready.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+		start.Set();
+		await Task.Delay(20, TestContext.Current.CancellationToken);
+
+		provider.Dispose();
+		await Task.WhenAll(workers).WaitAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, Volatile.Read(ref mismatches));
+		Assert.Equal(workers.Length, Volatile.Read(ref disposed));
+		Assert.Throws<ObjectDisposedException>(() =>
+			provider.TryComputeDigest(candidate, new byte[PersistentSecretIdentity.V2DigestByteLength]));
 	}
 
 	[Fact]
@@ -348,6 +453,33 @@ public sealed class PersistentSecretIdentityTests
 		Assert.Equal(PersistentSecretIdentityProviderState.Disposed, provider.State);
 		Assert.Throws<ObjectDisposedException>(() =>
 			provider.TryComputeDigest(Secret, new byte[PersistentSecretIdentity.V2DigestByteLength]));
+	}
+
+	private static void RunDigestUntilDisposed(
+		PersistentSecretIdentityProvider provider,
+		string candidate,
+		ReadOnlySpan<byte> expected,
+		CountdownEvent ready,
+		ManualResetEventSlim start,
+		ref int mismatches,
+		ref int disposed)
+	{
+		ready.Signal();
+		start.Wait();
+		Span<byte> digest = stackalloc byte[PersistentSecretIdentity.V2DigestByteLength];
+		while (true)
+		{
+			try
+			{
+				if (!provider.TryComputeDigest(candidate, digest) || !digest.SequenceEqual(expected))
+					Interlocked.Increment(ref mismatches);
+			}
+			catch (ObjectDisposedException)
+			{
+				Interlocked.Increment(ref disposed);
+				return;
+			}
+		}
 	}
 
 	[Fact]

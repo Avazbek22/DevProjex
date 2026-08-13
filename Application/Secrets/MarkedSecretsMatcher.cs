@@ -256,9 +256,7 @@ internal sealed class MarkedSecretsMatcher
 				continue;
 			}
 
-			if (start > content.Length - mark.Length ||
-			    !SecretTokenBoundary.IsBoundary(content, start) ||
-			    !SecretTokenBoundary.IsBoundary(content, start + mark.Length))
+			if (start > content.Length - mark.Length)
 			{
 				continue;
 			}
@@ -267,10 +265,8 @@ internal sealed class MarkedSecretsMatcher
 			if (value.IndexOfAny('\r', '\n') >= 0)
 				continue;
 			MarkedSecretValueNormalizer.ComputeHash(value, candidateHash);
-			// The hash is the last gate, not the only one. Translating the anchor puts the mark on
-			// the right characters when compression shifts them; verifying the value here means a
-			// mark that still cannot be placed is skipped rather than applied to whatever now sits
-			// at those coordinates.
+			// Session marks are exact source ranges, so token boundaries would reject a valid user-
+			// selected substring. The translated anchor plus the value hash prevents range drift.
 			if (!candidateHash.SequenceEqual(preparedMark.HashBytes))
 				continue;
 

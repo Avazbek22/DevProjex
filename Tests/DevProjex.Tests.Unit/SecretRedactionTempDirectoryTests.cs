@@ -133,6 +133,38 @@ public sealed class SecretRedactionTempDirectoryTests
 		Assert.False(Directory.Exists(abandonedPath));
 	}
 
+	[Fact]
+	public void Scavenger_ReachesStaleDirectoryAfterMoreThanThreeHundredRejectedCandidates()
+	{
+		using var root = new TemporaryDirectory();
+		var now = DateTime.UtcNow;
+		var candidates = new List<SecretRedactionTempDirectory>();
+		try
+		{
+			for (var index = 0; index < 301; index++)
+			{
+				var candidate = SecretRedactionTempDirectory.Create(root.Path);
+				candidate.AbandonForTest();
+				candidates.Add(candidate);
+			}
+			var stalePath = Directory.EnumerateDirectories(
+					root.Path,
+					$"{SecretRedactionTempDirectory.DirectoryPrefix}*",
+					SearchOption.TopDirectoryOnly)
+				.Skip(300)
+				.First();
+			MakeStale(stalePath, now);
+
+			Assert.Equal(1, SecretRedactionTempDirectory.Scavenge(root.Path, now));
+			Assert.False(Directory.Exists(stalePath));
+		}
+		finally
+		{
+			foreach (var candidate in candidates)
+				candidate.Dispose();
+		}
+	}
+
 	private static void MakeStale(string directory, DateTime now) =>
 		File.SetLastWriteTimeUtc(
 			Path.Combine(directory, SecretRedactionTempDirectory.OwnerFileName),
