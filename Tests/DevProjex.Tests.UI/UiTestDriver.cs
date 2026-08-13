@@ -870,6 +870,10 @@ internal static class UiTestDriver
 				lineText,
 				startColumn + value.Length,
 				typeface);
+			await EnsureHorizontalRangeVisibleAsync(
+				scrollViewer,
+				textControl.LeftPadding + startDistance,
+				textControl.LeftPadding + endDistance);
 			var localY = contentTopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2);
 			var start = Assert.IsType<Point>(textControl.TranslatePoint(
 				new Point(
@@ -967,6 +971,31 @@ internal static class UiTestDriver
 			await RaiseMenuItemClickAsync(menuItem);
 		flyout.Hide();
 		await WaitForSettledFramesAsync(frameCount: 2);
+	}
+
+	private static async Task EnsureHorizontalRangeVisibleAsync(
+		ScrollViewer scrollViewer,
+		double rangeLeft,
+		double rangeRight)
+	{
+		if (scrollViewer.Viewport.Width <= 0)
+			return;
+
+		const double viewportMargin = 24;
+		var offset = scrollViewer.Offset;
+		var targetX = offset.X;
+		if (rangeLeft < offset.X + viewportMargin)
+			targetX = rangeLeft - viewportMargin;
+		else if (rangeRight > offset.X + scrollViewer.Viewport.Width - viewportMargin)
+			targetX = rangeRight - scrollViewer.Viewport.Width + viewportMargin;
+
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		targetX = Math.Clamp(targetX, 0, maximumX);
+		if (Math.Abs(targetX - offset.X) <= 0.5)
+			return;
+
+		scrollViewer.Offset = new Vector(targetX, offset.Y);
+		await WaitForSettledFramesAsync(frameCount: 4);
 	}
 
 	public static async Task RequestManualSecretUnmarkThroughContextMenuAsync(MainWindow window)
