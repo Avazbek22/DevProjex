@@ -41,9 +41,11 @@ public sealed class GitleaksSecretDetectorTests
 
 		Assert.DoesNotContain("\"content\":", corpus, StringComparison.Ordinal);
 		Assert.Contains("\"contentBase64\":", corpus, StringComparison.Ordinal);
+		var semanticBudget = new SecretFileInspectionBudget(TimeSpan.FromSeconds(30));
 		Assert.Empty(Detector.Detect(
 			"Tests/Fixtures/Secrets/gitleaks-v8.30.1-corpus.jsonl",
-			corpus,
+			corpus.AsSpan(),
+			semanticBudget,
 			TestContext.Current.CancellationToken));
 	}
 

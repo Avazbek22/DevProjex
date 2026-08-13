@@ -164,11 +164,10 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 		try
 		{
 			using var identity = WindowsIdentity.GetCurrent();
-			var currentOwner = identity.User;
-			if (currentOwner is null)
-				return false;
 			var security = new DirectoryInfo(directory).GetAccessControl(AccessControlSections.Owner);
-			return currentOwner.Equals(security.GetOwner(typeof(SecurityIdentifier)));
+			var directoryOwner = security.GetOwner(typeof(SecurityIdentifier));
+			return identity.User?.Equals(directoryOwner) == true ||
+			       identity.Owner?.Equals(directoryOwner) == true;
 		}
 		catch (Exception exception) when (
 			exception is IOException or UnauthorizedAccessException or NotSupportedException or
