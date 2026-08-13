@@ -153,6 +153,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Contains(
 				"Hidden in 1 places",
 				UiTestDriver.GetToastMessages(window));
+			await UiTestDriver.WaitForPendingManualMarkOperationsAsync(window);
 
 			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
@@ -161,6 +162,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					manualValue,
 					StringComparison.Ordinal),
 				"removing the session mark to restore Preview content");
+			await UiTestDriver.WaitForPendingManualMarkOperationsAsync(window);
 		}
 		finally
 		{

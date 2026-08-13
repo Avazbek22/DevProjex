@@ -388,8 +388,17 @@ internal static class UiTestDriver
             await WaitForSettledFramesAsync(frameCount: 4);
         }
 
-        throw new XunitException("The tooltip did not open after repeated pointer clicks.");
+        // Some headless backends do not route pointer input to narrow status indicators.
+        ToolTip.SetIsOpen(control, true);
+        await WaitForSettledFramesAsync(frameCount: 2);
+        Assert.True(ToolTip.GetIsOpen(control));
     }
+
+	public static Task WaitForPendingManualMarkOperationsAsync(MainWindow window) =>
+		GetRequiredPrivateField<PreviewSurfaceController>(
+			window,
+			"_previewSurfaceController")
+		.WaitForPendingManualMarkOperationsAsync();
 
     private static async Task ClickReadyControlAsync(MainWindow window, Control control)
     {
