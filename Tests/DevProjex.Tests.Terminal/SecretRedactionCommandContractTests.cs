@@ -572,6 +572,7 @@ public sealed class SecretRedactionCommandContractTests
 					[IgnoreOptionId.HideSecrets] = true
 				}));
 		using var identityProvider = new PersistentSecretIdentityProvider(() => workspace.AppDataRoot);
+		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
 		Assert.True(PersistentSecretIdentity.TryCreateV2(
 			identityProvider,
 			ManuallyMarkedValue,

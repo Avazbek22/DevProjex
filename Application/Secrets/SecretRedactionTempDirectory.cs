@@ -15,6 +15,7 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 	// Cleanup is startup best effort. Bounding one pass keeps a polluted shared temp root from
 	// delaying application work; later starts continue where the previous pass stopped.
 	private const int MaximumDirectoriesPerScavenge = 256;
+	private const int MaximumDirectoryCreationAttempts = 16;
 	// A full day avoids touching output from a suspended process while still reclaiming crash
 	// residue automatically on a later application start.
 	internal static readonly TimeSpan MinimumScavengeAge = TimeSpan.FromHours(24);
@@ -32,32 +33,44 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 	public string Path { get; }
 
 	public static SecretRedactionTempDirectory Create()
-	{
-		var directory = Directory.CreateTempSubdirectory(DirectoryPrefix).FullName;
-		return Initialize(directory);
-	}
+		=> Create(System.IO.Path.GetTempPath());
 
-	internal static SecretRedactionTempDirectory Create(string tempRoot)
+	internal static SecretRedactionTempDirectory Create(
+		string tempRoot,
+		Func<Guid>? guidFactory = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(tempRoot);
 		Directory.CreateDirectory(tempRoot);
-		var directory = System.IO.Path.Combine(
-			tempRoot,
-			$"{DirectoryPrefix}{Guid.NewGuid():N}");
-		Directory.CreateDirectory(directory);
-		return Initialize(directory);
+		guidFactory ??= Guid.NewGuid;
+		for (var attempt = 0; attempt < MaximumDirectoryCreationAttempts; attempt++)
+		{
+			var directory = System.IO.Path.Combine(
+				tempRoot,
+				$"{DirectoryPrefix}{guidFactory():N}");
+			if (Directory.Exists(directory))
+				continue;
+			try
+			{
+				Directory.CreateDirectory(directory);
+				return Initialize(directory);
+			}
+			catch (IOException) when (Directory.Exists(directory))
+			{
+				// A concurrent creator won this cryptographically unlikely name collision.
+			}
+		}
+
+		throw new IOException("A unique secret-redaction temporary directory could not be created.");
 	}
 
 	private static SecretRedactionTempDirectory Initialize(string directory)
 	{
+		FileStream? lease = null;
 		try
 		{
 			TryRestrictDirectory(directory);
-			var ownerPath = System.IO.Path.Combine(directory, OwnerFileName);
-			File.WriteAllText(ownerPath, OwnerIdentity, new UTF8Encoding(false, true));
-			TryRestrictFile(ownerPath);
 			var leasePath = System.IO.Path.Combine(directory, LeaseFileName);
-			var lease = new FileStream(
+			lease = new FileStream(
 				leasePath,
 				FileMode.CreateNew,
 				FileAccess.ReadWrite,
@@ -65,11 +78,20 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 				bufferSize: 1,
 				FileOptions.None);
 			TryRestrictFile(leasePath);
-			return new SecretRedactionTempDirectory(directory, lease);
+			var ownerPath = System.IO.Path.Combine(directory, OwnerFileName);
+			File.WriteAllText(ownerPath, OwnerIdentity, new UTF8Encoding(false, true));
+			TryRestrictFile(ownerPath);
+			var ownedLease = lease;
+			lease = null;
+			return new SecretRedactionTempDirectory(directory, ownedLease);
 		}
 		catch
 		{
-			TryDelete(directory);
+			if (lease is not null)
+			{
+				lease.Dispose();
+				TryDelete(directory);
+			}
 			throw;
 		}
 	}
@@ -148,7 +170,7 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 		}
 	}
 
-	private static bool HasExpectedDirectoryName(string directory)
+	internal static bool HasExpectedDirectoryName(string directory)
 	{
 		var name = System.IO.Path.GetFileName(directory);
 		if (!name.StartsWith(DirectoryPrefix, StringComparison.Ordinal))

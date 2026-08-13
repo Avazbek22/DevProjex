@@ -255,7 +255,10 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		CancellationToken cancellationToken)
 	{
 
-		var configuration = _configuration.Value;
+		var configuration = budget.RunRuleInitialization(() => _configuration.Value);
+		foreach (var allowlist in configuration.GlobalAllowlists)
+			budget.RunRuleInitialization(allowlist.EnsureCompiled);
+		budget.Checkpoint(cancellationToken);
 		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
 		if (!ShouldInspectPath(configuration, normalizedPath))
 			return [];
@@ -278,8 +281,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				continue;
 			// Value-shape gates are path-independent necessary conditions. Running them first
 			// avoids constructing a provider rule's lazy path DFA for ordinary keyword noise.
+			budget.RunRuleInitialization(rule.EnsurePathRegexCompiled);
 			if (!rule.AppliesToPath(normalizedPath))
 				continue;
+			budget.RunRuleInitialization(rule.EnsureContentAndAllowlistsCompiled);
+			budget.Checkpoint(cancellationToken);
 			try
 			{
 				var contentRegex = rule.ContentRegex.Value;
@@ -1113,6 +1119,20 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		IReadOnlyList<CompiledAllowlist> Allowlists,
 		int Order)
 	{
+		public void EnsurePathRegexCompiled()
+		{
+			if (PathRegex is { IsValueCreated: false })
+				_ = PathRegex.Value;
+		}
+
+		public void EnsureContentAndAllowlistsCompiled()
+		{
+			if (ContentRegex is { IsValueCreated: false })
+				_ = ContentRegex.Value;
+			foreach (var allowlist in Allowlists)
+				allowlist.EnsureCompiled();
+		}
+
 		public bool AppliesToPath(string path) => PathRegex?.Value.IsMatch(path) ?? true;
 	}
 
@@ -1270,6 +1290,20 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		AllowlistRegexTarget RegexTarget,
 		bool RequireAll)
 	{
+		public void EnsureCompiled()
+		{
+			foreach (var path in Paths)
+			{
+				if (!path.IsValueCreated)
+					_ = path.Value;
+			}
+			foreach (var regex in Regexes)
+			{
+				if (!regex.IsValueCreated)
+					_ = regex.Value;
+			}
+		}
+
 		public void WarmUp(string probe = RegexWarmUpProbe)
 		{
 			foreach (var path in Paths)

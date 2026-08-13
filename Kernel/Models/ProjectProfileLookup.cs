@@ -6,7 +6,8 @@ public enum ProjectProfileLookupStatus
 	Missing = 1,
 	TemporarilyUnavailable = 2,
 	InvalidStorage = 3,
-	InvalidProjectPath = 4
+	InvalidProjectPath = 4,
+	UnsupportedFutureSchema = 5
 }
 
 public sealed record ProjectProfileLookupResult(

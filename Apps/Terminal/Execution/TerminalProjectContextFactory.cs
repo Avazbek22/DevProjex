@@ -14,6 +14,12 @@ public sealed class TerminalProjectContextFactory(
 		CancellationToken cancellationToken = default)
 	{
 		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
+		if (await secretRedactionSession
+			    .EnsurePersistentIdentityReadyAsync(markedSecrets, cancellationToken)
+			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+		{
+			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
+		}
 		if (selection.ProfileSource?.Kind == ProjectProfileSourceKind.Local)
 		{
 			secretRedactionSession.ReplacePersistentMarks(

@@ -24,6 +24,10 @@ public static class SecretInspectionLimits
 	// Provider regexes also have individual timeouts; this outer deadline caps their cumulative
 	// work plus structured and manual matching for one untrusted file.
 	public static readonly TimeSpan MaximumDetectorTimePerFile = TimeSpan.FromSeconds(5);
+	// Regex patterns and the pinned TOML catalog are trusted application data. A separate ceiling
+	// prevents a cold candidate set from inheriting the untrusted file deadline without allowing
+	// initialization failures to occupy a worker indefinitely.
+	public static readonly TimeSpan MaximumRuleInitializationTimePerFile = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>Allocation-free mutable budget owned by one file inspection.</summary>
@@ -34,6 +38,8 @@ public sealed class SecretFileInspectionBudget
 	private readonly CancellationToken _lifetimeToken;
 	private int _findingCount;
 	private long _matcherWorkUnits;
+	private long _excludedInitializationTimestampTicks;
+	private long _ruleInitializationTimestampTicks;
 
 	public SecretFileInspectionBudget()
 		: this(SecretInspectionLimits.MaximumDetectorTimePerFile, CancellationToken.None)
@@ -54,9 +60,43 @@ public sealed class SecretFileInspectionBudget
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		_lifetimeToken.ThrowIfCancellationRequested();
-		if (Stopwatch.GetElapsedTime(_startedTimestamp) > _maximumDuration)
+		var activeTimestampTicks = Math.Max(
+			0,
+			Stopwatch.GetTimestamp() - _startedTimestamp -
+			Volatile.Read(ref _excludedInitializationTimestampTicks));
+		if (Stopwatch.GetElapsedTime(0, activeTimestampTicks) > _maximumDuration)
 			throw SecretInspectionBudgetExceededException.DetectorDeadline();
 	}
+
+	/// <summary>
+	/// Accounts trusted lazy rule initialization separately from untrusted content matching.
+	/// Detector adapters must wrap only configuration or expression construction, never matching.
+	/// </summary>
+	public T RunRuleInitialization<T>(Func<T> initialize)
+	{
+		ArgumentNullException.ThrowIfNull(initialize);
+		var started = Stopwatch.GetTimestamp();
+		try
+		{
+			return initialize();
+		}
+		finally
+		{
+			var elapsed = Math.Max(0, Stopwatch.GetTimestamp() - started);
+			Interlocked.Add(ref _excludedInitializationTimestampTicks, elapsed);
+			var total = Interlocked.Add(ref _ruleInitializationTimestampTicks, elapsed);
+			if (Stopwatch.GetElapsedTime(0, total) > SecretInspectionLimits.MaximumRuleInitializationTimePerFile)
+				throw SecretInspectionBudgetExceededException.RuleInitializationDeadline();
+		}
+	}
+
+	/// <inheritdoc cref="RunRuleInitialization{T}(Func{T})" />
+	public void RunRuleInitialization(Action initialize) =>
+		RunRuleInitialization(() =>
+		{
+			initialize();
+			return true;
+		});
 
 	public void RegisterFinding(CancellationToken cancellationToken)
 	{
@@ -149,6 +189,9 @@ public sealed class SecretInspectionBudgetExceededException(string limitName) :
 
 	internal static SecretInspectionBudgetExceededException DetectorDeadline() =>
 		new(nameof(SecretInspectionLimits.MaximumDetectorTimePerFile));
+
+	internal static SecretInspectionBudgetExceededException RuleInitializationDeadline() =>
+		new(nameof(SecretInspectionLimits.MaximumRuleInitializationTimePerFile));
 
 	internal static SecretInspectionBudgetExceededException MatcherWork() =>
 		new(nameof(SecretInspectionLimits.MaximumPersistentMatcherWorkUnits));

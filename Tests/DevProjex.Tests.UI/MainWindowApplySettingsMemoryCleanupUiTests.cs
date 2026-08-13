@@ -1,4 +1,8 @@
+using System.Collections.Concurrent;
+using System.ComponentModel;
+using Avalonia.Threading;
 using DevProjex.Application.Secrets;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Kernel.Abstractions;
 
@@ -177,6 +181,53 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
         }
     }
 
+	[AvaloniaFact]
+	public async Task SecretDiscovery_FullRefreshCancelsObsoleteGenerationWithoutPublishingFailure()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var analyzer = new FirstSecretScanCancellationAnalyzer();
+		var (window, _) = await CreateMeasuredWindowAsync(
+			project,
+			services => services with
+			{
+				FileContentAnalyzer = analyzer.Attach(services.FileContentAnalyzer)
+			});
+		var notices = new ConcurrentQueue<string>();
+		var viewModel = UiTestDriver.GetViewModel(window);
+		PropertyChangedEventHandler noticeRecorder = (_, args) =>
+		{
+			if (string.Equals(args.PropertyName, nameof(viewModel.SettingsSecretsNotice), StringComparison.Ordinal))
+				notices.Enqueue(viewModel.SettingsSecretsNotice);
+		};
+		viewModel.PropertyChanged += noticeRecorder;
+
+		try
+		{
+			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await analyzer.FirstScanStarted.WaitAsync(
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken);
+
+			await Dispatcher.UIThread.InvokeAsync(
+				() => ((IRefreshTreePipelineHost)window).BeforeFullTreeRefresh());
+			await analyzer.FirstScanCanceled.WaitAsync(
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			Assert.DoesNotContain(
+				notices,
+				static notice => notice.Contains("The analysis could not be completed.", StringComparison.Ordinal));
+		}
+		finally
+		{
+			viewModel.PropertyChanged -= noticeRecorder;
+			analyzer.ReleaseFirstScan();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     private static async Task<(MainWindow Window, SessionMetricsRecorder SessionMetrics)>
         CreateMeasuredWindowAsync(
             UiTestProject project,
@@ -240,11 +291,15 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _firstScanCanceled =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource _releaseFirstScan =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
         private IFileContentAnalyzer? _inner;
         private int _secretScanReads;
 
         public Task FirstScanStarted => _firstScanStarted.Task;
         public Task FirstScanCanceled => _firstScanCanceled.Task;
+
+		public void ReleaseFirstScan() => _releaseFirstScan.TrySetResult();
 
         public IFileContentAnalyzer Attach(IFileContentAnalyzer inner)
         {
@@ -292,7 +347,7 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
                 _firstScanStarted.TrySetResult();
                 try
                 {
-                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+					await _releaseFirstScan.Task.WaitAsync(cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {

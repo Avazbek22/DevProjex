@@ -530,6 +530,12 @@ public sealed class SecretRedactionOutputPreparer
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
+		if (await context.Session
+			    .EnsureCurrentPersistentIdentityReadyAsync(cancellationToken)
+			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+		{
+			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
+		}
 		await context.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		var scope = context.BeginOutput(orderedFilePaths);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
@@ -773,6 +779,12 @@ public sealed class SecretRedactionOutputPreparer
 				.ConfigureAwait(false);
 		}
 
+		if (await redactionContext.Session
+			    .EnsureCurrentPersistentIdentityReadyAsync(cancellationToken)
+			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+		{
+			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
+		}
 		await redactionContext.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
 		var redactionScope = transformationScope.Redaction ??

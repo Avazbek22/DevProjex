@@ -11,7 +11,7 @@ internal sealed class PersistentSecretMarkDb
 
 internal sealed class PersistedProjectSecretMarks
 {
-	public long Revision { get; set; }
+	public long AppliedRevision { get; set; }
 	public List<PersistedSecretMarkState> States { get; set; } = [];
 }
 
@@ -23,4 +23,5 @@ internal sealed class PersistedSecretMarkState
 	public bool Removed { get; set; }
 	public long IssuedUtcTicks { get; set; }
 	public Guid OperationId { get; set; }
+	public long AppliedRevision { get; set; }
 }

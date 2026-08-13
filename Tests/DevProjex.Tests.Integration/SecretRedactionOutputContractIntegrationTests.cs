@@ -954,6 +954,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				})));
 		using (var identityProvider = new PersistentSecretIdentityProvider(() => appDataPath))
 		{
+			Assert.Equal(PersistentSecretIdentityAvailability.Ready, await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
 			Assert.True(PersistentSecretIdentity.TryCreateV2(
 				identityProvider,
 				GithubToken,
@@ -1026,6 +1027,72 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		using var archive = ZipFile.OpenRead(zip.DestinationPath);
 		Assert.DoesNotContain(GithubToken, ReadZipText(archive, "a-kept.cs"), StringComparison.Ordinal);
 		Assert.DoesNotContain(GithubToken, ReadZipText(archive, "b-redacted.cs"), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PendingPersistentMark_StaleStoreRefreshNeverLeaksAcrossOutputSurfaces()
+	{
+		const string manualValue = "ordinary-value-not-recognized-by-detector-77";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("pending-project");
+		var exportRoot = temporary.CreateDirectory("pending-exports");
+		var sourcePath = temporary.CreateFile(
+			"pending-project/src/config.cs",
+			$"const string value = \"{manualValue}\";\n");
+		using var workspace = new Workspace(
+			temporary,
+			sourceRoot,
+			exportRoot,
+			sourcePath,
+			ownsTemporary: false);
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(manualValue, out var normalized, out _));
+		var mark = new MarkedSecretProfileEntry(normalized.Hash, "value", normalized.Length);
+		var store = new StaleSnapshotMarkStore(new PersistentSecretMarksSnapshot(11, []));
+		using var session = new SecretRedactionSession(new NoFindingsDetector(), store);
+		session.ReplacePersistentMarks(sourceRoot, store.Snapshot);
+		var delta = PersistentSecretMarkDelta.Add(mark);
+		Assert.True(session.StagePersistentMarkDelta(sourceRoot, delta));
+		var analyzer = new FileContentAnalyzer();
+		var context = new SecretRedactionContext(sourceRoot, session);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+
+		using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: false,
+			transformationContext: context);
+		var clipboard = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
+		var selectedContent = await new SelectedContentExportService(analyzer).BuildAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			context);
+		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder);
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip);
+
+		Assert.All(
+			new[] { clipboard, selectedContent }.Concat(contextDocuments.Values),
+			output => Assert.DoesNotContain(manualValue, output, StringComparison.Ordinal));
+		Assert.DoesNotContain(
+			manualValue,
+			File.ReadAllText(Path.Combine(folder.DestinationPath, "src", "config.cs")),
+			StringComparison.Ordinal);
+		using var archive = ZipFile.OpenRead(zip.DestinationPath);
+		Assert.DoesNotContain(manualValue, ReadZipText(archive, "src/config.cs"), StringComparison.Ordinal);
+		Assert.True(store.LoadCount >= 4);
+		Assert.Equal(mark, Assert.Single(session.GetMarkedSecrets()));
 	}
 
 	[Fact]
@@ -1166,6 +1233,38 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			string repositoryRelativePath,
 			string content,
 			CancellationToken cancellationToken = default) => [];
+	}
+
+	private sealed class StaleSnapshotMarkStore(PersistentSecretMarksSnapshot snapshot)
+		: IPersistentSecretMarkStore
+	{
+		public PersistentSecretMarksSnapshot Snapshot { get; } = snapshot;
+		public int LoadCount { get; private set; }
+
+		public ValueTask<PersistentSecretMarksLoadResult> LoadMarksAsync(
+			string localProjectPath,
+			CancellationToken cancellationToken = default)
+		{
+			LoadCount++;
+			return ValueTask.FromResult(new PersistentSecretMarksLoadResult(
+				PersistentSecretMarkStoreStatus.Success,
+				Snapshot));
+		}
+
+		public ValueTask<PersistentSecretMarkWriteResult> AddMarkAsync(
+			string localProjectPath,
+			MarkedSecretProfileEntry mark,
+			CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+		public ValueTask<PersistentSecretMarkWriteResult> RemoveMarkAsync(
+			string localProjectPath,
+			PersistentSecretMarkId markId,
+			CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+		public ValueTask<PersistentSecretMarkWriteResult> ApplyMarkDeltaAsync(
+			string localProjectPath,
+			PersistentSecretMarkDelta delta,
+			CancellationToken cancellationToken = default) => throw new NotSupportedException();
 	}
 
 	private sealed class ExactValueDetector(string secret) : ISecretDetector

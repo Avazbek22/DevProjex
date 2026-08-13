@@ -189,6 +189,57 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task FirstPersistentManualSecret_WithContendedKeyLockDoesNotBlockDispatcher()
+	{
+		const string manualValue = "dispatcher-responsive-manual-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "persistent-key-contention");
+		var keyDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(keyDirectory);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		var lockPath = Path.Combine(keyDirectory, "secret-mark-hmac.key.lock");
+		var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+		try
+		{
+			var sourcePath = Path.Combine(project.RootPath, "src", "Secrets.cs");
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+
+			await UiTestDriver.RequestPersistentSecretMarkAsync(window, manualValue);
+			await window.Dispatcher
+				.InvokeAsync(static () => { }, DispatcherPriority.Background)
+				.GetTask()
+				.WaitAsync(TimeSpan.FromSeconds(1));
+			Assert.DoesNotContain(
+				manualValue,
+				UiTestDriver.RedactFileWithCurrentSession(window, sourcePath),
+				StringComparison.Ordinal);
+
+			heldLock.Dispose();
+			var store = new ProjectProfileStore(() => appDataPath);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var loaded = store.LoadMarksAsync(project.RootPath).AsTask().GetAwaiter().GetResult();
+					return loaded.Succeeded && loaded.Snapshot!.Marks.Count == 1;
+				},
+				"the async identity initialization to persist the pending mark");
+		}
+		finally
+		{
+			heldLock.Dispose();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task LockedProfileStore_IsRetriedWithoutTreatingPersistedSelectionsOrMarksAsMissing()
 	{
 		const string manualValue = "locked-profile-manual-secret-42";
@@ -212,6 +263,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				})));
 		using (var identityProvider = new PersistentSecretIdentityProvider(() => appDataPath))
 		{
+			Assert.Equal(PersistentSecretIdentityAvailability.Ready, await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
 			Assert.True(PersistentSecretIdentity.TryCreateV2(
 				identityProvider,
 				manualValue,

@@ -2,8 +2,53 @@ using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Unit;
 
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class SecretRedactionTempDirectoryTestCollection
+{
+	public const string Name = "Secret redaction temporary directory";
+}
+
+[Collection(SecretRedactionTempDirectoryTestCollection.Name)]
 public sealed class SecretRedactionTempDirectoryTests
 {
+	[Fact]
+	public void ProductionCreate_UsesScavengerFormatAndCrashResidueIsRemoved()
+	{
+		var now = DateTime.UtcNow;
+		var abandoned = SecretRedactionTempDirectory.Create();
+		var path = abandoned.Path;
+		try
+		{
+			Assert.True(SecretRedactionTempDirectory.HasExpectedDirectoryName(path));
+			abandoned.AbandonForTest();
+			MakeStale(path, now);
+
+			Assert.True(SecretRedactionTempDirectory.Scavenge(Path.GetTempPath(), now) >= 1);
+			Assert.False(Directory.Exists(path));
+		}
+		finally
+		{
+			abandoned.Dispose();
+		}
+	}
+
+	[Fact]
+	public void Create_RetriesWhenGeneratedDirectoryNameAlreadyExists()
+	{
+		using var root = new TemporaryDirectory();
+		var collision = Guid.ParseExact("11111111111111111111111111111111", "N");
+		var available = Guid.ParseExact("22222222222222222222222222222222", "N");
+		Directory.CreateDirectory(Path.Combine(
+			root.Path,
+			$"{SecretRedactionTempDirectory.DirectoryPrefix}{collision:N}"));
+		var generated = new Queue<Guid>([collision, available]);
+
+		using var created = SecretRedactionTempDirectory.Create(root.Path, generated.Dequeue);
+
+		Assert.EndsWith(available.ToString("N"), created.Path, StringComparison.Ordinal);
+		Assert.True(SecretRedactionTempDirectory.HasExpectedDirectoryName(created.Path));
+	}
+
 	[Fact]
 	public void Scavenger_RemovesOnlyStaleUnleasedOwnedDirectory()
 	{

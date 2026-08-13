@@ -7,7 +7,7 @@ internal sealed class PersistentSecretMarkStore(
 	Func<string> appDataPathProvider,
 	TimeSpan? lockTimeout = null)
 {
-	private const int CurrentSchemaVersion = 1;
+	private const int CurrentSchemaVersion = 2;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-secret-marks.json";
 	// GUI callers run off-thread and retry with backoff. A short attempt avoids tying up a worker
@@ -40,7 +40,11 @@ internal sealed class PersistentSecretMarkStore(
 	{
 		ArgumentNullException.ThrowIfNull(mark);
 		return RunOffCallerThreadAsync(
-			() => ApplyDelta(localProjectPath, PersistentSecretMarkDelta.Add(mark), _lockTimeout),
+			() => ApplyDelta(
+				localProjectPath,
+				PersistentSecretMarkDelta.Add(mark, observedRevision: 0),
+				_lockTimeout,
+				bindToCurrentRevision: true),
 			cancellationToken);
 	}
 
@@ -50,7 +54,11 @@ internal sealed class PersistentSecretMarkStore(
 		CancellationToken cancellationToken)
 	{
 		return RunOffCallerThreadAsync(
-			() => ApplyDelta(localProjectPath, PersistentSecretMarkDelta.Remove(markId), _lockTimeout),
+			() => ApplyDelta(
+				localProjectPath,
+				PersistentSecretMarkDelta.Remove(markId, observedRevision: 0),
+				_lockTimeout,
+				bindToCurrentRevision: true),
 			cancellationToken);
 	}
 
@@ -61,7 +69,7 @@ internal sealed class PersistentSecretMarkStore(
 	{
 		ArgumentNullException.ThrowIfNull(delta);
 		return RunOffCallerThreadAsync(
-			() => ApplyDelta(localProjectPath, delta, _lockTimeout),
+			() => ApplyDelta(localProjectPath, delta, _lockTimeout, bindToCurrentRevision: false),
 			cancellationToken);
 	}
 
@@ -119,18 +127,15 @@ internal sealed class PersistentSecretMarkStore(
 			{
 				if (project.States.Any(existing => HasIdentity(existing, mark.H, mark.Length)))
 					continue;
-				var delta = PersistentSecretMarkDelta.Add(mark);
+				var delta = PersistentSecretMarkDelta.Add(mark, project.AppliedRevision);
 				var deltaApplied = ApplyDelta(project, delta, out var limitExceeded);
 				if (limitExceeded)
 					return new PersistentSecretMarksLoadResult(PersistentSecretMarkStoreStatus.WriteFailed, null);
 				changed |= deltaApplied;
 			}
 
-			if (changed)
-			{
-				if (!TryAdvanceRevision(project) || !TrySave(fileSet, database))
-					return new PersistentSecretMarksLoadResult(PersistentSecretMarkStoreStatus.WriteFailed, null);
-			}
+			if (changed && !TrySave(fileSet, database))
+				return new PersistentSecretMarksLoadResult(PersistentSecretMarkStoreStatus.WriteFailed, null);
 
 			return new PersistentSecretMarksLoadResult(
 				PersistentSecretMarkStoreStatus.Success,
@@ -169,6 +174,8 @@ internal sealed class PersistentSecretMarkStore(
 				if (!CrossProcessFileLock.TryAcquire(fileSet, _lockTimeout, out var heldLock))
 					return;
 				using var _ = heldLock;
+				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+					return;
 				File.Delete(fileSet.PrimaryPath);
 				File.Delete(fileSet.BackupPath);
 			}
@@ -182,7 +189,8 @@ internal sealed class PersistentSecretMarkStore(
 	private PersistentSecretMarkWriteResult ApplyDelta(
 		string localProjectPath,
 		PersistentSecretMarkDelta delta,
-		TimeSpan timeout)
+		TimeSpan timeout,
+		bool bindToCurrentRevision)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 			return new PersistentSecretMarkWriteResult(PersistentSecretMarkStoreStatus.InvalidProjectPath, null);
@@ -207,10 +215,12 @@ internal sealed class PersistentSecretMarkStore(
 				return new PersistentSecretMarkWriteResult(PersistentSecretMarkStoreStatus.WriteFailed, null);
 			}
 			var project = GetOrCreateProject(database, normalizedPath);
+			if (bindToCurrentRevision)
+				delta = delta with { ObservedRevision = project.AppliedRevision };
 			var changed = ApplyDelta(project, delta, out var limitExceeded);
 			if (limitExceeded)
 				return new PersistentSecretMarkWriteResult(PersistentSecretMarkStoreStatus.WriteFailed, null);
-			if (changed && (!TryAdvanceRevision(project) || !TrySave(fileSet, database)))
+			if (changed && !TrySave(fileSet, database))
 				return new PersistentSecretMarkWriteResult(PersistentSecretMarkStoreStatus.WriteFailed, null);
 
 			return new PersistentSecretMarkWriteResult(
@@ -227,6 +237,8 @@ internal sealed class PersistentSecretMarkStore(
 		limitExceeded = false;
 		if (delta.OperationId == Guid.Empty ||
 		    delta.IssuedUtcTicks <= 0 ||
+		    delta.ObservedRevision < 0 ||
+		    delta.ObservedRevision > project.AppliedRevision ||
 		    delta.Kind is not (PersistentSecretMarkDeltaKind.Add or
 			    PersistentSecretMarkDeltaKind.Remove or
 			    PersistentSecretMarkDeltaKind.Replace))
@@ -248,13 +260,15 @@ internal sealed class PersistentSecretMarkStore(
 		{
 			return false;
 		}
+		if (project.States.Any(state => state.OperationId == delta.OperationId))
+			return false;
 
 		if (delta.Kind == PersistentSecretMarkDeltaKind.Replace)
 			return ApplyReplacement(project, delta, normalizedMark!, out limitExceeded);
 
 		var state = project.States.FirstOrDefault(existing =>
 			HasIdentity(existing, delta.MarkId.Hash, delta.MarkId.Length));
-		if (state is not null && CompareOrder(state, delta) >= 0)
+		if (state is not null && delta.ObservedRevision < state.AppliedRevision)
 			return false;
 		if (state is null &&
 		    project.States.Count >= ProjectProfileStorageLimits.MaximumPersistentMarkStatesPerProject)
@@ -276,6 +290,11 @@ internal sealed class PersistentSecretMarkStore(
 			state = new PersistedSecretMarkState();
 			project.States.Add(state);
 		}
+		if (!TryGetNextAppliedRevision(project, out var appliedRevision))
+		{
+			limitExceeded = true;
+			return false;
+		}
 
 		state.Hash = delta.MarkId.Hash.ToLowerInvariant();
 		state.Length = delta.MarkId.Length;
@@ -285,6 +304,8 @@ internal sealed class PersistentSecretMarkStore(
 		state.Removed = delta.Kind == PersistentSecretMarkDeltaKind.Remove;
 		state.IssuedUtcTicks = delta.IssuedUtcTicks;
 		state.OperationId = delta.OperationId;
+		state.AppliedRevision = appliedRevision;
+		project.AppliedRevision = appliedRevision;
 		return true;
 	}
 
@@ -299,13 +320,20 @@ internal sealed class PersistentSecretMarkStore(
 			return false;
 		var source = project.States.FirstOrDefault(existing =>
 			HasIdentity(existing, delta.MarkId.Hash, delta.MarkId.Length));
-		if (source is null || source.Removed || CompareOrder(source, delta) >= 0)
+		if (source is null || source.Removed || delta.ObservedRevision < source.AppliedRevision)
 			return false;
 
 		var target = project.States.FirstOrDefault(existing =>
 			HasIdentity(existing, replacement.H, replacement.Length));
+		if (target is not null && delta.ObservedRevision < target.AppliedRevision)
+			return false;
 		if (target is null &&
 		    project.States.Count >= ProjectProfileStorageLimits.MaximumPersistentMarkStatesPerProject)
+		{
+			limitExceeded = true;
+			return false;
+		}
+		if (!TryGetNextAppliedRevision(project, out var appliedRevision))
 		{
 			limitExceeded = true;
 			return false;
@@ -315,8 +343,7 @@ internal sealed class PersistentSecretMarkStore(
 		source.Key = null;
 		source.IssuedUtcTicks = delta.IssuedUtcTicks;
 		source.OperationId = delta.OperationId;
-		if (target is not null && CompareOrder(target, delta) >= 0)
-			return true;
+		source.AppliedRevision = appliedRevision;
 		if (target is null)
 		{
 			target = new PersistedSecretMarkState();
@@ -328,28 +355,35 @@ internal sealed class PersistentSecretMarkStore(
 		target.Removed = false;
 		target.IssuedUtcTicks = delta.IssuedUtcTicks;
 		target.OperationId = delta.OperationId;
+		target.AppliedRevision = appliedRevision;
+		project.AppliedRevision = appliedRevision;
 		return true;
 	}
 
-	private static int CompareOrder(PersistedSecretMarkState state, PersistentSecretMarkDelta delta)
+	private static bool TryGetNextAppliedRevision(
+		PersistedProjectSecretMarks project,
+		out long appliedRevision)
 	{
-		var tickOrder = state.IssuedUtcTicks.CompareTo(delta.IssuedUtcTicks);
-		return tickOrder != 0 ? tickOrder : state.OperationId.CompareTo(delta.OperationId);
-	}
-
-	private static bool TryAdvanceRevision(PersistedProjectSecretMarks project)
-	{
-		if (project.Revision == long.MaxValue)
+		if (project.AppliedRevision == long.MaxValue)
+		{
+			appliedRevision = 0;
 			return false;
-		project.Revision++;
+		}
+		appliedRevision = project.AppliedRevision + 1;
 		return true;
 	}
 
 	private StoreLoadResult LoadDatabase(JsonStoreFileSet fileSet)
 	{
-		if (TryLoadFromPath(fileSet.PrimaryPath, out var primary))
+		if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.UnsupportedFutureSchema);
+		if (TryLoadFromPath(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite))
+		{
+			if (primaryRequiresRewrite && !TrySave(fileSet, primary))
+				return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.WriteFailed);
 			return StoreLoadResult.Success(primary);
-		if (TryLoadFromPath(fileSet.BackupPath, out var backup))
+		}
+		if (TryLoadFromPath(fileSet.BackupPath, out var backup, out _))
 		{
 			if (!TrySave(fileSet, backup))
 				return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.WriteFailed);
@@ -361,9 +395,13 @@ internal sealed class PersistentSecretMarkStore(
 		return StoreLoadResult.Success(CreateDefaultDatabase());
 	}
 
-	private static bool TryLoadFromPath(string path, out PersistentSecretMarkDb database)
+	private static bool TryLoadFromPath(
+		string path,
+		out PersistentSecretMarkDb database,
+		out bool requiresRewrite)
 	{
 		database = CreateDefaultDatabase();
+		requiresRewrite = false;
 		if (!File.Exists(path))
 			return false;
 		try
@@ -378,7 +416,7 @@ internal sealed class PersistentSecretMarkStore(
 			using var document = JsonDocument.Parse(
 				stream,
 				new JsonDocumentOptions { MaxDepth = 64 });
-			return TryParseDatabase(document.RootElement, out database);
+			return TryParseDatabase(document.RootElement, out database, out requiresRewrite);
 		}
 		catch
 		{
@@ -386,9 +424,13 @@ internal sealed class PersistentSecretMarkStore(
 		}
 	}
 
-	private static bool TryParseDatabase(JsonElement root, out PersistentSecretMarkDb database)
+	private static bool TryParseDatabase(
+		JsonElement root,
+		out PersistentSecretMarkDb database,
+		out bool requiresRewrite)
 	{
 		database = CreateDefaultDatabase();
+		requiresRewrite = false;
 		if (root.ValueKind != JsonValueKind.Object)
 			return false;
 		var schemaVersion = root.TryGetProperty("schemaVersion", out var schemaElement) &&
@@ -397,6 +439,7 @@ internal sealed class PersistentSecretMarkStore(
 			: 0;
 		if (schemaVersion > CurrentSchemaVersion)
 			return false;
+		requiresRewrite = schemaVersion < CurrentSchemaVersion;
 		if (!root.TryGetProperty("projects", out var projectsElement))
 			return true;
 		if (projectsElement.ValueKind != JsonValueKind.Object)
@@ -413,7 +456,11 @@ internal sealed class PersistentSecretMarkStore(
 				parsed.InvalidProjects.Add(normalizedPath);
 				continue;
 			}
-			if (!TryParseProject(property.Value, out var project, out var exceededLimits))
+			if (!TryParseProject(
+				    property.Value,
+				    schemaVersion,
+				    out var project,
+				    out var exceededLimits))
 			{
 				parsed.InvalidProjects.Add(normalizedPath);
 				continue;
@@ -423,12 +470,13 @@ internal sealed class PersistentSecretMarkStore(
 			parsed.Projects[normalizedPath] = project;
 		}
 
-		database = Normalize(parsed);
+		database = Normalize(parsed, migrateLegacyOrdering: schemaVersion < CurrentSchemaVersion);
 		return true;
 	}
 
 	private static bool TryParseProject(
 		JsonElement element,
+		int schemaVersion,
 		out PersistedProjectSecretMarks project,
 		out bool exceededLimits)
 	{
@@ -436,10 +484,13 @@ internal sealed class PersistentSecretMarkStore(
 		exceededLimits = false;
 		if (element.ValueKind != JsonValueKind.Object)
 			return false;
-		if (element.TryGetProperty("revision", out var revisionElement) &&
+		var revisionProperty = schemaVersion < CurrentSchemaVersion
+			? "revision"
+			: "appliedRevision";
+		if (element.TryGetProperty(revisionProperty, out var revisionElement) &&
 		    revisionElement.TryGetInt64(out var revision))
 		{
-			project.Revision = Math.Max(0, revision);
+			project.AppliedRevision = Math.Max(0, revision);
 		}
 		if (!element.TryGetProperty("states", out var statesElement))
 			return true;
@@ -469,7 +520,9 @@ internal sealed class PersistentSecretMarkStore(
 		return true;
 	}
 
-	private static PersistentSecretMarkDb Normalize(PersistentSecretMarkDb database)
+	private static PersistentSecretMarkDb Normalize(
+		PersistentSecretMarkDb database,
+		bool migrateLegacyOrdering)
 	{
 		database.SchemaVersion = CurrentSchemaVersion;
 		database.Projects ??= new Dictionary<string, PersistedProjectSecretMarks>(PathComparer.Default);
@@ -478,10 +531,10 @@ internal sealed class PersistentSecretMarkStore(
 		{
 			if (!TryNormalizePath(path, out var normalizedPath) || value is null)
 				continue;
-			value.Revision = Math.Max(0, value.Revision);
+			value.AppliedRevision = Math.Max(0, value.AppliedRevision);
 			value.States ??= [];
-			value.States = value.States
-				.Where(static state => state is not null && IsValidState(state))
+			var normalizedStates = value.States
+				.Where(state => state is not null && IsValidState(state, migrateLegacyOrdering))
 				.Select(static state =>
 				{
 					state.Hash = state.Hash.ToLowerInvariant();
@@ -490,10 +543,33 @@ internal sealed class PersistentSecretMarkStore(
 				})
 				.GroupBy(
 					static state => new PersistentSecretMarkId(state.Hash.ToLowerInvariant(), state.Length))
-				.Select(static group => group
-					.OrderByDescending(static state => state.IssuedUtcTicks)
-					.ThenByDescending(static state => state.OperationId)
-					.First())
+				.Select(group => migrateLegacyOrdering
+					? group
+						.OrderByDescending(static state => state.IssuedUtcTicks)
+						.ThenByDescending(static state => state.OperationId)
+						.First()
+					: group
+						.OrderByDescending(static state => state.AppliedRevision)
+						.ThenByDescending(static state => state.OperationId)
+						.First())
+				.ToList();
+			if (migrateLegacyOrdering)
+			{
+				long appliedRevision = 0;
+				foreach (var state in normalizedStates
+				         .OrderBy(static state => state.IssuedUtcTicks)
+				         .ThenBy(static state => state.OperationId))
+				{
+					state.AppliedRevision = ++appliedRevision;
+				}
+				value.AppliedRevision = Math.Max(value.AppliedRevision, appliedRevision);
+			}
+			else if (normalizedStates.Any(state =>
+			         state.AppliedRevision <= 0 || state.AppliedRevision > value.AppliedRevision))
+			{
+				database.InvalidProjects.Add(normalizedPath);
+			}
+			value.States = normalizedStates
 				.OrderBy(static state => state.Hash, StringComparer.Ordinal)
 				.ThenBy(static state => state.Length)
 				.Take(ProjectProfileStorageLimits.MaximumPersistentMarkStatesPerProject)
@@ -549,10 +625,11 @@ internal sealed class PersistentSecretMarkStore(
 		PersistentSecretIdentity.IsSupported(hash) &&
 		length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength;
 
-	private static bool IsValidState(PersistedSecretMarkState state) =>
+	private static bool IsValidState(PersistedSecretMarkState state, bool migrateLegacyOrdering) =>
 		IsValidIdentity(state.Hash, state.Length) &&
 		state.IssuedUtcTicks > 0 &&
-		state.OperationId != Guid.Empty;
+		state.OperationId != Guid.Empty &&
+		(migrateLegacyOrdering || state.AppliedRevision > 0);
 
 	private static PersistedProjectSecretMarks GetOrCreateProject(
 		PersistentSecretMarkDb database,
@@ -575,7 +652,7 @@ internal sealed class PersistentSecretMarkStore(
 			.Where(static state => !state.Removed)
 			.Select(static state => new MarkedSecretProfileEntry(state.Hash, state.Key, state.Length))
 			.ToArray();
-		return new PersistentSecretMarksSnapshot(project.Revision, marks);
+		return new PersistentSecretMarksSnapshot(project.AppliedRevision, marks);
 	}
 
 	private static PersistentSecretMarkDb CreateDefaultDatabase() => new()

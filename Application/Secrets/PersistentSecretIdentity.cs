@@ -7,7 +7,24 @@ public interface IPersistentSecretIdentityProvider
 {
 	bool IsAvailable { get; }
 
+	ValueTask<PersistentSecretIdentityAvailability> EnsureAvailableAsync(
+		CancellationToken cancellationToken = default)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		return ValueTask.FromResult(
+			IsAvailable
+				? PersistentSecretIdentityAvailability.Ready
+				: PersistentSecretIdentityAvailability.PermanentlyUnavailable);
+	}
+
 	bool TryComputeDigest(ReadOnlySpan<char> normalizedValue, Span<byte> destination);
+}
+
+public enum PersistentSecretIdentityAvailability
+{
+	Ready = 0,
+	TemporarilyUnavailable = 1,
+	PermanentlyUnavailable = 2
 }
 
 public static class PersistentSecretIdentity

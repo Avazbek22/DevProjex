@@ -4,8 +4,23 @@ using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Tests.Unit;
 
+[Collection(SecretRedactionTempDirectoryTestCollection.Name)]
 public sealed class SecretInspectionBudgetTests
 {
+	[Fact]
+	public void TrustedRuleInitialization_DoesNotConsumeUntrustedMatchingDeadline()
+	{
+		var budget = new SecretFileInspectionBudget(TimeSpan.FromMilliseconds(25));
+
+		budget.RunRuleInitialization(static () => Thread.Sleep(50));
+		budget.Checkpoint(TestContext.Current.CancellationToken);
+		Thread.Sleep(40);
+
+		var exception = Assert.Throws<SecretInspectionBudgetExceededException>(() =>
+			budget.Checkpoint(TestContext.Current.CancellationToken));
+		Assert.Equal(nameof(SecretInspectionLimits.MaximumDetectorTimePerFile), exception.LimitName);
+	}
+
 	[Fact]
 	public void StructuredDetector_StopsBeforePublishingMoreThanPerFileLimit()
 	{

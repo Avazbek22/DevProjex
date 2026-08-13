@@ -173,31 +173,55 @@ public sealed class PersistentSecretIdentityTests
 	}
 
 	[Fact]
-	public void InstallationKey_IsReusedAndCorruptionIsFailSafe()
+	public async Task InstallationKey_IsReusedAndPrimaryCorruptionRecoversFromBackup()
 	{
 		using var workspace = new TemporaryDirectory();
 		var appData = workspace.CreateFolder("app-data");
 		string first;
 		using (var provider = new PersistentSecretIdentityProvider(() => appData))
 		{
-			Assert.True(provider.IsAvailable);
+			Assert.Equal(PersistentSecretIdentityAvailability.Ready, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
 			Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out first));
 		}
 		using (var provider = new PersistentSecretIdentityProvider(() => appData))
 		{
+			Assert.Equal(PersistentSecretIdentityAvailability.Ready, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
 			Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out var second));
 			Assert.Equal(first, second);
 		}
 
 		var keyPath = Path.Combine(appData, "DevProjex", "secret-mark-hmac.key");
 		File.WriteAllBytes(keyPath, [1, 2, 3]);
-		using var corrupted = new PersistentSecretIdentityProvider(() => appData);
-		Assert.False(corrupted.IsAvailable);
-		Assert.False(PersistentSecretIdentity.TryCreateV2(corrupted, Secret, out _));
+		using var recovered = new PersistentSecretIdentityProvider(() => appData);
+		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await recovered.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.True(PersistentSecretIdentity.TryCreateV2(recovered, Secret, out var afterRecovery));
+		Assert.Equal(first, afterRecovery);
 	}
 
 	[Fact]
-	public void Provider_DoesNotTouchStorageUntilAnIdentityIsRequired()
+	public async Task BothInstallationKeyCopiesCorrupt_FailsClosedWithoutGeneratingAReplacement()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		using (var provider = new PersistentSecretIdentityProvider(() => appData))
+			Assert.Equal(PersistentSecretIdentityAvailability.Ready, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		var keyPath = Path.Combine(appData, "DevProjex", "secret-mark-hmac.key");
+		var backupPath = keyPath + ".bak";
+		File.WriteAllBytes(keyPath, [1, 2, 3]);
+		File.WriteAllBytes(backupPath, [4, 5, 6]);
+		var primaryBefore = File.ReadAllBytes(keyPath);
+		var backupBefore = File.ReadAllBytes(backupPath);
+
+		using var corrupted = new PersistentSecretIdentityProvider(() => appData);
+		Assert.Equal(PersistentSecretIdentityAvailability.PermanentlyUnavailable, await corrupted.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(PersistentSecretIdentityProviderState.PermanentFault, corrupted.State);
+		Assert.False(PersistentSecretIdentity.TryCreateV2(corrupted, Secret, out _));
+		Assert.Equal(primaryBefore, File.ReadAllBytes(keyPath));
+		Assert.Equal(backupBefore, File.ReadAllBytes(backupPath));
+	}
+
+	[Fact]
+	public async Task Provider_DoesNotTouchStorageUntilAnIdentityIsRequired()
 	{
 		using var workspace = new TemporaryDirectory();
 		var appData = Path.Combine(workspace.Path, "app-data");
@@ -207,12 +231,13 @@ public sealed class PersistentSecretIdentityTests
 
 		Assert.False(File.Exists(keyPath));
 		Assert.False(File.Exists(keyPath + ".lock"));
+		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
 		Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out _));
 		Assert.True(File.Exists(keyPath));
 	}
 
 	[Fact]
-	public void UnixInstallationKey_WithSharedPermissionsIsRejected()
+	public async Task UnixInstallationKey_WithSharedPermissionsIsRejected()
 	{
 		if (OperatingSystem.IsWindows())
 			return;
@@ -220,7 +245,7 @@ public sealed class PersistentSecretIdentityTests
 		using var workspace = new TemporaryDirectory();
 		var appData = workspace.CreateFolder("app-data");
 		using (var provider = new PersistentSecretIdentityProvider(() => appData))
-			Assert.True(provider.IsAvailable);
+			Assert.Equal(PersistentSecretIdentityAvailability.Ready, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
 		var keyPath = Path.Combine(appData, "DevProjex", "secret-mark-hmac.key");
 		File.SetUnixFileMode(
 			keyPath,
@@ -228,7 +253,100 @@ public sealed class PersistentSecretIdentityTests
 
 		using var reopened = new PersistentSecretIdentityProvider(() => appData);
 
-		Assert.False(reopened.IsAvailable);
+		Assert.Equal(PersistentSecretIdentityAvailability.PermanentlyUnavailable, await reopened.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(PersistentSecretIdentityProviderState.PermanentFault, reopened.State);
+	}
+
+	[Fact]
+	public async Task TransientLockFailure_RetriesAndReadyStateIsCached()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		var directory = workspace.CreateFolder("app-data/DevProjex");
+		var lockPath = Path.Combine(directory, "secret-mark-hmac.key.lock");
+		using var provider = new PersistentSecretIdentityProvider(
+			() => appData,
+			TimeSpan.FromMilliseconds(30),
+			TimeSpan.Zero);
+
+		using (new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+		{
+			Assert.Equal(PersistentSecretIdentityAvailability.TemporarilyUnavailable, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+			Assert.Equal(PersistentSecretIdentityProviderState.TransientFault, provider.State);
+		}
+		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(PersistentSecretIdentityProviderState.Ready, provider.State);
+		Assert.Equal(2, provider.InitializationAttemptCount);
+		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(2, provider.InitializationAttemptCount);
+	}
+
+	[Fact]
+	public async Task ConcurrentFirstUse_PerformsOneInitialization()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		using var provider = new PersistentSecretIdentityProvider(
+			() => appData,
+			TimeSpan.FromSeconds(1),
+			TimeSpan.Zero);
+
+		var callers = Enumerable.Range(0, 16)
+			.Select(_ => provider.EnsureAvailableAsync(TestContext.Current.CancellationToken).AsTask())
+			.ToArray();
+		var results = await Task.WhenAll(callers);
+
+		Assert.All(results, static result => Assert.Equal(PersistentSecretIdentityAvailability.Ready, result));
+		Assert.Equal(1, provider.InitializationAttemptCount);
+	}
+
+	[Fact]
+	public async Task DisposeDuringInitialization_DoesNotPublishOrRetainTheKey()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		var directory = workspace.CreateFolder("app-data/DevProjex");
+		var lockPath = Path.Combine(directory, "secret-mark-hmac.key.lock");
+		using var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+		var provider = new PersistentSecretIdentityProvider(
+			() => appData,
+			TimeSpan.FromMilliseconds(100),
+			TimeSpan.Zero);
+
+		var initialization = provider.EnsureAvailableAsync(TestContext.Current.CancellationToken).AsTask();
+		Assert.True(SpinWait.SpinUntil(
+			() => provider.State == PersistentSecretIdentityProviderState.Initializing,
+			TimeSpan.FromSeconds(1)));
+		provider.Dispose();
+
+		Assert.Equal(PersistentSecretIdentityAvailability.PermanentlyUnavailable, await initialization);
+		Assert.Equal(PersistentSecretIdentityProviderState.Disposed, provider.State);
+		Assert.Throws<ObjectDisposedException>(() =>
+			provider.TryComputeDigest(Secret, new byte[PersistentSecretIdentity.V2DigestByteLength]));
+	}
+
+	[Fact]
+	public async Task UnixRawKey_IsMigratedOnceToValidatedEnvelopeAndBackup()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		var directory = workspace.CreateFolder("app-data/DevProjex");
+		var keyPath = Path.Combine(directory, "secret-mark-hmac.key");
+		File.WriteAllBytes(keyPath, Enumerable.Range(1, 32).Select(static value => (byte)value).ToArray());
+		File.SetUnixFileMode(keyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+		using var provider = new PersistentSecretIdentityProvider(() => appData);
+		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		var migrated = File.ReadAllBytes(keyPath);
+		var backup = File.ReadAllBytes(keyPath + ".bak");
+
+		Assert.True(migrated.Length > 32);
+		Assert.Equal(migrated, backup);
+		using var reopened = new PersistentSecretIdentityProvider(() => appData);
+		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await reopened.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(1, reopened.InitializationAttemptCount);
 	}
 
 	private sealed class EmptyDetector : ISecretDetector

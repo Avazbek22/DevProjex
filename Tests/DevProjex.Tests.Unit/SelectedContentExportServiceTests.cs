@@ -294,10 +294,14 @@ public sealed class SelectedContentExportServiceTests
 			TestContext.Current.CancellationToken);
 		session.ReplacePersistentMarks(projectRoot, initiallyLoaded.Snapshot!);
 		Assert.True(MarkedSecretValueNormalizer.TryCreate(secret, out var value, out _));
-		Assert.True(session.TryCreatePersistentMarkedSecret(value, "TOKEN", out var mark));
+		var mark = await session.CreatePersistentMarkedSecretAsync(
+			value,
+			"TOKEN",
+			TestContext.Current.CancellationToken);
+		Assert.NotNull(mark);
 		Assert.True((await secondStore.AddMarkAsync(
 			projectRoot,
-			mark,
+			mark!,
 			TestContext.Current.CancellationToken)).Succeeded);
 
 		var output = await new SelectedContentExportService(new FileContentAnalyzer()).BuildAsync(

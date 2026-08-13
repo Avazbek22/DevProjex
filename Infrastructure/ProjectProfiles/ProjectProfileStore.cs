@@ -35,6 +35,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
+			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+				return false;
 			return EnsureStorageExistsCore(fileSet);
 		}
 	}
@@ -90,6 +92,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
+			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+				return false;
 			var db = LoadInternal(fileSet);
 			db.SchemaVersion = CurrentSchemaVersion;
 
@@ -119,6 +123,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				if (CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
 				{
 					using var _ = heldLock;
+					if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+						return;
 					if (File.Exists(fileSet.PrimaryPath))
 						File.Delete(fileSet.PrimaryPath);
 					if (File.Exists(fileSet.BackupPath))
@@ -158,6 +164,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			}
 
 			using var _ = heldLock;
+			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			{
+				return new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.UnsupportedFutureSchema,
+					null);
+			}
 			if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 			{
 				if (primaryRequiresRewrite)
@@ -194,6 +206,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
+			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+				return false;
 			var db = LoadInternal(fileSet);
 			selectionDeleted = !db.Profiles.Remove(normalizedPath) || TrySaveInternal(fileSet, db);
 		}
@@ -246,6 +260,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				ProjectProfileLookupStatus.TemporarilyUnavailable,
 			PersistentSecretMarkStoreStatus.InvalidProjectPath =>
 				ProjectProfileLookupStatus.InvalidProjectPath,
+			PersistentSecretMarkStoreStatus.UnsupportedFutureSchema =>
+				ProjectProfileLookupStatus.UnsupportedFutureSchema,
 			_ => ProjectProfileLookupStatus.InvalidStorage
 		};
 

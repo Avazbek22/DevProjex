@@ -484,18 +484,25 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 
 			var markA = new MarkedSecretProfileEntry("001122334455", "A", 12);
 			var markB = new MarkedSecretProfileEntry("66778899aabb", "B", 16);
-			var staleAddA = PersistentSecretMarkDelta.Add(markA);
-			Assert.True((await coordinatorA.ApplyMarkDeltaAsync(
+			var staleAddA = PersistentSecretMarkDelta.Add(
+				markA,
+				sessionA.PersistentMarksStoreRevision);
+			var addedA = await coordinatorA.ApplyMarkDeltaAsync(
 				projectPath,
 				staleAddA,
-				TestContext.Current.CancellationToken)).Succeeded);
+				TestContext.Current.CancellationToken);
+			Assert.True(addedA.Succeeded);
 			Assert.True((await coordinatorB.ApplyMarkDeltaAsync(
 				projectPath,
-				PersistentSecretMarkDelta.Add(markB),
+				PersistentSecretMarkDelta.Add(
+					markB,
+					sessionB.PersistentMarksStoreRevision),
 				TestContext.Current.CancellationToken)).Succeeded);
 			Assert.True((await coordinatorA.ApplyMarkDeltaAsync(
 				projectPath,
-				PersistentSecretMarkDelta.Remove(new PersistentSecretMarkId(markA.H, markA.Length)),
+				PersistentSecretMarkDelta.Remove(
+					new PersistentSecretMarkId(markA.H, markA.Length),
+					addedA.Snapshot!.Revision),
 				TestContext.Current.CancellationToken)).Succeeded);
 
 			await coordinatorB.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);

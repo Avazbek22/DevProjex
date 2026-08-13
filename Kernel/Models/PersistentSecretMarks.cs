@@ -6,7 +6,8 @@ public enum PersistentSecretMarkStoreStatus
 	TemporarilyUnavailable = 1,
 	InvalidStorage = 2,
 	InvalidProjectPath = 3,
-	WriteFailed = 4
+	WriteFailed = 4,
+	UnsupportedFutureSchema = 5
 }
 
 public readonly record struct PersistentSecretMarkId(string Hash, int Length);
@@ -21,38 +22,51 @@ public enum PersistentSecretMarkDeltaKind
 public sealed record PersistentSecretMarkDelta(
 	Guid OperationId,
 	long IssuedUtcTicks,
+	long ObservedRevision,
 	PersistentSecretMarkDeltaKind Kind,
 	PersistentSecretMarkId MarkId,
 	MarkedSecretProfileEntry? Mark)
 {
 	private static long _lastIssuedUtcTicks = DateTime.UtcNow.Ticks;
 
-	public static PersistentSecretMarkDelta Add(MarkedSecretProfileEntry mark)
+	public static PersistentSecretMarkDelta Add(MarkedSecretProfileEntry mark) => Add(mark, 0);
+
+	public static PersistentSecretMarkDelta Add(MarkedSecretProfileEntry mark, long observedRevision)
 	{
 		ArgumentNullException.ThrowIfNull(mark);
 		return new PersistentSecretMarkDelta(
 			Guid.NewGuid(),
 			NextIssuedUtcTicks(),
+			observedRevision,
 			PersistentSecretMarkDeltaKind.Add,
 			new PersistentSecretMarkId(mark.H, mark.Length),
 			mark);
 	}
 
-	public static PersistentSecretMarkDelta Remove(PersistentSecretMarkId markId) => new(
+	public static PersistentSecretMarkDelta Remove(PersistentSecretMarkId markId) => Remove(markId, 0);
+
+	public static PersistentSecretMarkDelta Remove(PersistentSecretMarkId markId, long observedRevision) => new(
 		Guid.NewGuid(),
 		NextIssuedUtcTicks(),
+		observedRevision,
 		PersistentSecretMarkDeltaKind.Remove,
 		markId,
 		null);
 
 	public static PersistentSecretMarkDelta Replace(
 		PersistentSecretMarkId existingMarkId,
-		MarkedSecretProfileEntry replacement)
+		MarkedSecretProfileEntry replacement) => Replace(existingMarkId, replacement, 0);
+
+	public static PersistentSecretMarkDelta Replace(
+		PersistentSecretMarkId existingMarkId,
+		MarkedSecretProfileEntry replacement,
+		long observedRevision)
 	{
 		ArgumentNullException.ThrowIfNull(replacement);
 		return new PersistentSecretMarkDelta(
 			Guid.NewGuid(),
 			NextIssuedUtcTicks(),
+			observedRevision,
 			PersistentSecretMarkDeltaKind.Replace,
 			existingMarkId,
 			replacement);

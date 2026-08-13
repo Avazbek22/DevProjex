@@ -64,7 +64,10 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		{
 			try
 			{
-				secretRedactionSession.ReplacePersistentMarks(expectedProjectPath, result.Snapshot);
+				secretRedactionSession.AcknowledgePersistentMarkDelta(
+					expectedProjectPath,
+					delta.OperationId,
+					result.Snapshot);
 			}
 			catch (ObjectDisposedException)
 			{
@@ -128,6 +131,18 @@ public sealed class ProjectProfilePersistenceCoordinator(
 				CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus);
 				return new ProjectProfileLoadSnapshot(unavailableStatus, null, null);
 			}
+			var identityAvailability = await secretRedactionSession
+				.EnsurePersistentIdentityReadyAsync(marksResult.Snapshot.Marks, cancellationToken)
+				.ConfigureAwait(false);
+			if (identityAvailability != PersistentSecretIdentityAvailability.Ready)
+			{
+				var unavailableStatus = identityAvailability ==
+				                        PersistentSecretIdentityAvailability.TemporarilyUnavailable
+					? ProjectProfileLookupStatus.TemporarilyUnavailable
+					: ProjectProfileLookupStatus.InvalidStorage;
+				CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus);
+				return new ProjectProfileLoadSnapshot(unavailableStatus, null, null);
+			}
 
 			CompleteLoad(normalizedPath, attempt.Revision, result.Status);
 			return new ProjectProfileLoadSnapshot(result.Status, result.Profile, marksResult.Snapshot);
@@ -164,6 +179,8 @@ public sealed class ProjectProfilePersistenceCoordinator(
 				ProjectProfileLookupStatus.TemporarilyUnavailable,
 			PersistentSecretMarkStoreStatus.InvalidProjectPath =>
 				ProjectProfileLookupStatus.InvalidProjectPath,
+			PersistentSecretMarkStoreStatus.UnsupportedFutureSchema =>
+				ProjectProfileLookupStatus.UnsupportedFutureSchema,
 			_ => ProjectProfileLookupStatus.InvalidStorage
 		};
 

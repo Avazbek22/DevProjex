@@ -11,6 +11,7 @@ namespace DevProjex.Application.Secrets;
 /// </summary>
 public sealed class SecretRedactionSession : IDisposable
 {
+	private static readonly TimeSpan PreviewMigrationFlushDelay = TimeSpan.FromMilliseconds(250);
 	// Selection combinations are transient UI state; 32 entries cover normal toggling while
 	// preventing arbitrary selection churn from retaining snapshots for the whole session.
 	internal const int MaximumSnapshots = 32;
@@ -21,7 +22,10 @@ public sealed class SecretRedactionSession : IDisposable
 	private readonly SecretScanCache _scanCache;
 	private readonly object _sync = new();
 	private readonly HashSet<string> _keptOccurrenceIds = new(StringComparer.Ordinal);
+	private readonly Dictionary<PersistentSecretMarkId, MarkedSecretProfileEntry> _durablePersistentMarks = [];
 	private readonly Dictionary<PersistentSecretMarkId, MarkedSecretProfileEntry> _persistentMarks = [];
+	private readonly Dictionary<Guid, PersistentSecretMarkDelta> _pendingPersistentMarkDeltas = [];
+	private readonly List<Guid> _pendingPersistentMarkOrder = [];
 	private readonly Dictionary<PersistentSecretMarkId, PersistentSecretMarkDelta> _pendingMarkMigrations = [];
 	private readonly List<SessionMarkedSecret> _sessionMarks = [];
 	private readonly Dictionary<string, SecretRedactionSnapshot> _snapshots = new(StringComparer.Ordinal);
@@ -29,6 +33,8 @@ public sealed class SecretRedactionSession : IDisposable
 	private readonly LinkedList<string> _snapshotLru = new();
 	private SelectionKeyCacheEntry? _selectionKeyCache;
 	private CancellationTokenSource _generationCancellation = new();
+	private CancellationTokenSource? _previewMigrationFlushCancellation;
+	private Task? _previewMigrationFlushTask;
 	private Task? _detectorWarmUpTask;
 	private string? _activeProjectRoot;
 	private long _generation;
@@ -123,12 +129,30 @@ public sealed class SecretRedactionSession : IDisposable
 			throw new IOException(
 				$"Persistent secret marks could not be loaded ({loaded.Status}).");
 		}
+		if (await EnsurePersistentIdentityReadyAsync(
+			    loaded.Snapshot.Marks,
+			    cancellationToken).ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+		{
+			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
+		}
 
 		ReplaceMarkedSecretsCore(
 			loaded.Snapshot.Marks,
 			normalizedProjectRoot,
 			loaded.Snapshot.Revision,
 			expectedGeneration);
+	}
+
+	public long PersistentMarksStoreRevision
+	{
+		get
+		{
+			lock (_sync)
+			{
+				ObjectDisposedException.ThrowIf(_disposed, this);
+				return Math.Max(0, _persistentMarksStoreRevision);
+			}
+		}
 	}
 
 	public SecretRedactionScope BeginOutput(
@@ -210,7 +234,10 @@ public sealed class SecretRedactionSession : IDisposable
 		if (!PathComparer.Default.Equals(_persistentMarksProjectPath, newProjectRoot))
 		{
 			marksChanged |= _persistentMarks.Count > 0;
+			_durablePersistentMarks.Clear();
 			_persistentMarks.Clear();
+			_pendingPersistentMarkDeltas.Clear();
+			_pendingPersistentMarkOrder.Clear();
 			_pendingMarkMigrations.Clear();
 			_persistentMarksProjectPath = null;
 			_persistentMarksStoreRevision = -1;
@@ -284,21 +311,28 @@ public sealed class SecretRedactionSession : IDisposable
 			var identityChanged =
 				!PathComparer.Default.Equals(_persistentMarksProjectPath, projectPath) ||
 				_persistentMarksStoreRevision != storeRevision;
-			if (_persistentMarks.Count == replacement.Count &&
-			    _persistentMarks.All(pair => replacement.TryGetValue(pair.Key, out var value) && value == pair.Value) &&
+			if (!PathComparer.Default.Equals(_persistentMarksProjectPath, projectPath))
+			{
+				_pendingPersistentMarkDeltas.Clear();
+				_pendingPersistentMarkOrder.Clear();
+				_pendingMarkMigrations.Clear();
+			}
+			if (_durablePersistentMarks.Count == replacement.Count &&
+			    _durablePersistentMarks.All(pair => replacement.TryGetValue(pair.Key, out var value) && value == pair.Value) &&
 			    !identityChanged)
 			{
 				return;
 			}
 
-			var marksChanged = _persistentMarks.Count != replacement.Count ||
-			                   _persistentMarks.Any(pair =>
+			var marksChanged = _durablePersistentMarks.Count != replacement.Count ||
+			                   _durablePersistentMarks.Any(pair =>
 				                   !replacement.TryGetValue(pair.Key, out var value) || value != pair.Value);
-			_persistentMarks.Clear();
+			_durablePersistentMarks.Clear();
 			foreach (var (identity, mark) in replacement)
-				_persistentMarks.Add(identity, mark);
+				_durablePersistentMarks.Add(identity, mark);
 			_persistentMarksProjectPath = projectPath;
 			_persistentMarksStoreRevision = storeRevision;
+			marksChanged |= RebuildEffectivePersistentMarksLocked();
 			if (marksChanged)
 				AdvanceMarkedSecretsRevisionLocked();
 		}
@@ -317,13 +351,110 @@ public sealed class SecretRedactionSession : IDisposable
 		{
 			ObjectDisposedException.ThrowIf(_disposed, this);
 			var identity = new PersistentSecretMarkId(mark.H.ToLowerInvariant(), mark.Length);
-			if (!_persistentMarks.ContainsKey(identity) &&
-			    _persistentMarks.Count >= SecretInspectionLimits.MaximumPersistentMarksPerProject)
+			if (!_durablePersistentMarks.ContainsKey(identity) &&
+			    _durablePersistentMarks.Count >= SecretInspectionLimits.MaximumPersistentMarksPerProject)
 			{
 				throw SecretInspectionBudgetExceededException.PersistentMarks();
 			}
-			changed = !_persistentMarks.TryGetValue(identity, out var existing) || existing != mark;
-			_persistentMarks[identity] = mark;
+			changed = !_durablePersistentMarks.TryGetValue(identity, out var existing) || existing != mark;
+			_durablePersistentMarks[identity] = mark;
+			changed |= RebuildEffectivePersistentMarksLocked();
+			if (changed)
+				AdvanceMarkedSecretsRevisionLocked();
+		}
+		if (changed)
+			OverridesChanged?.Invoke(this, EventArgs.Empty);
+		return changed;
+	}
+
+	public bool StagePersistentMarkDelta(
+		string projectRoot,
+		PersistentSecretMarkDelta delta)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(delta);
+		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		ValidatePendingDelta(delta);
+		bool changed;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (!PathComparer.Default.Equals(_persistentMarksProjectPath, normalizedProjectRoot))
+				throw new InvalidOperationException("Persistent mark deltas must target the loaded project.");
+			if (delta.ObservedRevision > Math.Max(0, _persistentMarksStoreRevision))
+				throw new ArgumentException("The persistent mark delta observes a future store revision.", nameof(delta));
+			if (_pendingPersistentMarkDeltas.TryGetValue(delta.OperationId, out var existing))
+			{
+				if (existing != delta)
+					throw new InvalidOperationException("A persistent mark operation ID cannot identify different deltas.");
+				return false;
+			}
+
+			_pendingPersistentMarkDeltas.Add(delta.OperationId, delta);
+			_pendingPersistentMarkOrder.Add(delta.OperationId);
+			try
+			{
+				changed = RebuildEffectivePersistentMarksLocked();
+			}
+			catch
+			{
+				RemovePendingDeltaLocked(delta.OperationId);
+				throw;
+			}
+			if (changed)
+				AdvanceMarkedSecretsRevisionLocked();
+		}
+		if (changed)
+			OverridesChanged?.Invoke(this, EventArgs.Empty);
+		return changed;
+	}
+
+	public void AcknowledgePersistentMarkDelta(
+		string projectRoot,
+		Guid operationId,
+		PersistentSecretMarksSnapshot snapshot)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(snapshot);
+		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var replacement = NormalizePersistentMarks(snapshot.Marks);
+		bool changed;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (!PathComparer.Default.Equals(_persistentMarksProjectPath, normalizedProjectRoot))
+				return;
+
+			RemovePendingDeltaLocked(operationId);
+			if (snapshot.Revision >= _persistentMarksStoreRevision)
+			{
+				_durablePersistentMarks.Clear();
+				foreach (var (identity, mark) in replacement)
+					_durablePersistentMarks.Add(identity, mark);
+				_persistentMarksStoreRevision = snapshot.Revision;
+			}
+			changed = RebuildEffectivePersistentMarksLocked();
+			if (changed)
+				AdvanceMarkedSecretsRevisionLocked();
+		}
+		if (changed)
+			OverridesChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	public bool RollbackPendingPersistentMarkDelta(string projectRoot, Guid operationId)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		bool changed;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (!PathComparer.Default.Equals(_persistentMarksProjectPath, normalizedProjectRoot) ||
+			    !RemovePendingDeltaLocked(operationId))
+			{
+				return false;
+			}
+			changed = RebuildEffectivePersistentMarksLocked();
 			if (changed)
 				AdvanceMarkedSecretsRevisionLocked();
 		}
@@ -356,6 +487,116 @@ public sealed class SecretRedactionSession : IDisposable
 		return true;
 	}
 
+	public async ValueTask<MarkedSecretProfileEntry?> CreatePersistentMarkedSecretAsync(
+		MarkedSecretValue value,
+		string? key,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(value);
+		if (_persistentIdentityProvider is null ||
+		    await _persistentIdentityProvider
+			    .EnsureAvailableAsync(cancellationToken)
+			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+		{
+			return null;
+		}
+
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			return PersistentSecretIdentity.TryCreateV2(
+				_persistentIdentityProvider,
+				value.NormalizedValue,
+				out var identity)
+				? NormalizePersistentMark(new MarkedSecretProfileEntry(identity, key, value.Length))
+				: null;
+		}
+	}
+
+	public async ValueTask<PersistentSecretIdentityAvailability> EnsurePersistentIdentityReadyAsync(
+		IEnumerable<MarkedSecretProfileEntry> marks,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(marks);
+		var snapshot = marks as IReadOnlyCollection<MarkedSecretProfileEntry> ?? marks.ToArray();
+		if (snapshot.Count == 0)
+			return PersistentSecretIdentityAvailability.Ready;
+		var hasV2 = snapshot.Any(static mark => mark is not null && PersistentSecretIdentity.IsV2(mark.H));
+		var availability = _persistentIdentityProvider is null
+			? PersistentSecretIdentityAvailability.PermanentlyUnavailable
+			: await _persistentIdentityProvider
+				.EnsureAvailableAsync(cancellationToken)
+				.ConfigureAwait(false);
+		return availability == PersistentSecretIdentityAvailability.Ready || hasV2
+			? availability
+			: PersistentSecretIdentityAvailability.Ready;
+	}
+
+	internal ValueTask<PersistentSecretIdentityAvailability> EnsureCurrentPersistentIdentityReadyAsync(
+		CancellationToken cancellationToken = default)
+	{
+		MarkedSecretProfileEntry[] marks;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			marks = _persistentMarks.Values.ToArray();
+		}
+		return EnsurePersistentIdentityReadyAsync(marks, cancellationToken);
+	}
+
+	public bool TryPromoteSessionMarkToPendingPersistentMark(
+		string projectRoot,
+		string relativePath,
+		int sourceOffset,
+		MarkedSecretValue value,
+		PersistentSecretMarkDelta delta)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentOutOfRangeException.ThrowIfNegative(sourceOffset);
+		ArgumentNullException.ThrowIfNull(value);
+		ArgumentNullException.ThrowIfNull(delta);
+		ValidatePendingDelta(delta);
+		if (delta.Kind != PersistentSecretMarkDeltaKind.Add)
+			throw new ArgumentException("Only an add delta can replace a session source anchor.", nameof(delta));
+		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var anchor = new SessionMarkedSecret(
+			relativePath.Replace('\\', '/'),
+			sourceOffset,
+			value.Length,
+			value.Hash);
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (delta.ObservedRevision > Math.Max(0, _persistentMarksStoreRevision))
+				throw new ArgumentException("The persistent mark delta observes a future store revision.", nameof(delta));
+			if (!PathComparer.Default.Equals(_persistentMarksProjectPath, normalizedProjectRoot) ||
+			    !_sessionMarks.Remove(anchor))
+			{
+				return false;
+			}
+			if (!_pendingPersistentMarkDeltas.TryAdd(delta.OperationId, delta))
+			{
+				_sessionMarks.Add(anchor);
+				return false;
+			}
+			_pendingPersistentMarkOrder.Add(delta.OperationId);
+			try
+			{
+				RebuildEffectivePersistentMarksLocked();
+			}
+			catch
+			{
+				RemovePendingDeltaLocked(delta.OperationId);
+				_sessionMarks.Add(anchor);
+				throw;
+			}
+			AdvanceMarkedSecretsRevisionLocked();
+		}
+		OverridesChanged?.Invoke(this, EventArgs.Empty);
+		return true;
+	}
+
 	private static bool TryNormalizePersistentMark(
 		MarkedSecretProfileEntry? mark,
 		out MarkedSecretProfileEntry normalized)
@@ -379,6 +620,121 @@ public sealed class SecretRedactionSession : IDisposable
 		if (key?.Length > SecretInspectionLimits.MaximumPersistentMarkKeyLength)
 			key = null;
 		return mark with { H = mark.H.ToLowerInvariant(), Key = key };
+	}
+
+	private static Dictionary<PersistentSecretMarkId, MarkedSecretProfileEntry> NormalizePersistentMarks(
+		IEnumerable<MarkedSecretProfileEntry>? marks)
+	{
+		var normalizedMarks = (marks ?? [])
+			.Where(static mark => TryNormalizePersistentMark(mark, out _))
+			.Select(static mark => NormalizePersistentMark(mark))
+			.Take(SecretInspectionLimits.MaximumPersistentMarksPerProject + 1)
+			.ToArray();
+		if (normalizedMarks.Length > SecretInspectionLimits.MaximumPersistentMarksPerProject)
+			throw SecretInspectionBudgetExceededException.PersistentMarks();
+		return normalizedMarks
+			.GroupBy(static mark => new PersistentSecretMarkId(mark.H, mark.Length))
+			.Select(static group => group.First())
+			.ToDictionary(static mark => new PersistentSecretMarkId(mark.H, mark.Length));
+	}
+
+	private static void ValidatePendingDelta(PersistentSecretMarkDelta delta)
+	{
+		if (delta.OperationId == Guid.Empty)
+			throw new ArgumentException("The persistent mark operation ID is required.", nameof(delta));
+		if (delta.IssuedUtcTicks <= 0 || delta.ObservedRevision < 0)
+			throw new ArgumentException("The persistent mark operation metadata is invalid.", nameof(delta));
+		switch (delta.Kind)
+		{
+			case PersistentSecretMarkDeltaKind.Add:
+				if (!TryNormalizePersistentMark(delta.Mark, out var added) ||
+				    !HasIdentity(added, delta.MarkId))
+				{
+					throw new ArgumentException("The persistent mark add delta is invalid.", nameof(delta));
+				}
+				break;
+			case PersistentSecretMarkDeltaKind.Remove:
+				if (!IsValidPersistentMarkId(delta.MarkId) || delta.Mark is not null)
+					throw new ArgumentException("The persistent mark remove delta is invalid.", nameof(delta));
+				break;
+			case PersistentSecretMarkDeltaKind.Replace:
+				if (!IsValidPersistentMarkId(delta.MarkId) ||
+				    !TryNormalizePersistentMark(delta.Mark, out var replacement) ||
+				    HasIdentity(replacement, delta.MarkId))
+				{
+					throw new ArgumentException("The persistent mark replacement delta is invalid.", nameof(delta));
+				}
+				break;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(delta));
+		}
+	}
+
+	private static bool HasIdentity(MarkedSecretProfileEntry mark, PersistentSecretMarkId markId) =>
+		mark.Length == markId.Length &&
+		string.Equals(mark.H, markId.Hash, StringComparison.OrdinalIgnoreCase);
+
+	private static bool IsValidPersistentMarkId(PersistentSecretMarkId markId) =>
+		PersistentSecretIdentity.IsSupported(markId.Hash) &&
+		markId.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength;
+
+	private bool RebuildEffectivePersistentMarksLocked()
+	{
+		var effective = new Dictionary<PersistentSecretMarkId, MarkedSecretProfileEntry>(
+			_durablePersistentMarks);
+		foreach (var operationId in _pendingPersistentMarkOrder)
+		{
+			if (!_pendingPersistentMarkDeltas.TryGetValue(operationId, out var delta))
+				continue;
+			ApplyPendingDelta(effective, delta);
+			if (effective.Count > SecretInspectionLimits.MaximumPersistentMarksPerProject)
+				throw SecretInspectionBudgetExceededException.PersistentMarks();
+		}
+
+		if (_persistentMarks.Count == effective.Count &&
+		    _persistentMarks.All(pair => effective.TryGetValue(pair.Key, out var value) && value == pair.Value))
+		{
+			return false;
+		}
+
+		_persistentMarks.Clear();
+		foreach (var (identity, mark) in effective)
+			_persistentMarks.Add(identity, mark);
+		return true;
+	}
+
+	private static void ApplyPendingDelta(
+		Dictionary<PersistentSecretMarkId, MarkedSecretProfileEntry> marks,
+		PersistentSecretMarkDelta delta)
+	{
+		var sourceId = new PersistentSecretMarkId(delta.MarkId.Hash.ToLowerInvariant(), delta.MarkId.Length);
+		switch (delta.Kind)
+		{
+			case PersistentSecretMarkDeltaKind.Add:
+			{
+				var mark = NormalizePersistentMark(delta.Mark!);
+				marks[new PersistentSecretMarkId(mark.H, mark.Length)] = mark;
+				break;
+			}
+			case PersistentSecretMarkDeltaKind.Remove:
+				marks.Remove(sourceId);
+				break;
+			case PersistentSecretMarkDeltaKind.Replace:
+			{
+				marks.Remove(sourceId);
+				var mark = NormalizePersistentMark(delta.Mark!);
+				marks[new PersistentSecretMarkId(mark.H, mark.Length)] = mark;
+				break;
+			}
+		}
+	}
+
+	private bool RemovePendingDeltaLocked(Guid operationId)
+	{
+		if (!_pendingPersistentMarkDeltas.Remove(operationId))
+			return false;
+		_pendingPersistentMarkOrder.Remove(operationId);
+		return true;
 	}
 
 	public bool RemoveMarkedSecret(string hash)
@@ -442,6 +798,88 @@ public sealed class SecretRedactionSession : IDisposable
 		}
 	}
 
+	internal void SchedulePendingPersistentMarkMigrationsAfterPreview(string projectRoot)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		CancellationTokenSource? obsoleteSchedule;
+		CancellationTokenSource schedule;
+		long expectedGeneration;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (_persistentMarkStore is null ||
+			    _pendingMarkMigrations.Count == 0 ||
+			    !PathComparer.Default.Equals(_persistentMarksProjectPath, normalizedProjectRoot))
+			{
+				return;
+			}
+
+			expectedGeneration = _generation;
+			schedule = CancellationTokenSource.CreateLinkedTokenSource(_generationCancellation.Token);
+			obsoleteSchedule = _previewMigrationFlushCancellation;
+			_previewMigrationFlushCancellation = schedule;
+		}
+		CancelWithoutDispose(obsoleteSchedule);
+		var flushTask = FlushPreviewMigrationsAfterDelayAsync(
+			normalizedProjectRoot,
+			expectedGeneration,
+			schedule);
+		lock (_sync)
+		{
+			if (ReferenceEquals(_previewMigrationFlushCancellation, schedule))
+				_previewMigrationFlushTask = flushTask;
+		}
+	}
+
+	internal Task WaitForPreviewMigrationFlushAsync()
+	{
+		lock (_sync)
+			return _previewMigrationFlushTask ?? Task.CompletedTask;
+	}
+
+	private async Task FlushPreviewMigrationsAfterDelayAsync(
+		string projectRoot,
+		long expectedGeneration,
+		CancellationTokenSource schedule)
+	{
+		try
+		{
+			await Task.Delay(PreviewMigrationFlushDelay, schedule.Token).ConfigureAwait(false);
+			lock (_sync)
+			{
+				if (_disposed ||
+				    expectedGeneration != _generation ||
+				    !ReferenceEquals(_previewMigrationFlushCancellation, schedule) ||
+				    !PathComparer.Default.Equals(_persistentMarksProjectPath, projectRoot))
+				{
+					return;
+				}
+			}
+			await FlushPendingPersistentMarkMigrationsAsync(projectRoot, schedule.Token).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (schedule.IsCancellationRequested)
+		{
+			// A newer preview or generation owns the next migration attempt.
+		}
+		catch (Exception)
+		{
+			// Legacy identities remain valid; a later preview or strict output safely retries.
+		}
+		finally
+		{
+			lock (_sync)
+			{
+				if (ReferenceEquals(_previewMigrationFlushCancellation, schedule))
+				{
+					_previewMigrationFlushCancellation = null;
+					_previewMigrationFlushTask = null;
+				}
+			}
+			schedule.Dispose();
+		}
+	}
+
 	private void QueueLegacyMarkMigration(
 		MarkedSecretProfileEntry legacyMark,
 		string v2Identity,
@@ -459,7 +897,8 @@ public sealed class SecretRedactionSession : IDisposable
 				existingId,
 				PersistentSecretMarkDelta.Replace(
 					existingId,
-					legacyMark with { H = v2Identity }));
+					legacyMark with { H = v2Identity },
+					Math.Max(0, _persistentMarksStoreRevision)));
 		}
 	}
 
@@ -525,7 +964,7 @@ public sealed class SecretRedactionSession : IDisposable
 			ObjectDisposedException.ThrowIf(_disposed, this);
 			if (!string.IsNullOrWhiteSpace(persistentMarkHash))
 			{
-				var identities = _persistentMarks.Keys
+				var identities = _durablePersistentMarks.Keys
 					.Where(identity => string.Equals(
 						identity.Hash,
 						persistentMarkHash,
@@ -533,13 +972,15 @@ public sealed class SecretRedactionSession : IDisposable
 						(persistentMarkLength is null || identity.Length == persistentMarkLength))
 					.ToArray();
 				foreach (var identity in identities)
-					persistentRemoved |= _persistentMarks.Remove(identity);
+					persistentRemoved |= _durablePersistentMarks.Remove(identity);
 			}
 			if (!string.IsNullOrWhiteSpace(sessionMarkId))
 			{
 				sessionRemoved = _sessionMarks.RemoveAll(mark =>
 					string.Equals(mark.Id, sessionMarkId, StringComparison.Ordinal)) > 0;
 			}
+			if (persistentRemoved)
+				persistentRemoved |= RebuildEffectivePersistentMarksLocked();
 			if (persistentRemoved || sessionRemoved)
 				AdvanceMarkedSecretsRevisionLocked();
 		}
@@ -647,6 +1088,29 @@ public sealed class SecretRedactionSession : IDisposable
 	}
 
 	/// <summary>
+	/// Starts a new content identity generation after a project load, project reload, or Git update.
+	/// Selection-only tree rebuilds remain in the current generation and can reuse validated content.
+	/// </summary>
+	public void AdvanceContentGeneration(string projectRoot)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		CancellationTokenSource obsoleteGeneration;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (_activeProjectRoot is not null &&
+			    !PathComparer.Default.Equals(_activeProjectRoot, normalizedProjectRoot))
+			{
+				ClearProjectSpecificStateForSwitchLocked(normalizedProjectRoot);
+			}
+			_activeProjectRoot = normalizedProjectRoot;
+			obsoleteGeneration = AdvanceGenerationLocked();
+		}
+		CancelAndDispose(obsoleteGeneration);
+	}
+
+	/// <summary>
 	/// Releases all content-derived state when Hide Secrets is switched off. Keep-as-is decisions
 	/// remain session-only preferences and can be applied again if the user re-enables the option.
 	/// </summary>
@@ -673,7 +1137,10 @@ public sealed class SecretRedactionSession : IDisposable
 			obsoleteGeneration = AdvanceGenerationLocked();
 			_activeProjectRoot = null;
 			_keptOccurrenceIds.Clear();
+			_durablePersistentMarks.Clear();
 			_persistentMarks.Clear();
+			_pendingPersistentMarkDeltas.Clear();
+			_pendingPersistentMarkOrder.Clear();
 			_pendingMarkMigrations.Clear();
 			_persistentMarksProjectPath = null;
 			_persistentMarksStoreRevision = -1;
@@ -695,7 +1162,10 @@ public sealed class SecretRedactionSession : IDisposable
 			_disposed = true;
 			_activeProjectRoot = null;
 			_keptOccurrenceIds.Clear();
+			_durablePersistentMarks.Clear();
 			_persistentMarks.Clear();
+			_pendingPersistentMarkDeltas.Clear();
+			_pendingPersistentMarkOrder.Clear();
 			_pendingMarkMigrations.Clear();
 			_sessionMarks.Clear();
 		}
@@ -1138,6 +1608,20 @@ public sealed class SecretRedactionSession : IDisposable
 		finally
 		{
 			source.Dispose();
+		}
+	}
+
+	private static void CancelWithoutDispose(CancellationTokenSource? source)
+	{
+		if (source is null)
+			return;
+		try
+		{
+			source.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// The superseded background task completed between the swap and cancellation.
 		}
 	}
 

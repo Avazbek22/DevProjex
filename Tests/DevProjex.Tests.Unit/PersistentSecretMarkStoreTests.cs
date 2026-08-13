@@ -6,6 +6,44 @@ public sealed class PersistentSecretMarkStoreTests
 	private const string SecondHash = "aabbccddeeff";
 
 	[Fact]
+	public async Task FutureSchema_IsReadOnlyAcrossLoadMutationsMigrationAndClear()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var directory = temporary.CreateFolder("DevProjex");
+		var primaryPath = Path.Combine(directory, "project-secret-marks.json");
+		var backupPath = primaryPath + ".bak";
+		await File.WriteAllTextAsync(
+			primaryPath,
+			"{\"schemaVersion\":3,\"projects\":{\"future\":{}}}",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			backupPath,
+			"{\"schemaVersion\":1,\"projects\":{}}",
+			TestContext.Current.CancellationToken);
+		var primaryBefore = await File.ReadAllBytesAsync(primaryPath, TestContext.Current.CancellationToken);
+		var backupBefore = await File.ReadAllBytesAsync(backupPath, TestContext.Current.CancellationToken);
+		var store = new PersistentSecretMarkStore(() => temporary.Path);
+		var mark = Mark(FirstHash, 12);
+
+		var load = await store.LoadAsync(project, TestContext.Current.CancellationToken);
+		var add = await store.AddAsync(project, mark, TestContext.Current.CancellationToken);
+		var remove = await store.RemoveAsync(
+			project,
+			new PersistentSecretMarkId(mark.H, mark.Length),
+			TestContext.Current.CancellationToken);
+		var migration = store.MergeLegacy(project, [mark], TimeSpan.FromSeconds(1));
+		store.ClearAll();
+
+		Assert.Equal(PersistentSecretMarkStoreStatus.UnsupportedFutureSchema, load.Status);
+		Assert.Equal(PersistentSecretMarkStoreStatus.UnsupportedFutureSchema, add.Status);
+		Assert.Equal(PersistentSecretMarkStoreStatus.UnsupportedFutureSchema, remove.Status);
+		Assert.Equal(PersistentSecretMarkStoreStatus.UnsupportedFutureSchema, migration.Status);
+		Assert.Equal(primaryBefore, await File.ReadAllBytesAsync(primaryPath, TestContext.Current.CancellationToken));
+		Assert.Equal(backupBefore, await File.ReadAllBytesAsync(backupPath, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public async Task IndependentStores_AddDistinctMarks_PreserveBothDeltas()
 	{
 		using var temporary = new TemporaryDirectory();
@@ -60,10 +98,13 @@ public sealed class PersistentSecretMarkStoreTests
 		var project = temporary.CreateFolder("project");
 		var store = new ProjectProfileStore(() => temporary.Path);
 		var mark = Mark(FirstHash, 12);
-		var add = PersistentSecretMarkDelta.Add(mark);
-		var remove = PersistentSecretMarkDelta.Remove(new PersistentSecretMarkId(mark.H, mark.Length));
+		var add = PersistentSecretMarkDelta.Add(mark, observedRevision: 0);
 
-		Assert.True((await store.ApplyMarkDeltaAsync(project, add, cancellationToken)).Succeeded);
+		var added = await store.ApplyMarkDeltaAsync(project, add, cancellationToken);
+		Assert.True(added.Succeeded);
+		var remove = PersistentSecretMarkDelta.Remove(
+			new PersistentSecretMarkId(mark.H, mark.Length),
+			added.Snapshot!.Revision);
 		Assert.True((await store.ApplyMarkDeltaAsync(project, remove, cancellationToken)).Succeeded);
 		var afterRemove = await store.LoadMarksAsync(project, cancellationToken);
 		Assert.True((await store.ApplyMarkDeltaAsync(project, add, cancellationToken)).Succeeded);
@@ -73,7 +114,7 @@ public sealed class PersistentSecretMarkStoreTests
 		Assert.Empty(afterOldAddRetry.Snapshot!.Marks);
 		Assert.Equal(afterRemove.Snapshot.Revision, afterOldAddRetry.Snapshot.Revision);
 
-		var newerAdd = PersistentSecretMarkDelta.Add(mark);
+		var newerAdd = PersistentSecretMarkDelta.Add(mark, afterRemove.Snapshot.Revision);
 		Assert.True((await store.ApplyMarkDeltaAsync(project, newerAdd, cancellationToken)).Succeeded);
 		Assert.True((await store.ApplyMarkDeltaAsync(project, remove, cancellationToken)).Succeeded);
 		var afterOldRemoveRetry = await store.LoadMarksAsync(project, cancellationToken);
@@ -218,17 +259,18 @@ public sealed class PersistentSecretMarkStoreTests
 				Length = 8,
 				Removed = true,
 				IssuedUtcTicks = index + 1,
-				OperationId = Guid.NewGuid()
+				OperationId = Guid.NewGuid(),
+				AppliedRevision = index + 1
 			})
 			.ToList();
 		var database = new PersistentSecretMarkDb
 		{
-			SchemaVersion = 1,
+			SchemaVersion = 2,
 			Projects = new Dictionary<string, PersistedProjectSecretMarks>(PathComparer.Default)
 			{
 				[PathUtility.Normalize(project)] = new PersistedProjectSecretMarks
 				{
-					Revision = 1,
+					AppliedRevision = states.Count,
 					States = states
 				}
 			}
@@ -270,13 +312,15 @@ public sealed class PersistentSecretMarkStoreTests
 			project,
 			legacy,
 			TestContext.Current.CancellationToken)).Succeeded);
-		var migration = PersistentSecretMarkDelta.Replace(
-			new PersistentSecretMarkId(legacy.H, legacy.Length),
-			v2);
 		Assert.True((await store.AddMarkAsync(
 			project,
 			v2,
 			TestContext.Current.CancellationToken)).Succeeded);
+		var observed = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+		var migration = PersistentSecretMarkDelta.Replace(
+			new PersistentSecretMarkId(legacy.H, legacy.Length),
+			v2,
+			observed.Snapshot!.Revision);
 
 		var migrated = await store.ApplyMarkDeltaAsync(
 			project,
@@ -299,6 +343,7 @@ public sealed class PersistentSecretMarkStoreTests
 		var sameIdentityReplacement = new PersistentSecretMarkDelta(
 			Guid.NewGuid(),
 			DateTime.UtcNow.Ticks + 1,
+			added.Snapshot!.Revision,
 			PersistentSecretMarkDeltaKind.Replace,
 			new PersistentSecretMarkId(mark.H, mark.Length),
 			mark with { Key = "REPLACED" });
@@ -322,6 +367,126 @@ public sealed class PersistentSecretMarkStoreTests
 		Assert.True(afterUnknown.Succeeded);
 		Assert.Equal(added.Snapshot!.Revision, afterUnknown.Snapshot!.Revision);
 		Assert.Equal(mark, Assert.Single(afterUnknown.Snapshot.Marks));
+	}
+
+	[Fact]
+	public async Task CausalOrdering_IgnoresWallClockSkewAndRejectsOldAddRetry()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = new ProjectProfileStore(() => temporary.Path);
+		var mark = Mark(FirstHash, 12);
+		var add = new PersistentSecretMarkDelta(
+			Guid.NewGuid(),
+			DateTime.UtcNow.AddHours(12).Ticks,
+			0,
+			PersistentSecretMarkDeltaKind.Add,
+			new PersistentSecretMarkId(mark.H, mark.Length),
+			mark);
+
+		var added = await store.ApplyMarkDeltaAsync(project, add, TestContext.Current.CancellationToken);
+		var remove = new PersistentSecretMarkDelta(
+			Guid.NewGuid(),
+			DateTime.UtcNow.AddHours(-12).Ticks,
+			added.Snapshot!.Revision,
+			PersistentSecretMarkDeltaKind.Remove,
+			new PersistentSecretMarkId(mark.H, mark.Length),
+			null);
+		var removed = await store.ApplyMarkDeltaAsync(project, remove, TestContext.Current.CancellationToken);
+		var retried = await store.ApplyMarkDeltaAsync(project, add, TestContext.Current.CancellationToken);
+
+		Assert.True(removed.Succeeded);
+		Assert.Empty(removed.Snapshot!.Marks);
+		Assert.True(retried.Succeeded);
+		Assert.Empty(retried.Snapshot!.Marks);
+		Assert.Equal(removed.Snapshot.Revision, retried.Snapshot.Revision);
+	}
+
+	[Fact]
+	public async Task ReplayedOperationId_IsAnIdempotentNoOp()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = new ProjectProfileStore(() => temporary.Path);
+		var delta = PersistentSecretMarkDelta.Add(Mark(FirstHash, 12), observedRevision: 0);
+
+		var first = await store.ApplyMarkDeltaAsync(project, delta, TestContext.Current.CancellationToken);
+		var replay = await store.ApplyMarkDeltaAsync(project, delta, TestContext.Current.CancellationToken);
+
+		Assert.True(first.Succeeded);
+		Assert.True(replay.Succeeded);
+		Assert.Equal(first.Snapshot!.Revision, replay.Snapshot!.Revision);
+		Assert.Equal(first.Snapshot.Marks, replay.Snapshot.Marks);
+	}
+
+	[Fact]
+	public async Task IndependentConcurrentDeltas_ConvergeRegardlessOfArrivalOrder()
+	{
+		using var firstRoot = new TemporaryDirectory();
+		using var secondRoot = new TemporaryDirectory();
+		var firstProject = firstRoot.CreateFolder("project");
+		var secondProject = secondRoot.CreateFolder("project");
+		var firstDelta = PersistentSecretMarkDelta.Add(Mark(FirstHash, 12), observedRevision: 0);
+		var secondDelta = PersistentSecretMarkDelta.Add(Mark(SecondHash, 16), observedRevision: 0);
+		var firstStore = new ProjectProfileStore(() => firstRoot.Path);
+		var secondStore = new ProjectProfileStore(() => secondRoot.Path);
+
+		await firstStore.ApplyMarkDeltaAsync(firstProject, firstDelta, TestContext.Current.CancellationToken);
+		await firstStore.ApplyMarkDeltaAsync(firstProject, secondDelta, TestContext.Current.CancellationToken);
+		await secondStore.ApplyMarkDeltaAsync(secondProject, secondDelta, TestContext.Current.CancellationToken);
+		await secondStore.ApplyMarkDeltaAsync(secondProject, firstDelta, TestContext.Current.CancellationToken);
+		var first = await firstStore.LoadMarksAsync(firstProject, TestContext.Current.CancellationToken);
+		var second = await secondStore.LoadMarksAsync(secondProject, TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, first.Snapshot!.Revision);
+		Assert.Equal(first.Snapshot.Revision, second.Snapshot!.Revision);
+		Assert.Equal(
+			first.Snapshot.Marks.OrderBy(static mark => mark.H).ToArray(),
+			second.Snapshot.Marks.OrderBy(static mark => mark.H).ToArray());
+	}
+
+	[Fact]
+	public async Task SchemaOneOrdering_IsMigratedOnceToAppliedRevisions()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var directory = temporary.CreateFolder("DevProjex");
+		var normalizedProject = PathUtility.Normalize(project).Replace("\\", "\\\\", StringComparison.Ordinal);
+		var olderOperation = Guid.NewGuid();
+		var newerOperation = Guid.NewGuid();
+		var json = $$"""
+			{
+			  "schemaVersion": 1,
+			  "projects": {
+			    "{{normalizedProject}}": {
+			      "revision": 1,
+			      "states": [
+			        { "hash": "{{FirstHash}}", "length": 12, "key": "TOKEN", "removed": false, "issuedUtcTicks": 10, "operationId": "{{olderOperation}}" },
+			        { "hash": "{{FirstHash}}", "length": 12, "key": null, "removed": true, "issuedUtcTicks": 20, "operationId": "{{newerOperation}}" }
+			      ]
+			    }
+			  }
+			}
+			""";
+		var path = Path.Combine(directory, "project-secret-marks.json");
+		await File.WriteAllTextAsync(path, json, TestContext.Current.CancellationToken);
+		var store = new ProjectProfileStore(() => temporary.Path);
+
+		var migrated = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+		var firstBytes = await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken);
+		var loadedAgain = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+		var secondBytes = await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken);
+		var staleAdd = PersistentSecretMarkDelta.Add(Mark(FirstHash, 12), observedRevision: 0);
+		var afterStale = await store.ApplyMarkDeltaAsync(project, staleAdd, TestContext.Current.CancellationToken);
+
+		Assert.True(migrated.Succeeded);
+		Assert.Empty(migrated.Snapshot!.Marks);
+		Assert.Equal(migrated.Snapshot, loadedAgain.Snapshot);
+		Assert.Equal(firstBytes, secondBytes);
+		Assert.Contains("\"schemaVersion\": 2", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);
+		Assert.Contains("\"appliedRevision\"", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);
+		Assert.Empty(afterStale.Snapshot!.Marks);
+		Assert.Equal(migrated.Snapshot.Revision, afterStale.Snapshot.Revision);
 	}
 
 	private static MarkedSecretProfileEntry Mark(string hash, int length) =>

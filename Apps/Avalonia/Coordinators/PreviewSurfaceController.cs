@@ -152,32 +152,47 @@ internal sealed class PreviewSurfaceController : IDisposable
 				return;
 			}
 
-			if (!_secretRedactionSession.TryCreatePersistentMarkedSecret(
-			    e.Value,
-			    location.Key,
-			    out var mark))
+			ApplySessionOnlyManualMark(location, e.Value);
+			var mark = await _secretRedactionSession.CreatePersistentMarkedSecretAsync(
+				e.Value,
+				location.Key,
+				CancellationToken.None);
+			if (mark is null)
 			{
-				ApplySessionOnlyManualMark(location, e.Value);
 				await _persistProjectProfile(CancellationToken.None);
 				if (IsCurrentProject(operationProjectRoot))
 					await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
 				return;
 			}
-			var addedToSession = _secretRedactionSession.AddMarkedSecret(mark);
-			_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
-			_ensureHideSecretsEnabled();
-			_requestRedactionRefresh();
+			if (_disposed || !IsCurrentProject(operationProjectRoot))
+				return;
+			var delta = PersistentSecretMarkDelta.Add(
+				mark,
+				_secretRedactionSession.PersistentMarksStoreRevision);
+			if (!_secretRedactionSession.TryPromoteSessionMarkToPendingPersistentMark(
+				operationProjectRoot,
+				location.RelativePath,
+				location.SourceOffset,
+				e.Value,
+				delta))
+			{
+				return;
+			}
 
 			PersistentSecretMarkWriteResult write;
 			try
 			{
 				await _persistProjectProfile(CancellationToken.None);
-				write = await _applyPersistentMarkDelta(PersistentSecretMarkDelta.Add(mark));
+				write = await _applyPersistentMarkDelta(delta);
 			}
 			catch
 			{
 				if (!_disposed && IsCurrentProject(operationProjectRoot))
-					DowngradePersistentMarkToSession(addedToSession, mark, location, e.Value);
+					DowngradePersistentMarkToSession(
+						operationProjectRoot,
+						delta.OperationId,
+						location,
+						e.Value);
 				throw;
 			}
 			if (_disposed)
@@ -193,7 +208,11 @@ internal sealed class PreviewSurfaceController : IDisposable
 			}
 
 			if (IsCurrentProject(operationProjectRoot))
-				DowngradePersistentMarkToSession(addedToSession, mark, location, e.Value);
+				DowngradePersistentMarkToSession(
+					operationProjectRoot,
+					delta.OperationId,
+					location,
+					e.Value);
 			if (IsCurrentProject(operationProjectRoot))
 				await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
 		}
@@ -209,14 +228,13 @@ internal sealed class PreviewSurfaceController : IDisposable
 	}
 
 	private void DowngradePersistentMarkToSession(
-		bool addedToSession,
-		MarkedSecretProfileEntry mark,
+		string projectRoot,
+		Guid operationId,
 		ManualSecretLocation location,
 		MarkedSecretValue value)
 	{
-		if (addedToSession)
-			_secretRedactionSession.RemoveMarkedSecret(new PersistentSecretMarkId(mark.H, mark.Length));
 		ApplySessionOnlyManualMark(location, value);
+		_secretRedactionSession.RollbackPendingPersistentMarkDelta(projectRoot, operationId);
 	}
 
 	private void ApplySessionOnlyManualMark(
@@ -251,29 +269,38 @@ internal sealed class PreviewSurfaceController : IDisposable
 				: _secretRedactionSession.GetMarkedSecrets().FirstOrDefault(mark =>
 					string.Equals(mark.H, e.PersistentMarkHash, StringComparison.OrdinalIgnoreCase) &&
 					mark.Length == e.PersistentMarkLength);
-			var result = _secretRedactionSession.RemoveManualSecret(
-				persistentMark is null
-					? null
-					: new PersistentSecretMarkId(persistentMark.H, persistentMark.Length),
-				e.SessionMarkId);
-			if (!result.Removed)
+			var sessionRemoved = !string.IsNullOrWhiteSpace(e.SessionMarkId) &&
+			                     _secretRedactionSession.RemoveSessionMarkedSecret(e.SessionMarkId);
+			PersistentSecretMarkDelta? pendingRemove = null;
+			var persistentRemoved = false;
+			if (persistentMark is not null)
+			{
+				pendingRemove = PersistentSecretMarkDelta.Remove(
+					new PersistentSecretMarkId(persistentMark.H, persistentMark.Length),
+					_secretRedactionSession.PersistentMarksStoreRevision);
+				persistentRemoved = _secretRedactionSession.StagePersistentMarkDelta(
+					operationProjectRoot,
+					pendingRemove);
+			}
+			if (!persistentRemoved && !sessionRemoved)
 				return;
 
 			_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
 			_requestRedactionRefresh();
-			if (result.PersistentMarkRemoved && persistentMark is not null)
+			if (persistentRemoved && pendingRemove is not null)
 			{
 				PersistentSecretMarkWriteResult write;
 				try
 				{
-					write = await _applyPersistentMarkDelta(PersistentSecretMarkDelta.Remove(
-						new PersistentSecretMarkId(persistentMark.H, persistentMark.Length)));
+					write = await _applyPersistentMarkDelta(pendingRemove);
 				}
 				catch
 				{
 					if (!_disposed && IsCurrentProject(operationProjectRoot))
 					{
-						_secretRedactionSession.AddMarkedSecret(persistentMark);
+						_secretRedactionSession.RollbackPendingPersistentMarkDelta(
+							operationProjectRoot,
+							pendingRemove.OperationId);
 						_requestRedactionRefresh();
 					}
 					throw;
@@ -284,7 +311,9 @@ internal sealed class PreviewSurfaceController : IDisposable
 				{
 					if (IsCurrentProject(operationProjectRoot))
 					{
-						_secretRedactionSession.AddMarkedSecret(persistentMark);
+						_secretRedactionSession.RollbackPendingPersistentMarkDelta(
+							operationProjectRoot,
+							pendingRemove.OperationId);
 						_requestRedactionRefresh();
 					}
 					if (IsCurrentProject(operationProjectRoot))
