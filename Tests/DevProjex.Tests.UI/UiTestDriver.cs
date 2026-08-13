@@ -826,8 +826,6 @@ internal static class UiTestDriver
 		var endXCorrection = 0.0;
 		var startYCorrection = 0.0;
 		var endYCorrection = 0.0;
-		var previousLineNumber = 0;
-		var previousStartColumn = -1;
 		for (var attempt = 0; attempt < 5 && !selected; attempt++)
 		{
 			if (attempt > 0)
@@ -850,16 +848,6 @@ internal static class UiTestDriver
 				break;
 			}
 			Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
-			if (previousLineNumber != 0 &&
-			    (previousLineNumber != lineNumber || previousStartColumn != startColumn))
-			{
-				startXCorrection = 0;
-				endXCorrection = 0;
-				startYCorrection = 0;
-				endYCorrection = 0;
-			}
-			previousLineNumber = lineNumber;
-			previousStartColumn = startColumn;
 
 			var typeface = new Typeface(
 				textControl.TextFontFamily ?? FontFamily.Default,
@@ -899,9 +887,32 @@ internal static class UiTestDriver
 			window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
 			selected = string.Equals(value, textControl.GetSelectedText(), StringComparison.Ordinal);
 			contextPoint = new Point((start.X + end.X) / 2, (start.Y + end.Y) / 2);
-			if (selected || !textControl.TryGetSelectionRange(out var actualSelection))
+			if (selected)
 				continue;
 
+			var actualText = textControl.GetSelectedText();
+			var selectedValueOffset = value.IndexOf(actualText, StringComparison.Ordinal);
+			if (actualText.Length > 0 && selectedValueOffset >= 0)
+			{
+				var actualStartDistance = InvokeRequiredPrivateMethod<double>(
+					textControl,
+					"ResolveDistanceFromColumn",
+					lineText,
+					startColumn + selectedValueOffset,
+					typeface);
+				var actualEndDistance = InvokeRequiredPrivateMethod<double>(
+					textControl,
+					"ResolveDistanceFromColumn",
+					lineText,
+					startColumn + selectedValueOffset + actualText.Length,
+					typeface);
+				startXCorrection += startDistance - actualStartDistance;
+				endXCorrection += endDistance - actualEndDistance;
+				continue;
+			}
+
+			if (!textControl.TryGetSelectionRange(out var actualSelection))
+				continue;
 			startYCorrection += (lineNumber - actualSelection.StartLine) * lineHeight;
 			endYCorrection += (lineNumber - actualSelection.EndLine) * lineHeight;
 			if (actualSelection.StartLine == lineNumber)
