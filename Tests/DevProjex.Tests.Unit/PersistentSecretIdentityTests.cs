@@ -237,7 +237,7 @@ public sealed class PersistentSecretIdentityTests
 	}
 
 	[Fact]
-	public async Task UnixInstallationKey_WithSharedPermissionsIsRejected()
+	public async Task UnixInstallationKey_WithSharedPrimaryPermissionsRecoversFromBackup()
 	{
 		if (OperatingSystem.IsWindows())
 			return;
@@ -250,6 +250,31 @@ public sealed class PersistentSecretIdentityTests
 		File.SetUnixFileMode(
 			keyPath,
 			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+
+		using var reopened = new PersistentSecretIdentityProvider(() => appData);
+
+		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await reopened.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(PersistentSecretIdentityProviderState.Ready, reopened.State);
+		Assert.True(PersistentSecretIdentity.TryCreateV2(reopened, Secret, out _));
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(keyPath));
+	}
+
+	[Fact]
+	public async Task UnixInstallationKey_WithSharedPermissionsOnBothCopiesIsRejected()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		using (var provider = new PersistentSecretIdentityProvider(() => appData))
+			Assert.Equal(PersistentSecretIdentityAvailability.Ready, await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		var keyPath = Path.Combine(appData, "DevProjex", "secret-mark-hmac.key");
+		var sharedMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead;
+		File.SetUnixFileMode(keyPath, sharedMode);
+		File.SetUnixFileMode(keyPath + ".bak", sharedMode);
 
 		using var reopened = new PersistentSecretIdentityProvider(() => appData);
 
