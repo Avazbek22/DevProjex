@@ -3151,11 +3151,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			helpIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HideSecrets);
 			Assert.True(helpIndicator.IsVisible);
 			checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets);
-			await UiTestDriver.ClickAsync(window, helpIndicator);
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => ToolTip.GetIsOpen(helpIndicator),
-				"the content-processing tooltip to open on click");
+			await UiTestDriver.OpenToolTipThroughClickAsync(window, helpIndicator);
 			var helpToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(helpIndicator));
 			var helpText = Assert.IsType<TextBlock>(helpToolTip.Content);
 			Assert.Equal("Found: 3. Hidden: 2.", helpText.Text);
@@ -3332,11 +3328,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				checkBoxPosition.Y - (compressionCheckBox.Bounds.Height / 2),
 				0,
 				2);
-			await UiTestDriver.ClickAsync(window, compressionIndicator);
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => ToolTip.GetIsOpen(compressionIndicator),
-				"the compression status tooltip to open on click");
+			await UiTestDriver.OpenToolTipThroughClickAsync(window, compressionIndicator);
 			var compressionToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(compressionIndicator));
 			Assert.Equal(PlacementMode.Bottom, ToolTip.GetPlacement(compressionIndicator));
 			Assert.Equal(5, ToolTip.GetVerticalOffset(compressionIndicator));

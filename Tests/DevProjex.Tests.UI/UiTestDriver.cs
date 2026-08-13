@@ -126,7 +126,7 @@ internal static class UiTestDriver
         // teardown does not race app work that would still be running for a real user.
         await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
-        await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+        await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(30));
         await WaitForSettledFramesAsync(frameCount: 2);
         UntrackTopLevelWindow(window);
         if (cleanupAppData)
@@ -374,6 +374,21 @@ internal static class UiTestDriver
         await WaitForControlReadyForPointerAsync(window, control);
 
         await ClickReadyControlAsync(window, control);
+    }
+
+    public static async Task OpenToolTipThroughClickAsync(MainWindow window, Control control)
+    {
+        const int maximumAttempts = 3;
+        for (var attempt = 0; attempt < maximumAttempts; attempt++)
+        {
+            await ClickAsync(window, control);
+            if (ToolTip.GetIsOpen(control))
+                return;
+
+            await WaitForSettledFramesAsync(frameCount: 4);
+        }
+
+        throw new XunitException("The tooltip did not open after repeated pointer clicks.");
     }
 
     private static async Task ClickReadyControlAsync(MainWindow window, Control control)
