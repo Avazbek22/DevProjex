@@ -126,7 +126,7 @@ internal static class UiTestDriver
         // teardown does not race app work that would still be running for a real user.
         await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
-        await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(30));
+        await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(10));
         await WaitForSettledFramesAsync(frameCount: 2);
         UntrackTopLevelWindow(window);
         if (cleanupAppData)
@@ -378,27 +378,48 @@ internal static class UiTestDriver
 
     public static async Task OpenToolTipThroughClickAsync(MainWindow window, Control control)
     {
-        const int maximumAttempts = 3;
-        for (var attempt = 0; attempt < maximumAttempts; attempt++)
-        {
-            await ClickAsync(window, control);
-            if (ToolTip.GetIsOpen(control))
-                return;
+        await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, control);
+        var clickPoint = FindPointerHitPoint(window, control);
 
-            await WaitForSettledFramesAsync(frameCount: 4);
-        }
-
-        // Some headless backends do not route pointer input to narrow status indicators.
-        ToolTip.SetIsOpen(control, true);
+        window.MouseMove(clickPoint, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 2);
-        Assert.True(ToolTip.GetIsOpen(control));
+        window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        await WaitForConditionAsync(
+            window,
+            () => ToolTip.GetIsOpen(control),
+            $"the tooltip for '{GetControlDebugName(control)}' to open through pointer input");
     }
 
-	public static Task WaitForPendingManualMarkOperationsAsync(MainWindow window) =>
-		GetRequiredPrivateField<PreviewSurfaceController>(
-			window,
-			"_previewSurfaceController")
-		.WaitForPendingManualMarkOperationsAsync();
+    private static Point FindPointerHitPoint(MainWindow window, Control control)
+    {
+        ReadOnlySpan<double> relativeCoordinates = [0.5, 0.25, 0.75, 0.125, 0.875];
+        foreach (var relativeY in relativeCoordinates)
+        {
+            foreach (var relativeX in relativeCoordinates)
+            {
+                var point = control.TranslatePoint(
+                    new Point(control.Bounds.Width * relativeX, control.Bounds.Height * relativeY),
+                    window);
+                if (point is not { } candidate)
+                    continue;
+
+                var hit = window.InputHitTest(candidate);
+                if (hit is Visual visual &&
+                    (ReferenceEquals(visual, control) || visual.GetVisualAncestors().Contains(control)))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        var center = GetControlCenter(control, window);
+        var centerHit = window.InputHitTest(center);
+        throw new XunitException(
+            $"No pointer-hit location was found for '{GetControlDebugName(control)}'. " +
+            $"Center hit: '{centerHit?.GetType().FullName ?? "none"}'.");
+    }
 
     private static async Task ClickReadyControlAsync(MainWindow window, Control control)
     {
@@ -844,25 +865,121 @@ internal static class UiTestDriver
 		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
 			window,
 			"PreviewTextControl");
-		var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
-		Assert.NotNull(document);
-		var lineNumber = 0;
-		var startColumn = -1;
-		for (var candidateLine = 1; candidateLine <= document!.LineCount; candidateLine++)
+		var scrollViewer = GetRequiredPreviewScrollViewer(window);
+		var contextPoint = default(Point);
+		var selected = false;
+		var attemptDiagnostics = new List<string>();
+		var startXCorrection = 0.0;
+		var endXCorrection = 0.0;
+		var startYCorrection = 0.0;
+		var endYCorrection = 0.0;
+		for (var attempt = 0; attempt < 8 && !selected; attempt++)
 		{
-			var candidateColumn = document.GetLineText(candidateLine).IndexOf(value, StringComparison.Ordinal);
-			if (candidateColumn < 0)
+			if (attempt > 0)
+			{
+				textControl.ClearSelection();
+				await WaitForSettledFramesAsync(frameCount: 4);
+			}
+
+			var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
+			Assert.NotNull(document);
+			var lineNumber = 0;
+			var startColumn = -1;
+			for (var candidateLine = 1; candidateLine <= document!.LineCount; candidateLine++)
+			{
+				var candidateColumn = document.GetLineText(candidateLine).IndexOf(value, StringComparison.Ordinal);
+				if (candidateColumn < 0)
+					continue;
+				lineNumber = candidateLine;
+				startColumn = candidateColumn;
+				break;
+			}
+			Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
+
+			var typeface = new Typeface(
+				textControl.TextFontFamily ?? FontFamily.Default,
+				FontStyle.Normal,
+				FontWeight.Normal);
+			var lineText = document.GetLineText(lineNumber);
+			var lineHeight = InvokeRequiredPrivateMethod<double>(textControl, "ResolveLineHeight");
+			var contentTopPadding = InvokeRequiredPrivateMethod<double>(textControl, "ResolveContentTopPadding");
+			var startDistance = InvokeRequiredPrivateMethod<double>(
+				textControl,
+				"ResolveDistanceFromColumn",
+				lineText,
+				startColumn,
+				typeface);
+			var endDistance = InvokeRequiredPrivateMethod<double>(
+				textControl,
+				"ResolveDistanceFromColumn",
+				lineText,
+				startColumn + value.Length,
+				typeface);
+			await EnsureHorizontalRangeVisibleAsync(
+				scrollViewer,
+				textControl.LeftPadding + startDistance,
+				textControl.LeftPadding + endDistance);
+			var localY = contentTopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2);
+			var start = Assert.IsType<Point>(textControl.TranslatePoint(
+				new Point(
+					textControl.LeftPadding + startDistance + startXCorrection,
+					localY + startYCorrection),
+				window));
+			var end = Assert.IsType<Point>(textControl.TranslatePoint(
+				new Point(
+					textControl.LeftPadding + endDistance + endXCorrection,
+					localY + endYCorrection),
+				window));
+
+			textControl.Focus();
+			window.MouseMove(start, RawInputModifiers.None);
+			window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+			window.MouseMove(end, RawInputModifiers.LeftMouseButton);
+			window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
+			selected = string.Equals(value, textControl.GetSelectedText(), StringComparison.Ordinal);
+			contextPoint = new Point((start.X + end.X) / 2, (start.Y + end.Y) / 2);
+			var hasActualSelection = textControl.TryGetSelectionRange(out var actualSelection);
+			attemptDiagnostics.Add(
+				$"attempt={attempt + 1}, target={lineNumber}:{startColumn}-{startColumn + value.Length}, " +
+				$"scroll={scrollViewer.Offset.X:0.###}/{scrollViewer.Offset.Y:0.###}, " +
+				$"controlOffset={textControl.HorizontalOffset:0.###}/{textControl.VerticalOffset:0.###}, " +
+				$"correction={startXCorrection:0.###}/{endXCorrection:0.###}/{startYCorrection:0.###}/{endYCorrection:0.###}, " +
+				$"window={start.X:0.###},{start.Y:0.###}-{end.X:0.###},{end.Y:0.###}, " +
+				$"actual={(hasActualSelection ? $"{actualSelection.StartLine}:{actualSelection.StartColumn}-{actualSelection.EndLine}:{actualSelection.EndColumn}" : "none")}, " +
+				$"text='{textControl.GetSelectedText()}'");
+			if (selected || !hasActualSelection)
 				continue;
-			lineNumber = candidateLine;
-			startColumn = candidateColumn;
-			break;
+
+			startYCorrection += (lineNumber - actualSelection.StartLine) * lineHeight;
+			endYCorrection += (lineNumber - actualSelection.EndLine) * lineHeight;
+			if (actualSelection.StartLine == lineNumber)
+			{
+				var actualStartDistance = InvokeRequiredPrivateMethod<double>(
+					textControl,
+					"ResolveDistanceFromColumn",
+					lineText,
+					actualSelection.StartColumn,
+					typeface);
+				startXCorrection += startDistance - actualStartDistance;
+			}
+			if (actualSelection.EndLine == lineNumber)
+			{
+				var actualEndDistance = InvokeRequiredPrivateMethod<double>(
+					textControl,
+					"ResolveDistanceFromColumn",
+					lineText,
+					actualSelection.EndColumn,
+					typeface);
+				endXCorrection += endDistance - actualEndDistance;
+			}
 		}
-		Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
-		SetPreviewSelection(
-			textControl,
-			new PreviewSelectionRange(lineNumber, startColumn, lineNumber, startColumn + value.Length));
-		Assert.Equal(value, textControl.GetSelectedText());
-		InvokeRequiredPrivateMethod(textControl, "OpenContextMenu");
+		Assert.True(
+			selected,
+			$"Expected exact pointer selection '{value}', actual '{textControl.GetSelectedText()}'. " +
+			string.Join(" | ", attemptDiagnostics));
+
+		window.MouseDown(contextPoint, MouseButton.Right, RawInputModifiers.RightMouseButton);
+		window.MouseUp(contextPoint, MouseButton.Right, RawInputModifiers.None);
 		await WaitForSettledFramesAsync(frameCount: 2);
 
 		var flyout = Assert.IsType<MenuFlyout>(textControl.ContextFlyout);
@@ -878,28 +995,29 @@ internal static class UiTestDriver
 		await WaitForSettledFramesAsync(frameCount: 2);
 	}
 
-	private static void SetPreviewSelection(
-		DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl textControl,
-		PreviewSelectionRange selection)
+	private static async Task EnsureHorizontalRangeVisibleAsync(
+		ScrollViewer scrollViewer,
+		double rangeLeft,
+		double rangeRight)
 	{
-		var positionType = textControl.GetType().GetNestedType(
-			"SelectionPosition",
-			BindingFlags.NonPublic);
-		Assert.NotNull(positionType);
-		var anchor = Activator.CreateInstance(positionType!, selection.StartLine, selection.StartColumn);
-		var active = Activator.CreateInstance(positionType!, selection.EndLine, selection.EndColumn);
-		Assert.NotNull(anchor);
-		Assert.NotNull(active);
-		var anchorField = textControl.GetType().GetField(
-			"_selectionAnchor",
-			BindingFlags.Instance | BindingFlags.NonPublic);
-		var activeField = textControl.GetType().GetField(
-			"_selectionActive",
-			BindingFlags.Instance | BindingFlags.NonPublic);
-		Assert.NotNull(anchorField);
-		Assert.NotNull(activeField);
-		anchorField!.SetValue(textControl, anchor);
-		activeField!.SetValue(textControl, active);
+		if (scrollViewer.Viewport.Width <= 0)
+			return;
+
+		const double viewportMargin = 24;
+		var offset = scrollViewer.Offset;
+		var targetX = offset.X;
+		if (rangeLeft < offset.X + viewportMargin)
+			targetX = rangeLeft - viewportMargin;
+		else if (rangeRight > offset.X + scrollViewer.Viewport.Width - viewportMargin)
+			targetX = rangeRight - scrollViewer.Viewport.Width + viewportMargin;
+
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		targetX = Math.Clamp(targetX, 0, maximumX);
+		if (Math.Abs(targetX - offset.X) <= 0.5)
+			return;
+
+		scrollViewer.Offset = new Vector(targetX, offset.Y);
+		await WaitForSettledFramesAsync(frameCount: 4);
 	}
 
 	public static async Task RequestManualSecretUnmarkThroughContextMenuAsync(MainWindow window)
