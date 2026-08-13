@@ -48,6 +48,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 	private readonly Func<CancellationToken, Task> _persistProjectProfile;
 	private readonly object _manualMarkOperationsSync = new();
 	private readonly HashSet<Task> _manualMarkOperations = [];
+	private readonly SemaphoreSlim _manualMarkMutationGate = new(1, 1);
 
     private CancellationTokenSource? _selectionMetricsCts;
     private DispatcherTimer? _selectionMetricsDebounceTimer;
@@ -170,6 +171,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
 			if (!ApplySessionOnlyManualMark(location, e.Value))
 				return;
+			await _persistProjectProfile(CancellationToken.None);
 			var mark = e.Persistent
 				? await _secretRedactionSession.CreatePersistentMarkedSecretAsync(
 					e.Value,
@@ -183,33 +185,39 @@ internal sealed class PreviewSurfaceController : IDisposable
 					CancellationToken.None);
 			if (mark is null)
 			{
-				await _persistProjectProfile(CancellationToken.None);
 				if (IsCurrentProject(operationProjectRoot))
 					await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
 				return;
 			}
 			if (_disposed || !IsCurrentProject(operationProjectRoot))
 				return;
-			var delta = PersistentSecretMarkDelta.Add(
-				mark,
-				_secretRedactionSession.PersistentMarksStoreRevision);
-			var promotion = _secretRedactionSession.TryPromoteSessionMarkToPendingPersistentMark(
-				operationProjectRoot,
-				location.RelativePath,
-				location.SourceOffset,
-				e.Value,
-				delta);
-			if (!promotion.Staged)
+			PersistentSecretMarkDelta delta;
+			PersistentMarkStageResult promotion;
+			await _manualMarkMutationGate.WaitAsync(CancellationToken.None);
+			try
 			{
-				if (!_disposed && IsCurrentProject(operationProjectRoot))
-					await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
-				return;
+				if (_disposed || !IsCurrentProject(operationProjectRoot))
+					return;
+				delta = PersistentSecretMarkDelta.Add(
+					mark,
+					_secretRedactionSession.PersistentMarksStoreRevision);
+				promotion = _secretRedactionSession.TryPromoteSessionMarkToPendingPersistentMark(
+					operationProjectRoot,
+					location.RelativePath,
+					location.SourceOffset,
+					e.Value,
+					delta);
 			}
+			finally
+			{
+				_manualMarkMutationGate.Release();
+			}
+			if (!promotion.Staged)
+				return;
 
 			PersistentSecretMarkWriteResult write;
 			try
 			{
-				await _persistProjectProfile(CancellationToken.None);
 				write = await _applyPersistentMarkDelta(delta);
 			}
 			catch
@@ -299,6 +307,12 @@ internal sealed class PreviewSurfaceController : IDisposable
 		}
 	}
 
+	private Task[] CapturePendingManualMarkOperations()
+	{
+		lock (_manualMarkOperationsSync)
+			return _manualMarkOperations.ToArray();
+	}
+
 	private void DowngradePersistentMarkToSession(
 		string projectRoot,
 		Guid operationId,
@@ -342,18 +356,11 @@ internal sealed class PreviewSurfaceController : IDisposable
 		string? operationProjectRoot = null;
 		try
 		{
+			var precedingOperations = CapturePendingManualMarkOperations();
 			operationProjectRoot = _projectRootProvider();
 			if (string.IsNullOrWhiteSpace(operationProjectRoot))
 				return;
 			PersistentSecretMarkId? persistentMarkId = e.PersistentMarkId;
-			if (persistentMarkId is null &&
-			    !string.IsNullOrWhiteSpace(e.SessionMarkId) &&
-			    _secretRedactionSession.TryResolvePromotedPersistentMarkId(
-				    e.SessionMarkId,
-				    out var promotedMarkId))
-			{
-				persistentMarkId = promotedMarkId;
-			}
 			if (persistentMarkId is null && !string.IsNullOrWhiteSpace(e.PersistentMarkHash))
 			{
 				if (!PersistentSecretIdentity.IsSupported(e.PersistentMarkHash) ||
@@ -376,18 +383,71 @@ internal sealed class PreviewSurfaceController : IDisposable
 				await _showErrorAsync(_localization["Error.Secret.MarkApplyFailed"]);
 				return;
 			}
-			var sessionRemoved = !string.IsNullOrWhiteSpace(e.SessionMarkId) &&
-			                     _secretRedactionSession.RemoveSessionMarkedSecret(e.SessionMarkId);
+			var sessionRemoved = false;
+			var waitsForPersistentAdd = persistentMarkId is not null;
 			PersistentSecretMarkDelta? pendingRemove = null;
 			var persistentStage = default(PersistentMarkStageResult);
-			if (persistentMarkId is { } markId)
+			await _manualMarkMutationGate.WaitAsync(CancellationToken.None);
+			try
 			{
+				if (persistentMarkId is null &&
+				    !string.IsNullOrWhiteSpace(e.SessionMarkId) &&
+				    _secretRedactionSession.TryResolvePromotedPersistentMarkId(
+					    e.SessionMarkId,
+					    out var promotedMarkId))
+				{
+					persistentMarkId = promotedMarkId;
+					waitsForPersistentAdd = true;
+				}
+				sessionRemoved = !string.IsNullOrWhiteSpace(e.SessionMarkId) &&
+				                 _secretRedactionSession.RemoveSessionMarkedSecret(e.SessionMarkId);
+			}
+			finally
+			{
+				_manualMarkMutationGate.Release();
+			}
+
+			if (persistentMarkId is null)
+			{
+				if (sessionRemoved)
+				{
+					_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+					_requestRedactionRefresh();
+				}
+				return;
+			}
+
+			if (waitsForPersistentAdd && precedingOperations.Length > 0)
+				await Task.WhenAll(precedingOperations);
+			if (_disposed || !IsCurrentProject(operationProjectRoot))
+				return;
+
+			await _manualMarkMutationGate.WaitAsync(CancellationToken.None);
+			try
+			{
+				if (_disposed || !IsCurrentProject(operationProjectRoot))
+					return;
+				if (!string.IsNullOrWhiteSpace(e.SessionMarkId))
+				{
+					if (_secretRedactionSession.TryResolvePromotedPersistentMarkId(
+					    e.SessionMarkId,
+					    out var promotedMarkId))
+					{
+						persistentMarkId = promotedMarkId;
+					}
+					sessionRemoved |= _secretRedactionSession.RemoveSessionMarkedSecret(e.SessionMarkId);
+				}
+
 				pendingRemove = PersistentSecretMarkDelta.Remove(
-					markId,
+					persistentMarkId.Value,
 					_secretRedactionSession.PersistentMarksStoreRevision);
 				persistentStage = _secretRedactionSession.StagePersistentMarkDelta(
 					operationProjectRoot,
 					pendingRemove);
+			}
+			finally
+			{
+				_manualMarkMutationGate.Release();
 			}
 			if (!persistentStage.Staged && !sessionRemoved)
 				return;

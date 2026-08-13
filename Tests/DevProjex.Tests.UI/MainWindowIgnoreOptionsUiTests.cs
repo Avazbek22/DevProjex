@@ -61,7 +61,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		             """;
 		await File.WriteAllTextAsync(
 			Path.Combine(project.RootPath, "src", "Secrets.cs"),
-			source.Replace("\n", "\r\n", StringComparison.Ordinal),
+			source.ReplaceLineEndings("\r\n"),
 			TestContext.Current.CancellationToken);
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
 		var observedLabels = new List<string>();
@@ -177,6 +177,151 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			toastItems.CollectionChanged -= toastChanged;
 			await UiTestDriver.CloseWindowAsync(window);
 		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_UnmarkDuringIdentityInitializationDoesNotPersistTheRemovedAnchor()
+	{
+		const string manualValue = "pending-identity-unmark-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "pending-identity-unmark");
+		var keyDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(keyDirectory);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+
+		var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		var lockPath = Path.Combine(keyDirectory, "secret-mark-hmac.key.lock");
+		FileStream? heldLock = new(
+			lockPath,
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(firstWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(firstWindow, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(firstWindow, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				firstWindow,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(firstWindow).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the source anchor to hide content while identity initialization is blocked");
+
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(firstWindow);
+			await UiTestDriver.WaitForConditionAsync(
+				firstWindow,
+				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(firstWindow).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the pending source anchor to be removed before promotion");
+		}
+		finally
+		{
+			heldLock?.Dispose();
+			heldLock = null;
+			await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+		}
+
+		var stored = await new ProjectProfileStore(() => appDataPath).LoadMarksAsync(
+			project.RootPath,
+			TestContext.Current.CancellationToken);
+		Assert.True(stored.Succeeded);
+		Assert.Empty(stored.Snapshot!.Marks);
+
+		var reopenedWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(reopenedWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(reopenedWindow, PreviewContentMode.Content);
+			Assert.Contains(
+				manualValue,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(reopenedWindow),
+				StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(reopenedWindow);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_UnmarkDuringPendingAddPreservesCausalStoreOrder()
+	{
+		const string manualValue = "pending-add-unmark-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "pending-add-unmark");
+		var storeDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(storeDirectory);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		using (var identityProvider = new PersistentSecretIdentityProvider(() => appDataPath))
+		{
+			Assert.Equal(
+				PersistentSecretIdentityAvailability.Ready,
+				await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		}
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		FileStream? heldLock = new(
+			Path.Combine(storeDirectory, "project-secret-marks.json.lock"),
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(window, manualValue);
+			var session = UiTestDriver.GetSecretRedactionSession(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetPendingPersistentMarkCount(session) == 1 &&
+				      !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					      manualValue,
+					      StringComparison.Ordinal),
+				"the source anchor to be promoted while its durable Add is blocked");
+
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(window);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			Assert.Equal(1, UiTestDriver.GetPendingPersistentMarkCount(session));
+			Assert.DoesNotContain(
+				manualValue,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+
+			heldLock.Dispose();
+			heldLock = null;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetPendingPersistentMarkCount(session) == 0 &&
+				      UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					      manualValue,
+					      StringComparison.Ordinal),
+				"the durable Add to finish before Remove is issued with its resulting revision");
+		}
+		finally
+		{
+			heldLock?.Dispose();
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+
+		var stored = await new ProjectProfileStore(() => appDataPath).LoadMarksAsync(
+			project.RootPath,
+			TestContext.Current.CancellationToken);
+		Assert.True(stored.Succeeded);
+		Assert.Empty(stored.Snapshot!.Marks);
 	}
 
 	[AvaloniaFact]

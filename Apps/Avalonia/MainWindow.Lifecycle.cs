@@ -19,7 +19,7 @@ public partial class MainWindow
 			await _previewSurfaceController.WaitForPendingManualMarkOperationsAsync();
 			_allowCloseAfterManualSecretMarkPersistence = true;
 			// Never re-enter Close while Avalonia is still dispatching the cancelled Closing event.
-			Dispatcher.Post(Close, DispatcherPriority.Background);
+			Dispatcher.Post(Close, DispatcherPriority.Send);
 			return;
 		}
 
