@@ -135,6 +135,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			$"const string X = \"{manualValue}\";\n",
 			TestContext.Current.CancellationToken);
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var observedToastMessages = new ConcurrentQueue<string>();
+		var toastItems = UiTestDriver.GetToastService(window).Items;
+		System.Collections.Specialized.NotifyCollectionChangedEventHandler toastChanged = (_, args) =>
+		{
+			if (args.NewItems is null)
+				return;
+			foreach (var toast in args.NewItems.OfType<ToastMessageViewModel>())
+				observedToastMessages.Enqueue(toast.Message);
+		};
+		toastItems.CollectionChanged += toastChanged;
 		try
 		{
 			await UiTestDriver.OpenPreviewAsync(window);
@@ -152,7 +162,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				"the repeated session mark to redact Preview");
 			Assert.Contains(
 				"Hidden in 1 places",
-				UiTestDriver.GetToastMessages(window));
+				observedToastMessages);
 
 			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
@@ -164,6 +174,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		}
 		finally
 		{
+			toastItems.CollectionChanged -= toastChanged;
 			await UiTestDriver.CloseWindowAsync(window);
 		}
 	}

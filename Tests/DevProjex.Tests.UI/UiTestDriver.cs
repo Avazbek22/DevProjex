@@ -952,25 +952,42 @@ internal static class UiTestDriver
 
 			startYCorrection += (lineNumber - actualSelection.StartLine) * lineHeight;
 			endYCorrection += (lineNumber - actualSelection.EndLine) * lineHeight;
-			if (actualSelection.StartLine == lineNumber)
+			var actualColumnSpan = actualSelection.EndColumn - actualSelection.StartColumn;
+			var pointerPixelSpan = end.X - start.X;
+			var calibratedFromPointer = actualSelection.StartLine == lineNumber &&
+			                            actualSelection.EndLine == lineNumber &&
+			                            actualColumnSpan > 0 &&
+			                            pointerPixelSpan > 0;
+			if (calibratedFromPointer)
 			{
-				var actualStartDistance = InvokeRequiredPrivateMethod<double>(
-					textControl,
-					"ResolveDistanceFromColumn",
-					lineText,
-					actualSelection.StartColumn,
-					typeface);
-				startXCorrection += startDistance - actualStartDistance;
+				// Calibrate from the pointer result itself. Headless Windows can resolve a fallback
+				// font differently from FormattedText while the real hit-test remains authoritative.
+				var pixelsPerColumn = pointerPixelSpan / actualColumnSpan;
+				startXCorrection += (startColumn - actualSelection.StartColumn) * pixelsPerColumn;
+				endXCorrection += (startColumn + value.Length - actualSelection.EndColumn) * pixelsPerColumn;
 			}
-			if (actualSelection.EndLine == lineNumber)
+			else
 			{
-				var actualEndDistance = InvokeRequiredPrivateMethod<double>(
-					textControl,
-					"ResolveDistanceFromColumn",
-					lineText,
-					actualSelection.EndColumn,
-					typeface);
-				endXCorrection += endDistance - actualEndDistance;
+				if (actualSelection.StartLine == lineNumber)
+				{
+					var actualStartDistance = InvokeRequiredPrivateMethod<double>(
+						textControl,
+						"ResolveDistanceFromColumn",
+						lineText,
+						actualSelection.StartColumn,
+						typeface);
+					startXCorrection += startDistance - actualStartDistance;
+				}
+				if (actualSelection.EndLine == lineNumber)
+				{
+					var actualEndDistance = InvokeRequiredPrivateMethod<double>(
+						textControl,
+						"ResolveDistanceFromColumn",
+						lineText,
+						actualSelection.EndColumn,
+						typeface);
+					endXCorrection += endDistance - actualEndDistance;
+				}
 			}
 		}
 		Assert.True(
@@ -990,7 +1007,8 @@ internal static class UiTestDriver
 		Assert.True(menuItem.IsVisible);
 		Assert.True(menuItem.IsEnabled);
 		for (var click = 0; click < clickCount; click++)
-			await RaiseMenuItemClickAsync(menuItem);
+			menuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		await WaitForSettledFramesAsync(frameCount: 4);
 		flyout.Hide();
 		await WaitForSettledFramesAsync(frameCount: 2);
 	}
@@ -1040,11 +1058,8 @@ internal static class UiTestDriver
 		await RaiseMenuItemClickAsync(remove);
 	}
 
-	public static IReadOnlyList<string> GetToastMessages(MainWindow window) =>
-		GetRequiredPrivateField<DevProjex.Avalonia.Services.ToastService>(window, "_toastService")
-			.Items
-			.Select(static toast => toast.Message)
-			.ToArray();
+	public static DevProjex.Avalonia.Services.ToastService GetToastService(MainWindow window) =>
+		GetRequiredPrivateField<DevProjex.Avalonia.Services.ToastService>(window, "_toastService");
 
 	public static string GetWindowAppDataPath(MainWindow window) =>
 		WindowAppDataPaths.TryGetValue(window, out var path)
