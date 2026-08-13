@@ -14,7 +14,7 @@ public sealed class SmartSecretsDetector(
 	ISecretDetector providerDetector,
 	SmartIgnoreService smartIgnore) : ISecretDetector
 {
-	internal const string StructuredRulesVersion = "smart-secrets-v2";
+	internal const string StructuredRulesVersion = "smart-secrets-v3";
 
 	public string RulesIdentity =>
 		$"{providerDetector.RulesIdentity}:{StructuredRulesVersion}";
@@ -23,7 +23,9 @@ public sealed class SmartSecretsDetector(
 		providerDetector.WarmUp(cancellationToken);
 
 	public bool ShouldInspectPath(string repositoryRelativePath) =>
-		providerDetector.ShouldInspectPath(repositoryRelativePath);
+		ResolveEligibility(
+			providerDetector.ShouldInspectPath(repositoryRelativePath),
+			repositoryRelativePath) != SecretInspectionEligibility.None;
 
 	public ISecretDetectionScope CreateScope(string projectRoot) =>
 		new Scope(
@@ -41,15 +43,59 @@ public sealed class SmartSecretsDetector(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken = default) =>
-		!ShouldInspectPath(repositoryRelativePath)
-			? []
-			: Combine(
-			providerDetector.Detect(repositoryRelativePath, content, cancellationToken),
-			StructuredSecretDetector.Detect(
+		Detect(repositoryRelativePath, content, new SecretFileInspectionBudget(), cancellationToken);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken = default) =>
+		DetectEligible(
+			providerDetector,
+			repositoryRelativePath,
+			content,
+			ResolveEligibility(
+				providerDetector.ShouldInspectPath(repositoryRelativePath),
+				repositoryRelativePath),
+			budget,
+			cancellationToken);
+
+	private static IReadOnlyList<DetectedSecret> DetectEligible(
+		ISecretDetector provider,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretInspectionEligibility eligibility,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
+	{
+		if (eligibility == SecretInspectionEligibility.None)
+			return [];
+		var providerFindings = (eligibility & SecretInspectionEligibility.Provider) != 0
+			? provider.Detect(repositoryRelativePath, content, budget, cancellationToken)
+			: [];
+		var structuredFindings = (eligibility & SecretInspectionEligibility.Structured) != 0
+			? StructuredSecretDetector.Detect(
 				repositoryRelativePath,
 				content,
 				SmartSecretStack.None,
-				cancellationToken));
+				budget,
+				cancellationToken)
+			: [];
+		budget.Checkpoint(cancellationToken);
+		return Combine(providerFindings, structuredFindings);
+	}
+
+	private static SecretInspectionEligibility ResolveEligibility(
+		bool providerEligible,
+		string repositoryRelativePath)
+	{
+		var eligibility = providerEligible
+			? SecretInspectionEligibility.Provider
+			: SecretInspectionEligibility.None;
+		if (StructuredSecretDetector.ShouldInspectPath(repositoryRelativePath))
+			eligibility |= SecretInspectionEligibility.Structured;
+		return eligibility;
+	}
 
 	private static IReadOnlyList<DetectedSecret> Combine(
 		IReadOnlyList<DetectedSecret> providerFindings,
@@ -97,30 +143,55 @@ public sealed class SmartSecretsDetector(
 		}
 
 		public bool ShouldInspectPath(string fullPath, string repositoryRelativePath) =>
-			providerScope.ShouldInspectPath(fullPath, repositoryRelativePath);
+			ResolveEligibility(
+				providerScope.ShouldInspectPath(fullPath, repositoryRelativePath),
+				repositoryRelativePath) != SecretInspectionEligibility.None;
 
 		public IReadOnlyList<DetectedSecret> Detect(
 			string fullPath,
 			string repositoryRelativePath,
 			ReadOnlySpan<char> content,
-			CancellationToken cancellationToken = default)
-		{
-			if (!ShouldInspectPath(fullPath, repositoryRelativePath))
-				return [];
-
-			var providerFindings = providerScope.Detect(
+			CancellationToken cancellationToken = default) =>
+			Detect(
 				fullPath,
 				repositoryRelativePath,
 				content,
+				new SecretFileInspectionBudget(),
 				cancellationToken);
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string fullPath,
+			string repositoryRelativePath,
+			ReadOnlySpan<char> content,
+			SecretFileInspectionBudget budget,
+			CancellationToken cancellationToken = default)
+		{
+			var eligibility = ResolveEligibility(
+				providerScope.ShouldInspectPath(fullPath, repositoryRelativePath),
+				repositoryRelativePath);
+			if (eligibility == SecretInspectionEligibility.None)
+				return [];
+
+			var providerFindings = (eligibility & SecretInspectionEligibility.Provider) != 0
+				? providerScope.Detect(
+					fullPath,
+					repositoryRelativePath,
+					content,
+					budget,
+					cancellationToken)
+				: [];
 			var fileKind = StructuredSecretDetector.ClassifyFile(repositoryRelativePath);
 			var stack = GetContext(fullPath, fileKind).Stack;
-			var structuredFindings = StructuredSecretDetector.Detect(
-				repositoryRelativePath,
-				content,
-				stack,
-				fileKind,
-				cancellationToken);
+			var structuredFindings = (eligibility & SecretInspectionEligibility.Structured) != 0
+				? StructuredSecretDetector.Detect(
+					repositoryRelativePath,
+					content,
+					stack,
+					fileKind,
+					budget,
+					cancellationToken)
+				: [];
+			budget.Checkpoint(cancellationToken);
 			return Combine(providerFindings, structuredFindings);
 		}
 
@@ -150,6 +221,14 @@ public sealed class SmartSecretsDetector(
 		private readonly record struct ScopeContext(
 			SmartSecretStack Stack,
 			string RulesIdentity);
+	}
+
+	[Flags]
+	private enum SecretInspectionEligibility : byte
+	{
+		None = 0,
+		Provider = 1 << 0,
+		Structured = 1 << 1
 	}
 }
 
@@ -211,6 +290,7 @@ internal static class SmartSecretStackResolver
 
 internal static class StructuredSecretDetector
 {
+	private const int BudgetCheckpointMask = 0x3FF;
 	private const int CredentialUriOrder = -400;
 	private const int AuthorizationHeaderOrder = -350;
 	private const int ConnectionPasswordOrder = -300;
@@ -254,16 +334,54 @@ internal static class StructuredSecretDetector
 		"https://"
 	];
 
+	internal static bool ShouldInspectPath(string path) =>
+		Path.GetFileName(path).Length > 0;
+
+	private sealed class BudgetedSecretFindingCollection(
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken) : ICollection<DetectedSecret>, IReadOnlyList<DetectedSecret>
+	{
+		private readonly List<DetectedSecret> _items = [];
+
+		public int Count => _items.Count;
+		public bool IsReadOnly => false;
+		public DetectedSecret this[int index] => _items[index];
+
+		public void Add(DetectedSecret item)
+		{
+			ArgumentNullException.ThrowIfNull(item);
+			budget.RegisterFinding(cancellationToken);
+			_items.Add(item);
+		}
+
+		public void Clear() => _items.Clear();
+		public bool Contains(DetectedSecret item) => _items.Contains(item);
+		public void CopyTo(DetectedSecret[] array, int arrayIndex) => _items.CopyTo(array, arrayIndex);
+		public bool Remove(DetectedSecret item) => _items.Remove(item);
+		public List<DetectedSecret>.Enumerator GetEnumerator() => _items.GetEnumerator();
+		IEnumerator<DetectedSecret> IEnumerable<DetectedSecret>.GetEnumerator() => GetEnumerator();
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+	}
+
 	public static IReadOnlyList<DetectedSecret> Detect(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
 		SmartSecretStack stack,
+		CancellationToken cancellationToken) =>
+		Detect(repositoryRelativePath, content, stack, new SecretFileInspectionBudget(), cancellationToken);
+
+	internal static IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SmartSecretStack stack,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken) =>
 		Detect(
 			repositoryRelativePath,
 			content,
 			stack,
 			ClassifyFile(repositoryRelativePath),
+			budget,
 			cancellationToken);
 
 	internal static IReadOnlyList<DetectedSecret> Detect(
@@ -271,37 +389,57 @@ internal static class StructuredSecretDetector
 		ReadOnlySpan<char> content,
 		SmartSecretStack stack,
 		StructuredSecretFileKind fileKind,
+		CancellationToken cancellationToken) =>
+		Detect(
+			repositoryRelativePath,
+			content,
+			stack,
+			fileKind,
+			new SecretFileInspectionBudget(),
+			cancellationToken);
+
+	internal static IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SmartSecretStack stack,
+		StructuredSecretFileKind fileKind,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
+		ArgumentNullException.ThrowIfNull(budget);
+		budget.Checkpoint(cancellationToken);
 		if (content.IsEmpty)
 			return [];
 
-		var findings = new List<DetectedSecret>();
-		DetectCredentialUris(content, findings, cancellationToken);
-		DetectConnectionStrings(content, findings, cancellationToken);
+		var findings = new BudgetedSecretFindingCollection(budget, cancellationToken);
+		DetectCredentialUris(content, findings, budget, cancellationToken);
+		budget.Checkpoint(cancellationToken);
+		DetectConnectionStrings(content, findings, budget, cancellationToken);
+		budget.Checkpoint(cancellationToken);
 
 		switch (fileKind)
 		{
 			case StructuredSecretFileKind.Environment:
-				DetectEnvironmentAssignments(content, stack, findings, cancellationToken);
+				DetectEnvironmentAssignments(content, stack, findings, budget, cancellationToken);
 				break;
 			case StructuredSecretFileKind.Container:
-				DetectContainerAssignments(content, stack, findings, cancellationToken);
+				DetectContainerAssignments(content, stack, findings, budget, cancellationToken);
 				break;
 			case StructuredSecretFileKind.HttpRequest:
-				DetectAuthorizationHeaders(content, findings, cancellationToken);
+				DetectAuthorizationHeaders(content, findings, budget, cancellationToken);
 				break;
 			case StructuredSecretFileKind.PgPass:
-				DetectPgPassPasswords(content, findings, cancellationToken);
+				DetectPgPassPasswords(content, findings, budget, cancellationToken);
 				break;
 			case StructuredSecretFileKind.Netrc:
-				DetectNetrcPasswords(content, findings, cancellationToken);
+				DetectNetrcPasswords(content, findings, budget, cancellationToken);
 				break;
 			case not StructuredSecretFileKind.None:
-				DetectConfigurationValues(content, fileKind, stack, findings, cancellationToken);
+				DetectConfigurationValues(content, fileKind, stack, findings, budget, cancellationToken);
 				break;
 		}
 
+		budget.Checkpoint(cancellationToken);
 		return findings;
 	}
 
@@ -316,15 +454,17 @@ internal static class StructuredSecretDetector
 	private static void DetectCredentialUris(
 		ReadOnlySpan<char> content,
 		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
+		var checkpointCounter = 0;
 		for (var schemeIndex = 0; schemeIndex < CredentialSchemes.Length; schemeIndex++)
 		{
 			var scheme = CredentialSchemes[schemeIndex];
 			var searchStart = 0;
 			while (searchStart <= content.Length - scheme.Length)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
+				CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 				var relativeSchemeStart = content[searchStart..].IndexOf(
 					scheme.AsSpan(),
 					StringComparison.OrdinalIgnoreCase);
@@ -332,7 +472,11 @@ internal static class StructuredSecretDetector
 					break;
 
 				var authorityStart = searchStart + relativeSchemeStart + scheme.Length;
-				var authorityEnd = FindUriAuthorityEnd(content, authorityStart);
+				var authorityEnd = FindUriAuthorityEnd(
+					content,
+					authorityStart,
+					budget,
+					cancellationToken);
 				var authority = content[authorityStart..authorityEnd];
 				var at = authority.LastIndexOf('@');
 				if (at > 0)
@@ -356,12 +500,18 @@ internal static class StructuredSecretDetector
 		}
 	}
 
-	private static int FindUriAuthorityEnd(ReadOnlySpan<char> content, int start)
+	private static int FindUriAuthorityEnd(
+		ReadOnlySpan<char> content,
+		int start,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
 	{
 		var end = start;
 		var inTemplate = false;
 		while (end < content.Length)
 		{
+			if (((end - start) & BudgetCheckpointMask) == 0)
+				budget.Checkpoint(cancellationToken);
 			var character = content[end];
 			if (!inTemplate && end + 1 < content.Length &&
 			    character == '{' && content[end + 1] == '{')
@@ -388,12 +538,14 @@ internal static class StructuredSecretDetector
 	private static void DetectConnectionStrings(
 		ReadOnlySpan<char> content,
 		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 		var nextLineStart = 0;
+		var checkpointCounter = 0;
 		while (TryReadLine(content, ref nextLineStart, out var line, out var lineStart))
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			if (!LooksLikeConnectionString(line))
 				continue;
 
@@ -462,12 +614,14 @@ internal static class StructuredSecretDetector
 		ReadOnlySpan<char> content,
 		SmartSecretStack stack,
 		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 		var nextLineStart = 0;
+		var checkpointCounter = 0;
 		while (TryReadLine(content, ref nextLineStart, out var line, out var lineStart))
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			var trimmedOffset = IndexOfFirstNonWhitespace(line);
 			if (trimmedOffset < 0 || line[trimmedOffset] == '#')
 				continue;
@@ -497,12 +651,14 @@ internal static class StructuredSecretDetector
 		ReadOnlySpan<char> content,
 		SmartSecretStack stack,
 		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 		var nextLineStart = 0;
+		var checkpointCounter = 0;
 		while (TryReadLine(content, ref nextLineStart, out var line, out var lineStart))
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			var cursor = IndexOfFirstNonWhitespace(line);
 			if (cursor < 0 || line[cursor] == '#')
 				continue;
@@ -532,7 +688,9 @@ internal static class StructuredSecretDetector
 					lineStart,
 					firstKeyStart,
 					stack,
-					findings);
+					findings,
+					budget,
+					cancellationToken);
 				continue;
 			}
 
@@ -563,10 +721,14 @@ internal static class StructuredSecretDetector
 		int lineStart,
 		int cursor,
 		SmartSecretStack stack,
-		ICollection<DetectedSecret> findings)
+		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
 	{
+		var checkpointCounter = 0;
 		while (cursor < line.Length)
 		{
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			while (cursor < line.Length && char.IsWhiteSpace(line[cursor]))
 				cursor++;
 			var keyStart = cursor;
@@ -639,12 +801,14 @@ internal static class StructuredSecretDetector
 	private static void DetectAuthorizationHeaders(
 		ReadOnlySpan<char> content,
 		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 		var nextLineStart = 0;
+		var checkpointCounter = 0;
 		while (TryReadLine(content, ref nextLineStart, out var line, out var lineStart))
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			var colon = line.IndexOf(':');
 			if (colon <= 0)
 				continue;
@@ -699,12 +863,14 @@ internal static class StructuredSecretDetector
 	private static void DetectPgPassPasswords(
 		ReadOnlySpan<char> content,
 		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 		var nextLineStart = 0;
+		var checkpointCounter = 0;
 		while (TryReadLine(content, ref nextLineStart, out var line, out var lineStart))
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			var first = IndexOfFirstNonWhitespace(line);
 			if (first < 0 || line[first] == '#')
 				continue;
@@ -745,12 +911,14 @@ internal static class StructuredSecretDetector
 	private static void DetectNetrcPasswords(
 		ReadOnlySpan<char> content,
 		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 		var nextLineStart = 0;
+		var checkpointCounter = 0;
 		while (TryReadLine(content, ref nextLineStart, out var line, out var lineStart))
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			var cursor = 0;
 			while (TryReadNetrcToken(line, ref cursor, out var token))
 			{
@@ -815,18 +983,20 @@ internal static class StructuredSecretDetector
 		StructuredSecretFileKind fileKind,
 		SmartSecretStack stack,
 		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 		if (fileKind == StructuredSecretFileKind.Xml)
 		{
-			DetectXmlConfigurationValues(content, stack, findings, cancellationToken);
+			DetectXmlConfigurationValues(content, stack, findings, budget, cancellationToken);
 			return;
 		}
 
 		var nextLineStart = 0;
+		var checkpointCounter = 0;
 		while (TryReadLine(content, ref nextLineStart, out var line, out var lineStart))
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			var position = 0;
 			while (position < line.Length)
 			{
@@ -856,17 +1026,23 @@ internal static class StructuredSecretDetector
 		ReadOnlySpan<char> content,
 		SmartSecretStack stack,
 		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 		var searchStart = 0;
+		var checkpointCounter = 0;
 		while (searchStart < content.Length)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			var relativeTagStart = content[searchStart..].IndexOf('<');
 			if (relativeTagStart < 0)
 				break;
 			var tagStart = searchStart + relativeTagStart;
-			var tagEnd = FindXmlTagEnd(content, tagStart + 1);
+			var tagEnd = FindXmlTagEnd(
+				content,
+				tagStart + 1,
+				budget,
+				cancellationToken);
 			if (tagEnd < 0)
 				break;
 
@@ -882,7 +1058,12 @@ internal static class StructuredSecretDetector
 			while (cursor < tag.Length && IsXmlNameCharacter(tag[cursor]))
 				cursor++;
 			var elementName = tag[elementNameStart..cursor];
-			var attributes = ParseXmlAttributes(tag, tagStart + 1, cursor);
+			var attributes = ParseXmlAttributes(
+				tag,
+				tagStart + 1,
+				cursor,
+				budget,
+				cancellationToken);
 			var elementIsSensitive = IsSensitiveKey(elementName, stack);
 			var keyAttributeIsSensitive = false;
 			foreach (var attribute in attributes)
@@ -937,11 +1118,17 @@ internal static class StructuredSecretDetector
 		}
 	}
 
-	private static int FindXmlTagEnd(ReadOnlySpan<char> content, int start)
+	private static int FindXmlTagEnd(
+		ReadOnlySpan<char> content,
+		int start,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
 	{
 		var quote = '\0';
 		for (var index = start; index < content.Length; index++)
 		{
+			if (((index - start) & BudgetCheckpointMask) == 0)
+				budget.Checkpoint(cancellationToken);
 			var character = content[index];
 			if (quote != '\0')
 			{
@@ -960,12 +1147,16 @@ internal static class StructuredSecretDetector
 	private static IReadOnlyList<XmlAttributeSpan> ParseXmlAttributes(
 		ReadOnlySpan<char> tag,
 		int contentOffset,
-		int start)
+		int start,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
 	{
 		var attributes = new List<XmlAttributeSpan>();
 		var cursor = start;
+		var checkpointCounter = 0;
 		while (cursor < tag.Length)
 		{
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
 			while (cursor < tag.Length && (char.IsWhiteSpace(tag[cursor]) || tag[cursor] == '/'))
 				cursor++;
 			var nameStart = cursor;
@@ -1368,6 +1559,15 @@ internal static class StructuredSecretDetector
 		line = content[lineStart..contentEnd];
 		nextLineStart = relativeEnd < 0 ? content.Length + 1 : lineEnd + 1;
 		return true;
+	}
+
+	private static void CheckpointPeriodically(
+		ref int counter,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
+	{
+		if ((counter++ & BudgetCheckpointMask) == 0)
+			budget.Checkpoint(cancellationToken);
 	}
 
 	private static ReadOnlySpan<char> TrimKey(ReadOnlySpan<char> key)

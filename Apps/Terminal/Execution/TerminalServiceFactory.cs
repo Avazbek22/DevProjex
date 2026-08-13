@@ -41,8 +41,12 @@ public sealed class TerminalServiceFactory(
 		var selectionService = new FilterOptionSelectionService();
 		var treeExport = new TreeExportService();
 		var contentAnalyzer = new FileContentAnalyzer();
+		var localProfiles = new ProjectProfileStore(resolvedAppDataPathProvider);
+		var persistentSecretIdentity = new PersistentSecretIdentityProvider(resolvedAppDataPathProvider);
 		var secretRedactionSession = new SecretRedactionSession(
-			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore));
+			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore),
+			localProfiles,
+			persistentSecretIdentity);
 		var codeCompressionSession = CodeCompressionFactory.CreateSession();
 		var analysis = new ProjectAnalysisService(
 			scanOptions,
@@ -66,7 +70,6 @@ public sealed class TerminalServiceFactory(
 			contentAnalyzer,
 			secretRedactionSession,
 			codeCompressionSession);
-		var localProfiles = new ProjectProfileStore(resolvedAppDataPathProvider);
 		var portableProfiles = new PortableProjectProfileService();
 		var selectionResolver = new ProjectSelectionResolver(
 			localProfiles,

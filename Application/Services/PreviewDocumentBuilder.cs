@@ -230,7 +230,8 @@ public sealed class PreviewDocumentBuilder(
                     sectionStartLine,
                     builder.LineCount,
                     sectionStartLine,
-                    sectionStartLine + 2));
+                    sectionStartLine + 2,
+                    SourcePath: file));
                 continue;
             }
 
@@ -242,7 +243,8 @@ public sealed class PreviewDocumentBuilder(
                     sectionStartLine,
                     builder.LineCount,
                     sectionStartLine,
-                    sectionStartLine + 2));
+                    sectionStartLine + 2,
+                    SourcePath: file));
                 continue;
             }
 
@@ -254,7 +256,8 @@ public sealed class PreviewDocumentBuilder(
                     sectionStartLine,
                     builder.LineCount,
                     sectionStartLine,
-                    sectionStartLine + 2));
+                    sectionStartLine + 2,
+                    SourcePath: file));
                 continue;
             }
 
@@ -278,7 +281,8 @@ public sealed class PreviewDocumentBuilder(
                     sectionStartLine,
                     builder.LineCount,
                     sectionStartLine,
-                    sectionStartLine + 2));
+                    sectionStartLine + 2,
+                    SourcePath: file));
                 continue;
             }
 
@@ -314,7 +318,8 @@ public sealed class PreviewDocumentBuilder(
                 builder.LineCount,
                 sectionStartLine,
                 sectionStartLine + 2,
-				coordinateMap));
+				coordinateMap,
+				file));
         }
 
         if (anyWritten && trimTrailingEstimatedLine)

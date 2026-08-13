@@ -18,7 +18,10 @@ namespace DevProjex.Application.Services;
 /// Operations complete synchronously; ValueTask avoids one completed Task allocation
 /// per file while the caller owns bounded parallel scheduling.
 /// </summary>
-public sealed class FileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileContentAnalyzer
+public sealed class FileContentAnalyzer :
+	IFileContentAnalyzer,
+	IPrewarmFileContentAnalyzer,
+	ICoherentFileContentAnalyzer
 {
 	// 512 bytes is sufficient - all binary formats have null bytes in first 512 bytes
 	private const int BinaryCheckBufferSize = 512;
@@ -101,6 +104,12 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileCont
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default) =>
 		ValueTask.FromResult(ReadFactWithIdentitySync(path, maxSizeForFullRead, cancellationToken).Fact);
+
+	ValueTask<IdentifiedContentReadFact> ICoherentFileContentAnalyzer.ReadFactWithIdentityAsync(
+		string path,
+		long maximumReadBytes,
+		CancellationToken cancellationToken) =>
+		ValueTask.FromResult(ReadFactWithIdentitySync(path, maximumReadBytes, cancellationToken));
 
 	/// <inheritdoc />
 	public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
@@ -220,9 +229,16 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileCont
 		string path,
 		long maximumBytes,
 		CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(OpenCompleteTextBufferSync(path, maximumBytes, cancellationToken));
+		ValueTask.FromResult(OpenCompleteTextBufferWithIdentitySync(path, maximumBytes, cancellationToken).Buffer);
 
-	private ICompleteTextFileBuffer OpenCompleteTextBufferSync(
+	ValueTask<IdentifiedCompleteTextFileBuffer>
+		ICoherentFileContentAnalyzer.OpenCompleteTextBufferWithIdentityAsync(
+			string path,
+			long maximumBytes,
+			CancellationToken cancellationToken) =>
+		ValueTask.FromResult(OpenCompleteTextBufferWithIdentitySync(path, maximumBytes, cancellationToken));
+
+	private IdentifiedCompleteTextFileBuffer OpenCompleteTextBufferWithIdentitySync(
 		string path,
 		long maximumBytes,
 		CancellationToken cancellationToken)
@@ -233,7 +249,11 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileCont
 		try
 		{
 			if (HasKnownBinaryExtension(path))
-				return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary);
+			{
+				return new IdentifiedCompleteTextFileBuffer(
+					new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary),
+					null);
+			}
 
 			using var stream = _openSequentialRead(
 				path,
@@ -242,20 +262,30 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileCont
 				false);
 			var sizeBytes = stream.Length;
 			if (sizeBytes == 0)
-				return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Text);
+			{
+				return IdentifiedBuffer(
+					stream,
+					new ClassifiedCompleteTextFileBuffer(FileContentClassification.Text));
+			}
 
 			var bomEncoding = DetectBomEncoding(stream, cancellationToken);
 			var encoding = bomEncoding ?? StrictUtf8;
 			if (!CheckForNullBytes(stream, cancellationToken))
-				return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary, sizeBytes);
+			{
+				return IdentifiedBuffer(
+					stream,
+					new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary, sizeBytes));
+			}
 			// The scan limit is a text-buffer bound, not a project-copy size limit.
 			// Classify known and null-bearing binaries first so large binary assets still
 			// pass through folder and ZIP exports unchanged.
 			if (sizeBytes > maximumBytes || sizeBytes > int.MaxValue)
 			{
-				return new ClassifiedCompleteTextFileBuffer(
-					FileContentClassification.TooLarge,
-					sizeBytes);
+				return IdentifiedBuffer(
+					stream,
+					new ClassifiedCompleteTextFileBuffer(
+						FileContentClassification.TooLarge,
+						sizeBytes));
 			}
 
 			var capacity = Math.Max(1, encoding.GetMaxCharCount(checked((int)sizeBytes)));
@@ -310,12 +340,16 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileCont
 				throw new IOException("The file changed while its text buffer was being read.");
 			ContentPipelineDiagnostics.RecordFullFileRead(sizeBytes);
 			if (buffer.AsSpan(0, written).Contains('\0'))
-				return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary, sizeBytes);
+			{
+				return IdentifiedBuffer(
+					stream,
+					new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary, sizeBytes));
+			}
 
 			var result = new PooledCompleteTextFileBuffer(buffer, written, sizeBytes);
 			buffer = null;
 			written = 0;
-			return result;
+			return IdentifiedBuffer(stream, result);
 		}
 		catch (OperationCanceledException)
 		{
@@ -323,27 +357,27 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileCont
 		}
 		catch (UnauthorizedAccessException)
 		{
-			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.AccessDenied);
+			return UnidentifiedBuffer(FileContentClassification.AccessDenied);
 		}
 		catch (FileNotFoundException)
 		{
-			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Missing);
+			return UnidentifiedBuffer(FileContentClassification.Missing);
 		}
 		catch (DirectoryNotFoundException)
 		{
-			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Missing);
+			return UnidentifiedBuffer(FileContentClassification.Missing);
 		}
 		catch (DecoderFallbackException)
 		{
-			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.UnsupportedEncoding);
+			return UnidentifiedBuffer(FileContentClassification.UnsupportedEncoding);
 		}
 		catch (SecurityException)
 		{
-			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.AccessDenied);
+			return UnidentifiedBuffer(FileContentClassification.AccessDenied);
 		}
 		catch (IOException)
 		{
-			return new ClassifiedCompleteTextFileBuffer(FileContentClassification.Unreadable);
+			return UnidentifiedBuffer(FileContentClassification.Unreadable);
 		}
 		finally
 		{
@@ -355,6 +389,15 @@ public sealed class FileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileCont
 			}
 		}
 	}
+
+	private static IdentifiedCompleteTextFileBuffer IdentifiedBuffer(
+		FileStream stream,
+		ICompleteTextFileBuffer buffer) =>
+		new(buffer, FileContentIdentity.TryCapture(stream));
+
+	private static IdentifiedCompleteTextFileBuffer UnidentifiedBuffer(
+		FileContentClassification classification) =>
+		new(new ClassifiedCompleteTextFileBuffer(classification), null);
 
 	private static int GetPreambleLength(Encoding? bomEncoding)
 	{

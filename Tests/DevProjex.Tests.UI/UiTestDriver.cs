@@ -5,6 +5,7 @@ using DevProjex.Application.Context;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
+using DevProjex.Application.Secrets;
 using DevProjex.Kernel.Contracts;
 using System.Globalization;
 using System.Reflection;
@@ -748,6 +749,107 @@ internal static class UiTestDriver
         Assert.NotNull(document);
         return PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
     }
+
+	public static async Task<(string RelativePath, int SourceOffset)> RequestPersistentSecretMarkAsync(
+		MainWindow window,
+		string value)
+	{
+		var viewModel = GetViewModel(window);
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var document = textControl.Document ?? viewModel.PreviewDocument;
+		Assert.NotNull(document);
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(value, out var markedValue, out _));
+		var selection = default(PreviewSelectionRange);
+		var found = false;
+		for (var lineNumber = 1; lineNumber <= document!.LineCount; lineNumber++)
+		{
+			var column = document.GetLineText(lineNumber).IndexOf(value, StringComparison.Ordinal);
+			if (column < 0)
+				continue;
+			selection = new PreviewSelectionRange(
+				lineNumber,
+				column,
+				lineNumber,
+				column + value.Length);
+			found = true;
+			break;
+		}
+		Assert.True(found, "The value to mark was not found in the current preview document.");
+
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(window, "_previewSurfaceController");
+		var request = new DevProjex.Avalonia.Controls.PreviewManualSecretMarkRequestedEventArgs(
+			markedValue,
+			selection,
+			persistent: true);
+		var resolve = typeof(PreviewSurfaceController).GetMethod(
+			"TryResolveManualMarkLocation",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(resolve);
+		object?[] resolveArguments = [document, request, null];
+		Assert.True(Assert.IsType<bool>(resolve!.Invoke(controller, resolveArguments)));
+		Assert.NotNull(resolveArguments[2]);
+		var location = resolveArguments[2]!;
+		var relativePath = Assert.IsType<string>(location.GetType().GetProperty("RelativePath")?.GetValue(location));
+		var sourceOffset = Assert.IsType<int>(location.GetType().GetProperty("SourceOffset")?.GetValue(location));
+		var handler = typeof(PreviewSurfaceController).GetMethod(
+			"OnManualSecretMarkRequested",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(handler);
+		await window.Dispatcher.InvokeAsync(
+			() => handler!.Invoke(
+				controller,
+				[
+					textControl,
+					request
+				]),
+			DispatcherPriority.Normal);
+		return (relativePath, sourceOffset);
+	}
+
+	public static void OverridePreviewErrorHandler(
+		MainWindow window,
+		Func<string, Task> handler)
+	{
+		ArgumentNullException.ThrowIfNull(handler);
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(
+			window,
+			"_previewSurfaceController");
+		var field = typeof(PreviewSurfaceController).GetField(
+			"_showErrorAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		field!.SetValue(controller, handler);
+	}
+
+	public static void OverridePersistentSecretMarkDeltaHandler(
+		MainWindow window,
+		Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> handler)
+	{
+		ArgumentNullException.ThrowIfNull(handler);
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(
+			window,
+			"_previewSurfaceController");
+		var field = typeof(PreviewSurfaceController).GetField(
+			"_applyPersistentMarkDelta",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		field!.SetValue(controller, handler);
+	}
+
+	public static void SetCurrentProjectPath(MainWindow window, string projectPath) =>
+		SetRequiredPrivateField(window, "_currentPath", projectPath);
+
+	public static string RedactFileWithCurrentSession(MainWindow window, string filePath)
+	{
+		var session = GetRequiredPrivateField<SecretRedactionSession>(window, "_secretRedactionSession");
+		var projectRoot = GetRequiredPrivateField<string>(window, "_currentPath");
+		var scope = session.BeginOutput(projectRoot, [filePath]);
+		var result = scope.Redact(filePath, File.ReadAllText(filePath));
+		scope.Complete();
+		return result.Text;
+	}
 
     public static string ComputeVisibleStickyHeaderCopyPayload(MainWindow window)
     {

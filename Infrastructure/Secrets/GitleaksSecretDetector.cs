@@ -213,16 +213,28 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	public IReadOnlyList<DetectedSecret> Detect(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default) =>
+		Detect(
+			repositoryRelativePath,
+			content,
+			new SecretFileInspectionBudget(),
+			cancellationToken);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
-		cancellationToken.ThrowIfCancellationRequested();
+		ArgumentNullException.ThrowIfNull(budget);
+		budget.Checkpoint(cancellationToken);
 		if (content.Length == 0)
 			return [];
 
 		try
 		{
-			return DetectCore(repositoryRelativePath, content, cancellationToken);
+			return DetectCore(repositoryRelativePath, content, budget, cancellationToken);
 		}
 		catch (SecretDetectionException)
 		{
@@ -239,6 +251,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private IReadOnlyList<DetectedSecret> DetectCore(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 
@@ -253,7 +266,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		foreach (var ruleOrder in EnumerateCandidateRuleOrders(candidateRules, configuration.Rules.Count))
 		{
 			var rule = configuration.Rules[ruleOrder];
-			cancellationToken.ThrowIfCancellationRequested();
+			budget.Checkpoint(cancellationToken);
 			if (rule.ContentRegex is null)
 				continue;
 			if (rule.Id.Equals(GenericApiKeyRuleId, StringComparison.Ordinal) &&
@@ -272,7 +285,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				var contentRegex = rule.ContentRegex.Value;
 				foreach (var valueMatch in contentRegex.EnumerateMatches(content))
 				{
-					cancellationToken.ThrowIfCancellationRequested();
+					budget.Checkpoint(cancellationToken);
 					// ValueMatch deliberately omits capture groups. Re-running the expression over
 					// the already bounded full-match slice keeps the full file allocation-free while
 					// preserving the reviewed Gitleaks secretGroup semantics.
@@ -300,6 +313,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 						continue;
 					}
 
+					budget.RegisterFinding(cancellationToken);
 					findings.Add(new DetectedSecret(
 						rule.Id,
 						checked(valueMatch.Index + secretGroup.Index),
@@ -316,6 +330,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			}
 		}
 
+		budget.Checkpoint(cancellationToken);
 		return findings;
 	}
 

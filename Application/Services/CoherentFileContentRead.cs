@@ -59,6 +59,10 @@ internal readonly record struct IdentifiedContentReadFact(
 		new(new ContentReadFact(null, classification, null, null), null);
 }
 
+internal readonly record struct IdentifiedCompleteTextFileBuffer(
+	ICompleteTextFileBuffer Buffer,
+	FileContentIdentity? Identity);
+
 internal readonly record struct BudgetedContentReadResult(
 	ContentReadFact Fact,
 	FileContentIdentity? Identity,
@@ -79,5 +83,22 @@ internal interface IPrewarmFileContentAnalyzer
 		long maximumReadBytes,
 		WeightedByteBudget byteBudget,
 		SemaphoreSlim decodeScratchGate,
+		CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Internal file-reading contract for consumers whose cache metadata must describe the same
+/// handle that supplied the inspected bytes.
+/// </summary>
+internal interface ICoherentFileContentAnalyzer
+{
+	ValueTask<IdentifiedContentReadFact> ReadFactWithIdentityAsync(
+		string path,
+		long maximumReadBytes,
+		CancellationToken cancellationToken = default);
+
+	ValueTask<IdentifiedCompleteTextFileBuffer> OpenCompleteTextBufferWithIdentityAsync(
+		string path,
+		long maximumBytes,
 		CancellationToken cancellationToken = default);
 }

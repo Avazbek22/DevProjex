@@ -41,9 +41,11 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly Func<string, Task> _setClipboardTextAsync;
     private readonly Func<string, Task> _showErrorAsync;
 	private readonly Func<ContentTransformationContext?> _transformationContextProvider;
+	private readonly Func<string?> _projectRootProvider;
 	private readonly Action _requestRedactionRefresh;
 	private readonly Func<bool> _ensureHideSecretsEnabled;
-	private readonly Action _persistProjectProfile;
+	private readonly Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> _applyPersistentMarkDelta;
+	private readonly Func<CancellationToken, Task> _persistProjectProfile;
 
     private CancellationTokenSource? _selectionMetricsCts;
     private DispatcherTimer? _selectionMetricsDebounceTimer;
@@ -72,11 +74,13 @@ internal sealed class PreviewSurfaceController : IDisposable
         PreviewWorkspacePipeline previewPipeline,
         Func<bool> ensureClipboardOutputReady,
         Func<string, Task> setClipboardTextAsync,
-        Func<string, Task> showErrorAsync,
+		Func<string, Task> showErrorAsync,
+		Func<string?> projectRootProvider,
 		Func<ContentTransformationContext?> transformationContextProvider,
 		Action requestRedactionRefresh,
 		Func<bool> ensureHideSecretsEnabled,
-		Action persistProjectProfile)
+		Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> applyPersistentMarkDelta,
+		Func<CancellationToken, Task> persistProjectProfile)
     {
         _window = window;
         _viewModel = viewModel;
@@ -93,10 +97,12 @@ internal sealed class PreviewSurfaceController : IDisposable
         _previewPipeline = previewPipeline;
         _ensureClipboardOutputReady = ensureClipboardOutputReady;
         _setClipboardTextAsync = setClipboardTextAsync;
-        _showErrorAsync = showErrorAsync;
+		_showErrorAsync = showErrorAsync;
+		_projectRootProvider = projectRootProvider;
 		_transformationContextProvider = transformationContextProvider;
 		_requestRedactionRefresh = requestRedactionRefresh;
 		_ensureHideSecretsEnabled = ensureHideSecretsEnabled;
+		_applyPersistentMarkDelta = applyPersistentMarkDelta;
 		_persistProjectProfile = persistProjectProfile;
 
         controls.TextControl.VerticalOffset =
@@ -127,55 +133,205 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_requestRedactionRefresh();
 	}
 
-	private void OnManualSecretMarkRequested(
+	private async void OnManualSecretMarkRequested(
 		object? sender,
 		PreviewManualSecretMarkRequestedEventArgs e)
 	{
-		var document = _controls.TextControl.Document ?? _viewModel.PreviewDocument;
-		if (document is null || !TryResolveManualMarkLocation(document, e, out var location))
-			return;
+		string? operationProjectRoot = null;
+		try
+		{
+			operationProjectRoot = _projectRootProvider();
+			var document = _controls.TextControl.Document ?? _viewModel.PreviewDocument;
+			if (document is null || string.IsNullOrWhiteSpace(operationProjectRoot) ||
+			    !TryResolveManualMarkLocation(document, e, out var location))
+				return;
 
-		var changed = e.Persistent
-			? _secretRedactionSession.AddMarkedSecret(
-				new MarkedSecretProfileEntry(e.Value.Hash, location.Key, e.Value.Length))
-			: _secretRedactionSession.AddSessionMarkedSecret(
-				location.RelativePath,
-				location.SourceOffset,
-				e.Value);
-		if (!changed && !e.Persistent)
-			return;
+			if (!e.Persistent)
+			{
+				ApplySessionOnlyManualMark(location, e.Value);
+				return;
+			}
 
-		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
-		if (e.Persistent)
-			_pendingMarkedSecretHash = e.Value.Hash;
-		var hideSecretsChanged = _ensureHideSecretsEnabled();
-		if (e.Persistent)
-			_persistProjectProfile();
-		if (!hideSecretsChanged)
+			if (!_secretRedactionSession.TryCreatePersistentMarkedSecret(
+			    e.Value,
+			    location.Key,
+			    out var mark))
+			{
+				ApplySessionOnlyManualMark(location, e.Value);
+				await _persistProjectProfile(CancellationToken.None);
+				if (IsCurrentProject(operationProjectRoot))
+					await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
+				return;
+			}
+			var addedToSession = _secretRedactionSession.AddMarkedSecret(mark);
+			_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+			_ensureHideSecretsEnabled();
 			_requestRedactionRefresh();
+
+			PersistentSecretMarkWriteResult write;
+			try
+			{
+				await _persistProjectProfile(CancellationToken.None);
+				write = await _applyPersistentMarkDelta(PersistentSecretMarkDelta.Add(mark));
+			}
+			catch
+			{
+				if (!_disposed && IsCurrentProject(operationProjectRoot))
+					DowngradePersistentMarkToSession(addedToSession, mark, location, e.Value);
+				throw;
+			}
+			if (_disposed)
+				return;
+			if (write.Succeeded)
+			{
+				if (IsCurrentProject(operationProjectRoot))
+				{
+					_pendingMarkedSecretHash = mark.H;
+					_requestRedactionRefresh();
+				}
+				return;
+			}
+
+			if (IsCurrentProject(operationProjectRoot))
+				DowngradePersistentMarkToSession(addedToSession, mark, location, e.Value);
+			if (IsCurrentProject(operationProjectRoot))
+				await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
+		}
+		catch (OperationCanceledException)
+		{
+			// Window teardown can cancel pending UI work after the durable store has already decided it.
+		}
+		catch (Exception exception)
+		{
+			if (!_disposed && IsCurrentProject(operationProjectRoot))
+				await _showErrorAsync(exception.Message);
+		}
 	}
 
-	private void OnManualSecretUnmarkRequested(
-		object? sender,
-		PreviewManualSecretUnmarkRequestedEventArgs e)
+	private void DowngradePersistentMarkToSession(
+		bool addedToSession,
+		MarkedSecretProfileEntry mark,
+		ManualSecretLocation location,
+		MarkedSecretValue value)
 	{
-		var result = _secretRedactionSession.RemoveManualSecret(
-			e.PersistentMarkHash,
-			e.SessionMarkId);
-		if (!result.Removed)
+		if (addedToSession)
+			_secretRedactionSession.RemoveMarkedSecret(new PersistentSecretMarkId(mark.H, mark.Length));
+		ApplySessionOnlyManualMark(location, value);
+	}
+
+	private void ApplySessionOnlyManualMark(
+		ManualSecretLocation location,
+		MarkedSecretValue value)
+	{
+		if (!_secretRedactionSession.AddSessionMarkedSecret(
+			    location.RelativePath,
+			    location.SourceOffset,
+			    value))
+		{
 			return;
+		}
 
 		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
-		if (result.PersistentMarkRemoved)
-			_persistProjectProfile();
-		_toastService.Show(_localization[
-			e.AlsoDetected
-				? "Toast.Secret.MarkRemovedStillDetected"
-				: "Toast.Secret.MarkRemoved"]);
+		_ensureHideSecretsEnabled();
 		_requestRedactionRefresh();
 	}
 
-	private static bool TryResolveManualMarkLocation(
+	private async void OnManualSecretUnmarkRequested(
+		object? sender,
+		PreviewManualSecretUnmarkRequestedEventArgs e)
+	{
+		string? operationProjectRoot = null;
+		try
+		{
+			operationProjectRoot = _projectRootProvider();
+			if (string.IsNullOrWhiteSpace(operationProjectRoot))
+				return;
+			var persistentMark = string.IsNullOrWhiteSpace(e.PersistentMarkHash)
+				? null
+				: _secretRedactionSession.GetMarkedSecrets().FirstOrDefault(mark =>
+					string.Equals(mark.H, e.PersistentMarkHash, StringComparison.OrdinalIgnoreCase) &&
+					mark.Length == e.PersistentMarkLength);
+			var result = _secretRedactionSession.RemoveManualSecret(
+				persistentMark is null
+					? null
+					: new PersistentSecretMarkId(persistentMark.H, persistentMark.Length),
+				e.SessionMarkId);
+			if (!result.Removed)
+				return;
+
+			_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+			_requestRedactionRefresh();
+			if (result.PersistentMarkRemoved && persistentMark is not null)
+			{
+				PersistentSecretMarkWriteResult write;
+				try
+				{
+					write = await _applyPersistentMarkDelta(PersistentSecretMarkDelta.Remove(
+						new PersistentSecretMarkId(persistentMark.H, persistentMark.Length)));
+				}
+				catch
+				{
+					if (!_disposed && IsCurrentProject(operationProjectRoot))
+					{
+						_secretRedactionSession.AddMarkedSecret(persistentMark);
+						_requestRedactionRefresh();
+					}
+					throw;
+				}
+				if (_disposed)
+					return;
+				if (!write.Succeeded)
+				{
+					if (IsCurrentProject(operationProjectRoot))
+					{
+						_secretRedactionSession.AddMarkedSecret(persistentMark);
+						_requestRedactionRefresh();
+					}
+					if (IsCurrentProject(operationProjectRoot))
+						await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
+					return;
+				}
+			}
+
+			if (IsCurrentProject(operationProjectRoot))
+			{
+				_toastService.Show(_localization[
+					e.AlsoDetected
+						? "Toast.Secret.MarkRemovedStillDetected"
+						: "Toast.Secret.MarkRemoved"]);
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			// Window teardown can cancel pending UI work after the durable store has already decided it.
+		}
+		catch (Exception exception)
+		{
+			if (!_disposed && IsCurrentProject(operationProjectRoot))
+				await _showErrorAsync(exception.Message);
+		}
+	}
+
+	private bool IsCurrentProject(string? expectedProjectRoot)
+	{
+		if (string.IsNullOrWhiteSpace(expectedProjectRoot))
+			return false;
+		var currentProjectRoot = _projectRootProvider();
+		if (string.IsNullOrWhiteSpace(currentProjectRoot))
+			return false;
+		try
+		{
+			return PathComparer.Default.Equals(
+				Path.GetFullPath(expectedProjectRoot),
+				Path.GetFullPath(currentProjectRoot));
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private bool TryResolveManualMarkLocation(
 		IPreviewTextDocument document,
 		PreviewManualSecretMarkRequestedEventArgs request,
 		out ManualSecretLocation location)
@@ -204,10 +360,23 @@ internal sealed class PreviewSurfaceController : IDisposable
 		}
 
 		location = new ManualSecretLocation(
-			section.DisplayPath,
+			ResolveManualMarkRelativePath(
+				section,
+				_projectRootProvider()),
 			sourceOffset,
 			key);
 		return true;
+	}
+
+	private static string ResolveManualMarkRelativePath(
+		PreviewDocumentSection section,
+		string? projectRoot)
+	{
+		var sourcePath = section.SourcePath;
+		if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(projectRoot))
+			return section.DisplayPath;
+
+		return Path.GetRelativePath(projectRoot, sourcePath).Replace('\\', '/');
 	}
 
     public bool HasSelectionMetricsSnapshot =>

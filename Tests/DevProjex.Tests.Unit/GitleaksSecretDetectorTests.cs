@@ -503,7 +503,7 @@ public sealed class SecretRedactionSessionTests
 	[Fact(Timeout = 10_000)]
 	public void OutputScope_HighDensityFindingsResolveWithoutQuadraticOverlapWork()
 	{
-		const int findingCount = 20_000;
+		const int findingCount = SecretInspectionLimits.MaximumFindingsPerFile;
 		const string secret = "value-123456";
 		var content = string.Join('|', Enumerable.Repeat(secret, findingCount));
 		using var workspace = new TemporaryDirectory();

@@ -1,0 +1,339 @@
+using System.Security.Cryptography;
+using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Secrets;
+
+namespace DevProjex.Tests.Unit;
+
+public sealed class PersistentSecretIdentityTests
+{
+	private const string Secret = "persistent-secret-value-012345";
+
+	[Fact]
+	public void V2Identity_IsDeterministicFullHmacAndMatcherFindsIt()
+	{
+		var provider = new TestIdentityProvider();
+		Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out var first));
+		Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out var second));
+		Assert.Equal(first, second);
+		Assert.True(PersistentSecretIdentity.IsV2(first));
+		Assert.Equal(PersistentSecretIdentity.V2IdentifierLength, first.Length);
+		var mark = new MarkedSecretProfileEntry(first, "TOKEN", Secret.Length);
+		var matcher = new MarkedSecretsMatcher([mark], [], provider);
+
+		var finding = Assert.Single(matcher.Match(
+			"config.env",
+			$"TOKEN={Secret}",
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(first, finding.PersistentMarkHash);
+	}
+
+	[Fact]
+	public void V2Mark_WithUnavailableInstallationKeyFailsClosed()
+	{
+		var available = new TestIdentityProvider();
+		Assert.True(PersistentSecretIdentity.TryCreateV2(available, Secret, out var identity));
+		var mark = new MarkedSecretProfileEntry(identity, null, Secret.Length);
+
+		Assert.Throws<SecretDetectionException>(() =>
+			new MarkedSecretsMatcher([mark], [], new UnavailableIdentityProvider()));
+	}
+
+	[Fact]
+	public async Task LegacyMatch_IsAtomicallyMigratedToV2Once()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		var project = workspace.CreateFolder("project");
+		var path = workspace.CreateFile("project/config.env", $"TOKEN={Secret}\n");
+		var store = new ProjectProfileStore(() => appData);
+		var legacy = new MarkedSecretProfileEntry(
+			MarkedSecretValueNormalizer.ComputeHash(Secret),
+			"TOKEN",
+			Secret.Length);
+		Assert.True((await store.AddMarkAsync(
+			project,
+			legacy,
+			TestContext.Current.CancellationToken)).Succeeded);
+		using var identityProvider = new PersistentSecretIdentityProvider(() => appData);
+		using var session = new SecretRedactionSession(
+			new EmptyDetector(),
+			store,
+			identityProvider);
+		var loaded = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+		session.ReplacePersistentMarks(project, loaded.Snapshot!);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		var snapshot = await preparer.AnalyzeAsync(
+			new SecretRedactionContext(project, session),
+			[path],
+			TestContext.Current.CancellationToken);
+		var migrated = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, snapshot.RedactedCount);
+		var v2 = Assert.Single(migrated.Snapshot!.Marks);
+		Assert.True(PersistentSecretIdentity.IsV2(v2.H));
+		Assert.Equal(legacy.Key, v2.Key);
+		Assert.Equal(legacy.Length, v2.Length);
+		var revision = migrated.Snapshot.Revision;
+
+		await preparer.AnalyzeAsync(
+			new SecretRedactionContext(project, session),
+			[path],
+			TestContext.Current.CancellationToken);
+		var repeated = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+		Assert.Equal(revision, repeated.Snapshot!.Revision);
+	}
+
+	[Fact]
+	public async Task LegacyMigrationCompletingAfterProjectSwitch_DoesNotRebindOldProjectMarks()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectA = workspace.CreateFolder("project-a");
+		var projectB = workspace.CreateFolder("project-b");
+		var pathA = workspace.CreateFile("project-a/config.env", $"TOKEN={Secret}\n");
+		var legacy = new MarkedSecretProfileEntry(
+			MarkedSecretValueNormalizer.ComputeHash(Secret),
+			"TOKEN",
+			Secret.Length);
+		var provider = new TestIdentityProvider();
+		Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out var migratedIdentity));
+		var migrated = legacy with { H = migratedIdentity };
+		var store = new BlockingMarkStore(new PersistentSecretMarksSnapshot(2, [migrated]));
+		using var session = new SecretRedactionSession(new EmptyDetector(), store, provider);
+		session.ReplacePersistentMarks(projectA, new PersistentSecretMarksSnapshot(1, [legacy]));
+		var scopeA = session.BeginOutput(projectA, [pathA]);
+		_ = scopeA.Redact(pathA, File.ReadAllText(pathA), TestContext.Current.CancellationToken);
+
+		var flush = session
+			.FlushPendingPersistentMarkMigrationsAsync(projectA, TestContext.Current.CancellationToken)
+			.AsTask();
+		await store.ApplyStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		var projectBMark = migrated with { H = "v2:" + new string('b', 64), Key = "PROJECT-B" };
+		session.ReplacePersistentMarks(projectB, new PersistentSecretMarksSnapshot(7, [projectBMark]));
+		_ = session.BeginOutput(projectB, Array.Empty<string>());
+		store.AllowApplyToComplete.TrySetResult();
+		await flush;
+
+		Assert.Equal(projectBMark, Assert.Single(session.GetMarkedSecrets()));
+	}
+
+	[Fact]
+	public async Task PersistentMarkRefreshCompletingAfterDispose_DoesNotRepopulateSession()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var mark = new MarkedSecretProfileEntry(
+			"v2:" + new string('a', 64),
+			"TOKEN",
+			Secret.Length);
+		var store = new BlockingLoadMarkStore(new PersistentSecretMarksSnapshot(2, [mark]));
+		var session = new SecretRedactionSession(new EmptyDetector(), store, new TestIdentityProvider());
+		session.ReplacePersistentMarks(project, new PersistentSecretMarksSnapshot(1, []));
+
+		var refresh = session
+			.RefreshPersistentMarksAsync(project, TestContext.Current.CancellationToken)
+			.AsTask();
+		await store.LoadStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		session.Dispose();
+		store.AllowLoadToComplete.TrySetResult();
+
+		await Assert.ThrowsAsync<ObjectDisposedException>(() => refresh);
+		Assert.Empty(session.GetMarkedSecrets());
+	}
+
+	[Fact]
+	public async Task PersistentMarkRefreshCompletingAfterProjectSwitch_DoesNotRepopulateTheNewProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectA = workspace.CreateFolder("project-a");
+		var projectB = workspace.CreateFolder("project-b");
+		var projectAMark = new MarkedSecretProfileEntry(
+			"v2:" + new string('a', 64),
+			"PROJECT-A",
+			Secret.Length);
+		var projectBMark = new MarkedSecretProfileEntry(
+			"v2:" + new string('b', 64),
+			"PROJECT-B",
+			Secret.Length);
+		var store = new BlockingLoadMarkStore(new PersistentSecretMarksSnapshot(2, [projectAMark]));
+		using var session = new SecretRedactionSession(new EmptyDetector(), store, new TestIdentityProvider());
+		session.ReplacePersistentMarks(projectA, new PersistentSecretMarksSnapshot(1, []));
+
+		var refresh = session
+			.RefreshPersistentMarksAsync(projectA, TestContext.Current.CancellationToken)
+			.AsTask();
+		await store.LoadStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		session.ReplacePersistentMarks(projectB, new PersistentSecretMarksSnapshot(7, [projectBMark]));
+		_ = session.BeginOutput(projectB, Array.Empty<string>());
+		store.AllowLoadToComplete.TrySetResult();
+		await refresh;
+
+		Assert.Equal(projectBMark, Assert.Single(session.GetMarkedSecrets()));
+	}
+
+	[Fact]
+	public void InstallationKey_IsReusedAndCorruptionIsFailSafe()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		string first;
+		using (var provider = new PersistentSecretIdentityProvider(() => appData))
+		{
+			Assert.True(provider.IsAvailable);
+			Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out first));
+		}
+		using (var provider = new PersistentSecretIdentityProvider(() => appData))
+		{
+			Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out var second));
+			Assert.Equal(first, second);
+		}
+
+		var keyPath = Path.Combine(appData, "DevProjex", "secret-mark-hmac.key");
+		File.WriteAllBytes(keyPath, [1, 2, 3]);
+		using var corrupted = new PersistentSecretIdentityProvider(() => appData);
+		Assert.False(corrupted.IsAvailable);
+		Assert.False(PersistentSecretIdentity.TryCreateV2(corrupted, Secret, out _));
+	}
+
+	[Fact]
+	public void Provider_DoesNotTouchStorageUntilAnIdentityIsRequired()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = Path.Combine(workspace.Path, "app-data");
+		var keyPath = Path.Combine(appData, "DevProjex", "secret-mark-hmac.key");
+
+		using var provider = new PersistentSecretIdentityProvider(() => appData);
+
+		Assert.False(File.Exists(keyPath));
+		Assert.False(File.Exists(keyPath + ".lock"));
+		Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out _));
+		Assert.True(File.Exists(keyPath));
+	}
+
+	[Fact]
+	public void UnixInstallationKey_WithSharedPermissionsIsRejected()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		using (var provider = new PersistentSecretIdentityProvider(() => appData))
+			Assert.True(provider.IsAvailable);
+		var keyPath = Path.Combine(appData, "DevProjex", "secret-mark-hmac.key");
+		File.SetUnixFileMode(
+			keyPath,
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+
+		using var reopened = new PersistentSecretIdentityProvider(() => appData);
+
+		Assert.False(reopened.IsAvailable);
+	}
+
+	private sealed class EmptyDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+	}
+
+	private sealed class TestIdentityProvider : IPersistentSecretIdentityProvider
+	{
+		private static readonly byte[] Key = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
+
+		public bool IsAvailable => true;
+
+		public bool TryComputeDigest(ReadOnlySpan<char> normalizedValue, Span<byte> destination)
+		{
+			var bytes = Encoding.UTF8.GetBytes(normalizedValue.ToString());
+			HMACSHA256.HashData(Key, bytes, destination);
+			return true;
+		}
+	}
+
+	private sealed class UnavailableIdentityProvider : IPersistentSecretIdentityProvider
+	{
+		public bool IsAvailable => false;
+		public bool TryComputeDigest(ReadOnlySpan<char> normalizedValue, Span<byte> destination) => false;
+	}
+
+	private sealed class BlockingMarkStore(PersistentSecretMarksSnapshot resultSnapshot) :
+		IPersistentSecretMarkStore
+	{
+		public TaskCompletionSource ApplyStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource AllowApplyToComplete { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public ValueTask<PersistentSecretMarksLoadResult> LoadMarksAsync(
+			string localProjectPath,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(new PersistentSecretMarksLoadResult(
+				PersistentSecretMarkStoreStatus.Success,
+				resultSnapshot));
+
+		public ValueTask<PersistentSecretMarkWriteResult> AddMarkAsync(
+			string localProjectPath,
+			MarkedSecretProfileEntry mark,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<PersistentSecretMarkWriteResult> RemoveMarkAsync(
+			string localProjectPath,
+			PersistentSecretMarkId markId,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public async ValueTask<PersistentSecretMarkWriteResult> ApplyMarkDeltaAsync(
+			string localProjectPath,
+			PersistentSecretMarkDelta delta,
+			CancellationToken cancellationToken = default)
+		{
+			ApplyStarted.TrySetResult();
+			await AllowApplyToComplete.Task.WaitAsync(cancellationToken);
+			return new PersistentSecretMarkWriteResult(
+				PersistentSecretMarkStoreStatus.Success,
+				resultSnapshot);
+		}
+	}
+
+	private sealed class BlockingLoadMarkStore(PersistentSecretMarksSnapshot resultSnapshot) :
+		IPersistentSecretMarkStore
+	{
+		public TaskCompletionSource LoadStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource AllowLoadToComplete { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public async ValueTask<PersistentSecretMarksLoadResult> LoadMarksAsync(
+			string localProjectPath,
+			CancellationToken cancellationToken = default)
+		{
+			LoadStarted.TrySetResult();
+			await AllowLoadToComplete.Task.WaitAsync(cancellationToken);
+			return new PersistentSecretMarksLoadResult(
+				PersistentSecretMarkStoreStatus.Success,
+				resultSnapshot);
+		}
+
+		public ValueTask<PersistentSecretMarkWriteResult> AddMarkAsync(
+			string localProjectPath,
+			MarkedSecretProfileEntry mark,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<PersistentSecretMarkWriteResult> RemoveMarkAsync(
+			string localProjectPath,
+			PersistentSecretMarkId markId,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<PersistentSecretMarkWriteResult> ApplyMarkDeltaAsync(
+			string localProjectPath,
+			PersistentSecretMarkDelta delta,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+	}
+}

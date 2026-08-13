@@ -13,8 +13,17 @@ public sealed class TerminalProjectContextFactory(
 		ProjectSourceIdentity? knownIdentity = null,
 		CancellationToken cancellationToken = default)
 	{
-		secretRedactionSession.ReplaceMarkedSecrets(
-			ProjectSelectionMarkedSecretsResolver.Resolve(selection));
+		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
+		if (selection.ProfileSource?.Kind == ProjectProfileSourceKind.Local)
+		{
+			secretRedactionSession.ReplacePersistentMarks(
+				projectPath,
+				new PersistentSecretMarksSnapshot(0, markedSecrets));
+		}
+		else
+		{
+			secretRedactionSession.ReplaceMarkedSecrets(markedSecrets);
+		}
 		var sourceIdentity = await sourceIdentityResolver
 			.ResolveAsync(projectPath, knownIdentity, cancellationToken)
 			.ConfigureAwait(false);

@@ -286,6 +286,7 @@ public sealed class VirtualizedPreviewTextControlTests
 
 		Assert.NotNull(requested);
 		Assert.Equal(hash, requested!.PersistentMarkHash);
+		Assert.Equal(20, requested.PersistentMarkLength);
 		Assert.Null(requested.SessionMarkId);
 		Assert.True(requested.AlsoDetected);
 	}
@@ -353,6 +354,7 @@ public sealed class VirtualizedPreviewTextControlTests
 
 		Assert.NotNull(requested);
 		Assert.Null(requested!.PersistentMarkHash);
+		Assert.Equal(20, requested.PersistentMarkLength);
 		Assert.Equal(sessionMarkId, requested.SessionMarkId);
 		Assert.False(requested.AlsoDetected);
 	}

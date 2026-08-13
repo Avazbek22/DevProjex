@@ -906,7 +906,8 @@ public partial class MainWindow
 			_viewModel,
 			_selectionCoordinator,
 			services.ProjectProfileStore,
-			_secretRedactionSession);
+			_secretRedactionSession,
+			() => _currentPath);
         _taskbarProgress = new TaskbarProgressCoordinator(
             _viewModel,
             services.TaskbarProgressService);
@@ -1074,8 +1075,9 @@ public partial class MainWindow
             _metrics,
             _previewPipeline,
             EnsureTrackedGitOutputReady,
-            SetClipboardTextAsync,
+			SetClipboardTextAsync,
 			ShowErrorAsync,
+			() => _currentPath,
 			CreateContentTransformationContext,
 			() => ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets),
 			() =>
@@ -1084,7 +1086,8 @@ public partial class MainWindow
 				_selectionCoordinator.AcceptHideSecretsOverrideAsApplied(_currentPath);
 				return changed;
 			},
-			() => _projectProfiles.PersistIfNeeded(_currentPath));
+			delta => _projectProfiles.ApplyMarkDeltaAsync(_currentPath, delta),
+			cancellationToken => _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken));
         _previewWorkspaceController = new PreviewWorkspaceController(
             this,
             _viewModel,

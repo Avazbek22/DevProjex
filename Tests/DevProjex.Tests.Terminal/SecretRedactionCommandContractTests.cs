@@ -1,5 +1,6 @@
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -12,7 +13,7 @@ public sealed class SecretRedactionCommandContractTests
 	public async Task ExportContext_LocalProfileAppliesPersistentManualSecretMarks()
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);
-		AddPersistentManualSecret(workspace);
+		await AddPersistentManualSecretAsync(workspace);
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(
@@ -40,7 +41,7 @@ public sealed class SecretRedactionCommandContractTests
 	public async Task AnalyzeJson_LocalProfileCountsPersistentManualSecretMarks()
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);
-		AddPersistentManualSecret(workspace);
+		await AddPersistentManualSecretAsync(workspace);
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(
@@ -68,7 +69,7 @@ public sealed class SecretRedactionCommandContractTests
 	public async Task ExportProject_LocalProfileAppliesPersistentManualSecretMarks(string kind)
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);
-		AddPersistentManualSecret(workspace);
+		await AddPersistentManualSecretAsync(workspace);
 		var environment = new TestTerminalEnvironment();
 		var destination = kind == "folder"
 			? Path.Combine(workspace.OutputRoot, "manual-redacted")
@@ -482,6 +483,38 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Fact(Timeout = 20_000)]
+	public async Task ExportContext_FindingBudgetExceeded_ProducesNoPartialOutput()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		var destination = Path.Combine(workspace.OutputRoot, "budget-exceeded.txt");
+		var repeated = string.Join(
+			'\n',
+			Enumerable.Repeat(
+				$"token={GithubToken}",
+				SecretInspectionLimits.MaximumFindingsPerFile + 1));
+		workspace.Temporary.WriteFile("project/src/pathological.env", repeated);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content",
+				"--format", "text",
+				"--git-mode", "none",
+				"--hide-secrets",
+				"--plain",
+				"-o", destination
+			]);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.False(File.Exists(destination));
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-SECRET-DETECTION-FAILED", environment.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task ExportContextHelpAndCompletionExposeCanonicalToken()
 	{
@@ -522,12 +555,13 @@ public sealed class SecretRedactionCommandContractTests
 				new TerminalServiceFactory(() => workspace.AppDataRoot))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
 
-	private static void AddPersistentManualSecret(Workspace workspace)
+	private static async Task AddPersistentManualSecretAsync(Workspace workspace)
 	{
 		workspace.Temporary.WriteFile(
 			"project/src/manual.txt",
 			$"setting={ManuallyMarkedValue}\n");
-		new ProjectProfileStore(() => workspace.AppDataRoot).SaveProfile(
+		var store = new ProjectProfileStore(() => workspace.AppDataRoot);
+		store.SaveProfile(
 			workspace.ProjectRoot,
 			new ProjectSelectionProfile(
 				SelectedRootFolders: [],
@@ -536,14 +570,17 @@ public sealed class SecretRedactionCommandContractTests
 				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
 				{
 					[IgnoreOptionId.HideSecrets] = true
-				},
-				MarkedSecrets:
-				[
-					new MarkedSecretProfileEntry(
-						MarkedSecretValueNormalizer.ComputeHash(ManuallyMarkedValue),
-						"setting",
-						ManuallyMarkedValue.Length)
-				]));
+				}));
+		using var identityProvider = new PersistentSecretIdentityProvider(() => workspace.AppDataRoot);
+		Assert.True(PersistentSecretIdentity.TryCreateV2(
+			identityProvider,
+			ManuallyMarkedValue,
+			out var identity));
+		var result = await store.AddMarkAsync(
+			workspace.ProjectRoot,
+			new MarkedSecretProfileEntry(identity, "setting", ManuallyMarkedValue.Length),
+			TestContext.Current.CancellationToken);
+		Assert.True(result.Succeeded);
 	}
 
 	private static Workspace CreateWorkspace(bool includeSecret = true)

@@ -107,6 +107,20 @@ public sealed class ManualSecretRedactionSessionTests
 	}
 
 	[Fact]
+	public void CompoundPersistentRemoval_PreservesSameDigestWithDifferentLength()
+	{
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		var first = new MarkedSecretProfileEntry("001122334455", "FIRST", 8);
+		var second = new MarkedSecretProfileEntry("001122334455", "SECOND", 9);
+		Assert.True(session.AddMarkedSecret(first));
+		Assert.True(session.AddMarkedSecret(second));
+
+		Assert.True(session.RemoveMarkedSecret(new PersistentSecretMarkId(first.H, first.Length)));
+
+		Assert.Equal(second, Assert.Single(session.GetMarkedSecrets()));
+	}
+
+	[Fact]
 	public void RemovingCombinedManualMark_RemovesBothSourcesWithOneInvalidationAndLeavesDetectorActive()
 	{
 		using var workspace = new TemporaryDirectory();

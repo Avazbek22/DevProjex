@@ -76,6 +76,36 @@ public sealed class SecretRedactionCacheTests
 	}
 
 	[Fact]
+	public async Task Discovery_RevalidatesSameLengthSameTimestampContent()
+	{
+		Assert.Equal(Secret.Length, SameLengthPublicValue.Length);
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/config.env", $"token={Secret}\n");
+		var timestamp = File.GetLastWriteTimeUtc(path);
+		var detector = new CountingDetector();
+		using var session = new SecretRedactionSession(detector);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		var context = new SecretRedactionContext(workspace.Path, session);
+
+		var first = await preparer.DiscoverAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		Assert.Equal(1, first.RedactedCount);
+
+		File.WriteAllText(path, $"token={SameLengthPublicValue}\n");
+		File.SetLastWriteTimeUtc(path, timestamp);
+
+		var second = await preparer.DiscoverAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, second.RedactedCount);
+		Assert.Equal(2, detector.CallCount);
+	}
+
+	[Fact]
 	public void CompactCache_RetainsDeselectedFilesForBoundedReselectionReuse()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -305,6 +335,187 @@ public sealed class SecretRedactionCacheTests
 		Assert.Equal(0, secondScope.Complete().RedactedCount);
 	}
 
+	[Theory]
+	[InlineData(GenerationInvalidation.Disable)]
+	[InlineData(GenerationInvalidation.Reset)]
+	[InlineData(GenerationInvalidation.ProjectSwitch)]
+	public async Task ObsoleteScope_CannotRepopulateCacheOrPublishSnapshot(
+		GenerationInvalidation invalidation)
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstRoot = Directory.CreateDirectory(Path.Combine(workspace.Path, "first")).FullName;
+		var secondRoot = Directory.CreateDirectory(Path.Combine(workspace.Path, "second")).FullName;
+		var firstPath = workspace.CreateFile("first/config.env", $"token={Secret}\n");
+		var secondPath = workspace.CreateFile("second/config.env", $"token={Secret}\n");
+		var detector = new BlockingFirstDetector();
+		using var session = new SecretRedactionSession(detector);
+		var published = 0;
+		session.SnapshotPublished += (_, _) => Interlocked.Increment(ref published);
+		var staleScope = session.BeginOutput(firstRoot, [firstPath]);
+
+		var staleTask = Task.Run(
+			() => staleScope.Redact(
+				firstPath,
+				File.ReadAllText(firstPath),
+				TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken);
+		Assert.True(detector.Entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+		SecretRedactionScope? currentScope = null;
+		switch (invalidation)
+		{
+			case GenerationInvalidation.Disable:
+				session.Disable();
+				break;
+			case GenerationInvalidation.Reset:
+				session.Reset();
+				break;
+			case GenerationInvalidation.ProjectSwitch:
+				currentScope = session.BeginOutput(secondRoot, [secondPath]);
+				break;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(invalidation), invalidation, null);
+		}
+		detector.Release.Set();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => staleTask);
+		Assert.Equal(0, published);
+		Assert.Equal(0, session.GetCacheDiagnostics().EntryCount);
+
+		currentScope ??= session.BeginOutput(firstRoot, [firstPath]);
+		var currentPath = invalidation == GenerationInvalidation.ProjectSwitch ? secondPath : firstPath;
+		var current = currentScope.Redact(
+			currentPath,
+			File.ReadAllText(currentPath),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(1, current.RedactedCount);
+		_ = currentScope.Complete();
+		Assert.Equal(1, session.GetCacheDiagnostics().EntryCount);
+	}
+
+	[Fact]
+	public void ProjectSwitch_InvalidatesSelectionKeyCacheEvenWithoutPublishedSnapshots()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstRoot = Directory.CreateDirectory(Path.Combine(workspace.Path, "first")).FullName;
+		var secondRoot = Directory.CreateDirectory(Path.Combine(workspace.Path, "second")).FullName;
+		var firstPath = workspace.CreateFile("first/config.env", $"token={Secret}\n");
+		var secondPath = workspace.CreateFile("second/config.env", $"token={Secret}\n");
+		using var session = new SecretRedactionSession(new CountingDetector());
+		_ = session.BeginOutput(firstRoot, [firstPath]);
+		var reference = CacheSelectionList(session, firstRoot, firstPath);
+
+		_ = session.BeginOutput(secondRoot, [secondPath]);
+		ForceCollection();
+
+		Assert.False(reference.IsAlive);
+	}
+
+	[Fact]
+	public async Task PublicRedact_RejectsConcurrentConsumersWithoutCorruptingScope()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/config.env", $"token={Secret}\n");
+		var detector = new BlockingFirstDetector();
+		using var session = new SecretRedactionSession(detector);
+		var scope = session.BeginOutput(workspace.Path, [path]);
+		var content = File.ReadAllText(path);
+		var first = Task.Run(
+			() => scope.Redact(path, content, TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken);
+		Assert.True(detector.Entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+		var exception = Assert.Throws<InvalidOperationException>(
+			() => scope.Redact(path, content, TestContext.Current.CancellationToken));
+		Assert.Contains("ordered consumer", exception.Message, StringComparison.Ordinal);
+		Assert.Throws<InvalidOperationException>(() => scope.Complete());
+
+		detector.Release.Set();
+		var result = await first;
+		Assert.Equal(1, result.RedactedCount);
+		Assert.Equal(1, scope.Complete().RedactedCount);
+	}
+
+	[Fact]
+	public void ProjectSwitch_DoesNotCarryManualMarksIntoTheNewRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstRoot = workspace.CreateFolder("first");
+		var secondRoot = workspace.CreateFolder("second");
+		var firstPath = workspace.CreateFile("first/config.env", $"token={Secret}\n");
+		var secondPath = workspace.CreateFile("second/config.env", $"token={Secret}\n");
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		session.ReplaceMarkedSecrets([
+			new MarkedSecretProfileEntry(
+				MarkedSecretValueNormalizer.ComputeHash(Secret),
+				"TOKEN",
+				Secret.Length)
+		]);
+		var first = session.BeginOutput(firstRoot, [firstPath]);
+		Assert.Equal(1, first.Redact(
+			firstPath,
+			File.ReadAllText(firstPath),
+			TestContext.Current.CancellationToken).RedactedCount);
+
+		var second = session.BeginOutput(secondRoot, [secondPath]);
+
+		Assert.Equal(0, second.Redact(
+			secondPath,
+			File.ReadAllText(secondPath),
+			TestContext.Current.CancellationToken).RedactedCount);
+	}
+
+	[Fact]
+	public void Snapshots_UseBoundedLruAndEvictOldestSelection()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/config.env", "name=devprojex\n");
+		using var session = new SecretRedactionSession(new CountingDetector());
+
+		for (var index = 0; index < SecretRedactionSession.MaximumSnapshots + 8; index++)
+		{
+			var scope = session.BeginOutput(workspace.Path, [path], $"transform-{index:D2}");
+			_ = scope.Complete();
+		}
+
+		Assert.Equal(SecretRedactionSession.MaximumSnapshots, session.SnapshotCount);
+		Assert.Null(session.GetSnapshot(workspace.Path, [path], "transform-00"));
+		Assert.NotNull(session.GetSnapshot(workspace.Path, [path], "transform-39"));
+	}
+
+	[Fact]
+	public void InvalidateSnapshots_ReleasesCachedSelectionList()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/config.env", "name=devprojex\n");
+		using var session = new SecretRedactionSession(new CountingDetector());
+		var reference = CacheSelectionList(session, workspace.Path, path);
+
+		session.InvalidateSnapshots();
+		ForceCollection();
+
+		Assert.False(reference.IsAlive);
+	}
+
+	private static WeakReference CacheSelectionList(
+		SecretRedactionSession session,
+		string projectRoot,
+		string path)
+	{
+		IReadOnlyList<string> selected = new[] { path };
+		_ = session.GetSnapshot(projectRoot, selected);
+		return new WeakReference(selected);
+	}
+
+	private static void ForceCollection()
+	{
+		for (var attempt = 0; attempt < 3; attempt++)
+		{
+			GC.Collect();
+			GC.WaitForPendingFinalizers();
+		}
+	}
+
 	private static int Scan(
 		SecretRedactionSession session,
 		string projectRoot,
@@ -424,5 +635,44 @@ public sealed class SecretRedactionCacheTests
 				ReadOnlySpan<char> content,
 				CancellationToken cancellationToken = default) => [];
 		}
+	}
+
+	private sealed class BlockingFirstDetector : ISecretDetector
+	{
+		private int _calls;
+
+		public ManualResetEventSlim Entered { get; } = new();
+		public ManualResetEventSlim Release { get; } = new();
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default)
+		{
+			if (Interlocked.Increment(ref _calls) == 1)
+			{
+				Entered.Set();
+				Release.Wait(cancellationToken);
+			}
+			var start = content.IndexOf(Secret, StringComparison.Ordinal);
+			return start < 0
+				? []
+				: [new DetectedSecret("cache-test", start, Secret.Length, Secret, 0)];
+		}
+	}
+
+	private sealed class EmptyDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+	}
+
+	public enum GenerationInvalidation
+	{
+		Disable,
+		Reset,
+		ProjectSwitch
 	}
 }

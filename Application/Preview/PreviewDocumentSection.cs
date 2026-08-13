@@ -11,7 +11,8 @@ public sealed record PreviewDocumentSection(
     int EndLine,
     int HeaderLine,
     int ContentStartLine,
-    PreviewContentCoordinateMap? CoordinateMap = null);
+    PreviewContentCoordinateMap? CoordinateMap = null,
+    string? SourcePath = null);
 
 /// <summary>
 /// Provides efficient lookups over ordered preview sections without forcing

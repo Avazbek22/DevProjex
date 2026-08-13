@@ -11,34 +11,54 @@ namespace DevProjex.Application.Secrets;
 /// </summary>
 public sealed class SecretRedactionSession : IDisposable
 {
+	// Selection combinations are transient UI state; 32 entries cover normal toggling while
+	// preventing arbitrary selection churn from retaining snapshots for the whole session.
+	internal const int MaximumSnapshots = 32;
+
 	private readonly ISecretDetector _detector;
+	private readonly IPersistentSecretMarkStore? _persistentMarkStore;
+	private readonly IPersistentSecretIdentityProvider? _persistentIdentityProvider;
 	private readonly SecretScanCache _scanCache;
 	private readonly object _sync = new();
 	private readonly HashSet<string> _keptOccurrenceIds = new(StringComparer.Ordinal);
-	private readonly Dictionary<string, MarkedSecretProfileEntry> _persistentMarks =
-		new(StringComparer.OrdinalIgnoreCase);
+	private readonly Dictionary<PersistentSecretMarkId, MarkedSecretProfileEntry> _persistentMarks = [];
+	private readonly Dictionary<PersistentSecretMarkId, PersistentSecretMarkDelta> _pendingMarkMigrations = [];
 	private readonly List<SessionMarkedSecret> _sessionMarks = [];
 	private readonly Dictionary<string, SecretRedactionSnapshot> _snapshots = new(StringComparer.Ordinal);
+	private readonly Dictionary<string, LinkedListNode<string>> _snapshotLruNodes = new(StringComparer.Ordinal);
+	private readonly LinkedList<string> _snapshotLru = new();
 	private SelectionKeyCacheEntry? _selectionKeyCache;
+	private CancellationTokenSource _generationCancellation = new();
 	private Task? _detectorWarmUpTask;
+	private string? _activeProjectRoot;
+	private long _generation;
 	private long _overrideRevision;
 	private long _snapshotRevision;
 	private int _markedSecretsRevision;
+	private string? _persistentMarksProjectPath;
+	private long _persistentMarksStoreRevision = -1;
 	private int _activeFullContentBuffers;
 	private int _peakFullContentBuffers;
 	private bool _disposed;
 
-	public SecretRedactionSession(ISecretDetector detector)
-		: this(detector, new SecretScanCache())
+	public SecretRedactionSession(
+		ISecretDetector detector,
+		IPersistentSecretMarkStore? persistentMarkStore = null,
+		IPersistentSecretIdentityProvider? persistentIdentityProvider = null)
+		: this(detector, new SecretScanCache(), persistentMarkStore, persistentIdentityProvider)
 	{
 	}
 
 	internal SecretRedactionSession(
 		ISecretDetector detector,
-		SecretScanCache scanCache)
+		SecretScanCache scanCache,
+		IPersistentSecretMarkStore? persistentMarkStore = null,
+		IPersistentSecretIdentityProvider? persistentIdentityProvider = null)
 	{
 		_detector = detector ?? throw new ArgumentNullException(nameof(detector));
 		_scanCache = scanCache ?? throw new ArgumentNullException(nameof(scanCache));
+		_persistentMarkStore = persistentMarkStore;
+		_persistentIdentityProvider = persistentIdentityProvider;
 	}
 
 	public event EventHandler? OverridesChanged;
@@ -59,9 +79,9 @@ public sealed class SecretRedactionSession : IDisposable
 	/// </summary>
 	public Task BeginWarmUp()
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
 		lock (_sync)
 		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
 			if (_detectorWarmUpTask is not null)
 				return _detectorWarmUpTask;
 			_detectorWarmUpTask = Task.Run(() => _detector.WarmUp(CancellationToken.None));
@@ -77,6 +97,40 @@ public sealed class SecretRedactionSession : IDisposable
 	internal Task EnsureWarmUpAsync(CancellationToken cancellationToken) =>
 		BeginWarmUp().WaitAsync(cancellationToken);
 
+	internal async ValueTask RefreshPersistentMarksAsync(
+		string projectRoot,
+		CancellationToken cancellationToken)
+	{
+		if (_persistentMarkStore is null)
+			return;
+		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		long expectedGeneration;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			// Only local profiles bind a session to the machine-local mark store. Portable
+			// profiles deliberately carry no persistent marks and must not inherit local state.
+			if (!PathComparer.Default.Equals(_persistentMarksProjectPath, normalizedProjectRoot))
+				return;
+			expectedGeneration = _generation;
+		}
+
+		var loaded = await _persistentMarkStore
+			.LoadMarksAsync(normalizedProjectRoot, cancellationToken)
+			.ConfigureAwait(false);
+		if (!loaded.Succeeded || loaded.Snapshot is null)
+		{
+			throw new IOException(
+				$"Persistent secret marks could not be loaded ({loaded.Status}).");
+		}
+
+		ReplaceMarkedSecretsCore(
+			loaded.Snapshot.Marks,
+			normalizedProjectRoot,
+			loaded.Snapshot.Revision,
+			expectedGeneration);
+	}
+
 	public SecretRedactionScope BeginOutput(
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths,
@@ -91,68 +145,162 @@ public sealed class SecretRedactionSession : IDisposable
 		ContentSelectionSnapshot selection,
 		string transformIdentity = "")
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(selection);
-		// Selection changes are frequent UI state, not a cache lifetime boundary. The LRU already
-		// bounds retained entries; keeping deselected files warm makes folder off/on cycles cheap.
-		_scanCache.SynchronizeProject(projectRoot);
+		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
 
 		HashSet<string> keptOccurrences;
 		long overrideRevision;
 		long snapshotRevision;
+		long generation;
+		CancellationToken generationToken;
+		CancellationTokenSource? obsoleteGeneration = null;
 		MarkedSecretsMatcher markedSecretsMatcher;
 		int markedSecretsRevision;
 		lock (_sync)
 		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (_activeProjectRoot is null)
+			{
+				_activeProjectRoot = normalizedProjectRoot;
+			}
+			else if (!PathComparer.Default.Equals(_activeProjectRoot, normalizedProjectRoot))
+			{
+				obsoleteGeneration = AdvanceGenerationLocked();
+				ClearProjectSpecificStateForSwitchLocked(normalizedProjectRoot);
+				_activeProjectRoot = normalizedProjectRoot;
+			}
+			// Selection changes within a project are not a cache lifetime boundary. The bounded LRU
+			// keeps deselected files warm without allowing a previous project to repopulate the cache.
+			_scanCache.SynchronizeProject(normalizedProjectRoot);
 			keptOccurrences = new HashSet<string>(_keptOccurrenceIds, StringComparer.Ordinal);
 			overrideRevision = _overrideRevision;
 			snapshotRevision = _snapshotRevision;
+			generation = _generation;
+			generationToken = _generationCancellation.Token;
 			markedSecretsRevision = _markedSecretsRevision;
 			markedSecretsMatcher = new MarkedSecretsMatcher(
 				_persistentMarks.Values,
-				_sessionMarks);
+				_sessionMarks,
+				_persistentIdentityProvider,
+				(legacyMark, v2Identity) =>
+					QueueLegacyMarkMigration(legacyMark, v2Identity, generation));
 		}
+		CancelAndDispose(obsoleteGeneration);
 
 		return new SecretRedactionScope(
 			this,
-			projectRoot,
+			normalizedProjectRoot,
 			selection.CreateTransformFingerprint(transformIdentity),
 			keptOccurrences,
 			overrideRevision,
 			snapshotRevision,
 			markedSecretsMatcher,
 			markedSecretsRevision,
+			generation,
+			generationToken,
 			transformIdentity);
+	}
+
+	private void ClearProjectSpecificStateForSwitchLocked(string newProjectRoot)
+	{
+		var marksChanged = _sessionMarks.Count > 0;
+		_sessionMarks.Clear();
+		_keptOccurrenceIds.Clear();
+		if (!PathComparer.Default.Equals(_persistentMarksProjectPath, newProjectRoot))
+		{
+			marksChanged |= _persistentMarks.Count > 0;
+			_persistentMarks.Clear();
+			_pendingMarkMigrations.Clear();
+			_persistentMarksProjectPath = null;
+			_persistentMarksStoreRevision = -1;
+		}
+		if (marksChanged)
+			_markedSecretsRevision++;
+		_overrideRevision++;
 	}
 
 	public IReadOnlyCollection<MarkedSecretProfileEntry> GetMarkedSecrets()
 	{
 		lock (_sync)
-			return _persistentMarks.Values.OrderBy(static mark => mark.H, StringComparer.Ordinal).ToArray();
+			return _persistentMarks.Values
+				.OrderBy(static mark => mark.H, StringComparer.Ordinal)
+				.ThenBy(static mark => mark.Length)
+				.ToArray();
 	}
 
 	public void ReplaceMarkedSecrets(IEnumerable<MarkedSecretProfileEntry>? marks)
+		=> ReplaceMarkedSecretsCore(marks, null, -1, expectedGeneration: null);
+
+	public void ReplacePersistentMarks(
+		string projectRoot,
+		PersistentSecretMarksSnapshot snapshot)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(snapshot);
+		ReplaceMarkedSecretsCore(
+			snapshot.Marks,
+			Path.GetFullPath(projectRoot),
+			snapshot.Revision,
+			expectedGeneration: null);
+	}
+
+	private void ReplaceMarkedSecretsCore(
+		IEnumerable<MarkedSecretProfileEntry>? marks,
+		string? projectPath,
+		long storeRevision,
+		long? expectedGeneration)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
-		var replacement = (marks ?? [])
-			.Where(static mark => mark is not null)
-			.GroupBy(static mark => mark.H, StringComparer.OrdinalIgnoreCase)
+		var normalizedMarks = (marks ?? [])
+			.Where(static mark => TryNormalizePersistentMark(mark, out _))
+			.Select(static mark => NormalizePersistentMark(mark))
+			.Take(SecretInspectionLimits.MaximumPersistentMarksPerProject + 1)
+			.ToArray();
+		if (normalizedMarks.Length > SecretInspectionLimits.MaximumPersistentMarksPerProject)
+			throw SecretInspectionBudgetExceededException.PersistentMarks();
+		var replacement = normalizedMarks
+			.GroupBy(static mark => new PersistentSecretMarkId(mark.H.ToLowerInvariant(), mark.Length))
 			.Select(static group => group.First())
-			.ToDictionary(static mark => mark.H, StringComparer.OrdinalIgnoreCase);
+			.ToDictionary(static mark => new PersistentSecretMarkId(mark.H.ToLowerInvariant(), mark.Length));
 
 		lock (_sync)
 		{
-			if (_persistentMarks.Count == replacement.Count &&
-			    _persistentMarks.All(pair => replacement.TryGetValue(pair.Key, out var value) && value == pair.Value))
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (expectedGeneration is { } generation &&
+			    (generation != _generation ||
+			     !PathComparer.Default.Equals(_persistentMarksProjectPath, projectPath)))
+			{
+				return;
+			}
+			if (projectPath is not null &&
+			    PathComparer.Default.Equals(_persistentMarksProjectPath, projectPath) &&
+			    storeRevision >= 0 &&
+			    storeRevision < _persistentMarksStoreRevision)
 			{
 				return;
 			}
 
+			var identityChanged =
+				!PathComparer.Default.Equals(_persistentMarksProjectPath, projectPath) ||
+				_persistentMarksStoreRevision != storeRevision;
+			if (_persistentMarks.Count == replacement.Count &&
+			    _persistentMarks.All(pair => replacement.TryGetValue(pair.Key, out var value) && value == pair.Value) &&
+			    !identityChanged)
+			{
+				return;
+			}
+
+			var marksChanged = _persistentMarks.Count != replacement.Count ||
+			                   _persistentMarks.Any(pair =>
+				                   !replacement.TryGetValue(pair.Key, out var value) || value != pair.Value);
 			_persistentMarks.Clear();
-			foreach (var (hash, mark) in replacement)
-				_persistentMarks.Add(hash, mark);
-			AdvanceMarkedSecretsRevisionLocked();
+			foreach (var (identity, mark) in replacement)
+				_persistentMarks.Add(identity, mark);
+			_persistentMarksProjectPath = projectPath;
+			_persistentMarksStoreRevision = storeRevision;
+			if (marksChanged)
+				AdvanceMarkedSecretsRevisionLocked();
 		}
 		OverridesChanged?.Invoke(this, EventArgs.Empty);
 	}
@@ -161,11 +309,21 @@ public sealed class SecretRedactionSession : IDisposable
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentNullException.ThrowIfNull(mark);
+		if (!TryNormalizePersistentMark(mark, out var normalizedMark))
+			throw new ArgumentException("The persistent secret mark is invalid.", nameof(mark));
+		mark = normalizedMark;
 		bool changed;
 		lock (_sync)
 		{
-			changed = !_persistentMarks.TryGetValue(mark.H, out var existing) || existing != mark;
-			_persistentMarks[mark.H] = mark;
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			var identity = new PersistentSecretMarkId(mark.H.ToLowerInvariant(), mark.Length);
+			if (!_persistentMarks.ContainsKey(identity) &&
+			    _persistentMarks.Count >= SecretInspectionLimits.MaximumPersistentMarksPerProject)
+			{
+				throw SecretInspectionBudgetExceededException.PersistentMarks();
+			}
+			changed = !_persistentMarks.TryGetValue(identity, out var existing) || existing != mark;
+			_persistentMarks[identity] = mark;
 			if (changed)
 				AdvanceMarkedSecretsRevisionLocked();
 		}
@@ -174,10 +332,135 @@ public sealed class SecretRedactionSession : IDisposable
 		return changed;
 	}
 
+	public bool TryCreatePersistentMarkedSecret(
+		MarkedSecretValue value,
+		string? key,
+		out MarkedSecretProfileEntry mark)
+	{
+		ArgumentNullException.ThrowIfNull(value);
+		string identity;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (!PersistentSecretIdentity.TryCreateV2(
+				    _persistentIdentityProvider,
+				    value.NormalizedValue,
+				    out identity))
+			{
+				mark = null!;
+				return false;
+			}
+		}
+
+		mark = NormalizePersistentMark(new MarkedSecretProfileEntry(identity, key, value.Length));
+		return true;
+	}
+
+	private static bool TryNormalizePersistentMark(
+		MarkedSecretProfileEntry? mark,
+		out MarkedSecretProfileEntry normalized)
+	{
+		if (mark is null ||
+		    !PersistentSecretIdentity.IsSupported(mark.H) ||
+		    mark.Length is < MarkedSecretValueNormalizer.MinimumLength or
+			    > MarkedSecretValueNormalizer.MaximumLength)
+		{
+			normalized = null!;
+			return false;
+		}
+
+		normalized = NormalizePersistentMark(mark);
+		return true;
+	}
+
+	private static MarkedSecretProfileEntry NormalizePersistentMark(MarkedSecretProfileEntry mark)
+	{
+		var key = string.IsNullOrWhiteSpace(mark.Key) ? null : mark.Key.Trim();
+		if (key?.Length > SecretInspectionLimits.MaximumPersistentMarkKeyLength)
+			key = null;
+		return mark with { H = mark.H.ToLowerInvariant(), Key = key };
+	}
+
 	public bool RemoveMarkedSecret(string hash)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(hash);
 		return RemoveManualSecret(hash, null).PersistentMarkRemoved;
+	}
+
+	public bool RemoveMarkedSecret(PersistentSecretMarkId markId)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(markId.Hash);
+		return RemoveManualSecret(markId, null).PersistentMarkRemoved;
+	}
+
+	internal async ValueTask FlushPendingPersistentMarkMigrationsAsync(
+		string projectRoot,
+		CancellationToken cancellationToken)
+	{
+		if (_persistentMarkStore is null)
+			return;
+		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		PersistentSecretMarkDelta[] migrations;
+		long expectedGeneration;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (!PathComparer.Default.Equals(_persistentMarksProjectPath, normalizedProjectRoot) ||
+			    _pendingMarkMigrations.Count == 0)
+			{
+				return;
+			}
+			expectedGeneration = _generation;
+			migrations = _pendingMarkMigrations.Values.ToArray();
+		}
+
+		PersistentSecretMarksSnapshot? latest = null;
+		foreach (var migration in migrations)
+		{
+			var result = await _persistentMarkStore
+				.ApplyMarkDeltaAsync(projectRoot, migration, cancellationToken)
+				.ConfigureAwait(false);
+			if (!result.Succeeded || result.Snapshot is null)
+				throw new IOException($"Persistent secret mark migration failed ({result.Status}).");
+			latest = result.Snapshot;
+			lock (_sync)
+			{
+				if (_pendingMarkMigrations.TryGetValue(migration.MarkId, out var pending) &&
+				    pending.OperationId == migration.OperationId)
+				{
+					_pendingMarkMigrations.Remove(migration.MarkId);
+				}
+			}
+		}
+		if (latest is not null)
+		{
+			ReplaceMarkedSecretsCore(
+				latest.Marks,
+				normalizedProjectRoot,
+				latest.Revision,
+				expectedGeneration);
+		}
+	}
+
+	private void QueueLegacyMarkMigration(
+		MarkedSecretProfileEntry legacyMark,
+		string v2Identity,
+		long expectedGeneration)
+	{
+		var existingId = new PersistentSecretMarkId(legacyMark.H.ToLowerInvariant(), legacyMark.Length);
+		lock (_sync)
+		{
+			if (_disposed ||
+			    expectedGeneration != _generation ||
+			    _persistentMarkStore is null ||
+			    _persistentMarksProjectPath is null)
+				return;
+			_pendingMarkMigrations.TryAdd(
+				existingId,
+				PersistentSecretMarkDelta.Replace(
+					existingId,
+					legacyMark with { H = v2Identity }));
+		}
 	}
 
 	public bool AddSessionMarkedSecret(
@@ -197,6 +480,7 @@ public sealed class SecretRedactionSession : IDisposable
 		bool added;
 		lock (_sync)
 		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
 			added = !_sessionMarks.Contains(mark);
 			if (added)
 			{
@@ -212,11 +496,25 @@ public sealed class SecretRedactionSession : IDisposable
 	public bool RemoveSessionMarkedSecret(string sessionMarkId)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(sessionMarkId);
-		return RemoveManualSecret(null, sessionMarkId).SessionMarkRemoved;
+		return RemoveManualSecret((string?)null, sessionMarkId).SessionMarkRemoved;
 	}
 
 	public ManualSecretMarkRemovalResult RemoveManualSecret(
 		string? persistentMarkHash,
+		string? sessionMarkId) =>
+		RemoveManualSecretCore(persistentMarkHash, persistentMarkLength: null, sessionMarkId);
+
+	public ManualSecretMarkRemovalResult RemoveManualSecret(
+		PersistentSecretMarkId? persistentMarkId,
+		string? sessionMarkId) =>
+		RemoveManualSecretCore(
+			persistentMarkId?.Hash,
+			persistentMarkId?.Length,
+			sessionMarkId);
+
+	private ManualSecretMarkRemovalResult RemoveManualSecretCore(
+		string? persistentMarkHash,
+		int? persistentMarkLength,
 		string? sessionMarkId)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
@@ -224,8 +522,19 @@ public sealed class SecretRedactionSession : IDisposable
 		var sessionRemoved = false;
 		lock (_sync)
 		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
 			if (!string.IsNullOrWhiteSpace(persistentMarkHash))
-				persistentRemoved = _persistentMarks.Remove(persistentMarkHash);
+			{
+				var identities = _persistentMarks.Keys
+					.Where(identity => string.Equals(
+						identity.Hash,
+						persistentMarkHash,
+						StringComparison.OrdinalIgnoreCase) &&
+						(persistentMarkLength is null || identity.Length == persistentMarkLength))
+					.ToArray();
+				foreach (var identity in identities)
+					persistentRemoved |= _persistentMarks.Remove(identity);
+			}
 			if (!string.IsNullOrWhiteSpace(sessionMarkId))
 			{
 				sessionRemoved = _sessionMarks.RemoveAll(mark =>
@@ -246,6 +555,7 @@ public sealed class SecretRedactionSession : IDisposable
 		bool kept;
 		lock (_sync)
 		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
 			kept = _keptOccurrenceIds.Add(occurrenceId);
 			if (!kept)
 				_keptOccurrenceIds.Remove(occurrenceId);
@@ -270,7 +580,12 @@ public sealed class SecretRedactionSession : IDisposable
 	{
 		var key = GetOrComputeSelectionKey(projectRoot, orderedFilePaths, transformIdentity);
 		lock (_sync)
-			return _snapshots.GetValueOrDefault(key);
+		{
+			if (!_snapshots.TryGetValue(key, out var snapshot))
+				return null;
+			TouchSnapshotLocked(key);
+			return snapshot;
+		}
 	}
 
 	/// <summary>
@@ -283,20 +598,25 @@ public sealed class SecretRedactionSession : IDisposable
 		IReadOnlyList<string> orderedFilePaths,
 		string transformIdentity)
 	{
-		var cached = Volatile.Read(ref _selectionKeyCache);
-		if (cached is not null &&
-		    ReferenceEquals(cached.OrderedFilePaths, orderedFilePaths) &&
-		    string.Equals(cached.ProjectRoot, projectRoot, StringComparison.Ordinal) &&
-		    string.Equals(cached.TransformIdentity, transformIdentity, StringComparison.Ordinal))
+		lock (_sync)
 		{
-			return cached.SelectionKey;
-		}
+			var cached = _selectionKeyCache;
+			if (cached is not null &&
+			    ReferenceEquals(cached.OrderedFilePaths, orderedFilePaths) &&
+			    string.Equals(cached.ProjectRoot, projectRoot, StringComparison.Ordinal) &&
+			    string.Equals(cached.TransformIdentity, transformIdentity, StringComparison.Ordinal))
+			{
+				return cached.SelectionKey;
+			}
 
-		var key = BuildSelectionKey(projectRoot, orderedFilePaths, transformIdentity);
-		Volatile.Write(
-			ref _selectionKeyCache,
-			new SelectionKeyCacheEntry(projectRoot, orderedFilePaths, transformIdentity, key));
-		return key;
+			var key = BuildSelectionKey(projectRoot, orderedFilePaths, transformIdentity);
+			_selectionKeyCache = new SelectionKeyCacheEntry(
+				projectRoot,
+				orderedFilePaths,
+				transformIdentity,
+				key);
+			return key;
+		}
 	}
 
 	private sealed record SelectionKeyCacheEntry(
@@ -332,8 +652,13 @@ public sealed class SecretRedactionSession : IDisposable
 	/// </summary>
 	public void Disable()
 	{
-		_scanCache.Clear();
-		InvalidateSnapshots();
+		CancellationTokenSource obsoleteGeneration;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			obsoleteGeneration = AdvanceGenerationLocked();
+		}
+		CancelAndDispose(obsoleteGeneration);
 	}
 
 	/// <summary>
@@ -341,24 +666,43 @@ public sealed class SecretRedactionSession : IDisposable
 	/// </summary>
 	public void Reset()
 	{
-		_scanCache.Clear();
+		CancellationTokenSource obsoleteGeneration;
 		lock (_sync)
 		{
-			InvalidateSnapshotsLocked();
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			obsoleteGeneration = AdvanceGenerationLocked();
+			_activeProjectRoot = null;
 			_keptOccurrenceIds.Clear();
 			_persistentMarks.Clear();
+			_pendingMarkMigrations.Clear();
+			_persistentMarksProjectPath = null;
+			_persistentMarksStoreRevision = -1;
 			_sessionMarks.Clear();
 			_markedSecretsRevision++;
 			_overrideRevision++;
 		}
+		CancelAndDispose(obsoleteGeneration);
 	}
 
 	public void Dispose()
 	{
-		if (_disposed)
-			return;
-		_disposed = true;
-		Reset();
+		CancellationTokenSource generation;
+		lock (_sync)
+		{
+			if (_disposed)
+				return;
+			generation = AdvanceGenerationLocked();
+			_disposed = true;
+			_activeProjectRoot = null;
+			_keptOccurrenceIds.Clear();
+			_persistentMarks.Clear();
+			_pendingMarkMigrations.Clear();
+			_sessionMarks.Clear();
+		}
+		CancelAndDispose(generation);
+		CancelAndDispose(_generationCancellation);
+		if (_persistentIdentityProvider is IDisposable disposableIdentityProvider)
+			disposableIdentityProvider.Dispose();
 	}
 
 	internal bool TryGetCachedFindings(
@@ -369,18 +713,26 @@ public sealed class SecretRedactionSession : IDisposable
 		bool includeAutomaticDetection,
 		int markedSecretsRevision,
 		string transformIdentity,
-		out SecretScanCacheEntry entry) =>
-		_scanCache.TryGetByMetadata(
-			filePath,
-			metadata,
-			GetRulesIdentity(
-				detectorScope,
+		long generation,
+		CancellationToken generationToken,
+		out SecretScanCacheEntry entry)
+	{
+		lock (_sync)
+		{
+			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
+			return _scanCache.TryGetByMetadata(
 				filePath,
-				NormalizeRelativePath(projectRoot, filePath),
-				includeAutomaticDetection),
-			transformIdentity,
-			markedSecretsRevision,
-			out entry);
+				metadata,
+				GetRulesIdentity(
+					detectorScope,
+					filePath,
+					NormalizeRelativePath(projectRoot, filePath),
+					includeAutomaticDetection),
+				transformIdentity,
+				markedSecretsRevision,
+				out entry);
+		}
+	}
 
 	internal SecretScanCacheEntry GetOrDetectFindings(
 		string projectRoot,
@@ -392,6 +744,8 @@ public sealed class SecretRedactionSession : IDisposable
 		bool includeAutomaticDetection,
 		int markedSecretsRevision,
 		string transformIdentity,
+		long generation,
+		CancellationToken generationToken,
 		CancellationToken cancellationToken,
 		ContentTransformMap? transformMap = null) =>
 		GetOrDetectFindings(
@@ -404,6 +758,8 @@ public sealed class SecretRedactionSession : IDisposable
 			includeAutomaticDetection,
 			markedSecretsRevision,
 			transformIdentity,
+			generation,
+			generationToken,
 			cancellationToken,
 			transformMap);
 
@@ -417,11 +773,14 @@ public sealed class SecretRedactionSession : IDisposable
 		bool includeAutomaticDetection,
 		int markedSecretsRevision,
 		string transformIdentity,
+		long generation,
+		CancellationToken generationToken,
 		CancellationToken cancellationToken,
 		ContentTransformMap? transformMap = null,
 		ContentFingerprint? knownFingerprint = null,
 		bool allowIdentityTransformFallback = false)
 	{
+		ThrowIfGenerationIsNotCurrent(generation, generationToken);
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
 		var rulesIdentity = GetRulesIdentity(
 			detectorScope,
@@ -438,38 +797,53 @@ public sealed class SecretRedactionSession : IDisposable
 			ContentPipelineDiagnostics.RecordContentFingerprint();
 			contentFingerprint = HashText(content);
 		}
-		if (_scanCache.TryGetByContent(
-			    filePath,
-			    metadata,
-			    contentFingerprint,
-			    rulesIdentity,
-			    transformIdentity,
-			    markedSecretsRevision,
-			    out var cached))
+		SecretScanCacheEntry cached;
+		lock (_sync)
 		{
-			return cached;
+			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
+			if (_scanCache.TryGetByContent(
+				    filePath,
+				    metadata,
+				    contentFingerprint,
+				    rulesIdentity,
+				    transformIdentity,
+				    markedSecretsRevision,
+				    out cached))
+			{
+				return cached;
+			}
 		}
-		if (allowIdentityTransformFallback && transformIdentity.Length > 0 &&
-		    _scanCache.TryGetByContent(
-			    filePath,
-			    metadata,
-			    contentFingerprint,
-			    rulesIdentity,
-			    transformIdentity: string.Empty,
-			    markedSecretsRevision,
-			    out cached))
+		if (allowIdentityTransformFallback && transformIdentity.Length > 0)
 		{
-			StoreEquivalentTransformAlias(cached, transformIdentity);
-			return cached;
+			lock (_sync)
+			{
+				ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
+				if (_scanCache.TryGetByContent(
+					    filePath,
+					    metadata,
+					    contentFingerprint,
+					    rulesIdentity,
+					    transformIdentity: string.Empty,
+					    markedSecretsRevision,
+					    out cached))
+				{
+					StoreEquivalentTransformAliasLocked(cached, transformIdentity);
+					return cached;
+				}
+			}
 		}
 
+		var inspectionBudget = new SecretFileInspectionBudget(
+			SecretInspectionLimits.MaximumDetectorTimePerFile,
+			generationToken);
 		var detectorFindings = includeAutomaticDetection
-			? detectorScope.Detect(filePath, relativePath, content, cancellationToken)
+			? detectorScope.Detect(filePath, relativePath, content, inspectionBudget, cancellationToken)
 			: [];
 		var markedFindings = markedSecretsMatcher.Match(
 			relativePath,
 			content,
 			transformMap,
+			inspectionBudget,
 			cancellationToken);
 		var detected = SecretRedactionScope.ResolveNonOverlappingMatches(
 			detectorFindings.Count == 0
@@ -481,6 +855,7 @@ public sealed class SecretRedactionSession : IDisposable
 		for (var index = 0; index < detected.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			generationToken.ThrowIfCancellationRequested();
 			var finding = detected[index];
 			if (finding.Start < 0 || finding.Length <= 0 || finding.Start > content.Length - finding.Length)
 				throw new SecretDetectionException($"Secret detector returned an invalid span for '{relativePath}'.");
@@ -511,13 +886,17 @@ public sealed class SecretRedactionSession : IDisposable
 				rulesIdentity,
 				transformIdentity,
 				findings));
-		_scanCache.Store(entry, detectionExecuted: true);
-		if (allowIdentityTransformFallback && transformIdentity.Length > 0)
-			StoreEquivalentTransformAlias(entry, transformIdentity: string.Empty);
+		lock (_sync)
+		{
+			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
+			_scanCache.Store(entry, detectionExecuted: true);
+			if (allowIdentityTransformFallback && transformIdentity.Length > 0)
+				StoreEquivalentTransformAliasLocked(entry, transformIdentity: string.Empty);
+		}
 		return entry;
 	}
 
-	private void StoreEquivalentTransformAlias(
+	private void StoreEquivalentTransformAliasLocked(
 		SecretScanCacheEntry source,
 		string transformIdentity)
 	{
@@ -541,7 +920,9 @@ public sealed class SecretRedactionSession : IDisposable
 		ISecretDetectionScope detectorScope,
 		bool includeAutomaticDetection,
 		int markedSecretsRevision,
-		string transformIdentity)
+		string transformIdentity,
+		long generation,
+		CancellationToken generationToken)
 	{
 		var normalizedPath = Path.GetFullPath(filePath);
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
@@ -562,7 +943,11 @@ public sealed class SecretRedactionSession : IDisposable
 			ApproximateRetainedBytes: 96 +
 			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length) *
 			                          sizeof(char));
-		_scanCache.Store(entry, detectionExecuted: false);
+		lock (_sync)
+		{
+			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
+			_scanCache.Store(entry, detectionExecuted: false);
+		}
 		return entry;
 	}
 
@@ -580,7 +965,9 @@ public sealed class SecretRedactionSession : IDisposable
 		ISecretDetectionScope detectorScope,
 		bool includeAutomaticDetection,
 		int markedSecretsRevision,
-		string transformIdentity)
+		string transformIdentity,
+		long generation,
+		CancellationToken generationToken)
 	{
 		var normalizedPath = Path.GetFullPath(filePath);
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
@@ -601,7 +988,11 @@ public sealed class SecretRedactionSession : IDisposable
 			ApproximateRetainedBytes: 96 +
 			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length) *
 			                          sizeof(char));
-		_scanCache.Store(entry, detectionExecuted: false);
+		lock (_sync)
+		{
+			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
+			_scanCache.Store(entry, detectionExecuted: false);
+		}
 		return entry;
 	}
 
@@ -633,13 +1024,19 @@ public sealed class SecretRedactionSession : IDisposable
 	internal void Publish(
 		SecretRedactionSnapshot snapshot,
 		long overrideRevision,
-		long snapshotRevision)
+		long snapshotRevision,
+		long generation,
+		CancellationToken generationToken)
 	{
 		lock (_sync)
 		{
+			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
 			if (overrideRevision != _overrideRevision || snapshotRevision != _snapshotRevision)
 				return;
 			_snapshots[snapshot.SelectionKey] = snapshot;
+			TouchSnapshotLocked(snapshot.SelectionKey);
+			while (_snapshots.Count > MaximumSnapshots)
+				RemoveOldestSnapshotLocked();
 		}
 		SnapshotPublished?.Invoke(this, new SecretRedactionSnapshotPublishedEventArgs(snapshot));
 	}
@@ -695,6 +1092,84 @@ public sealed class SecretRedactionSession : IDisposable
 	{
 		_snapshotRevision++;
 		_snapshots.Clear();
+		_snapshotLru.Clear();
+		_snapshotLruNodes.Clear();
+		_selectionKeyCache = null;
+	}
+
+	private CancellationTokenSource AdvanceGenerationLocked()
+	{
+		var obsolete = _generationCancellation;
+		_generationCancellation = new CancellationTokenSource();
+		_generation++;
+		_scanCache.Clear();
+		InvalidateSnapshotsLocked();
+		return obsolete;
+	}
+
+	internal void ThrowIfGenerationIsNotCurrent(
+		long generation,
+		CancellationToken generationToken)
+	{
+		generationToken.ThrowIfCancellationRequested();
+		lock (_sync)
+			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
+	}
+
+	private void ThrowIfGenerationIsNotCurrentLocked(
+		long generation,
+		CancellationToken generationToken)
+	{
+		generationToken.ThrowIfCancellationRequested();
+		if (_disposed)
+			throw new ObjectDisposedException(nameof(SecretRedactionSession));
+		if (generation != _generation)
+			throw new OperationCanceledException("The secret-redaction scope belongs to an obsolete generation.");
+	}
+
+	private static void CancelAndDispose(CancellationTokenSource? source)
+	{
+		if (source is null)
+			return;
+		try
+		{
+			source.Cancel();
+		}
+		finally
+		{
+			source.Dispose();
+		}
+	}
+
+	private void TouchSnapshotLocked(string key)
+	{
+		if (_snapshotLruNodes.TryGetValue(key, out var existing))
+		{
+			_snapshotLru.Remove(existing);
+			_snapshotLru.AddFirst(existing);
+			return;
+		}
+
+		_snapshotLruNodes.Add(key, _snapshotLru.AddFirst(key));
+	}
+
+	private void RemoveOldestSnapshotLocked()
+	{
+		var oldest = _snapshotLru.Last;
+		if (oldest is null)
+			return;
+		_snapshotLru.RemoveLast();
+		_snapshotLruNodes.Remove(oldest.Value);
+		_snapshots.Remove(oldest.Value);
+	}
+
+	internal int SnapshotCount
+	{
+		get
+		{
+			lock (_sync)
+				return _snapshots.Count;
+		}
 	}
 
 	private sealed class FullContentBufferLease(SecretRedactionSession owner) : IDisposable
@@ -722,6 +1197,8 @@ public sealed class SecretRedactionScope
 	private readonly IReadOnlySet<string> _keptOccurrenceIds;
 	private readonly long _overrideRevision;
 	private readonly long _snapshotRevision;
+	private readonly long _generation;
+	private readonly CancellationToken _generationToken;
 	private readonly MarkedSecretsMatcher _markedSecretsMatcher;
 	private readonly int _markedSecretsRevision;
 	private readonly string _transformIdentity;
@@ -731,8 +1208,10 @@ public sealed class SecretRedactionScope
 	private readonly Dictionary<string, int> _markedSecretCounts = new(StringComparer.OrdinalIgnoreCase);
 	private readonly ConcurrentDictionary<string, SecretContentInspectionMode> _inspectionModes =
 		new(PathComparer.Default);
+	private readonly SecretOutputInspectionBudget _outputInspectionBudget = new();
 	private int _detectedCount;
 	private int _redactedCount;
+	private int _publicConsumerActive;
 	// The count scan runs files in parallel, so "first" would depend on thread timing. Keeping the
 	// ordinally smallest path makes the reported file the same on every run.
 	private string? _unscannablePath;
@@ -747,6 +1226,8 @@ public sealed class SecretRedactionScope
 		long snapshotRevision,
 		MarkedSecretsMatcher markedSecretsMatcher,
 		int markedSecretsRevision,
+		long generation,
+		CancellationToken generationToken,
 		string transformIdentity = "")
 	{
 		_session = session;
@@ -757,6 +1238,8 @@ public sealed class SecretRedactionScope
 		_snapshotRevision = snapshotRevision;
 		_markedSecretsMatcher = markedSecretsMatcher;
 		_markedSecretsRevision = markedSecretsRevision;
+		_generation = generation;
+		_generationToken = generationToken;
 		_detectorScope = session.CreateDetectorScope(_projectRoot);
 		SelectionKey = selectionKey;
 	}
@@ -781,7 +1264,7 @@ public sealed class SecretRedactionScope
 			: SecretContentInspectionMode.None;
 	}
 
-	public bool TryAnalyzeCached(string filePath)
+	internal bool TryAnalyzeCached(string filePath)
 	{
 		EnsureActive();
 		if (!TryGetCachedEntry(filePath, SecretFileMetadata.Capture(filePath), out var entry))
@@ -810,6 +1293,8 @@ public sealed class SecretRedactionScope
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
 			_transformIdentity,
+			_generation,
+			_generationToken,
 			out entry);
 	}
 
@@ -857,6 +1342,8 @@ public sealed class SecretRedactionScope
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
 			_transformIdentity,
+			_generation,
+			_generationToken,
 			cancellationToken);
 	}
 
@@ -873,7 +1360,9 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity);
+			_transformIdentity,
+			_generation,
+			_generationToken);
 	}
 
 	internal SecretScanCacheEntry StoreBinary(string filePath, SecretFileMetadata metadata)
@@ -889,7 +1378,9 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity);
+			_transformIdentity,
+			_generation,
+			_generationToken);
 	}
 
 	internal SecretScanCacheEntry StoreUnscannable(string filePath, SecretFileMetadata metadata)
@@ -906,7 +1397,9 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity);
+			_transformIdentity,
+			_generation,
+			_generationToken);
 	}
 
 	internal void AnalyzeUnscannable(string filePath, SecretFileMetadata metadata)
@@ -923,7 +1416,9 @@ public sealed class SecretRedactionScope
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
-			_transformIdentity);
+			_transformIdentity,
+			_generation,
+			_generationToken);
 	}
 
 	private void RecordUnscannable(string filePath)
@@ -940,12 +1435,20 @@ public sealed class SecretRedactionScope
 
 	internal void ProcessEntry(string filePath, SecretScanCacheEntry entry)
 	{
-		EnsureActive();
-		// Also runs for entries served from the cache, which is the only way a second scan of the
-		// same unchanged file would otherwise forget that it was never read.
-		if (entry.IsUnscannable)
-			RecordUnscannable(filePath);
-		ProcessFindings(filePath, entry.Findings);
+		EnterOrderedConsumer();
+		try
+		{
+			EnsureActive();
+			// Also runs for entries served from the cache, which is the only way a second scan of the
+			// same unchanged file would otherwise forget that it was never read.
+			if (entry.IsUnscannable)
+				RecordUnscannable(filePath);
+			ProcessFindings(filePath, entry.Findings, transformMap: null);
+		}
+		finally
+		{
+			ExitOrderedConsumer();
+		}
 	}
 
 	public SecretTextRedactionResult Redact(
@@ -962,8 +1465,17 @@ public sealed class SecretRedactionScope
 		ContentTransformMap? transformMap,
 		CancellationToken cancellationToken = default)
 	{
-		var plan = CreatePlan(filePath, content, transformMap, cancellationToken);
-		return plan.BuildResult(content);
+		EnsureActive();
+		EnterOrderedConsumer();
+		try
+		{
+			var plan = CreatePlan(filePath, content, transformMap, cancellationToken);
+			return plan.BuildResult(content);
+		}
+		finally
+		{
+			ExitOrderedConsumer();
+		}
 	}
 
 	internal SecretFileRedactionPlan CreatePlan(
@@ -991,11 +1503,27 @@ public sealed class SecretRedactionScope
 		ContentFingerprint? knownFingerprint,
 		CancellationToken cancellationToken = default)
 	{
+		return CreatePlan(
+			filePath,
+			content,
+			transformMap,
+			SecretFileMetadata.Capture(filePath),
+			knownFingerprint,
+			cancellationToken);
+	}
+
+	internal SecretFileRedactionPlan CreatePlan(
+		string filePath,
+		string content,
+		ContentTransformMap? transformMap,
+		SecretFileMetadata metadata,
+		ContentFingerprint? knownFingerprint,
+		CancellationToken cancellationToken = default)
+	{
 		EnsureActive();
 		var inspectionMode = GetContentInspectionMode(filePath);
 		if (inspectionMode == SecretContentInspectionMode.None)
-			return ProcessFindings(filePath, []);
-		var metadata = SecretFileMetadata.Capture(filePath);
+			return ProcessFindings(filePath, [], transformMap);
 		// Measured on the text this scope was handed, not on the file on disk. Compression runs
 		// first and the plan describes its output, so gating on the on-disk size would refuse work
 		// the scanner is about to do on a fraction of that text - the limit would fight the very
@@ -1017,12 +1545,14 @@ public sealed class SecretRedactionScope
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
 			_transformIdentity,
+			_generation,
+			_generationToken,
 			cancellationToken,
 			transformMap,
 			knownFingerprint,
 			allowIdentityTransformFallback:
 				knownFingerprint is not null && transformMap?.IsIdentity == true);
-		return ProcessFindings(filePath, entry.Findings);
+		return ProcessFindings(filePath, entry.Findings, transformMap);
 	}
 
 	internal IDisposable TrackFullContentBuffer() => _session.TrackFullContentBuffer();
@@ -1032,26 +1562,41 @@ public sealed class SecretRedactionScope
 
 	internal SecretRedactionSnapshot Complete(int skippedFileCount, int failedFileCount)
 	{
-		EnsureActive();
-		ArgumentOutOfRangeException.ThrowIfNegative(skippedFileCount);
-		ArgumentOutOfRangeException.ThrowIfNegative(failedFileCount);
-		_completed = true;
-		var snapshot = new SecretRedactionSnapshot(
-			SelectionKey,
-			_detectedCount,
-			_redactedCount,
-			new Dictionary<string, int>(_markedSecretCounts, StringComparer.OrdinalIgnoreCase),
-			Volatile.Read(ref _unscannablePath),
-			skippedFileCount,
-			failedFileCount);
-		_session.Publish(snapshot, _overrideRevision, _snapshotRevision);
-		return snapshot;
+		EnterOrderedConsumer();
+		try
+		{
+			EnsureActive();
+			ArgumentOutOfRangeException.ThrowIfNegative(skippedFileCount);
+			ArgumentOutOfRangeException.ThrowIfNegative(failedFileCount);
+			_completed = true;
+			var snapshot = new SecretRedactionSnapshot(
+				SelectionKey,
+				_detectedCount,
+				_redactedCount,
+				new Dictionary<string, int>(_markedSecretCounts, StringComparer.OrdinalIgnoreCase),
+				Volatile.Read(ref _unscannablePath),
+				skippedFileCount,
+				failedFileCount);
+			_session.Publish(
+				snapshot,
+				_overrideRevision,
+				_snapshotRevision,
+				_generation,
+				_generationToken);
+			return snapshot;
+		}
+		finally
+		{
+			ExitOrderedConsumer();
+		}
 	}
 
 	private SecretFileRedactionPlan ProcessFindings(
 		string filePath,
-		IReadOnlyList<SecretFindingMetadata> findings)
+		IReadOnlyList<SecretFindingMetadata> findings,
+		ContentTransformMap? transformMap)
 	{
+		_outputInspectionBudget.RegisterFindings(findings.Count);
 		var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
 		var replacements = new SecretReplacement[findings.Count];
 		var spans = new SecretPreviewSpan[findings.Count];
@@ -1068,8 +1613,9 @@ public sealed class SecretRedactionScope
 				_identityIndexes.Add(identity, identityIndex);
 			}
 
+			var coordinateIdentity = ResolveOccurrenceCoordinateIdentity(finding, transformMap);
 			var occurrenceId = SecretRedactionSession.HashValue(
-				$"{_projectRoot}\n{relativePath}\n{finding.RuleId}\n{finding.ValueFingerprint}\n{finding.Start}\n{finding.Length}".AsSpan());
+				$"{_projectRoot}\n{relativePath}\n{finding.RuleId}\n{finding.ValueFingerprint}\n{coordinateIdentity}".AsSpan());
 			var kept = _keptOccurrenceIds.Contains(occurrenceId);
 			var replacement = kept
 				? null
@@ -1104,11 +1650,43 @@ public sealed class SecretRedactionScope
 		return new SecretFileRedactionPlan(replacements, spans, findings.Count, redactedInFile);
 	}
 
+	private string ResolveOccurrenceCoordinateIdentity(
+		SecretFindingMetadata finding,
+		ContentTransformMap? transformMap)
+	{
+		if (transformMap is null or { IsIdentity: true })
+			return $"source:{finding.Start}:{finding.Length}";
+		if (transformMap.TryMapSourceBackedRange(
+			    finding.Start,
+			    finding.Length,
+			    out var sourceStart,
+			    out var sourceLength))
+		{
+			return $"source:{sourceStart}:{sourceLength}";
+		}
+
+		// Replacement-only text has no source coordinate. Its namespace includes the exact
+		// transform identity so it can never inherit a keep decision from source content.
+		return $"transform:{_transformIdentity}:{finding.Start}:{finding.Length}";
+	}
+
 	private void EnsureActive()
 	{
 		if (_completed)
 			throw new InvalidOperationException("The redaction output scope is already complete.");
+		_session.ThrowIfGenerationIsNotCurrent(_generation, _generationToken);
 	}
+
+	private void EnterOrderedConsumer()
+	{
+		if (Interlocked.CompareExchange(ref _publicConsumerActive, 1, 0) != 0)
+		{
+			throw new InvalidOperationException(
+				"A redaction scope accepts one ordered consumer at a time.");
+		}
+	}
+
+	private void ExitOrderedConsumer() => Volatile.Write(ref _publicConsumerActive, 0);
 
 	internal static IReadOnlyList<DetectedSecret> ResolveNonOverlappingMatches(
 		IReadOnlyList<DetectedSecret> matches)
