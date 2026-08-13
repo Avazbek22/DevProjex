@@ -729,6 +729,8 @@ public partial class MainWindow
     private TaskCompletionSource<bool>? _projectCopyExportCompletion;
     private bool _projectCopyExportClosePending;
     private bool _allowCloseAfterProjectCopyExportCleanup;
+	private bool _manualSecretMarkClosePending;
+	private bool _allowCloseAfterManualSecretMarkPersistence;
     private GitCloneWindow? _gitCloneWindow;
     private string? _currentCachedRepoPath;
     private IRepositoryCacheSession? _currentRepositorySession;

@@ -483,6 +483,39 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Fact]
+	public async Task ExportContext_LocalProfileAppliesSourceBoundMarkToOnlySelectedOccurrence()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		var content = $"first={ManuallyMarkedValue}\nsecond={ManuallyMarkedValue}\n";
+		workspace.Temporary.WriteFile("project/src/manual.txt", content);
+		await AddPersistentManualSecretAsync(
+			workspace,
+			relativePath: "src/manual.txt",
+			sourceOffset: content.IndexOf(ManuallyMarkedValue, StringComparison.Ordinal),
+			writeSource: false);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", "local",
+				"--view", "content",
+				"--format", "text",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(1, CountOccurrences(environment.StandardOutput, ManuallyMarkedValue));
+		Assert.Equal(
+			1,
+			CountOccurrences(environment.StandardOutput, "DEVPROJEX_REDACTED[manual-secret#1]"));
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Fact(Timeout = 20_000)]
 	public async Task ExportContext_FindingBudgetExceeded_ProducesNoPartialOutput()
 	{
@@ -555,11 +588,18 @@ public sealed class SecretRedactionCommandContractTests
 				new TerminalServiceFactory(() => workspace.AppDataRoot))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
 
-	private static async Task AddPersistentManualSecretAsync(Workspace workspace)
+	private static async Task AddPersistentManualSecretAsync(
+		Workspace workspace,
+		string? relativePath = null,
+		int? sourceOffset = null,
+		bool writeSource = true)
 	{
-		workspace.Temporary.WriteFile(
-			"project/src/manual.txt",
-			$"setting={ManuallyMarkedValue}\n");
+		if (writeSource)
+		{
+			workspace.Temporary.WriteFile(
+				"project/src/manual.txt",
+				$"setting={ManuallyMarkedValue}\n");
+		}
 		var store = new ProjectProfileStore(() => workspace.AppDataRoot);
 		store.SaveProfile(
 			workspace.ProjectRoot,
@@ -579,9 +619,22 @@ public sealed class SecretRedactionCommandContractTests
 			out var identity));
 		var result = await store.AddMarkAsync(
 			workspace.ProjectRoot,
-			new MarkedSecretProfileEntry(identity, "setting", ManuallyMarkedValue.Length),
+			new MarkedSecretProfileEntry(
+				identity,
+				"setting",
+				ManuallyMarkedValue.Length,
+				relativePath,
+				sourceOffset),
 			TestContext.Current.CancellationToken);
 		Assert.True(result.Succeeded);
+	}
+
+	private static int CountOccurrences(string value, string search)
+	{
+		var count = 0;
+		for (var offset = 0; (offset = value.IndexOf(search, offset, StringComparison.Ordinal)) >= 0; offset += search.Length)
+			count++;
+		return count;
 	}
 
 	private static Workspace CreateWorkspace(bool includeSecret = true)

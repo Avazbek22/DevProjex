@@ -437,17 +437,29 @@ public partial class MainWindow : Window
 		// Reuse that snapshot synchronously so rollback also restores the measured label.
 		var discoveryActive = IsSecretDiscoveryActiveForCurrentSelection();
 		var cachedRedactionSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
-		_secretRedactionMatchedCount = cachedRedactionSnapshot?.DetectedCount;
-		_secretRedactionCount = cachedRedactionSnapshot?.RedactedCount;
-		_secretRedactionScanState = discoveryActive && cachedRedactionSnapshot is null
-			? SecretScanState.Scanning
-			: ResolveSecretScanState(cachedRedactionSnapshot);
-		_viewModel.SetContentProcessingStatus(
-			_secretRedactionScanState,
-			cachedRedactionSnapshot?.DetectedCount,
-			cachedRedactionSnapshot?.RedactedCount,
-			cachedRedactionSnapshot?.SkippedFileCount,
-			cachedRedactionSnapshot?.FailedFileCount);
+		if (cachedRedactionSnapshot is not null)
+		{
+			_secretRedactionMatchedCount = cachedRedactionSnapshot.DetectedCount;
+			_secretRedactionCount = cachedRedactionSnapshot.RedactedCount;
+			_secretRedactionScanState = ResolveSecretScanState(cachedRedactionSnapshot);
+			_viewModel.SetContentProcessingStatus(
+				_secretRedactionScanState,
+				cachedRedactionSnapshot.DetectedCount,
+				cachedRedactionSnapshot.RedactedCount,
+				cachedRedactionSnapshot.SkippedFileCount,
+				cachedRedactionSnapshot.FailedFileCount);
+		}
+		// A visible preview is already a complete measurement. Keep it until its replacement
+		// publishes so a session-to-durable mark transition cannot flash an empty status.
+		else if (!_viewModel.IsAnyPreviewVisible || _secretRedactionCount is null)
+		{
+			_secretRedactionMatchedCount = null;
+			_secretRedactionCount = null;
+			_secretRedactionScanState = discoveryActive
+				? SecretScanState.Scanning
+				: SecretScanState.Pending;
+			_viewModel.SetContentProcessingStatus(_secretRedactionScanState);
+		}
 		RelabelIgnoreOptionsWithCurrentCounts();
 		if (_viewModel.IsAnyPreviewVisible)
 			_previewPipeline.ScheduleRefresh(immediate: true);

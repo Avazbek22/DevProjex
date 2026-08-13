@@ -1,3 +1,4 @@
+using DevProjex.Application.Context;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Persistence;
 using System.Text.Json.Nodes;
@@ -504,21 +505,76 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		IEnumerable<MarkedSecretProfileEntry>? marks)
 	{
 		return (marks ?? [])
-			.Where(static mark =>
-				mark is not null &&
-				PersistentSecretIdentity.IsSupported(mark.H) &&
-				mark.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength)
-			.Select(static mark => mark with
-			{
-				H = mark.H.ToLowerInvariant(),
-				Key = NormalizeMarkedSecretKey(mark.Key)
-			})
-			.GroupBy(static mark => new PersistentSecretMarkId(mark.H, mark.Length))
+			.Select(static mark => TryNormalizeMarkedSecret(mark, out var normalized) ? normalized : null)
+			.Where(static mark => mark is not null)
+			.Select(static mark => mark!)
+			.GroupBy(static mark => new PersistentSecretMarkId(
+				mark.H,
+				mark.Length,
+				mark.RelativePath,
+				mark.SourceOffset))
 			.Select(static group => group.First())
 			.OrderBy(static mark => mark.H, StringComparer.Ordinal)
 			.ThenBy(static mark => mark.Length)
+			.ThenBy(static mark => mark.RelativePath, StringComparer.Ordinal)
+			.ThenBy(static mark => mark.SourceOffset)
 			.Take(ProjectProfileStorageLimits.MaximumPersistentMarksPerProject)
 			.ToList();
+	}
+
+	private static bool TryNormalizeMarkedSecret(
+		MarkedSecretProfileEntry? mark,
+		out MarkedSecretProfileEntry normalized)
+	{
+		if (mark is null ||
+		    !PersistentSecretIdentity.IsSupported(mark.H) ||
+		    mark.Length is < MarkedSecretValueNormalizer.MinimumLength or
+			    > MarkedSecretValueNormalizer.MaximumLength)
+		{
+			normalized = null!;
+			return false;
+		}
+
+		string? relativePath = null;
+		int? sourceOffset = null;
+		if (mark.RelativePath is not null || mark.SourceOffset is not null)
+		{
+			if (string.IsNullOrWhiteSpace(mark.RelativePath) || mark.SourceOffset is null or < 0)
+			{
+				normalized = null!;
+				return false;
+			}
+			try
+			{
+				relativePath = ProjectSelectionPath.NormalizeRelative(mark.RelativePath);
+			}
+			catch (ProjectContextValidationException)
+			{
+				normalized = null!;
+				return false;
+			}
+			if (relativePath.Length == 0 ||
+			    relativePath.Length > ProjectProfileStorageLimits.MaximumMarkedSecretPathLength)
+			{
+				normalized = null!;
+				return false;
+			}
+			sourceOffset = mark.SourceOffset;
+			if (!PersistentSecretIdentity.IsV2(mark.H))
+			{
+				normalized = null!;
+				return false;
+			}
+		}
+
+		normalized = mark with
+		{
+			H = mark.H.ToLowerInvariant(),
+			Key = NormalizeMarkedSecretKey(mark.Key),
+			RelativePath = relativePath,
+			SourceOffset = sourceOffset
+		};
+		return true;
 	}
 
 	private static string? NormalizeMarkedSecretKey(string? key)

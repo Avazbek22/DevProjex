@@ -10,7 +10,24 @@ public enum PersistentSecretMarkStoreStatus
 	UnsupportedFutureSchema = 5
 }
 
-public readonly record struct PersistentSecretMarkId(string Hash, int Length);
+public readonly record struct PersistentSecretMarkId(
+	string Hash,
+	int Length,
+	string? RelativePath = null,
+	int? SourceOffset = null)
+{
+	public bool Equals(PersistentSecretMarkId other) =>
+		StringComparer.OrdinalIgnoreCase.Equals(Hash, other.Hash) &&
+		Length == other.Length &&
+		PathComparer.Default.Equals(RelativePath, other.RelativePath) &&
+		SourceOffset == other.SourceOffset;
+
+	public override int GetHashCode() => HashCode.Combine(
+		StringComparer.OrdinalIgnoreCase.GetHashCode(Hash ?? string.Empty),
+		Length,
+		RelativePath is null ? 0 : PathComparer.Default.GetHashCode(RelativePath),
+		SourceOffset);
+}
 
 public enum PersistentSecretMarkDeltaKind
 {
@@ -43,7 +60,11 @@ public sealed record PersistentSecretMarkDelta(
 			NextIssuedUtcTicks(),
 			observedRevision,
 			PersistentSecretMarkDeltaKind.Add,
-			new PersistentSecretMarkId(mark.H, mark.Length),
+			new PersistentSecretMarkId(
+				mark.H,
+				mark.Length,
+				mark.RelativePath,
+				mark.SourceOffset),
 			mark);
 	}
 

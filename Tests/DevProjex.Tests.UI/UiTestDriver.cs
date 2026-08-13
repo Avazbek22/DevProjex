@@ -816,61 +816,73 @@ internal static class UiTestDriver
 		int clickCount = 1)
 	{
 		Assert.True(clickCount > 0);
+		await WaitForPreviewReadyAsync(window);
 		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
 			window,
 			"PreviewTextControl");
-		var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
-		Assert.NotNull(document);
-
-		var lineNumber = 0;
-		var startColumn = -1;
-		for (var candidateLine = 1; candidateLine <= document!.LineCount; candidateLine++)
+		var contextPoint = default(Point);
+		var selected = false;
+		for (var attempt = 0; attempt < 3 && !selected; attempt++)
 		{
-			var candidateColumn = document.GetLineText(candidateLine).IndexOf(value, StringComparison.Ordinal);
-			if (candidateColumn < 0)
-				continue;
-			lineNumber = candidateLine;
-			startColumn = candidateColumn;
-			break;
+			if (attempt > 0)
+			{
+				textControl.ClearSelection();
+				await WaitForSettledFramesAsync(frameCount: 4);
+			}
+
+			var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
+			Assert.NotNull(document);
+			var lineNumber = 0;
+			var startColumn = -1;
+			for (var candidateLine = 1; candidateLine <= document!.LineCount; candidateLine++)
+			{
+				var candidateColumn = document.GetLineText(candidateLine).IndexOf(value, StringComparison.Ordinal);
+				if (candidateColumn < 0)
+					continue;
+				lineNumber = candidateLine;
+				startColumn = candidateColumn;
+				break;
+			}
+			Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
+
+			var typeface = new Typeface(
+				textControl.TextFontFamily ?? FontFamily.Default,
+				FontStyle.Normal,
+				FontWeight.Normal);
+			var lineText = document.GetLineText(lineNumber);
+			var origin = Assert.IsType<Point>(textControl.TranslatePoint(default, window));
+			var lineHeight = InvokeRequiredPrivateMethod<double>(textControl, "ResolveLineHeight");
+			var startDistance = InvokeRequiredPrivateMethod<double>(
+				textControl,
+				"ResolveDistanceFromColumn",
+				lineText,
+				startColumn,
+				typeface);
+			var endDistance = InvokeRequiredPrivateMethod<double>(
+				textControl,
+				"ResolveDistanceFromColumn",
+				lineText,
+				startColumn + value.Length,
+				typeface);
+			var y = origin.Y + textControl.TopPadding + ((lineNumber - 1) * lineHeight) -
+			        textControl.VerticalOffset + (lineHeight / 2);
+			var start = new Point(
+				origin.X + textControl.LeftPadding + startDistance - textControl.HorizontalOffset,
+				y);
+			var end = new Point(
+				origin.X + textControl.LeftPadding + endDistance - textControl.HorizontalOffset,
+				y);
+
+			textControl.Focus();
+			window.MouseMove(start, RawInputModifiers.None);
+			window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+			window.MouseMove(end, RawInputModifiers.LeftMouseButton);
+			window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
+			selected = string.Equals(value, textControl.GetSelectedText(), StringComparison.Ordinal);
+			contextPoint = new Point((start.X + end.X) / 2, y);
 		}
-		Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
-
-		var typeface = new Typeface(
-			textControl.TextFontFamily ?? FontFamily.Default,
-			FontStyle.Normal,
-			FontWeight.Normal);
-		var lineText = document.GetLineText(lineNumber);
-		var origin = Assert.IsType<Point>(textControl.TranslatePoint(default, window));
-		var lineHeight = InvokeRequiredPrivateMethod<double>(textControl, "ResolveLineHeight");
-		var startDistance = InvokeRequiredPrivateMethod<double>(
-			textControl,
-			"ResolveDistanceFromColumn",
-			lineText,
-			startColumn,
-			typeface);
-		var endDistance = InvokeRequiredPrivateMethod<double>(
-			textControl,
-			"ResolveDistanceFromColumn",
-			lineText,
-			startColumn + value.Length,
-			typeface);
-		var y = origin.Y + textControl.TopPadding + ((lineNumber - 1) * lineHeight) -
-		        textControl.VerticalOffset + (lineHeight / 2);
-		var start = new Point(
-			origin.X + textControl.LeftPadding + startDistance - textControl.HorizontalOffset,
-			y);
-		var end = new Point(
-			origin.X + textControl.LeftPadding + endDistance - textControl.HorizontalOffset,
-			y);
-
-		textControl.Focus();
-		window.MouseMove(start, RawInputModifiers.None);
-		window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
-		window.MouseMove(end, RawInputModifiers.LeftMouseButton);
-		window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
 		Assert.Equal(value, textControl.GetSelectedText());
 
-		var contextPoint = new Point((start.X + end.X) / 2, y);
 		window.MouseDown(contextPoint, MouseButton.Right, RawInputModifiers.RightMouseButton);
 		window.MouseUp(contextPoint, MouseButton.Right, RawInputModifiers.None);
 		await WaitForSettledFramesAsync(frameCount: 2);

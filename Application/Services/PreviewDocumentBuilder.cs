@@ -541,7 +541,8 @@ public sealed class PreviewDocumentBuilder(
 							: span.SourceLength,
 						span.Source,
 						span.PersistentMarkHash,
-						span.SessionMarkId));
+						span.SessionMarkId,
+						span.PersistentMarkId));
 				}
 
 				if (index < spanText.Length)

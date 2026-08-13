@@ -1,4 +1,5 @@
 using DevProjex.Application.Compression;
+using System.Security.Cryptography;
 
 namespace DevProjex.Application.Secrets;
 
@@ -26,6 +27,7 @@ internal sealed class MarkedSecretsMatcher
 	private const int CancellationCheckMask = 0xFFF;
 
 	private readonly PersistentHashGroup[] _persistentHashGroups;
+	private readonly IReadOnlyDictionary<string, PreparedPersistentSourceMark[]> _persistentSourceMarksByPath;
 	private readonly IReadOnlyDictionary<string, PreparedSessionMark[]> _sessionMarksByPath;
 	private readonly IPersistentSecretIdentityProvider? _identityProvider;
 	private readonly Action<MarkedSecretProfileEntry, string>? _legacyMigration;
@@ -49,6 +51,7 @@ internal sealed class MarkedSecretsMatcher
 			throw SecretInspectionBudgetExceededException.PersistentMarks();
 
 		_persistentHashGroups = normalizedPersistentMarks
+			.Where(static mark => mark.RelativePath is null)
 			.GroupBy(static mark => mark.Length)
 			.Select(static group => new PersistentHashGroup(
 				group.Key,
@@ -67,6 +70,17 @@ internal sealed class MarkedSecretsMatcher
 			throw new SecretDetectionException(
 				"The installation key required for persistent secret marks is unavailable.");
 		}
+		_persistentSourceMarksByPath = normalizedPersistentMarks
+			.Where(static mark => mark.RelativePath is not null)
+			.GroupBy(static mark => NormalizePath(mark.RelativePath!), PathComparer.Default)
+			.ToDictionary(
+				static group => group.Key,
+				static group => group
+					.Select(static mark => new PreparedPersistentSourceMark(
+						mark,
+						PersistentHash.Create(mark)))
+					.ToArray(),
+				PathComparer.Default);
 		_sessionMarksByPath = sessionMarks
 			.Where(static mark => IsValidHash(mark.Hash))
 			.GroupBy(static mark => NormalizePath(mark.RelativePath), PathComparer.Default)
@@ -88,6 +102,7 @@ internal sealed class MarkedSecretsMatcher
 
 	public bool RequiresContentInspection(string relativePath) =>
 		_persistentHashGroups.Length > 0 ||
+		_persistentSourceMarksByPath.ContainsKey(NormalizePath(relativePath)) ||
 		_sessionMarksByPath.ContainsKey(NormalizePath(relativePath));
 
 	/// <param name="content">The text being scanned, after every enabled transformation.</param>
@@ -113,10 +128,14 @@ internal sealed class MarkedSecretsMatcher
 	{
 		ArgumentNullException.ThrowIfNull(budget);
 		budget.Checkpoint(cancellationToken);
+		var normalizedPath = NormalizePath(relativePath);
+		_persistentSourceMarksByPath.TryGetValue(
+			normalizedPath,
+			out var persistentSourceMarks);
 		_sessionMarksByPath.TryGetValue(
-			NormalizePath(relativePath),
+			normalizedPath,
 			out var sessionMarks);
-		if (_persistentHashGroups.Length == 0 && sessionMarks is null)
+		if (_persistentHashGroups.Length == 0 && persistentSourceMarks is null && sessionMarks is null)
 			return [];
 
 		var findings = new List<DetectedSecret>();
@@ -126,6 +145,13 @@ internal sealed class MarkedSecretsMatcher
 			Interlocked.Increment(ref _persistentIndexBuildCount);
 			MatchPersistent(content, positions, findings, budget, cancellationToken);
 		}
+		MatchPersistentSource(
+			persistentSourceMarks,
+			content,
+			transformMap,
+			findings,
+			budget,
+			cancellationToken);
 		MatchSession(
 			sessionMarks,
 			content,
@@ -134,6 +160,66 @@ internal sealed class MarkedSecretsMatcher
 			budget,
 			cancellationToken);
 		return findings;
+	}
+
+	private void MatchPersistentSource(
+		IReadOnlyList<PreparedPersistentSourceMark>? marks,
+		ReadOnlySpan<char> content,
+		ContentTransformMap? transformMap,
+		ICollection<DetectedSecret> findings,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
+	{
+		if (marks is null)
+			return;
+
+		Span<byte> candidateDigest = stackalloc byte[PersistentSecretIdentity.V2DigestByteLength];
+		try
+		{
+			for (var index = 0; index < marks.Count; index++)
+			{
+				if ((index & 0xFF) == 0)
+				{
+					budget.RegisterMatcherWork(
+						Math.Min(0x100, marks.Count - index),
+						cancellationToken);
+				}
+				var prepared = marks[index];
+				var mark = prepared.Mark;
+				if (!TryResolveAnchor(mark.SourceOffset!.Value, transformMap, out var start) ||
+				    start > content.Length - mark.Length)
+				{
+					continue;
+				}
+
+				var value = content.Slice(start, mark.Length);
+				if (value.IndexOfAny('\r', '\n') >= 0 ||
+				    _identityProvider is null ||
+				    !_identityProvider.TryComputeDigest(value, candidateDigest) ||
+				    !candidateDigest.SequenceEqual(prepared.Hash.Bytes))
+				{
+					continue;
+				}
+
+				budget.RegisterFinding(cancellationToken);
+				var markId = new PersistentSecretMarkId(
+					mark.H,
+					mark.Length,
+					mark.RelativePath,
+					mark.SourceOffset);
+				findings.Add(CreateFinding(
+					content,
+					start,
+					mark.Length,
+					mark.H,
+					SecretFindingSource.PersistentMark,
+					persistentMarkId: markId));
+			}
+		}
+		finally
+		{
+			CryptographicOperations.ZeroMemory(candidateDigest);
+		}
 	}
 
 	private void MatchPersistent(
@@ -221,7 +307,10 @@ internal sealed class MarkedSecretsMatcher
 					start,
 					group.Length,
 					resolvedMark.H,
-					SecretFindingSource.PersistentMark));
+					SecretFindingSource.PersistentMark,
+					persistentMarkId: new PersistentSecretMarkId(
+						resolvedMark.H,
+						resolvedMark.Length)));
 			}
 		}
 	}
@@ -291,15 +380,21 @@ internal sealed class MarkedSecretsMatcher
 	private static bool TryResolveAnchor(
 		SessionMarkedSecret mark,
 		ContentTransformMap? transformMap,
+		out int start) =>
+		TryResolveAnchor(mark.SourceOffset, transformMap, out start);
+
+	private static bool TryResolveAnchor(
+		int sourceOffset,
+		ContentTransformMap? transformMap,
 		out int start)
 	{
 		if (transformMap is null or { IsIdentity: true })
 		{
-			start = mark.SourceOffset;
+			start = sourceOffset;
 			return true;
 		}
 
-		return transformMap.TryToTransformed(mark.SourceOffset, out start);
+		return transformMap.TryToTransformed(sourceOffset, out start);
 	}
 
 	private static DetectedSecret CreateFinding(
@@ -308,7 +403,8 @@ internal sealed class MarkedSecretsMatcher
 		int length,
 		string hash,
 		SecretFindingSource source,
-		string? sessionMarkId = null) =>
+		string? sessionMarkId = null,
+		PersistentSecretMarkId? persistentMarkId = null) =>
 		new(
 			RuleId,
 			start,
@@ -317,11 +413,16 @@ internal sealed class MarkedSecretsMatcher
 			RuleOrder,
 			source,
 			source == SecretFindingSource.PersistentMark ? hash : null,
-			sessionMarkId);
+			sessionMarkId,
+			persistentMarkId);
 
 	private static bool IsValid(MarkedSecretProfileEntry mark) =>
 		mark.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength &&
-		PersistentSecretIdentity.IsSupported(mark.H);
+		PersistentSecretIdentity.IsSupported(mark.H) &&
+		(mark.RelativePath is null && mark.SourceOffset is null ||
+		 PersistentSecretIdentity.IsV2(mark.H) &&
+		 !string.IsNullOrWhiteSpace(mark.RelativePath) &&
+		 mark.SourceOffset is >= 0);
 
 	private static bool IsValidHash(string? hash) =>
 		hash is not null &&
@@ -350,6 +451,10 @@ internal sealed class MarkedSecretsMatcher
 	}
 
 	private sealed record PreparedSessionMark(SessionMarkedSecret Mark, byte[] HashBytes);
+
+	private sealed record PreparedPersistentSourceMark(
+		MarkedSecretProfileEntry Mark,
+		PersistentHash Hash);
 
 	private sealed class TextPositionIndex(
 		ulong[] boundaryBits,

@@ -4,6 +4,7 @@ public sealed class PersistentSecretMarkStoreTests
 {
 	private const string FirstHash = "001122334455";
 	private const string SecondHash = "aabbccddeeff";
+	private const string V2Hash = "v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 	[Fact]
 	public async Task FutureSchema_IsReadOnlyAcrossLoadMutationsMigrationAndClear()
@@ -15,7 +16,7 @@ public sealed class PersistentSecretMarkStoreTests
 		var backupPath = primaryPath + ".bak";
 		await File.WriteAllTextAsync(
 			primaryPath,
-			"{\"schemaVersion\":3,\"projects\":{\"future\":{}}}",
+			"{\"schemaVersion\":4,\"projects\":{\"future\":{}}}",
 			TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(
 			backupPath,
@@ -62,6 +63,91 @@ public sealed class PersistentSecretMarkStoreTests
 		Assert.Equal(2, loaded.Snapshot!.Marks.Count);
 		Assert.Contains(loaded.Snapshot.Marks, mark => mark.H == FirstHash);
 		Assert.Contains(loaded.Snapshot.Marks, mark => mark.H == SecondHash);
+	}
+
+	[Fact]
+	public async Task SourceBoundMark_RoundTripsAndRemovalDoesNotAffectGlobalSameValue()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var writer = new ProjectProfileStore(() => temporary.Path);
+		var global = new MarkedSecretProfileEntry(V2Hash, "TOKEN", 10);
+		var sourceBound = new MarkedSecretProfileEntry(
+			V2Hash,
+			"TOKEN",
+			10,
+			"src/config.cs",
+			42);
+
+		Assert.True((await writer.AddMarkAsync(
+			project,
+			global,
+			TestContext.Current.CancellationToken)).Succeeded);
+		Assert.True((await writer.AddMarkAsync(
+			project,
+			sourceBound,
+			TestContext.Current.CancellationToken)).Succeeded);
+		var restarted = new ProjectProfileStore(() => temporary.Path);
+		var loaded = await restarted.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+
+		Assert.True(loaded.Succeeded);
+		Assert.Equal(2, loaded.Snapshot!.Marks.Count);
+		Assert.Contains(global, loaded.Snapshot.Marks);
+		Assert.Contains(sourceBound, loaded.Snapshot.Marks);
+		var removed = await restarted.RemoveMarkAsync(
+			project,
+			new PersistentSecretMarkId(
+				sourceBound.H,
+				sourceBound.Length,
+				sourceBound.RelativePath,
+				sourceBound.SourceOffset),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(removed.Succeeded);
+		Assert.Equal(global, Assert.Single(removed.Snapshot!.Marks));
+		var json = await File.ReadAllTextAsync(
+			Path.Combine(temporary.Path, "DevProjex", "project-secret-marks.json"),
+			TestContext.Current.CancellationToken);
+		Assert.Contains("\"schemaVersion\": 3", json, StringComparison.Ordinal);
+		Assert.DoesNotContain("abcdefghij", json, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task MalformedSourceBoundStates_AreDiscardedWithoutLosingValidSibling()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var directory = temporary.CreateFolder("DevProjex");
+		var normalizedProject = PathUtility.Normalize(project).Replace("\\", "\\\\", StringComparison.Ordinal);
+		var json = $$"""
+			{
+			  "schemaVersion": 3,
+			  "projects": {
+			    "{{normalizedProject}}": {
+			      "appliedRevision": 4,
+			      "states": [
+			        { "hash": "{{V2Hash}}", "length": 10, "key": "valid", "relativePath": "src/config.cs", "sourceOffset": 42, "removed": false, "issuedUtcTicks": 1, "operationId": "{{Guid.NewGuid()}}", "appliedRevision": 1 },
+			        { "hash": "{{V2Hash}}", "length": 10, "key": "traversal", "relativePath": "../outside.cs", "sourceOffset": 42, "removed": false, "issuedUtcTicks": 2, "operationId": "{{Guid.NewGuid()}}", "appliedRevision": 2 },
+			        { "hash": "{{V2Hash}}", "length": 10, "key": "missing-offset", "relativePath": "src/missing.cs", "removed": false, "issuedUtcTicks": 3, "operationId": "{{Guid.NewGuid()}}", "appliedRevision": 3 },
+			        { "hash": "{{FirstHash}}", "length": 10, "key": "legacy-source", "relativePath": "src/legacy.cs", "sourceOffset": 0, "removed": false, "issuedUtcTicks": 4, "operationId": "{{Guid.NewGuid()}}", "appliedRevision": 4 }
+			      ]
+			    }
+			  }
+			}
+			""";
+		await File.WriteAllTextAsync(
+			Path.Combine(directory, "project-secret-marks.json"),
+			json,
+			TestContext.Current.CancellationToken);
+
+		var loaded = await new ProjectProfileStore(() => temporary.Path).LoadMarksAsync(
+			project,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(loaded.Succeeded);
+		var valid = Assert.Single(loaded.Snapshot!.Marks);
+		Assert.Equal("src/config.cs", valid.RelativePath);
+		Assert.Equal(42, valid.SourceOffset);
 	}
 
 	[Fact]
@@ -490,10 +576,49 @@ public sealed class PersistentSecretMarkStoreTests
 			migrated.Snapshot.StateAppliedRevisions!.OrderBy(static pair => pair.Key.Hash),
 			loadedAgain.Snapshot.StateAppliedRevisions!.OrderBy(static pair => pair.Key.Hash));
 		Assert.Equal(firstBytes, secondBytes);
-		Assert.Contains("\"schemaVersion\": 2", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);
+		Assert.Contains("\"schemaVersion\": 3", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);
 		Assert.Contains("\"appliedRevision\"", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);
 		Assert.Empty(afterStale.Snapshot!.Marks);
 		Assert.Equal(migrated.Snapshot.Revision, afterStale.Snapshot.Revision);
+	}
+
+	[Fact]
+	public async Task SchemaTwoUpgrade_AddsSourceScopeSupportWithoutReorderingAppliedRevisions()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var directory = temporary.CreateFolder("DevProjex");
+		var normalizedProject = PathUtility.Normalize(project).Replace("\\", "\\\\", StringComparison.Ordinal);
+		var operationId = Guid.NewGuid();
+		var json = $$"""
+			{
+			  "schemaVersion": 2,
+			  "projects": {
+			    "{{normalizedProject}}": {
+			      "appliedRevision": 17,
+			      "states": [
+			        { "hash": "{{FirstHash}}", "length": 12, "key": "TOKEN", "removed": false, "issuedUtcTicks": 99, "operationId": "{{operationId}}", "appliedRevision": 17 }
+			      ]
+			    }
+			  }
+			}
+			""";
+		var path = Path.Combine(directory, "project-secret-marks.json");
+		await File.WriteAllTextAsync(path, json, TestContext.Current.CancellationToken);
+
+		var loaded = await new ProjectProfileStore(() => temporary.Path).LoadMarksAsync(
+			project,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(loaded.Succeeded);
+		Assert.Equal(17, loaded.Snapshot!.Revision);
+		Assert.Equal(
+			17,
+			loaded.Snapshot.StateAppliedRevisions![new PersistentSecretMarkId(FirstHash, 12)]);
+		Assert.Contains(
+			"\"schemaVersion\": 3",
+			await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken),
+			StringComparison.Ordinal);
 	}
 
 	private static MarkedSecretProfileEntry Mark(string hash, int length) =>

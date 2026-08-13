@@ -46,6 +46,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 	private readonly Func<bool> _ensureHideSecretsEnabled;
 	private readonly Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> _applyPersistentMarkDelta;
 	private readonly Func<CancellationToken, Task> _persistProjectProfile;
+	private readonly object _manualMarkOperationsSync = new();
+	private readonly HashSet<Task> _manualMarkOperations = [];
 
     private CancellationTokenSource? _selectionMetricsCts;
     private DispatcherTimer? _selectionMetricsDebounceTimer;
@@ -55,7 +57,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private bool _hasSelectionMetricsSnapshot;
     private bool _scrollSyncActive;
 	private Vector? _pendingRedactionViewportOffset;
-	private string? _pendingMarkedSecretHash;
+	private PersistentSecretMarkId? _pendingMarkedSecretId;
     private bool _disposed;
 
     public PreviewSurfaceController(
@@ -142,8 +144,15 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_requestRedactionRefresh();
 	}
 
-	private async void OnManualSecretMarkRequested(
+	private void OnManualSecretMarkRequested(
 		object? sender,
+		PreviewManualSecretMarkRequestedEventArgs e)
+	{
+		var operation = ApplyManualSecretMarkAsync(e);
+		TrackManualMarkOperation(operation);
+	}
+
+	private async Task ApplyManualSecretMarkAsync(
 		PreviewManualSecretMarkRequestedEventArgs e)
 	{
 		string? operationProjectRoot = null;
@@ -159,17 +168,19 @@ internal sealed class PreviewSurfaceController : IDisposable
 				return;
 			}
 
-			if (!e.Persistent)
-			{
-				ApplySessionOnlyManualMark(location, e.Value);
+			if (!ApplySessionOnlyManualMark(location, e.Value))
 				return;
-			}
-
-			ApplySessionOnlyManualMark(location, e.Value);
-			var mark = await _secretRedactionSession.CreatePersistentMarkedSecretAsync(
-				e.Value,
-				location.Key,
-				CancellationToken.None);
+			var mark = e.Persistent
+				? await _secretRedactionSession.CreatePersistentMarkedSecretAsync(
+					e.Value,
+					location.Key,
+					CancellationToken.None)
+				: await _secretRedactionSession.CreatePersistentSourceMarkedSecretAsync(
+					e.Value,
+					location.Key,
+					location.RelativePath,
+					location.SourceOffset,
+					CancellationToken.None);
 			if (mark is null)
 			{
 				await _persistProjectProfile(CancellationToken.None);
@@ -217,7 +228,11 @@ internal sealed class PreviewSurfaceController : IDisposable
 			{
 				if (IsCurrentProject(operationProjectRoot))
 				{
-					_pendingMarkedSecretHash = mark.H;
+					_pendingMarkedSecretId = new PersistentSecretMarkId(
+						mark.H,
+						mark.Length,
+						mark.RelativePath,
+						mark.SourceOffset);
 					_requestRedactionRefresh();
 				}
 				return;
@@ -240,6 +255,47 @@ internal sealed class PreviewSurfaceController : IDisposable
 		{
 			if (!_disposed && IsCurrentProject(operationProjectRoot))
 				await _showErrorAsync(exception.Message);
+		}
+	}
+
+	private void TrackManualMarkOperation(Task operation)
+	{
+		if (operation.IsCompleted)
+			return;
+		lock (_manualMarkOperationsSync)
+			_manualMarkOperations.Add(operation);
+		_ = operation.ContinueWith(
+			completed =>
+			{
+				lock (_manualMarkOperationsSync)
+					_manualMarkOperations.Remove(completed);
+			},
+			CancellationToken.None,
+			TaskContinuationOptions.ExecuteSynchronously,
+			TaskScheduler.Default);
+	}
+
+	internal bool HasPendingManualMarkOperations
+	{
+		get
+		{
+			lock (_manualMarkOperationsSync)
+				return _manualMarkOperations.Count > 0;
+		}
+	}
+
+	internal async Task WaitForPendingManualMarkOperationsAsync()
+	{
+		while (true)
+		{
+			Task pending;
+			lock (_manualMarkOperationsSync)
+			{
+				if (_manualMarkOperations.Count == 0)
+					return;
+				pending = Task.WhenAll(_manualMarkOperations);
+			}
+			await pending.ConfigureAwait(true);
 		}
 	}
 
@@ -272,8 +328,15 @@ internal sealed class PreviewSurfaceController : IDisposable
 		return true;
 	}
 
-	private async void OnManualSecretUnmarkRequested(
+	private void OnManualSecretUnmarkRequested(
 		object? sender,
+		PreviewManualSecretUnmarkRequestedEventArgs e)
+	{
+		var operation = RemoveManualSecretMarkAsync(e);
+		TrackManualMarkOperation(operation);
+	}
+
+	private async Task RemoveManualSecretMarkAsync(
 		PreviewManualSecretUnmarkRequestedEventArgs e)
 	{
 		string? operationProjectRoot = null;
@@ -282,8 +345,16 @@ internal sealed class PreviewSurfaceController : IDisposable
 			operationProjectRoot = _projectRootProvider();
 			if (string.IsNullOrWhiteSpace(operationProjectRoot))
 				return;
-			PersistentSecretMarkId? persistentMarkId = null;
-			if (!string.IsNullOrWhiteSpace(e.PersistentMarkHash))
+			PersistentSecretMarkId? persistentMarkId = e.PersistentMarkId;
+			if (persistentMarkId is null &&
+			    !string.IsNullOrWhiteSpace(e.SessionMarkId) &&
+			    _secretRedactionSession.TryResolvePromotedPersistentMarkId(
+				    e.SessionMarkId,
+				    out var promotedMarkId))
+			{
+				persistentMarkId = promotedMarkId;
+			}
+			if (persistentMarkId is null && !string.IsNullOrWhiteSpace(e.PersistentMarkHash))
 			{
 				if (!PersistentSecretIdentity.IsSupported(e.PersistentMarkHash) ||
 				    e.PersistentMarkLength is < MarkedSecretValueNormalizer.MinimumLength or
@@ -296,6 +367,14 @@ internal sealed class PreviewSurfaceController : IDisposable
 				persistentMarkId = new PersistentSecretMarkId(
 					e.PersistentMarkHash,
 					e.PersistentMarkLength);
+			}
+			else if (persistentMarkId is { } suppliedMarkId &&
+			         (!PersistentSecretIdentity.IsSupported(suppliedMarkId.Hash) ||
+			          suppliedMarkId.Length is < MarkedSecretValueNormalizer.MinimumLength or
+				          > MarkedSecretValueNormalizer.MaximumLength))
+			{
+				await _showErrorAsync(_localization["Error.Secret.MarkApplyFailed"]);
+				return;
 			}
 			var sessionRemoved = !string.IsNullOrWhiteSpace(e.SessionMarkId) &&
 			                     _secretRedactionSession.RemoveSessionMarkedSecret(e.SessionMarkId);
@@ -1094,13 +1173,13 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (!ReferenceEquals(previousDocument, document))
             previousDocument?.Dispose();
 
-		if (_pendingMarkedSecretHash is { Length: > 0 } markHash)
+		if (_pendingMarkedSecretId is { } markId)
 		{
-			_pendingMarkedSecretHash = null;
+			_pendingMarkedSecretId = null;
 			var hiddenCount = document.Redactions
 				.Where(span =>
 					span.State == SecretPreviewSpanState.Redacted &&
-					string.Equals(span.PersistentMarkHash, markHash, StringComparison.OrdinalIgnoreCase))
+					span.PersistentMarkId == markId)
 				.Select(static span => span.OccurrenceId)
 				.Distinct(StringComparer.Ordinal)
 				.Count();

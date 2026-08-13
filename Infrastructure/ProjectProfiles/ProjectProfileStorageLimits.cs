@@ -18,6 +18,7 @@ internal static class ProjectProfileStorageLimits
 	// otherwise amplify dictionary and normalization allocations from malformed JSON.
 	public const int MaximumStateNameLength = 4_096;
 	public const int MaximumMarkedSecretKeyLength = SecretInspectionLimits.MaximumPersistentMarkKeyLength;
+	public const int MaximumMarkedSecretPathLength = SecretInspectionLimits.MaximumPersistentMarkPathLength;
 	public const int MaximumPersistentMarksPerProject =
 		SecretInspectionLimits.MaximumPersistentMarksPerProject;
 	// A removed state is retained as a tombstone so delayed typed deltas cannot resurrect it.

@@ -43,7 +43,8 @@ internal sealed record SecretFindingMetadata(
 	int RuleOrder,
 	SecretFindingSource Source,
 	string? PersistentMarkHash,
-	string? SessionMarkId);
+	string? SessionMarkId,
+	PersistentSecretMarkId? PersistentMarkId);
 
 internal sealed record SecretScanCacheEntry(
 	string NormalizedPath,

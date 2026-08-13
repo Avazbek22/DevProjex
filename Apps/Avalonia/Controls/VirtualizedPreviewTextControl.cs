@@ -23,12 +23,14 @@ public sealed class PreviewManualSecretUnmarkRequestedEventArgs(
 	string? persistentMarkHash,
 	int persistentMarkLength,
 	string? sessionMarkId,
-	bool alsoDetected) : EventArgs
+	bool alsoDetected,
+	PersistentSecretMarkId? persistentMarkId = null) : EventArgs
 {
 	public string? PersistentMarkHash { get; } = persistentMarkHash;
 	public int PersistentMarkLength { get; } = persistentMarkLength;
 	public string? SessionMarkId { get; } = sessionMarkId;
 	public bool AlsoDetected { get; } = alsoDetected;
+	public PersistentSecretMarkId? PersistentMarkId { get; } = persistentMarkId;
 }
 
 internal sealed class PreviewManualSecretMarkRejectedEventArgs(string message) : EventArgs
@@ -2063,7 +2065,8 @@ public sealed class VirtualizedPreviewTextControl : Control
 				redaction.PersistentMarkHash,
 				redaction.SourceLength,
 				redaction.SessionMarkId,
-				redaction.Source.HasFlag(SecretFindingSource.Detector)));
+				redaction.Source.HasFlag(SecretFindingSource.Detector),
+				redaction.PersistentMarkId));
 	}
 
 	private void RaiseManualSecretMarkRequested(bool persistent)

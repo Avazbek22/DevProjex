@@ -119,7 +119,8 @@ public sealed record DetectedSecret(
 	int RuleOrder,
 	SecretFindingSource Source = SecretFindingSource.Detector,
 	string? PersistentMarkHash = null,
-	string? SessionMarkId = null);
+	string? SessionMarkId = null,
+	PersistentSecretMarkId? PersistentMarkId = null);
 
 [Flags]
 public enum SecretFindingSource

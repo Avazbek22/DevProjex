@@ -1,4 +1,5 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Tests.Unit;
 
@@ -25,6 +26,97 @@ public sealed class PersistentSecretMarkOverlayTests
 
 		Assert.Equal(mark, Assert.Single(session.GetMarkedSecrets()));
 		Assert.DoesNotContain(FirstSecret, Redact(session, project, path), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PendingSourceAdd_SurvivesRefreshAndRedactsOnlyItsAnchoredOccurrence()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("app-data");
+		var content = $"FIRST={FirstSecret}\nSECOND={FirstSecret}\n";
+		var path = workspace.CreateFile("project/config.env", content);
+		var store = new MutableMarkStore(new PersistentSecretMarksSnapshot(4, []));
+		using var identityProvider = new PersistentSecretIdentityProvider(() => appData);
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.Ready,
+			await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.True(PersistentSecretIdentity.TryCreateV2(
+			identityProvider,
+			FirstSecret,
+			out var identity));
+		var mark = new MarkedSecretProfileEntry(
+			identity,
+			"FIRST",
+			FirstSecret.Length,
+			"config.env",
+			content.IndexOf(FirstSecret, StringComparison.Ordinal));
+		using var session = new SecretRedactionSession(new EmptyDetector(), store, identityProvider);
+		session.ReplacePersistentMarks(project, store.Snapshot);
+
+		Assert.True(session.StagePersistentMarkDelta(
+			project,
+			PersistentSecretMarkDelta.Add(mark, observedRevision: 4)).Staged);
+		await session.RefreshPersistentMarksAsync(project, TestContext.Current.CancellationToken);
+		var output = Redact(session, project, path);
+
+		Assert.Equal(1, CountOccurrences(output, FirstSecret));
+		Assert.Equal(1, CountOccurrences(output, "DEVPROJEX_REDACTED[manual-secret#1]"));
+	}
+
+	[Fact]
+	public async Task PromotedSourceMark_StaleSessionIdResolvesUntilPersistentRemovalIsAcknowledged()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("app-data");
+		var content = $"TOKEN={FirstSecret}\n";
+		var sourceOffset = content.IndexOf(FirstSecret, StringComparison.Ordinal);
+		var value = Value(FirstSecret);
+		var anchor = new SessionMarkedSecret("config.env", sourceOffset, value.Length, value.Hash);
+		using var identityProvider = new PersistentSecretIdentityProvider(() => appData);
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.Ready,
+			await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.True(PersistentSecretIdentity.TryCreateV2(
+			identityProvider,
+			FirstSecret,
+			out var identity));
+		var mark = new MarkedSecretProfileEntry(
+			identity,
+			"TOKEN",
+			value.Length,
+			"config.env",
+			sourceOffset);
+		var markId = new PersistentSecretMarkId(identity, value.Length, "config.env", sourceOffset);
+		using var session = new SecretRedactionSession(new EmptyDetector(), persistentIdentityProvider: identityProvider);
+		session.ReplacePersistentMarks(project, PersistentSecretMarksSnapshot.Empty);
+		Assert.True(session.AddSessionMarkedSecret("config.env", sourceOffset, value));
+		var add = PersistentSecretMarkDelta.Add(mark);
+
+		Assert.True(session.TryPromoteSessionMarkToPendingPersistentMark(
+			project,
+			"config.env",
+			sourceOffset,
+			value,
+			add).Staged);
+		session.AcknowledgePersistentMarkDelta(
+			project,
+			add.OperationId,
+			Snapshot(1, [mark], (markId, 1)));
+
+		Assert.True(session.TryResolvePromotedPersistentMarkId(anchor.Id, out var resolvedMarkId));
+		Assert.Equal(markId, resolvedMarkId);
+
+		var remove = PersistentSecretMarkDelta.Remove(markId, observedRevision: 1);
+		Assert.True(session.StagePersistentMarkDelta(project, remove).Staged);
+		session.AcknowledgePersistentMarkDelta(
+			project,
+			remove.OperationId,
+			Snapshot(2, [], (markId, 2)));
+
+		Assert.False(session.TryResolvePromotedPersistentMarkId(anchor.Id, out _));
+		Assert.Equal(0, session.PendingPersistentMarkCount);
 	}
 
 	[Fact]
@@ -328,6 +420,18 @@ public sealed class PersistentSecretMarkOverlayTests
 	{
 		Assert.True(MarkedSecretValueNormalizer.TryCreate(secret, out var value, out _));
 		return value;
+	}
+
+	private static int CountOccurrences(string content, string value)
+	{
+		var count = 0;
+		var offset = 0;
+		while ((offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+		{
+			count++;
+			offset += value.Length;
+		}
+		return count;
 	}
 
 	private sealed class EmptyDetector : ISecretDetector

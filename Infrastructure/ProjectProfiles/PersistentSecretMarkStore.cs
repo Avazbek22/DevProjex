@@ -1,4 +1,5 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Context;
 using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.ProjectProfiles;
@@ -7,7 +8,8 @@ internal sealed class PersistentSecretMarkStore(
 	Func<string> appDataPathProvider,
 	TimeSpan? lockTimeout = null)
 {
-	private const int CurrentSchemaVersion = 2;
+	private const int CurrentSchemaVersion = 3;
+	private const int AppliedRevisionSchemaVersion = 2;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-secret-marks.json";
 	// GUI callers run off-thread and retry with backoff. A short attempt avoids tying up a worker
@@ -125,7 +127,7 @@ internal sealed class PersistentSecretMarkStore(
 			var changed = false;
 			foreach (var mark in NormalizeMarks(legacyMarks))
 			{
-				if (project.States.Any(existing => HasIdentity(existing, mark.H, mark.Length)))
+				if (project.States.Any(existing => HasIdentity(existing, CreateIdentity(mark))))
 					continue;
 				var delta = PersistentSecretMarkDelta.Add(mark, project.AppliedRevision);
 				var deltaApplied = ApplyDelta(project, delta, out var limitExceeded);
@@ -246,19 +248,19 @@ internal sealed class PersistentSecretMarkStore(
 			return false;
 		}
 		MarkedSecretProfileEntry? normalizedMark = null;
+		if (!TryNormalizeIdentity(delta.MarkId, out var normalizedMarkId))
+			return false;
+		delta = delta with { MarkId = normalizedMarkId };
 		if (delta.Kind is PersistentSecretMarkDeltaKind.Add or PersistentSecretMarkDeltaKind.Replace)
 		{
 			normalizedMark = NormalizeMarks([delta.Mark!]).FirstOrDefault();
 			if (normalizedMark is null ||
 			    delta.Kind == PersistentSecretMarkDeltaKind.Add &&
-			    !HasIdentity(normalizedMark, delta.MarkId.Hash, delta.MarkId.Length))
+			    !HasIdentity(normalizedMark, delta.MarkId))
 			{
 				return false;
 			}
-		}
-		else if (!IsValidIdentity(delta.MarkId.Hash, delta.MarkId.Length))
-		{
-			return false;
+			delta = delta with { Mark = normalizedMark };
 		}
 		if (project.States.Any(state => state.OperationId == delta.OperationId))
 			return false;
@@ -267,7 +269,7 @@ internal sealed class PersistentSecretMarkStore(
 			return ApplyReplacement(project, delta, normalizedMark!, out limitExceeded);
 
 		var state = project.States.FirstOrDefault(existing =>
-			HasIdentity(existing, delta.MarkId.Hash, delta.MarkId.Length));
+			HasIdentity(existing, delta.MarkId));
 		if (state is not null && delta.ObservedRevision < state.AppliedRevision)
 			return false;
 		if (state is null &&
@@ -298,6 +300,8 @@ internal sealed class PersistentSecretMarkStore(
 
 		state.Hash = delta.MarkId.Hash.ToLowerInvariant();
 		state.Length = delta.MarkId.Length;
+		state.RelativePath = delta.MarkId.RelativePath;
+		state.SourceOffset = delta.MarkId.SourceOffset;
 		state.Key = delta.Kind == PersistentSecretMarkDeltaKind.Add
 			? normalizedMark!.Key
 			: null;
@@ -316,15 +320,15 @@ internal sealed class PersistentSecretMarkStore(
 		out bool limitExceeded)
 	{
 		limitExceeded = false;
-		if (HasIdentity(replacement, delta.MarkId.Hash, delta.MarkId.Length))
+		if (HasIdentity(replacement, delta.MarkId))
 			return false;
 		var source = project.States.FirstOrDefault(existing =>
-			HasIdentity(existing, delta.MarkId.Hash, delta.MarkId.Length));
+			HasIdentity(existing, delta.MarkId));
 		if (source is null || source.Removed || delta.ObservedRevision < source.AppliedRevision)
 			return false;
 
 		var target = project.States.FirstOrDefault(existing =>
-			HasIdentity(existing, replacement.H, replacement.Length));
+			HasIdentity(existing, CreateIdentity(replacement)));
 		if (target is not null && delta.ObservedRevision < target.AppliedRevision)
 			return false;
 		if (target is null &&
@@ -352,6 +356,8 @@ internal sealed class PersistentSecretMarkStore(
 		target.Hash = replacement.H.ToLowerInvariant();
 		target.Length = replacement.Length;
 		target.Key = replacement.Key;
+		target.RelativePath = replacement.RelativePath;
+		target.SourceOffset = replacement.SourceOffset;
 		target.Removed = false;
 		target.IssuedUtcTicks = delta.IssuedUtcTicks;
 		target.OperationId = delta.OperationId;
@@ -470,7 +476,7 @@ internal sealed class PersistentSecretMarkStore(
 			parsed.Projects[normalizedPath] = project;
 		}
 
-		database = Normalize(parsed, migrateLegacyOrdering: schemaVersion < CurrentSchemaVersion);
+		database = Normalize(parsed, migrateLegacyOrdering: schemaVersion < AppliedRevisionSchemaVersion);
 		return true;
 	}
 
@@ -484,7 +490,7 @@ internal sealed class PersistentSecretMarkStore(
 		exceededLimits = false;
 		if (element.ValueKind != JsonValueKind.Object)
 			return false;
-		var revisionProperty = schemaVersion < CurrentSchemaVersion
+		var revisionProperty = schemaVersion < AppliedRevisionSchemaVersion
 			? "revision"
 			: "appliedRevision";
 		if (element.TryGetProperty(revisionProperty, out var revisionElement) &&
@@ -535,14 +541,20 @@ internal sealed class PersistentSecretMarkStore(
 			value.States ??= [];
 			var normalizedStates = value.States
 				.Where(state => state is not null && IsValidState(state, migrateLegacyOrdering))
-				.Select(static state =>
+				.Select(state =>
 				{
 					state.Hash = state.Hash.ToLowerInvariant();
 					state.Key = NormalizeMarkedSecretKey(state.Key);
+					_ = TryNormalizeScope(
+						state.RelativePath,
+						state.SourceOffset,
+						out var relativePath,
+						out var sourceOffset);
+					state.RelativePath = relativePath;
+					state.SourceOffset = sourceOffset;
 					return state;
 				})
-				.GroupBy(
-					static state => new PersistentSecretMarkId(state.Hash.ToLowerInvariant(), state.Length))
+				.GroupBy(CreateIdentity)
 				.Select(group => migrateLegacyOrdering
 					? group
 						.OrderByDescending(static state => state.IssuedUtcTicks)
@@ -572,6 +584,8 @@ internal sealed class PersistentSecretMarkStore(
 			value.States = normalizedStates
 				.OrderBy(static state => state.Hash, StringComparer.Ordinal)
 				.ThenBy(static state => state.Length)
+				.ThenBy(static state => state.RelativePath, StringComparer.Ordinal)
+				.ThenBy(static state => state.SourceOffset)
 				.Take(ProjectProfileStorageLimits.MaximumPersistentMarkStatesPerProject)
 				.ToList();
 			if (value.States.Count(static state => !state.Removed) >
@@ -589,20 +603,45 @@ internal sealed class PersistentSecretMarkStore(
 		IEnumerable<MarkedSecretProfileEntry>? marks)
 	{
 		return (marks ?? [])
-			.Where(static mark =>
-				mark is not null &&
-				PersistentSecretIdentity.IsSupported(mark.H) &&
-				mark.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength)
-			.Select(static mark => mark with
-			{
-				H = mark.H.ToLowerInvariant(),
-				Key = NormalizeMarkedSecretKey(mark.Key)
-			})
-			.GroupBy(static mark => new PersistentSecretMarkId(mark.H, mark.Length))
+			.Select(static mark => TryNormalizeMark(mark, out var normalized) ? normalized : null)
+			.Where(static mark => mark is not null)
+			.Select(static mark => mark!)
+			.GroupBy(CreateIdentity)
 			.Select(static group => group.First())
 			.OrderBy(static mark => mark.H, StringComparer.Ordinal)
 			.ThenBy(static mark => mark.Length)
+			.ThenBy(static mark => mark.RelativePath, StringComparer.Ordinal)
+			.ThenBy(static mark => mark.SourceOffset)
 			.ToList();
+	}
+
+	private static bool TryNormalizeMark(
+		MarkedSecretProfileEntry? mark,
+		out MarkedSecretProfileEntry normalized)
+	{
+		if (mark is null ||
+		    !PersistentSecretIdentity.IsSupported(mark.H) ||
+		    mark.Length is < MarkedSecretValueNormalizer.MinimumLength or
+			    > MarkedSecretValueNormalizer.MaximumLength ||
+		    !TryNormalizeScope(
+			    mark.RelativePath,
+			    mark.SourceOffset,
+			    out var relativePath,
+			    out var sourceOffset) ||
+		    relativePath is not null && !PersistentSecretIdentity.IsV2(mark.H))
+		{
+			normalized = null!;
+			return false;
+		}
+
+		normalized = mark with
+		{
+			H = mark.H.ToLowerInvariant(),
+			Key = NormalizeMarkedSecretKey(mark.Key),
+			RelativePath = relativePath,
+			SourceOffset = sourceOffset
+		};
+		return true;
 	}
 
 	private static string? NormalizeMarkedSecretKey(string? key)
@@ -615,18 +654,76 @@ internal sealed class PersistentSecretMarkStore(
 			: null;
 	}
 
-	private static bool HasIdentity(MarkedSecretProfileEntry mark, string hash, int length) =>
-		mark.Length == length && string.Equals(mark.H, hash, StringComparison.OrdinalIgnoreCase);
+	private static bool HasIdentity(MarkedSecretProfileEntry mark, PersistentSecretMarkId identity) =>
+		CreateIdentity(mark) == identity;
 
-	private static bool HasIdentity(PersistedSecretMarkState state, string hash, int length) =>
-		state.Length == length && string.Equals(state.Hash, hash, StringComparison.OrdinalIgnoreCase);
+	private static bool HasIdentity(PersistedSecretMarkState state, PersistentSecretMarkId identity) =>
+		CreateIdentity(state) == identity;
 
-	private static bool IsValidIdentity(string? hash, int length) =>
-		PersistentSecretIdentity.IsSupported(hash) &&
-		length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength;
+	private static bool TryNormalizeIdentity(
+		PersistentSecretMarkId identity,
+		out PersistentSecretMarkId normalized)
+	{
+		if (!PersistentSecretIdentity.IsSupported(identity.Hash) ||
+		    identity.Length is < MarkedSecretValueNormalizer.MinimumLength or
+			    > MarkedSecretValueNormalizer.MaximumLength ||
+		    !TryNormalizeScope(
+			    identity.RelativePath,
+			    identity.SourceOffset,
+			    out var relativePath,
+			    out var sourceOffset) ||
+		    relativePath is not null && !PersistentSecretIdentity.IsV2(identity.Hash))
+		{
+			normalized = default;
+			return false;
+		}
+
+		normalized = new PersistentSecretMarkId(
+			identity.Hash.ToLowerInvariant(),
+			identity.Length,
+			relativePath,
+			sourceOffset);
+		return true;
+	}
+
+	private static bool TryNormalizeScope(
+		string? relativePath,
+		int? sourceOffset,
+		out string? normalizedPath,
+		out int? normalizedOffset)
+	{
+		normalizedPath = null;
+		normalizedOffset = null;
+		if (relativePath is null && sourceOffset is null)
+			return true;
+		if (string.IsNullOrWhiteSpace(relativePath) || sourceOffset is null or < 0)
+			return false;
+		try
+		{
+			var candidate = ProjectSelectionPath.NormalizeRelative(relativePath);
+			if (candidate.Length == 0 || candidate.Length > ProjectProfileStorageLimits.MaximumMarkedSecretPathLength)
+				return false;
+			normalizedPath = candidate;
+			normalizedOffset = sourceOffset;
+			return true;
+		}
+		catch (ProjectContextValidationException)
+		{
+			return false;
+		}
+	}
+
+	private static PersistentSecretMarkId CreateIdentity(MarkedSecretProfileEntry mark) =>
+		new(mark.H.ToLowerInvariant(), mark.Length, mark.RelativePath, mark.SourceOffset);
+
+	private static PersistentSecretMarkId CreateIdentity(PersistedSecretMarkState state) =>
+		new(state.Hash.ToLowerInvariant(), state.Length, state.RelativePath, state.SourceOffset);
 
 	private static bool IsValidState(PersistedSecretMarkState state, bool migrateLegacyOrdering) =>
-		IsValidIdentity(state.Hash, state.Length) &&
+		PersistentSecretIdentity.IsSupported(state.Hash) &&
+		state.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength &&
+		TryNormalizeScope(state.RelativePath, state.SourceOffset, out _, out _) &&
+		(state.RelativePath is null || PersistentSecretIdentity.IsV2(state.Hash)) &&
 		state.IssuedUtcTicks > 0 &&
 		state.OperationId != Guid.Empty &&
 		(migrateLegacyOrdering || state.AppliedRevision > 0);
@@ -650,10 +747,15 @@ internal sealed class PersistentSecretMarkStore(
 			return PersistentSecretMarksSnapshot.Empty;
 		var marks = project.States
 			.Where(static state => !state.Removed)
-			.Select(static state => new MarkedSecretProfileEntry(state.Hash, state.Key, state.Length))
+			.Select(static state => new MarkedSecretProfileEntry(
+				state.Hash,
+				state.Key,
+				state.Length,
+				state.RelativePath,
+				state.SourceOffset))
 			.ToArray();
 		var stateAppliedRevisions = project.States.ToDictionary(
-			static state => new PersistentSecretMarkId(state.Hash, state.Length),
+			CreateIdentity,
 			static state => state.AppliedRevision);
 		return new PersistentSecretMarksSnapshot(
 			project.AppliedRevision,

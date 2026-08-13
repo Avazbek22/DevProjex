@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Secrets;
 
@@ -26,6 +27,85 @@ public sealed class PersistentSecretIdentityTests
 			TestContext.Current.CancellationToken));
 
 		Assert.Equal(first, finding.PersistentMarkHash);
+	}
+
+	[Fact]
+	public void V2SourceBoundMark_MatchesOnlyExactOccurrenceAcrossTransformMap()
+	{
+		const string relativePath = "src/config.cs";
+		var source = $"// shift me\nFIRST={Secret}\nSECOND={Secret}\n";
+		var sourceOffset = source.IndexOf(Secret, StringComparison.Ordinal);
+		var provider = new TestIdentityProvider();
+		Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out var identity));
+		var mark = new MarkedSecretProfileEntry(
+			identity,
+			"FIRST",
+			Secret.Length,
+			relativePath,
+			sourceOffset);
+		var matcher = new MarkedSecretsMatcher([mark], [], provider);
+
+		var sourceFinding = Assert.Single(matcher.Match(
+			relativePath,
+			source,
+			TestContext.Current.CancellationToken));
+		Assert.Equal(sourceOffset, sourceFinding.Start);
+		Assert.Equal(
+			new PersistentSecretMarkId(identity, Secret.Length, relativePath, sourceOffset),
+			sourceFinding.PersistentMarkId);
+		Assert.Empty(matcher.Match(
+			"src/other.cs",
+			source,
+			TestContext.Current.CancellationToken));
+
+		var removedPrefixLength = "// shift me\n".Length;
+		var plan = CodeCompressionPlan.Create(
+			relativePath,
+			"csharp",
+			[new CodeCompressionEdit(0, removedPrefixLength, string.Empty)],
+			source.Length,
+			"source-bound-test");
+		var transformed = plan.Apply(source);
+		var transformedFinding = Assert.Single(matcher.Match(
+			relativePath,
+			transformed.Text,
+			transformed.Map,
+			TestContext.Current.CancellationToken));
+		Assert.Equal(sourceOffset - removedPrefixLength, transformedFinding.Start);
+
+		var changed = source.Remove(sourceOffset, Secret.Length).Insert(sourceOffset, new string('x', Secret.Length));
+		Assert.Empty(matcher.Match(relativePath, changed, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public void V2SourceBoundMark_UsesUtf16SourceCoordinatesWithoutSplittingUnicode()
+	{
+		const string relativePath = "src/unicode.txt";
+		const string secret = "пароль-🔐-42";
+		var source = $"😀 prefix\nfirst={secret}\nsecond={secret}\n";
+		var sourceOffset = source.IndexOf(secret, StringComparison.Ordinal);
+		var provider = new TestIdentityProvider();
+		Assert.True(PersistentSecretIdentity.TryCreateV2(provider, secret, out var identity));
+		var matcher = new MarkedSecretsMatcher(
+			[
+				new MarkedSecretProfileEntry(
+					identity,
+					"first",
+					secret.Length,
+					relativePath,
+					sourceOffset)
+			],
+			[],
+			provider);
+
+		var finding = Assert.Single(matcher.Match(
+			relativePath,
+			source,
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(sourceOffset, finding.Start);
+		Assert.Equal(secret.Length, finding.Length);
+		Assert.Equal(secret, source.Substring(finding.Start, finding.Length));
 	}
 
 	[Fact]

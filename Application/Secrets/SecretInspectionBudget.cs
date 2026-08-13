@@ -18,6 +18,9 @@ public static class SecretInspectionLimits
 	public const int MaximumDistinctPersistentMarkLengths = 256;
 	// Keys are display metadata, not matching input. Longer values add no useful identity signal.
 	public const int MaximumPersistentMarkKeyLength = 256;
+	// Source-bound marks store project-relative paths. Four KiB matches the profile path ceiling
+	// and prevents malformed stores from retaining unbounded path strings in every scan scope.
+	public const int MaximumPersistentMarkPathLength = 4_096;
 	// Fifty million cheap boundary-length probes bound CPU on the 16 MiB scan ceiling while
 	// remaining far above measured project workloads.
 	public const long MaximumPersistentMatcherWorkUnits = 50_000_000;

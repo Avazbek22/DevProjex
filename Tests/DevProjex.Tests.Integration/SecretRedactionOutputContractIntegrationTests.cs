@@ -1030,6 +1030,109 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task SourceBoundManualMark_AfterStoreRestartRedactsOnlySelectedOccurrenceEverywhere()
+	{
+		const string manualValue = "abcdefghij";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("source-bound-project");
+		var exportRoot = temporary.CreateDirectory("source-bound-exports");
+		var sourceContent = $"const string first = \"{manualValue}\";\nconst string second = \"{manualValue}\";\n";
+		var sourcePath = temporary.CreateFile("source-bound-project/src/config.cs", sourceContent);
+		using var workspace = new Workspace(
+			temporary,
+			sourceRoot,
+			exportRoot,
+			sourcePath,
+			ownsTemporary: false);
+		var appDataPath = temporary.CreateDirectory("source-bound-app-data");
+		var firstStore = new ProjectProfileStore(() => appDataPath);
+		Assert.True(firstStore.TrySaveProfile(
+			sourceRoot,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions: [IgnoreOptionId.HideSecrets],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.HideSecrets] = true
+				})));
+		using (var identityProvider = new PersistentSecretIdentityProvider(() => appDataPath))
+		{
+			Assert.Equal(
+				PersistentSecretIdentityAvailability.Ready,
+				await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+			Assert.True(PersistentSecretIdentity.TryCreateV2(identityProvider, manualValue, out var identity));
+			var write = await firstStore.AddMarkAsync(
+				sourceRoot,
+				new MarkedSecretProfileEntry(
+					identity,
+					"first",
+					manualValue.Length,
+					"src/config.cs",
+					sourceContent.IndexOf(manualValue, StringComparison.Ordinal)),
+				TestContext.Current.CancellationToken);
+			Assert.True(write.Succeeded);
+		}
+
+		var reopenedStore = new ProjectProfileStore(() => appDataPath);
+		var loaded = await reopenedStore.LoadMarksAsync(sourceRoot, TestContext.Current.CancellationToken);
+		Assert.True(loaded.Succeeded);
+		using var identityProviderAfterRestart = new PersistentSecretIdentityProvider(() => appDataPath);
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.Ready,
+			await identityProviderAfterRestart.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		using var session = new SecretRedactionSession(
+			new NoFindingsDetector(),
+			reopenedStore,
+			identityProviderAfterRestart);
+		session.ReplacePersistentMarks(sourceRoot, loaded.Snapshot!);
+		var analyzer = new FileContentAnalyzer();
+		var context = new SecretRedactionContext(sourceRoot, session);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+		using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: false,
+			transformationContext: context);
+		var previewAndClipboard = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
+		var selectedContent = await new SelectedContentExportService(analyzer).BuildAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			context);
+		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder);
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip);
+
+		Assert.Equal(NormalizeForClipboard(selectedContent), previewAndClipboard);
+		Assert.All(
+			new[] { previewAndClipboard, selectedContent }.Concat(contextDocuments.Values),
+			AssertOnlySelectedOccurrenceIsRedacted);
+		AssertOnlySelectedOccurrenceIsRedacted(
+			File.ReadAllText(Path.Combine(folder.DestinationPath, "src", "config.cs")));
+		using var archive = ZipFile.OpenRead(zip.DestinationPath);
+		AssertOnlySelectedOccurrenceIsRedacted(ReadZipText(archive, "src/config.cs"));
+		Assert.Equal(sourceContent, File.ReadAllText(sourcePath));
+
+		static void AssertOnlySelectedOccurrenceIsRedacted(string output)
+		{
+			Assert.Equal(1, CountOccurrences(output, manualValue));
+			Assert.Equal(1, CountOccurrences(output, "DEVPROJEX_REDACTED[manual-secret#1]"));
+		}
+	}
+
+	[Fact]
 	public async Task PendingPersistentMark_StaleStoreRefreshNeverLeaksAcrossOutputSurfaces()
 	{
 		const string manualValue = "ordinary-value-not-recognized-by-detector-77";

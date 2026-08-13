@@ -17,7 +17,8 @@ public sealed record SecretPreviewSpan(
 	int SourceLength = 0,
 	SecretFindingSource Source = SecretFindingSource.Detector,
 	string? PersistentMarkHash = null,
-	string? SessionMarkId = null);
+	string? SessionMarkId = null,
+	PersistentSecretMarkId? PersistentMarkId = null);
 
 public sealed record SecretTextRedactionResult(
 	string Text,

@@ -8,6 +8,20 @@ public partial class MainWindow
 
     private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
+		if (!_allowCloseAfterManualSecretMarkPersistence &&
+		    _previewSurfaceController.HasPendingManualMarkOperations)
+		{
+			e.Cancel = true;
+			if (_manualSecretMarkClosePending)
+				return;
+
+			_manualSecretMarkClosePending = true;
+			await _previewSurfaceController.WaitForPendingManualMarkOperationsAsync();
+			_allowCloseAfterManualSecretMarkPersistence = true;
+			Close();
+			return;
+		}
+
         if (_allowCloseAfterProjectCopyExportCleanup || _projectCopyExportCts is null)
             return;
 

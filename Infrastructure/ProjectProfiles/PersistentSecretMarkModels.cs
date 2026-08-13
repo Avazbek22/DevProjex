@@ -20,6 +20,8 @@ internal sealed class PersistedSecretMarkState
 	public string Hash { get; set; } = string.Empty;
 	public int Length { get; set; }
 	public string? Key { get; set; }
+	public string? RelativePath { get; set; }
+	public int? SourceOffset { get; set; }
 	public bool Removed { get; set; }
 	public long IssuedUtcTicks { get; set; }
 	public Guid OperationId { get; set; }

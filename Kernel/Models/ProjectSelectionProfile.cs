@@ -13,4 +13,6 @@ public sealed record ProjectSelectionProfile(
 public sealed record MarkedSecretProfileEntry(
 	string H,
 	string? Key,
-	int Length);
+	int Length,
+	string? RelativePath = null,
+	int? SourceOffset = null);

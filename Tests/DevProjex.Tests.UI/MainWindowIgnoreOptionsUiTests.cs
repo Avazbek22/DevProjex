@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO.Compression;
+using DevProjex.Avalonia.Controls;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Presentation;
@@ -459,6 +460,292 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		finally
 		{
 			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(0)]
+	[InlineData(1)]
+	[InlineData(2)]
+	[InlineData(3)]
+	[InlineData(4)]
+	[InlineData(5)]
+	[InlineData(6)]
+	[InlineData(7)]
+	public async Task HideHere_CloseImmediatelyAndReopen_PreservesOnlySelectedOccurrence(int transformMode)
+	{
+		const string manualValue = "abcdefghij";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, $"hide-here-restart-{transformMode}");
+		Directory.CreateDirectory(appDataPath);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$$"""
+			  internal static class Secrets
+			  {
+			      private const string First = "{{manualValue}}";
+			      private const string Second = "{{manualValue}}";
+			  }
+			  """,
+			TestContext.Current.CancellationToken);
+
+		var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			foreach (var (optionId, mask) in new[]
+			         {
+				         (IgnoreOptionId.CompressCode, 1),
+				         (IgnoreOptionId.StripComments, 2),
+				         (IgnoreOptionId.StripBlankLines, 4)
+			         })
+			{
+				if ((transformMode & mask) != 0)
+					await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(firstWindow, optionId);
+			}
+			if (transformMode != 0)
+				await UiTestDriver.ClickApplySettingsAsync(firstWindow);
+			await UiTestDriver.OpenPreviewAsync(firstWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(firstWindow, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(
+				firstWindow,
+				manualValue,
+				persistent: false);
+			await UiTestDriver.WaitForConditionAsync(
+				firstWindow,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(firstWindow),
+					manualValue) == 1,
+				"the selected occurrence to be hidden before immediate shutdown");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+		}
+		var persisted = await new ProjectProfileStore(() => appDataPath).LoadMarksAsync(
+			project.RootPath,
+			TestContext.Current.CancellationToken);
+		Assert.True(persisted.Succeeded);
+		var persistedSourceMark = Assert.Single(persisted.Snapshot!.Marks);
+		Assert.True(PersistentSecretIdentity.IsV2(persistedSourceMark.H));
+		Assert.Equal("src/Secrets.cs", persistedSourceMark.RelativePath);
+		Assert.True(persistedSourceMark.SourceOffset > 0);
+		Assert.DoesNotContain(
+			manualValue,
+			await File.ReadAllTextAsync(
+				Path.Combine(appDataPath, "DevProjex", "project-secret-marks.json"),
+				TestContext.Current.CancellationToken),
+			StringComparison.Ordinal);
+
+		var reopenedWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				reopenedWindow,
+				IgnoreOptionId.HideSecrets,
+				visible: true,
+				isChecked: true);
+			await UiTestDriver.OpenPreviewAsync(reopenedWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(reopenedWindow, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				reopenedWindow,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(reopenedWindow),
+					manualValue) == 1,
+				"only the selected source occurrence to remain hidden after restart");
+			var expectedClipboard = UiTestDriver.ComputeCurrentPreviewCopyPayload(reopenedWindow);
+			await UiTestDriver.SetClipboardTextAsync(reopenedWindow, "hide-here-restart-copy-pending");
+			await UiTestDriver.ClickPreviewCopyButtonAsync(reopenedWindow);
+			await UiTestDriver.WaitForClipboardTextAsync(reopenedWindow, expectedClipboard);
+			Assert.Equal(
+				1,
+				CountOccurrences(
+					Assert.IsType<string>(await UiTestDriver.GetClipboardTextAsync(reopenedWindow)),
+					manualValue));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(reopenedWindow);
+		}
+
+		static int CountOccurrences(string content, string value)
+		{
+			var count = 0;
+			var offset = 0;
+			while ((offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+			{
+				count++;
+				offset += value.Length;
+			}
+
+			return count;
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_UnmarkAfterRestartAndCloseImmediately_RemainsRemoved()
+	{
+		const string manualValue = "restart-unmark-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "hide-here-restart-unmark");
+		Directory.CreateDirectory(appDataPath);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string first = \"{manualValue}\";\nconst string second = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+
+		var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(firstWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(firstWindow, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(firstWindow, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				firstWindow,
+				() => UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+					firstWindow,
+					"PreviewTextControl").Document?.Redactions.Count == 1,
+				"the source-bound mark to become visible before restart");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+		}
+
+		var unmarkWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(unmarkWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(unmarkWindow, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				unmarkWindow,
+				() => UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+					unmarkWindow,
+					"PreviewTextControl").Document?.Redactions.Count == 1,
+				"the source-bound mark to load before removal");
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(unmarkWindow);
+			await UiTestDriver.WaitForConditionAsync(
+				unmarkWindow,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(unmarkWindow),
+					manualValue) == 2,
+				"the selected occurrence to be restored before immediate shutdown");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(unmarkWindow, cleanupAppData: false);
+		}
+
+		var finalWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(finalWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(finalWindow, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				finalWindow,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(finalWindow),
+					manualValue) == 2,
+				"the durable source-bound removal to survive a second restart");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(finalWindow);
+		}
+
+		static int CountOccurrences(string content, string value)
+		{
+			var count = 0;
+			var offset = 0;
+			while ((offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+			{
+				count++;
+				offset += value.Length;
+			}
+			return count;
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_CloseWhileMarkStoreIsContended_WaitsForDurableWrite()
+	{
+		const string manualValue = "contended-close-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "hide-here-contended-close");
+		var storeDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(storeDirectory);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string first = \"{manualValue}\";\nconst string second = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		using (var identityProvider = new PersistentSecretIdentityProvider(() => appDataPath))
+		{
+			Assert.Equal(
+				PersistentSecretIdentityAvailability.Ready,
+				await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		}
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		FileStream? heldLock = new(
+			Path.Combine(storeDirectory, "project-secret-marks.json.lock"),
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(window, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					manualValue) == 1,
+				"the source-bound mark to redact before its store write completes");
+
+			window.Close();
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			Assert.False(window.ShutdownCompletion.IsCompleted);
+
+			heldLock.Dispose();
+			heldLock = null;
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+		}
+		finally
+		{
+			heldLock?.Dispose();
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+
+		var loaded = await new ProjectProfileStore(() => appDataPath).LoadMarksAsync(
+			project.RootPath,
+			TestContext.Current.CancellationToken);
+		Assert.True(loaded.Succeeded);
+		var mark = Assert.Single(loaded.Snapshot!.Marks);
+		Assert.Equal("src/Secrets.cs", mark.RelativePath);
+		Assert.True(mark.SourceOffset >= 0);
+
+		static int CountOccurrences(string content, string value)
+		{
+			var count = 0;
+			var offset = 0;
+			while ((offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+			{
+				count++;
+				offset += value.Length;
+			}
+			return count;
 		}
 	}
 
