@@ -1974,7 +1974,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		_contextFlyout = new MenuFlyout();
 		_contextFlyout.Items.Add(_copyMenuItem);
 		_contextFlyout.Items.Add(_selectAllMenuItem);
-		_contextFlyout.Items.Add(new Separator());
+		_contextFlyout.Items.Add(new Separator { Cursor = PreviewMenuCursor });
 		_contextFlyout.Items.Add(_alwaysHideSecretMenuItem);
 		_contextFlyout.Items.Add(_hideSecretHereMenuItem);
 		_contextFlyout.Items.Add(_removeSecretMarkMenuItem);

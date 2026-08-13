@@ -1036,6 +1036,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Cursor" Value="Arrow" />
         <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="Padding" Value="4" />
         <Setter Property="RenderTransformOrigin" Value="50%,0%" />

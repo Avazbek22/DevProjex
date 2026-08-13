@@ -850,8 +850,8 @@ internal static class UiTestDriver
 				FontStyle.Normal,
 				FontWeight.Normal);
 			var lineText = document.GetLineText(lineNumber);
-			var origin = Assert.IsType<Point>(textControl.TranslatePoint(default, window));
 			var lineHeight = InvokeRequiredPrivateMethod<double>(textControl, "ResolveLineHeight");
+			var contentTopPadding = InvokeRequiredPrivateMethod<double>(textControl, "ResolveContentTopPadding");
 			var startDistance = InvokeRequiredPrivateMethod<double>(
 				textControl,
 				"ResolveDistanceFromColumn",
@@ -864,14 +864,13 @@ internal static class UiTestDriver
 				lineText,
 				startColumn + value.Length,
 				typeface);
-			var y = origin.Y + textControl.TopPadding + ((lineNumber - 1) * lineHeight) -
-			        textControl.VerticalOffset + (lineHeight / 2);
-			var start = new Point(
-				origin.X + textControl.LeftPadding + startDistance - textControl.HorizontalOffset,
-				y);
-			var end = new Point(
-				origin.X + textControl.LeftPadding + endDistance - textControl.HorizontalOffset,
-				y);
+			var localY = contentTopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2);
+			var start = Assert.IsType<Point>(textControl.TranslatePoint(
+				new Point(textControl.LeftPadding + startDistance, localY),
+				window));
+			var end = Assert.IsType<Point>(textControl.TranslatePoint(
+				new Point(textControl.LeftPadding + endDistance, localY),
+				window));
 
 			textControl.Focus();
 			window.MouseMove(start, RawInputModifiers.None);
@@ -879,7 +878,7 @@ internal static class UiTestDriver
 			window.MouseMove(end, RawInputModifiers.LeftMouseButton);
 			window.MouseUp(end, MouseButton.Left, RawInputModifiers.None);
 			selected = string.Equals(value, textControl.GetSelectedText(), StringComparison.Ordinal);
-			contextPoint = new Point((start.X + end.X) / 2, y);
+			contextPoint = new Point((start.X + end.X) / 2, (start.Y + end.Y) / 2);
 		}
 		Assert.Equal(value, textControl.GetSelectedText());
 

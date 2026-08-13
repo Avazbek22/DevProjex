@@ -201,15 +201,17 @@ public sealed class VirtualizedPreviewTextControlTests
 			Assert.Equal(secret, control.GetSelectedText());
 			var flyout = Assert.IsType<MenuFlyout>(control.ContextFlyout);
 			Assert.True(flyout.IsOpen);
+			Separator? separator = null;
 			Assert.Collection(
 				flyout.Items,
 				item => Assert.Same(GetMenuItem(control, "_copyMenuItem"), item),
 				item => Assert.Same(GetMenuItem(control, "_selectAllMenuItem"), item),
-				item => Assert.IsType<Separator>(item),
+				item => separator = Assert.IsType<Separator>(item),
 				item => Assert.Same(GetMenuItem(control, "_alwaysHideSecretMenuItem"), item),
 				item => Assert.Same(GetMenuItem(control, "_hideSecretHereMenuItem"), item),
 				item => Assert.Same(GetMenuItem(control, "_removeSecretMarkMenuItem"), item));
 			var alwaysItem = GetMenuItem(control, "_alwaysHideSecretMenuItem");
+			Assert.Same(alwaysItem.Cursor, separator!.Cursor);
 			Assert.True(alwaysItem.IsEnabled);
 			Assert.Contains('…', Assert.IsType<string>(alwaysItem.Header));
 			Assert.DoesNotContain(secret, Assert.IsType<string>(alwaysItem.Header), StringComparison.Ordinal);
