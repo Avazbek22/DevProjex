@@ -458,6 +458,23 @@ public sealed class TreeNodeViewModelTests
         Assert.Contains(secondRoot.FullPath, second);
     }
 
+    [Fact]
+    public void TreeSelectionSnapshotCache_DetachesRawSnapshotWithoutCopyingIt()
+    {
+        var root = CreateTree();
+        root.IsChecked = true;
+        var roots = new List<TreeNodeViewModel> { root };
+        var cache = new TreeSelectionSnapshotCache();
+        var cached = cache.GetOrCreate(roots);
+
+        var detached = cache.DetachRawSnapshotForTreeReplacement(roots);
+        var rebuilt = cache.GetOrCreate(roots);
+
+        Assert.Same(cached, detached);
+        Assert.NotSame(detached, rebuilt);
+        Assert.Equal(detached, rebuilt);
+    }
+
 	[Fact]
 	public void TreeSelectionSnapshotCache_ReusesNormalizedSelectionAndOrderedFilesPerRevision()
 	{

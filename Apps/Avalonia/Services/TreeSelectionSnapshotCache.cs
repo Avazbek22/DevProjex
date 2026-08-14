@@ -107,6 +107,19 @@ internal sealed class TreeSelectionSnapshotCache
         return selected;
     }
 
+	/// <summary>
+	/// Transfers the immutable raw selection to a tree-replacement snapshot without rehashing it.
+	/// Detached background projections may keep reading the same set; no consumer mutates it.
+	/// </summary>
+	public IReadOnlySet<string> DetachRawSnapshotForTreeReplacement(IList<TreeNodeViewModel> roots)
+	{
+		var snapshot = GetOrCreate(roots);
+		_snapshotVersion = -1;
+		_snapshotRoot = null;
+		_snapshot = null;
+		return snapshot;
+	}
+
 	public IReadOnlySet<string> GetOrCreateNormalized(
 		IList<TreeNodeViewModel> roots,
 		TreeNodeDescriptor treeRoot)

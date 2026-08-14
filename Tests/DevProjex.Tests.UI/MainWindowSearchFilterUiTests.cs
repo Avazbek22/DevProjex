@@ -29,6 +29,8 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             Assert.True(viewModel.SearchTotalMatches > 0);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.SearchVisible);
+            await GetSearchFilterController(window).CloseSearchAsync();
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () => !UiTestDriver.GetViewModel(window).SearchVisible,
@@ -106,6 +108,8 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             Assert.NotEmpty(viewModel.TreeNodes);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.FilterVisible);
+            await GetSearchFilterController(window).CloseFilterAsync();
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () => !UiTestDriver.GetViewModel(window).FilterVisible,
@@ -161,6 +165,8 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             filteredPreviewService.IsChecked = false;
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.FilterVisible);
+            await GetSearchFilterController(window).CloseFilterAsync();
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () => !viewModel.FilterVisible &&
@@ -181,6 +187,63 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
                 toast => toast.Message.StartsWith(
                     "Checked items hidden by the current settings:",
                     StringComparison.Ordinal));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task InteractiveFilter_MultipleQueriesPreserveLatestSelectionOverrides()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var root = Assert.Single(viewModel.TreeNodes);
+            root.IsChecked = false;
+            var readme = Assert.Single(
+                root.Children,
+                node => string.Equals(node.DisplayName, "README.md", StringComparison.Ordinal));
+            var previewService = Assert.Single(
+                root.Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal));
+            var readmePath = readme.FullPath;
+            readme.IsChecked = true;
+            previewService.IsChecked = true;
+
+            await UiTestDriver.OpenFilterAsync(window);
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            var filterBox = Assert.IsType<TextBox>(filterBar.FilterBoxControl);
+            await UiTestDriver.EnterTextAsync(window, filterBox, "PreviewService");
+            await UiTestDriver.WaitForFilterAppliedAsync(window, "PreviewService");
+            Assert.True(Assert.Single(
+                Assert.Single(viewModel.TreeNodes).Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal)).IsChecked);
+            Assert.Single(
+                Assert.Single(viewModel.TreeNodes).Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal)).IsChecked = false;
+
+            await SetFilterTextAsync(window, filterBox, "README");
+            var filteredReadme = Assert.Single(
+                Assert.Single(viewModel.TreeNodes).Flatten(),
+                node => string.Equals(node.DisplayName, "README.md", StringComparison.Ordinal));
+            Assert.True(filteredReadme.IsChecked);
+            filteredReadme.IsChecked = false;
+            filteredReadme.IsChecked = true;
+
+            await SetFilterTextAsync(window, filterBox, "PreviewService");
+            Assert.False(Assert.Single(
+                Assert.Single(viewModel.TreeNodes).Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal)).IsChecked);
+
+            await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.FilterVisible);
+            await GetSearchFilterController(window).CloseFilterAsync();
+
+            Assert.Equal([readmePath], UiTestDriver.GetCheckedTreePaths(window));
         }
         finally
         {
@@ -313,6 +376,8 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             Assert.False(root.IsExpanded);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(UiTestDriver.GetViewModel(window).SearchVisible);
+            await GetSearchFilterController(window).CloseSearchAsync();
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () =>
@@ -1152,6 +1217,8 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             Assert.True(CountDescriptorNodes(filteredRoot.Descriptor) < baselineCount);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.FilterVisible);
+            await GetSearchFilterController(window).CloseFilterAsync();
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () =>
@@ -1197,6 +1264,15 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
                        string.IsNullOrEmpty(viewModel.SearchQuery);
             },
             "search cycle to close");
+    }
+
+    private static async Task SetFilterTextAsync(
+        MainWindow window,
+        TextBox filterBox,
+        string query)
+    {
+        await window.Dispatcher.InvokeAsync(() => filterBox.Text = query);
+        await UiTestDriver.WaitForFilterAppliedAsync(window, query);
     }
 
     private static int CountRealizedNodes(TreeNodeViewModel root)

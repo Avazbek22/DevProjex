@@ -176,6 +176,102 @@ public sealed class MainWindowApplySettingsSelectionUiTests
     }
 
     [AvaloniaFact]
+    public async Task StructuralApply_WhileFilterActive_DefersExactLossToastUntilFilterCloses()
+    {
+        using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+        var disappearingPath = Path.Combine(project.RootPath, "src", "selected.tree-state");
+        File.WriteAllText(disappearingPath, "selected\n");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+        try
+        {
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+            var survivingPath = Path.Combine(project.RootPath, "README.md");
+            SelectOnlyPaths(window, survivingPath, disappearingPath);
+
+            await UiTestDriver.OpenFilterAsync(window);
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(filterBar.FilterBoxControl),
+                "selected.tree-state");
+            await UiTestDriver.WaitForFilterAppliedAsync(window, "selected.tree-state");
+            Assert.True(FindNodeByPath(window, disappearingPath)!.IsChecked);
+            var filterSelectionSnapshot = GetInteractiveFilterSelectionSnapshot(window);
+            Assert.NotNull(filterSelectionSnapshot);
+
+            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".tree-state");
+            await UiTestDriver.ClickApplySettingsAsync(window);
+            Assert.Same(filterSelectionSnapshot, GetInteractiveFilterSelectionSnapshot(window));
+
+            Assert.DoesNotContain(
+                UiTestDriver.GetToastService(window).Items,
+                toast => toast.Message.StartsWith(
+                    "Checked items hidden by the current settings:",
+                    StringComparison.Ordinal));
+
+            await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(UiTestDriver.GetViewModel(window).FilterVisible);
+            await GetSearchFilterController(window).CloseFilterAsync();
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetToastService(window).Items.Any(
+                    toast => string.Equals(
+                        toast.Message,
+                        "Checked items hidden by the current settings: 1",
+                        StringComparison.Ordinal)),
+                "structural selection loss toast after closing the filter");
+
+            Assert.Equal([survivingPath], UiTestDriver.GetCheckedTreePaths(window));
+            Assert.Null(GetInteractiveFilterSelectionSnapshot(window));
+            Assert.Contains(
+                UiTestDriver.GetToastService(window).Items,
+                toast => string.Equals(
+                    toast.Message,
+                    "Checked items hidden by the current settings: 1",
+                    StringComparison.Ordinal));
+
+            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".tree-state");
+            await UiTestDriver.ClickApplySettingsAsync(window);
+
+            Assert.False(FindNodeByPath(window, disappearingPath)!.IsChecked);
+            Assert.Equal([survivingPath], UiTestDriver.GetCheckedTreePaths(window));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StructuralApply_RealTreeCheckboxSelectionSurvivesGraphReplacement()
+    {
+        using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+        try
+        {
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+            var oldRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            oldRoot.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+            var sourcePath = Path.Combine(project.RootPath, "src");
+            var sourceCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
+            await UiTestDriver.ClickAsync(window, sourceCheckBox);
+            Assert.True(FindNodeByPath(window, sourcePath)!.IsChecked);
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFolders);
+            await UiTestDriver.ClickApplySettingsAsync(window);
+
+            Assert.NotSame(oldRoot, Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes));
+            Assert.True(FindNodeByPath(window, sourcePath)!.IsChecked);
+            Assert.Equal([sourcePath], UiTestDriver.GetCheckedTreePaths(window));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task RefreshProject_PreservesSelectionAndExpansion()
     {
         using var project = UiTestProject.CreateDefault();
@@ -201,6 +297,52 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         }
         finally
         {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task RefreshProject_SelectionChangedDuringBuildUsesLatestUiState()
+    {
+        using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+        var blockingTreeBuilder = new BlockingTreeBuilder();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            configureServices: services => services with
+            {
+                BuildTreeUseCase = new BuildTreeUseCase(
+                    blockingTreeBuilder,
+                    new TreeNodePresentationService(
+                        services.Localization,
+                        new IconMapper()))
+            });
+        try
+        {
+            var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            root.IsChecked = false;
+            var docs = FindRequiredDirectChild(root, "docs");
+            var source = FindRequiredDirectChild(root, "src");
+            docs.IsChecked = true;
+
+            blockingTreeBuilder.Arm();
+            var refreshTask = UiTestDriver.RefreshProjectAsync(window);
+            await blockingTreeBuilder.BuildStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            docs.IsChecked = false;
+            source.IsChecked = true;
+            source.IsExpanded = true;
+            blockingTreeBuilder.Release();
+            await refreshTask.WaitAsync(TimeSpan.FromSeconds(40));
+
+            var refreshedRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            var refreshedSource = FindRequiredDirectChild(refreshedRoot, "src");
+            Assert.True(refreshedSource.IsChecked);
+            Assert.True(refreshedSource.IsExpanded);
+            Assert.Equal([refreshedSource.FullPath], UiTestDriver.GetCheckedTreePaths(window));
+        }
+        finally
+        {
+            blockingTreeBuilder.Release();
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
@@ -274,12 +416,12 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             InvokePrivateAsyncVoid(window, "OnGitBranchSwitch", window, "feature");
             await UiTestDriver.WaitForConditionAsync(
                 window,
-                () => string.Equals(
-                          UiTestDriver.GetViewModel(window).CurrentBranch,
-                          "feature",
-                          StringComparison.Ordinal) &&
-                      !UiTestDriver.GetViewModel(window).StatusBusy,
-                "git branch switch to publish its replacement tree",
+                () => UiTestDriver.GetToastService(window).Items.Any(
+                    toast => string.Equals(
+                        toast.Message,
+                        "Checked items hidden by the current settings: 1",
+                        StringComparison.Ordinal)),
+                "git branch switch selection-loss toast",
                 timeout: TimeSpan.FromSeconds(30));
 
             Assert.Equal([sourcePath], UiTestDriver.GetCheckedTreePaths(window));
@@ -503,6 +645,28 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         Assert.Single(
             parent.Children,
             node => string.Equals(node.DisplayName, displayName, StringComparison.Ordinal));
+
+    private static DevProjex.Avalonia.Coordinators.SearchFilterInteractionController
+        GetSearchFilterController(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_searchFilterController",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        return Assert.IsType<DevProjex.Avalonia.Coordinators.SearchFilterInteractionController>(
+            field?.GetValue(window));
+    }
+
+    private static ProjectTreeSelectionSnapshot? GetInteractiveFilterSelectionSnapshot(
+        MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_interactiveFilterSelectionSnapshot",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        var snapshot = field?.GetValue(window);
+        return snapshot is null
+            ? null
+            : Assert.IsType<ProjectTreeSelectionSnapshot>(snapshot);
+    }
 
     private static async Task InvokePrivateTaskAsync(MainWindow window, string methodName)
     {

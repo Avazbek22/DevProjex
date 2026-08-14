@@ -179,8 +179,10 @@ public partial class MainWindow : IRefreshTreePipelineHost
         if (!interactiveFilter && !string.IsNullOrWhiteSpace(input.NameFilter) && root.Children.Count == 0)
             _toastService.Show(_localization["Toast.NoMatches"]);
 
-        if (!interactiveFilter &&
-            _interactiveFilterSelectionSnapshot is null &&
+        var shouldReportMissingSelection =
+            completedFilterSelectionTransfer ||
+            !interactiveFilter && _interactiveFilterSelectionSnapshot is null;
+        if (shouldReportMissingSelection &&
             selectionRestore.MissingCheckedPathCount > 0)
         {
             _toastService.Show(
