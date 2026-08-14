@@ -545,7 +545,9 @@ internal static class UiTestDriver
         var keySymbol = physicalKey.ToQwertyKeySymbol(modifiers.HasFlag(RawInputModifiers.Shift));
         inputRoot.KeyPress(key, modifiers, physicalKey, keySymbol);
         await WaitForSettledFramesAsync(frameCount: 1);
-        inputRoot.KeyRelease(key, modifiers, physicalKey, keySymbol);
+        if (inputRoot.IsVisible)
+            inputRoot.KeyRelease(key, modifiers, physicalKey, keySymbol);
+
         await WaitForSettledFramesAsync(frameCount: 3);
     }
 
