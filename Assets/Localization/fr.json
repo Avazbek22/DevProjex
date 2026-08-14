@@ -205,6 +205,7 @@
   "Preview.Secret.Mark.Validation.TooLong": "Sélectionnez au maximum 512 caractères.",
   "Preview.Secret.Mark.Validation.Multiline": "Les valeurs multilignes ne sont pas prises en charge.",
   "Preview.Secret.Mark.Validation.ContentOnly": "Sélectionnez une valeur dans le contenu d’un fichier.",
+  "Error.Secret.MarkApplyFailed": "Le marquage du secret n’a pas pu être appliqué. Actualisez l’aperçu et réessayez.",
   "Toast.Secret.HiddenCount": "Masqué à {0} endroits",
   "Toast.Secret.MarkRemoved": "Marquage supprimé.",
   "Toast.Secret.MarkRemovedStillDetected": "Marquage supprimé. Le détecteur masque toujours cette valeur.",

@@ -115,6 +115,23 @@ public sealed class MarkedSecretsMatcherOptimizationTests(ITestOutputHelper outp
 	}
 
 	[Fact]
+	public void SessionMark_ExactSelectedSubstringDoesNotRequireTokenBoundaries()
+	{
+		const string marked = "selected-fragment-0001";
+		var content = $"prefix{marked}suffix";
+		var value = CreateValue(marked);
+		var offset = content.IndexOf(marked, StringComparison.Ordinal);
+		var matcher = new MarkedSecretsMatcher(
+			[],
+			[new SessionMarkedSecret("config.env", offset, value.Length, value.Hash)]);
+
+		var finding = Assert.Single(matcher.Match("config.env", content, CancellationToken));
+
+		Assert.Equal(offset, finding.Start);
+		Assert.Equal(marked, finding.Value);
+	}
+
+	[Fact]
 	public void SessionOnlyMatching_ObservesCancellationWithoutBuildingAnIndex()
 	{
 		const string marked = "secret-value-0001";

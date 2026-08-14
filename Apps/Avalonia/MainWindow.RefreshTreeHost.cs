@@ -51,6 +51,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
     void IRefreshTreePipelineHost.BeforeFullTreeRefresh()
     {
+		CancelSecretRedactionDiscovery();
         // Full-tree refresh invalidates the active metrics baseline.
         // Cancel early so obsolete file reads stop before we start the next build.
         _metrics.CancelAndDiscardBackgroundCalculation();

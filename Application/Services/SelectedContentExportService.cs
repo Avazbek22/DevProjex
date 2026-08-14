@@ -105,6 +105,13 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		// Convert to list and sort in-place
 		var files = new List<string>(uniqueFiles);
 		files.Sort(PathComparer.Default);
+		var redactionContext = transformationContext?.Redaction;
+		if (redactionContext is not null)
+		{
+			await redactionContext.Session
+				.RefreshPersistentMarksAsync(redactionContext.ProjectRoot, cancellationToken)
+				.ConfigureAwait(false);
+		}
 		using var transformationScope = transformationContext?.BeginOutput(files);
 		var redactionScope = transformationScope?.Redaction;
 
@@ -120,6 +127,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 
 			TextFileContent? content;
 			ContentFingerprint? contentFingerprint = null;
+			SecretFileMetadata? redactionMetadata = null;
 			if (redactionScope is null)
 			{
 				if (transformationScope?.Compression is not null)
@@ -142,9 +150,10 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			{
 				var scanLimit = maxFileSizeForFullRead ??
 				                SecretRedactionOutputPreparer.MaximumScannableFileBytes;
-				var readFact = await contentAnalyzer
-					.ReadFactAsync(file, scanLimit, cancellationToken)
+				var coherentRead = await ReadRedactionFactAsync(file, scanLimit, cancellationToken)
 					.ConfigureAwait(false);
+				var readFact = coherentRead.Fact;
+				redactionMetadata = coherentRead.Metadata;
 				var readResult = readFact.ToReadResult();
 				content = readResult.Content;
 				contentFingerprint = readFact.Fingerprint;
@@ -195,6 +204,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 					file,
 					transformedText,
 					compression?.Map,
+					redactionMetadata ?? SecretFileMetadata.Capture(file),
+					contentFingerprint,
 					cancellationToken);
 
 			processedFileCount++;
@@ -247,12 +258,61 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		}
 
 		var snapshot = redactionScope?.Complete();
+		if (redactionContext is not null)
+		{
+			await redactionContext.Session
+				.FlushPendingPersistentMarkMigrationsAsync(
+					redactionContext.ProjectRoot,
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
 		if (publishCompressionSnapshot)
 			transformationScope?.Compression?.Complete();
 		var textOutput = anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
 
 		return new SelectedContentExportResult(textOutput, snapshot);
 	}
+
+	private async ValueTask<CoherentRedactionRead> ReadRedactionFactAsync(
+		string path,
+		long maximumBytes,
+		CancellationToken cancellationToken)
+	{
+		if (contentAnalyzer is ICoherentFileContentAnalyzer coherentAnalyzer)
+		{
+			var identified = await coherentAnalyzer
+				.ReadFactWithIdentityAsync(path, maximumBytes, cancellationToken)
+				.ConfigureAwait(false);
+			var metadata = identified.Identity is { } identity
+				? SecretFileMetadata.FromIdentity(identity)
+				: SecretFileMetadata.Capture(path);
+			EnsureContentMatchesMetadata(path, identified.Fact, metadata);
+			return new CoherentRedactionRead(identified.Fact, metadata);
+		}
+
+		var before = SecretFileMetadata.Capture(path);
+		var fact = await contentAnalyzer
+			.ReadFactAsync(path, maximumBytes, cancellationToken)
+			.ConfigureAwait(false);
+		var after = SecretFileMetadata.Capture(path);
+		if (before != after)
+			throw new SecretDetectionException($"Hide Secrets could not inspect a changing file: '{path}'.");
+		EnsureContentMatchesMetadata(path, fact, after);
+		return new CoherentRedactionRead(fact, after);
+	}
+
+	private static void EnsureContentMatchesMetadata(
+		string path,
+		ContentReadFact fact,
+		SecretFileMetadata metadata)
+	{
+		if (fact.ToReadResult().Content is { } content && content.SizeBytes != metadata.Length)
+			throw new SecretDetectionException($"Hide Secrets could not inspect a changing file: '{path}'.");
+	}
+
+	private readonly record struct CoherentRedactionRead(
+		ContentReadFact Fact,
+		SecretFileMetadata Metadata);
 
 	private static string MapDisplayPath(string filePath, Func<string, string>? displayPathMapper)
 	{

@@ -6,6 +6,7 @@ using DevProjex.Infrastructure.Updates;
 namespace DevProjex.Infrastructure.Persistence;
 
 [JsonSerializable(typeof(ProjectProfileDb))]
+[JsonSerializable(typeof(PersistentSecretMarkDb))]
 [JsonSerializable(typeof(RecentProjectsDb))]
 [JsonSerializable(typeof(UserSettingsDb))]
 [JsonSerializable(typeof(UpdateCheckSettings))]

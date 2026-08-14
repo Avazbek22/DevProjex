@@ -598,7 +598,7 @@ public partial class MainWindow
                     // Accepting that sole change here avoids cancelling and restarting its active scan.
                     if (_selectionCoordinator.TryAcceptHideSecretsOnlyChangeAsApplied(_currentPath))
                     {
-                        _projectProfiles.PersistIfNeeded(_currentPath);
+						await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
                         return;
                     }
 
@@ -606,7 +606,7 @@ public partial class MainWindow
                         _selectionCoordinator.TryAcceptContentTransformationOnlyChangeAsApplied(_currentPath))
                     {
                         await ApplyContentTransformationSettingsAsync(currentTree, cancellationToken);
-                        _projectProfiles.PersistIfNeeded(_currentPath);
+						await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
                         return;
                     }
 
@@ -619,7 +619,7 @@ public partial class MainWindow
                     // instead of presenting settings that describe a different tree.
                 } while (refreshOutcome == TreeRefreshOutcome.StaleInput);
 
-                _projectProfiles.PersistIfNeeded(_currentPath);
+				await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
             }
             catch (OperationCanceledException)
             {

@@ -350,6 +350,11 @@ public sealed class AvaloniaCompiledBindingContractTests
 			"ScrollViewer.preview-scroll",
 			"Ibeam",
 			avaloniaNamespace);
+		AssertCursorSetter(
+			styles,
+			"MenuFlyoutPresenter",
+			"Arrow",
+			avaloniaNamespace);
 		foreach (var selector in new[]
 		         {
 			         "ScrollViewer.preview-scroll ScrollBar",

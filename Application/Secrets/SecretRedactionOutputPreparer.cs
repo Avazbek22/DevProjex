@@ -7,8 +7,16 @@ namespace DevProjex.Application.Secrets;
 /// the transformed bytes in temporary files. Consumers may then render context, folders, or ZIPs
 /// without reopening source text and without retaining a whole project in managed memory.
 /// </summary>
-public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAnalyzer)
+public sealed class SecretRedactionOutputPreparer
 {
+	private readonly IFileContentAnalyzer contentAnalyzer;
+
+	public SecretRedactionOutputPreparer(IFileContentAnalyzer contentAnalyzer)
+	{
+		this.contentAnalyzer = contentAnalyzer ?? throw new ArgumentNullException(nameof(contentAnalyzer));
+		SecretRedactionTempDirectoryScavenger.StartOnce();
+	}
+
 	public const long MaximumScannableFileBytes = 16 * 1024 * 1024;
 	private const long MaximumParallelScanFileBytes = 1024 * 1024;
 	// Parallel scanning applies only to files at or below the per-file parallel limit, so the
@@ -43,10 +51,16 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				.ConfigureAwait(false);
 		}
 
-		if (context.Redaction is { } redactionContext)
+		var redactionContext = context.Redaction;
+		if (redactionContext is not null)
+		{
+			await redactionContext.Session
+				.RefreshPersistentMarksAsync(redactionContext.ProjectRoot, cancellationToken)
+				.ConfigureAwait(false);
 			await redactionContext.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+		}
 
-		string? workingDirectory = null;
+		SecretRedactionTempDirectory? workingDirectory = null;
 		var preparedFiles = new Dictionary<string, PreparedSecretFile>(PathComparer.Default);
 		var unscannablePaths = new List<string>();
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
@@ -123,6 +137,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					sourcePath,
 					transformedText,
 					compressed.Map,
+					prepared.Metadata,
 					compressed.Map.IsIdentity
 						? prepared.SourceFingerprint
 						: null,
@@ -139,7 +154,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 
 				var encoding = result.Encoding ?? TextFileEncoding.Utf8;
 				workingDirectory ??= CreateWorkingDirectory();
-				var preparedPath = Path.Combine(workingDirectory, $"{prepared.Index:D8}.redacted.txt");
+				var preparedPath = Path.Combine(workingDirectory.Path, $"{prepared.Index:D8}.redacted.txt");
 				await WritePreparedTextAsync(
 						preparedPath,
 						transformedText,
@@ -157,6 +172,14 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 
 			var snapshot = scope?.Complete(unscannablePaths.Count, failedFileCount: 0);
 			var compression = transformationScope.Compression?.Complete();
+			if (redactionContext is not null)
+			{
+				await redactionContext.Session
+					.FlushPendingPersistentMarkMigrationsAsync(
+						redactionContext.ProjectRoot,
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
 			return new PreparedSecretRedactionOutput(
 				workingDirectory,
 				preparedFiles,
@@ -166,8 +189,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		}
 		catch
 		{
-			if (workingDirectory is not null)
-				DeleteWorkingDirectory(workingDirectory);
+			workingDirectory?.Dispose();
 			throw;
 		}
 	}
@@ -287,13 +309,10 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		CompressionWorkItem item,
 		CancellationToken cancellationToken)
 	{
-		var metadataBeforeRead = SecretFileMetadata.Capture(item.SourcePath);
-		var readFact = await contentAnalyzer
-			.ReadFactAsync(item.SourcePath, MaximumScannableFileBytes, cancellationToken)
+		var coherentRead = await ReadFactCoherentlyAsync(item.SourcePath, cancellationToken)
 			.ConfigureAwait(false);
+		var readFact = coherentRead.Fact;
 		var result = readFact.ToReadResult();
-		var metadataAfterRead = SecretFileMetadata.Capture(item.SourcePath);
-		EnsureStableRead(item.SourcePath, metadataBeforeRead, metadataAfterRead, result.Content);
 		IDisposable? contentLease = null;
 		try
 		{
@@ -324,7 +343,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			return new PreparedTransformationEntry(
 				item.Index,
 				item.SourcePath,
-				metadataAfterRead,
+				coherentRead.Metadata,
 				result,
 				compression,
 				readFact.Fingerprint,
@@ -342,7 +361,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		IReadOnlyList<string> orderedFilePaths,
 		CancellationToken cancellationToken)
 	{
-		var workingDirectory = new Lazy<string>(
+		var workingDirectory = new Lazy<SecretRedactionTempDirectory>(
 			CreateWorkingDirectory,
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var prepared = new PreparedSecretFile?[orderedFilePaths.Count];
@@ -413,7 +432,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		catch
 		{
 			if (workingDirectory.IsValueCreated)
-				DeleteWorkingDirectory(workingDirectory.Value);
+				workingDirectory.Value.Dispose();
 			throw;
 		}
 	}
@@ -421,18 +440,15 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	private async Task<PreparedSecretFile> PrepareCompressedFileAsync(
 		ContentTransformationContext context,
 		ContentTransformationScope transformationScope,
-		Lazy<string> workingDirectory,
+		Lazy<SecretRedactionTempDirectory> workingDirectory,
 		CompressionWorkItem workItem,
 		CancellationToken cancellationToken)
 	{
 		var sourcePath = workItem.SourcePath;
-		var metadataBeforeRead = SecretFileMetadata.Capture(sourcePath);
-		var readFact = await contentAnalyzer
-			.ReadFactAsync(sourcePath, MaximumScannableFileBytes, cancellationToken)
+		var coherentRead = await ReadFactCoherentlyAsync(sourcePath, cancellationToken)
 			.ConfigureAwait(false);
+		var readFact = coherentRead.Fact;
 		var result = readFact.ToReadResult();
-		var metadataAfterRead = SecretFileMetadata.Capture(sourcePath);
-		EnsureStableRead(sourcePath, metadataBeforeRead, metadataAfterRead, result.Content);
 
 		if (result.Classification != FileContentClassification.Text)
 		{
@@ -468,7 +484,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			return PreparedSecretFile.Unchanged(sourcePath);
 
 		var encoding = result.Encoding ?? TextFileEncoding.Utf8;
-		var preparedPath = Path.Combine(workingDirectory.Value, $"{workItem.Index:D8}.compressed.txt");
+		var preparedPath = Path.Combine(workingDirectory.Value.Path, $"{workItem.Index:D8}.compressed.txt");
 		await WritePreparedTextAsync(
 				preparedPath,
 				compressed.Text,
@@ -514,6 +530,12 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
+		if (await context.Session
+			    .EnsureCurrentPersistentIdentityReadyAsync(cancellationToken)
+			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+		{
+			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
+		}
 		await context.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		var scope = context.BeginOutput(orderedFilePaths);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
@@ -591,7 +613,11 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				skippedFileCount++;
 		}
 
-		return scope.Complete(skippedFileCount, failedFileCount: 0);
+		var snapshot = scope.Complete(skippedFileCount, failedFileCount: 0);
+		await context.Session
+			.FlushPendingPersistentMarkMigrationsAsync(context.ProjectRoot, cancellationToken)
+			.ConfigureAwait(false);
+		return snapshot;
 	}
 
 	/// <summary>
@@ -705,8 +731,16 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			var entry = entries[index];
 			if (entry is not null)
 			{
-				scope.ProcessEntry(orderedFilePaths[index], entry);
-				if (entry.IsUnscannable)
+				try
+				{
+					scope.ProcessEntry(orderedFilePaths[index], entry);
+				}
+				catch (SecretInspectionBudgetExceededException)
+				{
+					outcomes[index] = SecretDiscoveryFileOutcome.Failed;
+					entry = null;
+				}
+				if (entry?.IsUnscannable == true)
 					outcomes[index] = SecretDiscoveryFileOutcome.SkippedByLimit;
 			}
 
@@ -721,7 +755,11 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			}
 		}
 
-		return scope.Complete(skippedFileCount, failedFileCount);
+		var snapshot = scope.Complete(skippedFileCount, failedFileCount);
+		await context.Session
+			.FlushPendingPersistentMarkMigrationsAsync(context.ProjectRoot, cancellationToken)
+			.ConfigureAwait(false);
+		return snapshot;
 	}
 
 	public async Task<SecretRedactionSnapshot> AnalyzeAsync(
@@ -741,6 +779,12 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				.ConfigureAwait(false);
 		}
 
+		if (await redactionContext.Session
+			    .EnsureCurrentPersistentIdentityReadyAsync(cancellationToken)
+			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
+		{
+			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
+		}
 		await redactionContext.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
 		var redactionScope = transformationScope.Redaction ??
@@ -770,6 +814,7 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 						prepared.SourcePath,
 						prepared.Compression.Text,
 						prepared.Compression.Map,
+						prepared.Metadata,
 						prepared.Compression.Map.IsIdentity
 							? prepared.SourceFingerprint
 							: null,
@@ -784,7 +829,11 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 
 		// Analysis borrows the compression pipeline but is not itself a transformed output. Publishing
 		// its auxiliary snapshot would make compression statistics appear before Preview or export ran.
-		return redactionScope.Complete(skippedFileCount, failedFileCount: 0);
+		var snapshot = redactionScope.Complete(skippedFileCount, failedFileCount: 0);
+		await redactionContext.Session
+			.FlushPendingPersistentMarkMigrationsAsync(redactionContext.ProjectRoot, cancellationToken)
+			.ConfigureAwait(false);
+		return snapshot;
 	}
 
 	public Task<SecretRedactionSnapshot> DiscoverAsync(
@@ -836,7 +885,15 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 				continue;
 			if (attempt.CachedEntry is not null)
 			{
-				redactionScope.ProcessEntry(attempt.SourcePath!, attempt.CachedEntry);
+				try
+				{
+					redactionScope.ProcessEntry(attempt.SourcePath!, attempt.CachedEntry);
+				}
+				catch (SecretInspectionBudgetExceededException)
+				{
+					failedFileCount++;
+					continue;
+				}
 				if (attempt.CachedEntry.IsUnscannable)
 					skippedFileCount++;
 				continue;
@@ -849,32 +906,44 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			}
 
 			var prepared = attempt.Entry;
-			switch (prepared.ReadResult.Classification)
+			try
 			{
-				case FileContentClassification.Binary:
-					redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
-					break;
-				case FileContentClassification.TooLarge:
-					redactionScope.AnalyzeUnscannable(prepared.SourcePath, prepared.Metadata);
-					skippedFileCount++;
-					break;
-				case FileContentClassification.Text:
-					redactionScope.CreatePlan(
-						prepared.SourcePath,
-						prepared.Compression.Text,
-						prepared.Compression.Map,
-						prepared.Compression.Map.IsIdentity
-							? prepared.SourceFingerprint
-							: null,
-						cancellationToken);
-					break;
-				default:
-					failedFileCount++;
-					break;
+				switch (prepared.ReadResult.Classification)
+				{
+					case FileContentClassification.Binary:
+						redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
+						break;
+					case FileContentClassification.TooLarge:
+						redactionScope.AnalyzeUnscannable(prepared.SourcePath, prepared.Metadata);
+						skippedFileCount++;
+						break;
+					case FileContentClassification.Text:
+						redactionScope.CreatePlan(
+							prepared.SourcePath,
+							prepared.Compression.Text,
+							prepared.Compression.Map,
+							prepared.Metadata,
+							prepared.Compression.Map.IsIdentity
+								? prepared.SourceFingerprint
+								: null,
+							cancellationToken);
+						break;
+					default:
+						failedFileCount++;
+						break;
+				}
+			}
+			catch (SecretInspectionBudgetExceededException)
+			{
+				failedFileCount++;
 			}
 		}
 
-		return redactionScope.Complete(skippedFileCount, failedFileCount);
+		var snapshot = redactionScope.Complete(skippedFileCount, failedFileCount);
+		await redactionContext.Session
+			.FlushPendingPersistentMarkMigrationsAsync(redactionContext.ProjectRoot, cancellationToken)
+			.ConfigureAwait(false);
+		return snapshot;
 	}
 
 	private async IAsyncEnumerable<DiscoveryTransformationAttempt> PrepareOrderedDiscoveryEntriesAsync(
@@ -1087,38 +1156,27 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		CancellationToken cancellationToken)
 	{
 		var sourcePath = workItem.SourcePath;
-		var metadataBeforeRead = workItem.Metadata;
-
-		await using var contentBuffer = await contentAnalyzer
-			.OpenCompleteTextBufferAsync(
-				sourcePath,
-				MaximumScannableFileBytes,
-				cancellationToken)
+		var coherentRead = await OpenCompleteTextBufferCoherentlyAsync(sourcePath, cancellationToken)
 			.ConfigureAwait(false);
-		var metadataAfterRead = SecretFileMetadata.Capture(sourcePath);
-		if (metadataBeforeRead != metadataAfterRead ||
-		    contentBuffer.SizeBytes > 0 && contentBuffer.SizeBytes != metadataAfterRead.Length)
-		{
-			throw new SecretDetectionException(
-				$"Hide Secrets could not inspect a changing file: '{sourcePath}'.");
-		}
+		await using var contentBuffer = coherentRead.Buffer;
+		var metadata = coherentRead.Metadata;
 
 		switch (contentBuffer.Classification)
 		{
 			case FileContentClassification.Binary:
-				return scope.StoreBinary(sourcePath, metadataAfterRead);
+				return scope.StoreBinary(sourcePath, metadata);
 			case FileContentClassification.TooLarge:
 				// This scan only feeds the count on the checkbox. One file it may not read is a
 				// reason to leave that file out of the count, never to refuse the whole project -
 				// the user asked how many secrets are here, not for a guarantee about output.
-				return scope.StoreUnscannable(sourcePath, metadataAfterRead);
+				return scope.StoreUnscannable(sourcePath, metadata);
 			case FileContentClassification.Text:
 				using (scope.TrackFullContentBuffer())
 				{
 					return scope.Detect(
 						sourcePath,
 						contentBuffer.Content.Span,
-						metadataAfterRead,
+						metadata,
 						cancellationToken);
 				}
 			default:
@@ -1126,6 +1184,110 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 					$"Hide Secrets could not inspect '{sourcePath}' ({contentBuffer.Classification}).");
 		}
 	}
+
+	private async ValueTask<CoherentSecretContentRead> ReadFactCoherentlyAsync(
+		string path,
+		CancellationToken cancellationToken)
+	{
+		if (contentAnalyzer is ICoherentFileContentAnalyzer coherentAnalyzer)
+		{
+			var identified = await coherentAnalyzer
+				.ReadFactWithIdentityAsync(path, MaximumScannableFileBytes, cancellationToken)
+				.ConfigureAwait(false);
+			var metadata = ResolveReadMetadata(
+				path,
+				identified.Identity,
+				identified.Fact.ToReadResult().Content);
+			return new CoherentSecretContentRead(identified.Fact, metadata);
+		}
+
+		var before = SecretFileMetadata.Capture(path);
+		var fact = await contentAnalyzer
+			.ReadFactAsync(path, MaximumScannableFileBytes, cancellationToken)
+			.ConfigureAwait(false);
+		var after = SecretFileMetadata.Capture(path);
+		EnsureStableRead(path, before, after, fact.ToReadResult().Content);
+		return new CoherentSecretContentRead(fact, after);
+	}
+
+	private async ValueTask<CoherentSecretTextBuffer> OpenCompleteTextBufferCoherentlyAsync(
+		string path,
+		CancellationToken cancellationToken)
+	{
+		if (contentAnalyzer is ICoherentFileContentAnalyzer coherentAnalyzer)
+		{
+			var identified = await coherentAnalyzer
+				.OpenCompleteTextBufferWithIdentityAsync(
+					path,
+					MaximumScannableFileBytes,
+					cancellationToken)
+				.ConfigureAwait(false);
+			try
+			{
+				var metadata = ResolveBufferMetadata(path, identified.Identity, identified.Buffer);
+				return new CoherentSecretTextBuffer(identified.Buffer, metadata);
+			}
+			catch
+			{
+				await identified.Buffer.DisposeAsync().ConfigureAwait(false);
+				throw;
+			}
+		}
+
+		var before = SecretFileMetadata.Capture(path);
+		var buffer = await contentAnalyzer
+			.OpenCompleteTextBufferAsync(path, MaximumScannableFileBytes, cancellationToken)
+			.ConfigureAwait(false);
+		try
+		{
+			var after = SecretFileMetadata.Capture(path);
+			if (before != after || buffer.SizeBytes > 0 && buffer.SizeBytes != after.Length)
+			{
+				throw new SecretDetectionException(
+					$"Hide Secrets could not inspect a changing file: '{path}'.");
+			}
+			return new CoherentSecretTextBuffer(buffer, after);
+		}
+		catch
+		{
+			await buffer.DisposeAsync().ConfigureAwait(false);
+			throw;
+		}
+	}
+
+	private static SecretFileMetadata ResolveReadMetadata(
+		string path,
+		FileContentIdentity? identity,
+		TextFileContent? content)
+	{
+		var metadata = identity is { } value
+			? SecretFileMetadata.FromIdentity(value)
+			: SecretFileMetadata.Capture(path);
+		if (content is not null && content.SizeBytes != metadata.Length)
+			throw new SecretDetectionException($"Hide Secrets could not inspect a changing file: '{path}'.");
+		return metadata;
+	}
+
+	private static SecretFileMetadata ResolveBufferMetadata(
+		string path,
+		FileContentIdentity? identity,
+		ICompleteTextFileBuffer buffer)
+	{
+		var metadata = identity is { } value
+			? SecretFileMetadata.FromIdentity(value)
+			: SecretFileMetadata.Capture(path);
+		if (buffer.SizeBytes > 0 && buffer.SizeBytes != metadata.Length)
+			throw new SecretDetectionException($"Hide Secrets could not inspect a changing file: '{path}'.");
+		return metadata;
+	}
+
+	private readonly record struct CoherentSecretContentRead(
+		ContentReadFact Fact,
+		SecretFileMetadata Metadata);
+
+	private readonly record struct CoherentSecretTextBuffer(
+		ICompleteTextFileBuffer Buffer,
+		SecretFileMetadata Metadata);
 
 	private readonly record struct SecretScanWorkItem(
 		int Index,
@@ -1150,10 +1312,8 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 		_ => throw new ArgumentOutOfRangeException(nameof(encoding), encoding, null)
 	};
 
-	private static string CreateWorkingDirectory() =>
-		// CreateTempSubdirectory is atomic and creates owner-only (0700) directories on Unix.
-		// A predictable shared temp parent would expose prepared output to symlink and permission races.
-		Directory.CreateTempSubdirectory("DevProjex-SecretRedaction-").FullName;
+	private static SecretRedactionTempDirectory CreateWorkingDirectory() =>
+		SecretRedactionTempDirectory.Create();
 
 	/// <summary>
 	/// Relative path for the compressor's language lookup. It only needs the extension and a stable
@@ -1222,20 +1382,6 @@ public sealed class SecretRedactionOutputPreparer(IFileContentAnalyzer contentAn
 			throw new SecretDetectionException($"Hide Secrets could not inspect a changing file: '{path}'.");
 	}
 
-	internal static void DeleteWorkingDirectory(string path)
-	{
-		try
-		{
-			if (Directory.Exists(path))
-				Directory.Delete(path, recursive: true);
-		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-		{
-			// A per-match override can intentionally keep a value in the decided output, so these
-			// files are private working data rather than a sanitized cache. Cleanup remains
-			// best effort because an antivirus-held handle must not invalidate a completed export.
-		}
-	}
 }
 
 public sealed record PreparedSecretFile(
@@ -1288,12 +1434,12 @@ public sealed record PreparedSecretSpan(int Start, int Length)
 
 public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 {
-	private readonly string? _workingDirectory;
+	private readonly SecretRedactionTempDirectory? _workingDirectory;
 	private readonly IReadOnlyDictionary<string, PreparedSecretFile> _files;
 	private bool _disposed;
 
 	internal PreparedSecretRedactionOutput(
-		string? workingDirectory,
+		SecretRedactionTempDirectory? workingDirectory,
 		IReadOnlyDictionary<string, PreparedSecretFile> files,
 		SecretRedactionSnapshot? snapshot,
 		Compression.CodeCompressionSnapshot? compressionSnapshot = null,
@@ -1334,7 +1480,7 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 			return ValueTask.CompletedTask;
 		_disposed = true;
 		if (_workingDirectory is not null)
-			SecretRedactionOutputPreparer.DeleteWorkingDirectory(_workingDirectory);
+			_workingDirectory.Dispose();
 		return ValueTask.CompletedTask;
 	}
 }

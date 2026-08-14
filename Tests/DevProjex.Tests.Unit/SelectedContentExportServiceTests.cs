@@ -1,6 +1,9 @@
 namespace DevProjex.Tests.Unit;
 
 using DevProjex.Application.Compression;
+using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Infrastructure.Secrets;
 
 public sealed class SelectedContentExportServiceTests
 {
@@ -269,6 +272,56 @@ public sealed class SelectedContentExportServiceTests
 		Assert.Equal(1, compressor.AnalysisCount);
 		Assert.Equal(1, session.Snapshot.CompressedFiles);
 		Assert.Equal(1, publishedSnapshots);
+	}
+
+	[Fact]
+	public async Task BuildAsync_RefreshesPersistentMarksAddedByAnotherStoreBeforeClipboardOutput()
+	{
+		const string secret = "clipboard-persistent-secret-012345";
+		using var workspace = new TemporaryDirectory();
+		var projectRoot = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("app-data");
+		var file = workspace.CreateFile("project/config.env", $"TOKEN={secret}\n");
+		var firstStore = new ProjectProfileStore(() => appData);
+		var secondStore = new ProjectProfileStore(() => appData);
+		var identityProvider = new PersistentSecretIdentityProvider(() => appData);
+		using var session = new SecretRedactionSession(
+			new EmptySecretDetector(),
+			firstStore,
+			identityProvider);
+		var initiallyLoaded = await firstStore.LoadMarksAsync(
+			projectRoot,
+			TestContext.Current.CancellationToken);
+		session.ReplacePersistentMarks(projectRoot, initiallyLoaded.Snapshot!);
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(secret, out var value, out _));
+		var mark = await session.CreatePersistentMarkedSecretAsync(
+			value,
+			"TOKEN",
+			TestContext.Current.CancellationToken);
+		Assert.NotNull(mark);
+		Assert.True((await secondStore.AddMarkAsync(
+			projectRoot,
+			mark!,
+			TestContext.Current.CancellationToken)).Succeeded);
+
+		var output = await new SelectedContentExportService(new FileContentAnalyzer()).BuildAsync(
+			[file],
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			ContentTransformationContext.For(
+				compression: null,
+				new SecretRedactionContext(projectRoot, session)));
+
+		Assert.DoesNotContain(secret, output, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[manual-secret#1]", output, StringComparison.Ordinal);
+	}
+
+	private sealed class EmptySecretDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
 	}
 
 	private sealed class RecordingCodeCompressor : ICodeCompressor

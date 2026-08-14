@@ -212,6 +212,45 @@ public sealed class SmartSecretsDetectorTests
 			static finding => finding.RuleId is "config-secret" or "environment-secret");
 	}
 
+	[Theory]
+	[InlineData("go.mod")]
+	[InlineData("package-lock.json")]
+	[InlineData("vendor/private/config.txt")]
+	public void Detect_ProviderAllowlistedPathStillRunsHighConfidenceStructuredTier(string path)
+	{
+		const string content = "https://service:production-password@example.test/repository";
+
+		var finding = Assert.Single(
+			Detector.Detect(path, content, TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "credential-uri-password");
+
+		Assert.Equal("production-password", finding.Value);
+	}
+
+	[Theory]
+	[InlineData("go.mod")]
+	[InlineData("package-lock.json")]
+	[InlineData("vendor/module/config.txt")]
+	public void Detect_ProviderRulesStillRespectProviderPathAllowlist(string path)
+	{
+		const string providerToken = "AKIAIOSFODNN7EXAMPLE";
+
+		var findings = Detector.Detect(path, providerToken, TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(findings, static finding => finding.RuleId == "aws-access-token");
+	}
+
+	[Theory]
+	[InlineData("go.mod", "module example.test/project")]
+	[InlineData("package-lock.json", "{ \"lockfileVersion\": 3 }")]
+	[InlineData("vendor/module/config.txt", "endpoint=https://example.test/public")]
+	public void Detect_AllowlistedStructuredTierDoesNotCreateNoise(string path, string content)
+	{
+		var findings = Detector.Detect(path, content, TestContext.Current.CancellationToken);
+
+		Assert.Empty(findings);
+	}
+
 	[Fact]
 	public void DetectionScope_NearestProjectMarkerOwnsEnvironmentVocabulary()
 	{

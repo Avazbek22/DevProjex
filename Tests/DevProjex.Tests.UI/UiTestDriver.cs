@@ -1,10 +1,12 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Context;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
+using DevProjex.Application.Secrets;
 using DevProjex.Kernel.Contracts;
 using System.Globalization;
 using System.Reflection;
@@ -372,6 +374,51 @@ internal static class UiTestDriver
         await WaitForControlReadyForPointerAsync(window, control);
 
         await ClickReadyControlAsync(window, control);
+    }
+
+    public static async Task OpenToolTipThroughClickAsync(MainWindow window, Control control)
+    {
+        await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, control);
+        var clickPoint = FindPointerHitPoint(window, control);
+
+        window.MouseMove(clickPoint, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 2);
+        window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        await WaitForConditionAsync(
+            window,
+            () => ToolTip.GetIsOpen(control),
+            $"the tooltip for '{GetControlDebugName(control)}' to open through pointer input");
+    }
+
+    private static Point FindPointerHitPoint(MainWindow window, Control control)
+    {
+        ReadOnlySpan<double> relativeCoordinates = [0.5, 0.25, 0.75, 0.125, 0.875];
+        foreach (var relativeY in relativeCoordinates)
+        {
+            foreach (var relativeX in relativeCoordinates)
+            {
+                var point = control.TranslatePoint(
+                    new Point(control.Bounds.Width * relativeX, control.Bounds.Height * relativeY),
+                    window);
+                if (point is not { } candidate)
+                    continue;
+
+                var hit = window.InputHitTest(candidate);
+                if (hit is Visual visual &&
+                    (ReferenceEquals(visual, control) || visual.GetVisualAncestors().Contains(control)))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        var center = GetControlCenter(control, window);
+        var centerHit = window.InputHitTest(center);
+        throw new XunitException(
+            $"No pointer-hit location was found for '{GetControlDebugName(control)}'. " +
+            $"Center hit: '{centerHit?.GetType().FullName ?? "none"}'.");
     }
 
     private static async Task ClickReadyControlAsync(MainWindow window, Control control)
@@ -748,6 +795,303 @@ internal static class UiTestDriver
         Assert.NotNull(document);
         return PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
     }
+
+	public static async Task<(string RelativePath, int SourceOffset)> RequestPersistentSecretMarkAsync(
+		MainWindow window,
+		string value)
+	{
+		var viewModel = GetViewModel(window);
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var document = textControl.Document ?? viewModel.PreviewDocument;
+		Assert.NotNull(document);
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(value, out var markedValue, out _));
+		var selection = default(PreviewSelectionRange);
+		var found = false;
+		for (var lineNumber = 1; lineNumber <= document!.LineCount; lineNumber++)
+		{
+			var column = document.GetLineText(lineNumber).IndexOf(value, StringComparison.Ordinal);
+			if (column < 0)
+				continue;
+			selection = new PreviewSelectionRange(
+				lineNumber,
+				column,
+				lineNumber,
+				column + value.Length);
+			found = true;
+			break;
+		}
+		Assert.True(found, "The value to mark was not found in the current preview document.");
+
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(window, "_previewSurfaceController");
+		var request = new DevProjex.Avalonia.Controls.PreviewManualSecretMarkRequestedEventArgs(
+			markedValue,
+			selection,
+			persistent: true);
+		var resolve = typeof(PreviewSurfaceController).GetMethod(
+			"TryResolveManualMarkLocation",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(resolve);
+		object?[] resolveArguments = [document, request, null];
+		Assert.True(Assert.IsType<bool>(resolve!.Invoke(controller, resolveArguments)));
+		Assert.NotNull(resolveArguments[2]);
+		var location = resolveArguments[2]!;
+		var relativePath = Assert.IsType<string>(location.GetType().GetProperty("RelativePath")?.GetValue(location));
+		var sourceOffset = Assert.IsType<int>(location.GetType().GetProperty("SourceOffset")?.GetValue(location));
+		var handler = typeof(PreviewSurfaceController).GetMethod(
+			"OnManualSecretMarkRequested",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(handler);
+		await window.Dispatcher.InvokeAsync(
+			() => handler!.Invoke(
+				controller,
+				[
+					textControl,
+					request
+				]),
+			DispatcherPriority.Normal);
+		return (relativePath, sourceOffset);
+	}
+
+	public static async Task RequestSecretMarkThroughContextMenuAsync(
+		MainWindow window,
+		string value,
+		bool persistent = false,
+		int clickCount = 1)
+	{
+		Assert.True(clickCount > 0);
+		await WaitForPreviewReadyAsync(window);
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var scrollViewer = GetRequiredPreviewScrollViewer(window);
+		var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
+		Assert.NotNull(document);
+		var lineNumber = 0;
+		var startColumn = -1;
+		for (var candidateLine = 1; candidateLine <= document!.LineCount; candidateLine++)
+		{
+			var candidateColumn = document.GetLineText(candidateLine).IndexOf(value, StringComparison.Ordinal);
+			if (candidateColumn < 0)
+				continue;
+			lineNumber = candidateLine;
+			startColumn = candidateColumn;
+			break;
+		}
+		Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
+
+		var lineHeight = InvokeRequiredPrivateMethod<double>(textControl, "ResolveLineHeight");
+		var contentTopPadding = InvokeRequiredPrivateMethod<double>(textControl, "ResolveContentTopPadding");
+		var localY = contentTopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2);
+		var startTarget = await FindHorizontalTargetForColumnAsync(
+			window,
+			textControl,
+			scrollViewer,
+			localY,
+			lineNumber,
+			startColumn);
+		var endTarget = await FindHorizontalTargetForColumnAsync(
+			window,
+			textControl,
+			scrollViewer,
+			localY,
+			lineNumber,
+			startColumn + value.Length);
+
+		textControl.ClearSelection();
+		await SetHorizontalOffsetAsync(scrollViewer, startTarget.HorizontalOffset);
+		var start = ResolveViewportPoint(window, textControl, startTarget.ContentX, localY);
+		textControl.Focus();
+		window.MouseMove(start, RawInputModifiers.None);
+		window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+		window.MouseUp(start, MouseButton.Left, RawInputModifiers.None);
+		await SetHorizontalOffsetAsync(scrollViewer, endTarget.HorizontalOffset);
+		var end = ResolveViewportPoint(window, textControl, endTarget.ContentX, localY);
+		window.MouseMove(end, RawInputModifiers.Shift);
+		window.MouseDown(
+			end,
+			MouseButton.Left,
+			RawInputModifiers.LeftMouseButton | RawInputModifiers.Shift);
+		window.MouseUp(end, MouseButton.Left, RawInputModifiers.Shift);
+		var selected = string.Equals(value, textControl.GetSelectedText(), StringComparison.Ordinal);
+		Assert.True(
+			selected,
+			$"Expected exact pointer selection '{value}', actual '{textControl.GetSelectedText()}'. " +
+			$"target={lineNumber}:{startColumn}-{startColumn + value.Length}, " +
+			$"offsets={startTarget.HorizontalOffset:0.###}/{endTarget.HorizontalOffset:0.###}.");
+
+		await WaitForSettledFramesAsync(frameCount: 2);
+		var currentEnd = ResolveViewportPoint(window, textControl, endTarget.ContentX, localY);
+		var contextPoint = new Point(currentEnd.X - 12, currentEnd.Y);
+		window.MouseDown(contextPoint, MouseButton.Right, RawInputModifiers.RightMouseButton);
+		window.MouseUp(contextPoint, MouseButton.Right, RawInputModifiers.None);
+		await WaitForSettledFramesAsync(frameCount: 2);
+
+		var flyout = Assert.IsType<MenuFlyout>(textControl.ContextFlyout);
+		Assert.True(flyout.IsOpen);
+		var menuItem = GetRequiredPrivateField<MenuItem>(
+			textControl,
+			persistent ? "_alwaysHideSecretMenuItem" : "_hideSecretHereMenuItem");
+		Assert.True(menuItem.IsVisible);
+		Assert.True(menuItem.IsEnabled);
+		for (var click = 0; click < clickCount; click++)
+			menuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		await WaitForSettledFramesAsync(frameCount: 4);
+		flyout.Hide();
+		await WaitForSettledFramesAsync(frameCount: 2);
+	}
+
+	private static async Task<PointerViewportTarget> FindHorizontalTargetForColumnAsync(
+		MainWindow window,
+		DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl textControl,
+		ScrollViewer scrollViewer,
+		double localY,
+		int targetLine,
+		int targetColumn)
+	{
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		var low = 8.0;
+		var high = Math.Max(low, scrollViewer.Extent.Width - 32);
+		var preferredViewportX = Math.Max(8, Math.Min(72, scrollViewer.Viewport.Width - 32));
+		var diagnostics = new List<string>();
+		for (var attempt = 0; attempt < 24 && low <= high; attempt++)
+		{
+			var contentX = (low + high) / 2;
+			var horizontalOffset = Math.Clamp(contentX - preferredViewportX, 0, maximumX);
+			await SetHorizontalOffsetAsync(scrollViewer, horizontalOffset);
+			var point = ResolveViewportPoint(window, textControl, contentX, localY);
+			var probeEnd = new Point(point.X + 24, point.Y);
+			textControl.ClearSelection();
+			window.MouseMove(point, RawInputModifiers.None);
+			window.MouseDown(point, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+			window.MouseMove(probeEnd, RawInputModifiers.LeftMouseButton);
+			window.MouseUp(probeEnd, MouseButton.Left, RawInputModifiers.None);
+			if (!textControl.TryGetSelectionRange(out var actual) || actual.StartLine != targetLine)
+			{
+				diagnostics.Add($"{contentX:0.###}:none");
+				high = contentX - 0.25;
+				continue;
+			}
+
+			diagnostics.Add($"{contentX:0.###}:{actual.StartLine}:{actual.StartColumn}");
+			if (actual.StartColumn == targetColumn)
+				return new PointerViewportTarget(horizontalOffset, contentX);
+			if (actual.StartColumn < targetColumn)
+				low = contentX + 0.25;
+			else
+				high = contentX - 0.25;
+		}
+
+		throw new XunitException(
+			$"Could not position preview column {targetLine}:{targetColumn} inside the pointer viewport. " +
+			string.Join(", ", diagnostics));
+	}
+
+	private static Point ResolveViewportPoint(
+		MainWindow window,
+		DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl textControl,
+		double contentX,
+		double localY)
+	{
+		return Assert.IsType<Point>(textControl.TranslatePoint(
+			new Point(contentX, localY),
+			window));
+	}
+
+	private static async Task SetHorizontalOffsetAsync(ScrollViewer scrollViewer, double offset)
+	{
+		scrollViewer.Offset = new Vector(offset, scrollViewer.Offset.Y);
+		await WaitForSettledFramesAsync(frameCount: 2);
+	}
+
+	private readonly record struct PointerViewportTarget(double HorizontalOffset, double ContentX);
+
+	public static async Task RequestManualSecretUnmarkThroughContextMenuAsync(MainWindow window)
+	{
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var redaction = Assert.Single((textControl.Document ?? GetViewModel(window).PreviewDocument)!.Redactions);
+		InvokeRequiredPrivateMethod(textControl, "EnsureContextMenu");
+		var contextField = textControl.GetType().GetField(
+			"_contextManualRedaction",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(contextField);
+		contextField!.SetValue(textControl, redaction);
+		InvokeRequiredPrivateMethod(textControl, "PrepareManualSecretMenuItems");
+		await WaitForSettledFramesAsync(frameCount: 2);
+		var remove = GetRequiredPrivateField<MenuItem>(textControl, "_removeSecretMarkMenuItem");
+		Assert.True(remove.IsVisible);
+		Assert.True(remove.IsEnabled);
+		await RaiseMenuItemClickAsync(remove);
+	}
+
+	public static DevProjex.Avalonia.Services.ToastService GetToastService(MainWindow window) =>
+		GetRequiredPrivateField<DevProjex.Avalonia.Services.ToastService>(window, "_toastService");
+
+	public static string GetWindowAppDataPath(MainWindow window) =>
+		WindowAppDataPaths.TryGetValue(window, out var path)
+			? path
+			: throw new XunitException("The window app-data path is not tracked.");
+
+	public static void OverridePreviewErrorHandler(
+		MainWindow window,
+		Func<string, Task> handler)
+	{
+		ArgumentNullException.ThrowIfNull(handler);
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(
+			window,
+			"_previewSurfaceController");
+		var field = typeof(PreviewSurfaceController).GetField(
+			"_showErrorAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		field!.SetValue(controller, handler);
+	}
+
+	public static void OverridePersistentSecretMarkDeltaHandler(
+		MainWindow window,
+		Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> handler)
+	{
+		ArgumentNullException.ThrowIfNull(handler);
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(
+			window,
+			"_previewSurfaceController");
+		var field = typeof(PreviewSurfaceController).GetField(
+			"_applyPersistentMarkDelta",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		field!.SetValue(controller, handler);
+	}
+
+	public static void SetCurrentProjectPath(MainWindow window, string projectPath) =>
+		SetRequiredPrivateField(window, "_currentPath", projectPath);
+
+	public static string RedactFileWithCurrentSession(MainWindow window, string filePath)
+	{
+		var session = GetRequiredPrivateField<SecretRedactionSession>(window, "_secretRedactionSession");
+		var projectRoot = GetRequiredPrivateField<string>(window, "_currentPath");
+		var scope = session.BeginOutput(projectRoot, [filePath]);
+		var result = scope.Redact(filePath, File.ReadAllText(filePath));
+		scope.Complete();
+		return result.Text;
+	}
+
+	public static SecretRedactionSession GetSecretRedactionSession(MainWindow window) =>
+		GetRequiredPrivateField<SecretRedactionSession>(window, "_secretRedactionSession");
+
+	public static int GetPendingPersistentMarkCount(SecretRedactionSession session)
+	{
+		var property = typeof(SecretRedactionSession).GetProperty(
+			"PendingPersistentMarkCount",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(property);
+		return Assert.IsType<int>(property!.GetValue(session));
+	}
+
+	public static CodeCompressionSession GetCodeCompressionSession(MainWindow window) =>
+		GetRequiredPrivateField<CodeCompressionSession>(window, "_codeCompressionSession");
 
     public static string ComputeVisibleStickyHeaderCopyPayload(MainWindow window)
     {
@@ -1493,6 +1837,39 @@ internal static class UiTestDriver
         var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<T>(field?.GetValue(window));
     }
+
+	private static T GetRequiredPrivateField<T>(object instance, string fieldName)
+	{
+		var field = instance.GetType().GetField(
+			fieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<T>(field!.GetValue(instance));
+	}
+
+	private static T InvokeRequiredPrivateMethod<T>(
+		object instance,
+		string methodName,
+		params object?[] arguments)
+	{
+		var method = instance.GetType().GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		return Assert.IsType<T>(method!.Invoke(instance, arguments));
+	}
+
+	private static void InvokeRequiredPrivateMethod(
+		object instance,
+		string methodName,
+		params object?[] arguments)
+	{
+		var method = instance.GetType().GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(instance, arguments);
+	}
 
 	private static object GetRequiredPrivateFieldValue(MainWindow window, string fieldName)
 	{

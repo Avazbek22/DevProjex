@@ -3,6 +3,39 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfileStoreTests
 {
 	[Fact]
+	public async Task FutureSchemaSelectionStore_IsNeverDowngradedOrMutated()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var directory = temporary.CreateFolder("DevProjex");
+		var primaryPath = Path.Combine(directory, "project-profiles.json");
+		var backupPath = primaryPath + ".bak";
+		await File.WriteAllTextAsync(
+			primaryPath,
+			"{\"schemaVersion\":4,\"profiles\":{\"future\":{}}}",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			backupPath,
+			"{\"schemaVersion\":3,\"profiles\":{}}",
+			TestContext.Current.CancellationToken);
+		var primaryBefore = await File.ReadAllBytesAsync(primaryPath, TestContext.Current.CancellationToken);
+		var backupBefore = await File.ReadAllBytesAsync(backupPath, TestContext.Current.CancellationToken);
+		var store = new ProjectProfileStore(() => temporary.Path);
+
+		var lookup = store.LookupProfile(project, TimeSpan.FromSeconds(1));
+		var saved = store.TrySaveProfile(project, new ProjectSelectionProfile([], [], []));
+		var deleted = store.TryDeleteProfile(project);
+		var ensured = store.EnsureStorageExists();
+		store.ClearAllProfiles();
+
+		Assert.Equal(ProjectProfileLookupStatus.UnsupportedFutureSchema, lookup.Status);
+		Assert.False(saved);
+		Assert.False(deleted);
+		Assert.False(ensured);
+		Assert.Equal(primaryBefore, await File.ReadAllBytesAsync(primaryPath, TestContext.Current.CancellationToken));
+		Assert.Equal(backupBefore, await File.ReadAllBytesAsync(backupPath, TestContext.Current.CancellationToken));
+	}
+	[Fact]
 	public void GetPath_IncludesExpectedSegments()
 	{
 		var store = new ProjectProfileStore();

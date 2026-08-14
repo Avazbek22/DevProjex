@@ -78,10 +78,11 @@ public sealed class PreviewDocumentBuilder(
 		bool includeSourceCoordinateMaps = false)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
+		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
         if (orderedFiles.Count == 0)
         {
 			using var emptyScope = transformationContext?.BeginOutput(orderedFiles);
-			CompleteTransformation(emptyScope);
+			CompleteTransformation(emptyScope, transformationContext);
             return null;
 		}
 
@@ -103,7 +104,7 @@ public sealed class PreviewDocumentBuilder(
 			includeSourceCoordinateMaps,
             cancellationToken).ConfigureAwait(false);
 
-		CompleteTransformation(transformationScope);
+		CompleteTransformation(transformationScope, transformationContext);
 		if (!anyWritten)
 			return null;
 
@@ -120,12 +121,13 @@ public sealed class PreviewDocumentBuilder(
 		bool includeSourceCoordinateMaps = false)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
+		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
         var normalizedTreeText = treeText.TrimEnd('\r', '\n');
 
         if (orderedFiles.Count == 0)
         {
 			using var emptyScope = transformationContext?.BeginOutput(orderedFiles);
-			CompleteTransformation(emptyScope);
+			CompleteTransformation(emptyScope, transformationContext);
             return CreateInMemory(normalizedTreeText);
 		}
 
@@ -147,7 +149,7 @@ public sealed class PreviewDocumentBuilder(
 			redactions,
 			includeSourceCoordinateMaps,
             cancellationToken).ConfigureAwait(false);
-		CompleteTransformation(transformationScope);
+		CompleteTransformation(transformationScope, transformationContext);
 
         if (!wroteTree && !wroteContent)
             return CreateInMemory(string.Empty);
@@ -155,10 +157,27 @@ public sealed class PreviewDocumentBuilder(
         return builder.BuildDocument(sections, redactions);
     }
 
-	private static void CompleteTransformation(ContentTransformationScope? scope)
+	private static void CompleteTransformation(
+		ContentTransformationScope? scope,
+		ContentTransformationContext? context)
 	{
 		scope?.Redaction?.Complete();
 		scope?.Compression?.Complete();
+		if (scope?.Redaction is not null && context?.Redaction is { } redaction)
+			redaction.Session.SchedulePendingPersistentMarkMigrationsAfterPreview(redaction.ProjectRoot);
+	}
+
+	private static async ValueTask EnsurePersistentIdentityReadyAsync(
+		ContentTransformationContext? transformationContext,
+		CancellationToken cancellationToken)
+	{
+		var session = transformationContext?.Redaction?.Session;
+		if (session is not null &&
+		    await session.EnsureCurrentPersistentIdentityReadyAsync(cancellationToken).ConfigureAwait(false) !=
+		    PersistentSecretIdentityAvailability.Ready)
+		{
+			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
+		}
 	}
 
     private async Task<bool> AppendContentEntriesAsync(
@@ -230,7 +249,8 @@ public sealed class PreviewDocumentBuilder(
                     sectionStartLine,
                     builder.LineCount,
                     sectionStartLine,
-                    sectionStartLine + 2));
+                    sectionStartLine + 2,
+                    SourcePath: file));
                 continue;
             }
 
@@ -242,7 +262,8 @@ public sealed class PreviewDocumentBuilder(
                     sectionStartLine,
                     builder.LineCount,
                     sectionStartLine,
-                    sectionStartLine + 2));
+                    sectionStartLine + 2,
+                    SourcePath: file));
                 continue;
             }
 
@@ -254,7 +275,8 @@ public sealed class PreviewDocumentBuilder(
                     sectionStartLine,
                     builder.LineCount,
                     sectionStartLine,
-                    sectionStartLine + 2));
+                    sectionStartLine + 2,
+                    SourcePath: file));
                 continue;
             }
 
@@ -278,7 +300,8 @@ public sealed class PreviewDocumentBuilder(
                     sectionStartLine,
                     builder.LineCount,
                     sectionStartLine,
-                    sectionStartLine + 2));
+                    sectionStartLine + 2,
+                    SourcePath: file));
                 continue;
             }
 
@@ -314,7 +337,8 @@ public sealed class PreviewDocumentBuilder(
                 builder.LineCount,
                 sectionStartLine,
                 sectionStartLine + 2,
-				coordinateMap));
+				coordinateMap,
+				file));
         }
 
         if (anyWritten && trimTrailingEstimatedLine)
@@ -517,7 +541,8 @@ public sealed class PreviewDocumentBuilder(
 							: span.SourceLength,
 						span.Source,
 						span.PersistentMarkHash,
-						span.SessionMarkId));
+						span.SessionMarkId,
+						span.PersistentMarkId));
 				}
 
 				if (index < spanText.Length)

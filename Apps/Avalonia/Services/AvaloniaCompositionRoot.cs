@@ -69,8 +69,12 @@ public static class AvaloniaCompositionRoot
         var filterSelectionService = new FilterOptionSelectionService();
         var treeExportService = new TreeExportService();
         var fileContentAnalyzer = new FileContentAnalyzer();
+		var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
+		var persistentSecretIdentity = new PersistentSecretIdentityProvider(appDataPathProvider);
 		var secretRedactionSession = new SecretRedactionSession(
-			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService));
+			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService),
+			projectProfileStore,
+			persistentSecretIdentity);
 		var codeCompressionSession = CodeCompressionFactory.CreateSession();
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
@@ -108,7 +112,6 @@ public static class AvaloniaCompositionRoot
         var themeSettingsStore = new ThemeSettingsStore(appDataPathProvider);
         var recentProjectsStore = new RecentProjectsStore(appDataPathProvider);
         var recentFolderAvailabilityService = new RecentFolderAvailabilityService();
-        var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
         var zipDownloadService = new ZipDownloadService();

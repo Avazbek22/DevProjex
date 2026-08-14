@@ -64,7 +64,7 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
-	public void ProjectProfileStore_LoadsMissingMarkedSecretsAndAddsTheFieldOnSave()
+	public async Task ProjectProfileStore_LoadsMissingMarkedSecretsAndPersistsMarksInDedicatedStore()
 	{
 		using var temp = new TemporaryDirectory();
 		var store = new ProjectProfileStore(() => Path.Combine(temp.Path, "appdata"));
@@ -76,24 +76,26 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
 		Assert.Empty(loaded.MarkedSecrets!);
 
-		var marked = loaded with
-		{
-			MarkedSecrets = [new MarkedSecretProfileEntry("9f2a4c1e8b3d", "STRIPE_SECRET_KEY", 24)]
-		};
-		store.SaveProfile(projectPath, marked);
+		var write = await store.AddMarkAsync(
+			projectPath,
+			new MarkedSecretProfileEntry("9f2a4c1e8b3d", "STRIPE_SECRET_KEY", 24),
+			TestContext.Current.CancellationToken);
+		Assert.True(write.Succeeded);
 
 		using var document = JsonDocument.Parse(File.ReadAllText(storePath));
-		var persistedMark = document.RootElement
+		var persistedMarks = document.RootElement
 			.GetProperty("profiles")
 			.EnumerateObject()
 			.Single()
 			.Value
 			.GetProperty("markedSecrets")
-			.EnumerateArray()
-			.Single();
-		Assert.Equal("9f2a4c1e8b3d", persistedMark.GetProperty("h").GetString());
-		Assert.Equal("STRIPE_SECRET_KEY", persistedMark.GetProperty("key").GetString());
-		Assert.Equal(24, persistedMark.GetProperty("length").GetInt32());
+			.EnumerateArray();
+		Assert.Empty(persistedMarks);
+		Assert.True(store.TryLoadProfile(projectPath, out var reloaded));
+		var persistedMark = Assert.Single(reloaded.MarkedSecrets!);
+		Assert.Equal("9f2a4c1e8b3d", persistedMark.H);
+		Assert.Equal("STRIPE_SECRET_KEY", persistedMark.Key);
+		Assert.Equal(24, persistedMark.Length);
 	}
 
 	[Fact]

@@ -8,6 +8,21 @@ public partial class MainWindow
 
     private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
+		if (!_allowCloseAfterManualSecretMarkPersistence &&
+		    _previewSurfaceController.HasPendingManualMarkOperations)
+		{
+			e.Cancel = true;
+			if (_manualSecretMarkClosePending)
+				return;
+
+			_manualSecretMarkClosePending = true;
+			await _previewSurfaceController.WaitForPendingManualMarkOperationsAsync();
+			_allowCloseAfterManualSecretMarkPersistence = true;
+			// Never re-enter Close while Avalonia is still dispatching the cancelled Closing event.
+			Dispatcher.Post(Close, DispatcherPriority.Send);
+			return;
+		}
+
         if (_allowCloseAfterProjectCopyExportCleanup || _projectCopyExportCts is null)
             return;
 

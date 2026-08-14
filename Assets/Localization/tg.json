@@ -205,6 +205,7 @@
   "Preview.Secret.Mark.Validation.TooLong": "На бештар аз 512 аломатро интихоб кунед.",
   "Preview.Secret.Mark.Validation.Multiline": "Қиматҳои бисёрсатра дастгирӣ намешаванд.",
   "Preview.Secret.Mark.Validation.ContentOnly": "Қиматро дар мундариҷаи файл интихоб кунед.",
+  "Error.Secret.MarkApplyFailed": "Нишони сирро татбиқ кардан нашуд. Пешнамоишро нав карда, боз кӯшиш кунед.",
   "Toast.Secret.HiddenCount": "Дар {0} ҷой пинҳон шуд",
   "Toast.Secret.MarkRemoved": "Нишона хориҷ шуд.",
   "Toast.Secret.MarkRemovedStillDetected": "Нишона хориҷ шуд. Детектор ҳанӯз ин қиматро пинҳон мекунад.",

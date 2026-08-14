@@ -1,23 +1,1353 @@
 using System.Collections.Concurrent;
+using System.IO.Compression;
+using DevProjex.Avalonia.Controls;
+using DevProjex.Application.Compression;
+using DevProjex.Application.Context;
 using DevProjex.Application.Presentation;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
+using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Infrastructure.Secrets;
+using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
 using DevProjex.Avalonia.Views;
+using DevProjex.Avalonia.ViewModels;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.VisualTree;
+using System.ComponentModel;
 
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowIgnoreOptionsUiTests
 {
+	[AvaloniaTheory]
+	[InlineData(0, false)]
+	[InlineData(1, false)]
+	[InlineData(2, false)]
+	[InlineData(3, false)]
+	[InlineData(4, false)]
+	[InlineData(5, false)]
+	[InlineData(6, false)]
+	[InlineData(7, false)]
+	[InlineData(0, true)]
+	[InlineData(1, true)]
+	[InlineData(2, true)]
+	[InlineData(3, true)]
+	[InlineData(4, true)]
+	[InlineData(5, true)]
+	[InlineData(6, true)]
+	[InlineData(7, true)]
+	public async Task HideHere_ThroughPreviewContextMenu_RedactsSelectedContent(
+		int transformMode,
+		bool hideSecretsInitiallyEnabled)
+	{
+		const string manualValue = "ordinary-context-menu-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var source = $$"""
+		             internal sealed class Secrets
+		             {
+		                 // Coordinate-shifting comment.
+
+		                 const string X = "prefix{{manualValue}}suffix";
+		             }
+		             """;
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			source.ReplaceLineEndings("\r\n"),
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var observedLabels = new List<string>();
+		IgnoreOptionViewModel? hideSecretsOption = null;
+		PropertyChangedEventHandler? labelChanged = null;
+		try
+		{
+			await SetTransformationAsync(IgnoreOptionId.CompressCode, (transformMode & 1) != 0);
+			await SetTransformationAsync(IgnoreOptionId.StripComments, (transformMode & 2) != 0);
+			await SetTransformationAsync(IgnoreOptionId.StripBlankLines, (transformMode & 4) != 0);
+			if (transformMode != 0)
+				await UiTestDriver.ClickApplySettingsAsync(window);
+			if (hideSecretsInitiallyEnabled)
+				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+			hideSecretsOption = UiTestDriver.GetViewModel(window).HideSecretsOption;
+			Assert.NotNull(hideSecretsOption);
+			observedLabels.Add(hideSecretsOption!.Label);
+			labelChanged = (_, args) =>
+			{
+				if (args.PropertyName == nameof(IgnoreOptionViewModel.Label))
+					observedLabels.Add(hideSecretsOption.Label);
+			};
+			hideSecretsOption.PropertyChanged += labelChanged;
+			Assert.Contains(
+				manualValue,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(window, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).HideSecretsOption is { IsChecked: true } &&
+				      !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					      manualValue,
+					      StringComparison.Ordinal) &&
+				      hideSecretsOption.Label.EndsWith("(1/1)", StringComparison.Ordinal),
+				"the context-menu session mark to redact Preview");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+			var measuredIndex = observedLabels.FindIndex(static label =>
+				label.EndsWith("(1/1)", StringComparison.Ordinal));
+			Assert.True(measuredIndex >= 0);
+			Assert.All(
+				observedLabels.Skip(measuredIndex),
+				static label => Assert.EndsWith("(1/1)", label, StringComparison.Ordinal));
+		}
+		finally
+		{
+			if (hideSecretsOption is not null && labelChanged is not null)
+				hideSecretsOption.PropertyChanged -= labelChanged;
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+
+		async Task SetTransformationAsync(IgnoreOptionId optionId, bool enabled)
+		{
+			var option = UiTestDriver.GetViewModel(window).ContentProcessingOptions.Single(
+				candidate => candidate.Id == optionId);
+			if (option.IsChecked != enabled)
+				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_RepeatedRequestReportsFeedbackAndUnmarkRestoresContent()
+	{
+		const string manualValue = "repeatable-manual-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string X = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var observedToastMessages = new ConcurrentQueue<string>();
+		var toastItems = UiTestDriver.GetToastService(window).Items;
+		System.Collections.Specialized.NotifyCollectionChangedEventHandler toastChanged = (_, args) =>
+		{
+			if (args.NewItems is null)
+				return;
+			foreach (var toast in args.NewItems.OfType<ToastMessageViewModel>())
+				observedToastMessages.Enqueue(toast.Message);
+		};
+		toastItems.CollectionChanged += toastChanged;
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(
+				window,
+				manualValue,
+				clickCount: 2);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the repeated session mark to redact Preview");
+			Assert.Contains(
+				"Hidden in 1 places",
+				observedToastMessages);
+
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"removing the session mark to restore Preview content");
+		}
+		finally
+		{
+			toastItems.CollectionChanged -= toastChanged;
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_UnmarkDuringIdentityInitializationDoesNotPersistTheRemovedAnchor()
+	{
+		const string manualValue = "pending-identity-unmark-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "pending-identity-unmark");
+		var keyDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(keyDirectory);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+
+		var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		var lockPath = Path.Combine(keyDirectory, "secret-mark-hmac.key.lock");
+		FileStream? heldLock = new(
+			lockPath,
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(firstWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(firstWindow, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(firstWindow, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				firstWindow,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(firstWindow).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the source anchor to hide content while identity initialization is blocked");
+
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(firstWindow);
+			await UiTestDriver.WaitForConditionAsync(
+				firstWindow,
+				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(firstWindow).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the pending source anchor to be removed before promotion");
+		}
+		finally
+		{
+			heldLock?.Dispose();
+			heldLock = null;
+			await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+		}
+
+		var stored = await new ProjectProfileStore(() => appDataPath).LoadMarksAsync(
+			project.RootPath,
+			TestContext.Current.CancellationToken);
+		Assert.True(stored.Succeeded);
+		Assert.Empty(stored.Snapshot!.Marks);
+
+		var reopenedWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(reopenedWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(reopenedWindow, PreviewContentMode.Content);
+			Assert.Contains(
+				manualValue,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(reopenedWindow),
+				StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(reopenedWindow);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_UnmarkDuringPendingAddPreservesCausalStoreOrder()
+	{
+		const string manualValue = "pending-add-unmark-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "pending-add-unmark");
+		var storeDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(storeDirectory);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		using (var identityProvider = new PersistentSecretIdentityProvider(() => appDataPath))
+		{
+			Assert.Equal(
+				PersistentSecretIdentityAvailability.Ready,
+				await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		}
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		FileStream? heldLock = new(
+			Path.Combine(storeDirectory, "project-secret-marks.json.lock"),
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(window, manualValue);
+			var session = UiTestDriver.GetSecretRedactionSession(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetPendingPersistentMarkCount(session) == 1 &&
+				      !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					      manualValue,
+					      StringComparison.Ordinal),
+				"the source anchor to be promoted while its durable Add is blocked");
+
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(window);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			Assert.Equal(1, UiTestDriver.GetPendingPersistentMarkCount(session));
+			Assert.DoesNotContain(
+				manualValue,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+
+			heldLock.Dispose();
+			heldLock = null;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetPendingPersistentMarkCount(session) == 0 &&
+				      UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					      manualValue,
+					      StringComparison.Ordinal),
+				"the durable Add to finish before Remove is issued with its resulting revision");
+		}
+		finally
+		{
+			heldLock?.Dispose();
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+
+		var stored = await new ProjectProfileStore(() => appDataPath).LoadMarksAsync(
+			project.RootPath,
+			TestContext.Current.CancellationToken);
+		Assert.True(stored.Succeeded);
+		Assert.Empty(stored.Snapshot!.Marks);
+	}
+
+	[AvaloniaFact]
+	public async Task PersistentUnmark_DurableRefreshRemovedMarkStillSendsStagedDelta()
+	{
+		const string manualValue = "ordinary-ui-unmark-race-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "persistent-unmark-race");
+		Directory.CreateDirectory(appDataPath);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		var store = new ProjectProfileStore(() => appDataPath);
+		Assert.True(store.TrySaveProfile(
+			project.RootPath,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions: [IgnoreOptionId.HideSecrets],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.HideSecrets] = true
+				})));
+		string identity;
+		using (var identityProvider = new PersistentSecretIdentityProvider(() => appDataPath))
+		{
+			Assert.Equal(
+				PersistentSecretIdentityAvailability.Ready,
+				await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+			Assert.True(PersistentSecretIdentity.TryCreateV2(identityProvider, manualValue, out identity));
+		}
+		Assert.True((await store.AddMarkAsync(
+			project.RootPath,
+			new MarkedSecretProfileEntry(identity, "caption", manualValue.Length),
+			TestContext.Current.CancellationToken)).Succeeded);
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the durable manual mark to redact Preview before the competing refresh");
+
+			var session = UiTestDriver.GetSecretRedactionSession(window);
+			var capturedRevision = session.PersistentMarksStoreRevision;
+			Assert.True(capturedRevision >= 1);
+			session.ReplacePersistentMarks(
+				project.RootPath,
+				new PersistentSecretMarksSnapshot(capturedRevision + 1, []));
+			Assert.Empty(session.GetMarkedSecrets());
+
+			var sent = new TaskCompletionSource<PersistentSecretMarkDelta>(
+				TaskCreationOptions.RunContinuationsAsynchronously);
+			UiTestDriver.OverridePersistentSecretMarkDeltaHandler(
+				window,
+				delta =>
+				{
+					var acknowledged = new PersistentSecretMarksSnapshot(
+						capturedRevision + 2,
+						[],
+						new Dictionary<PersistentSecretMarkId, long>
+						{
+							[delta.MarkId] = capturedRevision + 2
+						});
+					session.AcknowledgePersistentMarkDelta(
+						project.RootPath,
+						delta.OperationId,
+						acknowledged);
+					sent.TrySetResult(delta);
+					return Task.FromResult(new PersistentSecretMarkWriteResult(
+						PersistentSecretMarkStoreStatus.Success,
+						acknowledged));
+				});
+
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(window);
+			var remove = await sent.Task.WaitAsync(
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken);
+			Assert.Equal(PersistentSecretMarkDeltaKind.Remove, remove.Kind);
+			Assert.Equal(new PersistentSecretMarkId(identity, manualValue.Length), remove.MarkId);
+			Assert.Equal(0, UiTestDriver.GetPendingPersistentMarkCount(session));
+
+			session.ReplacePersistentMarks(
+				project.RootPath,
+				new PersistentSecretMarksSnapshot(capturedRevision + 1, [
+					new MarkedSecretProfileEntry(identity, "caption", manualValue.Length)
+				]));
+			Assert.Empty(session.GetMarkedSecrets());
+			Assert.Contains(
+				manualValue,
+				UiTestDriver.RedactFileWithCurrentSession(
+					window,
+					Path.Combine(project.RootPath, "src", "Secrets.cs")),
+				StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(0)]
+	[InlineData(7)]
+	public async Task HideHere_ContextMenuRedactsEveryOutputSurface(int transformMode)
+	{
+		const string manualValue = "all-output-context-menu-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$$"""
+			  internal sealed class Secrets
+			  {
+			      // Coordinate-shifting comment.
+
+			      const string X = "prefix{{manualValue}}suffix";
+			  }
+			  """,
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			foreach (var (optionId, mask) in new[]
+			         {
+				         (IgnoreOptionId.CompressCode, 1),
+				         (IgnoreOptionId.StripComments, 2),
+				         (IgnoreOptionId.StripBlankLines, 4)
+			         })
+			{
+				if ((transformMode & mask) != 0)
+					await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+			}
+			if (transformMode != 0)
+				await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(window, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the UI mark to redact Preview before validating exports");
+
+			var preview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			await UiTestDriver.SetClipboardTextAsync(window, "pending-context-menu-copy");
+			await UiTestDriver.ClickPreviewCopyButtonAsync(window);
+			await UiTestDriver.WaitForClipboardTextAsync(window, preview);
+			var clipboard = await UiTestDriver.GetClipboardTextAsync(window);
+			var session = UiTestDriver.GetSecretRedactionSession(window);
+			var compression = UiTestDriver.GetCodeCompressionSession(window);
+			var analyzer = new FileContentAnalyzer();
+			var plan = await BuildSecretOutputPlanAsync(project.RootPath, transformMode);
+			var contextService = new ProjectContextDocumentService(
+				new TreeExportService(),
+				analyzer,
+				secretRedactionSession: session,
+				codeCompressionSession: compression);
+			using var contextDestination = new MemoryStream();
+			await contextService.WriteCompleteAsync(
+				plan,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Text,
+				contextDestination,
+				TestContext.Current.CancellationToken,
+				plain: true);
+			var contextOutput = Encoding.UTF8.GetString(contextDestination.ToArray());
+			var copyService = new ProjectCopyExportService(
+				new ProjectCopyExportPlanBuilder(),
+				analyzer,
+				session,
+				compression);
+			var folderPath = Path.Combine(project.AppDataPath, $"folder-{Guid.NewGuid():N}");
+			var zipPath = Path.Combine(project.AppDataPath, $"archive-{Guid.NewGuid():N}.zip");
+			await ExportAsync(ProjectCopyExportFormat.Folder, folderPath);
+			await ExportAsync(ProjectCopyExportFormat.Zip, zipPath);
+			var folderOutput = await File.ReadAllTextAsync(
+				Path.Combine(folderPath, "src", "Secrets.cs"),
+				TestContext.Current.CancellationToken);
+			using var archive = ZipFile.OpenRead(zipPath);
+			var entry = Assert.Single(
+				archive.Entries,
+				static candidate => candidate.FullName.EndsWith("src/Secrets.cs", StringComparison.Ordinal));
+			using var reader = new StreamReader(entry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+			var zipOutput = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+			Assert.All(
+				new[] { preview, clipboard, contextOutput, folderOutput, zipOutput },
+				output =>
+				{
+					Assert.DoesNotContain(manualValue, output, StringComparison.Ordinal);
+					Assert.Contains("DEVPROJEX_REDACTED[manual-secret#1]", output, StringComparison.Ordinal);
+				});
+			Assert.Contains(
+				manualValue,
+				await File.ReadAllTextAsync(
+					Path.Combine(project.RootPath, "src", "Secrets.cs"),
+					TestContext.Current.CancellationToken),
+				StringComparison.Ordinal);
+
+			async Task ExportAsync(ProjectCopyExportFormat format, string destination)
+			{
+				await copyService.ExportAsync(
+					new ProjectCopyExportRequest(
+						plan.SourceRoot,
+						"project",
+						plan.ProjectedTree,
+						new HashSet<string>(PathComparer.Default),
+						destination,
+						format,
+						ProjectCopyDestinationMode.Exact,
+						ProjectCopyConflictPolicy.Fail,
+						RedactSecrets: true,
+						CompressCode: (transformMode & 1) != 0,
+						StripComments: (transformMode & 2) != 0,
+						StripBlankLines: (transformMode & 4) != 0),
+					cancellationToken: TestContext.Current.CancellationToken);
+			}
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(0)]
+	[InlineData(7)]
+	public async Task AlwaysHide_ThroughPreviewContextMenuPersistsAcrossTransformExtremes(int transformMode)
+	{
+		const string manualValue = "persistent-context-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$$"""
+			  internal sealed class Secrets
+			  {
+			      // Coordinate-shifting comment.
+
+			      const string X = "{{manualValue}}";
+			  }
+			  """,
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			foreach (var (optionId, mask) in new[]
+			         {
+				         (IgnoreOptionId.CompressCode, 1),
+				         (IgnoreOptionId.StripComments, 2),
+				         (IgnoreOptionId.StripBlankLines, 4)
+			         })
+			{
+				if ((transformMode & mask) != 0)
+					await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+			}
+			if (transformMode != 0)
+				await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(
+				window,
+				manualValue,
+				persistent: true);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the persistent context-menu mark to redact Preview");
+
+			var store = new ProjectProfileStore(() => UiTestDriver.GetWindowAppDataPath(window));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var loaded = store.LoadMarksAsync(project.RootPath).AsTask().GetAwaiter().GetResult();
+					return loaded.Succeeded && loaded.Snapshot!.Marks.Count == 1;
+				},
+				"the context-menu mark to become durable");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(0)]
+	[InlineData(1)]
+	[InlineData(2)]
+	[InlineData(3)]
+	[InlineData(4)]
+	[InlineData(5)]
+	[InlineData(6)]
+	[InlineData(7)]
+	public async Task HideHere_CloseImmediatelyAndReopen_PreservesOnlySelectedOccurrence(int transformMode)
+	{
+		const string manualValue = "abcdefghij";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, $"hide-here-restart-{transformMode}");
+		Directory.CreateDirectory(appDataPath);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$$"""
+			  internal static class Secrets
+			  {
+			      private const string First = "{{manualValue}}";
+			      private const string Second = "{{manualValue}}";
+			  }
+			  """,
+			TestContext.Current.CancellationToken);
+
+		var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			foreach (var (optionId, mask) in new[]
+			         {
+				         (IgnoreOptionId.CompressCode, 1),
+				         (IgnoreOptionId.StripComments, 2),
+				         (IgnoreOptionId.StripBlankLines, 4)
+			         })
+			{
+				if ((transformMode & mask) != 0)
+					await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(firstWindow, optionId);
+			}
+			if (transformMode != 0)
+				await UiTestDriver.ClickApplySettingsAsync(firstWindow);
+			await UiTestDriver.OpenPreviewAsync(firstWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(firstWindow, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(
+				firstWindow,
+				manualValue,
+				persistent: false);
+			await UiTestDriver.WaitForConditionAsync(
+				firstWindow,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(firstWindow),
+					manualValue) == 1,
+				"the selected occurrence to be hidden before immediate shutdown");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+		}
+		var persisted = await new ProjectProfileStore(() => appDataPath).LoadMarksAsync(
+			project.RootPath,
+			TestContext.Current.CancellationToken);
+		Assert.True(persisted.Succeeded);
+		var persistedSourceMark = Assert.Single(persisted.Snapshot!.Marks);
+		Assert.True(PersistentSecretIdentity.IsV2(persistedSourceMark.H));
+		Assert.Equal("src/Secrets.cs", persistedSourceMark.RelativePath);
+		Assert.True(persistedSourceMark.SourceOffset > 0);
+		Assert.DoesNotContain(
+			manualValue,
+			await File.ReadAllTextAsync(
+				Path.Combine(appDataPath, "DevProjex", "project-secret-marks.json"),
+				TestContext.Current.CancellationToken),
+			StringComparison.Ordinal);
+
+		var reopenedWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				reopenedWindow,
+				IgnoreOptionId.HideSecrets,
+				visible: true,
+				isChecked: true);
+			await UiTestDriver.OpenPreviewAsync(reopenedWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(reopenedWindow, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				reopenedWindow,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(reopenedWindow),
+					manualValue) == 1,
+				"only the selected source occurrence to remain hidden after restart");
+			var expectedClipboard = UiTestDriver.ComputeCurrentPreviewCopyPayload(reopenedWindow);
+			await UiTestDriver.SetClipboardTextAsync(reopenedWindow, "hide-here-restart-copy-pending");
+			await UiTestDriver.ClickPreviewCopyButtonAsync(reopenedWindow);
+			await UiTestDriver.WaitForClipboardTextAsync(reopenedWindow, expectedClipboard);
+			Assert.Equal(
+				1,
+				CountOccurrences(
+					Assert.IsType<string>(await UiTestDriver.GetClipboardTextAsync(reopenedWindow)),
+					manualValue));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(reopenedWindow);
+		}
+
+		static int CountOccurrences(string content, string value)
+		{
+			var count = 0;
+			var offset = 0;
+			while ((offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+			{
+				count++;
+				offset += value.Length;
+			}
+
+			return count;
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_UnmarkAfterRestartAndCloseImmediately_RemainsRemoved()
+	{
+		const string manualValue = "restart-unmark-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "hide-here-restart-unmark");
+		Directory.CreateDirectory(appDataPath);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string first = \"{manualValue}\";\nconst string second = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+
+		var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(firstWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(firstWindow, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(firstWindow, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				firstWindow,
+				() => UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+					firstWindow,
+					"PreviewTextControl").Document?.Redactions.Count == 1,
+				"the source-bound mark to become visible before restart");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+		}
+
+		var unmarkWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(unmarkWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(unmarkWindow, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				unmarkWindow,
+				() => UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+					unmarkWindow,
+					"PreviewTextControl").Document?.Redactions.Count == 1,
+				"the source-bound mark to load before removal");
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(unmarkWindow);
+			await UiTestDriver.WaitForConditionAsync(
+				unmarkWindow,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(unmarkWindow),
+					manualValue) == 2,
+				"the selected occurrence to be restored before immediate shutdown");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(unmarkWindow, cleanupAppData: false);
+		}
+
+		var finalWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(finalWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(finalWindow, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				finalWindow,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(finalWindow),
+					manualValue) == 2,
+				"the durable source-bound removal to survive a second restart");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(finalWindow);
+		}
+
+		static int CountOccurrences(string content, string value)
+		{
+			var count = 0;
+			var offset = 0;
+			while ((offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+			{
+				count++;
+				offset += value.Length;
+			}
+			return count;
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_CloseWhileMarkStoreIsContended_WaitsForDurableWrite()
+	{
+		const string manualValue = "contended-close-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "hide-here-contended-close");
+		var storeDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(storeDirectory);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string first = \"{manualValue}\";\nconst string second = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		using (var identityProvider = new PersistentSecretIdentityProvider(() => appDataPath))
+		{
+			Assert.Equal(
+				PersistentSecretIdentityAvailability.Ready,
+				await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		}
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		FileStream? heldLock = new(
+			Path.Combine(storeDirectory, "project-secret-marks.json.lock"),
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(window, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => CountOccurrences(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					manualValue) == 1,
+				"the source-bound mark to redact before its store write completes");
+
+			window.Close();
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			Assert.False(window.ShutdownCompletion.IsCompleted);
+
+			heldLock.Dispose();
+			heldLock = null;
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+		}
+		finally
+		{
+			heldLock?.Dispose();
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+
+		var loaded = await new ProjectProfileStore(() => appDataPath).LoadMarksAsync(
+			project.RootPath,
+			TestContext.Current.CancellationToken);
+		Assert.True(loaded.Succeeded);
+		var mark = Assert.Single(loaded.Snapshot!.Marks);
+		Assert.Equal("src/Secrets.cs", mark.RelativePath);
+		Assert.True(mark.SourceOffset >= 0);
+
+		static int CountOccurrences(string content, string value)
+		{
+			var count = 0;
+			var offset = 0;
+			while ((offset = content.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+			{
+				count++;
+				offset += value.Length;
+			}
+			return count;
+		}
+	}
+
+	private static async Task<ProjectContextPlan> BuildSecretOutputPlanAsync(
+		string projectRoot,
+		int transformMode)
+	{
+		var analysisService = new ProjectAnalysisService(
+			new ScanOptionsUseCase(new FileSystemScanner()),
+			ProjectLoadWorkflowRuntime.CreateBuildTreeUseCase(),
+			new FilterOptionSelectionService(),
+			ProjectLoadWorkflowRuntime.CreateIgnoreOptionsService(),
+			ProjectLoadWorkflowRuntime.CreateIgnoreRulesService(),
+			new TreeExportService(),
+			new FileContentAnalyzer());
+		return await new ProjectContextPlanner(analysisService).BuildAsync(
+			new ProjectContextRequest(
+				projectRoot,
+				new ProjectSelectionSpec(
+					GitMode: GitFilteringMode.None,
+					Exclusions: [],
+					HideSecrets: true,
+					CompressCode: (transformMode & 1) != 0,
+					StripComments: (transformMode & 2) != 0,
+					StripBlankLines: (transformMode & 4) != 0)),
+			TestContext.Current.CancellationToken);
+	}
+
+	[AvaloniaFact]
+	public async Task KeepAsIs_PersistsAcrossEveryContentTransformationCombination()
+	{
+		const string secret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$$"""
+			  internal sealed class Secrets
+			  {
+			      // The transformations before the value deliberately move its output coordinate.
+
+			      private static string Build()
+			      {
+			          return "noise";
+			      }
+
+			      public const string AwsAccessKey = "{{secret}}";
+			  }
+			  """,
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver
+					.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+						window,
+						"PreviewTextControl")
+					.Document?.Redactions is [{ State: SecretPreviewSpanState.Redacted }],
+				"the initial secret occurrence to be redacted");
+
+			var previewControl = UiTestDriver
+				.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+					window,
+					"PreviewTextControl");
+			previewControl.Focus();
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => previewControl.Document?.Redactions is
+					[{ State: SecretPreviewSpanState.KeptAsIs }],
+				"the source occurrence to be kept");
+
+			var modes = new[]
+			{
+				0b000, 0b001, 0b011, 0b010, 0b110, 0b111, 0b101, 0b100, 0b000
+			};
+			foreach (var mode in modes.Skip(1))
+			{
+				await SetContentOptionAsync(IgnoreOptionId.CompressCode, (mode & 0b001) != 0);
+				await SetContentOptionAsync(IgnoreOptionId.StripComments, (mode & 0b010) != 0);
+				await SetContentOptionAsync(IgnoreOptionId.StripBlankLines, (mode & 0b100) != 0);
+				await UiTestDriver.ClickApplySettingsAsync(window);
+				await UiTestDriver.WaitForConditionAsync(
+					window,
+					() => previewControl.Document?.Redactions is
+						[{ State: SecretPreviewSpanState.KeptAsIs }] &&
+					      UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+						      secret,
+						      StringComparison.Ordinal),
+					$"Keep as is to survive transformation mode {mode}");
+			}
+
+			async Task SetContentOptionAsync(IgnoreOptionId optionId, bool expected)
+			{
+				var option = UiTestDriver.GetViewModel(window).ContentProcessingOptions.Single(
+					candidate => candidate.Id == optionId);
+				if (option.IsChecked != expected)
+					await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+			}
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PersistentManualSecret_RestartRestoresProfileAndPreviewClipboardRedaction()
+	{
+		const string manualValue = "ordinary-manual-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "persistent-restart");
+		Directory.CreateDirectory(appDataPath);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(firstWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(firstWindow, PreviewContentMode.Content);
+			Assert.Contains(
+				manualValue,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(firstWindow),
+				StringComparison.Ordinal);
+
+			await UiTestDriver.RequestPersistentSecretMarkAsync(firstWindow, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				firstWindow,
+				() => UiTestDriver.GetViewModel(firstWindow).HideSecretsOption is { IsChecked: true } &&
+				      !UiTestDriver.ComputeCurrentPreviewCopyPayload(firstWindow).Contains(
+					      manualValue,
+					      StringComparison.Ordinal),
+				"the durable manual mark to redact Preview");
+
+			var store = new ProjectProfileStore(() => appDataPath);
+			PersistentSecretMarksLoadResult? persisted = null;
+			var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+			while (DateTime.UtcNow < deadline)
+			{
+				persisted = await store.LoadMarksAsync(
+					project.RootPath,
+					TestContext.Current.CancellationToken);
+				if (persisted.Succeeded && persisted.Snapshot!.Marks.Count == 1)
+					break;
+				await Task.Delay(25, TestContext.Current.CancellationToken);
+			}
+			Assert.True(persisted?.Succeeded);
+			var mark = Assert.Single(persisted!.Snapshot!.Marks);
+			Assert.True(PersistentSecretIdentity.IsV2(mark.H));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+		}
+
+		var reopenedWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		try
+		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				reopenedWindow,
+				IgnoreOptionId.HideSecrets,
+				visible: true,
+				isChecked: true);
+			await UiTestDriver.OpenPreviewAsync(reopenedWindow);
+			await UiTestDriver.SwitchPreviewModeAsync(reopenedWindow, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				reopenedWindow,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(reopenedWindow).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the reopened Preview to apply the persistent mark");
+
+			var expectedClipboard = UiTestDriver.ComputeCurrentPreviewCopyPayload(reopenedWindow);
+			await UiTestDriver.SetClipboardTextAsync(reopenedWindow, "pending-persistent-mark-copy");
+			await UiTestDriver.ClickPreviewCopyButtonAsync(reopenedWindow);
+			await UiTestDriver.WaitForClipboardTextAsync(reopenedWindow, expectedClipboard);
+			Assert.Contains("DEVPROJEX_REDACTED[manual-secret#1]", expectedClipboard, StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(reopenedWindow);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task FirstPersistentManualSecret_WithContendedKeyLockDoesNotBlockDispatcher()
+	{
+		const string manualValue = "dispatcher-responsive-manual-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "persistent-key-contention");
+		var keyDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(keyDirectory);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		var lockPath = Path.Combine(keyDirectory, "secret-mark-hmac.key.lock");
+		var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+		try
+		{
+			var sourcePath = Path.Combine(project.RootPath, "src", "Secrets.cs");
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+
+			await UiTestDriver.RequestPersistentSecretMarkAsync(window, manualValue);
+			await window.Dispatcher
+				.InvokeAsync(static () => { }, DispatcherPriority.Background)
+				.GetTask()
+				.WaitAsync(TimeSpan.FromSeconds(1));
+			Assert.DoesNotContain(
+				manualValue,
+				UiTestDriver.RedactFileWithCurrentSession(window, sourcePath),
+				StringComparison.Ordinal);
+
+			heldLock.Dispose();
+			var store = new ProjectProfileStore(() => appDataPath);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var loaded = store.LoadMarksAsync(project.RootPath).AsTask().GetAwaiter().GetResult();
+					return loaded.Succeeded && loaded.Snapshot!.Marks.Count == 1;
+				},
+				"the async identity initialization to persist the pending mark");
+		}
+		finally
+		{
+			heldLock.Dispose();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task LockedProfileStore_IsRetriedWithoutTreatingPersistedSelectionsOrMarksAsMissing()
+	{
+		const string manualValue = "locked-profile-manual-secret-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "locked-profile-retry");
+		Directory.CreateDirectory(appDataPath);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		var store = new ProjectProfileStore(() => appDataPath);
+		Assert.True(store.TrySaveProfile(
+			project.RootPath,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions: [IgnoreOptionId.HideSecrets],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.HideSecrets] = true
+				})));
+		using (var identityProvider = new PersistentSecretIdentityProvider(() => appDataPath))
+		{
+			Assert.Equal(PersistentSecretIdentityAvailability.Ready, await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+			Assert.True(PersistentSecretIdentity.TryCreateV2(
+				identityProvider,
+				manualValue,
+				out var identity));
+			Assert.True((await store.AddMarkAsync(
+				project.RootPath,
+				new MarkedSecretProfileEntry(identity, "caption", manualValue.Length),
+				TestContext.Current.CancellationToken)).Succeeded);
+		}
+
+		var storeDirectory = Path.Combine(appDataPath, "DevProjex");
+		var lockPath = Path.Combine(storeDirectory, "project-profiles.json.lock");
+		Task<MainWindow> opening;
+		using (new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+		{
+			opening = UiTestDriver.CreateLoadedMainWindowAsync(
+				project,
+				appDataPathOverride: appDataPath);
+			await Task.Delay(500, TestContext.Current.CancellationToken);
+			Assert.False(opening.IsCompleted);
+		}
+
+		var window = await opening;
+		try
+		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				visible: true,
+				isChecked: true);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the profile loaded after lock release to retain its persistent mark");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PersistentManualSecret_WithUnavailableIdentityKeyFallsBackToSessionOnlyRedaction()
+	{
+		const string manualValue = "ordinary-session-fallback-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var appDataPath = Path.Combine(project.AppDataPath, "persistent-key-unavailable");
+		var keyDirectory = Path.Combine(appDataPath, "DevProjex");
+		Directory.CreateDirectory(keyDirectory);
+		await File.WriteAllBytesAsync(
+			Path.Combine(keyDirectory, "secret-mark-hmac.key"),
+			[1, 2, 3],
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+		var errors = new ConcurrentQueue<string>();
+		UiTestDriver.OverridePreviewErrorHandler(
+			window,
+			message =>
+			{
+				errors.Enqueue(message);
+				return Task.CompletedTask;
+			});
+		try
+		{
+			var sourcePath = Path.Combine(project.RootPath, "src", "Secrets.cs");
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+
+			var location = await UiTestDriver.RequestPersistentSecretMarkAsync(window, manualValue);
+			Assert.Equal("src/Secrets.cs", location.RelativePath);
+			Assert.Equal(
+				(await File.ReadAllTextAsync(sourcePath, TestContext.Current.CancellationToken))
+					.IndexOf(manualValue, StringComparison.Ordinal),
+				location.SourceOffset);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).HideSecretsOption is { IsChecked: true },
+				"Hide Secrets to be enabled for the session-only fallback");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => errors.Count == 1,
+				"the existing profile-write error channel to be invoked");
+			Assert.DoesNotContain(
+				manualValue,
+				UiTestDriver.RedactFileWithCurrentSession(window, sourcePath),
+				StringComparison.Ordinal);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the failed persistent mark to remain redacted for the current session");
+
+			var stored = await new ProjectProfileStore(() => appDataPath)
+				.LoadMarksAsync(project.RootPath, TestContext.Current.CancellationToken);
+			Assert.True(stored.Succeeded);
+			Assert.Empty(stored.Snapshot!.Marks);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PersistentManualSecret_CompletingAfterProjectSwitchDoesNotReportFailureInNewProject()
+	{
+		const string manualValue = "ordinary-stale-project-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$"const string caption = \"{manualValue}\";\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var errors = new ConcurrentQueue<string>();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		UiTestDriver.OverridePreviewErrorHandler(
+			window,
+			message =>
+			{
+				errors.Enqueue(message);
+				return Task.CompletedTask;
+			});
+		UiTestDriver.OverridePersistentSecretMarkDeltaHandler(
+			window,
+			async _ =>
+			{
+				writeStarted.TrySetResult();
+				await releaseWrite.Task;
+				return new PersistentSecretMarkWriteResult(
+					PersistentSecretMarkStoreStatus.WriteFailed,
+					null);
+			});
+
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.RequestPersistentSecretMarkAsync(window, manualValue);
+			await writeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+			var nextProject = Path.Combine(project.AppDataPath, "next-project");
+			Directory.CreateDirectory(nextProject);
+			await window.Dispatcher.InvokeAsync(
+				() => UiTestDriver.SetCurrentProjectPath(window, nextProject),
+				DispatcherPriority.Normal);
+			releaseWrite.TrySetResult();
+			await window.Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Background);
+			await Task.Delay(100, TestContext.Current.CancellationToken);
+
+			Assert.Empty(errors);
+			await window.Dispatcher.InvokeAsync(
+				() => UiTestDriver.SetCurrentProjectPath(window, project.RootPath),
+				DispatcherPriority.Normal);
+		}
+		finally
+		{
+			releaseWrite.TrySetResult();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task HideSecrets_IsOptInAndUpdatesPreviewCountWithoutChangingSource()
     {
@@ -1977,11 +3307,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			helpIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HideSecrets);
 			Assert.True(helpIndicator.IsVisible);
 			checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets);
-			await UiTestDriver.ClickAsync(window, helpIndicator);
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => ToolTip.GetIsOpen(helpIndicator),
-				"the content-processing tooltip to open on click");
+			await UiTestDriver.OpenToolTipThroughClickAsync(window, helpIndicator);
 			var helpToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(helpIndicator));
 			var helpText = Assert.IsType<TextBlock>(helpToolTip.Content);
 			Assert.Equal("Found: 3. Hidden: 2.", helpText.Text);
@@ -2158,11 +3484,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				checkBoxPosition.Y - (compressionCheckBox.Bounds.Height / 2),
 				0,
 				2);
-			await UiTestDriver.ClickAsync(window, compressionIndicator);
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => ToolTip.GetIsOpen(compressionIndicator),
-				"the compression status tooltip to open on click");
+			await UiTestDriver.OpenToolTipThroughClickAsync(window, compressionIndicator);
 			var compressionToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(compressionIndicator));
 			Assert.Equal(PlacementMode.Bottom, ToolTip.GetPlacement(compressionIndicator));
 			Assert.Equal(5, ToolTip.GetVerticalOffset(compressionIndicator));

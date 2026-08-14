@@ -43,6 +43,18 @@ public interface ISecretDetector
 		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken = default) =>
 		Detect(repositoryRelativePath, content.ToString(), cancellationToken);
+
+	IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(budget);
+		var findings = Detect(repositoryRelativePath, content, cancellationToken);
+		budget.RegisterFindings(findings.Count, cancellationToken);
+		return findings;
+	}
 }
 
 public interface ISecretDetectionScope
@@ -56,6 +68,19 @@ public interface ISecretDetectionScope
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken = default);
+
+	IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(budget);
+		var findings = Detect(fullPath, repositoryRelativePath, content, cancellationToken);
+		budget.RegisterFindings(findings.Count, cancellationToken);
+		return findings;
+	}
 }
 
 internal sealed class UnscopedSecretDetectionScope(ISecretDetector detector) : ISecretDetectionScope
@@ -72,6 +97,14 @@ internal sealed class UnscopedSecretDetectionScope(ISecretDetector detector) : I
 		ReadOnlySpan<char> content,
 		CancellationToken cancellationToken = default) =>
 		detector.Detect(repositoryRelativePath, content, cancellationToken);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken = default) =>
+		detector.Detect(repositoryRelativePath, content, budget, cancellationToken);
 }
 
 /// <summary>
@@ -86,7 +119,8 @@ public sealed record DetectedSecret(
 	int RuleOrder,
 	SecretFindingSource Source = SecretFindingSource.Detector,
 	string? PersistentMarkHash = null,
-	string? SessionMarkId = null);
+	string? SessionMarkId = null,
+	PersistentSecretMarkId? PersistentMarkId = null);
 
 [Flags]
 public enum SecretFindingSource
@@ -96,7 +130,7 @@ public enum SecretFindingSource
 	SessionMark = 4
 }
 
-public sealed class SecretDetectionException(
+public class SecretDetectionException(
 	string message,
 	Exception? innerException = null)
 	: Exception(message, innerException);

@@ -201,15 +201,17 @@ public sealed class VirtualizedPreviewTextControlTests
 			Assert.Equal(secret, control.GetSelectedText());
 			var flyout = Assert.IsType<MenuFlyout>(control.ContextFlyout);
 			Assert.True(flyout.IsOpen);
+			Separator? separator = null;
 			Assert.Collection(
 				flyout.Items,
 				item => Assert.Same(GetMenuItem(control, "_copyMenuItem"), item),
 				item => Assert.Same(GetMenuItem(control, "_selectAllMenuItem"), item),
-				item => Assert.IsType<Separator>(item),
+				item => separator = Assert.IsType<Separator>(item),
 				item => Assert.Same(GetMenuItem(control, "_alwaysHideSecretMenuItem"), item),
 				item => Assert.Same(GetMenuItem(control, "_hideSecretHereMenuItem"), item),
 				item => Assert.Same(GetMenuItem(control, "_removeSecretMarkMenuItem"), item));
 			var alwaysItem = GetMenuItem(control, "_alwaysHideSecretMenuItem");
+			Assert.Same(alwaysItem.Cursor, separator!.Cursor);
 			Assert.True(alwaysItem.IsEnabled);
 			Assert.Contains('…', Assert.IsType<string>(alwaysItem.Header));
 			Assert.DoesNotContain(secret, Assert.IsType<string>(alwaysItem.Header), StringComparison.Ordinal);
@@ -218,6 +220,78 @@ public sealed class VirtualizedPreviewTextControlTests
 		finally
 		{
 			window.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public void ManualSecretContextMenu_DisabledSelectionsExposeAndReportTheirReason()
+	{
+		const string text = "config.env:\n\nshort\nfirst-valid-value\nsecond-valid-value";
+		using var document = new InMemoryPreviewTextDocument(
+			text,
+			[new PreviewDocumentSection("config.env", 1, 5, 1, 3)]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 220,
+			TextFontSize = 16,
+			TextBrush = Brushes.White,
+			SecretSelectionTooShort = "too short",
+			SecretSelectionMultiline = "multiline",
+			SecretSelectionContentOnly = "content only"
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 280,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		string? rejected = null;
+		control.ManualSecretMarkRejected += (_, args) => rejected = args.Message;
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			InvokePrivate(control, "EnsureContextMenu");
+			AssertRejected(new PreviewSelectionRange(1, 0, 1, "config.env".Length), "content only");
+			AssertRejected(new PreviewSelectionRange(3, 0, 3, "short".Length), "too short");
+			AssertRejected(
+				new PreviewSelectionRange(4, 0, 5, "second-valid-value".Length),
+				"multiline");
+			AssertStaleActiveRequestIsRejected();
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		void AssertRejected(PreviewSelectionRange range, string expectedReason)
+		{
+			SelectRange(window, control, range);
+			InvokePrivate(control, "PrepareManualSecretMenuItems");
+			var item = GetMenuItem(control, "_hideSecretHereMenuItem");
+			Assert.False(item.IsEnabled);
+			Assert.Equal(expectedReason, ToolTip.GetTip(item));
+		}
+
+		void AssertStaleActiveRequestIsRejected()
+		{
+			var range = new PreviewSelectionRange(4, 0, 4, "first-valid-value".Length);
+			SelectRange(window, control, range);
+			InvokePrivate(control, "PrepareManualSecretMenuItems");
+			var item = GetMenuItem(control, "_hideSecretHereMenuItem");
+			Assert.True(item.IsEnabled);
+			var candidateField = typeof(VirtualizedPreviewTextControl).GetField(
+				"_contextMarkedSecret",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(candidateField);
+			candidateField!.SetValue(control, null);
+			rejected = null;
+			item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+			Assert.Equal("content only", rejected);
 		}
 	}
 
@@ -286,6 +360,7 @@ public sealed class VirtualizedPreviewTextControlTests
 
 		Assert.NotNull(requested);
 		Assert.Equal(hash, requested!.PersistentMarkHash);
+		Assert.Equal(20, requested.PersistentMarkLength);
 		Assert.Null(requested.SessionMarkId);
 		Assert.True(requested.AlsoDetected);
 	}
@@ -353,6 +428,7 @@ public sealed class VirtualizedPreviewTextControlTests
 
 		Assert.NotNull(requested);
 		Assert.Null(requested!.PersistentMarkHash);
+		Assert.Equal(20, requested.PersistentMarkLength);
 		Assert.Equal(sessionMarkId, requested.SessionMarkId);
 		Assert.False(requested.AlsoDetected);
 	}
@@ -831,6 +907,53 @@ public sealed class VirtualizedPreviewTextControlTests
 
 		Assert.NotNull(field);
 		return Assert.IsType<string>(field!.GetValue(control));
+	}
+
+	private static void SelectRange(
+		Window window,
+		VirtualizedPreviewTextControl control,
+		PreviewSelectionRange range)
+	{
+		_ = window;
+		var positionType = typeof(VirtualizedPreviewTextControl).GetNestedType(
+			"SelectionPosition",
+			BindingFlags.NonPublic);
+		Assert.NotNull(positionType);
+		var anchor = Activator.CreateInstance(positionType!, range.StartLine, range.StartColumn);
+		var active = Activator.CreateInstance(positionType!, range.EndLine, range.EndColumn);
+		Assert.NotNull(anchor);
+		Assert.NotNull(active);
+		SetSelectionAnchor(control, anchor!);
+		var activeField = typeof(VirtualizedPreviewTextControl).GetField(
+			"_selectionActive",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(activeField);
+		activeField!.SetValue(control, active);
+		Assert.Equal(range.Normalize(), AssertSelectionRange(control));
+	}
+
+	private static PreviewSelectionRange AssertSelectionRange(VirtualizedPreviewTextControl control)
+	{
+		Assert.True(control.TryGetSelectionRange(out var range));
+		return range;
+	}
+
+	private static Point ResolvePoint(
+		Window window,
+		VirtualizedPreviewTextControl control,
+		int lineNumber,
+		int column)
+	{
+		var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+		var typeface = ResolveTestTypeface(control);
+		var lineHeight = InvokeResolveLineHeight(control);
+		return new Point(
+			origin.X + control.LeftPadding + MeasureRenderedPrefixWidth(
+				control,
+				control.Document!.GetLineText(lineNumber),
+				column,
+				typeface),
+			origin.Y + control.TopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2));
 	}
 
     private static Dictionary<int, object> GetFormattedLineCacheEntries(

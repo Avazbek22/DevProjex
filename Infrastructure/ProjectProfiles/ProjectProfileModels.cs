@@ -5,7 +5,6 @@ internal sealed class ProjectProfileDb
 	public int SchemaVersion { get; set; }
 	public Dictionary<string, PersistedProjectProfile> Profiles { get; set; } = new(PathComparer.Default);
 }
-
 internal sealed class PersistedProjectProfile
 {
 	public List<string> SelectedRootFolders { get; set; } = [];
@@ -15,19 +14,7 @@ internal sealed class PersistedProjectProfile
 	public Dictionary<string, bool> ExtensionStates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 	public Dictionary<IgnoreOptionId, bool> IgnoreOptionStates { get; set; } = [];
 	public List<string> SelectedPaths { get; set; } = [];
-	public List<MarkedSecretProfileEntry> MarkedSecrets { get; set; } = [];
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public List<MarkedSecretProfileEntry>? MarkedSecrets { get; set; }
 	public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
-
-public enum ProjectProfileLookupStatus
-{
-	Found = 0,
-	Missing = 1,
-	TemporarilyUnavailable = 2,
-	InvalidStorage = 3,
-	InvalidProjectPath = 4
-}
-
-public sealed record ProjectProfileLookupResult(
-	ProjectProfileLookupStatus Status,
-	ProjectSelectionProfile? Profile);

@@ -213,16 +213,28 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	public IReadOnlyList<DetectedSecret> Detect(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default) =>
+		Detect(
+			repositoryRelativePath,
+			content,
+			new SecretFileInspectionBudget(),
+			cancellationToken);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
-		cancellationToken.ThrowIfCancellationRequested();
+		ArgumentNullException.ThrowIfNull(budget);
+		budget.Checkpoint(cancellationToken);
 		if (content.Length == 0)
 			return [];
 
 		try
 		{
-			return DetectCore(repositoryRelativePath, content, cancellationToken);
+			return DetectCore(repositoryRelativePath, content, budget, cancellationToken);
 		}
 		catch (SecretDetectionException)
 		{
@@ -239,10 +251,14 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	private IReadOnlyList<DetectedSecret> DetectCore(
 		string repositoryRelativePath,
 		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 
-		var configuration = _configuration.Value;
+		var configuration = budget.RunRuleInitialization(() => _configuration.Value);
+		foreach (var allowlist in configuration.GlobalAllowlists)
+			budget.RunRuleInitialization(allowlist.EnsureCompiled);
+		budget.Checkpoint(cancellationToken);
 		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
 		if (!ShouldInspectPath(configuration, normalizedPath))
 			return [];
@@ -253,7 +269,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		foreach (var ruleOrder in EnumerateCandidateRuleOrders(candidateRules, configuration.Rules.Count))
 		{
 			var rule = configuration.Rules[ruleOrder];
-			cancellationToken.ThrowIfCancellationRequested();
+			budget.Checkpoint(cancellationToken);
 			if (rule.ContentRegex is null)
 				continue;
 			if (rule.Id.Equals(GenericApiKeyRuleId, StringComparison.Ordinal) &&
@@ -265,14 +281,17 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				continue;
 			// Value-shape gates are path-independent necessary conditions. Running them first
 			// avoids constructing a provider rule's lazy path DFA for ordinary keyword noise.
+			budget.RunRuleInitialization(rule.EnsurePathRegexCompiled);
 			if (!rule.AppliesToPath(normalizedPath))
 				continue;
+			budget.RunRuleInitialization(rule.EnsureContentAndAllowlistsCompiled);
+			budget.Checkpoint(cancellationToken);
 			try
 			{
 				var contentRegex = rule.ContentRegex.Value;
 				foreach (var valueMatch in contentRegex.EnumerateMatches(content))
 				{
-					cancellationToken.ThrowIfCancellationRequested();
+					budget.Checkpoint(cancellationToken);
 					// ValueMatch deliberately omits capture groups. Re-running the expression over
 					// the already bounded full-match slice keeps the full file allocation-free while
 					// preserving the reviewed Gitleaks secretGroup semantics.
@@ -300,6 +319,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 						continue;
 					}
 
+					budget.RegisterFinding(cancellationToken);
 					findings.Add(new DetectedSecret(
 						rule.Id,
 						checked(valueMatch.Index + secretGroup.Index),
@@ -316,6 +336,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 			}
 		}
 
+		budget.Checkpoint(cancellationToken);
 		return findings;
 	}
 
@@ -1098,6 +1119,20 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		IReadOnlyList<CompiledAllowlist> Allowlists,
 		int Order)
 	{
+		public void EnsurePathRegexCompiled()
+		{
+			if (PathRegex is { IsValueCreated: false })
+				_ = PathRegex.Value;
+		}
+
+		public void EnsureContentAndAllowlistsCompiled()
+		{
+			if (ContentRegex is { IsValueCreated: false })
+				_ = ContentRegex.Value;
+			foreach (var allowlist in Allowlists)
+				allowlist.EnsureCompiled();
+		}
+
 		public bool AppliesToPath(string path) => PathRegex?.Value.IsMatch(path) ?? true;
 	}
 
@@ -1255,6 +1290,20 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		AllowlistRegexTarget RegexTarget,
 		bool RequireAll)
 	{
+		public void EnsureCompiled()
+		{
+			foreach (var path in Paths)
+			{
+				if (!path.IsValueCreated)
+					_ = path.Value;
+			}
+			foreach (var regex in Regexes)
+			{
+				if (!regex.IsValueCreated)
+					_ = regex.Value;
+			}
+		}
+
 		public void WarmUp(string probe = RegexWarmUpProbe)
 		{
 			foreach (var path in Paths)

@@ -205,6 +205,7 @@
   "Preview.Secret.Mark.Validation.TooLong": "Выделите не более 512 символов.",
   "Preview.Secret.Mark.Validation.Multiline": "Многострочные значения пока не поддерживаются.",
   "Preview.Secret.Mark.Validation.ContentOnly": "Выделите значение в содержимом файла.",
+  "Error.Secret.MarkApplyFailed": "Не удалось применить пометку секрета. Обновите предпросмотр и повторите попытку.",
   "Toast.Secret.HiddenCount": "Скрыто в {0} местах",
   "Toast.Secret.MarkRemoved": "Пометка удалена.",
   "Toast.Secret.MarkRemovedStillDetected": "Пометка удалена. Детектор по-прежнему скрывает это значение.",

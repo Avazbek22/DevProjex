@@ -51,7 +51,46 @@ internal static class JsonStorePersistence
         JsonStoreFileSet fileSet,
         TDocument document,
         JsonSerializerOptions serializerOptions)
+		=> TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: false,
+			maximumPayloadBytes: long.MaxValue);
+
+	public static bool TryWriteAtomic<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions,
+		long maximumPayloadBytes)
+		=> TryWriteAtomic(fileSet, document, serializerOptions, flushToDisk: false, maximumPayloadBytes);
+
+	public static bool TryWriteAtomicDurable<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions)
+		=> TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: true,
+			maximumPayloadBytes: long.MaxValue);
+
+	public static bool TryWriteAtomicDurable<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions,
+		long maximumPayloadBytes)
+		=> TryWriteAtomic(fileSet, document, serializerOptions, flushToDisk: true, maximumPayloadBytes);
+
+	private static bool TryWriteAtomic<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions,
+		bool flushToDisk,
+		long maximumPayloadBytes)
     {
+		string? tempPath = null;
         try
         {
             if (string.IsNullOrWhiteSpace(fileSet.DirectoryPath))
@@ -59,9 +98,21 @@ internal static class JsonStorePersistence
 
             Directory.CreateDirectory(fileSet.DirectoryPath);
 
-            var json = JsonSerializer.Serialize(document, serializerOptions);
-            var tempPath = Path.Combine(fileSet.DirectoryPath, $"{fileSet.FileName}.{Guid.NewGuid():N}.tmp");
-            File.WriteAllText(tempPath, json);
+			var payload = JsonSerializer.SerializeToUtf8Bytes(document, serializerOptions);
+			if (payload.LongLength > maximumPayloadBytes)
+				return false;
+			tempPath = Path.Combine(fileSet.DirectoryPath, $"{fileSet.FileName}.{Guid.NewGuid():N}.tmp");
+			using (var stream = new FileStream(
+				       tempPath,
+				       FileMode.CreateNew,
+				       FileAccess.Write,
+				       FileShare.None,
+				       bufferSize: 16 * 1024,
+				       flushToDisk ? FileOptions.WriteThrough : FileOptions.None))
+			{
+				stream.Write(payload);
+				stream.Flush(flushToDisk);
+			}
 
             try
             {
@@ -84,6 +135,20 @@ internal static class JsonStorePersistence
         {
             return false;
         }
+		finally
+		{
+			if (tempPath is not null)
+			{
+				try
+				{
+					File.Delete(tempPath);
+				}
+				catch
+				{
+					// A failed atomic write must not mask its original persistence result.
+				}
+			}
+		}
     }
 
     private static void TryMirrorPrimaryToBackup(JsonStoreFileSet fileSet)

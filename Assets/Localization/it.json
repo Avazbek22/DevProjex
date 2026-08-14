@@ -205,6 +205,7 @@
   "Preview.Secret.Mark.Validation.TooLong": "Seleziona non più di 512 caratteri.",
   "Preview.Secret.Mark.Validation.Multiline": "I valori su più righe non sono supportati.",
   "Preview.Secret.Mark.Validation.ContentOnly": "Seleziona un valore nel contenuto di un file.",
+  "Error.Secret.MarkApplyFailed": "Non è stato possibile applicare il contrassegno del segreto. Aggiorna l’anteprima e riprova.",
   "Toast.Secret.HiddenCount": "Nascosto in {0} posizioni",
   "Toast.Secret.MarkRemoved": "Contrassegno rimosso.",
   "Toast.Secret.MarkRemovedStillDetected": "Contrassegno rimosso. Il rilevatore nasconde ancora questo valore.",

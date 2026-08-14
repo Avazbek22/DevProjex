@@ -23,6 +23,9 @@ public sealed record SecretScanCacheDiagnostics(
 
 internal readonly record struct SecretFileMetadata(long Length, long LastWriteUtcTicks)
 {
+	public static SecretFileMetadata FromIdentity(FileContentIdentity identity) =>
+		new(identity.Length, identity.LastWriteTimeUtcTicks);
+
 	public static SecretFileMetadata Capture(string path)
 	{
 		var info = new FileInfo(path);
@@ -40,7 +43,8 @@ internal sealed record SecretFindingMetadata(
 	int RuleOrder,
 	SecretFindingSource Source,
 	string? PersistentMarkHash,
-	string? SessionMarkId);
+	string? SessionMarkId,
+	PersistentSecretMarkId? PersistentMarkId);
 
 internal sealed record SecretScanCacheEntry(
 	string NormalizedPath,

@@ -187,6 +187,72 @@ public sealed class ContentTransformMap
 	public bool TryToSource(int transformedOffset, out int sourceOffset) =>
 		TryMap(transformedOffset, _transformedStarts, _transformedLengths, _sourceStarts, _sourceLengths, TransformedLength, out sourceOffset);
 
+	internal bool TryMapSourceBackedRange(
+		int transformedStart,
+		int transformedLength,
+		out int sourceStart,
+		out int sourceLength)
+	{
+		sourceStart = -1;
+		sourceLength = -1;
+		if (transformedStart < 0 || transformedLength < 0 ||
+		    TransformedLength >= 0 && transformedStart > TransformedLength - transformedLength)
+		{
+			return false;
+		}
+
+		var transformedEnd = checked(transformedStart + transformedLength);
+		var index = FindLastStartingAtOrBefore(_transformedStarts, transformedStart);
+		if (index < 0)
+			index = 0;
+		else if (_transformedStarts[index] + _transformedLengths[index] <= transformedStart)
+			index++;
+
+		for (; index < _transformedStarts.Length && _transformedStarts[index] < transformedEnd; index++)
+		{
+			var editStart = _transformedStarts[index];
+			var editLength = _transformedLengths[index];
+			if (editLength == 0
+					? editStart > transformedStart
+					: editStart + editLength > transformedStart)
+			{
+				return false;
+			}
+		}
+
+		if (!TryToSource(transformedStart, out sourceStart) ||
+		    !TryMapRangeEndToSource(transformedEnd, out var sourceEnd) ||
+		    sourceEnd < sourceStart)
+		{
+			sourceStart = -1;
+			return false;
+		}
+
+		sourceLength = sourceEnd - sourceStart;
+		return true;
+	}
+
+	private bool TryMapRangeEndToSource(int transformedEnd, out int sourceEnd)
+	{
+		var deletion = FindLastStartingAtOrBefore(_transformedStarts, transformedEnd);
+		if (deletion >= 0 &&
+		    _transformedStarts[deletion] == transformedEnd &&
+		    _transformedLengths[deletion] == 0)
+		{
+			while (deletion > 0 &&
+			       _transformedStarts[deletion - 1] == transformedEnd &&
+			       _transformedLengths[deletion - 1] == 0)
+			{
+				deletion--;
+			}
+
+			sourceEnd = _sourceStarts[deletion];
+			return true;
+		}
+
+		return TryToSource(transformedEnd, out sourceEnd);
+	}
+
 	private static bool TryMap(
 		int offset,
 		int[] fromStarts,

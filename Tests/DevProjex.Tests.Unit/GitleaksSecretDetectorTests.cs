@@ -12,6 +12,9 @@ public sealed class GitleaksSecretDetectorTests
 		"dropbox-short-lived-api-token"
 	];
 	private const string CorpusResourceSuffix = ".Fixtures.Secrets.gitleaks-v8.30.1-corpus.jsonl";
+	// This storage contract scans all 302 encoded fixtures as one synthetic file; it is not a
+	// production per-file deadline assertion and needs headroom under parallel CI load.
+	private static readonly TimeSpan EncodedCorpusInspectionTimeout = TimeSpan.FromSeconds(30);
 	private static readonly JsonSerializerOptions CorpusJsonOptions = new()
 	{
 		PropertyNameCaseInsensitive = true
@@ -43,7 +46,8 @@ public sealed class GitleaksSecretDetectorTests
 		Assert.Contains("\"contentBase64\":", corpus, StringComparison.Ordinal);
 		Assert.Empty(Detector.Detect(
 			"Tests/Fixtures/Secrets/gitleaks-v8.30.1-corpus.jsonl",
-			corpus,
+			corpus.AsSpan(),
+			new SecretFileInspectionBudget(EncodedCorpusInspectionTimeout),
 			TestContext.Current.CancellationToken));
 	}
 
@@ -503,7 +507,7 @@ public sealed class SecretRedactionSessionTests
 	[Fact(Timeout = 10_000)]
 	public void OutputScope_HighDensityFindingsResolveWithoutQuadraticOverlapWork()
 	{
-		const int findingCount = 20_000;
+		const int findingCount = SecretInspectionLimits.MaximumFindingsPerFile;
 		const string secret = "value-123456";
 		var content = string.Join('|', Enumerable.Repeat(secret, findingCount));
 		using var workspace = new TemporaryDirectory();

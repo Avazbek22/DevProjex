@@ -60,6 +60,9 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
 
     void IProjectLoadSnapshotPipelineHost.BeforeProjectLoadTreeRefresh()
     {
+		CancelSecretRedactionDiscovery();
+		if (!string.IsNullOrWhiteSpace(_currentPath))
+			_secretRedactionSession.AdvanceContentGeneration(_currentPath);
         // Mirrors a full tree refresh without requiring an intermediate UI-applied
         // selection state. This keeps obsolete metrics IO out of the load hot path.
         _metrics.CancelBackgroundCalculation();

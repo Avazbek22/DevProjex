@@ -16,4 +16,5 @@ public sealed record PreviewRedactionSpan(
 	int SourceLength = 0,
 	SecretFindingSource Source = SecretFindingSource.Detector,
 	string? PersistentMarkHash = null,
-	string? SessionMarkId = null);
+	string? SessionMarkId = null,
+	PersistentSecretMarkId? PersistentMarkId = null);

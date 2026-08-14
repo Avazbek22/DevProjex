@@ -21,12 +21,21 @@ public sealed class PreviewManualSecretMarkRequestedEventArgs(
 
 public sealed class PreviewManualSecretUnmarkRequestedEventArgs(
 	string? persistentMarkHash,
+	int persistentMarkLength,
 	string? sessionMarkId,
-	bool alsoDetected) : EventArgs
+	bool alsoDetected,
+	PersistentSecretMarkId? persistentMarkId = null) : EventArgs
 {
 	public string? PersistentMarkHash { get; } = persistentMarkHash;
+	public int PersistentMarkLength { get; } = persistentMarkLength;
 	public string? SessionMarkId { get; } = sessionMarkId;
 	public bool AlsoDetected { get; } = alsoDetected;
+	public PersistentSecretMarkId? PersistentMarkId { get; } = persistentMarkId;
+}
+
+internal sealed class PreviewManualSecretMarkRejectedEventArgs(string message) : EventArgs
+{
+	public string Message { get; } = message;
 }
 
 /// <summary>
@@ -42,6 +51,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	public event EventHandler<PreviewRedactionToggleRequestedEventArgs>? RedactionToggleRequested;
 	public event EventHandler<PreviewManualSecretMarkRequestedEventArgs>? ManualSecretMarkRequested;
 	public event EventHandler<PreviewManualSecretUnmarkRequestedEventArgs>? ManualSecretUnmarkRequested;
+	internal event EventHandler<PreviewManualSecretMarkRejectedEventArgs>? ManualSecretMarkRejected;
 
     public static readonly StyledProperty<string> TextProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(Text), string.Empty);
@@ -203,6 +213,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private TextBlock? _redactionToolTipText;
 	private MarkedSecretValue? _contextMarkedSecret;
 	private PreviewSelectionRange _contextSelectionRange;
+	private string? _contextSecretMarkRejectionMessage;
 	private PreviewRedactionSpan? _contextManualRedaction;
     private static Cursor? _previewTextCursor;
     private static Cursor? _previewMenuCursor;
@@ -1963,7 +1974,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		_contextFlyout = new MenuFlyout();
 		_contextFlyout.Items.Add(_copyMenuItem);
 		_contextFlyout.Items.Add(_selectAllMenuItem);
-		_contextFlyout.Items.Add(new Separator());
+		_contextFlyout.Items.Add(new Separator { Cursor = PreviewMenuCursor });
 		_contextFlyout.Items.Add(_alwaysHideSecretMenuItem);
 		_contextFlyout.Items.Add(_hideSecretHereMenuItem);
 		_contextFlyout.Items.Add(_removeSecretMarkMenuItem);
@@ -2052,14 +2063,22 @@ public sealed class VirtualizedPreviewTextControl : Control
 			this,
 			new PreviewManualSecretUnmarkRequestedEventArgs(
 				redaction.PersistentMarkHash,
+				redaction.SourceLength,
 				redaction.SessionMarkId,
-				redaction.Source.HasFlag(SecretFindingSource.Detector)));
+				redaction.Source.HasFlag(SecretFindingSource.Detector),
+				redaction.PersistentMarkId));
 	}
 
 	private void RaiseManualSecretMarkRequested(bool persistent)
 	{
 		if (_contextMarkedSecret is null || _contextSelectionRange.IsCollapsed)
+		{
+			ManualSecretMarkRejected?.Invoke(
+				this,
+				new PreviewManualSecretMarkRejectedEventArgs(
+					_contextSecretMarkRejectionMessage ?? SecretSelectionContentOnly));
 			return;
+		}
 		ManualSecretMarkRequested?.Invoke(
 			this,
 			new PreviewManualSecretMarkRequestedEventArgs(
@@ -2109,6 +2128,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		_hideSecretHereMenuItem.IsVisible = !removeVisible && HasSelection;
 		_contextMarkedSecret = null;
 		_contextSelectionRange = default;
+		_contextSecretMarkRejectionMessage = null;
 		if (removeVisible || !HasSelection)
 			return;
 
@@ -2141,6 +2161,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var reason = !isValid
 			? GetValidationMessage(validationError)
 			: SecretSelectionContentOnly;
+		_contextSecretMarkRejectionMessage = enabled ? null : reason;
 		ToolTip.SetTip(_alwaysHideSecretMenuItem, enabled ? null : reason);
 		ToolTip.SetTip(_hideSecretHereMenuItem, enabled ? null : reason);
 	}
