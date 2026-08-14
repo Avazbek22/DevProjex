@@ -38,18 +38,33 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				Assert.Equal(viewModel.GitCloneLocalCacheLabel, comboBox.PlaceholderText);
 				Assert.Equal(expected.Select(static entry => entry.LocalPath), items.Select(static item => item.LocalPath), PathComparer.Default);
 				Assert.Equal("newer", items[0].Entry.RepositoryName);
-				Assert.Equal("newer (ZIP)", items[0].DisplayName);
-				Assert.Contains("feature", items[0].DetailsText, StringComparison.Ordinal);
+				Assert.Equal("example / newer (ZIP)", items[0].DisplayName);
+				Assert.Equal("feature", items[0].DetailsText);
 				Assert.Contains(
 					expected[0].LastOpenedUtc.ToLocalTime().ToString("g", CultureInfo.GetCultureInfo("en-US")),
-					items[0].DetailsText,
+					items[0].ToolTipText,
 					StringComparison.Ordinal);
 				Assert.Contains(
 					RepositoryCacheEntryViewModel.FormatByteSize(
 						expected[0].ApproximateSizeBytes,
 						CultureInfo.GetCultureInfo("en-US")),
-					items[0].DetailsText,
+					items[0].ToolTipText,
 					StringComparison.Ordinal);
+				Assert.Contains(expected[0].RepositoryUrl, items[0].ToolTipText, StringComparison.Ordinal);
+				var deleteButton = await OpenAndFindDeleteButtonAsync(window, comboBox, items[0]);
+				var itemRow = Assert.Single(
+					deleteButton.GetVisualAncestors().OfType<Grid>(),
+					grid => ReferenceEquals(grid.DataContext, items[0]) && ToolTip.GetTip(grid) is not null);
+				Assert.Equal(items[0].ToolTipText, ToolTip.GetTip(itemRow));
+				var textStack = Assert.Single(itemRow.Children.OfType<StackPanel>());
+				var textLines = textStack.Children.OfType<TextBlock>().ToArray();
+				Assert.Equal(0, textStack.Spacing);
+				Assert.Equal(2, textLines.Length);
+				Assert.Equal(items[0].DisplayName, textLines[0].Text);
+				Assert.Equal(items[0].DetailsText, textLines[1].Text);
+				Assert.Equal(11, textLines[1].FontSize);
+				Assert.Equal(0.6, textLines[1].Opacity);
+				comboBox.IsDropDownOpen = false;
 				Assert.Equal(
 					viewModel.GitCloneRecentRepositoriesLabel,
 					cloneWindow.FindControl<TextBlock>("RecentRepositoriesLabelText")?.Text);
@@ -92,8 +107,8 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				await WaitForCatalogAsync(window, expectedCount: 2);
 				var viewModel = UiTestDriver.GetViewModel(window);
 				var originalSourceType = viewModel.ProjectSourceType;
-				var removed = viewModel.CachedRepositories.Single(item => item.DisplayName.StartsWith("remove", StringComparison.Ordinal));
-				var kept = viewModel.CachedRepositories.Single(item => item.DisplayName.StartsWith("keep", StringComparison.Ordinal));
+				var removed = viewModel.CachedRepositories.Single(item => item.Entry.RepositoryName == "remove");
+				var kept = viewModel.CachedRepositories.Single(item => item.Entry.RepositoryName == "keep");
 				var comboBox = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
 				comboBox.SelectedItem = kept;
 				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);

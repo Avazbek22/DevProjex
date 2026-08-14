@@ -1,4 +1,5 @@
 using System.Globalization;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.ViewModels;
 
@@ -6,6 +7,7 @@ public sealed record RepositoryCacheEntryViewModel(
 	RepositoryCacheCatalogEntry Entry,
 	string DisplayName,
 	string DetailsText,
+	string ToolTipText,
 	string RemoveText,
 	bool CanDelete,
 	string? DeleteToolTip)
@@ -22,20 +24,24 @@ public sealed record RepositoryCacheEntryViewModel(
 		bool canDelete,
 		string activeDeleteToolTip)
 	{
+		var repositoryDisplayName = RecentProjectPresentationService.CreateRepositoryDisplayText(entry.RepositoryUrl);
+		if (string.IsNullOrWhiteSpace(repositoryDisplayName))
+			repositoryDisplayName = entry.RepositoryName;
 		var displayName = entry.ContentKind == RepositoryCacheContentKind.Zip
-			? $"{entry.RepositoryName} ({zipLabel})"
-			: entry.RepositoryName;
+			? $"{repositoryDisplayName} ({zipLabel})"
+			: repositoryDisplayName;
 		var branch = string.IsNullOrWhiteSpace(entry.Branch) ? "-" : entry.Branch;
-		var details = string.Concat(
-			branch,
-			" | ",
+		var toolTipText = string.Concat(
+			entry.RepositoryUrl,
+			Environment.NewLine,
 			FormatByteSize(entry.ApproximateSizeBytes, culture),
-			" | ",
+			Environment.NewLine,
 			entry.LastOpenedUtc.ToLocalTime().ToString("g", culture));
 		return new RepositoryCacheEntryViewModel(
 			entry,
 			displayName,
-			details,
+			branch,
+			toolTipText,
 			removeText,
 			canDelete,
 			canDelete ? null : activeDeleteToolTip);

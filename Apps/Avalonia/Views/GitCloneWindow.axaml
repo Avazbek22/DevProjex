@@ -158,7 +158,7 @@
             <DataTemplate x:DataType="vm:RepositoryCacheEntryViewModel">
               <Grid ColumnDefinitions="*,Auto"
                     ColumnSpacing="8"
-                    ToolTip.Tip="{Binding RepositoryUrl}">
+                    ToolTip.Tip="{Binding ToolTipText}">
                 <StackPanel Grid.Column="0"
                             Spacing="0">
                   <TextBlock Text="{Binding DisplayName}"

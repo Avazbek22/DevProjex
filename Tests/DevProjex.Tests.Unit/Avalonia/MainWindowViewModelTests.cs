@@ -28,6 +28,7 @@ public sealed class MainWindowViewModelTests
 			localPath),
 		"repository",
 		"main | 1 KB",
+		"https://github.com/example/repository.git",
 		"Remove",
 		CanDelete: true,
 		DeleteToolTip: null);
