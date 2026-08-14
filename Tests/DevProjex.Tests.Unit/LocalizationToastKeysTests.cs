@@ -11,6 +11,7 @@ public sealed class LocalizationToastKeysTests
 		"Toast.Export.Content",
 		"Toast.Export.TreeAndContent",
 		"Toast.NoMatches",
+		"Toast.Tree.CheckedSelectionHidden",
 		"Toast.Git.CloneSuccess",
 		"Toast.Git.CloneError",
 		"Toast.Git.UpdatesApplied",
@@ -57,8 +58,10 @@ public sealed class LocalizationToastKeysTests
 		}
 	}
 
-	[Fact]
-	public void ToastBranchSwitched_ContainsPlaceholder()
+	[Theory]
+	[InlineData("Toast.Git.BranchSwitched")]
+	[InlineData("Toast.Tree.CheckedSelectionHidden")]
+	public void FormattedToast_ContainsPlaceholder(string key)
 	{
 		var localizationDir = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
 		var files = Directory.GetFiles(localizationDir, "*.json");
@@ -66,8 +69,8 @@ public sealed class LocalizationToastKeysTests
 		foreach (var file in files)
 		{
 			var map = ReadKeyValues(File.ReadAllText(file));
-			Assert.True(map.TryGetValue("Toast.Git.BranchSwitched", out var value),
-				$"Missing Toast.Git.BranchSwitched in {Path.GetFileName(file)}");
+			Assert.True(map.TryGetValue(key, out var value),
+				$"Missing {key} in {Path.GetFileName(file)}");
 			Assert.Contains("{0}", value);
 		}
 	}

@@ -207,6 +207,7 @@
   "Preview.Secret.Mark.Validation.ContentOnly": "Selecciona un valor dentro del contenido de un archivo.",
   "Error.Secret.MarkApplyFailed": "No se pudo aplicar la marca de secreto. Actualiza la vista previa e inténtalo de nuevo.",
   "Toast.Secret.HiddenCount": "Ocultado en {0} lugares",
+  "Toast.Tree.CheckedSelectionHidden": "Elementos marcados ocultos por la configuración actual: {0}",
   "Toast.Secret.MarkRemoved": "Marca eliminada.",
   "Toast.Secret.MarkRemovedStillDetected": "Marca eliminada. El detector sigue ocultando este valor.",
     "SecretRedaction.NoFindingsNotice":  "Las reglas configuradas no encontraron coincidencias; esto no garantiza la seguridad.",

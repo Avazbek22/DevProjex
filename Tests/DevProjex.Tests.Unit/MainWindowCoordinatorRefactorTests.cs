@@ -1192,16 +1192,38 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal("keep.cs", Assert.Single(source.Children).DisplayName);
         Assert.Equal(2, projectRoot.Children.Count);
         Assert.Equal(2, projectRoot.Children[0].Children.Count);
+        Assert.True(host.LastAppliedInput!.PreserveCheckedPaths);
+        Assert.False(host.LastAppliedInput.PreserveExpandedPaths);
     }
 
     [Fact]
-    public async Task ProjectLoadSnapshotPipeline_ReloadAsync_BuildsTreeFromSelectionSnapshot()
+    public async Task RefreshTreePipeline_ContinuousRefreshTransfersSelectionAndExpansion()
+    {
+        var host = new RecordingRefreshTreeHost(CreateViewModel());
+        using var pipeline = new RefreshTreePipeline(host);
+
+        var outcome = await pipeline.RefreshTreeAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(TreeRefreshOutcome.Applied, outcome);
+        Assert.True(host.LastAppliedInput!.PreserveCheckedPaths);
+        Assert.True(host.LastAppliedInput.PreserveExpandedPaths);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProjectLoadSnapshotPipeline_ReloadAsync_BuildsTreeFromSelectionSnapshot(
+        bool preserveTreeState)
     {
         var selectionSnapshot = CreateSelectionRefreshSnapshot();
         var host = new RecordingProjectLoadSnapshotHost(selectionSnapshot);
         var pipeline = new ProjectLoadSnapshotPipeline(host);
 
-        await pipeline.ReloadAsync(@"C:\Project", TestContext.Current.CancellationToken);
+        await pipeline.ReloadAsync(
+            @"C:\Project",
+            preserveTreeState,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(
             [
@@ -1219,6 +1241,8 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Contains(".cs", host.CapturedTreeInput.Options.AllowedExtensions);
         Assert.DoesNotContain(".md", host.CapturedTreeInput.Options.AllowedExtensions);
         Assert.True(host.CapturedTreeInput.Options.IgnoreRules.IgnoreDotFolders);
+        Assert.Equal(preserveTreeState, host.CapturedTreeInput.PreserveCheckedPaths);
+        Assert.Equal(preserveTreeState, host.CapturedTreeInput.PreserveExpandedPaths);
     }
 
     [Fact]
@@ -1231,7 +1255,10 @@ public sealed class MainWindowCoordinatorRefactorTests
         };
         var pipeline = new ProjectLoadSnapshotPipeline(host);
 
-        await pipeline.ReloadAsync(@"C:\Project", TestContext.Current.CancellationToken);
+        await pipeline.ReloadAsync(
+            @"C:\Project",
+            preserveTreeState: false,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(
             [ProjectLoadSnapshotHostCall.BuildSelectionSnapshot],
@@ -1702,7 +1729,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public TreeRefreshInput CreateTreeRefreshInput(
             string currentPath,
-            SelectionRefreshSnapshot snapshot)
+            SelectionRefreshSnapshot snapshot,
+            bool preserveTreeState)
         {
             Assert.Same(selectionSnapshot, snapshot);
             Calls.Add(ProjectLoadSnapshotHostCall.CreateTreeInput);
@@ -1734,7 +1762,9 @@ public sealed class MainWindowCoordinatorRefactorTests
                     allowedExtensions,
                     allowedRoots,
                     rules),
-                NameFilter: null);
+                NameFilter: null,
+                PreserveCheckedPaths: preserveTreeState,
+                PreserveExpandedPaths: preserveTreeState);
             return CapturedTreeInput;
         }
 
@@ -1993,6 +2023,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public BuildTreeSnapshotResult? LastAppliedResult { get; private set; }
 
+        public TreeRefreshInput? LastAppliedInput { get; private set; }
+
         public TreeRefreshInput? CaptureTreeRefreshInput(bool preserveCheckedPaths)
         {
             return new TreeRefreshInput(
@@ -2067,6 +2099,7 @@ public sealed class MainWindowCoordinatorRefactorTests
                 return;
 
             ApplyCount++;
+            LastAppliedInput = input;
             LastAppliedResult = result;
             LastUsedInMemoryFilter = usedInMemoryFilter;
             viewModel.TreeNodes.Add(root);

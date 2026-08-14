@@ -7,10 +7,17 @@ public partial class MainWindow
     private bool IsBackgroundMetricsActive()
         => _metrics.IsBackgroundActive;
 
-	private void OnTreeNodeCheckedChanged(TreeNodeViewModel _)
+	private void OnTreeNodeCheckedChanged(TreeNodeViewModel node)
     {
 		if (_suppressTreeSelectionChanges > 0)
 			return;
+
+		if (_interactiveFilterSelectionSnapshot is { } filterSnapshot &&
+			!string.IsNullOrWhiteSpace(_currentPath) &&
+			filterSnapshot.IsForProject(_currentPath))
+		{
+			filterSnapshot.RecordOverride(node.FullPath, node.IsChecked == true);
+		}
 
 		if (_treeSelectionChangeBatchDepth > 0)
 		{

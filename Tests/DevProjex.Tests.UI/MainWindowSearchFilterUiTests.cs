@@ -118,6 +118,77 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task InteractiveFilter_PreservesHiddenSelectionAndRestoresEntryExpansion()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var root = Assert.Single(viewModel.TreeNodes);
+            root.IsChecked = false;
+            var readme = Assert.Single(
+                root.Children,
+                node => string.Equals(node.DisplayName, "README.md", StringComparison.Ordinal));
+            var docs = Assert.Single(
+                root.Children,
+                node => string.Equals(node.DisplayName, "docs", StringComparison.Ordinal));
+            var source = Assert.Single(
+                root.Children,
+                node => string.Equals(node.DisplayName, "src", StringComparison.Ordinal));
+            var previewService = Assert.Single(
+                root.Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal));
+            readme.IsChecked = true;
+            previewService.IsChecked = true;
+            docs.IsExpanded = true;
+            source.IsExpanded = false;
+            var expectedReadmePath = readme.FullPath;
+
+            await UiTestDriver.OpenFilterAsync(window);
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(filterBar.FilterBoxControl),
+                "PreviewService");
+            await UiTestDriver.WaitForFilterAppliedAsync(window, "PreviewService");
+
+            var filteredRoot = Assert.Single(viewModel.TreeNodes);
+            var filteredPreviewService = Assert.Single(
+                filteredRoot.Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal));
+            Assert.True(filteredPreviewService.IsChecked);
+            filteredPreviewService.IsChecked = false;
+
+            await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !viewModel.FilterVisible &&
+                      !viewModel.IsFilterInProgress &&
+                      string.IsNullOrEmpty(viewModel.NameFilter),
+                "filter close to restore selection and expansion");
+
+            var restoredRoot = Assert.Single(viewModel.TreeNodes);
+            Assert.Equal([expectedReadmePath], UiTestDriver.GetCheckedTreePaths(window));
+            Assert.True(Assert.Single(
+                restoredRoot.Children,
+                node => string.Equals(node.DisplayName, "docs", StringComparison.Ordinal)).IsExpanded);
+            Assert.False(Assert.Single(
+                restoredRoot.Children,
+                node => string.Equals(node.DisplayName, "src", StringComparison.Ordinal)).IsExpanded);
+            Assert.DoesNotContain(
+                UiTestDriver.GetToastService(window).Items,
+                toast => toast.Message.StartsWith(
+                    "Checked items hidden by the current settings:",
+                    StringComparison.Ordinal));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SearchAndFilter_AreMutuallyExclusiveWhenSwitchingTools()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

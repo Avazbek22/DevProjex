@@ -19,7 +19,8 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
 
     TreeRefreshInput IProjectLoadSnapshotPipelineHost.CreateTreeRefreshInput(
         string currentPath,
-        SelectionRefreshSnapshot selectionSnapshot)
+        SelectionRefreshSnapshot selectionSnapshot,
+        bool preserveTreeState)
     {
         var allowedExt = CollectCheckedSelectionNames(
             selectionSnapshot.EffectiveExtensionOptions,
@@ -55,7 +56,9 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             options,
             nameFilter,
             selectionSnapshot.TreeInventory,
-            inventoryScope);
+            inventoryScope,
+            PreserveCheckedPaths: preserveTreeState,
+            PreserveExpandedPaths: preserveTreeState);
     }
 
     void IProjectLoadSnapshotPipelineHost.BeforeProjectLoadTreeRefresh()

@@ -207,6 +207,7 @@
   "Preview.Secret.Mark.Validation.ContentOnly": "Sélectionnez une valeur dans le contenu d’un fichier.",
   "Error.Secret.MarkApplyFailed": "Le marquage du secret n’a pas pu être appliqué. Actualisez l’aperçu et réessayez.",
   "Toast.Secret.HiddenCount": "Masqué à {0} endroits",
+  "Toast.Tree.CheckedSelectionHidden": "Éléments cochés masqués par les paramètres actuels : {0}",
   "Toast.Secret.MarkRemoved": "Marquage supprimé.",
   "Toast.Secret.MarkRemovedStillDetected": "Marquage supprimé. Le détecteur masque toujours cette valeur.",
   "SecretRedaction.NoFindingsNotice": "Les règles configurées n’ont rien détecté ; cela ne garantit pas la sécurité.",

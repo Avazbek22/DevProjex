@@ -12,7 +12,8 @@ internal interface IProjectLoadSnapshotPipelineHost
 
     TreeRefreshInput CreateTreeRefreshInput(
         string currentPath,
-        SelectionRefreshSnapshot selectionSnapshot);
+        SelectionRefreshSnapshot selectionSnapshot,
+        bool preserveTreeState);
 
     void BeforeProjectLoadTreeRefresh();
 

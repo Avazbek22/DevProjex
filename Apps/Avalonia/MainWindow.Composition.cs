@@ -681,6 +681,7 @@ public partial class MainWindow
     private BuildTreeResult? _filterBaseTree;
     private ProjectTreeInventoryState? _currentTreeInventory;
     private bool _lastInteractiveFilterUsedInMemory;
+    private ProjectTreeSelectionSnapshot? _interactiveFilterSelectionSnapshot;
     // Advanced ignore counts are always part of the ignore-options UX now. The old
     // persisted toggle is normalized to true so legacy settings cannot hide counts.
     private const bool AdvancedIgnoreCountsAlwaysEnabled = true;

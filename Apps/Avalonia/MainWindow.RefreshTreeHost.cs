@@ -44,9 +44,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
             reusableInventory?.Scope,
             _selectionCoordinator.CurrentSelectionRevision,
             _filterBaseTree,
-            preserveCheckedPaths
-                ? new HashSet<string>(GetCheckedPaths(), PathComparer.Default)
-                : null);
+            PreserveCheckedPaths: preserveCheckedPaths);
     }
 
     void IRefreshTreePipelineHost.BeforeFullTreeRefresh()
@@ -101,6 +99,17 @@ public partial class MainWindow : IRefreshTreePipelineHost
         if (!PathComparer.Default.Equals(_currentPath, input.CurrentPath))
             return;
 
+        if (interactiveFilter)
+            _searchFilterController.CaptureFilterExpansionForTreeReplacement(input.CurrentPath);
+
+        var selectionSnapshot = CaptureSelectionForTreeReplacement(input);
+        var expansionSnapshot = input.PreserveExpandedPaths &&
+                                string.IsNullOrWhiteSpace(input.NameFilter)
+            ? ProjectTreeUiState.CaptureExpansion(
+                input.CurrentPath,
+                _viewModel.TreeNodes)
+            : null;
+
 		_treeSelectionSnapshotCache.ResetForTreeReplacement();
 
         // Swap trees only after the new root is fully materialized.
@@ -147,21 +156,38 @@ public partial class MainWindow : IRefreshTreePipelineHost
         }
 
         _viewModel.TreeNodes.Add(root);
-        root.IsExpanded = true;
-		if (input.CheckedPaths is { Count: > 0 })
-		{
-			ApplyTreeSelectionWithoutPublishing(() =>
-			{
-				foreach (var path in input.CheckedPaths)
-					FindTreeNodeByPath(root, path)?.IsChecked = true;
-			});
-		}
+        ProjectTreeUiState.RestoreExpansion(root, expansionSnapshot);
+
+        var selectionRestore = TreeSelectionRestoreResult.ProjectMismatch;
+        if (selectionSnapshot is not null)
+        {
+            ApplyTreeSelectionWithoutPublishing(() =>
+            {
+                selectionRestore = selectionSnapshot.Restore(root);
+            });
+        }
+
+        var completedFilterSelectionTransfer =
+            _interactiveFilterSelectionSnapshot is not null &&
+            string.IsNullOrWhiteSpace(input.NameFilter);
+        if (completedFilterSelectionTransfer)
+            _interactiveFilterSelectionSnapshot = null;
 
         if (!interactiveFilter)
             _selectionCoordinator.AcceptCurrentSelectionsAsApplied(input.CurrentPath, result.Inventory);
 
         if (!interactiveFilter && !string.IsNullOrWhiteSpace(input.NameFilter) && root.Children.Count == 0)
             _toastService.Show(_localization["Toast.NoMatches"]);
+
+        if (!interactiveFilter &&
+            _interactiveFilterSelectionSnapshot is null &&
+            selectionRestore.MissingCheckedPathCount > 0)
+        {
+            _toastService.Show(
+                _localization.Format(
+                    "Toast.Tree.CheckedSelectionHidden",
+                    selectionRestore.MissingCheckedPathCount));
+        }
 
         if (!interactiveFilter)
             ReapplyActiveTreeQueryPresentation();
@@ -184,34 +210,30 @@ public partial class MainWindow : IRefreshTreePipelineHost
         SchedulePreviewRefresh(immediate: true);
     }
 
-	private static TreeNodeViewModel? FindTreeNodeByPath(
-		TreeNodeViewModel root,
-		string path)
+	private ProjectTreeSelectionSnapshot? CaptureSelectionForTreeReplacement(TreeRefreshInput input)
 	{
-		if (PathComparer.Default.Equals(root.FullPath, path))
-			return root;
-		if (!PathUtility.IsPathInside(path, root.FullPath))
+		if (!input.PreserveCheckedPaths)
 			return null;
 
-		var current = root;
-		while (true)
+		if (_interactiveFilterSelectionSnapshot is { } filterSnapshot)
 		{
-			TreeNodeViewModel? next = null;
-			foreach (var child in current.Children)
-			{
-				if (PathComparer.Default.Equals(child.FullPath, path))
-					return child;
-				if (PathUtility.IsPathInside(path, child.FullPath))
-				{
-					next = child;
-					break;
-				}
-			}
+			if (filterSnapshot.IsForProject(input.CurrentPath))
+				return filterSnapshot;
 
-			if (next is null)
-				return null;
-			current = next;
+			_interactiveFilterSelectionSnapshot = null;
 		}
+
+		var snapshot = ProjectTreeSelectionSnapshot.Capture(
+			input.CurrentPath,
+			_viewModel.TreeNodes,
+			_treeSelectionSnapshotCache);
+		if (snapshot is not null &&
+			!string.IsNullOrWhiteSpace(input.NameFilter))
+		{
+			_interactiveFilterSelectionSnapshot = snapshot;
+		}
+
+		return snapshot;
 	}
 
     private void ReapplyActiveTreeQueryPresentation() =>

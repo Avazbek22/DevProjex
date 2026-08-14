@@ -207,6 +207,7 @@
   "Preview.Secret.Mark.Validation.ContentOnly": "Файл мазмұнындағы мәнді таңдаңыз.",
   "Error.Secret.MarkApplyFailed": "Құпия белгісін қолдану мүмкін болмады. Алдын ала қарауды жаңартып, қайталап көріңіз.",
   "Toast.Secret.HiddenCount": "{0} жерде жасырылды",
+  "Toast.Tree.CheckedSelectionHidden": "Ағымдағы параметрлер жасырған белгіленген элементтер: {0}",
   "Toast.Secret.MarkRemoved": "Белгі алынып тасталды.",
   "Toast.Secret.MarkRemovedStillDetected": "Белгі алынып тасталды. Детектор бұл мәнді әлі де жасырады.",
   "SecretRedaction.NoFindingsNotice": "Бапталған ережелер ештеңе таппады; бұл қауіпсіздік кепілдігі емес.",

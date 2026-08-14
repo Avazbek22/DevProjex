@@ -207,6 +207,7 @@
   "Preview.Secret.Mark.Validation.ContentOnly": "Fayl mazmunidagi qiymatni tanlang.",
   "Error.Secret.MarkApplyFailed": "Sir belgisini qo‘llab bo‘lmadi. Ko‘rib chiqishni yangilang va qayta urinib ko‘ring.",
   "Toast.Secret.HiddenCount": "{0} ta joyda yashirildi",
+  "Toast.Tree.CheckedSelectionHidden": "Joriy sozlamalar yashirgan belgilangan elementlar: {0}",
   "Toast.Secret.MarkRemoved": "Belgi olib tashlandi.",
   "Toast.Secret.MarkRemovedStillDetected": "Belgi olib tashlandi. Detektor bu qiymatni hali ham yashiradi.",
   "SecretRedaction.NoFindingsNotice": "Sozlangan qoidalar hech narsa topmadi; bu xavfsizlik kafolati emas.",

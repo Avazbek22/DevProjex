@@ -35,7 +35,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly CancellationToken _lifetimeToken;
 
-    private HashSet<string>? _filterExpansionSnapshot;
+    private ProjectTreeExpansionSnapshot? _filterExpansionSnapshot;
     private SuspendedTextTool _suspendedTool;
     private int _filterApplyVersion;
     private int _realtimeSuppressionDepth;
@@ -384,7 +384,8 @@ internal sealed class SearchFilterInteractionController : IDisposable
         var version = 0;
         try
         {
-            if (string.IsNullOrEmpty(_getCurrentPath()))
+            var currentPath = _getCurrentPath();
+            if (string.IsNullOrEmpty(currentPath))
             {
                 _viewModel.UpdateFilterMatchSummary(0);
                 _viewModel.SetFilterInProgress(false);
@@ -394,9 +395,6 @@ internal sealed class SearchFilterInteractionController : IDisposable
             var query = _viewModel.NameFilter?.Trim();
             var hasQuery = !string.IsNullOrWhiteSpace(query);
             version = Interlocked.Increment(ref _filterApplyVersion);
-
-            if (hasQuery && _filterExpansionSnapshot is null)
-                _filterExpansionSnapshot = CaptureExpandedNodes();
 
             cancellationToken.ThrowIfCancellationRequested();
             _lifetimeToken.ThrowIfCancellationRequested();
@@ -414,7 +412,12 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
             if (!hasQuery && _filterExpansionSnapshot is not null)
             {
-                RestoreExpandedNodes(_filterExpansionSnapshot);
+                if (_viewModel.TreeNodes.Count == 1)
+                {
+                    ProjectTreeUiState.RestoreExpansion(
+                        _viewModel.TreeNodes[0],
+                        _filterExpansionSnapshot);
+                }
                 _filterExpansionSnapshot = null;
                 _resetInteractiveFilterCache();
             }
@@ -648,6 +651,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
         _suspendedTool = SuspendedTextTool.None;
         Interlocked.Increment(ref _filterApplyVersion);
         _resetInteractiveFilterCache();
+    }
+
+    public void CaptureFilterExpansionForTreeReplacement(string projectPath)
+    {
+        if (_filterExpansionSnapshot is not null)
+            return;
+
+        _filterExpansionSnapshot = ProjectTreeUiState.CaptureExpansion(
+            projectPath,
+            _viewModel.TreeNodes);
     }
 
     public IDisposable SuppressRealtimeUpdates()
@@ -959,45 +972,6 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
         Interlocked.Exchange(ref lastTimestamp, now);
         return false;
-    }
-
-    private HashSet<string> CaptureExpandedNodes()
-    {
-        var result = new HashSet<string>(PathComparer.Default);
-        TreeNodeViewModel.ForEachRealizedDescendant(_viewModel.TreeNodes, node =>
-        {
-            if (node.IsExpanded)
-                result.Add(node.FullPath);
-        });
-        return result;
-    }
-
-    private void RestoreExpandedNodes(HashSet<string> expandedPaths)
-    {
-        using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
-        {
-            var stack = new Stack<TreeNodeViewModel>();
-            for (var index = _viewModel.TreeNodes.Count - 1; index >= 0; index--)
-                stack.Push(_viewModel.TreeNodes[index]);
-
-            while (stack.Count > 0)
-            {
-                var node = stack.Pop();
-                var shouldExpand = node.Parent is null || expandedPaths.Contains(node.FullPath);
-                node.IsExpanded = shouldExpand;
-
-                // Only an expanded branch can contain another expansion state worth restoring.
-                if (!shouldExpand || !node.HasChildren)
-                    continue;
-
-                var children = node.Children;
-                for (var index = children.Count - 1; index >= 0; index--)
-                    stack.Push(children[index]);
-            }
-        }
-
-        if (_viewModel.TreeNodes.FirstOrDefault() is { } root && !root.IsExpanded)
-            root.IsExpanded = true;
     }
 
     private static TextToolState CreateToolState(

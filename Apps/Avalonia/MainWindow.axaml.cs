@@ -1223,7 +1223,8 @@ public partial class MainWindow : Window
     private async Task ReloadProjectAsync(
         CancellationToken cancellationToken = default,
         bool applyStoredProfile = false,
-        bool reuseUnchangedDiscoveryCaches = false)
+        bool reuseUnchangedDiscoveryCaches = false,
+        bool preserveTreeState = true)
     {
         if (string.IsNullOrEmpty(_currentPath)) return;
         cancellationToken.ThrowIfCancellationRequested();
@@ -1278,7 +1279,10 @@ public partial class MainWindow : Window
 			}
 		}
 
-		await _projectLoadSnapshotPipeline.ReloadAsync(_currentPath, cancellationToken);
+		await _projectLoadSnapshotPipeline.ReloadAsync(
+			_currentPath,
+			preserveTreeState,
+			cancellationToken);
 	}
 
 	private async Task<ProjectProfileLoadSnapshot> LoadProjectProfileWithRetryAsync(
@@ -1319,6 +1323,7 @@ public partial class MainWindow : Window
 
         // Clear search state first (holds references to TreeNodeViewModel)
         _searchFilterController.ClearProjectState();
+        _interactiveFilterSelectionSnapshot = null;
 
         // Clear TreeView selection and temporarily disconnect ItemsSource
         // to force Avalonia to release all TreeViewItem containers

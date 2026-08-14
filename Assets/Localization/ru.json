@@ -207,6 +207,7 @@
   "Preview.Secret.Mark.Validation.ContentOnly": "Выделите значение в содержимом файла.",
   "Error.Secret.MarkApplyFailed": "Не удалось применить пометку секрета. Обновите предпросмотр и повторите попытку.",
   "Toast.Secret.HiddenCount": "Скрыто в {0} местах",
+  "Toast.Tree.CheckedSelectionHidden": "Текущими настройками скрыто отмеченных элементов: {0}",
   "Toast.Secret.MarkRemoved": "Пометка удалена.",
   "Toast.Secret.MarkRemovedStillDetected": "Пометка удалена. Детектор по-прежнему скрывает это значение.",
   "SecretRedaction.NoFindingsNotice": "Заданные правила ничего не обнаружили; это не гарантия безопасности.",
