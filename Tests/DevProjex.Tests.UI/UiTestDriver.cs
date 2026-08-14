@@ -431,6 +431,31 @@ internal static class UiTestDriver
         await WaitForSettledFramesAsync(frameCount: 4);
     }
 
+    public static async Task PressExtendedMouseButtonAsync(
+        MainWindow window,
+        Control control,
+        MouseButton button)
+    {
+        var pressedModifier = button switch
+        {
+            MouseButton.XButton1 => RawInputModifiers.XButton1MouseButton,
+            MouseButton.XButton2 => RawInputModifiers.XButton2MouseButton,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(button),
+                button,
+                "An extended mouse button is required.")
+        };
+
+        await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, control);
+        var point = FindPointerHitPoint(window, control);
+        window.MouseMove(point, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 1);
+        window.MouseDown(point, button, pressedModifier);
+        window.MouseUp(point, button, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
     public static async Task DoubleClickAsync(MainWindow window, Control control)
     {
         var clickPoint = GetControlCenter(control, window);

@@ -146,6 +146,7 @@ public partial class MainWindow
 			_codeCompressionSession.Reset();
 
             // Unsubscribe from tunneled/bubbled events
+            RemoveHandler(PointerPressedEvent, OnWindowPointerPressedForPreviewNavigation);
             RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
             RemoveHandler(KeyDownEvent, OnKeyDown);
             RemoveHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened);
