@@ -57,6 +57,14 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 
             await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".tree-state");
             await UiTestDriver.ClickApplySettingsAsync(window);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetToastService(window).Items.Any(
+                    toast => string.Equals(
+                        toast.Message,
+                        "Checked items hidden by the current settings: 2",
+                        StringComparison.Ordinal)),
+                "exact structural selection-loss toast");
 
             var selectedPaths = UiTestDriver.GetCheckedTreePaths(window);
             Assert.Single(selectedPaths);
