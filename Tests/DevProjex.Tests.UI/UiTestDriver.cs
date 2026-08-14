@@ -8,6 +8,7 @@ using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Application.Secrets;
 using DevProjex.Kernel.Contracts;
+using DevProjex.Infrastructure.Git;
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -44,6 +45,10 @@ internal static class UiTestDriver
         Directory.CreateDirectory(appDataPath);
 
         var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		services = services with
+		{
+			RepoCacheService = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"))
+		};
         if (configureServices is not null)
             services = configureServices(services);
         var window = new MainWindow(options, services)
@@ -329,21 +334,34 @@ internal static class UiTestDriver
 
     public static async Task<GitCloneWindow> OpenGitCloneWindowAsync(MainWindow window)
     {
-        var cloneWindow = new GitCloneWindow
-        {
-            DataContext = GetViewModel(window)
-        };
-        TrackTopLevelWindow(cloneWindow);
+        var method = typeof(MainWindow).GetMethod(
+            "OnGitClone",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        await window.Dispatcher.InvokeAsync(() =>
+            method!.Invoke(window, [window, new RoutedEventArgs()]));
 
-        cloneWindow.Show(window);
+        GitCloneWindow? cloneWindow = null;
+        await WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var field = typeof(MainWindow).GetField(
+                    "_gitCloneWindow",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                cloneWindow = field?.GetValue(window) as GitCloneWindow;
+                return cloneWindow is not null;
+            },
+            "git clone window to be created");
+        TrackTopLevelWindow(cloneWindow!);
 
         await WaitForConditionAsync(
             window,
-            () => cloneWindow.IsVisible,
+            () => cloneWindow!.IsVisible,
             "git clone window to open");
 
         await WaitForSettledFramesAsync(frameCount: 4);
-        return cloneWindow;
+        return cloneWindow!;
     }
 
     public static Button GetRequiredApplySettingsButton(MainWindow window)
@@ -370,29 +388,43 @@ internal static class UiTestDriver
 
     public static async Task ClickAsync(MainWindow window, Control control)
     {
+        var inputRoot = TopLevel.GetTopLevel(control) ?? window;
         await EnsureControlVisibleAsync(window, control);
-        await WaitForControlReadyForPointerAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, inputRoot, control);
 
-        await ClickReadyControlAsync(window, control);
+        await ClickReadyControlAsync(inputRoot, control);
     }
 
     public static async Task OpenToolTipThroughClickAsync(MainWindow window, Control control)
     {
+        var inputRoot = TopLevel.GetTopLevel(control) ?? window;
         await EnsureControlVisibleAsync(window, control);
-        await WaitForControlReadyForPointerAsync(window, control);
-        var clickPoint = FindPointerHitPoint(window, control);
+        await WaitForControlReadyForPointerAsync(window, inputRoot, control);
+        var clickPoint = FindPointerHitPoint(inputRoot, control);
 
-        window.MouseMove(clickPoint, RawInputModifiers.None);
+        inputRoot.MouseMove(clickPoint, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 2);
-        window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
-        window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        inputRoot.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        inputRoot.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
         await WaitForConditionAsync(
             window,
             () => ToolTip.GetIsOpen(control),
             $"the tooltip for '{GetControlDebugName(control)}' to open through pointer input");
     }
 
-    private static Point FindPointerHitPoint(MainWindow window, Control control)
+    public static async Task OpenToolTipThroughPointerAsync(MainWindow window, Control control)
+    {
+        var inputRoot = TopLevel.GetTopLevel(control) ?? window;
+        await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, inputRoot, control);
+        inputRoot.MouseMove(FindPointerHitPoint(inputRoot, control), RawInputModifiers.None);
+        await WaitForConditionAsync(
+            window,
+            () => ToolTip.GetIsOpen(control),
+            $"the tooltip for '{GetControlDebugName(control)}' to open through pointer hover");
+    }
+
+    private static Point FindPointerHitPoint(TopLevel inputRoot, Control control)
     {
         ReadOnlySpan<double> relativeCoordinates = [0.5, 0.25, 0.75, 0.125, 0.875];
         foreach (var relativeY in relativeCoordinates)
@@ -401,11 +433,11 @@ internal static class UiTestDriver
             {
                 var point = control.TranslatePoint(
                     new Point(control.Bounds.Width * relativeX, control.Bounds.Height * relativeY),
-                    window);
+                    inputRoot);
                 if (point is not { } candidate)
                     continue;
 
-                var hit = window.InputHitTest(candidate);
+                var hit = inputRoot.InputHitTest(candidate);
                 if (hit is Visual visual &&
                     (ReferenceEquals(visual, control) || visual.GetVisualAncestors().Contains(control)))
                 {
@@ -414,20 +446,20 @@ internal static class UiTestDriver
             }
         }
 
-        var center = GetControlCenter(control, window);
-        var centerHit = window.InputHitTest(center);
+        var center = GetControlCenter(control, inputRoot);
+        var centerHit = inputRoot.InputHitTest(center);
         throw new XunitException(
             $"No pointer-hit location was found for '{GetControlDebugName(control)}'. " +
             $"Center hit: '{centerHit?.GetType().FullName ?? "none"}'.");
     }
 
-    private static async Task ClickReadyControlAsync(MainWindow window, Control control)
+    private static async Task ClickReadyControlAsync(TopLevel inputRoot, Control control)
     {
-        var clickPoint = GetControlCenter(control, window);
-        window.MouseMove(clickPoint, RawInputModifiers.None);
+        var clickPoint = GetControlCenter(control, inputRoot);
+        inputRoot.MouseMove(clickPoint, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 2);
-        window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
-        window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        inputRoot.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        inputRoot.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 4);
     }
 
@@ -494,7 +526,7 @@ internal static class UiTestDriver
         await WaitForSettledFramesAsync(frameCount: 12);
     }
 
-    public static async Task PressKeyAsync(MainWindow window, Key key, RawInputModifiers modifiers = RawInputModifiers.None)
+    public static async Task PressKeyAsync(TopLevel inputRoot, Key key, RawInputModifiers modifiers = RawInputModifiers.None)
     {
         var physicalKey = key switch
         {
@@ -502,22 +534,26 @@ internal static class UiTestDriver
             Key.B => PhysicalKey.B,
             Key.P => PhysicalKey.P,
             Key.N => PhysicalKey.N,
+			Key.Enter => PhysicalKey.Enter,
+			Key.Down => PhysicalKey.ArrowDown,
+			Key.Up => PhysicalKey.ArrowUp,
             Key.Escape => PhysicalKey.Escape,
             Key.Space => PhysicalKey.Space,
             Key.D0 => PhysicalKey.Digit0,
             _ => PhysicalKey.None
         };
         var keySymbol = physicalKey.ToQwertyKeySymbol(modifiers.HasFlag(RawInputModifiers.Shift));
-        window.KeyPress(key, modifiers, physicalKey, keySymbol);
+        inputRoot.KeyPress(key, modifiers, physicalKey, keySymbol);
         await WaitForSettledFramesAsync(frameCount: 1);
-        window.KeyRelease(key, modifiers, physicalKey, keySymbol);
+        inputRoot.KeyRelease(key, modifiers, physicalKey, keySymbol);
         await WaitForSettledFramesAsync(frameCount: 3);
     }
 
     public static async Task EnterTextAsync(MainWindow window, TextBox textBox, string text)
     {
         await ClickAsync(window, textBox);
-        window.KeyTextInput(text);
+		var inputRoot = TopLevel.GetTopLevel(textBox) ?? window;
+		inputRoot.KeyTextInput(text);
         await WaitForSettledFramesAsync(frameCount: 4);
     }
 
@@ -1627,10 +1663,16 @@ internal static class UiTestDriver
     }
 
     private static async Task WaitForControlReadyForPointerAsync(MainWindow window, Control control)
+        => await WaitForControlReadyForPointerAsync(window, window, control);
+
+    private static async Task WaitForControlReadyForPointerAsync(
+        MainWindow window,
+        TopLevel inputRoot,
+        Control control)
     {
         await WaitForConditionAsync(
             window,
-            () => IsControlReadyForPointer(control, window),
+            () => IsControlReadyForPointer(control, inputRoot),
             $"control '{GetControlDebugName(control)}' to be ready for pointer input");
     }
 
@@ -1673,11 +1715,11 @@ internal static class UiTestDriver
             $"Timed out waiting for {description} to stay ready for pointer input.{lastFailureText} Current state: {DescribeState(window)}");
     }
 
-    private static bool IsControlReadyForPointer(Control control, MainWindow window)
+    private static bool IsControlReadyForPointer(Control control, TopLevel inputRoot)
         => control.IsVisible
            && control.Bounds.Width > 0.5
            && control.Bounds.Height > 0.5
-           && control.TranslatePoint(default, window).HasValue;
+           && control.TranslatePoint(default, inputRoot).HasValue;
 
     private static string GetControlDebugName(Control control)
         => string.IsNullOrWhiteSpace(control.Name) ? control.GetType().Name : control.Name!;

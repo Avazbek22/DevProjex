@@ -6,8 +6,12 @@ public partial class GitCloneWindow : Window
 {
     public event EventHandler<RoutedEventArgs>? StartCloneRequested;
     public event EventHandler<RoutedEventArgs>? CancelRequested;
+	internal event EventHandler<RepositoryCacheEntryEventArgs>? OpenCachedRepositoryRequested;
+	internal event EventHandler<RepositoryCacheEntryEventArgs>? DeleteCachedRepositoryRequested;
     private readonly TextBox? _urlTextBox;
     private readonly ComboBox? _recentRepositoriesComboBox;
+	private readonly ComboBox? _localCacheComboBox;
+	private bool _updatingUrlFromRecentSelection;
 
     public GitCloneWindow()
     {
@@ -20,9 +24,13 @@ public partial class GitCloneWindow : Window
         AvaloniaXamlLoader.Load(this);
         _urlTextBox = this.FindControl<TextBox>("UrlTextBox");
         _recentRepositoriesComboBox = this.FindControl<ComboBox>("RecentRepositoriesComboBox");
+		_localCacheComboBox = this.FindControl<ComboBox>("LocalCacheComboBox");
 
         if (_recentRepositoriesComboBox is not null)
             _recentRepositoriesComboBox.DropDownOpened += OnRecentRepositoriesDropDownOpened;
+		if (_localCacheComboBox is not null)
+			_localCacheComboBox.DropDownOpened += OnRecentRepositoriesDropDownOpened;
+		AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
 
         Closed += OnClosed;
 
@@ -43,13 +51,16 @@ public partial class GitCloneWindow : Window
     {
         if (_recentRepositoriesComboBox is not null)
             _recentRepositoriesComboBox.DropDownOpened -= OnRecentRepositoriesDropDownOpened;
+		if (_localCacheComboBox is not null)
+			_localCacheComboBox.DropDownOpened -= OnRecentRepositoriesDropDownOpened;
+		RemoveHandler(KeyDownEvent, OnWindowKeyDown);
 
         Closed -= OnClosed;
     }
 
     private void OnStartClone(object? sender, RoutedEventArgs e)
     {
-        StartCloneRequested?.Invoke(this, e);
+		ConfirmSelection(e);
     }
 
     private void OnCancel(object? sender, RoutedEventArgs e)
@@ -57,11 +68,11 @@ public partial class GitCloneWindow : Window
         CancelRequested?.Invoke(this, e);
     }
 
-    private void OnUrlKeyDown(object? sender, KeyEventArgs e)
+    private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
         {
-            StartCloneRequested?.Invoke(this, new RoutedEventArgs());
+			ConfirmSelection(new RoutedEventArgs());
             e.Handled = true;
         }
         else if (e.Key == Key.Escape)
@@ -71,6 +82,12 @@ public partial class GitCloneWindow : Window
         }
     }
 
+	private void OnUrlTextChanged(object? sender, TextChangedEventArgs e)
+	{
+		if (!_updatingUrlFromRecentSelection)
+			ClearLocalCacheSelection();
+	}
+
     private void OnRecentRepositorySelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (sender is not ComboBox { SelectedItem: RecentProjectEntryViewModel recent })
@@ -79,13 +96,68 @@ public partial class GitCloneWindow : Window
         if (DataContext is not MainWindowViewModel viewModel)
             return;
 
-        viewModel.GitCloneUrl = recent.Value;
+		ClearLocalCacheSelection();
+		_updatingUrlFromRecentSelection = true;
+		try
+		{
+			viewModel.GitCloneUrl = recent.Value;
+			if (_urlTextBox is not null && !string.Equals(_urlTextBox.Text, recent.Value, StringComparison.Ordinal))
+				_urlTextBox.Text = recent.Value;
+		}
+		finally
+		{
+			_updatingUrlFromRecentSelection = false;
+		}
         Dispatcher.Post(() =>
         {
             _urlTextBox?.Focus();
             _urlTextBox?.SelectAll();
         }, DispatcherPriority.Input);
     }
+
+	private void OnLocalCacheSelectionChanged(object? sender, SelectionChangedEventArgs e)
+	{
+		if (sender is not ComboBox comboBox || DataContext is not MainWindowViewModel viewModel)
+			return;
+		viewModel.SelectedGitCloneCacheEntry = comboBox.SelectedItem as RepositoryCacheEntryViewModel;
+	}
+
+	private void OnDeleteLocalCacheEntry(object? sender, RoutedEventArgs e)
+	{
+		if (sender is Button { Tag: RepositoryCacheEntryViewModel entry } && entry.CanDelete)
+		{
+			if (_localCacheComboBox?.SelectedItem is RepositoryCacheEntryViewModel selected &&
+			    PathComparer.Default.Equals(selected.LocalPath, entry.LocalPath))
+			{
+				ClearLocalCacheSelection();
+			}
+			DeleteCachedRepositoryRequested?.Invoke(this, new RepositoryCacheEntryEventArgs(entry));
+		}
+		e.Handled = true;
+	}
+
+	private void ConfirmSelection(RoutedEventArgs e)
+	{
+		if (DataContext is not MainWindowViewModel { CanStartGitClone: true })
+		{
+			e.Handled = true;
+			return;
+		}
+
+		if (_localCacheComboBox?.SelectedItem is RepositoryCacheEntryViewModel entry)
+			OpenCachedRepositoryRequested?.Invoke(this, new RepositoryCacheEntryEventArgs(entry));
+		else
+			StartCloneRequested?.Invoke(this, e);
+		e.Handled = true;
+	}
+
+	private void ClearLocalCacheSelection()
+	{
+		if (_localCacheComboBox is not null)
+			_localCacheComboBox.SelectedItem = null;
+		if (DataContext is MainWindowViewModel viewModel)
+			viewModel.SelectedGitCloneCacheEntry = null;
+	}
 
     private void OnRecentRepositoriesDropDownOpened(object? sender, EventArgs e)
     {
@@ -109,4 +181,9 @@ public partial class GitCloneWindow : Window
                 PopupBackdropTransparencyFallback.Transparent);
         }, DispatcherPriority.Loaded);
     }
+}
+
+internal sealed class RepositoryCacheEntryEventArgs(RepositoryCacheEntryViewModel entry) : EventArgs
+{
+	public RepositoryCacheEntryViewModel Entry { get; } = entry;
 }

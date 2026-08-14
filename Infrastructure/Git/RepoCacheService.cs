@@ -230,6 +230,76 @@ public sealed class RepoCacheService : IRepoCacheService
 		return matchingEntry;
 	}
 
+	public IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories()
+	{
+		var latestByIdentity = new Dictionary<string, RepositoryCacheIndexEntry>(
+			StringComparer.OrdinalIgnoreCase);
+		foreach (var searchRoot in CacheSearchRootPaths)
+		{
+			var fileSet = GetIndexFileSet(searchRoot);
+			if (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath))
+				continue;
+			if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+				continue;
+
+			using (heldLock)
+			{
+				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+					continue;
+
+				var document = LoadIndex(fileSet);
+				List<RepositoryCacheIndexEntry>? retained = null;
+				for (var index = 0; index < document.Entries.Count; index++)
+				{
+					var entry = document.Entries[index];
+					if (!Directory.Exists(entry.LocalPath))
+					{
+						if (retained is null)
+						{
+							retained = new List<RepositoryCacheIndexEntry>(document.Entries.Count - 1);
+							for (var retainedIndex = 0; retainedIndex < index; retainedIndex++)
+								retained.Add(document.Entries[retainedIndex]);
+						}
+						continue;
+					}
+					retained?.Add(entry);
+					if (entry.State != RepositoryCacheEntryState.Ready)
+						continue;
+					if (!latestByIdentity.TryGetValue(entry.Identity, out var previous) ||
+					    entry.LastOpenedUtc > previous.LastOpenedUtc)
+					{
+						latestByIdentity[entry.Identity] = entry;
+					}
+				}
+
+				if (retained is not null)
+					WriteIndex(fileSet, retained);
+			}
+		}
+
+		var catalog = new List<RepositoryCacheCatalogEntry>(latestByIdentity.Count);
+		foreach (var entry in latestByIdentity.Values)
+		{
+			catalog.Add(new RepositoryCacheCatalogEntry(
+				RepositoryUrlUtility.ToSafeDisplay(entry.RepositoryUrl),
+				RepositoryUrlUtility.GetRepositoryName(entry.RepositoryUrl),
+				entry.Branch,
+				entry.LastOpenedUtc,
+				Math.Max(0, entry.ApproximateSizeBytes),
+				ResolveContentKind(entry),
+				entry.LocalPath));
+		}
+
+		catalog.Sort(static (left, right) =>
+		{
+			var byLastOpened = right.LastOpenedUtc.CompareTo(left.LastOpenedUtc);
+			return byLastOpened != 0
+				? byLastOpened
+				: StringComparer.OrdinalIgnoreCase.Compare(left.RepositoryUrl, right.RepositoryUrl);
+		});
+		return catalog.ToArray();
+	}
+
 	public async Task<IRepositoryCacheSession?> TryAcquireRepositorySessionAsync(
 		string repositoryUrl,
 		string? branch = null,
@@ -266,9 +336,20 @@ public sealed class RepoCacheService : IRepoCacheService
 			return null;
 		}
 
-		var entry = FindIndexedRepositoryByPath(normalizedPath);
+		var entry = FindIndexedRepositoryByPathAcrossRoots(normalizedPath);
 		if (entry is null)
 			return null;
+		if (!PathUtility.IsPathInside(entry.LocalPath, CacheRootPath))
+		{
+			RecordIndexedRepositoryCore(
+				entry.RepositoryUrl,
+				entry.LocalPath,
+				entry.Branch,
+				entry.CommitHash,
+				entry.State,
+				entry.ApproximateSizeBytes,
+				entry.ContentKind);
+		}
 
 		var session = await TryAcquireSessionCoreAsync(
 			entry.Identity,
@@ -325,15 +406,16 @@ public sealed class RepoCacheService : IRepoCacheService
 			return;
 		}
 
+		var owningCacheRoot = GetOwningCacheRoot(normalizedPath);
 		if (PathUtility.IsPathInside(
 			normalizedPath,
-			Path.Combine(CacheRootPath, RepositoryCacheLayout.StagingDirectoryName)))
+			Path.Combine(owningCacheRoot, RepositoryCacheLayout.StagingDirectoryName)))
 		{
 			MoveToTrashAndClean(normalizedPath);
 			return;
 		}
 
-		var fileSet = GetIndexFileSet();
+		var fileSet = GetIndexFileSet(owningCacheRoot);
 		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
 			return;
 
@@ -383,10 +465,16 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	public void ClearAllCache()
 	{
-		if (!Directory.Exists(CacheRootPath))
+		foreach (var cacheRoot in CacheSearchRootPaths)
+			ClearCacheRoot(cacheRoot);
+	}
+
+	private void ClearCacheRoot(string cacheRoot)
+	{
+		if (!Directory.Exists(cacheRoot))
 			return;
 
-		var fileSet = GetIndexFileSet();
+		var fileSet = GetIndexFileSet(cacheRoot);
 		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
 			return;
 
@@ -413,7 +501,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			var indexedContainers = document.Entries
 				.Select(entry => RepositoryCacheLayout.GetContainer(entry.LocalPath))
 				.ToHashSet(PathComparer.Default);
-			foreach (var directory in EnumerateRepositoryRootDirectories())
+			foreach (var directory in EnumerateRepositoryRootDirectories(cacheRoot))
 			{
 				if (indexedContainers.Contains(directory))
 					continue;
@@ -431,8 +519,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		foreach (var trashPath in trashPaths)
 			MoveToTrashAndClean(trashPath);
-		CleanupUnindexedRepositories();
-		CleanupTrash();
+		CleanupUnindexedRepositories(cacheRoot);
+		CleanupTrash(cacheRoot);
 	}
 
 	public void CleanupStaleCacheOnStartup()
@@ -560,7 +648,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 			var document = LoadIndex(fileSet);
 			var entries = document.Entries
-				.Where(entry => !PathsBelongToSameRepository(entry.LocalPath, normalizedPath))
+				.Where(entry => !ArePathsInSameRepository(entry.LocalPath, normalizedPath))
 				.ToList();
 			if (entries.Count != document.Entries.Count)
 				WriteIndex(fileSet, entries);
@@ -866,7 +954,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			var entries = document.Entries
 				.Where(candidate =>
 					!string.Equals(candidate.Identity, identity, StringComparison.OrdinalIgnoreCase) &&
-					!PathsBelongToSameRepository(candidate.LocalPath, normalizedPath))
+					!ArePathsInSameRepository(candidate.LocalPath, normalizedPath))
 				.ToList();
 			entries.Add(entry);
 			WriteIndex(fileSet, entries);
@@ -962,6 +1050,31 @@ public sealed class RepoCacheService : IRepoCacheService
 			return FindByPath(LoadIndex(fileSet), path);
 	}
 
+	private RepositoryCacheIndexEntry? FindIndexedRepositoryByPathAcrossRoots(string path)
+	{
+		RepositoryCacheIndexEntry? matchingEntry = null;
+		foreach (var searchRoot in CacheSearchRootPaths)
+		{
+			var fileSet = GetIndexFileSet(searchRoot);
+			if (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath))
+				continue;
+			if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+				continue;
+
+			using (heldLock)
+			{
+				var candidate = FindByPath(LoadIndex(fileSet), path);
+				if (candidate is not null &&
+				    (matchingEntry is null || candidate.LastOpenedUtc > matchingEntry.LastOpenedUtc))
+				{
+					matchingEntry = candidate;
+				}
+			}
+		}
+
+		return matchingEntry;
+	}
+
 	private static RepositoryCacheIndexEntry? FindByIdentity(
 		RepositoryCacheIndexDocument document,
 		string identity) =>
@@ -973,9 +1086,12 @@ public sealed class RepoCacheService : IRepoCacheService
 	private static RepositoryCacheIndexEntry? FindByPath(
 		RepositoryCacheIndexDocument document,
 		string path) =>
-		document.Entries.FirstOrDefault(entry => PathsBelongToSameRepository(entry.LocalPath, path));
+		document.Entries.FirstOrDefault(entry => ArePathsInSameRepository(entry.LocalPath, path));
 
-	private static bool PathsBelongToSameRepository(string left, string right)
+	public bool PathsBelongToSameRepository(string left, string right) =>
+		ArePathsInSameRepository(left, right);
+
+	private static bool ArePathsInSameRepository(string left, string right)
 	{
 		try
 		{
@@ -1114,8 +1230,11 @@ public sealed class RepoCacheService : IRepoCacheService
 	}
 
 	private void CleanupUnindexedRepositories()
+		=> CleanupUnindexedRepositories(CacheRootPath);
+
+	private void CleanupUnindexedRepositories(string cacheRoot)
 	{
-		var fileSet = GetIndexFileSet();
+		var fileSet = GetIndexFileSet(cacheRoot);
 		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
 			return;
 
@@ -1125,7 +1244,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			var indexedContainers = LoadIndex(fileSet).Entries
 				.Select(entry => RepositoryCacheLayout.GetContainer(entry.LocalPath))
 				.ToHashSet(PathComparer.Default);
-			foreach (var directory in EnumerateRepositoryRootDirectories())
+			foreach (var directory in EnumerateRepositoryRootDirectories(cacheRoot))
 			{
 				if (indexedContainers.Contains(directory))
 					continue;
@@ -1187,15 +1306,15 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 	}
 
-	private IEnumerable<string> EnumerateRepositoryRootDirectories()
+	private static IEnumerable<string> EnumerateRepositoryRootDirectories(string cacheRoot)
 	{
-		if (!Directory.Exists(CacheRootPath))
+		if (!Directory.Exists(cacheRoot))
 			yield break;
 
 		IEnumerable<string> directories;
 		try
 		{
-			directories = Directory.EnumerateDirectories(CacheRootPath).ToArray();
+			directories = Directory.EnumerateDirectories(cacheRoot).ToArray();
 		}
 		catch
 		{

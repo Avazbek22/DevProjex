@@ -696,9 +696,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// 2. Check for common names (main, master)
     /// 3. Fall back to current branch
     /// </summary>
-    private async Task<string?> GetDefaultBranchAsync(
+    public async Task<string?> GetDefaultBranchAsync(
         string repositoryPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken = default)
     {
         // METHOD 1: Try to get default branch from remote HEAD symbolic ref
         var result = await RunGitCommandAsync(
@@ -708,26 +708,56 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
         if (result.ExitCode == 0)
         {
-            var refPath = result.Output.Trim();
-            // Extract branch name from "refs/remotes/origin/main"
-            var parts = refPath.Split('/');
-            if (parts.Length > 0)
-                return parts[^1];
+            var remoteHeadBranch = ResolveRemoteHeadBranch(result.Output);
+            if (remoteHeadBranch is not null)
+                return remoteHeadBranch;
         }
 
         // METHOD 2: Check for common default branch names
         var branchResult = await RunGitCommandAsync(repositoryPath, "branch -r", cancellationToken);
         if (branchResult.ExitCode == 0)
         {
-            var branches = branchResult.Output;
-            if (branches.Contains("origin/main"))
-                return "main";
-            if (branches.Contains("origin/master"))
-                return "master";
+            var commonDefault = ResolveCommonDefaultBranch(branchResult.Output);
+            if (commonDefault is not null)
+                return commonDefault;
         }
 
         // METHOD 3: Fall back to whatever branch we're currently on
         return await GetCurrentBranchAsync(repositoryPath, cancellationToken);
+    }
+
+    internal static string? ResolveRemoteHeadBranch(string symbolicReference)
+    {
+        const string RemoteHeadPrefix = "refs/remotes/origin/";
+        var reference = symbolicReference.Trim();
+        if (!reference.StartsWith(RemoteHeadPrefix, StringComparison.Ordinal) ||
+            reference.Length == RemoteHeadPrefix.Length)
+        {
+            return null;
+        }
+
+        return reference[RemoteHeadPrefix.Length..];
+    }
+
+    internal static string? ResolveCommonDefaultBranch(string remoteBranches)
+    {
+        var hasMaster = false;
+        foreach (var rawLine in remoteBranches.AsSpan().EnumerateLines())
+        {
+            var line = rawLine.Trim();
+            if (line.StartsWith("* ", StringComparison.Ordinal))
+                line = line[2..].TrimStart();
+            if (line.Equals("origin/main", StringComparison.Ordinal) ||
+                line.EndsWith("-> origin/main", StringComparison.Ordinal))
+            {
+                return "main";
+            }
+
+            hasMaster |= line.Equals("origin/master", StringComparison.Ordinal) ||
+                         line.EndsWith("-> origin/master", StringComparison.Ordinal);
+        }
+
+        return hasMaster ? "master" : null;
     }
 
     /// <summary>

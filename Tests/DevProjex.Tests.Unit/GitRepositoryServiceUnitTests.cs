@@ -95,11 +95,36 @@ public class GitRepositoryServiceUnitTests
     [Fact]
     public void GetDefaultBranchAsync_UsesCommonDefaults()
     {
-        // Test that common default branch names are recognized
-        // This is a structural test - actual implementation uses git commands
-        var commonDefaults = new[] { "main", "master", "develop" };
+        Assert.Equal(
+            "release/v1",
+            GitRepositoryService.ResolveRemoteHeadBranch("refs/remotes/origin/release/v1\n"));
+        Assert.Equal(
+            "main",
+            GitRepositoryService.ResolveCommonDefaultBranch("  origin/master\n  origin/main\n"));
+        Assert.Equal(
+            "master",
+            GitRepositoryService.ResolveCommonDefaultBranch("  origin/master\n"));
+        Assert.Equal(
+            "main",
+            GitRepositoryService.ResolveCommonDefaultBranch("  origin/HEAD -> origin/main\n"));
+    }
 
-        Assert.All(commonDefaults, name => Assert.NotEmpty(name));
+    [Theory]
+    [InlineData("origin/mainline")]
+    [InlineData("origin/masterpiece")]
+    [InlineData("origin/user/main")]
+    public void GetDefaultBranchAsync_DoesNotMatchBranchNameSubstrings(string remoteBranch)
+    {
+        Assert.Null(GitRepositoryService.ResolveCommonDefaultBranch(remoteBranch));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("refs/remotes/upstream/main")]
+    [InlineData("refs/remotes/origin/")]
+    public void GetDefaultBranchAsync_RejectsMalformedRemoteHead(string symbolicReference)
+    {
+        Assert.Null(GitRepositoryService.ResolveRemoteHeadBranch(symbolicReference));
     }
 
     #endregion

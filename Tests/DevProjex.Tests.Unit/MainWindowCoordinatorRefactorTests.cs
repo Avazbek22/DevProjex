@@ -350,26 +350,25 @@ public sealed class MainWindowCoordinatorRefactorTests
             ProjectLoadHostCall.YieldProjectLoadStartupFrame,
             ProjectLoadHostCall.ReloadProject,
             ProjectLoadHostCall.RecordRecentFolder,
-            ProjectLoadHostCall.DeleteRepositoryDirectory,
-            ProjectLoadHostCall.ClearCurrentCachedRepoPath,
+            ProjectLoadHostCall.ReleaseCurrentRepositorySession,
             ProjectLoadHostCall.ClearProjectLoadCancellation,
             ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup
         ], host.Calls);
     }
 
     [Fact]
-    public async Task ProjectLoadPipeline_AwaitsRepositoryCleanupBeforeReleasingCachedIdentity()
+    public async Task ProjectLoadPipeline_ReleasesCachedSessionOnlyAfterSuccessfulReload()
     {
         var viewModel = CreateViewModel();
-        var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reloadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseReload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var host = new RecordingProjectLoadHost(viewModel)
         {
             CurrentCachedRepoPathValue = @"C:\Cache\Repo",
-            DeleteRepositoryDirectoryHandler = async token =>
+            ReloadHandler = async token =>
             {
-                cleanupStarted.SetResult();
-                await releaseCleanup.Task.WaitAsync(token);
+                reloadStarted.SetResult();
+                await releaseReload.Task.WaitAsync(token);
             }
         };
         var status = new StatusOperationCoordinator(
@@ -382,15 +381,17 @@ public sealed class MainWindowCoordinatorRefactorTests
             @"C:\Project",
             fromDialog: true,
             recordRecentFolder: false);
-        await cleanupStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+        await reloadStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
 
         Assert.False(loadTask.IsCompleted);
         Assert.Equal(@"C:\Cache\Repo", host.CurrentCachedRepoPath);
+        Assert.DoesNotContain(ProjectLoadHostCall.ReleaseCurrentRepositorySession, host.Calls);
 
-        releaseCleanup.SetResult();
+        releaseReload.SetResult();
         await loadTask;
 
         Assert.Null(host.CurrentCachedRepoPath);
+        Assert.Equal(1, host.Calls.Count(call => call == ProjectLoadHostCall.ReleaseCurrentRepositorySession));
     }
 
     [Fact]
@@ -436,7 +437,10 @@ public sealed class MainWindowCoordinatorRefactorTests
     public async Task ProjectLoadPipeline_OpenFolderAsync_CancellationAppliesFallbackWithoutSuccessSideEffects()
     {
         var viewModel = CreateViewModel();
-        var host = new RecordingProjectLoadHost(viewModel);
+        var host = new RecordingProjectLoadHost(viewModel)
+        {
+            CurrentCachedRepoPathValue = @"C:\Cache\Repo"
+        };
         var status = new StatusOperationCoordinator(
             viewModel,
             isBackgroundMetricsActive: () => false,
@@ -450,12 +454,14 @@ public sealed class MainWindowCoordinatorRefactorTests
         };
         pipeline = new ProjectLoadPipeline(host, status);
 
-        await pipeline.OpenFolderAsync(@"C:\Canceled", fromDialog: false, recordRecentFolder: true);
+        await pipeline.OpenFolderAsync(@"C:\Canceled", fromDialog: true, recordRecentFolder: true);
         pipeline.Dispose();
 
         Assert.Contains(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
         Assert.Contains(ProjectLoadHostCall.ShowLoadCanceledToast, host.Calls);
         Assert.DoesNotContain(ProjectLoadHostCall.RecordRecentFolder, host.Calls);
+        Assert.DoesNotContain(ProjectLoadHostCall.ReleaseCurrentRepositorySession, host.Calls);
+        Assert.Equal(@"C:\Cache\Repo", host.CurrentCachedRepoPath);
         Assert.DoesNotContain(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
         Assert.False(viewModel.StatusBusy);
     }
@@ -1581,7 +1587,6 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public Func<CancellationToken, Task>? RecordRecentFolderHandler { get; set; }
 
-        public Func<CancellationToken, Task>? DeleteRepositoryDirectoryHandler { get; set; }
 
         public void CaptureProjectLoadCancellationSnapshot() =>
             Calls.Add(ProjectLoadHostCall.CaptureCancellationSnapshot);
@@ -1640,19 +1645,10 @@ public sealed class MainWindowCoordinatorRefactorTests
                 await RecordRecentFolderHandler(cancellationToken);
         }
 
-        public async Task DeleteRepositoryDirectoryAsync(string path, CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            _ = path;
-            Calls.Add(ProjectLoadHostCall.DeleteRepositoryDirectory);
-            if (DeleteRepositoryDirectoryHandler is not null)
-                await DeleteRepositoryDirectoryHandler(cancellationToken);
-        }
-
-        public void ClearCurrentCachedRepoPath()
+        public void ReleaseCurrentRepositorySession()
         {
             CurrentCachedRepoPathValue = null;
-            Calls.Add(ProjectLoadHostCall.ClearCurrentCachedRepoPath);
+            Calls.Add(ProjectLoadHostCall.ReleaseCurrentRepositorySession);
         }
 
         public void ClearProjectLoadCancellation() =>
@@ -1686,8 +1682,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         UpdateTitle,
         ReloadProject,
         RecordRecentFolder,
-        DeleteRepositoryDirectory,
-        ClearCurrentCachedRepoPath,
+        ReleaseCurrentRepositorySession,
         ClearProjectLoadCancellation,
         ApplyCancellationFallback,
         ScheduleInitialProjectLoadCleanup,

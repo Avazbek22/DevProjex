@@ -136,11 +136,41 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 		service.DeleteRepositoryDirectory(basePath);
 		Assert.True(Directory.Exists(basePath));
 		Assert.NotNull(service.FindIndexedRepository(RepositoryUrl));
+		Assert.Single(service.ListIndexedRepositories());
 
 		session.Dispose();
 		service.DeleteRepositoryDirectory(basePath);
 		Assert.False(Directory.Exists(basePath));
 		Assert.Null(service.FindIndexedRepository(RepositoryUrl));
+		Assert.Empty(service.ListIndexedRepositories());
+	}
+
+	[Fact]
+	public async Task ClearAllCache_PreservesPinnedRepositoryAndRemovesUnpinnedEntries()
+	{
+		var service = CreateService(new FakeWorktreeManager(supported: true));
+		var pinnedUrl = "https://github.com/example/pinned.zip";
+		var removableUrl = "https://github.com/example/removable.zip";
+		var pinnedPath = Publish(service, pinnedUrl, RepositoryCacheContentKind.Zip, "pinned");
+		var removablePath = Publish(service, removableUrl, RepositoryCacheContentKind.Zip, "remove");
+		var pinned = await service.TryAcquireRepositorySessionAsync(
+			pinnedUrl,
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.NotNull(pinned);
+
+		service.ClearAllCache();
+
+		var retained = Assert.Single(service.ListIndexedRepositories());
+		Assert.Equal(pinnedUrl, retained.RepositoryUrl);
+		Assert.True(Directory.Exists(pinnedPath));
+		Assert.False(Directory.Exists(removablePath));
+		using (JsonDocument.Parse(File.ReadAllBytes(Path.Combine(_cacheRoot, "cache-index.json"))))
+		{
+		}
+
+		pinned.Dispose();
+		service.ClearAllCache();
+		Assert.Empty(service.ListIndexedRepositories());
 	}
 
 	[Fact]
@@ -180,6 +210,40 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 		Assert.NotNull(session);
 		Assert.True(Directory.Exists(session.RepositoryPath));
 		Assert.NotNull(service.FindIndexedRepository(RepositoryUrl));
+	}
+
+	[Fact]
+	public async Task CatalogListingAndGarbageCollection_RaceKeepsIndexConsistent()
+	{
+		var policy = new RepositoryCachePolicy(1, TimeSpan.FromDays(60));
+		var service = CreateService(new FakeWorktreeManager(supported: true), policy);
+		var otherProcess = CreateService(new FakeWorktreeManager(supported: true), policy);
+		var pinnedUrl = "https://github.com/example/catalog-pinned.zip";
+		var removableUrl = "https://github.com/example/catalog-removable.zip";
+		var pinnedPath = Publish(service, pinnedUrl, RepositoryCacheContentKind.Zip, "pinned");
+		using var pinned = await service.TryAcquireRepositorySessionAsync(
+			pinnedUrl,
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.NotNull(pinned);
+		Publish(service, removableUrl, RepositoryCacheContentKind.Zip, "removable");
+
+		var operations = new List<Task>(16);
+		for (var iteration = 0; iteration < 8; iteration++)
+		{
+			operations.Add(Task.Run(
+				() => service.ListIndexedRepositories(),
+				TestContext.Current.CancellationToken));
+			operations.Add(Task.Run(
+				otherProcess.CollectGarbage,
+				TestContext.Current.CancellationToken));
+		}
+		await Task.WhenAll(operations);
+
+		var retained = Assert.Single(service.ListIndexedRepositories());
+		Assert.Equal(pinnedUrl, retained.RepositoryUrl);
+		Assert.True(Directory.Exists(pinnedPath));
+		using var index = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(_cacheRoot, "cache-index.json")));
+		Assert.Equal(2, index.RootElement.GetProperty("schemaVersion").GetInt32());
 	}
 
 	[Fact]

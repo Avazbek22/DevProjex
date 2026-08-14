@@ -17,7 +17,8 @@ internal sealed class ProjectLoadPipeline(
         host.CancelPreviewRefresh();
 
         var hadLoadedProjectBefore = host.ViewModel.IsProjectLoaded;
-        var cachedRepoPathToDeleteOnSuccess = fromDialog ? host.CurrentCachedRepoPath : null;
+        var releaseCachedRepositoryOnSuccess =
+            fromDialog && !string.IsNullOrWhiteSpace(host.CurrentCachedRepoPath);
         var projectLoadCts = ReplaceCancellationSource(ref _activeLoadCts);
         var cancellationToken = projectLoadCts.Token;
 
@@ -46,11 +47,8 @@ internal sealed class ProjectLoadPipeline(
             if (recordRecentFolder)
                 await host.RecordRecentFolderAsync(path, cancellationToken);
 
-            if (fromDialog && !string.IsNullOrWhiteSpace(cachedRepoPathToDeleteOnSuccess))
-            {
-                await host.DeleteRepositoryDirectoryAsync(cachedRepoPathToDeleteOnSuccess, cancellationToken);
-                host.ClearCurrentCachedRepoPath();
-            }
+            if (releaseCachedRepositoryOnSuccess)
+                host.ReleaseCurrentRepositorySession();
 
             host.ClearProjectLoadCancellation();
             statusOperations.Complete(statusOperationId);

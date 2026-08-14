@@ -92,20 +92,26 @@
                  IsVisible="{Binding !GitCloneInProgress}" />
 
       <!-- URL Input (visible when not in progress) -->
-      <TextBox Grid.Row="2"
+      <TextBox Grid.Row="1"
                Name="UrlTextBox"
                Text="{Binding GitCloneUrl, Mode=TwoWay}"
                PlaceholderText="{Binding GitCloneUrlPlaceholder}"
                Margin="0,0,0,16"
                IsVisible="{Binding !GitCloneInProgress}"
-               KeyDown="OnUrlKeyDown" />
+               TextChanged="OnUrlTextChanged" />
 
       <!-- Recent repositories (visible when not in progress) -->
       <Border Name="RecentRepositoriesContainer"
-              Grid.Row="3"
+              Grid.Row="2"
               Margin="0,0,0,12"
               IsVisible="{Binding GitCloneRecentRepositoriesVisible}">
-        <ComboBox Name="RecentRepositoriesComboBox"
+        <StackPanel>
+          <TextBlock Name="RecentRepositoriesLabelText"
+                     Text="{Binding GitCloneRecentRepositoriesLabel}"
+                     FontSize="12"
+                     FontWeight="SemiBold"
+                     Margin="2,0,0,5" />
+          <ComboBox Name="RecentRepositoriesComboBox"
                   Classes="recent-repositories-combo"
                   ItemsSource="{Binding RecentRepositories}"
                   IsEnabled="{Binding HasRecentRepositories}"
@@ -126,11 +132,80 @@
               </StackPanel>
             </DataTemplate>
           </ComboBox.ItemTemplate>
-        </ComboBox>
+          </ComboBox>
+        </StackPanel>
       </Border>
 
+      <StackPanel Name="LocalCacheContainer"
+                  Grid.Row="3"
+                  Margin="0,0,0,14"
+                  IsVisible="{Binding GitCloneLocalCacheVisible}">
+        <TextBlock Name="LocalCacheLabelText"
+                   Text="{Binding GitCloneLocalCacheLabel}"
+                   FontSize="12"
+                   FontWeight="SemiBold"
+                   Margin="2,0,0,5" />
+        <ComboBox Name="LocalCacheComboBox"
+                  Classes="recent-repositories-combo"
+                  ItemsSource="{Binding CachedRepositories}"
+                  SelectedItem="{Binding SelectedGitCloneCacheEntry, Mode=TwoWay}"
+                  IsEnabled="{Binding CanUseGitCloneLocalCache}"
+                  PlaceholderText="{Binding GitCloneLocalCacheLabel}"
+                  AutomationProperties.Name="{Binding GitCloneLocalCacheLabel}"
+                  MaxDropDownHeight="320"
+                  SelectionChanged="OnLocalCacheSelectionChanged">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:RepositoryCacheEntryViewModel">
+              <Grid ColumnDefinitions="*,Auto"
+                    ColumnSpacing="8"
+                    ToolTip.Tip="{Binding RepositoryUrl}">
+                <StackPanel Grid.Column="0"
+                            Spacing="0">
+                  <TextBlock Text="{Binding DisplayName}"
+                             TextWrapping="NoWrap"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding DetailsText}"
+                             FontSize="11"
+                             Opacity="0.6"
+                             TextWrapping="NoWrap"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Border Grid.Column="1"
+                        Classes="cache-delete-tooltip-host"
+                        Background="Transparent"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="{Binding DeleteToolTip}"
+                        Tag="{Binding}">
+                  <Button Name="DeleteLocalCacheEntryButton"
+                          Classes="menu-icon-button"
+                          Width="24"
+                          Height="24"
+                          MinWidth="24"
+                          MinHeight="24"
+                          Padding="4"
+                          AutomationProperties.Name="{Binding RemoveText}"
+                          IsEnabled="{Binding CanDelete}"
+                          Tag="{Binding}"
+                          Click="OnDeleteLocalCacheEntry">
+                    <Viewbox Width="16"
+                             Height="16"
+                             Stretch="Uniform">
+                      <Path Data="M8,3 H16 M5,6 H19 M7,6 V20 H17 V6 M10,10 V17 M14,10 V17"
+                            Stroke="{DynamicResource AppTextBrush}"
+                            StrokeThickness="1.5"
+                            StrokeLineCap="Round"
+                            StrokeJoin="Round" />
+                    </Viewbox>
+                  </Button>
+                </Border>
+              </Grid>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+      </StackPanel>
+
       <!-- Progress section (visible when in progress) -->
-      <StackPanel Grid.Row="2"
+      <StackPanel Grid.Row="1"
                   Classes="clone-progress-surface"
                   IsVisible="{Binding GitCloneInProgress}">
         <TextBlock Text="{Binding GitCloneStatus}"
@@ -145,14 +220,18 @@
                   Orientation="Horizontal"
                   HorizontalAlignment="Right"
                   Spacing="8">
-        <Button Content="{Binding DialogOK}"
+        <Button Name="StartCloneButton"
+                Content="{Binding DialogOK}"
                 Classes="primary-action"
                 MinWidth="80"
                 HorizontalContentAlignment="Center"
                 Click="OnStartClone"
+                IsDefault="True"
                 IsVisible="{Binding !GitCloneInProgress}"
                 IsEnabled="{Binding CanStartGitClone}" />
-        <Button Content="{Binding DialogCancel}"
+        <Button Name="CancelCloneButton"
+                Content="{Binding DialogCancel}"
+                IsCancel="True"
                 Click="OnCancel" />
       </StackPanel>
     </Grid>

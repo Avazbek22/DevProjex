@@ -62,6 +62,7 @@ public partial class MainWindow
         CancelAndDispose(ref _projectOperationCts);
         CancelAndDispose(ref _applySettingsCts);
         CancelAndDispose(ref _gitCloneCts);
+		CancelAndDispose(ref _gitCloneCatalogCts);
         CancelAndDispose(ref _gitOperationCts);
         CancelAndDispose(ref _projectCopyExportCts);
 		CancelSecretRedactionDiscovery();

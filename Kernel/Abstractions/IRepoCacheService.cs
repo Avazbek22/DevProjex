@@ -37,6 +37,12 @@ public interface IRepoCacheService
     RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl);
 
     /// <summary>
+    /// Lists ready repositories from the current and compatibility cache indexes.
+    /// Missing repository directories are removed from their owning indexes.
+    /// </summary>
+    IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories();
+
+    /// <summary>
     /// Pins a cache checkout for an indexed repository. Cache roots must be on a local file system;
     /// exclusive file-handle leases are not reliable on every network file system.
     /// </summary>
@@ -106,4 +112,9 @@ public interface IRepoCacheService
     /// Checks if the given path is within the cache.
     /// </summary>
     bool IsInCache(string path);
+
+    /// <summary>
+    /// Determines whether two cache paths belong to the same managed repository container.
+    /// </summary>
+    bool PathsBelongToSameRepository(string left, string right);
 }

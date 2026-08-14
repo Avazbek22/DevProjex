@@ -26,9 +26,7 @@ internal interface IProjectLoadPipelineHost
 
     Task RecordRecentFolderAsync(string path, CancellationToken cancellationToken);
 
-    Task DeleteRepositoryDirectoryAsync(string path, CancellationToken cancellationToken);
-
-    void ClearCurrentCachedRepoPath();
+    void ReleaseCurrentRepositorySession();
 
     void ClearProjectLoadCancellation();
 

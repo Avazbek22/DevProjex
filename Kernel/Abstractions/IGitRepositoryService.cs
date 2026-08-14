@@ -27,6 +27,14 @@ public interface IGitRepositoryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resolves the remote default branch without changing the current checkout.
+    /// Falls back to the current branch when remote metadata is unavailable.
+    /// </summary>
+    Task<string?> GetDefaultBranchAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Switches to the specified branch.
     /// </summary>
     Task<bool> SwitchBranchAsync(

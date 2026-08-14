@@ -808,6 +808,11 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             return Task.FromResult(branches);
         }
 
+        public Task<string?> GetDefaultBranchAsync(
+            string requestedRepositoryPath,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>("main");
+
         public Task<bool> SwitchBranchAsync(
             string requestedRepositoryPath,
             string branchName,

@@ -725,6 +725,8 @@ public partial class MainWindow
     private CancellationTokenSource? _applySettingsCts;
     private Task _latestApplySettingsTask = Task.CompletedTask;
     private CancellationTokenSource? _gitCloneCts;
+	private CancellationTokenSource? _gitCloneCatalogCts;
+	private int _gitCloneActionInProgress;
     private CancellationTokenSource? _gitOperationCts;
     private CancellationTokenSource? _projectCopyExportCts;
     private TaskCompletionSource<bool>? _projectCopyExportCompletion;

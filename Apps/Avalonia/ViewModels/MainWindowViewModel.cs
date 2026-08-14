@@ -45,6 +45,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly NotifyCollectionChangedEventHandler _extensionsChangedHandler;
     private readonly NotifyCollectionChangedEventHandler _recentFoldersChangedHandler;
     private readonly NotifyCollectionChangedEventHandler _recentRepositoriesChangedHandler;
+	private readonly NotifyCollectionChangedEventHandler _cachedRepositoriesChangedHandler;
     private bool _disposed;
 
     private string _title;
@@ -124,6 +125,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _menuFileRecentEmpty = string.Empty;
     private string _menuFileOpenNewWindow = string.Empty;
     private string _gitCloneRecentRepositoriesLabel = string.Empty;
+	private bool _gitCloneCacheLoading;
+	private bool _gitCloneCacheManagementInProgress;
+	private RepositoryCacheEntryViewModel? _selectedGitCloneCacheEntry;
     private double _helpPopoverMaxWidth = 800;
     private double _helpPopoverMaxHeight = 680;
     private double _aboutPopoverMaxWidth = 520;
@@ -170,16 +174,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(HasRecentRepositories));
             RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
         };
+		_cachedRepositoriesChangedHandler = (_, _) =>
+		{
+			RaisePropertyChanged(nameof(HasCachedRepositories));
+			RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
+			RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
+		};
 
         // Subscribe to collection changes to update "All" checkbox labels with counts
         IgnoreOptions.CollectionChanged += _ignoreOptionsChangedHandler;
         Extensions.CollectionChanged += _extensionsChangedHandler;
         RecentFolders.CollectionChanged += _recentFoldersChangedHandler;
         RecentRepositories.CollectionChanged += _recentRepositoriesChangedHandler;
+		CachedRepositories.CollectionChanged += _cachedRepositoriesChangedHandler;
         ToastItems.CollectionChanged += OnToastItemsCollectionChanged;
     }
 
     private ObservableCollection<TreeNodeViewModel> _treeNodes = [];
+	private readonly ResettableObservableCollection<RepositoryCacheEntryViewModel> _cachedRepositories = [];
 
     public ObservableCollection<TreeNodeViewModel> TreeNodes
     {
@@ -213,6 +225,26 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<FontFamily> FontFamilies { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentFolders { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentRepositories { get; } = [];
+	public ObservableCollection<RepositoryCacheEntryViewModel> CachedRepositories => _cachedRepositories;
+
+	internal void ReplaceCachedRepositories(IEnumerable<RepositoryCacheEntryViewModel> entries)
+	{
+		var selectedPath = SelectedGitCloneCacheEntry?.LocalPath;
+		_cachedRepositories.ReplaceAll(entries);
+		if (selectedPath is null)
+			return;
+
+		RepositoryCacheEntryViewModel? replacement = null;
+		for (var index = 0; index < _cachedRepositories.Count; index++)
+		{
+			var candidate = _cachedRepositories[index];
+			if (!PathComparer.Default.Equals(candidate.LocalPath, selectedPath))
+				continue;
+			replacement = candidate;
+			break;
+		}
+		SelectedGitCloneCacheEntry = replacement;
+	}
 
     public void ResetTreeNodes()
     {
@@ -1119,8 +1151,47 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(CanStartGitClone));
             RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
+			RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
+			RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
         }
     }
+
+	public RepositoryCacheEntryViewModel? SelectedGitCloneCacheEntry
+	{
+		get => _selectedGitCloneCacheEntry;
+		set
+		{
+			if (ReferenceEquals(_selectedGitCloneCacheEntry, value)) return;
+			_selectedGitCloneCacheEntry = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(CanStartGitClone));
+		}
+	}
+
+	public bool GitCloneCacheLoading
+	{
+		get => _gitCloneCacheLoading;
+		set
+		{
+			if (_gitCloneCacheLoading == value) return;
+			_gitCloneCacheLoading = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
+			RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
+		}
+	}
+
+	public bool GitCloneCacheManagementInProgress
+	{
+		get => _gitCloneCacheManagementInProgress;
+		set
+		{
+			if (_gitCloneCacheManagementInProgress == value) return;
+			_gitCloneCacheManagementInProgress = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
+		}
+	}
 
     public double HelpPopoverMaxWidth
     {
@@ -1352,12 +1423,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool RecentFoldersMenuVisible => HasRecentFolders;
 
     public bool HasRecentRepositories => RecentRepositories.Count > 0;
+	public bool HasCachedRepositories => CachedRepositories.Count > 0;
 
     // Hide the clone recent list while cloning is in progress to avoid
     // exposing stale selections during the active git operation.
     public bool GitCloneRecentRepositoriesVisible => !GitCloneInProgress && HasRecentRepositories;
+	public bool GitCloneLocalCacheVisible =>
+		!GitCloneInProgress && !GitCloneCacheLoading && HasCachedRepositories;
+	public bool CanUseGitCloneLocalCache =>
+		!GitCloneInProgress && !GitCloneCacheLoading && !GitCloneCacheManagementInProgress && HasCachedRepositories;
 
-    public bool CanStartGitClone => !GitCloneInProgress && !string.IsNullOrWhiteSpace(GitCloneUrl);
+	public bool CanStartGitClone =>
+		!GitCloneInProgress &&
+		(SelectedGitCloneCacheEntry is not null || !string.IsNullOrWhiteSpace(GitCloneUrl));
 
     public bool AllIgnoreChecked
     {
@@ -1556,7 +1634,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string GitCloneProgressDownloading { get; private set; } = string.Empty;
     public string GitCloneProgressExtracting { get; private set; } = string.Empty;
     public string GitCloneProgressPreparing { get; private set; } = string.Empty;
-    public string GitCloneProgressSwitchingBranch { get; private set; } = string.Empty;
+	public string GitCloneProgressSwitchingBranch { get; private set; } = string.Empty;
+	public string GitCloneLocalCacheLabel { get; private set; } = string.Empty;
+	public string GitCloneLocalCacheZip { get; private set; } = string.Empty;
+	public string GitCloneLocalCacheRemove { get; private set; } = string.Empty;
+	public string GitCloneLocalCacheActiveDeleteToolTip { get; private set; } = string.Empty;
 
     // Git error messages
     public string GitErrorGitNotFound { get; private set; } = string.Empty;
@@ -1701,7 +1783,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         GitCloneProgressDownloading = _localization["Git.Clone.Progress.Downloading"];
         GitCloneProgressExtracting = _localization["Git.Clone.Progress.Extracting"];
         GitCloneProgressPreparing = _localization["Git.Clone.Progress.Preparing"];
-        GitCloneProgressSwitchingBranch = _localization["Git.Clone.Progress.SwitchingBranch"];
+		GitCloneProgressSwitchingBranch = _localization["Git.Clone.Progress.SwitchingBranch"];
+		GitCloneLocalCacheLabel = _localization["Git.Clone.LocalCache"];
+		GitCloneLocalCacheZip = _localization["Git.Clone.LocalCache.Zip"];
+		GitCloneLocalCacheRemove = _localization["Dialog.RecentFolderUnavailable.Remove"];
+		GitCloneLocalCacheActiveDeleteToolTip = _localization["Git.Clone.LocalCache.ActiveDeleteTooltip"];
 
         // Git error messages
         GitErrorGitNotFound = _localization["Git.Error.GitNotFound"];
@@ -1867,7 +1953,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(GitCloneProgressDownloading));
         RaisePropertyChanged(nameof(GitCloneProgressExtracting));
         RaisePropertyChanged(nameof(GitCloneProgressPreparing));
-        RaisePropertyChanged(nameof(GitCloneProgressSwitchingBranch));
+		RaisePropertyChanged(nameof(GitCloneProgressSwitchingBranch));
+		RaisePropertyChanged(nameof(GitCloneLocalCacheLabel));
+		RaisePropertyChanged(nameof(GitCloneLocalCacheZip));
+		RaisePropertyChanged(nameof(GitCloneLocalCacheRemove));
+		RaisePropertyChanged(nameof(GitCloneLocalCacheActiveDeleteToolTip));
         RaisePropertyChanged(nameof(GitErrorGitNotFound));
         RaisePropertyChanged(nameof(GitErrorCloneFailed));
         RaisePropertyChanged(nameof(GitErrorInvalidUrl));
@@ -2270,6 +2360,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         Extensions.CollectionChanged -= _extensionsChangedHandler;
         RecentFolders.CollectionChanged -= _recentFoldersChangedHandler;
         RecentRepositories.CollectionChanged -= _recentRepositoriesChangedHandler;
+		CachedRepositories.CollectionChanged -= _cachedRepositoriesChangedHandler;
         ToastItems.CollectionChanged -= OnToastItemsCollectionChanged;
 
         // Clear collections to release references
@@ -2285,7 +2376,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		HideSecretsOption = null;
         Extensions.Clear();
         FontFamilies.Clear();
-        GitBranches.Clear();
+		GitBranches.Clear();
+		SelectedGitCloneCacheEntry = null;
+		CachedRepositories.Clear();
         ToastItems.Clear();
 
         // Clear large strings
