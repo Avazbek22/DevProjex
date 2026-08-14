@@ -11,10 +11,34 @@ public sealed class MainWindowCoordinatorRefactorTests
     [InlineData("Receiving objects: 42%", 42)]
     [InlineData("99%", 99)]
     [InlineData("Resolving deltas: 12.5%", 12.5)]
+    [InlineData("phase 10% final 75%", 75)]
     public void GitProgressStatusParser_ParsesTrailingPercent(string status, double expected)
     {
         Assert.True(GitProgressStatusParser.TryParseTrailingPercent(status, out var percent));
         Assert.Equal(expected, percent);
+    }
+
+    [Theory]
+    [InlineData("42%", 42)]
+    [InlineData("Receiving objects: 42% (42/100), 1.00 MiB", 42)]
+    [InlineData("remote: Compressing objects: 100% (10/10), done.", 100)]
+    [InlineData("Resolving deltas: 12.5% (1/8)", 12.5)]
+    public void GitProgressStatusParser_ParsesStandaloneAndEmbeddedPercent(
+        string status,
+        double expected)
+    {
+        Assert.True(GitProgressStatusParser.TryParsePercent(status, out var percent));
+        Assert.Equal(expected, percent);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Cloning into repository...")]
+    [InlineData("Receiving objects: 101%")]
+    [InlineData("Receiving objects: -1%")]
+    public void GitProgressStatusParser_RejectsMissingOrInvalidPercent(string status)
+    {
+        Assert.False(GitProgressStatusParser.TryParsePercent(status, out _));
     }
 
     [Fact]

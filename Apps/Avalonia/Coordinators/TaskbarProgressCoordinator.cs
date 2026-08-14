@@ -8,6 +8,8 @@ public sealed class TaskbarProgressCoordinator(
     : IDisposable
 {
     private bool _gitCloneProgressActive;
+    private bool _gitCloneProgressIsIndeterminate;
+    private double? _lastGitClonePercent;
 
     public void Attach(Window window)
     {
@@ -38,6 +40,8 @@ public sealed class TaskbarProgressCoordinator(
     public void BeginGitClone()
     {
         _gitCloneProgressActive = true;
+        _gitCloneProgressIsIndeterminate = true;
+        _lastGitClonePercent = null;
         taskbarProgressService.SetIndeterminate();
     }
 
@@ -46,19 +50,23 @@ public sealed class TaskbarProgressCoordinator(
         if (!_gitCloneProgressActive)
             return;
 
-        if (GitProgressStatusParser.TryParseTrailingPercent(status, out var percent))
-        {
-            taskbarProgressService.SetProgress(percent);
+        if (!GitProgressStatusParser.TryParsePercent(status, out var percent) ||
+            _lastGitClonePercent == percent)
             return;
-        }
 
-        taskbarProgressService.SetIndeterminate();
+        _lastGitClonePercent = percent;
+        _gitCloneProgressIsIndeterminate = false;
+        taskbarProgressService.SetProgress(percent);
     }
 
     public void SetGitCloneIndeterminate()
     {
-        if (_gitCloneProgressActive)
-            taskbarProgressService.SetIndeterminate();
+        if (!_gitCloneProgressActive || _gitCloneProgressIsIndeterminate)
+            return;
+
+        _gitCloneProgressIsIndeterminate = true;
+        _lastGitClonePercent = null;
+        taskbarProgressService.SetIndeterminate();
     }
 
     public void MarkGitCloneError()
@@ -73,6 +81,8 @@ public sealed class TaskbarProgressCoordinator(
             return;
 
         _gitCloneProgressActive = false;
+        _gitCloneProgressIsIndeterminate = false;
+        _lastGitClonePercent = null;
         SyncWithStatusBar();
     }
 

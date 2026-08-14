@@ -37,6 +37,8 @@ public partial class MainWindow
             _viewModel.GitCloneUrl = string.Empty;
             _viewModel.GitCloneStatus = string.Empty;
             _viewModel.GitCloneInProgress = false;
+            _viewModel.GitCloneProgressIsIndeterminate = true;
+            _viewModel.GitCloneProgressValue = 0;
             _viewModel.GitCloneCacheManagementInProgress = false;
             _viewModel.ReplaceCachedRepositories([]);
 
@@ -101,6 +103,8 @@ public partial class MainWindow
 
         _viewModel.GitCloneInProgress = true;
         _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
+        _viewModel.GitCloneProgressIsIndeterminate = true;
+        _viewModel.GitCloneProgressValue = 0;
         _taskbarProgress.BeginGitClone();
 
         string? stagingPath = null;
@@ -111,32 +115,53 @@ public partial class MainWindow
             // Track current operation for progress reporting
             string currentOperation = string.Empty;
 
-            var progress = new Progress<string>(status =>
+            void UpdateCloneProgress(string status)
             {
-                Dispatcher.Post(() =>
+                if (!Dispatcher.UIThread.CheckAccess())
                 {
-                    _taskbarProgress.UpdateGitClone(status);
+                    Dispatcher.Post(() => UpdateCloneProgress(status));
+                    return;
+                }
 
-                    // Handle phase transition markers
-                    if (status == "::EXTRACTING::")
-                    {
-                        currentOperation = _viewModel.GitCloneProgressExtracting;
-                        _viewModel.GitCloneStatus = currentOperation;
-                        return;
-                    }
+                if (status == "::EXTRACTING::")
+                {
+                    currentOperation = _viewModel.GitCloneProgressExtracting;
+                    BeginGitCloneProgressPhase(currentOperation);
+                    return;
+                }
 
-                    // Keep localized phase labels and append numeric progress only.
-                    // Raw git stderr lines (e.g. "Cloning into ...") are not shown in UI.
-                    if (status.EndsWith('%') && status.Length <= 4 && !string.IsNullOrEmpty(currentOperation))
-                    {
-                        _viewModel.GitCloneStatus = $"{currentOperation} {status}";
-                    }
-                    else if (!string.IsNullOrEmpty(currentOperation))
-                    {
-                        _viewModel.GitCloneStatus = currentOperation;
-                    }
-                });
-            });
+                if (string.IsNullOrEmpty(currentOperation) ||
+                    !GitProgressStatusParser.TryParsePercent(status, out var percent))
+                {
+                    return;
+                }
+
+                _viewModel.GitCloneStatus = $"{currentOperation} {percent.ToString("0.##", CultureInfo.CurrentCulture)}%";
+                _viewModel.GitCloneProgressIsIndeterminate = false;
+                _viewModel.GitCloneProgressValue = percent;
+                _taskbarProgress.UpdateGitClone(status);
+            }
+
+			async Task PublishCachedRefreshPhaseAsync(CachedRepositoryRefreshPhase phase)
+			{
+				void Publish()
+				{
+					currentOperation = phase == CachedRepositoryRefreshPhase.SwitchingBranch
+						? _viewModel.GitCloneProgressSwitchingBranch
+						: _viewModel.StatusOperationGettingUpdates;
+					BeginGitCloneProgressPhase(currentOperation);
+				}
+
+				if (Dispatcher.UIThread.CheckAccess())
+				{
+					Publish();
+					return;
+				}
+
+				await Dispatcher.UIThread.InvokeAsync(Publish);
+			}
+
+            var progress = new Progress<string>(UpdateCloneProgress);
 
             GitCloneResult result;
             var cachedUpdateFailed = false;
@@ -154,13 +179,7 @@ public partial class MainWindow
 							_gitService,
 							cacheSession.RepositoryPath,
 							branch,
-							phase => Dispatcher.Post(() =>
-							{
-								currentOperation = phase == CachedRepositoryRefreshPhase.SwitchingBranch
-									? _viewModel.GitCloneProgressSwitchingBranch
-									: _viewModel.StatusOperationGettingUpdates;
-								_viewModel.GitCloneStatus = currentOperation;
-							}),
+							PublishCachedRefreshPhaseAsync,
 							progress,
 							cancellationToken);
 						branch = refresh.Branch;
@@ -195,8 +214,7 @@ public partial class MainWindow
                     if (gitAvailable)
                     {
                         currentOperation = _viewModel.GitCloneProgressCloning;
-                        _viewModel.GitCloneStatus = currentOperation;
-                        _taskbarProgress.SetGitCloneIndeterminate();
+                        BeginGitCloneProgressPhase(currentOperation);
                         result = await _gitService.CloneAsync(url, stagingPath, progress, cancellationToken);
                     }
                     else
@@ -204,8 +222,7 @@ public partial class MainWindow
                         _viewModel.GitCloneStatus = _viewModel.GitErrorGitNotFound;
                         await Task.Delay(1500, cancellationToken);
                         currentOperation = _viewModel.GitCloneProgressDownloading;
-                        _viewModel.GitCloneStatus = currentOperation;
-                        _taskbarProgress.SetGitCloneIndeterminate();
+                        BeginGitCloneProgressPhase(currentOperation);
                         result = await _zipDownloadService.DownloadAndExtractAsync(
                             url,
                             stagingPath,
@@ -382,6 +399,8 @@ public partial class MainWindow
 		var cancellationToken = operationCts.Token;
 		_viewModel.GitCloneInProgress = true;
 		_viewModel.GitCloneStatus = _viewModel.GitCloneProgressPreparing;
+		_viewModel.GitCloneProgressIsIndeterminate = true;
+		_viewModel.GitCloneProgressValue = 0;
 		IRepositoryCacheSession? session = null;
 		try
 		{
@@ -433,6 +452,14 @@ public partial class MainWindow
 			DisposeIfCurrent(ref _gitCloneCts, operationCts);
 			Volatile.Write(ref _gitCloneActionInProgress, 0);
 		}
+	}
+
+	private void BeginGitCloneProgressPhase(string status)
+	{
+		_viewModel.GitCloneStatus = status;
+		_viewModel.GitCloneProgressIsIndeterminate = true;
+		_viewModel.GitCloneProgressValue = 0;
+		_taskbarProgress.SetGitCloneIndeterminate();
 	}
 
 	private async void OnDeleteCachedRepositoryRequested(object? sender, RepositoryCacheEntryEventArgs e)

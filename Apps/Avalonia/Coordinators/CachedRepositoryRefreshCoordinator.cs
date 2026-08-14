@@ -16,7 +16,7 @@ internal static class CachedRepositoryRefreshCoordinator
 		IGitRepositoryService gitService,
 		string repositoryPath,
 		string? fallbackBranch,
-		Action<CachedRepositoryRefreshPhase>? phaseChanged,
+		Func<CachedRepositoryRefreshPhase, Task>? phaseChanged,
 		IProgress<string>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -32,7 +32,9 @@ internal static class CachedRepositoryRefreshCoordinator
 			cancellationToken.ThrowIfCancellationRequested();
 			if (!string.IsNullOrWhiteSpace(defaultBranch))
 			{
-				phaseChanged?.Invoke(CachedRepositoryRefreshPhase.SwitchingBranch);
+				if (phaseChanged is not null)
+					await phaseChanged(CachedRepositoryRefreshPhase.SwitchingBranch).ConfigureAwait(false);
+				cancellationToken.ThrowIfCancellationRequested();
 				var switched = await gitService
 					.SwitchBranchAsync(repositoryPath, defaultBranch, progress, cancellationToken)
 					.ConfigureAwait(false);
@@ -57,7 +59,9 @@ internal static class CachedRepositoryRefreshCoordinator
 				.GetCurrentBranchAsync(repositoryPath, cancellationToken)
 				.ConfigureAwait(false) ?? branch;
 			cancellationToken.ThrowIfCancellationRequested();
-			phaseChanged?.Invoke(CachedRepositoryRefreshPhase.GettingUpdates);
+			if (phaseChanged is not null)
+				await phaseChanged(CachedRepositoryRefreshPhase.GettingUpdates).ConfigureAwait(false);
+			cancellationToken.ThrowIfCancellationRequested();
 			var pulled = await gitService
 				.PullUpdatesAsync(repositoryPath, progress, cancellationToken)
 				.ConfigureAwait(false);

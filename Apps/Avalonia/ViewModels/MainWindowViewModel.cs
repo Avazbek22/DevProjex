@@ -121,6 +121,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _gitCloneUrl = string.Empty;
     private string _gitCloneStatus = string.Empty;
     private bool _gitCloneInProgress;
+    private bool _gitCloneProgressIsIndeterminate = true;
+    private double _gitCloneProgressValue;
     private string _menuFileRecent = string.Empty;
     private string _menuFileRecentEmpty = string.Empty;
     private string _menuFileOpenNewWindow = string.Empty;
@@ -1153,6 +1155,29 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(GitCloneRecentRepositoriesVisible));
 			RaisePropertyChanged(nameof(GitCloneLocalCacheVisible));
 			RaisePropertyChanged(nameof(CanUseGitCloneLocalCache));
+        }
+    }
+
+    public bool GitCloneProgressIsIndeterminate
+    {
+        get => _gitCloneProgressIsIndeterminate;
+        set
+        {
+            if (_gitCloneProgressIsIndeterminate == value) return;
+            _gitCloneProgressIsIndeterminate = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public double GitCloneProgressValue
+    {
+        get => _gitCloneProgressValue;
+        set
+        {
+            var clamped = Math.Clamp(value, 0, 100);
+            if (_gitCloneProgressValue.Equals(clamped)) return;
+            _gitCloneProgressValue = clamped;
+            RaisePropertyChanged();
         }
     }
 

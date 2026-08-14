@@ -155,7 +155,7 @@ public sealed class MainWindowTaskbarProgressUiTests
 
             InvokeGitCloneTaskbarMethod(window, "BeginGitCloneTaskbarProgress");
             InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "Receiving objects: 42%");
-            InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "::EXTRACTING::");
+            InvokeGitCloneTaskbarMethod(window, "SetGitCloneIndeterminate");
             InvokeGitCloneTaskbarMethod(window, "MarkGitCloneTaskbarProgressError");
             InvokeGitCloneTaskbarMethod(window, "CompleteGitCloneTaskbarProgress");
 
@@ -261,6 +261,10 @@ public sealed class MainWindowTaskbarProgressUiTests
 
             InvokeGitCloneTaskbarMethod(window, "BeginGitCloneTaskbarProgress");
             InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "42%");
+            InvokeGitCloneTaskbarMethod(
+                window,
+                "UpdateGitCloneTaskbarProgress",
+                "Receiving objects: 42% (42/100), 1.00 MiB");
             InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "Receiving objects: 87%");
             InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "Resolving deltas: 99.5%");
             InvokeGitCloneTaskbarMethod(window, "UpdateGitCloneTaskbarProgress", "Cloning into repository...");
@@ -273,7 +277,6 @@ public sealed class MainWindowTaskbarProgressUiTests
                 TaskbarProgressCall.Progress(42),
                 TaskbarProgressCall.Progress(87),
                 TaskbarProgressCall.Progress(99.5),
-                TaskbarProgressCall.Indeterminate(),
                 TaskbarProgressCall.Clear()
             ], taskbarProgress.Calls);
         }
@@ -290,6 +293,7 @@ public sealed class MainWindowTaskbarProgressUiTests
         {
             "BeginGitCloneTaskbarProgress" => nameof(TaskbarProgressCoordinator.BeginGitClone),
             "UpdateGitCloneTaskbarProgress" => nameof(TaskbarProgressCoordinator.UpdateGitClone),
+            "SetGitCloneIndeterminate" => nameof(TaskbarProgressCoordinator.SetGitCloneIndeterminate),
             "MarkGitCloneTaskbarProgressError" => nameof(TaskbarProgressCoordinator.MarkGitCloneError),
             "CompleteGitCloneTaskbarProgress" => nameof(TaskbarProgressCoordinator.CompleteGitClone),
             _ => methodName

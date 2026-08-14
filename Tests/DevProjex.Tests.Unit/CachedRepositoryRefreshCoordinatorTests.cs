@@ -12,7 +12,11 @@ public sealed class CachedRepositoryRefreshCoordinatorTests
 			git,
 			"repository",
 			"feature",
-			phases.Add,
+			phase =>
+			{
+				phases.Add(phase);
+				return Task.CompletedTask;
+			},
 			progress: null,
 			TestContext.Current.CancellationToken);
 

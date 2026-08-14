@@ -674,6 +674,62 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 	}
 
 	[AvaloniaFact]
+	public async Task CachedUrl_PairedGitProgressKeepsDialogProgressDeterminate()
+	{
+		var appDataPath = CreateAppDataPath();
+		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		const string repositoryUrl = "https://github.com/example/progress.git";
+		CreateCachedRepository(cache, repositoryUrl, "main", 128, git: true);
+		var git = new PairedProgressGitRepositoryService();
+		var window = await CreateWindowAsync(appDataPath, cache, git);
+
+		try
+		{
+			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			await WaitForCatalogAsync(window, expectedCount: 1);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var statuses = new List<string>();
+			viewModel.PropertyChanged += (_, args) =>
+			{
+				if (args.PropertyName == nameof(MainWindowViewModel.GitCloneStatus))
+					statuses.Add(viewModel.GitCloneStatus);
+			};
+
+			viewModel.GitCloneUrl = repositoryUrl;
+			await UiTestDriver.RaiseButtonClickAsync(
+				Assert.IsType<Button>(cloneWindow.FindControl<Button>("StartCloneButton")));
+			await git.ProgressReported.Task.WaitAsync(TimeSpan.FromSeconds(10));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !viewModel.GitCloneProgressIsIndeterminate &&
+				      viewModel.GitCloneProgressValue == 42,
+				"paired Git progress to become determinate");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+			var progressBar = Assert.IsType<ProgressBar>(cloneWindow.FindControl<ProgressBar>("CloneProgressBar"));
+			Assert.False(progressBar.IsIndeterminate);
+			Assert.Equal(42, progressBar.Value);
+			Assert.EndsWith(" 42%", viewModel.GitCloneStatus, StringComparison.Ordinal);
+			var firstMeasuredStatus = statuses.FindIndex(static status => status.EndsWith(" 42%", StringComparison.Ordinal));
+			Assert.True(firstMeasuredStatus >= 0);
+			Assert.All(
+				statuses.Skip(firstMeasuredStatus),
+				static status => Assert.EndsWith(" 42%", status, StringComparison.Ordinal));
+
+			git.ReleasePull.TrySetResult();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !cloneWindow.IsVisible,
+				"cached repository operation to complete");
+		}
+		finally
+		{
+			git.ReleasePull.TrySetResult();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task CachedZipUrl_OpensWithoutGitOrFalseUpdateFailureToast()
 	{
 		var appDataPath = CreateAppDataPath();
@@ -986,5 +1042,53 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		public Task<string?> GetRemoteUrlAsync(string repositoryPath, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
 		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
 		public Task<GitCloneResult> CloneAsync(string url, string targetDirectory, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+	}
+
+	private sealed class PairedProgressGitRepositoryService : IGitRepositoryService
+	{
+		public TaskCompletionSource ProgressReported { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource ReleasePull { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public Task<string?> GetDefaultBranchAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("main");
+
+		public Task<bool> SwitchBranchAsync(
+			string repositoryPath,
+			string branchName,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+		public async Task<bool> PullUpdatesAsync(
+			string repositoryPath,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default)
+		{
+			progress?.Report("42%");
+			progress?.Report("Receiving objects: 42% (42/100), 1.00 MiB");
+			ProgressReported.TrySetResult();
+			await ReleasePull.Task.WaitAsync(cancellationToken);
+			return false;
+		}
+
+		public Task<string?> GetCurrentBranchAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("main");
+
+		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<IReadOnlyList<GitBranch>>([]);
+
+		public Task<string?> GetHeadCommitAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("head");
+
+		public Task<string?> GetRemoteUrlAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>(null);
+
+		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) =>
+			Task.FromResult(true);
+
+		public Task<GitCloneResult> CloneAsync(
+			string url,
+			string targetDirectory,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) => throw new NotSupportedException();
 	}
 }

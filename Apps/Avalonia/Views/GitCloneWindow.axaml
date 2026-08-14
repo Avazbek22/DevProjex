@@ -238,7 +238,11 @@
         <TextBlock Text="{Binding GitCloneStatus}"
                    FontSize="13"
                    Margin="0,0,0,8" />
-        <ProgressBar IsIndeterminate="True"
+        <ProgressBar Name="CloneProgressBar"
+                     Minimum="0"
+                     Maximum="100"
+                     Value="{Binding GitCloneProgressValue}"
+                     IsIndeterminate="{Binding GitCloneProgressIsIndeterminate}"
                      Height="4" />
       </StackPanel>
 

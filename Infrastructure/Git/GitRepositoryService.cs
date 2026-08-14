@@ -810,10 +810,16 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     if (progress is not null)
                     {
                         var previousPercent = Interlocked.Exchange(ref lastReportedPercent, percent);
-                        if (previousPercent != percent)
-                            progress.Report($"{percent}%");
                         if (IsSafeGitProgressLine(line))
+                        {
+                            // Preserve the phase detail for richer consumers without also
+                            // emitting a second standalone percentage for the same Git line.
                             progress.Report(line);
+                        }
+                        else if (previousPercent != percent)
+                        {
+                            progress.Report($"{percent}%");
+                        }
                     }
 
                     // Progress lines can be very noisy during clone/fetch and are not

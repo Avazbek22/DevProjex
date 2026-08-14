@@ -197,8 +197,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         Assert.True(result.Success, $"Clone failed: {result.ErrorMessage}");
         Assert.Contains(
             progress.Reports,
-            static report => report.EndsWith('%') &&
-                             int.TryParse(report.AsSpan(0, report.Length - 1), out _));
+            static report => report.Contains('%', StringComparison.Ordinal));
     }
 
     [Fact]
