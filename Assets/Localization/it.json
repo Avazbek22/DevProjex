@@ -207,6 +207,7 @@
   "Preview.Secret.Mark.Validation.ContentOnly": "Seleziona un valore nel contenuto di un file.",
   "Error.Secret.MarkApplyFailed": "Non è stato possibile applicare il contrassegno del segreto. Aggiorna l’anteprima e riprova.",
   "Toast.Secret.HiddenCount": "Nascosto in {0} posizioni",
+  "Toast.Tree.CheckedSelectionHidden": "Elementi selezionati nascosti dalle impostazioni correnti: {0}",
   "Toast.Secret.MarkRemoved": "Contrassegno rimosso.",
   "Toast.Secret.MarkRemovedStillDetected": "Contrassegno rimosso. Il rilevatore nasconde ancora questo valore.",
   "SecretRedaction.NoFindingsNotice": "Le regole configurate non hanno trovato corrispondenze; non è una garanzia di sicurezza.",

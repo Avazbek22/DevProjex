@@ -207,6 +207,7 @@
   "Preview.Secret.Mark.Validation.ContentOnly": "Қиматро дар мундариҷаи файл интихоб кунед.",
   "Error.Secret.MarkApplyFailed": "Нишони сирро татбиқ кардан нашуд. Пешнамоишро нав карда, боз кӯшиш кунед.",
   "Toast.Secret.HiddenCount": "Дар {0} ҷой пинҳон шуд",
+  "Toast.Tree.CheckedSelectionHidden": "Унсурҳои қайдшудае, ки танзимоти ҷорӣ пинҳон кард: {0}",
   "Toast.Secret.MarkRemoved": "Нишона хориҷ шуд.",
   "Toast.Secret.MarkRemovedStillDetected": "Нишона хориҷ шуд. Детектор ҳанӯз ин қиматро пинҳон мекунад.",
   "SecretRedaction.NoFindingsNotice": "Қоидаҳои танзимшуда чизе наёфтанд; ин кафолати амният нест.",

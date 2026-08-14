@@ -9,4 +9,5 @@ internal sealed record TreeRefreshInput(
     ProjectTreeInventoryReuseScope? TreeInventoryScope = null,
     long? SelectionRevision = null,
     BuildTreeResult? InteractiveFilterBaseTree = null,
-    IReadOnlySet<string>? CheckedPaths = null);
+    bool PreserveCheckedPaths = false,
+    bool PreserveExpandedPaths = false);

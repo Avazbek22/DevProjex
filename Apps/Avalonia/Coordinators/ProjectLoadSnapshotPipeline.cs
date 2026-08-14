@@ -4,7 +4,10 @@ namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHost host)
 {
-    public async Task ReloadAsync(string currentPath, CancellationToken cancellationToken)
+    public async Task ReloadAsync(
+        string currentPath,
+        bool preserveTreeState,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
             return;
@@ -21,7 +24,10 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
         if (host.TryHandleSelectionRootAccessDenied(currentPath, selectionSnapshot))
             return;
 
-        var treeInput = host.CreateTreeRefreshInput(currentPath, selectionSnapshot);
+        var treeInput = host.CreateTreeRefreshInput(
+            currentPath,
+            selectionSnapshot,
+            preserveTreeState);
         host.BeforeProjectLoadTreeRefresh();
 
         BuildTreeSnapshotResult treeBuild;

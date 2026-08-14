@@ -207,6 +207,7 @@
   "Preview.Secret.Mark.Validation.ContentOnly": "Select a value inside file content.",
   "Error.Secret.MarkApplyFailed": "The secret mark could not be applied. Refresh Preview and try again.",
   "Toast.Secret.HiddenCount": "Hidden in {0} places",
+  "Toast.Tree.CheckedSelectionHidden": "Checked items hidden by the current settings: {0}",
   "Toast.Secret.MarkRemoved": "Mark removed.",
   "Toast.Secret.MarkRemovedStillDetected": "Mark removed. The detector still hides this value.",
   "SecretRedaction.NoFindingsNotice": "The configured rules matched nothing; this is not a safety guarantee.",

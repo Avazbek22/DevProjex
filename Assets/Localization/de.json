@@ -207,6 +207,7 @@
   "Preview.Secret.Mark.Validation.ContentOnly": "Wählen Sie einen Wert im Dateiinhalt aus.",
   "Error.Secret.MarkApplyFailed": "Die geheime Markierung konnte nicht angewendet werden. Aktualisieren Sie die Vorschau und versuchen Sie es erneut.",
   "Toast.Secret.HiddenCount": "An {0} Stellen ausgeblendet",
+  "Toast.Tree.CheckedSelectionHidden": "Durch die aktuellen Einstellungen ausgeblendete markierte Elemente: {0}",
   "Toast.Secret.MarkRemoved": "Markierung entfernt.",
   "Toast.Secret.MarkRemovedStillDetected": "Markierung entfernt. Der Detektor blendet diesen Wert weiterhin aus.",
   "SecretRedaction.NoFindingsNotice": "Die konfigurierten Regeln fanden keine Übereinstimmung; dies ist keine Sicherheitsgarantie.",

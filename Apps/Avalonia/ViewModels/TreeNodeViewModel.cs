@@ -245,6 +245,65 @@ public sealed class TreeNodeViewModel(
             child.CollectCheckedPaths(selected);
     }
 
+    internal void SetCheckedForTreeStateRestore(bool value)
+    {
+        _deferredChildCheckedState = value;
+        if (_isChecked != value)
+        {
+            _isChecked = value;
+            RaisePropertyChanged(nameof(IsChecked));
+        }
+
+        if (_children.Count == 0)
+            return;
+
+        var pending = new Stack<TreeNodeViewModel>();
+        for (var index = _children.Count - 1; index >= 0; index--)
+            pending.Push(_children[index]);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            current._deferredChildCheckedState = value;
+            if (current._isChecked != value)
+            {
+                current._isChecked = value;
+                current.RaisePropertyChanged(nameof(IsChecked));
+            }
+
+            for (var index = current._children.Count - 1; index >= 0; index--)
+                pending.Push(current._children[index]);
+        }
+    }
+
+    internal void RecalculateCheckedStateForTreeRestore()
+    {
+        if (_children.Count == 0)
+            return;
+
+        var allChecked = true;
+        var anyChecked = false;
+        for (var index = 0; index < _children.Count; index++)
+        {
+            var childState = _children[index]._isChecked;
+            if (childState != true)
+                allChecked = false;
+            if (childState != false)
+                anyChecked = true;
+            if (!allChecked && anyChecked)
+                break;
+        }
+
+        if (_children.Count < Descriptor.Children.Count)
+            allChecked = false;
+
+        bool? next = allChecked ? true : anyChecked ? null : false;
+        if (_isChecked == next)
+            return;
+
+        _isChecked = next;
+        RaisePropertyChanged(nameof(IsChecked));
+    }
+
     public void UpdateIcon(IImage? icon)
     {
         Icon = icon;

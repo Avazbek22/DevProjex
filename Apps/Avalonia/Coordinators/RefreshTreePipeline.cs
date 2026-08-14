@@ -12,12 +12,15 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
         CancellationToken cancellationToken = default,
         MemoryCleanupReason? postLoadCleanupReason = null)
     {
-        var input = host.CaptureTreeRefreshInput(
-            preserveCheckedPaths:
-            !interactiveFilter &&
-            postLoadCleanupReason == MemoryCleanupReason.ApplySettingsWorkCompleted);
+        var input = host.CaptureTreeRefreshInput(preserveCheckedPaths: true);
         if (input is null)
             return TreeRefreshOutcome.Skipped;
+
+        input = input with
+        {
+            PreserveCheckedPaths = true,
+            PreserveExpandedPaths = !interactiveFilter
+        };
 
         cancellationToken.ThrowIfCancellationRequested();
 
