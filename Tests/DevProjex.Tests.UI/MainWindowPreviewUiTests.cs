@@ -1005,6 +1005,59 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task ExtendedMouseButtons_NavigatePreviewDirectionallyWithoutToggling()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var treeIsland = UiTestDriver.GetRequiredControl<Border>(window, "TreeIsland");
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                treeIsland,
+                MouseButton.XButton1);
+            Assert.False(viewModel.IsPreviewMode);
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                treeIsland,
+                MouseButton.XButton2);
+            await UiTestDriver.WaitForPreviewReadyAsync(window);
+
+            var previewDocument = viewModel.PreviewDocument;
+            Assert.NotNull(previewDocument);
+            Assert.True(viewModel.IsPreviewMode);
+            var previewScrollViewer = UiTestDriver.GetRequiredPreviewScrollViewer(window);
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                previewScrollViewer,
+                MouseButton.XButton2);
+            Assert.True(viewModel.IsPreviewMode);
+            Assert.Same(previewDocument, viewModel.PreviewDocument);
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                previewScrollViewer,
+                MouseButton.XButton1);
+            await UiTestDriver.WaitForPreviewClosedAsync(window);
+            Assert.False(viewModel.IsPreviewMode);
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                treeIsland,
+                MouseButton.XButton1);
+            Assert.False(viewModel.IsPreviewMode);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task PreviewModeButtons_SwitchBetweenTreeContentAndCombinedModes()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

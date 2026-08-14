@@ -1022,6 +1022,11 @@ public partial class MainWindow
             OnWindowPointerPressedForMemoryCleanup,
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
+        AddHandler(
+            PointerPressedEvent,
+            OnWindowPointerPressedForPreviewNavigation,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
         AddHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged, RoutingStrategies.Tunnel, true);
 
         _searchFilterController = new SearchFilterInteractionController(

@@ -684,20 +684,42 @@ public partial class MainWindow : Window
             return;
 
         if (_viewModel.IsPreviewMode)
-        {
-            ObserveDetachedTask(
-                _previewWorkspaceController.CloseAsync(),
-                "ClosePreviewMode");
-        }
+            RequestPreviewClose();
         else
-        {
-            ObserveDetachedTask(
-                _previewWorkspaceController.OpenAsync(),
-                "OpenPreviewMode");
-        }
+            RequestPreviewOpen();
     }
 
     private void OnPreviewClose(object? sender, RoutedEventArgs e)
+        => RequestPreviewClose();
+
+    private void OnWindowPointerPressedForPreviewNavigation(
+        object? sender,
+        PointerPressedEventArgs e)
+    {
+        switch (e.Properties.PointerUpdateKind)
+        {
+            case PointerUpdateKind.XButton1Pressed:
+                e.Handled = true;
+                RequestPreviewClose();
+                break;
+            case PointerUpdateKind.XButton2Pressed:
+                e.Handled = true;
+                RequestPreviewOpen();
+                break;
+        }
+    }
+
+    private void RequestPreviewOpen()
+    {
+        if (!_viewModel.CanTogglePreview || _viewModel.IsPreviewMode)
+            return;
+
+        ObserveDetachedTask(
+            _previewWorkspaceController.OpenAsync(),
+            "OpenPreviewMode");
+    }
+
+    private void RequestPreviewClose()
     {
         if (!_viewModel.CanTogglePreview || !_viewModel.IsPreviewMode)
             return;
