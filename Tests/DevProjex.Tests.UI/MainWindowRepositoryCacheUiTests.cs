@@ -1,6 +1,8 @@
 using Avalonia.Automation;
 using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.RecentProjects;
@@ -51,11 +53,49 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 					items[0].ToolTipText,
 					StringComparison.Ordinal);
 				Assert.Contains(expected[0].RepositoryUrl, items[0].ToolTipText, StringComparison.Ordinal);
+				cloneWindow.Resources["MenuPopupBrush"] = new SolidColorBrush(Color.FromArgb(32, 1, 2, 3));
+				viewModel.SetThemeEffects(transparent: true, mica: false, acrylic: false);
 				var deleteButton = await OpenAndFindDeleteButtonAsync(window, comboBox, items[0]);
+				var popup = comboBox
+					.GetVisualDescendants()
+					.OfType<Popup>()
+					.First(static candidate => string.Equals(candidate.Name, "PART_Popup", StringComparison.Ordinal));
+				var popupSurface = Assert.IsType<Border>(popup.Child);
+				var popupBackground = Assert.IsType<SolidColorBrush>(popupSurface.Background);
+				Assert.Equal((byte)32, popupBackground.Color.A);
 				var itemRow = Assert.Single(
 					deleteButton.GetVisualAncestors().OfType<Grid>(),
 					grid => ReferenceEquals(grid.DataContext, items[0]) && ToolTip.GetTip(grid) is not null);
-				Assert.Equal(items[0].ToolTipText, ToolTip.GetTip(itemRow));
+				var itemToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(itemRow));
+				var hostTransparencyBeforeToolTip = cloneWindow.TransparencyLevelHint.ToArray();
+				var hostBackgroundBeforeToolTip = cloneWindow.Background;
+				ToolTip.SetIsOpen(itemRow, true);
+				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+				Assert.True(ToolTip.GetIsOpen(itemRow));
+				Assert.Equal(items[0].ToolTipText, itemToolTip.Content);
+				var toolTipBackground = Assert.IsType<SolidColorBrush>(itemToolTip.Background);
+				Assert.Equal((byte)32, toolTipBackground.Color.A);
+				Assert.Equal(1, itemToolTip.Opacity);
+				var toolTipLevel = Assert.IsAssignableFrom<TopLevel>(TopLevel.GetTopLevel(itemToolTip));
+				if (toolTipLevel is PopupRoot)
+				{
+					Assert.Same(cloneWindow, ThemedToolTipService.ResolveHostTopLevel(toolTipLevel));
+					Assert.Equal(
+						[
+							WindowTransparencyLevel.AcrylicBlur,
+							WindowTransparencyLevel.Blur,
+							WindowTransparencyLevel.Transparent,
+							WindowTransparencyLevel.None
+						],
+						toolTipLevel.TransparencyLevelHint);
+					Assert.Equal(Colors.Transparent, Assert.IsType<SolidColorBrush>(toolTipLevel.Background).Color);
+				}
+				else
+				{
+					Assert.Same(cloneWindow, toolTipLevel);
+					Assert.Equal(hostTransparencyBeforeToolTip, cloneWindow.TransparencyLevelHint);
+					Assert.Same(hostBackgroundBeforeToolTip, cloneWindow.Background);
+				}
 				var textStack = Assert.Single(itemRow.Children.OfType<StackPanel>());
 				var textLines = textStack.Children.OfType<TextBlock>().ToArray();
 				Assert.Equal(0, textStack.Spacing);
@@ -65,6 +105,15 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				Assert.Equal(11, textLines[1].FontSize);
 				Assert.Equal(0.6, textLines[1].Opacity);
 				comboBox.IsDropDownOpen = false;
+				comboBox.SelectedItem = items[0];
+				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+				var selectedContent = Assert.Single(
+					comboBox.GetVisualDescendants().OfType<StackPanel>(),
+					panel => ReferenceEquals(panel.Tag, items[0]));
+				Assert.DoesNotContain(selectedContent.GetVisualDescendants(), static visual => visual is Button);
+				Assert.Equal(
+					items[0].DisplayName,
+					selectedContent.Children.OfType<TextBlock>().First().Text);
 				Assert.Equal(
 					viewModel.GitCloneRecentRepositoriesLabel,
 					cloneWindow.FindControl<TextBlock>("RecentRepositoriesLabelText")?.Text);
@@ -185,7 +234,15 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				var activeDeleteButton = await OpenAndFindDeleteButtonAsync(window, activeCombo, activeItem);
 				Assert.Equal(activeItem.RemoveText, AutomationProperties.GetName(activeDeleteButton));
 				var icon = Assert.IsType<Viewbox>(activeDeleteButton.Content);
-				Assert.IsType<global::Avalonia.Controls.Shapes.Path>(icon.Child);
+				var iconViewport = Assert.IsType<Canvas>(icon.Child);
+				Assert.Single(iconViewport.Children.OfType<global::Avalonia.Controls.Shapes.Path>());
+				Assert.Equal(HorizontalAlignment.Center, activeDeleteButton.HorizontalContentAlignment);
+				Assert.Equal(VerticalAlignment.Center, activeDeleteButton.VerticalContentAlignment);
+				Assert.Equal(HorizontalAlignment.Center, icon.HorizontalAlignment);
+				Assert.Equal(VerticalAlignment.Center, icon.VerticalAlignment);
+				var iconOrigin = Assert.IsType<Point>(icon.TranslatePoint(default, activeDeleteButton));
+				Assert.InRange(Math.Abs(iconOrigin.X + (icon.Bounds.Width / 2) - (activeDeleteButton.Bounds.Width / 2)), 0, 0.01);
+				Assert.InRange(Math.Abs(iconOrigin.Y + (icon.Bounds.Height / 2) - (activeDeleteButton.Bounds.Height / 2)), 0, 0.01);
 				Assert.False(activeDeleteButton.IsEnabled);
 				var tooltipHost = Assert.Single(
 					activeDeleteButton.GetVisualAncestors().OfType<Border>(),

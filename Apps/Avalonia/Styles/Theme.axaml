@@ -568,26 +568,20 @@
         <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
     </Style>
 
-    <!-- ToolTip animations -->
+    <!-- ToolTips share the same adaptive material and native backdrop pipeline as popup menus. -->
     <Style Selector="ToolTip">
-        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
+        <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="10,6" />
         <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
-        <Setter Property="Opacity" Value="0.98" />
+        <Setter Property="Opacity" Value="1" />
         <Setter Property="Transitions">
             <Transitions>
                 <DoubleTransition Property="Opacity" Duration="0:0:0.15" Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
-    </Style>
-
-    <Style Selector="ToolTip.preview-blurred-tooltip">
-        <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="8" />
-        <Setter Property="Padding" Value="10,6" />
-        <Setter Property="Opacity" Value="0.92" />
     </Style>
 
     <Style Selector="TextBlock.section-title">

@@ -720,8 +720,7 @@
                         Margin="0,0,8,0"
                         Click="OnPreviewCopyCurrentMode">
                   <ToolTip.Tip>
-                    <ToolTip Classes="preview-blurred-tooltip"
-                             Loaded="OnPreviewToolTipLoaded">
+                    <ToolTip>
                       <TextBlock Text="{Binding PreviewCopyCurrentModeTooltip}" />
                     </ToolTip>
                   </ToolTip.Tip>
@@ -864,8 +863,7 @@
                               VerticalAlignment="Center"
                               Click="OnPreviewCopyVisibleFilePath">
                         <ToolTip.Tip>
-                          <ToolTip Classes="preview-blurred-tooltip"
-                                   Loaded="OnPreviewToolTipLoaded">
+                          <ToolTip>
                             <TextBlock Text="{Binding PreviewCopyFilePathTooltip}" />
                           </ToolTip>
                         </ToolTip.Tip>

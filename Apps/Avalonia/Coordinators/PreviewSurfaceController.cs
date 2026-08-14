@@ -624,18 +624,6 @@ internal sealed class PreviewSurfaceController : IDisposable
         UpdateStickyPath();
     }
 
-    public void HandleToolTipLoaded(object? sender)
-    {
-        if (sender is not ToolTip toolTip)
-            return;
-
-        PopupBackdropConfigurator.TryApply(
-            toolTip,
-            TopLevel.GetTopLevel(_window),
-            _viewModel.ActiveThemeEffect,
-            PopupBackdropTransparencyFallback.Transparent);
-    }
-
     public async Task CopyVisibleFilePathAsync()
     {
         if (!_ensureClipboardOutputReady() ||

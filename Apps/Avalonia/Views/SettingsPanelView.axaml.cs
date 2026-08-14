@@ -1,5 +1,3 @@
-using DevProjex.Avalonia.Services;
-
 namespace DevProjex.Avalonia.Views;
 
 public partial class SettingsPanelView : UserControl
@@ -49,18 +47,6 @@ public partial class SettingsPanelView : UserControl
 
     private void OnExtensionsAllChanged(object? sender, RoutedEventArgs e)
         => ExtensionsAllChanged?.Invoke(sender, e);
-
-	private void OnContentProcessingToolTipLoaded(object? sender, RoutedEventArgs e)
-	{
-		if (sender is not ToolTip toolTip || DataContext is not MainWindowViewModel viewModel)
-			return;
-
-		PopupBackdropConfigurator.TryApply(
-			toolTip,
-			TopLevel.GetTopLevel(this),
-			viewModel.ActiveThemeEffect,
-			PopupBackdropTransparencyFallback.Transparent);
-	}
 
 	private void OnContentProcessingStatusIndicatorPointerPressed(
 		object? sender,

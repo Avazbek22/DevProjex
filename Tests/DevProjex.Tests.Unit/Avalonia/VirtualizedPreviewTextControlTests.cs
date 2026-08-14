@@ -139,7 +139,6 @@ public sealed class VirtualizedPreviewTextControlTests
 			window.MouseMove(point, RawInputModifiers.None);
 			Assert.NotSame(textCursor, control.Cursor);
 			var toolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(control));
-			Assert.Contains("preview-blurred-tooltip", toolTip.Classes);
 			Assert.Equal(
 				"Detected github-pat.\n" +
 				"Click to keep the original value.\n" +

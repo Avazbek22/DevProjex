@@ -533,14 +533,6 @@ public partial class TopMenuBarView : UserControl
         ApplyPopupBackdropIfOpen(UpdatePopup);
     }
 
-    private void OnToolTipLoaded(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not ToolTip toolTip)
-            return;
-
-        ApplyToolTipBackdrop(toolTip);
-    }
-
     private void ApplyPopupBackdrop(Popup? popup)
     {
         if (DataContext is not MainWindowViewModel viewModel)
@@ -557,18 +549,6 @@ public partial class TopMenuBarView : UserControl
     {
         if (popup?.IsOpen == true)
             ApplyPopupBackdrop(popup);
-    }
-
-    private void ApplyToolTipBackdrop(ToolTip toolTip)
-    {
-        if (DataContext is not MainWindowViewModel viewModel)
-            return;
-
-        PopupBackdropConfigurator.TryApply(
-            toolTip,
-            TopLevel.GetTopLevel(this),
-            viewModel.ActiveThemeEffect,
-            PopupBackdropTransparencyFallback.Transparent);
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)

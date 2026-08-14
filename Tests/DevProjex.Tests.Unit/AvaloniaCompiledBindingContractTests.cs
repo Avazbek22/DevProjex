@@ -305,6 +305,60 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void ThemeStyles_ToolTipsUseOneAdaptivePopupMaterialAndBackdropPipeline()
+	{
+		var repositoryRoot = FindRepositoryRoot();
+		var styleFile = Path.Combine(
+			repositoryRoot,
+			"Apps",
+			"Avalonia",
+			"Styles",
+			"Theme.axaml");
+		var document = XDocument.Load(styleFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var toolTipStyle = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Style"),
+			element => element.Attribute("Selector")?.Value == "ToolTip");
+		var setters = toolTipStyle
+			.Elements(avaloniaNamespace + "Setter")
+			.ToDictionary(
+				setter => setter.Attribute("Property")?.Value ?? string.Empty,
+				setter => setter.Attribute("Value")?.Value ?? string.Empty,
+				StringComparer.Ordinal);
+
+		Assert.Equal("{DynamicResource MenuPopupBrush}", setters["Background"]);
+		Assert.Equal("{DynamicResource AppBorderBrush}", setters["BorderBrush"]);
+		Assert.Equal("1", setters["BorderThickness"]);
+		Assert.Equal("8", setters["CornerRadius"]);
+		Assert.Equal("10,6", setters["Padding"]);
+		Assert.Equal("1", setters["Opacity"]);
+
+		var avaloniaDirectory = Path.Combine(repositoryRoot, "Apps", "Avalonia");
+		foreach (var viewFile in Directory.EnumerateFiles(
+			         avaloniaDirectory,
+			         "*.axaml",
+			         SearchOption.AllDirectories))
+		{
+			if (PathComparer.Default.Equals(viewFile, styleFile))
+				continue;
+
+			var viewDocument = XDocument.Load(viewFile);
+			Assert.DoesNotContain(
+				viewDocument.Descendants(),
+				element => element.Name.LocalName == "Style" &&
+				           element.Attribute("Selector")?.Value == "ToolTip");
+		}
+
+		var appSource = File.ReadAllText(Path.Combine(avaloniaDirectory, "App.axaml.cs"));
+		Assert.Contains("ThemedToolTipService.Initialize();", appSource, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"preview-blurred-tooltip",
+			File.ReadAllText(styleFile),
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void ThemeStyles_UnavailableRecentFolderRemainsEnabledButVisuallyMuted()
 	{
 		var styleFile = Path.Combine(
