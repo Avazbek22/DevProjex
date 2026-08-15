@@ -311,8 +311,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			combo.SelectedItem = active;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.True(firstCloneWindow.IsVisible);
-			await UiTestDriver.ClickAsync(
-				window,
+			await UiTestDriver.RaiseButtonClickAsync(
 				Assert.IsType<Button>(firstCloneWindow.FindControl<Button>("StartCloneButton")));
 			await UiTestDriver.WaitForConditionAsync(
 				window,
@@ -460,12 +459,15 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 	{
 		var appDataPath = CreateAppDataPath();
 		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		const string recentRepositoryUrl = "https://github.com/example/network-intent.git";
 		var repositoryPath = CreateCachedRepository(
 			cache,
 			"https://github.com/example/offline.git",
 			"feature/offline",
 			128,
 			git: true);
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		recentStore.AddRepository(recentStore.Load(), recentRepositoryUrl);
 		var git = new FailingNetworkGitRepositoryService();
 		var window = await CreateWindowAsync(appDataPath, cache, git);
 
@@ -474,18 +476,25 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
 			await WaitForCatalogAsync(window, expectedCount: 1);
 			var viewModel = UiTestDriver.GetViewModel(window);
-			viewModel.GitCloneUrl = "https://github.com/example/network-intent.git";
+			var recentCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("RecentRepositoriesComboBox"));
+			var cacheCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
+			var urlTextBox = Assert.IsType<TextBox>(cloneWindow.FindControl<TextBox>("UrlTextBox"));
+			var recentEntry = Assert.Single(recentCombo.Items.OfType<RecentProjectEntryViewModel>());
+			recentCombo.SelectedItem = recentEntry;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
-			var combo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
-			combo.SelectedItem = viewModel.CachedRepositories.Single();
+			Assert.Same(recentEntry, recentCombo.SelectedItem);
+			Assert.Equal(recentRepositoryUrl, urlTextBox.Text);
+
+			var cacheEntry = viewModel.CachedRepositories.Single();
+			cacheCombo.SelectedItem = cacheEntry;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.True(cloneWindow.IsVisible);
-			Assert.Equal(
-				"https://github.com/example/network-intent.git",
-				Assert.IsType<TextBox>(cloneWindow.FindControl<TextBox>("UrlTextBox")).Text);
+			Assert.Same(cacheEntry, cacheCombo.SelectedItem);
+			Assert.Same(cacheEntry, viewModel.SelectedGitCloneCacheEntry);
+			Assert.Null(recentCombo.SelectedItem);
+			Assert.Equal(string.Empty, urlTextBox.Text);
 			Assert.Equal(0, git.OperationCount);
-			await UiTestDriver.ClickAsync(
-				window,
+			await UiTestDriver.RaiseButtonClickAsync(
 				Assert.IsType<Button>(cloneWindow.FindControl<Button>("StartCloneButton")));
 			await UiTestDriver.WaitForConditionAsync(
 				window,
@@ -585,43 +594,118 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 	}
 
 	[AvaloniaFact]
-	public async Task GitCloneWindow_UrlAndRecentIntentClearCacheSelectionAndEnterUsesNetworkPath()
+	public async Task GitCloneWindow_EscapeInRepositoryDropDownClosesOnlyThePopup()
 	{
 		var appDataPath = CreateAppDataPath();
 		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
-		const string repositoryUrl = "https://github.com/example/recent-intent.git";
-		CreateCachedRepository(cache, repositoryUrl, "feature", 64, git: true);
+		CreateCachedRepository(cache, "https://github.com/example/cached.git", "main", 64, git: true);
 		var recentStore = new RecentProjectsStore(() => appDataPath);
-		recentStore.AddRepository(recentStore.Load(), repositoryUrl);
+		recentStore.AddRepository(recentStore.Load(), "https://github.com/example/recent.git");
+		var window = await CreateWindowAsync(appDataPath, cache);
+
+		try
+		{
+			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			try
+			{
+				await WaitForCatalogAsync(window, expectedCount: 1);
+				var cancelRequestCount = 0;
+				cloneWindow.CancelRequested += (_, _) => cancelRequestCount++;
+				var recentCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("RecentRepositoriesComboBox"));
+				var cacheCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
+
+				await AssertEscapeClosesOnlyDropDownAsync(recentCombo);
+				await AssertEscapeClosesOnlyDropDownAsync(cacheCombo);
+
+				Assert.True(cloneWindow.IsVisible);
+				Assert.Equal(0, cancelRequestCount);
+
+				async Task AssertEscapeClosesOnlyDropDownAsync(ComboBox comboBox)
+				{
+					comboBox.Focus();
+					comboBox.IsDropDownOpen = true;
+					await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+					var popup = Assert.Single(
+						comboBox.GetVisualDescendants().OfType<Popup>(),
+						static candidate => candidate.IsOpen);
+					var popupRoot = Assert.IsAssignableFrom<TopLevel>(TopLevel.GetTopLevel(popup.Child));
+
+					await UiTestDriver.PressKeyAsync(popupRoot, Key.Escape);
+
+					Assert.False(comboBox.IsDropDownOpen);
+					Assert.True(cloneWindow.IsVisible);
+					Assert.Equal(0, cancelRequestCount);
+				}
+			}
+			finally
+			{
+				await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
+			}
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task GitCloneWindow_RecentCacheRecentTransitionsKeepOnlyTheLastIntent()
+	{
+		var appDataPath = CreateAppDataPath();
+		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		const string recentRepositoryUrl = "https://github.com/example/recent-intent.git";
+		const string localCacheRepositoryUrl = "https://github.com/example/local-cache-intent.git";
+		CreateCachedRepository(cache, recentRepositoryUrl, "main", 64, git: true);
+		CreateCachedRepository(cache, localCacheRepositoryUrl, "feature", 64, git: true);
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		recentStore.AddRepository(recentStore.Load(), recentRepositoryUrl);
 		var git = new OfflineUpdateGitRepositoryService();
 		var window = await CreateWindowAsync(appDataPath, cache, git);
 
 		try
 		{
 			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
-			await WaitForCatalogAsync(window, expectedCount: 1);
+			await WaitForCatalogAsync(window, expectedCount: 2);
 			var viewModel = UiTestDriver.GetViewModel(window);
 			var cacheCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
 			var recentCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("RecentRepositoriesComboBox"));
 			var urlTextBox = Assert.IsType<TextBox>(cloneWindow.FindControl<TextBox>("UrlTextBox"));
-			var cacheEntry = Assert.Single(viewModel.CachedRepositories);
-			cacheCombo.SelectedItem = cacheEntry;
-			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
-			Assert.Same(cacheEntry, viewModel.SelectedGitCloneCacheEntry);
+			var recentEntry = Assert.Single(
+				recentCombo.Items.OfType<RecentProjectEntryViewModel>(),
+				item => string.Equals(item.Value, recentRepositoryUrl, StringComparison.OrdinalIgnoreCase));
+			var cacheEntry = Assert.Single(
+				viewModel.CachedRepositories,
+				item => string.Equals(item.Entry.RepositoryUrl, localCacheRepositoryUrl, StringComparison.OrdinalIgnoreCase));
 
-			await UiTestDriver.ClickAsync(window, urlTextBox);
-			urlTextBox.SelectAll();
-			cloneWindow.KeyTextInput("https://github.com/example/manual-intent.git");
+			recentCombo.IsDropDownOpen = true;
+			recentCombo.SelectedItem = recentEntry;
+			recentCombo.IsDropDownOpen = false;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			Assert.Equal(recentRepositoryUrl, urlTextBox.Text);
+			Assert.Same(recentEntry, recentCombo.SelectedItem);
 			Assert.Null(cacheCombo.SelectedItem);
 			Assert.Null(viewModel.SelectedGitCloneCacheEntry);
 
 			cacheCombo.SelectedItem = cacheEntry;
-			recentCombo.SelectedItem = recentCombo.Items
-				.OfType<RecentProjectEntryViewModel>()
-				.Single(item => string.Equals(item.Value, repositoryUrl, StringComparison.OrdinalIgnoreCase));
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Null(recentCombo.SelectedItem);
+			Assert.Equal(string.Empty, urlTextBox.Text);
+			Assert.Same(cacheEntry, viewModel.SelectedGitCloneCacheEntry);
+
+			recentCombo.IsDropDownOpen = true;
+			recentCombo.IsDropDownOpen = false;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+			Assert.Null(recentCombo.SelectedItem);
+			Assert.Equal(string.Empty, urlTextBox.Text);
+			Assert.Same(cacheEntry, cacheCombo.SelectedItem);
+			Assert.Same(cacheEntry, viewModel.SelectedGitCloneCacheEntry);
+
+			recentCombo.IsDropDownOpen = true;
+			recentCombo.SelectedItem = recentEntry;
+			recentCombo.IsDropDownOpen = false;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
-			Assert.Equal(repositoryUrl, urlTextBox.Text);
+			Assert.Equal(recentRepositoryUrl, urlTextBox.Text);
+			Assert.Same(recentEntry, recentCombo.SelectedItem);
 			Assert.Null(cacheCombo.SelectedItem);
 			Assert.Null(viewModel.SelectedGitCloneCacheEntry);
 			Assert.True(cloneWindow.IsVisible);
@@ -635,6 +719,81 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
 			Assert.Equal(1, git.PullCount);
 			Assert.Equal(0, git.CloneCount);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task GitCloneWindow_ManualUrlClearsCacheAndRecentIntentBeforeNetworkOpen()
+	{
+		var appDataPath = CreateAppDataPath();
+		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		const string recentRepositoryUrl = "https://github.com/example/recent-before-manual.git";
+		const string cacheRepositoryUrl = "https://github.com/example/cache-before-manual.git";
+		const string manualRepositoryUrl = "https://github.com/example/manual-intent.git";
+		CreateCachedRepository(cache, recentRepositoryUrl, "main", 64, git: true);
+		CreateCachedRepository(cache, cacheRepositoryUrl, "feature", 64, git: true);
+		CreateCachedRepository(cache, manualRepositoryUrl, "main", 64, git: true);
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		recentStore.AddRepository(recentStore.Load(), recentRepositoryUrl);
+		var git = new OfflineUpdateGitRepositoryService();
+		var window = await CreateWindowAsync(appDataPath, cache, git);
+
+		try
+		{
+			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			await WaitForCatalogAsync(window, expectedCount: 3);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var recentCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("RecentRepositoriesComboBox"));
+			var cacheCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
+			var urlTextBox = Assert.IsType<TextBox>(cloneWindow.FindControl<TextBox>("UrlTextBox"));
+			var recentEntry = Assert.Single(recentCombo.Items.OfType<RecentProjectEntryViewModel>());
+			var cacheEntry = Assert.Single(
+				viewModel.CachedRepositories,
+				item => string.Equals(item.Entry.RepositoryUrl, cacheRepositoryUrl, StringComparison.OrdinalIgnoreCase));
+
+			cacheCombo.SelectedItem = cacheEntry;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Same(cacheEntry, cacheCombo.SelectedItem);
+			Assert.Null(recentCombo.SelectedItem);
+			Assert.Equal(string.Empty, urlTextBox.Text);
+
+			await EnterManualUrlAsync();
+			Assert.Null(cacheCombo.SelectedItem);
+			Assert.Null(recentCombo.SelectedItem);
+			Assert.Equal(manualRepositoryUrl, urlTextBox.Text);
+
+			recentCombo.SelectedItem = recentEntry;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Same(recentEntry, recentCombo.SelectedItem);
+			Assert.Null(cacheCombo.SelectedItem);
+			Assert.Equal(recentRepositoryUrl, urlTextBox.Text);
+
+			await EnterManualUrlAsync();
+			Assert.Null(cacheCombo.SelectedItem);
+			Assert.Null(recentCombo.SelectedItem);
+			Assert.Equal(manualRepositoryUrl, urlTextBox.Text);
+			Assert.Equal(0, git.PullCount);
+
+			await UiTestDriver.PressKeyAsync(cloneWindow, Key.Enter);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !cloneWindow.IsVisible,
+				"Enter to confirm the manually entered repository URL");
+			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+			Assert.Equal(1, git.PullCount);
+			Assert.Equal(0, git.CloneCount);
+
+			async Task EnterManualUrlAsync()
+			{
+				await UiTestDriver.ClickAsync(window, urlTextBox);
+				urlTextBox.SelectAll();
+				cloneWindow.KeyTextInput(manualRepositoryUrl);
+				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+			}
 		}
 		finally
 		{
@@ -661,8 +820,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			await WaitForCatalogAsync(window, expectedCount: 1);
 			var combo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
 			combo.SelectedItem = UiTestDriver.GetViewModel(window).CachedRepositories.Single();
-			await UiTestDriver.ClickAsync(
-				window,
+			await UiTestDriver.RaiseButtonClickAsync(
 				Assert.IsType<Button>(cloneWindow.FindControl<Button>("StartCloneButton")));
 			await UiTestDriver.WaitForConditionAsync(
 				window,
@@ -712,8 +870,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				Directory.Delete(RepositoryCacheLayout.GetContainer(entry.LocalPath), recursive: true);
 				var combo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
 				combo.SelectedItem = entry;
-				await UiTestDriver.ClickAsync(
-					window,
+				await UiTestDriver.RaiseButtonClickAsync(
 					Assert.IsType<Button>(cloneWindow.FindControl<Button>("StartCloneButton")));
 
 				await UiTestDriver.WaitForConditionAsync(
@@ -834,6 +991,63 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		finally
 		{
 			git.ReleasePull.TrySetResult();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task GitCloneWindow_RecentKeyboardSelectionUpdatesUrlAndEnterUsesNetworkPath()
+	{
+		var appDataPath = CreateAppDataPath();
+		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		const string firstRepositoryUrl = "https://github.com/example/keyboard-first.git";
+		const string secondRepositoryUrl = "https://github.com/example/keyboard-second.git";
+		CreateCachedRepository(cache, firstRepositoryUrl, "main", 64, git: true);
+		CreateCachedRepository(cache, secondRepositoryUrl, "main", 64, git: true);
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var recentProjects = recentStore.AddRepository(recentStore.Load(), firstRepositoryUrl);
+		recentStore.AddRepository(recentProjects, secondRepositoryUrl);
+		var git = new OfflineUpdateGitRepositoryService();
+		var window = await CreateWindowAsync(appDataPath, cache, git);
+
+		try
+		{
+			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			await WaitForCatalogAsync(window, expectedCount: 2);
+			var recentCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("RecentRepositoriesComboBox"));
+			var urlTextBox = Assert.IsType<TextBox>(cloneWindow.FindControl<TextBox>("UrlTextBox"));
+			var recentEntries = recentCombo.Items.OfType<RecentProjectEntryViewModel>().ToArray();
+			Assert.Equal(2, recentEntries.Length);
+			recentCombo.Focus();
+			recentCombo.IsDropDownOpen = true;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+			await UiTestDriver.PressKeyAsync(cloneWindow, Key.Down);
+			Assert.True(recentCombo.IsDropDownOpen);
+			Assert.Same(recentEntries[0], recentCombo.SelectedItem);
+			Assert.Equal(recentEntries[0].Value, urlTextBox.Text);
+
+			await UiTestDriver.PressKeyAsync(cloneWindow, Key.Down);
+			Assert.Same(recentEntries[1], recentCombo.SelectedItem);
+			Assert.Equal(recentEntries[1].Value, urlTextBox.Text);
+
+			await UiTestDriver.PressKeyAsync(cloneWindow, Key.Up);
+			Assert.Same(recentEntries[0], recentCombo.SelectedItem);
+			Assert.Equal(recentEntries[0].Value, urlTextBox.Text);
+			Assert.Equal(0, git.PullCount);
+
+			await UiTestDriver.PressKeyAsync(cloneWindow, Key.Enter);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !cloneWindow.IsVisible,
+				"Enter to confirm the highlighted recent repository");
+			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+
+			Assert.Equal(1, git.PullCount);
+			Assert.Equal(0, git.CloneCount);
+		}
+		finally
+		{
 			await UiTestDriver.CloseWindowAsync(window);
 		}
 	}

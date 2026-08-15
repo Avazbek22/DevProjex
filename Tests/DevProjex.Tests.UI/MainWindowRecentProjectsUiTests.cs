@@ -1,3 +1,5 @@
+using Avalonia.Controls.Primitives;
+using Avalonia.VisualTree;
 using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.UI;
@@ -167,7 +169,7 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 	}
 
 	[AvaloniaFact]
-	public async Task GitCloneWindow_RecentRepositories_FillsUrlFromSelection()
+	public async Task GitCloneWindow_RecentRepositorySelectionRemainsVisibleUntilUrlIsEdited()
 	{
 		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
 		var recentStore = new RecentProjectsStore(() => appDataPath);
@@ -191,13 +193,30 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 				Assert.Equal(UiTestDriver.GetViewModel(window).GitCloneRecentRepositoriesLabel, recentComboBox!.PlaceholderText);
 				Assert.True(recentComboBox.Items.OfType<RecentProjectEntryViewModel>().Any());
 
-				recentComboBox.SelectedItem = recentComboBox.Items
+				var recentEntry = recentComboBox.Items
 					.OfType<RecentProjectEntryViewModel>()
 					.Single(item => string.Equals(item.Value, repositoryUrl, StringComparison.OrdinalIgnoreCase));
+				recentComboBox.IsDropDownOpen = true;
+				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+				var popup = Assert.Single(
+					recentComboBox.GetVisualDescendants().OfType<Popup>(),
+					static candidate => candidate.IsOpen);
+				var recentItem = Assert.Single(
+					popup.Child!.GetVisualDescendants().OfType<ComboBoxItem>(),
+					candidate => ReferenceEquals(candidate.DataContext, recentEntry));
+				await UiTestDriver.ClickAsync(window, recentItem);
 
 				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
 
 				Assert.Equal(repositoryUrl, urlTextBox!.Text);
+				Assert.Same(recentEntry, recentComboBox.SelectedItem);
+				Assert.True(urlTextBox.IsFocused);
+				Assert.Equal(0, urlTextBox.SelectionStart);
+				Assert.Equal(repositoryUrl.Length, urlTextBox.SelectionEnd);
+
+				urlTextBox.Text = "https://github.com/example/manually-edited";
+				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+				Assert.Null(recentComboBox.SelectedItem);
 			}
 			finally
 			{
