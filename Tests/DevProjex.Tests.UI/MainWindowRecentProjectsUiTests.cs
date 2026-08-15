@@ -1,4 +1,5 @@
 using Avalonia.Controls.Primitives;
+using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.RecentProjects;
@@ -126,6 +127,16 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 				static candidate => candidate.IsOpen);
 			var popupRoot = Assert.IsAssignableFrom<Visual>(popup.Child);
 			var scrollViewer = Assert.Single(popupRoot.GetVisualDescendants().OfType<ScrollViewer>());
+			var nativeHoverScrollButtons = popupRoot
+				.GetVisualDescendants()
+				.OfType<RepeatButton>()
+				.Where(button => !button.Classes.Contains(MenuScrollBehavior.ArrowButtonClass))
+				.ToArray();
+			var arrowButtons = popupRoot
+				.GetVisualDescendants()
+				.OfType<RepeatButton>()
+				.Where(button => button.Classes.Contains(MenuScrollBehavior.ArrowButtonClass))
+				.ToArray();
 			var scrollIndicator = Assert.Single(
 				popupRoot.GetVisualDescendants().OfType<Control>(),
 				control => control.Classes.Contains("menu-external-scrollbar"));
@@ -134,15 +145,72 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 				border => border.Classes.Contains("menu-scroll-indicator-thumb"));
 
 			Assert.Equal(ScrollBarVisibility.Visible, scrollViewer.VerticalScrollBarVisibility);
-			Assert.True(scrollViewer.Bounds.Height <= 510);
+			Assert.True(scrollViewer.Bounds.Height <= 520);
+			Assert.Equal(2, nativeHoverScrollButtons.Length);
+			Assert.All(nativeHoverScrollButtons, static button =>
+			{
+				Assert.False(button.IsVisible);
+				Assert.False(button.IsHitTestVisible);
+			});
+			Assert.Equal(2, arrowButtons.Length);
+			Assert.All(arrowButtons, static button =>
+			{
+				Assert.True(button.IsVisible);
+				Assert.True(button.IsHitTestVisible);
+				Assert.True(button.Bounds.Width <= 12);
+				Assert.True(button.Bounds.Height <= 14);
+				Assert.Equal(0, button.BorderThickness.Left);
+				Assert.Equal(0, button.BorderThickness.Top);
+				Assert.Equal(0, button.BorderThickness.Right);
+				Assert.Equal(0, button.BorderThickness.Bottom);
+				var icon = Assert.IsType<PathIcon>(button.Content);
+				Assert.NotNull(icon.Foreground);
+			});
+
+			var menuItems = popupRoot
+				.GetVisualDescendants()
+				.OfType<MenuItem>()
+				.ToArray();
+			var partiallyVisibleItems = menuItems
+				.Where(item => item.TranslatePoint(default, scrollViewer) is { } origin &&
+				               origin.Y < scrollViewer.Viewport.Height &&
+				               origin.Y + item.Bounds.Height > scrollViewer.Viewport.Height)
+				.ToArray();
+			Assert.Empty(partiallyVisibleItems);
 			Assert.True(scrollIndicator.IsVisible);
 			Assert.True(indicatorThumb.Bounds.Height >= 32);
 
-			var maximumOffset = scrollViewer.Extent.Height - scrollViewer.Viewport.Height;
+			var firstOrigin = Assert.IsType<Point>(menuItems[0].TranslatePoint(default, scrollViewer));
+			var secondOrigin = Assert.IsType<Point>(menuItems[1].TranslatePoint(default, scrollViewer));
+			var rowStep = secondOrigin.Y - firstOrigin.Y;
+			var rawMaximumOffset = scrollViewer.Extent.Height - scrollViewer.Viewport.Height;
+			var maximumOffset = Math.Floor(rawMaximumOffset / rowStep) * rowStep;
 			Assert.True(maximumOffset > 0);
-			scrollViewer.Offset = new Vector(0, maximumOffset);
+			var upButton = Assert.Single(arrowButtons, static button => Grid.GetRow(button) == 0);
+			var downButton = Assert.Single(arrowButtons, static button => Grid.GetRow(button) == 2);
+			Assert.False(upButton.IsEnabled);
+			Assert.True(downButton.IsEnabled);
+
+			var lastInitiallyVisibleItem = menuItems
+				.Last(item => item.TranslatePoint(default, scrollViewer) is { } origin &&
+				              origin.Y + item.Bounds.Height <= scrollViewer.Viewport.Height);
+			lastInitiallyVisibleItem.BringIntoView();
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(0, scrollViewer.Offset.Y, precision: 3);
+
+			downButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(rowStep, scrollViewer.Offset.Y, precision: 3);
+
+			scrollViewer.Offset = new Vector(0, rowStep * 1.4);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(rowStep, scrollViewer.Offset.Y, precision: 3);
+
+			scrollViewer.Offset = new Vector(0, rawMaximumOffset);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Equal(maximumOffset, scrollViewer.Offset.Y, precision: 3);
+			Assert.True(upButton.IsEnabled);
+			Assert.False(downButton.IsEnabled);
 		}
 		finally
 		{
