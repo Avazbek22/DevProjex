@@ -3311,7 +3311,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var helpToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(helpIndicator));
 			var helpText = Assert.IsType<TextBlock>(helpToolTip.Content);
 			Assert.Equal("Found: 3. Hidden: 2.", helpText.Text);
-			Assert.Equal(PlacementMode.Bottom, ToolTip.GetPlacement(helpIndicator));
+			Assert.Equal(PlacementMode.BottomEdgeAlignedRight, ToolTip.GetPlacement(helpIndicator));
 			Assert.Equal(5, ToolTip.GetVerticalOffset(helpIndicator));
 			Assert.Equal(VerticalAlignment.Center, helpIndicator.VerticalAlignment);
 			var checkBoxPosition = Assert.IsType<Point>(checkBox.TranslatePoint(default, processingBorder));
@@ -3699,6 +3699,71 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		}
 	}
 
+	[AvaloniaTheory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ContentProcessingStatusToolTip_StaysInsideWindowAtMinimumSizeInRussian(bool compactMode)
+	{
+		using var project = UiTestProject.CreateDefault();
+		LocalizationService? localization = null;
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services =>
+			{
+				localization = services.Localization;
+				return services;
+			});
+		try
+		{
+			window.Width = window.MinWidth;
+			window.Height = window.MinHeight;
+			Assert.IsType<LocalizationService>(localization).SetLanguage(AppLanguage.Ru);
+			if (compactMode)
+				window.Classes.Add("compact-mode");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.ContentProcessingOptions.Count ==
+				      ProjectPresentationCatalog.ContentTransformationOptionIds.Count,
+				"the content processing section to load");
+
+			viewModel.SetAppliedContentTransformationState(
+				compressCode: false,
+				stripComments: false,
+				stripBlankLines: true);
+			viewModel.SetBlankLineStripStatus(strippedFiles: 999, totalFiles: 1000);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+			var indicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.StripBlankLines);
+			Assert.True(indicator.IsVisible);
+			ToolTip.SetIsOpen(indicator, true);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => ToolTip.GetIsOpen(indicator),
+				"the content-processing tooltip to open");
+			var toolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(indicator));
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+			var windowLeft = window.PointToScreen(default).X;
+			var windowRight = window.PointToScreen(new Point(window.ClientSize.Width, 0)).X;
+			var toolTipLeft = toolTip.PointToScreen(default).X;
+			var toolTipRight = toolTip.PointToScreen(new Point(toolTip.Bounds.Width, 0)).X;
+			Assert.True(
+				toolTipLeft >= windowLeft,
+				$"The content-processing tooltip extends beyond the window: tooltip={toolTipLeft}, window={windowLeft}.");
+			Assert.True(
+				toolTipRight <= windowRight,
+				$"The content-processing tooltip extends beyond the window: tooltip={toolTipRight}, window={windowRight}.");
+			Assert.Equal(PlacementMode.BottomEdgeAlignedRight, ToolTip.GetPlacement(indicator));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task CompressionWithoutSecretFindings_KeepsCompressionAndSecretsStatusesSeparate()
 	{
@@ -3758,7 +3823,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				2);
 			await UiTestDriver.OpenToolTipThroughClickAsync(window, compressionIndicator);
 			var compressionToolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(compressionIndicator));
-			Assert.Equal(PlacementMode.Bottom, ToolTip.GetPlacement(compressionIndicator));
+			Assert.Equal(PlacementMode.BottomEdgeAlignedRight, ToolTip.GetPlacement(compressionIndicator));
 			Assert.Equal(5, ToolTip.GetVerticalOffset(compressionIndicator));
 			Assert.Equal(
 				option.StatusText,

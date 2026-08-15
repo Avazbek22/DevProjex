@@ -210,7 +210,7 @@
 							PointerPressed="OnContentProcessingStatusIndicatorPointerPressed"
 							PointerReleased="OnContentProcessingStatusIndicatorPointerReleased"
 							ToolTip.ShowDelay="450"
-							ToolTip.Placement="Bottom"
+							ToolTip.Placement="BottomEdgeAlignedRight"
 							ToolTip.VerticalOffset="5">
 					  <Border.RenderTransform>
 						<TranslateTransform Y="3" />
