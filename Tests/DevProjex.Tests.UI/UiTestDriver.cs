@@ -543,10 +543,27 @@ internal static class UiTestDriver
             _ => PhysicalKey.None
         };
         var keySymbol = physicalKey.ToQwertyKeySymbol(modifiers.HasFlag(RawInputModifiers.Shift));
-        inputRoot.KeyPress(key, modifiers, physicalKey, keySymbol);
-        await WaitForSettledFramesAsync(frameCount: 1);
-        if (inputRoot.IsVisible)
-            inputRoot.KeyRelease(key, modifiers, physicalKey, keySymbol);
+        var inputWindow = inputRoot as Window;
+        var windowClosed = false;
+        EventHandler? closedHandler = null;
+        if (inputWindow is not null)
+        {
+            closedHandler = (_, _) => windowClosed = true;
+            inputWindow.Closed += closedHandler;
+        }
+
+        try
+        {
+            inputRoot.KeyPress(key, modifiers, physicalKey, keySymbol);
+            await WaitForSettledFramesAsync(frameCount: 1);
+            if (!windowClosed && inputRoot.IsVisible)
+                inputRoot.KeyRelease(key, modifiers, physicalKey, keySymbol);
+        }
+        finally
+        {
+            if (inputWindow is not null && closedHandler is not null)
+                inputWindow.Closed -= closedHandler;
+        }
 
         await WaitForSettledFramesAsync(frameCount: 3);
     }
