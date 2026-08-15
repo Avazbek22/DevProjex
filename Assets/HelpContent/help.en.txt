@@ -185,6 +185,8 @@ Tree + content:
 ## 7) Preview mode
 Opened with the eye icon button in the top bar or with Ctrl+B.
 
+Mouse side buttons follow browser-style navigation: Forward opens Preview mode, and Back closes it. Repeating the current direction has no effect.
+
 Shows the final result in a separate workspace next to the tree. This mode does not copy to the clipboard and does not export to a file on its own — it is a viewing mode.
 
 By default, the workspace opens as:

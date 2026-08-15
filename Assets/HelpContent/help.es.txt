@@ -185,6 +185,8 @@ Médico:
 ## 7) Modo de vista previa
 Se abre con el botón del icono del ojo en la barra superior o con Ctrl+B.
 
+Los botones laterales del ratón siguen la navegación del navegador: Adelante abre el modo de vista previa y Atrás lo cierra. Repetir la dirección ya activa no tiene efecto.
+
 Muestra el resultado final en un espacio de trabajo separado al lado del árbol. Este modo no copia al portapapeles ni exporta a un archivo por sí solo: es un modo de visualización.
 
 De forma predeterminada, el espacio de trabajo se abre como:

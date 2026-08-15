@@ -185,6 +185,8 @@ Baum + Inhalt:
 ## 7) Vorschaumodus
 Wird über die Schaltfläche mit dem Auge in der oberen Leiste oder mit Ctrl+B geöffnet.
 
+Die seitlichen Maustasten funktionieren wie die Browsernavigation: Vorwärts öffnet den Vorschaumodus, Zurück schließt ihn. Ein erneuter Druck in der bereits aktiven Richtung hat keine Wirkung.
+
 Zeigt das Endergebnis in einem separaten Arbeitsbereich neben dem Baum. Dieser Modus kopiert nichts in die Zwischenablage und exportiert nichts in eine Datei — er dient nur zur Vorschau.
 
 Standardmäßig wird folgender Arbeitsbereich geöffnet:

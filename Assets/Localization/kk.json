@@ -75,7 +75,7 @@
   "Filter.ByName": "Атау бойынша сүзгі",
   "Filter.Tooltip": "Атау бойынша сүзгі (Ctrl+Shift+N)",
   "CopyFormat.Tooltip": "Ағаш пішімі",
-  "Preview.Tooltip": "Алдын ала қарау режимі (Ctrl+B)",
+  "Preview.Tooltip": "Алдын ала қарау режимі (Ctrl+B)\nТінтуірдің бүйірлік түймелері: «Алға» — ашу, «Артқа» — жабу",
   "Preview.HideTree.Tooltip": "Ағаш панелін жасыру",
   "Preview.Modes.Label": "Үш режим:",
   "Preview.Mode.Tree": "Ағаш",

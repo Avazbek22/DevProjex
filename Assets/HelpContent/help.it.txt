@@ -185,6 +185,8 @@ Albero + contenuto:
 ## 7) Modalità anteprima
 Si apre con il pulsante con icona a forma di occhio nella barra superiore o con Ctrl+B.
 
+I pulsanti laterali del mouse seguono la navigazione del browser: Avanti apre la modalità anteprima, Indietro la chiude. Ripetere la direzione già attiva non produce effetti.
+
 Mostra il risultato finale in un’area di lavoro separata accanto all’albero. Questa modalità non copia nulla negli appunti e non esporta nulla su file: serve solo per la visualizzazione.
 
 Per impostazione predefinita l’area di lavoro si apre così:

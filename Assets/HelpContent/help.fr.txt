@@ -185,6 +185,8 @@ Arborescence + contenu :
 ## 7) Mode aperçu
 S’ouvre avec le bouton icône œil dans la barre supérieure ou avec Ctrl+B.
 
+Les boutons latéraux de la souris suivent la navigation du navigateur : Suivant ouvre le mode aperçu et Précédent le ferme. Répéter la direction déjà active n’a aucun effet.
+
 Affiche le résultat final dans un espace de travail séparé, à côté de l’arborescence. Ce mode ne copie rien dans le presse-papiers et n’exporte rien vers un fichier par lui-même : il sert uniquement à la consultation.
 
 Par défaut, l’espace de travail s’ouvre ainsi :

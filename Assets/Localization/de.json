@@ -75,7 +75,7 @@
   "Filter.ByName": "Nach Name filtern",
   "Filter.Tooltip": "Nach Name filtern (Ctrl+Shift+N)",
   "CopyFormat.Tooltip": "Baumformat",
-  "Preview.Tooltip": "Vorschaumodus (Ctrl+B)",
+  "Preview.Tooltip": "Vorschaumodus (Ctrl+B)\nSeitliche Maustasten: Vorwärts — öffnen, Zurück — schließen",
   "Preview.HideTree.Tooltip": "Baumleiste ausblenden",
   "Preview.Modes.Label": "Drei Modi:",
   "Preview.Mode.Tree": "Baum",

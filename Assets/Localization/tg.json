@@ -75,7 +75,7 @@
   "Filter.ByName": "Филтр бо ном",
   "Filter.Tooltip": "Филтр бо ном (Ctrl+Shift+N)",
   "CopyFormat.Tooltip": "Формати дарахт",
-  "Preview.Tooltip": "Режими пешнамоиш (Ctrl+B)",
+  "Preview.Tooltip": "Режими пешнамоиш (Ctrl+B)\nТугмаҳои паҳлуии муш: «Ба пеш» — кушодан, «Ба қафо» — бастан",
   "Preview.HideTree.Tooltip": "Пинҳон кардани панели дарахт",
   "Preview.Modes.Label": "Се режим:",
   "Preview.Mode.Tree": "Дарахт",

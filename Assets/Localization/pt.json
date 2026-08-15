@@ -75,7 +75,7 @@
     "Filter.ByName":  "Filtrar por nome",
     "Filter.Tooltip":  "Filtrar por nome (Ctrl+Shift+N)",
     "CopyFormat.Tooltip":  "Formato de árvore",
-    "Preview.Tooltip":  "Modo de visualização (Ctrl+B)",
+    "Preview.Tooltip":  "Modo de visualização (Ctrl+B)\nBotões laterais do mouse: Avançar — abrir, Voltar — fechar",
     "Preview.HideTree.Tooltip":  "Ocultar painel de árvore",
     "Preview.Modes.Label":  "Três modos:",
     "Preview.Mode.Tree":  "Árvore",

@@ -185,6 +185,8 @@ Daraxt + mazmun:
 ## 7) Preview rejimi
 Yuqori paneldagi ko‘zcha ikonali tugma yoki Ctrl+B orqali ochiladi.
 
+Sichqonchaning yon tugmalari brauzerdagi kabi ishlaydi: «Oldinga» Preview rejimini ochadi, «Orqaga» esa yopadi. Joriy yo‘nalishni qayta bosish hech narsani o‘zgartirmaydi.
+
 Yakuniy natijani daraxt yonidagi alohida ishchi hududda ko‘rsatadi. Bu rejim o‘zi hech narsani clipboardga nusxalamaydi va faylga eksport qilmaydi — u faqat ko‘rish uchun xizmat qiladi.
 
 Standart holatda ishchi hudud quyidagicha ochiladi:
