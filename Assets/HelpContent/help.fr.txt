@@ -63,7 +63,7 @@ Règles :
 * seuls les dossiers locaux sont ajoutés à la liste ;
 * les dépôts Git clonés via DevProjex ne sont pas ajoutés à cette liste ;
 * aucun doublon n’est créé — rouvrir le même dossier le remonte en haut de la liste ;
-* jusqu’à 15 derniers dossiers sont conservés ;
+* jusqu’à 32 derniers dossiers sont conservés ;
 * l’historique est conservé entre les démarrages de l’application.
 
 Pour chaque élément, le dossier parent et le nom du projet sont affichés, par exemple `Projects / App`.
@@ -112,7 +112,7 @@ Règles :
 * seules les URL des dépôts sont ajoutées à la liste ;
 * les dossiers locaux ne sont pas ajoutés à cette liste ;
 * aucun doublon n’est créé — re-cloner le même dépôt le remonte en haut de la liste ;
-* jusqu’à 7 derniers dépôts sont conservés ;
+* jusqu’à 16 derniers dépôts sont conservés ;
 * l’historique est conservé entre les démarrages de l’application.
 
 Si vous choisissez un élément dans la liste, l’URL est automatiquement insérée dans le champ de saisie.

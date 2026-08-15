@@ -63,7 +63,7 @@ Qoidalar:
 * ro‘yxatga faqat lokal jildlar qo‘shiladi;
 * DevProjex orqali klonlangan Git repozitoriylari bu ro‘yxatga qo‘shilmaydi;
 * dublikatlar yaratilmaydi — bir xil jildni qayta ochish uni ro‘yxatning yuqorisiga olib chiqadi;
-* 15 tagacha so‘nggi jild saqlanadi;
+* 32 tagacha so‘nggi jild saqlanadi;
 * tarix ilova qayta ishga tushirilganda ham saqlanadi.
 
 Har bir elementda yuqori jild va loyiha nomi ko‘rsatiladi, masalan `Projects / App`.
@@ -112,7 +112,7 @@ Qoidalar:
 * ro‘yxatga faqat repozitoriy URL manzillari qo‘shiladi;
 * lokal jildlar bu ro‘yxatga qo‘shilmaydi;
 * dublikatlar yaratilmaydi — bir xil repozitoriyani qayta klonlash uni ro‘yxatning yuqorisiga olib chiqadi;
-* 7 tagacha so‘nggi repozitoriy saqlanadi;
+* 16 tagacha so‘nggi repozitoriy saqlanadi;
 * tarix ilova qayta ishga tushirilganda ham saqlanadi.
 
 Ro‘yxatdan element tanlansa, URL avtomatik ravishda kiritish maydoniga qo‘yiladi.
