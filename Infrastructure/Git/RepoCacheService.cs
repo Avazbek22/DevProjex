@@ -33,6 +33,7 @@ public sealed class RepoCacheService : IRepoCacheService
 	private readonly TimeProvider _timeProvider;
 	private readonly IGitWorktreeManager _worktreeManager;
 	private readonly RepoCacheTestHooks? _testHooks;
+	private readonly object _garbageCollectionSync = new();
 
 	public string CacheRootPath { get; }
 	public IReadOnlyList<string> CacheSearchRootPaths { get; }
@@ -530,6 +531,14 @@ public sealed class RepoCacheService : IRepoCacheService
 	}
 
 	public void CollectGarbage()
+	{
+		// A synchronous caller must observe completed cleanup even when session warm-up
+		// has already queued a background collection for the same service instance.
+		lock (_garbageCollectionSync)
+			CollectGarbageCore();
+	}
+
+	private void CollectGarbageCore()
 	{
 		CleanupTrash();
 		CleanupStaging();
