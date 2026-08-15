@@ -57,7 +57,7 @@
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="8" />
       <Setter Property="ClipToBounds" Value="True" />
-      <Setter Property="Padding" Value="4" />
+      <Setter Property="Padding" Value="4,0,0,0" />
     </Style>
 
     <Style Selector="ComboBox.recent-repositories-combo ComboBoxItem">

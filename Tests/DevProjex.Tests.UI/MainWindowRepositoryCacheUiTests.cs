@@ -66,6 +66,13 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 					realizedScrollViewer.GetVisualDescendants().OfType<ScrollBar>(),
 					static scrollBar => scrollBar.Orientation == Orientation.Vertical);
 				var thumb = Assert.Single(verticalScrollBar.GetVisualDescendants().OfType<Thumb>());
+				var popup = Assert.Single(
+					comboBox.GetVisualDescendants().OfType<Popup>(),
+					static candidate => candidate.IsOpen);
+				var popupBorder = Assert.IsType<Border>(popup.Child);
+				var scrollBarOrigin = Assert.IsType<Point>(verticalScrollBar.TranslatePoint(default, popupBorder));
+				var popupInnerRight = popupBorder.Bounds.Width - popupBorder.BorderThickness.Right;
+				var popupInnerBottom = popupBorder.Bounds.Height - popupBorder.BorderThickness.Bottom;
 
 				Assert.InRange(
 					comboBox.MaxDropDownHeight,
@@ -80,6 +87,18 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				Assert.Equal(0, verticalScrollBar.Margin.Top);
 				Assert.Equal(0, verticalScrollBar.Margin.Bottom);
 				Assert.Equal(VerticalAlignment.Stretch, verticalScrollBar.VerticalAlignment);
+				Assert.InRange(
+					Math.Abs(scrollBarOrigin.Y - popupBorder.BorderThickness.Top),
+					0,
+					0.5);
+				Assert.InRange(
+					Math.Abs(scrollBarOrigin.X + verticalScrollBar.Bounds.Width - popupInnerRight),
+					0,
+					0.5);
+				Assert.InRange(
+					Math.Abs(scrollBarOrigin.Y + verticalScrollBar.Bounds.Height - popupInnerBottom),
+					0,
+					0.5);
 				Assert.Equal(5, thumb.Width);
 				Assert.True(thumb.MinHeight >= 28);
 				Assert.Equal(new CornerRadius(3), thumb.CornerRadius);
