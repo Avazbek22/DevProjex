@@ -409,7 +409,6 @@ public sealed partial class SelectionSyncCoordinator(
 			return;
 
 		var changed = false;
-		var hideSecretsChanged = false;
 		_suppressIgnoreItemCheck = true;
 		try
 		{
@@ -420,7 +419,6 @@ public sealed partial class SelectionSyncCoordinator(
 
 				option.IsChecked = isChecked;
 				changed = true;
-				hideSecretsChanged |= option.Id == IgnoreOptionId.HideSecrets;
 			}
 		}
 		finally
@@ -445,8 +443,9 @@ public sealed partial class SelectionSyncCoordinator(
 		_session.IgnoreOptions.IsInitialized = true;
 		UpdateIgnoreSelectionCache();
 		RequestPendingApplyEvaluation();
-		if (hideSecretsChanged)
-			contentTransformationChanged?.Invoke(IgnoreOptionId.HideSecrets);
+		// A section-wide change is one draft transaction. Publishing Hide Secrets here would
+		// expose it immediately while the syntax transforms remain unapplied, producing a
+		// transient pipeline that the user did not explicitly select.
 	}
 
     public Task PopulateExtensionsForRootSelectionAsync(

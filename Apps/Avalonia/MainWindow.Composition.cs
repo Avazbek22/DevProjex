@@ -25,10 +25,7 @@ public partial class MainWindow
 	{
 		// Scanning is opt-in: a snapshot finishing after the user switched the option off must
 		// not repopulate counters that the disable path just cleared.
-		var enabled = _selectionCoordinator
-			.GetSelectedIgnoreOptionIds()
-			.Contains(IgnoreOptionId.HideSecrets);
-		if (!enabled)
+		if (!_appliedHideSecretsEnabled)
 			return;
 
 		var snapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
@@ -209,6 +206,7 @@ public partial class MainWindow
 	private void CaptureAppliedContentTransformationState()
 	{
 		var selectedOptions = _selectionCoordinator.GetSelectedIgnoreOptionIds();
+		_appliedHideSecretsEnabled = selectedOptions.Contains(IgnoreOptionId.HideSecrets);
 		_appliedCompressCodeEnabled = selectedOptions.Contains(IgnoreOptionId.CompressCode);
 		_appliedStripCommentsEnabled = selectedOptions.Contains(IgnoreOptionId.StripComments);
 		_appliedStripBlankLinesEnabled = selectedOptions.Contains(IgnoreOptionId.StripBlankLines);
@@ -246,7 +244,7 @@ public partial class MainWindow
 	private SecretRedactionContext? CreateSecretRedactionContext()
 	{
 		if (string.IsNullOrWhiteSpace(_currentPath) ||
-		    !_selectionCoordinator.GetSelectedIgnoreOptionIds().Contains(IgnoreOptionId.HideSecrets))
+		    !_appliedHideSecretsEnabled)
 		{
 			return null;
 		}
@@ -259,10 +257,7 @@ public partial class MainWindow
 	{
 		// Scanning is opt-in: nothing runs while Hide Secrets is off, and a visible preview owns
 		// the strict analysis for the enabled state, so background discovery stands down there too.
-		var hideSecretsEnabled = _selectionCoordinator
-			.GetSelectedIgnoreOptionIds()
-			.Contains(IgnoreOptionId.HideSecrets);
-		if (!hideSecretsEnabled ||
+		if (!_appliedHideSecretsEnabled ||
 		    _viewModel.IsAnyPreviewVisible ||
 		    _windowLifetimeCts is not { IsCancellationRequested: false } ||
 		    _currentTree is null ||
@@ -533,10 +528,7 @@ public partial class MainWindow
 		if (_windowLifetimeCts is not { IsCancellationRequested: false })
 			return;
 
-		var hideSecretsEnabled = _selectionCoordinator
-			.GetSelectedIgnoreOptionIds()
-			.Contains(IgnoreOptionId.HideSecrets);
-		if (_viewModel.IsAnyPreviewVisible && hideSecretsEnabled)
+		if (_viewModel.IsAnyPreviewVisible && _appliedHideSecretsEnabled)
 		{
 			_previewPipeline.ScheduleRefresh(immediate: true);
 			return;
@@ -813,6 +805,7 @@ public partial class MainWindow
 	private int? _secretRedactionCount;
 	private int? _secretRedactionMatchedCount;
 	private SecretScanState _secretRedactionScanState = SecretScanState.Disabled;
+	private bool _appliedHideSecretsEnabled;
 	private bool _appliedCompressCodeEnabled;
 	private bool _appliedStripCommentsEnabled;
 	private bool _appliedStripBlankLinesEnabled;
@@ -901,10 +894,10 @@ public partial class MainWindow
             TryElevateAndRestart,
             () => _currentPath,
             _statusOperations,
-            ScheduleContentTransformationRefresh);
-        // Parameter checkboxes edit a draft until Apply publishes a replacement tree. Starting secret
-        // discovery here would repeatedly scan the still-active tree and then discard that work. Tree
-        // publication is the single invalidation boundary for applied parameter changes.
+            ApplyImmediateContentTransformationSelectionChange);
+        // Syntax rows and the section-wide content batch remain drafts until Apply. Individual Hide
+        // Secrets changes take the explicit callback above; tree publication is the boundary for all
+        // other parameter changes, avoiding scans against a tree that is about to be replaced.
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(
@@ -1092,9 +1085,11 @@ public partial class MainWindow
 			() => ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets),
 			() =>
 			{
-				var changed = _selectionCoordinator.ApplyHideSecretsOverride(true);
+				var wasApplied = _appliedHideSecretsEnabled;
+				_selectionCoordinator.ApplyHideSecretsOverride(true);
 				_selectionCoordinator.AcceptHideSecretsOverrideAsApplied(_currentPath);
-				return changed;
+				var activationScheduled = !wasApplied && _appliedHideSecretsEnabled;
+				return activationScheduled || TryApplySelectedHideSecretsState();
 			},
 			delta => _projectProfiles.ApplyMarkDeltaAsync(_currentPath, delta),
 			cancellationToken => _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken));
@@ -1267,10 +1262,7 @@ public partial class MainWindow
             }
 			else if (args.PropertyName == nameof(MainWindowViewModel.IsAnyPreviewVisible))
 			{
-				var hideSecretsEnabled = _selectionCoordinator
-					.GetSelectedIgnoreOptionIds()
-					.Contains(IgnoreOptionId.HideSecrets);
-				if (_viewModel.IsAnyPreviewVisible && hideSecretsEnabled)
+				if (_viewModel.IsAnyPreviewVisible && _appliedHideSecretsEnabled)
 					CancelSecretRedactionDiscovery();
 				else
 					ScheduleSecretRedactionCountRefresh();

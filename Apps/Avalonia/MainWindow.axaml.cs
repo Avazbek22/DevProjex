@@ -413,10 +413,7 @@ public partial class MainWindow : Window
 				? GetCompressionSnapshotForCurrentSelection()
 				: null;
 		}
-		var enabled = _selectionCoordinator
-			.GetSelectedIgnoreOptionIds()
-			.Contains(IgnoreOptionId.HideSecrets);
-		if (!enabled)
+		if (!_appliedHideSecretsEnabled)
 		{
 			// Secret scanning is strictly opt-in: with the checkbox off no discovery may run, not
 			// even in the background. Cancel anything in flight and return the row to neutral.
@@ -472,6 +469,30 @@ public partial class MainWindow : Window
 				: StatusOperationPresentation.ExtendedDelay);
 	}
 
+	private void ApplyImmediateContentTransformationSelectionChange(IgnoreOptionId? changedOptionId)
+	{
+		if (changedOptionId == IgnoreOptionId.HideSecrets)
+		{
+			TryApplySelectedHideSecretsState();
+			return;
+		}
+
+		ScheduleContentTransformationRefresh(changedOptionId);
+	}
+
+	private bool TryApplySelectedHideSecretsState()
+	{
+		var selected = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(IgnoreOptionId.HideSecrets);
+		if (_appliedHideSecretsEnabled == selected)
+			return false;
+
+		_appliedHideSecretsEnabled = selected;
+		ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets);
+		return true;
+	}
+
 	internal static bool RequiresCompressionRefresh(IgnoreOptionId? changedOptionId) =>
 		changedOptionId is null or IgnoreOptionId.CompressCode or IgnoreOptionId.StripComments or
 			IgnoreOptionId.StripBlankLines;
@@ -490,10 +511,9 @@ public partial class MainWindow : Window
 	{
 		CancelSecretRedactionDiscovery();
 		_secretRedactionSession.InvalidateSnapshots();
-		var enabled = _selectionCoordinator
-			.GetSelectedIgnoreOptionIds()
-			.Contains(IgnoreOptionId.HideSecrets);
-		_secretRedactionScanState = enabled ? SecretScanState.Pending : SecretScanState.Disabled;
+		_secretRedactionScanState = _appliedHideSecretsEnabled
+			? SecretScanState.Pending
+			: SecretScanState.Disabled;
 		_viewModel.SetContentProcessingStatus(_secretRedactionScanState);
 		if (_secretRedactionCount is not null)
 			_secretRedactionCount = null;
@@ -1332,6 +1352,10 @@ public partial class MainWindow : Window
 		_secretRedactionScanState = SecretScanState.Disabled;
 		_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
 		_secretRedactionSession.Reset();
+		_appliedHideSecretsEnabled = false;
+		_appliedCompressCodeEnabled = false;
+		_appliedStripCommentsEnabled = false;
+		_appliedStripBlankLinesEnabled = false;
 		PublishTransformationContext();
 		_codeCompressionSnapshot = null;
 		_codeCompressionSession.Reset();
@@ -1369,9 +1393,6 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterBaseTree = null;
         _currentTreeInventory = null;
-		_appliedCompressCodeEnabled = false;
-		_appliedStripCommentsEnabled = false;
-		_appliedStripBlankLinesEnabled = false;
 		_viewModel.SetAppliedContentTransformationState(
 			compressCode: false,
 			stripComments: false,

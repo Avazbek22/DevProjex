@@ -3480,6 +3480,226 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task ContentProcessingAll_KeepsThePublishedPreviewStableUntilApply()
+	{
+		const string removedSecret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$$"""
+			  internal sealed class Secrets
+			  {
+			      public string Read()
+			      {
+			          return "{{removedSecret}}";
+			      }
+			  }
+			  """,
+			TestContext.Current.CancellationToken);
+		var analyzer = new CountingSecretScanContentAnalyzer();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = analyzer.Attach(services.FileContentAnalyzer)
+			});
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var publishedDocument = viewModel.PreviewDocument;
+			Assert.NotNull(publishedDocument);
+			Assert.Contains(
+				removedSecret,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+			analyzer.Reset();
+
+			var allCheckBox = UiTestDriver.GetRequiredControl<CheckBox>(
+				window,
+				"ContentProcessingAllCheckBox");
+			await UiTestDriver.ClickAsync(window, allCheckBox);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+
+			Assert.All(viewModel.ContentProcessingOptions, static option => Assert.True(option.IsChecked));
+			Assert.Same(publishedDocument, viewModel.PreviewDocument);
+			Assert.Equal(0, analyzer.TotalReadCount);
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+			Assert.Contains(
+				removedSecret,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+
+			await UiTestDriver.ClickAsync(window, allCheckBox);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+			Assert.All(viewModel.ContentProcessingOptions, static option => Assert.False(option.IsChecked));
+			Assert.Same(publishedDocument, viewModel.PreviewDocument);
+			Assert.Equal(0, analyzer.TotalReadCount);
+
+			await UiTestDriver.ClickAsync(window, allCheckBox);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+			Assert.All(viewModel.ContentProcessingOptions, static option => Assert.True(option.IsChecked));
+			Assert.Same(publishedDocument, viewModel.PreviewDocument);
+			Assert.Equal(0, analyzer.TotalReadCount);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"DevProjex found no secrets",
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
+				"the atomic content pipeline to settle after Apply");
+			Assert.DoesNotContain(
+				removedSecret,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ContentProcessingAll_AppliesDeferredHideSecretsWhenSyntaxModesAreAlreadyApplied()
+	{
+		const string survivingSecret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+		const string manualValue = "ordinary-draft-reconcile-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			"internal sealed class Secrets { }",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "settings.json"),
+			$$"""{"accessKey":"{{survivingSecret}}","label":"{{manualValue}}"}""",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			foreach (var optionId in new[]
+			         {
+				         IgnoreOptionId.CompressCode,
+				         IgnoreOptionId.StripComments,
+				         IgnoreOptionId.StripBlankLines
+			         })
+			{
+				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+			}
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var publishedDocument = viewModel.PreviewDocument;
+			Assert.NotNull(publishedDocument);
+			Assert.Contains(
+				survivingSecret,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+
+			var allCheckBox = UiTestDriver.GetRequiredControl<CheckBox>(
+				window,
+				"ContentProcessingAllCheckBox");
+			await UiTestDriver.ClickAsync(window, allCheckBox);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+
+			Assert.True(viewModel.HideSecretsOption?.IsChecked);
+			Assert.Same(publishedDocument, viewModel.PreviewDocument);
+			Assert.Contains(
+				survivingSecret,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					viewModel.SettingsSecretsNotice,
+					"Found: 1. Hidden: 1.",
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
+				"the deferred Hide Secrets selection to publish after Apply");
+			var output = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.DoesNotContain(survivingSecret, output, StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[aws-access-token#1]", output, StringComparison.Ordinal);
+
+			await UiTestDriver.ClickAsync(window, allCheckBox);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(window, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"manual redaction to refresh while reconciling an unchecked section draft");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ContentProcessingAll_DraftThenHideHereActivatesRedactionWithoutApplyingSyntaxModes()
+	{
+		const string manualValue = "ordinary-bulk-draft-secret-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Secrets.cs"),
+			$$"""
+			  internal sealed class Secrets
+			  {
+			      // This comment proves that syntax transformations remain drafts.
+			      public string Read() => "{{manualValue}}";
+			  }
+			  """,
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var allCheckBox = UiTestDriver.GetRequiredControl<CheckBox>(
+				window,
+				"ContentProcessingAllCheckBox");
+
+			await UiTestDriver.ClickAsync(window, allCheckBox);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(window, manualValue);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal) &&
+				      string.Equals(
+					      viewModel.SettingsSecretsNotice,
+					      "Found: 1. Hidden: 1.",
+					      StringComparison.Ordinal),
+				"the explicit manual mark to activate redaction over the staged section draft");
+
+			var output = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.Contains(
+				"This comment proves that syntax transformations remain drafts.",
+				output,
+				StringComparison.Ordinal);
+			Assert.True(viewModel.HasPendingFilterSettingsChanges);
+			Assert.Equal(string.Empty, viewModel.SettingsCompressionNotice);
+			Assert.Equal(string.Empty, viewModel.SettingsCommentStripNotice);
+			Assert.Equal(string.Empty, viewModel.SettingsBlankLineStripNotice);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task CompressionWithoutSecretFindings_KeepsCompressionAndSecretsStatusesSeparate()
 	{
 		using var project = UiTestProject.CreateDefault();

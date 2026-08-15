@@ -125,11 +125,11 @@ public partial class MainWindow : IRefreshTreePipelineHost
         _currentTree = result.Tree;
 		if (!interactiveFilter)
 		{
-			// «Apply settings» is the commit point for the Compress Code checkbox. Every
-			// non-interactive tree publication - load, refresh, Apply - captures the checkbox as
-			// the applied transformation state; until then it is a draft with no effect on
-			// produced content, the preview, or the measured counters. Name-filter publications
-			// deliberately keep the previously applied state.
+			// «Apply settings» is the commit point for syntax transformations and section-wide
+			// content batches. Every non-interactive tree publication - load, refresh, Apply -
+			// captures the selected transformation state; until then its draft has no effect on
+			// produced content, preview, or counters. Name-filter publications deliberately keep
+			// the previously applied state.
 			CaptureAppliedContentTransformationState();
 		}
 		// Keep tree publication visually pure. Initial/full refresh work must remain pending until

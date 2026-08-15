@@ -600,11 +600,13 @@ public partial class MainWindow
                         cancellationToken);
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
 
-                    // Hide Secrets updates content immediately and does not affect the tree.
-                    // Accepting that sole change here avoids cancelling and restarting its active scan.
+                    // An individual Hide Secrets toggle is already live; the section-wide checkbox
+                    // stages it with the syntax modes. Synchronization is therefore a no-op for the
+                    // common case and publishes the deferred batch case without rebuilding the tree.
                     if (_selectionCoordinator.TryAcceptHideSecretsOnlyChangeAsApplied(_currentPath))
                     {
-						await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
+                        ApplyImmediateContentTransformationSelectionChange(IgnoreOptionId.HideSecrets);
+                        await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
                         return;
                     }
 

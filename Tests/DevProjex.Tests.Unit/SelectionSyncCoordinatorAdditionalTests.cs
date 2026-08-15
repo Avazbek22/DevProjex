@@ -1134,7 +1134,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[AvaloniaFact]
-	public void ContentProcessingAll_UpdatesOnlyItsSectionWithOnePipelineRefresh()
+	public void ContentProcessingAll_StagesItsSectionWithoutPublishingThePipeline()
 	{
 		var changedOptions = new List<IgnoreOptionId?>();
 		var viewModel = CreateViewModel();
@@ -1154,7 +1154,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.All(viewModel.ContentProcessingOptions, static option => Assert.False(option.IsChecked));
 		Assert.False(viewModel.AllContentProcessingChecked);
 		Assert.True(viewModel.AllIgnoreChecked);
-		Assert.Equal([IgnoreOptionId.HideSecrets], changedOptions);
+		Assert.Empty(changedOptions);
 		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
 
 		coordinator.HandleContentProcessingAllChanged(isChecked: true);
@@ -1162,7 +1162,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.All(viewModel.ContentProcessingOptions, static option => Assert.True(option.IsChecked));
 		Assert.True(viewModel.AllContentProcessingChecked);
 		Assert.True(viewModel.AllIgnoreChecked);
-		Assert.Equal([IgnoreOptionId.HideSecrets, IgnoreOptionId.HideSecrets], changedOptions);
+		Assert.Empty(changedOptions);
 
 		var blankLines = Assert.Single(
 			viewModel.ContentProcessingOptions,
@@ -1171,7 +1171,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		Assert.False(viewModel.AllContentProcessingChecked);
 		Assert.True(viewModel.AllIgnoreChecked);
-		Assert.Equal([IgnoreOptionId.HideSecrets, IgnoreOptionId.HideSecrets], changedOptions);
+		Assert.Empty(changedOptions);
 	}
 
 	[Fact]
