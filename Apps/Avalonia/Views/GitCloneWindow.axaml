@@ -38,6 +38,7 @@
       <Setter Property="MinHeight" Value="34" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="Padding" Value="10,6" />
+      <Setter Property="MaxDropDownHeight" Value="320" />
     </Style>
 
     <Style Selector="ComboBox.recent-repositories-combo /template/ Border#PART_BorderElement,
@@ -75,6 +76,41 @@
                      ComboBox.recent-repositories-combo ComboBoxItem:selected /template/ Border">
       <Setter Property="Background" Value="{DynamicResource MenuPressedBrush}" />
       <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollViewer">
+      <Setter Property="AllowAutoHide" Value="False" />
+      <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+      <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollBar:vertical">
+      <Setter Property="AllowAutoHide" Value="False" />
+      <Setter Property="Width" Value="10" />
+      <Setter Property="MinWidth" Value="10" />
+      <Setter Property="Margin" Value="4,0,0,0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollBar:vertical /template/ Thumb">
+      <Setter Property="Width" Value="5" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource AppMutedTextBrush}" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Opacity" Value="0.72" />
+      <Setter Property="RenderTransform" Value="none" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollBar:vertical /template/ Thumb:pointerover">
+      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollBar:vertical /template/ Thumb:pressed">
+      <Setter Property="Background" Value="{DynamicResource AppAccentPressedBrush}" />
+      <Setter Property="Opacity" Value="1" />
     </Style>
   </Window.Styles>
 
@@ -152,7 +188,6 @@
                   IsEnabled="{Binding CanUseGitCloneLocalCache}"
                   PlaceholderText="{Binding GitCloneLocalCacheLabel}"
                   AutomationProperties.Name="{Binding GitCloneLocalCacheLabel}"
-                  MaxDropDownHeight="320"
                   SelectionChanged="OnLocalCacheSelectionChanged">
           <ComboBox.SelectionBoxItemTemplate>
             <DataTemplate x:DataType="vm:RepositoryCacheEntryViewModel">

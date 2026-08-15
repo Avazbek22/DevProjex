@@ -16,6 +16,92 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspace)
 {
 	[AvaloniaFact]
+	public async Task GitCloneWindow_LargeLocalCacheUsesOwnerBoundedScrollablePopup()
+	{
+		var appDataPath = CreateAppDataPath();
+		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		const int repositoryCount = 18;
+		for (var index = 0; index < repositoryCount; index++)
+		{
+			CreateCachedRepository(
+				cache,
+				$"https://github.com/example/cache-{index:D2}.git",
+				"main",
+				64,
+				git: false);
+		}
+
+		var window = await CreateWindowAsync(appDataPath, cache);
+		try
+		{
+			window.Height = window.MinHeight;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			try
+			{
+				await WaitForCatalogAsync(window, repositoryCount);
+				var comboBox = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
+				comboBox.IsDropDownOpen = true;
+
+				ScrollViewer? scrollViewer = null;
+				await UiTestDriver.WaitForConditionAsync(
+					window,
+					() =>
+					{
+						var popup = comboBox
+							.GetVisualDescendants()
+							.OfType<Popup>()
+							.FirstOrDefault(static candidate => candidate.IsOpen);
+						scrollViewer = popup?.Child?
+							.GetVisualDescendants()
+							.OfType<ScrollViewer>()
+							.FirstOrDefault();
+						return scrollViewer is { Viewport.Height: > 0 } &&
+						       scrollViewer.Extent.Height > scrollViewer.Viewport.Height;
+					},
+					"large local-cache popup to expose a scrollable viewport");
+
+				var realizedScrollViewer = Assert.IsType<ScrollViewer>(scrollViewer);
+				var verticalScrollBar = Assert.Single(
+					realizedScrollViewer.GetVisualDescendants().OfType<ScrollBar>(),
+					static scrollBar => scrollBar.Orientation == Orientation.Vertical);
+				var thumb = Assert.Single(verticalScrollBar.GetVisualDescendants().OfType<Thumb>());
+
+				Assert.InRange(
+					comboBox.MaxDropDownHeight,
+					GitCloneWindow.MinimumRepositoryDropDownHeight,
+					GitCloneWindow.MaximumRepositoryDropDownHeight - 1);
+				Assert.True(realizedScrollViewer.Bounds.Height <= comboBox.MaxDropDownHeight + 1);
+				Assert.False(realizedScrollViewer.AllowAutoHide);
+				Assert.Equal(ScrollBarVisibility.Disabled, realizedScrollViewer.HorizontalScrollBarVisibility);
+				Assert.Equal(ScrollBarVisibility.Auto, realizedScrollViewer.VerticalScrollBarVisibility);
+				Assert.True(verticalScrollBar.IsVisible);
+				Assert.Equal(10, verticalScrollBar.Width);
+				Assert.Equal(0, verticalScrollBar.Margin.Top);
+				Assert.Equal(0, verticalScrollBar.Margin.Bottom);
+				Assert.Equal(VerticalAlignment.Stretch, verticalScrollBar.VerticalAlignment);
+				Assert.Equal(5, thumb.Width);
+				Assert.True(thumb.MinHeight >= 28);
+				Assert.Equal(new CornerRadius(3), thumb.CornerRadius);
+				Assert.Equal(0.72, thumb.Opacity);
+
+				var maximumOffset = realizedScrollViewer.Extent.Height - realizedScrollViewer.Viewport.Height;
+				realizedScrollViewer.Offset = new Vector(0, maximumOffset);
+				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+				Assert.Equal(maximumOffset, realizedScrollViewer.Offset.Y, precision: 3);
+			}
+			finally
+			{
+				await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
+			}
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task GitCloneWindow_LocalCache_ShowsNewestFirstDetailsAndLocalizedHeadings()
 	{
 		var appDataPath = CreateAppDataPath();

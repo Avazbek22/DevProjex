@@ -4,6 +4,10 @@ namespace DevProjex.Avalonia.Views;
 
 public partial class GitCloneWindow : Window
 {
+	internal const double MaximumRepositoryDropDownHeight = 320;
+	internal const double MinimumRepositoryDropDownHeight = 120;
+	private const double RepositoryDropDownEdgeMargin = 12;
+
     public event EventHandler<RoutedEventArgs>? StartCloneRequested;
     public event EventHandler<RoutedEventArgs>? CancelRequested;
 	internal event EventHandler<RepositoryCacheEntryEventArgs>? OpenCachedRepositoryRequested;
@@ -167,6 +171,8 @@ public partial class GitCloneWindow : Window
             return;
         }
 
+		comboBox.MaxDropDownHeight = ResolveRepositoryDropDownHeight(comboBox);
+
         Dispatcher.Post(() =>
         {
             var popup = comboBox
@@ -181,6 +187,26 @@ public partial class GitCloneWindow : Window
                 PopupBackdropTransparencyFallback.Transparent);
         }, DispatcherPriority.Loaded);
     }
+
+	private double ResolveRepositoryDropDownHeight(ComboBox comboBox)
+	{
+		if (Owner is not Window owner || !owner.IsVisible || comboBox.Bounds.Height <= 0)
+			return MaximumRepositoryDropDownHeight;
+
+		var renderScaling = Math.Max(0.1, TopLevel.GetTopLevel(comboBox)?.RenderScaling ?? RenderScaling);
+		var ownerTop = owner.PointToScreen(default).Y;
+		var ownerBottom = owner.PointToScreen(new Point(0, owner.ClientSize.Height)).Y;
+		var comboTop = comboBox.PointToScreen(default).Y;
+		var comboBottom = comboBox.PointToScreen(new Point(0, comboBox.Bounds.Height)).Y;
+		var availableAbove = (comboTop - ownerTop) / renderScaling - RepositoryDropDownEdgeMargin;
+		var availableBelow = (ownerBottom - comboBottom) / renderScaling - RepositoryDropDownEdgeMargin;
+		var placementIndependentHeight = Math.Min(availableAbove, availableBelow);
+
+		return Math.Clamp(
+			placementIndependentHeight,
+			MinimumRepositoryDropDownHeight,
+			MaximumRepositoryDropDownHeight);
+	}
 }
 
 internal sealed class RepositoryCacheEntryEventArgs(RepositoryCacheEntryViewModel entry) : EventArgs
