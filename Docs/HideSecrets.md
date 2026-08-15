@@ -76,6 +76,9 @@ shape are stronger evidence:
   defines only `ARG KEY` and `ARG KEY=value`;
 - `Authorization` and `Proxy-Authorization` credentials in `.http` and
   `.rest` request files, with the authentication scheme left visible;
+- every `Cookie` pair value and the initial `Set-Cookie` pair value in `.http`
+  and `.rest` request files; cookie names remain visible, and `Set-Cookie`
+  attributes such as `Path`, `HttpOnly`, and `Max-Age` stay visible;
 - password fields in `.pgpass`, `pgpass.conf`, `.netrc`, and `_netrc`;
 - `appsettings*.json`, `*.config`, `application*.yml`,
   `application*.yaml`, `*.tfvars`, `docker-compose*.yml`, and
@@ -83,7 +86,11 @@ shape are stronger evidence:
 - quoted assignments in `settings.py`.
 
 Credential URIs and connection strings redact only the password segment. Host,
-user, database, scheme, and other surrounding values remain visible.
+user, database, scheme, and other surrounding values remain visible. Credential
+URIs on RFC 2606 documentation hosts (`example.com`, `example.net`,
+`example.org`, their subdomains, and the `.test`, `.example`, and `.invalid`
+TLDs) are not redacted. `localhost` is intentionally still inspected because
+development credentials can be real secrets.
 
 The structured tier reuses Smart Ignore's project-scope resolver and root facts.
 The nearest marked project owns its descendants, so stack-specific vocabulary
@@ -94,11 +101,11 @@ shaped credentials in source remain covered by Gitleaks rules.
 References and placeholders such as `${DB_PASSWORD}`, `$(DbPassword)`,
 `%DB_PASSWORD%`, `{{ secret }}`, `<password>`, and empty values are not redacted.
 Common template values such as `changeme`, `your-password-here`, `replace_me`,
-`placeholder`, `null`, `none`, and repeated non-numeric characters are also
-ignored. These checks match whole values or interpolation syntax, never a
-substring inside an otherwise credential-shaped value. Weak literal values such
-as `password`, `admin`, `0000`, and `123456` still match in recognized
-configuration shapes.
+`placeholder`, `null`, `none`, `your-api-key-here`-style templates, and repeated
+non-numeric characters are also ignored. These checks match whole values or
+interpolation syntax, never a substring inside an otherwise credential-shaped
+value. Weak literal values such as `password`, `admin`, `0000`, and `123456`
+still match in recognized configuration shapes.
 
 The provider tier intentionally preserves Gitleaks' upstream substring-based
 stopwords, including their false-negative trade-off. The scope-aware tier does

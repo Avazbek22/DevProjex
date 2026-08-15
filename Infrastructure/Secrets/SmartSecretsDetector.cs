@@ -14,7 +14,7 @@ public sealed class SmartSecretsDetector(
 	ISecretDetector providerDetector,
 	SmartIgnoreService smartIgnore) : ISecretDetector
 {
-	internal const string StructuredRulesVersion = "smart-secrets-v3";
+	internal const string StructuredRulesVersion = "smart-secrets-v4";
 
 	public string RulesIdentity =>
 		$"{providerDetector.RulesIdentity}:{StructuredRulesVersion}";
@@ -293,6 +293,7 @@ internal static class StructuredSecretDetector
 	private const int BudgetCheckpointMask = 0x3FF;
 	private const int CredentialUriOrder = -400;
 	private const int AuthorizationHeaderOrder = -350;
+	private const int CookieHeaderOrder = -325;
 	private const int ConnectionPasswordOrder = -300;
 	private const int PgPassPasswordOrder = -275;
 	private const int NetrcPasswordOrder = -250;
@@ -307,6 +308,14 @@ internal static class StructuredSecretDetector
 		"change-me",
 		"your-password-here",
 		"your_password_here",
+		"your-api-key-here",
+		"your_api_key_here",
+		"your-token-here",
+		"your_token_here",
+		"insert-key-here",
+		"insert_key_here",
+		"enter-password-here",
+		"enter_password_here",
 		"replace_me",
 		"replaceme",
 		"todo",
@@ -426,7 +435,7 @@ internal static class StructuredSecretDetector
 				DetectContainerAssignments(content, stack, findings, budget, cancellationToken);
 				break;
 			case StructuredSecretFileKind.HttpRequest:
-				DetectAuthorizationHeaders(content, findings, budget, cancellationToken);
+				DetectHttpRequestHeaders(content, findings, budget, cancellationToken);
 				break;
 			case StructuredSecretFileKind.PgPass:
 				DetectPgPassPasswords(content, findings, budget, cancellationToken);
@@ -482,7 +491,7 @@ internal static class StructuredSecretDetector
 				if (at > 0)
 				{
 					var colon = authority[..at].IndexOf(':');
-					if (colon >= 0)
+					if (colon >= 0 && !IsRfc2606DocumentationHost(authority[(at + 1)..]))
 					{
 						var valueStart = authorityStart + colon + 1;
 						AddFinding(
@@ -499,6 +508,57 @@ internal static class StructuredSecretDetector
 			}
 		}
 	}
+
+	internal static bool IsRfc2606DocumentationHost(ReadOnlySpan<char> host)
+	{
+		host = host.Trim();
+		if (host.IsEmpty)
+			return false;
+
+		if (host[0] == '[')
+		{
+			var closingBracket = host.IndexOf(']');
+			if (closingBracket <= 0)
+				return false;
+			var portSeparator = host.LastIndexOf(':');
+			if (portSeparator > closingBracket)
+				host = host[..portSeparator];
+			if (host.Length <= 2 || host[^1] != ']')
+				return false;
+			host = host[1..^1];
+		}
+		else
+		{
+			var portSeparator = host.LastIndexOf(':');
+			if (portSeparator >= 0)
+				host = host[..portSeparator];
+		}
+
+		if (host.IsEmpty)
+			return false;
+		if (host[^1] == '.')
+			host = host[..^1];
+		if (host.IsEmpty)
+			return false;
+		if (IsHostOrSubdomainOf(host, "example.com") ||
+		    IsHostOrSubdomainOf(host, "example.net") ||
+		    IsHostOrSubdomainOf(host, "example.org"))
+		{
+			return true;
+		}
+
+		var lastLabelSeparator = host.LastIndexOf('.');
+		var lastLabel = host[(lastLabelSeparator + 1)..];
+		return lastLabel.Equals("test", StringComparison.OrdinalIgnoreCase) ||
+		       lastLabel.Equals("example", StringComparison.OrdinalIgnoreCase) ||
+		       lastLabel.Equals("invalid", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool IsHostOrSubdomainOf(ReadOnlySpan<char> host, string domain) =>
+		host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
+		host.Length > domain.Length &&
+		host[host.Length - domain.Length - 1] == '.' &&
+		host.EndsWith(domain, StringComparison.OrdinalIgnoreCase);
 
 	private static int FindUriAuthorityEnd(
 		ReadOnlySpan<char> content,
@@ -798,7 +858,7 @@ internal static class StructuredSecretDetector
 		return TrimEnd(line, start, line.Length);
 	}
 
-	private static void DetectAuthorizationHeaders(
+	private static void DetectHttpRequestHeaders(
 		ReadOnlySpan<char> content,
 		ICollection<DetectedSecret> findings,
 		SecretFileInspectionBudget budget,
@@ -813,6 +873,34 @@ internal static class StructuredSecretDetector
 			if (colon <= 0)
 				continue;
 			var headerName = line[..colon].Trim();
+			if (headerName.Equals("Cookie", StringComparison.OrdinalIgnoreCase))
+			{
+				DetectCookieHeaderValues(
+					content,
+					line,
+					lineStart,
+					colon + 1,
+					firstPairOnly: false,
+					findings,
+					ref checkpointCounter,
+					budget,
+					cancellationToken);
+				continue;
+			}
+			if (headerName.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase))
+			{
+				DetectCookieHeaderValues(
+					content,
+					line,
+					lineStart,
+					colon + 1,
+					firstPairOnly: true,
+					findings,
+					ref checkpointCounter,
+					budget,
+					cancellationToken);
+				continue;
+			}
 			if (!headerName.Equals("Authorization", StringComparison.OrdinalIgnoreCase) &&
 			    !headerName.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase))
 			{
@@ -857,6 +945,49 @@ internal static class StructuredSecretDetector
 				ruleId,
 				AuthorizationHeaderOrder,
 				findings);
+		}
+	}
+
+	private static void DetectCookieHeaderValues(
+		ReadOnlySpan<char> content,
+		ReadOnlySpan<char> line,
+		int lineStart,
+		int firstSegmentStart,
+		bool firstPairOnly,
+		ICollection<DetectedSecret> findings,
+		ref int checkpointCounter,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
+	{
+		var segmentStart = firstSegmentStart;
+		while (segmentStart <= line.Length)
+		{
+			CheckpointPeriodically(ref checkpointCounter, budget, cancellationToken);
+			var relativeSeparator = line[segmentStart..].IndexOf(';');
+			var segmentEnd = relativeSeparator < 0
+				? line.Length
+				: segmentStart + relativeSeparator;
+			var relativeEquals = line[segmentStart..segmentEnd].IndexOf('=');
+			if (relativeEquals >= 0)
+			{
+				var valueStart = segmentStart + relativeEquals + 1;
+				while (valueStart < segmentEnd && char.IsWhiteSpace(line[valueStart]))
+					valueStart++;
+				var valueEnd = segmentEnd;
+				while (valueEnd > valueStart && char.IsWhiteSpace(line[valueEnd - 1]))
+					valueEnd--;
+				AddFinding(
+					content,
+					lineStart + valueStart,
+					valueEnd - valueStart,
+					"http-cookie",
+					CookieHeaderOrder,
+					findings);
+			}
+
+			if (firstPairOnly || relativeSeparator < 0)
+				break;
+			segmentStart = segmentEnd + 1;
 		}
 	}
 
