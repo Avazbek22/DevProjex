@@ -331,7 +331,6 @@ public partial class MainWindow
 
         _gitCloneWindow?.Close();
         _gitCloneWindow = null;
-        _viewModel.GitCloneInProgress = false;
 
         var opened = await TryOpenFolderAsync(
             result.LocalPath,

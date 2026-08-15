@@ -216,8 +216,12 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => UiTestDriver.GetViewModel(window).CanChangeProjectTree,
-				"cached project load to release project-changing operations");
+				() =>
+				{
+					var viewModel = UiTestDriver.GetViewModel(window);
+					return viewModel.CanChangeProjectTree && !viewModel.GitCloneInProgress;
+				},
+				"cached project load to release project-changing and Git operations");
 
 			var secondCloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
 			try
