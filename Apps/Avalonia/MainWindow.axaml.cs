@@ -514,9 +514,6 @@ public partial class MainWindow : Window
         ScrollChangedEventArgs e)
         => _previewSurfaceController.HandleTextScrollChanged(sender, e);
 
-    private void OnPreviewToolTipLoaded(object? sender, RoutedEventArgs e)
-        => _previewSurfaceController.HandleToolTipLoaded(sender);
-
     private async void OnPreviewCopyVisibleFilePath(
         object? sender,
         RoutedEventArgs e)

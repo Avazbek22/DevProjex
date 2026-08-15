@@ -57,7 +57,15 @@ Assert-Plan -Name 'Unknown documentation asset format fails safe' -Path '.github
 Assert-Plan -Name 'Root text note only' -Path 'release-note.txt' `
 	-Disabled ($allHeavyTargets + 'Documentation')
 
-Assert-Plan -Name 'Embedded help text is production' -Path 'Assets/HelpContent/en/overview.txt' `
+Assert-Plan -Name 'Embedded help text runs only content-coupled suites' -Path 'Assets/HelpContent/help.de.txt' `
+	-Enabled @('Unit', 'Integration', 'Terminal', 'Documentation') `
+	-Disabled @('UI', 'TerminalCommand', 'IgnoreScanner', 'Release', 'Store', 'Full')
+
+Assert-Plan -Name 'Nested help text stays content-coupled' -Path 'Assets/HelpContent/en/overview.txt' `
+	-Enabled @('Unit', 'Integration', 'Terminal', 'Documentation') `
+	-Disabled @('UI', 'TerminalCommand', 'IgnoreScanner', 'Release', 'Store', 'Full')
+
+Assert-Plan -Name 'Non-text file under help content fails safe to production' -Path 'Assets/HelpContent/generate-help.ps1' `
 	-Enabled @('Unit', 'Integration', 'Terminal', 'UI', 'TerminalCommand', 'Release', 'Store') `
 	-Disabled @('Full')
 

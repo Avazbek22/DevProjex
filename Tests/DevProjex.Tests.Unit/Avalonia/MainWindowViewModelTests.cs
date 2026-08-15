@@ -17,6 +17,22 @@ public sealed class MainWindowViewModelTests
         return new MainWindowViewModel(localization, helpContentProvider);
     }
 
+	private static RepositoryCacheEntryViewModel CreateCacheEntry(string localPath) => new(
+		new RepositoryCacheCatalogEntry(
+			"https://github.com/example/repository.git",
+			"repository",
+			"main",
+			DateTimeOffset.UtcNow,
+			1024,
+			RepositoryCacheContentKind.Git,
+			localPath),
+		"repository",
+		"main | 1 KB",
+		"https://github.com/example/repository.git",
+		"Remove",
+		CanDelete: true,
+		DeleteToolTip: null);
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -210,6 +226,40 @@ public sealed class MainWindowViewModelTests
         Assert.True(recentFoldersVisibilityRaised);
         Assert.True(recentRepositoriesVisibilityRaised);
     }
+
+	[Fact]
+	public void GitCloneConfirmation_AllowsSelectedCacheEntryWithoutUrl()
+	{
+		var viewModel = CreateViewModel();
+		var entry = CreateCacheEntry("c:/cache/repository");
+
+		Assert.False(viewModel.CanStartGitClone);
+
+		viewModel.SelectedGitCloneCacheEntry = entry;
+
+		Assert.True(viewModel.CanStartGitClone);
+		viewModel.GitCloneInProgress = true;
+		Assert.False(viewModel.CanStartGitClone);
+	}
+
+	[Fact]
+	public void ReplaceCachedRepositories_PreservesSelectedPathAndClearsMissingSelection()
+	{
+		var viewModel = CreateViewModel();
+		var original = CreateCacheEntry("c:/cache/repository");
+		viewModel.ReplaceCachedRepositories([original]);
+		viewModel.SelectedGitCloneCacheEntry = original;
+		var refreshed = CreateCacheEntry("c:/cache/repository");
+
+		viewModel.ReplaceCachedRepositories([refreshed]);
+
+		Assert.Same(refreshed, viewModel.SelectedGitCloneCacheEntry);
+
+		viewModel.ReplaceCachedRepositories([]);
+
+		Assert.Null(viewModel.SelectedGitCloneCacheEntry);
+		Assert.False(viewModel.CanStartGitClone);
+	}
 
     [Fact]
     public void MenuFileOpenNewWindow_UsesLocalizedValue()

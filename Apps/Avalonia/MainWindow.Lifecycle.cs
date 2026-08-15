@@ -62,6 +62,7 @@ public partial class MainWindow
         CancelAndDispose(ref _projectOperationCts);
         CancelAndDispose(ref _applySettingsCts);
         CancelAndDispose(ref _gitCloneCts);
+		CancelAndDispose(ref _gitCloneCatalogCts);
         CancelAndDispose(ref _gitOperationCts);
         CancelAndDispose(ref _projectCopyExportCts);
 		CancelSecretRedactionDiscovery();
@@ -150,7 +151,7 @@ public partial class MainWindow
             RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
             RemoveHandler(KeyDownEvent, OnKeyDown);
             RemoveHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened);
-            RemoveHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened);
+            RemoveHandler(MenuItem.SubmenuOpenedEvent, MenuScrollBehavior.HandleSubmenuOpened);
 
             // Unsubscribe from window lifecycle events
             Opened -= OnOpened;

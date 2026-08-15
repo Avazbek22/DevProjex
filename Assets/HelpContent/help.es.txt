@@ -63,7 +63,7 @@ Reglas:
 * sólo se agregan carpetas locales a la lista;
 * Los repositorios Git clonados mediante DevProjex no se agregan a esta lista;
 * no se crean duplicados: abrir la misma carpeta nuevamente la mueve a la parte superior;
-* se almacenan hasta 15 carpetas recientes;
+* se almacenan hasta 32 carpetas recientes;
 * El historial se conserva entre los lanzamientos de la aplicación.
 
 Cada elemento muestra la carpeta principal y el nombre del proyecto, por ejemplo `Projects / App`.
@@ -112,7 +112,7 @@ Reglas:
 * sólo se agregan a la lista las URL del repositorio;
 * las carpetas locales no se agregan a esta lista;
 * no se crean duplicados: clonar nuevamente el mismo repositorio lo mueve a la parte superior;
-* se almacenan hasta 7 repositorios recientes;
+* se almacenan hasta 16 repositorios recientes;
 * El historial se conserva entre los lanzamientos de la aplicación.
 
 Al seleccionar un elemento, se llena automáticamente el campo URL.

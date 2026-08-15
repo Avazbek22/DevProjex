@@ -1096,21 +1096,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 			Content = _redactionToolTipText,
 			MaxWidth = 420
 		};
-		_redactionToolTip.Classes.Add("preview-blurred-tooltip");
-		_redactionToolTip.Loaded += OnRedactionToolTipLoaded;
 		return _redactionToolTip;
-	}
-
-	private void OnRedactionToolTipLoaded(object? sender, RoutedEventArgs e)
-	{
-		if (sender is not ToolTip toolTip || DataContext is not MainWindowViewModel viewModel)
-			return;
-
-		PopupBackdropConfigurator.TryApply(
-			toolTip,
-			TopLevel.GetTopLevel(this),
-			viewModel.ActiveThemeEffect,
-			PopupBackdropTransparencyFallback.Transparent);
 	}
 
 	private void MoveToRedaction(bool forward)

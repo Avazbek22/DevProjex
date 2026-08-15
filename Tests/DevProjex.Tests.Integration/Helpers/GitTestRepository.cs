@@ -71,6 +71,14 @@ internal sealed class GitTestRepository : IDisposable, IAsyncDisposable
         await RunGitAsync(_seedRepositoryPath, $"push origin \"{branchName}\"", cancellationToken);
     }
 
+    public async Task<string> GetBranchHeadAsync(
+        string branchName,
+        CancellationToken cancellationToken = default) =>
+        (await RunGitAsync(
+            null,
+            $"--git-dir=\"{BareRepositoryPath}\" rev-parse \"refs/heads/{branchName}\"",
+            cancellationToken)).Trim();
+
     public void Dispose() => _tempDirectory.Dispose();
 
     public ValueTask DisposeAsync()

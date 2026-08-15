@@ -38,6 +38,7 @@
       <Setter Property="MinHeight" Value="34" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="Padding" Value="10,6" />
+      <Setter Property="MaxDropDownHeight" Value="320" />
     </Style>
 
     <Style Selector="ComboBox.recent-repositories-combo /template/ Border#PART_BorderElement,
@@ -56,7 +57,7 @@
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="8" />
       <Setter Property="ClipToBounds" Value="True" />
-      <Setter Property="Padding" Value="4" />
+      <Setter Property="Padding" Value="4,0,0,0" />
     </Style>
 
     <Style Selector="ComboBox.recent-repositories-combo ComboBoxItem">
@@ -76,6 +77,41 @@
       <Setter Property="Background" Value="{DynamicResource MenuPressedBrush}" />
       <Setter Property="CornerRadius" Value="6" />
     </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollViewer">
+      <Setter Property="AllowAutoHide" Value="False" />
+      <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+      <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollBar:vertical">
+      <Setter Property="AllowAutoHide" Value="False" />
+      <Setter Property="Width" Value="10" />
+      <Setter Property="MinWidth" Value="10" />
+      <Setter Property="Margin" Value="4,0,0,0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollBar:vertical /template/ Thumb">
+      <Setter Property="Width" Value="5" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="Background" Value="{DynamicResource AppMutedTextBrush}" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Opacity" Value="0.72" />
+      <Setter Property="RenderTransform" Value="none" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollBar:vertical /template/ Thumb:pointerover">
+      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+
+    <Style Selector="ComboBox.recent-repositories-combo /template/ Popup ScrollBar:vertical /template/ Thumb:pressed">
+      <Setter Property="Background" Value="{DynamicResource AppAccentPressedBrush}" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
   </Window.Styles>
 
   <Border Name="CloneWindowCard"
@@ -92,20 +128,26 @@
                  IsVisible="{Binding !GitCloneInProgress}" />
 
       <!-- URL Input (visible when not in progress) -->
-      <TextBox Grid.Row="2"
+      <TextBox Grid.Row="1"
                Name="UrlTextBox"
                Text="{Binding GitCloneUrl, Mode=TwoWay}"
                PlaceholderText="{Binding GitCloneUrlPlaceholder}"
                Margin="0,0,0,16"
                IsVisible="{Binding !GitCloneInProgress}"
-               KeyDown="OnUrlKeyDown" />
+               TextChanged="OnUrlTextChanged" />
 
       <!-- Recent repositories (visible when not in progress) -->
       <Border Name="RecentRepositoriesContainer"
-              Grid.Row="3"
+              Grid.Row="2"
               Margin="0,0,0,12"
               IsVisible="{Binding GitCloneRecentRepositoriesVisible}">
-        <ComboBox Name="RecentRepositoriesComboBox"
+        <StackPanel>
+          <TextBlock Name="RecentRepositoriesLabelText"
+                     Text="{Binding GitCloneRecentRepositoriesLabel}"
+                     FontSize="12"
+                     FontWeight="SemiBold"
+                     Margin="2,0,0,5" />
+          <ComboBox Name="RecentRepositoriesComboBox"
                   Classes="recent-repositories-combo"
                   ItemsSource="{Binding RecentRepositories}"
                   IsEnabled="{Binding HasRecentRepositories}"
@@ -126,17 +168,116 @@
               </StackPanel>
             </DataTemplate>
           </ComboBox.ItemTemplate>
-        </ComboBox>
+          </ComboBox>
+        </StackPanel>
       </Border>
 
+      <StackPanel Name="LocalCacheContainer"
+                  Grid.Row="3"
+                  Margin="0,0,0,14"
+                  IsVisible="{Binding GitCloneLocalCacheVisible}">
+        <TextBlock Name="LocalCacheLabelText"
+                   Text="{Binding GitCloneLocalCacheLabel}"
+                   FontSize="12"
+                   FontWeight="SemiBold"
+                   Margin="2,0,0,5" />
+        <ComboBox Name="LocalCacheComboBox"
+                  Classes="recent-repositories-combo"
+                  ItemsSource="{Binding CachedRepositories}"
+                  SelectedItem="{Binding SelectedGitCloneCacheEntry, Mode=TwoWay}"
+                  IsEnabled="{Binding CanUseGitCloneLocalCache}"
+                  PlaceholderText="{Binding GitCloneLocalCacheLabel}"
+                  AutomationProperties.Name="{Binding GitCloneLocalCacheLabel}"
+                  SelectionChanged="OnLocalCacheSelectionChanged">
+          <ComboBox.SelectionBoxItemTemplate>
+            <DataTemplate x:DataType="vm:RepositoryCacheEntryViewModel">
+              <StackPanel Spacing="0"
+                          Tag="{Binding}">
+                <ToolTip.Tip>
+                  <ToolTip Content="{Binding ToolTipText}" />
+                </ToolTip.Tip>
+                <TextBlock Text="{Binding DisplayName}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding DetailsText}"
+                           FontSize="11"
+                           Opacity="0.6"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ComboBox.SelectionBoxItemTemplate>
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:RepositoryCacheEntryViewModel">
+              <Grid ColumnDefinitions="*,Auto"
+                    ColumnSpacing="8">
+                <ToolTip.Tip>
+                  <ToolTip Content="{Binding ToolTipText}" />
+                </ToolTip.Tip>
+                <StackPanel Grid.Column="0"
+                            Spacing="0">
+                  <TextBlock Text="{Binding DisplayName}"
+                             TextWrapping="NoWrap"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding DetailsText}"
+                             FontSize="11"
+                             Opacity="0.6"
+                             TextWrapping="NoWrap"
+                             TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Border Grid.Column="1"
+                        Classes="cache-delete-tooltip-host"
+                        Background="Transparent"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="{Binding DeleteToolTip}"
+                        Tag="{Binding}">
+                  <Button Name="DeleteLocalCacheEntryButton"
+                          Classes="menu-icon-button"
+                          Width="24"
+                          Height="24"
+                          MinWidth="24"
+                          MinHeight="24"
+                          Padding="2"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          AutomationProperties.Name="{Binding RemoveText}"
+                          IsEnabled="{Binding CanDelete}"
+                          Tag="{Binding}"
+                          Click="OnDeleteLocalCacheEntry">
+                    <Viewbox Width="20"
+                             Height="20"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center"
+                             Stretch="Uniform">
+                      <Canvas Width="24"
+                              Height="24">
+                        <Path Data="M8,3 H16 M5,6 H19 M7,6 V20 H17 V6 M10,10 V17 M14,10 V17"
+                              Stroke="{DynamicResource AppTextBrush}"
+                              StrokeThickness="1.5"
+                              StrokeLineCap="Round"
+                              StrokeJoin="Round" />
+                      </Canvas>
+                    </Viewbox>
+                  </Button>
+                </Border>
+              </Grid>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+      </StackPanel>
+
       <!-- Progress section (visible when in progress) -->
-      <StackPanel Grid.Row="2"
+      <StackPanel Grid.Row="1"
                   Classes="clone-progress-surface"
                   IsVisible="{Binding GitCloneInProgress}">
         <TextBlock Text="{Binding GitCloneStatus}"
                    FontSize="13"
                    Margin="0,0,0,8" />
-        <ProgressBar IsIndeterminate="True"
+        <ProgressBar Name="CloneProgressBar"
+                     Minimum="0"
+                     Maximum="100"
+                     Value="{Binding GitCloneProgressValue}"
+                     IsIndeterminate="{Binding GitCloneProgressIsIndeterminate}"
                      Height="4" />
       </StackPanel>
 
@@ -145,14 +286,18 @@
                   Orientation="Horizontal"
                   HorizontalAlignment="Right"
                   Spacing="8">
-        <Button Content="{Binding DialogOK}"
+        <Button Name="StartCloneButton"
+                Content="{Binding DialogOK}"
                 Classes="primary-action"
                 MinWidth="80"
                 HorizontalContentAlignment="Center"
                 Click="OnStartClone"
+                IsDefault="True"
                 IsVisible="{Binding !GitCloneInProgress}"
                 IsEnabled="{Binding CanStartGitClone}" />
-        <Button Content="{Binding DialogCancel}"
+        <Button Name="CancelCloneButton"
+                Content="{Binding DialogCancel}"
+                IsCancel="True"
                 Click="OnCancel" />
       </StackPanel>
     </Grid>

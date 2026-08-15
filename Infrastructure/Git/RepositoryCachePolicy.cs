@@ -7,8 +7,8 @@ internal sealed record RepositoryCachePolicy(
 	// Ten GiB bounds unattended growth while leaving room for several large shallow clones.
 	public const long DefaultMaximumSizeBytes = 10L * 1024 * 1024 * 1024;
 
-	// Sixty days preserves normal revisits while aging out abandoned project snapshots.
-	public static readonly TimeSpan DefaultMaximumUnusedAge = TimeSpan.FromDays(60);
+	// Ninety days preserves longer revisit cycles while aging out abandoned project snapshots.
+	public static readonly TimeSpan DefaultMaximumUnusedAge = TimeSpan.FromDays(90);
 
 	public static RepositoryCachePolicy Default { get; } = new(
 		DefaultMaximumSizeBytes,

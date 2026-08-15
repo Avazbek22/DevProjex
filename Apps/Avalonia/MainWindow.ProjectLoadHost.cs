@@ -60,15 +60,9 @@ public partial class MainWindow : IProjectLoadPipelineHost
         CancellationToken cancellationToken) =>
         RecordRecentFolderAsync(path, cancellationToken);
 
-    Task IProjectLoadPipelineHost.DeleteRepositoryDirectoryAsync(
-        string path,
-        CancellationToken cancellationToken) =>
-        Task.Run(
-            () => _repoCacheService.DeleteRepositoryDirectory(path),
-            cancellationToken);
-
-    void IProjectLoadPipelineHost.ClearCurrentCachedRepoPath()
+    void IProjectLoadPipelineHost.ReleaseCurrentRepositorySession()
     {
+        Interlocked.Exchange(ref _currentRepositorySession, null)?.Dispose();
         _currentCachedRepoPath = null;
     }
 

@@ -63,7 +63,7 @@ Regras:
 * apenas pastas locais são adicionadas à lista;
 * Repositórios Git clonados via DevProjex não são adicionados a esta lista;
 * duplicatas não são criadas – abrir a mesma pasta novamente a move para o topo;
-* até 15 pastas recentes são armazenadas;
+* até 32 pastas recentes são armazenadas;
 * o histórico é preservado entre as inicializações do aplicativo.
 
 Cada item mostra a pasta pai e o nome do projeto, por exemplo `Projects / App`.
@@ -112,7 +112,7 @@ Regras:
 * apenas URLs de repositório são adicionadas à lista;
 * pastas locais não são adicionadas a esta lista;
 * duplicatas não são criadas — clonar o mesmo repositório novamente o move para o topo;
-* até 7 repositórios recentes são armazenados;
+* até 16 repositórios recentes são armazenados;
 * o histórico é preservado entre as inicializações do aplicativo.
 
 A seleção de um item preenche automaticamente o campo URL.

@@ -22,7 +22,7 @@
           Grid.ColumnSpan="4"
           Margin="0"
           Padding="0,0,210,0">
-      <MenuItem Header="{Binding MenuFile}">
+      <MenuItem Name="FileMenuItem" Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}"
                   Click="OnOpenFolder"
                   IsEnabled="{Binding CanChangeProjectTree}" />
@@ -77,7 +77,7 @@
                         ToolTip.ShowDelay="450"
                         ToolTip.Placement="Right">
                   <ToolTip.Tip>
-                    <ToolTip Loaded="OnToolTipLoaded" MaxWidth="340">
+                    <ToolTip MaxWidth="340">
                       <TextBlock Text="{Binding MenuFileExportProjectCopyFolderHelp}"
                                  MaxWidth="320"
                                  TextWrapping="Wrap" />
@@ -121,7 +121,7 @@
                         ToolTip.ShowDelay="450"
                         ToolTip.Placement="Right">
                   <ToolTip.Tip>
-                    <ToolTip Loaded="OnToolTipLoaded" MaxWidth="340">
+                    <ToolTip MaxWidth="340">
                       <TextBlock Text="{Binding MenuFileExportProjectCopyZipHelp}"
                                  MaxWidth="320"
                                  TextWrapping="Wrap" />
@@ -240,7 +240,7 @@
             ToolTip.ShowDelay="700"
             ToolTip.Placement="Bottom">
       <ToolTip.Tip>
-        <ToolTip Loaded="OnToolTipLoaded">
+        <ToolTip>
           <TextBlock Text="{Binding CopyFormatTooltip}" />
         </ToolTip>
       </ToolTip.Tip>
@@ -305,7 +305,7 @@
             ToolTip.ShowDelay="700"
             ToolTip.Placement="Left">
       <ToolTip.Tip>
-        <ToolTip Loaded="OnToolTipLoaded">
+        <ToolTip>
           <TextBlock Text="{Binding PreviewTooltip}" />
         </ToolTip>
       </ToolTip.Tip>
@@ -327,7 +327,7 @@
             ToolTip.ShowDelay="700"
             ToolTip.Placement="Left">
       <ToolTip.Tip>
-        <ToolTip Loaded="OnToolTipLoaded">
+        <ToolTip>
           <TextBlock Text="{Binding FilterTooltip}" />
         </ToolTip>
       </ToolTip.Tip>

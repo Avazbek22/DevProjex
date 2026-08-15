@@ -53,7 +53,7 @@ public sealed class ProjectCopyExportUiContractTests
         Assert.Null(Attribute(indicator, "Cursor"));
         Assert.Equal("OnProjectCopyHelpIndicatorPointerPressed", Attribute(indicator, "PointerPressed"));
         Assert.Equal("OnProjectCopyHelpIndicatorPointerReleased", Attribute(indicator, "PointerReleased"));
-        Assert.Equal("OnToolTipLoaded", Attribute(tooltip, "Loaded"));
+        Assert.Null(Attribute(tooltip, "Loaded"));
         Assert.Contains(indicator.Descendants(), element =>
             element.Name.LocalName == "TextBlock" && Attribute(element, "Text") == $"{{Binding {helpProperty}}}" &&
             Attribute(element, "TextWrapping") == "Wrap");

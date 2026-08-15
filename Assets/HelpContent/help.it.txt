@@ -63,7 +63,7 @@ Regole:
 * nell’elenco vengono aggiunte solo cartelle locali;
 * i repository Git clonati tramite DevProjex non vengono aggiunti a questo elenco;
 * non vengono creati duplicati — riaprire la stessa cartella la sposta in cima;
-* vengono conservate fino a 15 cartelle recenti;
+* vengono conservate fino a 32 cartelle recenti;
 * la cronologia viene mantenuta tra gli avvii dell’applicazione.
 
 Per ogni elemento vengono mostrati la cartella padre e il nome del progetto, ad esempio `Projects / App`.
@@ -112,7 +112,7 @@ Regole:
 * nell’elenco vengono aggiunti solo gli URL dei repository;
 * le cartelle locali non vengono aggiunte a questo elenco;
 * non vengono creati duplicati — clonare di nuovo lo stesso repository lo sposta in cima;
-* vengono conservati fino a 7 repository recenti;
+* vengono conservati fino a 16 repository recenti;
 * la cronologia viene mantenuta tra gli avvii dell’applicazione.
 
 Se selezioni un elemento dall’elenco, l’URL viene inserito automaticamente nel campo di input.

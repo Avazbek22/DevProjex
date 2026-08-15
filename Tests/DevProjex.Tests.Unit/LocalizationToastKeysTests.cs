@@ -14,6 +14,8 @@ public sealed class LocalizationToastKeysTests
 		"Toast.Tree.CheckedSelectionHidden",
 		"Toast.Git.CloneSuccess",
 		"Toast.Git.CloneError",
+		"Toast.Git.CachedUpdateFailed",
+		"Toast.Git.CacheEntryMissing",
 		"Toast.Git.UpdatesApplied",
 		"Toast.Git.NoUpdates",
 		"Toast.Git.BranchSwitched",

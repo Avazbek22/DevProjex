@@ -237,6 +237,14 @@ public sealed class RepositoryCacheCatalogTests
 			throw new NotSupportedException();
 		}
 
+		public Task<string?> GetDefaultBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default)
+		{
+			NetworkOperationCount++;
+			throw new NotSupportedException();
+		}
+
 		public Task<bool> SwitchBranchAsync(
 			string repositoryPath,
 			string branchName,

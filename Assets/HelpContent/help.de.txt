@@ -63,7 +63,7 @@ Regeln:
 * in die Liste werden nur lokale Ordner aufgenommen;
 * über DevProjex geklonte Git-Repositories werden dieser Liste nicht hinzugefügt;
 * es werden keine Duplikate erzeugt — das erneute Öffnen desselben Ordners verschiebt ihn nach oben;
-* es werden bis zu 15 letzte Ordner gespeichert;
+* es werden bis zu 32 letzte Ordner gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
 
 Für jeden Eintrag werden der übergeordnete Ordner und der Projektname angezeigt, zum Beispiel `Projects / App`.
@@ -112,7 +112,7 @@ Regeln:
 * in die Liste werden nur Repository-URLs aufgenommen;
 * lokale Ordner werden dieser Liste nicht hinzugefügt;
 * es werden keine Duplikate erzeugt — das erneute Klonen desselben Repositories verschiebt es nach oben;
-* es werden bis zu 7 letzte Repositories gespeichert;
+* es werden bis zu 16 letzte Repositories gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
 
 Wenn Sie einen Eintrag auswählen, wird die URL automatisch in das Eingabefeld eingesetzt.
