@@ -36,10 +36,10 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	}
 
 	[Fact]
-	public void DefaultPolicy_UsesTenGiBAndSixtyDays()
+	public void DefaultPolicy_UsesTenGiBAndNinetyDays()
 	{
 		Assert.Equal(10L * 1024 * 1024 * 1024, RepositoryCachePolicy.Default.MaximumSizeBytes);
-		Assert.Equal(TimeSpan.FromDays(60), RepositoryCachePolicy.Default.MaximumUnusedAge);
+		Assert.Equal(TimeSpan.FromDays(90), RepositoryCachePolicy.Default.MaximumUnusedAge);
 	}
 
 	[Fact]
