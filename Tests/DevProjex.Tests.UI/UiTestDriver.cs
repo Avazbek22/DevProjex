@@ -557,7 +557,17 @@ internal static class UiTestDriver
             inputRoot.KeyPress(key, modifiers, physicalKey, keySymbol);
             await WaitForSettledFramesAsync(frameCount: 1);
             if (!windowClosed && inputRoot.IsVisible)
-                inputRoot.KeyRelease(key, modifiers, physicalKey, keySymbol);
+            {
+                try
+                {
+                    inputRoot.KeyRelease(key, modifiers, physicalKey, keySymbol);
+                }
+                catch (ObjectDisposedException) when (inputWindow is not null)
+                {
+                    // Enter may synchronously destroy a dialog before Avalonia raises Closed.
+                    // A real input source cannot deliver the matching release to that top-level.
+                }
+            }
         }
         finally
         {

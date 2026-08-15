@@ -400,8 +400,11 @@ public sealed class CodeCompressionSessionTests
 			["C:/project/blocked.cs", "C:/project/failure.cs"],
 			cancellationToken);
 
-		await compressor.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
-		await analyzer.FailureObserved.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+		// This timeout protects only test coordination; the 250 ms assertion below remains the
+		// behavioral bound. Loaded single-core CI runners can delay the second producer continuation.
+		var coordinationTimeout = TimeSpan.FromSeconds(30);
+		await Task.WhenAll(compressor.Started.Task, analyzer.FailureObserved.Task)
+			.WaitAsync(coordinationTimeout, cancellationToken);
 		try
 		{
 			var completed = await Task.WhenAny(

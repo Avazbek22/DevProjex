@@ -3550,8 +3550,12 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					viewModel.SettingsSecretsNotice,
 					"DevProjex found no secrets",
 					StringComparison.Ordinal) &&
-				      !viewModel.StatusBusy,
+				      !viewModel.StatusBusy &&
+				      !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					      removedSecret,
+					      StringComparison.Ordinal),
 				"the atomic content pipeline to settle after Apply");
+			Assert.NotSame(publishedDocument, viewModel.PreviewDocument);
 			Assert.DoesNotContain(
 				removedSecret,
 				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
@@ -3575,7 +3579,12 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(
 			Path.Combine(project.RootPath, "settings.json"),
-			$$"""{"accessKey":"{{survivingSecret}}","label":"{{manualValue}}"}""",
+			$$"""
+			  {
+			    "accessKey": "{{survivingSecret}}",
+			    "label": "{{manualValue}}"
+			  }
+			  """,
 			TestContext.Current.CancellationToken);
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
 		try
