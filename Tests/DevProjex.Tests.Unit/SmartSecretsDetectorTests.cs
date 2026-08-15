@@ -56,6 +56,7 @@ public sealed class SmartSecretsDetectorTests
 	[InlineData("db.localhost:5432")]
 	[InlineData("example.com.evil.io")]
 	[InlineData("prod.internal:443")]
+	[InlineData("test")]
 	[InlineData("[::1]:5432")]
 	public void Detect_CredentialUriOnOperationalHost_RedactsPassword(string host)
 	{
@@ -77,6 +78,9 @@ public sealed class SmartSecretsDetectorTests
 	[InlineData("service.EXAMPLE", true)]
 	[InlineData("cache.invalid:6379", true)]
 	[InlineData("example.com.:443", true)]
+	[InlineData("test", false)]
+	[InlineData("example", false)]
+	[InlineData("invalid:6379", false)]
 	[InlineData("localhost:5432", false)]
 	[InlineData("db.localhost", false)]
 	[InlineData("example.com.evil.io:443", false)]

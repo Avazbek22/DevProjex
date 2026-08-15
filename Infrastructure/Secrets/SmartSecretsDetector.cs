@@ -548,6 +548,8 @@ internal static class StructuredSecretDetector
 		}
 
 		var lastLabelSeparator = host.LastIndexOf('.');
+		if (lastLabelSeparator <= 0)
+			return false;
 		var lastLabel = host[(lastLabelSeparator + 1)..];
 		return lastLabel.Equals("test", StringComparison.OrdinalIgnoreCase) ||
 		       lastLabel.Equals("example", StringComparison.OrdinalIgnoreCase) ||
