@@ -226,6 +226,16 @@ function Add-PathToCiPlan {
 		return
 	}
 
+	if ((Test-PathStartsWith $normalized 'Assets/HelpContent/') -and
+		$normalized.EndsWith('.txt', [StringComparison]::OrdinalIgnoreCase)) {
+		# Help text ships inside every product, but an edit can only break the suites that
+		# read it: embedded-resource loading (Unit), per-language coverage (Integration)
+		# and the documentation contracts (Terminal, Documentation). Non-text files in the
+		# same directory stay on the shared production layer plan below.
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'Documentation') -Reason "Help content: $normalized"
+		return
+	}
+
 	if ((Test-PathStartsWith $normalized 'Kernel/') -or
 		(Test-PathStartsWith $normalized 'Application/') -or
 		(Test-PathStartsWith $normalized 'Infrastructure/') -or
