@@ -304,7 +304,8 @@
             Margin="0,0,3,0"
             AutomationProperties.HelpText="{Binding PreviewTooltip}"
             ToolTip.ShowDelay="700"
-            ToolTip.Placement="Left">
+            ToolTip.Placement="BottomEdgeAlignedRight"
+            ToolTip.VerticalOffset="5">
       <ToolTip.Tip>
         <ToolTip>
           <TextBlock Text="{Binding PreviewTooltip}" />
@@ -326,7 +327,8 @@
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
             ToolTip.ShowDelay="700"
-            ToolTip.Placement="Left">
+            ToolTip.Placement="BottomEdgeAlignedRight"
+            ToolTip.VerticalOffset="5">
       <ToolTip.Tip>
         <ToolTip>
           <TextBlock Text="{Binding FilterTooltip}" />
