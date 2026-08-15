@@ -1885,6 +1885,29 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("All (3)", viewModel.SettingsAllExtensions);
     }
 
+	[Fact]
+	public void SettingsAllContentProcessing_TracksOnlyTransformationCount()
+	{
+		var viewModel = CreateViewModel(new Dictionary<string, string>
+		{
+			["Settings.All"] = "All"
+		});
+
+		viewModel.IgnoreOptions.Add(
+			new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "hidden folders", true));
+		viewModel.IgnoreOptions.Add(
+			new IgnoreOptionViewModel(IgnoreOptionId.HideSecrets, "hide secrets", false));
+		viewModel.IgnoreOptions.Add(
+			new IgnoreOptionViewModel(IgnoreOptionId.CompressCode, "compress code", false));
+
+		Assert.Equal("All (1)", viewModel.SettingsAllIgnore);
+		Assert.Equal("All (2)", viewModel.SettingsAllContentProcessing);
+
+		viewModel.IgnoreOptions.RemoveAt(2);
+
+		Assert.Equal("All (1)", viewModel.SettingsAllContentProcessing);
+	}
+
     [Fact]
     public void SettingsAllIgnore_WhenItemRemoved_UpdatesCount()
     {

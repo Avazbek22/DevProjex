@@ -67,6 +67,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool _allExtensionsChecked;
     private bool _allIgnoreChecked;
+	private bool _allContentProcessingChecked;
 	private IgnoreOptionViewModel? _hideSecretsOption;
 	private SecretScanState _contentProcessingScanState;
 	private int? _contentProcessingDetectedCount;
@@ -1473,6 +1474,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+	public bool AllContentProcessingChecked
+	{
+		get => _allContentProcessingChecked;
+		set
+		{
+			if (_allContentProcessingChecked == value) return;
+			_allContentProcessingChecked = value;
+			RaisePropertyChanged();
+		}
+	}
+
     public string MenuFile { get; private set; } = string.Empty;
     public string MenuFileOpen { get; private set; } = string.Empty;
     public string MenuFileOpenNewWindow
@@ -1584,6 +1596,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	public string PreviewSecretSelectionContentOnly { get; private set; } = string.Empty;
     public string SettingsAll { get; private set; } = string.Empty;
     public string SettingsAllIgnore { get; private set; } = string.Empty;
+	public string SettingsAllContentProcessing { get; private set; } = string.Empty;
     public string SettingsAllExtensions { get; private set; } = string.Empty;
     public string SettingsExtensions { get; private set; } = string.Empty;
     public string SettingsFont { get; private set; } = string.Empty;
@@ -2020,8 +2033,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             baseText = _localization["Settings.All"];
 
 		SettingsAllIgnore = PathIgnoreOptions.Count > 0 ? $"{baseText} ({PathIgnoreOptions.Count})" : baseText;
+		SettingsAllContentProcessing = ContentProcessingOptions.Count > 0
+			? $"{baseText} ({ContentProcessingOptions.Count})"
+			: baseText;
         SettingsAllExtensions = Extensions.Count > 0 ? $"{baseText} ({Extensions.Count})" : baseText;
         RaisePropertyChanged(nameof(SettingsAllIgnore));
+		RaisePropertyChanged(nameof(SettingsAllContentProcessing));
         RaisePropertyChanged(nameof(SettingsAllExtensions));
     }
 

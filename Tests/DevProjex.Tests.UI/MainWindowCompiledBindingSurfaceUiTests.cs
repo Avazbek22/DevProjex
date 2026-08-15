@@ -38,18 +38,21 @@ public sealed class MainWindowCompiledBindingSurfaceUiTests(UiWorkspaceFixture w
 			window.Classes.Add("compact-mode");
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 
-			var checkBox = UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox");
-			var contentPresenter = Assert.Single(
-				checkBox.GetVisualDescendants().OfType<ContentPresenter>(),
-				presenter => presenter.Name == "PART_ContentPresenter");
-			var box = Assert.Single(
-				checkBox.GetVisualDescendants().OfType<Border>(),
-				border => border.Name == "NormalRectangle");
+			foreach (var checkBoxName in new[] { "IgnoreAllCheckBox", "ContentProcessingAllCheckBox" })
+			{
+				var checkBox = UiTestDriver.GetRequiredControl<CheckBox>(window, checkBoxName);
+				var contentPresenter = Assert.Single(
+					checkBox.GetVisualDescendants().OfType<ContentPresenter>(),
+					presenter => presenter.Name == "PART_ContentPresenter");
+				var box = Assert.Single(
+					checkBox.GetVisualDescendants().OfType<Border>(),
+					border => border.Name == "NormalRectangle");
 
-			Assert.Null(checkBox.RenderTransform);
-			Assert.Null(contentPresenter.RenderTransform);
-			Assert.Equal(18, box.Bounds.Width, precision: 3);
-			Assert.Equal(18, box.Bounds.Height, precision: 3);
+				Assert.Null(checkBox.RenderTransform);
+				Assert.Null(contentPresenter.RenderTransform);
+				Assert.Equal(18, box.Bounds.Width, precision: 3);
+				Assert.Equal(18, box.Bounds.Height, precision: 3);
+			}
 		}
 		finally
 		{

@@ -47,6 +47,7 @@ public sealed partial class SelectionSyncCoordinator(
     private bool _suppressExtensionAllCheck;
     private bool _suppressExtensionItemCheck;
     private bool _suppressIgnoreAllCheck;
+	private bool _suppressContentProcessingAllCheck;
     private bool _suppressIgnoreItemCheck;
     private int _extensionScanVersion;
     private int _ignoreOptionsVersion;
@@ -401,6 +402,52 @@ public sealed partial class SelectionSyncCoordinator(
             QueueFullRefresh(currentPath, changedIgnoreOptionId: null);
         }
     }
+
+	public void HandleContentProcessingAllChanged(bool isChecked)
+	{
+		if (_suppressContentProcessingAllCheck)
+			return;
+
+		var changed = false;
+		var hideSecretsChanged = false;
+		_suppressIgnoreItemCheck = true;
+		try
+		{
+			foreach (var option in viewModel.ContentProcessingOptions)
+			{
+				if (option.IsChecked == isChecked)
+					continue;
+
+				option.IsChecked = isChecked;
+				changed = true;
+				hideSecretsChanged |= option.Id == IgnoreOptionId.HideSecrets;
+			}
+		}
+		finally
+		{
+			_suppressIgnoreItemCheck = false;
+		}
+
+		_suppressContentProcessingAllCheck = true;
+		try
+		{
+			viewModel.AllContentProcessingChecked =
+				isChecked && viewModel.ContentProcessingOptions.Count > 0;
+		}
+		finally
+		{
+			_suppressContentProcessingAllCheck = false;
+		}
+
+		if (!changed)
+			return;
+
+		_session.IgnoreOptions.IsInitialized = true;
+		UpdateIgnoreSelectionCache();
+		RequestPendingApplyEvaluation();
+		if (hideSecretsChanged)
+			contentTransformationChanged?.Invoke(IgnoreOptionId.HideSecrets);
+	}
 
     public Task PopulateExtensionsForRootSelectionAsync(
         string path,
@@ -1266,16 +1313,24 @@ public sealed partial class SelectionSyncCoordinator(
     public void SyncIgnoreAllCheckbox()
     {
         _suppressIgnoreAllCheck = true;
+		_suppressContentProcessingAllCheck = true;
         try
         {
             var hasItems = false;
+			var hasContentProcessingItems = false;
             var hasGitFilteringOptions = false;
             var hasSelectedGitFilteringMode = false;
             var allOrdinaryOptionsChecked = true;
+			var allContentProcessingOptionsChecked = true;
             foreach (var option in viewModel.IgnoreOptions)
             {
 				if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
+				{
+					hasContentProcessingItems = true;
+					if (!option.IsChecked)
+						allContentProcessingOptionsChecked = false;
 					continue;
+				}
                 hasItems = true;
                 if (GitFilteringModeResolver.IsGitFilteringOption(option.Id))
                 {
@@ -1292,10 +1347,13 @@ public sealed partial class SelectionSyncCoordinator(
                 hasItems &&
                 allOrdinaryOptionsChecked &&
                 (!hasGitFilteringOptions || hasSelectedGitFilteringMode);
+			viewModel.AllContentProcessingChecked =
+				hasContentProcessingItems && allContentProcessingOptionsChecked;
         }
         finally
         {
             _suppressIgnoreAllCheck = false;
+			_suppressContentProcessingAllCheck = false;
         }
     }
 

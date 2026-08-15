@@ -9,6 +9,9 @@ public partial class SettingsPanelView : UserControl
     private Grid? _ignoreHeaderGrid;
     private TextBlock? _ignoreHeaderText;
     private CheckBox? _ignoreAllCheckBox;
+	private Grid? _contentProcessingHeaderGrid;
+	private TextBlock? _contentProcessingHeaderText;
+	private CheckBox? _contentProcessingAllCheckBox;
     private Grid? _extensionsHeaderGrid;
     private TextBlock? _extensionsHeaderText;
     private CheckBox? _extensionsAllCheckBox;
@@ -19,6 +22,7 @@ public partial class SettingsPanelView : UserControl
 
     public event EventHandler<RoutedEventArgs>? ApplySettingsRequested;
     public event EventHandler<RoutedEventArgs>? IgnoreAllChanged;
+	public event EventHandler<RoutedEventArgs>? ContentProcessingAllChanged;
     public event EventHandler<RoutedEventArgs>? ExtensionsAllChanged;
     public event EventHandler<SettingsPanelMinimumWidthChangedEventArgs>? MinimumWidthChanged;
 	public event EventHandler? SecretScanRetryRequested;
@@ -31,6 +35,9 @@ public partial class SettingsPanelView : UserControl
         _ignoreHeaderGrid = this.FindControl<Grid>("IgnoreHeaderGrid");
         _ignoreHeaderText = this.FindControl<TextBlock>("IgnoreHeaderText");
         _ignoreAllCheckBox = this.FindControl<CheckBox>("IgnoreAllCheckBox");
+		_contentProcessingHeaderGrid = this.FindControl<Grid>("ContentProcessingHeaderGrid");
+		_contentProcessingHeaderText = this.FindControl<TextBlock>("ContentProcessingHeaderText");
+		_contentProcessingAllCheckBox = this.FindControl<CheckBox>("ContentProcessingAllCheckBox");
         _extensionsHeaderGrid = this.FindControl<Grid>("ExtensionsHeaderGrid");
         _extensionsHeaderText = this.FindControl<TextBlock>("ExtensionsHeaderText");
         _extensionsAllCheckBox = this.FindControl<CheckBox>("ExtensionsAllCheckBox");
@@ -44,6 +51,9 @@ public partial class SettingsPanelView : UserControl
 
     private void OnIgnoreAllChanged(object? sender, RoutedEventArgs e)
         => IgnoreAllChanged?.Invoke(sender, e);
+
+	private void OnContentProcessingAllChanged(object? sender, RoutedEventArgs e)
+		=> ContentProcessingAllChanged?.Invoke(sender, e);
 
     private void OnExtensionsAllChanged(object? sender, RoutedEventArgs e)
         => ExtensionsAllChanged?.Invoke(sender, e);
@@ -116,7 +126,12 @@ public partial class SettingsPanelView : UserControl
 
         var contentWidth = Math.Max(
             MeasureHeaderWidth(_ignoreHeaderGrid, _ignoreHeaderText, _ignoreAllCheckBox),
-            MeasureHeaderWidth(_extensionsHeaderGrid, _extensionsHeaderText, _extensionsAllCheckBox));
+			Math.Max(
+				MeasureHeaderWidth(
+					_contentProcessingHeaderGrid,
+					_contentProcessingHeaderText,
+					_contentProcessingAllCheckBox),
+				MeasureHeaderWidth(_extensionsHeaderGrid, _extensionsHeaderText, _extensionsAllCheckBox)));
 
         var panelPadding = _panelRoot?.Padding ?? default;
         var borderThickness = _panelRoot?.BorderThickness ?? default;
@@ -190,6 +205,8 @@ public partial class SettingsPanelView : UserControl
 
         ToggleMinimumWidthAffectingSizeChanges(_ignoreHeaderText, subscribe: true);
         ToggleMinimumWidthAffectingSizeChanges(_ignoreAllCheckBox, subscribe: true);
+		ToggleMinimumWidthAffectingSizeChanges(_contentProcessingHeaderText, subscribe: true);
+		ToggleMinimumWidthAffectingSizeChanges(_contentProcessingAllCheckBox, subscribe: true);
         ToggleMinimumWidthAffectingSizeChanges(_extensionsHeaderText, subscribe: true);
         ToggleMinimumWidthAffectingSizeChanges(_extensionsAllCheckBox, subscribe: true);
         _minimumWidthSizeSubscriptionsAttached = true;
@@ -202,6 +219,8 @@ public partial class SettingsPanelView : UserControl
 
         ToggleMinimumWidthAffectingSizeChanges(_ignoreHeaderText, subscribe: false);
         ToggleMinimumWidthAffectingSizeChanges(_ignoreAllCheckBox, subscribe: false);
+		ToggleMinimumWidthAffectingSizeChanges(_contentProcessingHeaderText, subscribe: false);
+		ToggleMinimumWidthAffectingSizeChanges(_contentProcessingAllCheckBox, subscribe: false);
         ToggleMinimumWidthAffectingSizeChanges(_extensionsHeaderText, subscribe: false);
         ToggleMinimumWidthAffectingSizeChanges(_extensionsAllCheckBox, subscribe: false);
         _minimumWidthSizeSubscriptionsAttached = false;

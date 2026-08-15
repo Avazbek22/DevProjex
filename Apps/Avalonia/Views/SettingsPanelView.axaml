@@ -160,12 +160,23 @@
 			Margin="0,10,0,0"
 			IsVisible="{Binding HasContentProcessingOptions}"
 			IsEnabled="{Binding AreFilterSettingsEnabled}">
-		<TextBlock Name="ContentProcessingHeaderText"
-				   Grid.Row="0"
-				   Classes="section-title"
-				   Text="{Binding SettingsSecretsTitle}"
-				   Margin="0,0,0,6"
-				   FontSize="15" />
+		<Grid Name="ContentProcessingHeaderGrid"
+			  Grid.Row="0"
+			  ColumnDefinitions="*,3,Auto"
+			  Margin="0,0,0,6">
+		  <TextBlock Name="ContentProcessingHeaderText"
+					 Grid.Column="0"
+					 Classes="section-title"
+					 Text="{Binding SettingsSecretsTitle}"
+					 Margin="0"
+					 FontSize="15" />
+		  <CheckBox Name="ContentProcessingAllCheckBox"
+					Classes="section-all"
+					Grid.Column="2"
+					Content="{Binding SettingsAllContentProcessing}"
+					IsChecked="{Binding AllContentProcessingChecked, Mode=TwoWay}"
+					IsCheckedChanged="OnContentProcessingAllChanged" />
+		</Grid>
 		<Border Name="ContentProcessingOptionsBorder" Grid.Row="1" Classes="checklist-border">
 		  <Grid>
 			<ListBox Name="ContentProcessingOptionsList"

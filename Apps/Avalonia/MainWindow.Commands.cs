@@ -548,6 +548,12 @@ public partial class MainWindow
         _selectionCoordinator.HandleIgnoreAllChanged(check, _currentPath);
     }
 
+	private void OnContentProcessingAllChanged(object? sender, RoutedEventArgs e)
+	{
+		var check = (sender as CheckBox)?.IsChecked == true;
+		_selectionCoordinator.HandleContentProcessingAllChanged(check);
+	}
+
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
         var activeOperationType = _statusOperations.GetActiveSnapshot().OperationType;

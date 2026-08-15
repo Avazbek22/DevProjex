@@ -3428,6 +3428,58 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task ContentProcessingAll_TogglesItsRowsAndTracksIndividualDrafts()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.ContentProcessingOptions.Count ==
+				      ProjectPresentationCatalog.ContentTransformationOptionIds.Count,
+				"all content-processing rows to load");
+			var allCheckBox = UiTestDriver.GetRequiredControl<CheckBox>(
+				window,
+				"ContentProcessingAllCheckBox");
+
+			Assert.Equal(viewModel.SettingsAllContentProcessing, allCheckBox.Content);
+			Assert.Equal($"All ({viewModel.ContentProcessingOptions.Count})", allCheckBox.Content);
+			Assert.False(allCheckBox.IsChecked);
+
+			await UiTestDriver.ClickAsync(window, allCheckBox);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.AllContentProcessingChecked &&
+				      viewModel.ContentProcessingOptions.All(static option => option.IsChecked),
+				"the section-wide content toggle to check every row");
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.StripBlankLines);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !viewModel.AllContentProcessingChecked,
+				"an individual draft to clear the section-wide checkbox");
+
+			await UiTestDriver.ClickAsync(window, allCheckBox);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.ContentProcessingOptions.All(static option => option.IsChecked),
+				"the section-wide toggle to restore every row");
+			await UiTestDriver.ClickAsync(window, allCheckBox);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.ContentProcessingOptions.All(static option => !option.IsChecked),
+				"the section-wide toggle to clear every row");
+			Assert.False(viewModel.AllContentProcessingChecked);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task CompressionWithoutSecretFindings_KeepsCompressionAndSecretsStatusesSeparate()
 	{
 		using var project = UiTestProject.CreateDefault();

@@ -1133,6 +1133,47 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.True(MainWindow.RequiresCompressionRefresh(changedOptionId: null));
 	}
 
+	[AvaloniaFact]
+	public void ContentProcessingAll_UpdatesOnlyItsSectionWithOnePipelineRefresh()
+	{
+		var changedOptions = new List<IgnoreOptionId?>();
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => @"C:\Project",
+			contentTransformationChangedWithId: changedOptions.Add);
+		ApplySelectionRefreshSnapshot(coordinator, CreateReversibleSelectionRefreshSnapshot());
+		HookAllOptionListeners(coordinator, viewModel);
+		var revisionBefore = coordinator.CurrentSelectionRevision;
+
+		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.True(viewModel.AllContentProcessingChecked);
+
+		coordinator.HandleContentProcessingAllChanged(isChecked: false);
+
+		Assert.All(viewModel.ContentProcessingOptions, static option => Assert.False(option.IsChecked));
+		Assert.False(viewModel.AllContentProcessingChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.Equal([IgnoreOptionId.HideSecrets], changedOptions);
+		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
+
+		coordinator.HandleContentProcessingAllChanged(isChecked: true);
+
+		Assert.All(viewModel.ContentProcessingOptions, static option => Assert.True(option.IsChecked));
+		Assert.True(viewModel.AllContentProcessingChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.Equal([IgnoreOptionId.HideSecrets, IgnoreOptionId.HideSecrets], changedOptions);
+
+		var blankLines = Assert.Single(
+			viewModel.ContentProcessingOptions,
+			static option => option.Id == IgnoreOptionId.StripBlankLines);
+		blankLines.IsChecked = false;
+
+		Assert.False(viewModel.AllContentProcessingChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.Equal([IgnoreOptionId.HideSecrets, IgnoreOptionId.HideSecrets], changedOptions);
+	}
+
 	[Fact]
 	public void ReversibleRefresh_CoupledGitModeSnapshotIsNotRestoredForSingleCheckboxClear()
 	{
