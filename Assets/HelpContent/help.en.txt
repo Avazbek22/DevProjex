@@ -112,7 +112,7 @@ Rules:
 * only repository URLs are added to the list;
 * local folders are not added to this list;
 * duplicates are not created — cloning the same repository again moves it to the top;
-* up to 7 recent repositories are stored;
+* up to 16 recent repositories are stored;
 * history is preserved between app launches.
 
 Selecting an item automatically fills the URL field.

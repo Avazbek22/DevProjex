@@ -237,17 +237,17 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
-	public void AddRepository_ClampsToSevenItems()
+	public void AddRepository_ClampsToSixteenItems()
 	{
 		using var temp = new TemporaryDirectory();
 		var store = new RecentProjectsStore(() => temp.Path);
 		var db = store.Load();
 
-		for (var i = 0; i < 9; i++)
+		for (var i = 0; i < 18; i++)
 			db = store.AddRepository(db, $"https://example.com/user/repo{i}");
 
-		Assert.Equal(7, db.RecentRepositories.Count);
-		Assert.Contains(db.RecentRepositories, entry => entry.Url.EndsWith("repo8", StringComparison.Ordinal));
+		Assert.Equal(16, db.RecentRepositories.Count);
+		Assert.Contains(db.RecentRepositories, entry => entry.Url.EndsWith("repo17", StringComparison.Ordinal));
 		Assert.DoesNotContain(db.RecentRepositories, entry => entry.Url.EndsWith("repo0", StringComparison.Ordinal));
 	}
 
