@@ -847,7 +847,7 @@ public partial class MainWindow
         // Clear old items - they will be garbage collected since they have no external references
         // and we're using a named handler method instead of lambda captures
         branchMenuItem.Items.Clear();
-        GitBranchMenuScrollBehavior.SetScrollable(branchMenuItem, _viewModel.GitBranches.Count);
+        MenuScrollBehavior.SetScrollable(branchMenuItem, _viewModel.GitBranches.Count);
 
         foreach (var branch in _viewModel.GitBranches)
             branchMenuItem.Items.Add(CreateBranchMenuItem(branch));

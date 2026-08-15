@@ -208,17 +208,17 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
-	public void AddFolder_ClampsToFifteenItems()
+	public void AddFolder_ClampsToThirtyTwoItems()
 	{
 		using var temp = new TemporaryDirectory();
 		var store = new RecentProjectsStore(() => temp.Path);
 		var db = store.Load();
 
-		for (var i = 0; i < 17; i++)
+		for (var i = 0; i < 34; i++)
 			db = store.AddFolder(db, Path.Combine(temp.Path, $"Folder{i}"));
 
-		Assert.Equal(15, db.RecentFolders.Count);
-		Assert.Contains(db.RecentFolders, entry => entry.Path.EndsWith("Folder16", StringComparison.Ordinal));
+		Assert.Equal(32, db.RecentFolders.Count);
+		Assert.Contains(db.RecentFolders, entry => entry.Path.EndsWith("Folder33", StringComparison.Ordinal));
 		Assert.DoesNotContain(db.RecentFolders, entry => entry.Path.EndsWith("Folder0", StringComparison.Ordinal));
 	}
 

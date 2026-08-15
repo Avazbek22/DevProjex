@@ -63,7 +63,7 @@ Rules:
 * only local folders are added to the list;
 * Git repositories cloned via DevProjex are not added to this list;
 * duplicates are not created — opening the same folder again moves it to the top;
-* up to 15 recent folders are stored;
+* up to 32 recent folders are stored;
 * history is preserved between app launches.
 
 Each item shows the parent folder and project name, for example `Projects / App`.

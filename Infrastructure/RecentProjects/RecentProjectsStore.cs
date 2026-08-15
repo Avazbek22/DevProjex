@@ -5,7 +5,7 @@ namespace DevProjex.Infrastructure.RecentProjects;
 public sealed class RecentProjectsStore
 {
 	private const int CurrentSchemaVersion = 3;
-	private const int MaxRecentFolders = 15;
+	private const int MaxRecentFolders = 32;
 	private const int MaxRecentFolderRemovals = 64;
 	private const int MaxRecentRepositories = 16;
 	private const int MaxRecentRepositoryRemovals = 32;

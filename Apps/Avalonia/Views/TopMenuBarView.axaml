@@ -22,7 +22,7 @@
           Grid.ColumnSpan="4"
           Margin="0"
           Padding="0,0,210,0">
-      <MenuItem Header="{Binding MenuFile}">
+      <MenuItem Name="FileMenuItem" Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}"
                   Click="OnOpenFolder"
                   IsEnabled="{Binding CanChangeProjectTree}" />

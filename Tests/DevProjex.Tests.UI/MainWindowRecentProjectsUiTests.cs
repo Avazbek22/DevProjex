@@ -1,5 +1,6 @@
 using Avalonia.Controls.Primitives;
 using Avalonia.VisualTree;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.UI;
@@ -84,6 +85,64 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 			Assert.Equal(firstPath, recentItems[1].Tag);
 			Assert.Equal(secondPath, recentItems[2].Tag);
 			Assert.DoesNotContain(recentItems, item => string.Equals(item.Tag as string, repositoryUrl, StringComparison.OrdinalIgnoreCase));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task FileMenu_RecentFolders_LargeHistoryUsesScrollableMenuOnFirstOpen()
+	{
+		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var db = recentStore.Load();
+		for (var index = 0; index < 20; index++)
+		{
+			var folderPath = Path.Combine(workspace.Project.RootPath, "history", $"scroll-{index:D2}");
+			Directory.CreateDirectory(folderPath);
+			db = recentStore.AddFolder(db, folderPath);
+		}
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath);
+
+		try
+		{
+			var recentMenu = await OpenRecentMenuAsync(window);
+			Assert.Contains("menu-scrollable", recentMenu.Classes);
+			Assert.True(recentMenu.IsSubMenuOpen);
+			Assert.True(recentMenu.Items.Count > MenuScrollBehavior.VisibleItemLimit);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 12);
+			var popupCandidates = recentMenu.GetVisualDescendants().OfType<Popup>().ToArray();
+			Assert.True(
+				popupCandidates.Any(static candidate => candidate.IsOpen),
+				$"No open recent popup. Popups: {popupCandidates.Length}.");
+
+			var popup = Assert.Single(
+				recentMenu.GetVisualDescendants().OfType<Popup>(),
+				static candidate => candidate.IsOpen);
+			var popupRoot = Assert.IsAssignableFrom<Visual>(popup.Child);
+			var scrollViewer = Assert.Single(popupRoot.GetVisualDescendants().OfType<ScrollViewer>());
+			var scrollIndicator = Assert.Single(
+				popupRoot.GetVisualDescendants().OfType<Control>(),
+				control => control.Classes.Contains("menu-external-scrollbar"));
+			var indicatorThumb = Assert.Single(
+				popupRoot.GetVisualDescendants().OfType<Border>(),
+				border => border.Classes.Contains("menu-scroll-indicator-thumb"));
+
+			Assert.Equal(ScrollBarVisibility.Visible, scrollViewer.VerticalScrollBarVisibility);
+			Assert.True(scrollViewer.Bounds.Height <= 510);
+			Assert.True(scrollIndicator.IsVisible);
+			Assert.True(indicatorThumb.Bounds.Height >= 32);
+
+			var maximumOffset = scrollViewer.Extent.Height - scrollViewer.Viewport.Height;
+			Assert.True(maximumOffset > 0);
+			scrollViewer.Offset = new Vector(0, maximumOffset);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(maximumOffset, scrollViewer.Offset.Y, precision: 3);
 		}
 		finally
 		{
@@ -318,7 +377,10 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 
 	private static async Task<MenuItem> OpenRecentMenuAsync(MainWindow window)
 	{
+		var fileMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "FileMenuItem");
 		var recentMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "RecentMenuItem");
+		fileMenu.IsSubMenuOpen = true;
+		await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 		recentMenu.IsSubMenuOpen = true;
 		await UiTestDriver.WaitForConditionAsync(
 			window,

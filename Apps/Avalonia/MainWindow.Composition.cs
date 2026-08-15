@@ -1314,7 +1314,7 @@ public partial class MainWindow
 
         // Hook menu item submenu opening to apply brushes directly
         AddHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened, RoutingStrategies.Bubble);
-        AddHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened, RoutingStrategies.Bubble);
+        AddHandler(MenuItem.SubmenuOpenedEvent, MenuScrollBehavior.HandleSubmenuOpened, RoutingStrategies.Bubble);
     }
 
     private StartupInteractionController CreateStartupInteractionController(

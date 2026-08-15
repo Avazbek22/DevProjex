@@ -1,3 +1,4 @@
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia;
@@ -116,6 +117,7 @@ public partial class MainWindow
 
         if (_viewModel.RecentFolders.Count == 0)
         {
+            MenuScrollBehavior.SetScrollable(recentMenuItem, 0);
             recentMenuItem.Items.Add(new MenuItem
             {
                 Header = _viewModel.MenuFileRecentEmpty,
@@ -139,6 +141,8 @@ public partial class MainWindow
             item.Click += OnRecentFolderMenuItemClick;
             recentMenuItem.Items.Add(item);
         }
+
+        MenuScrollBehavior.SetScrollable(recentMenuItem, _viewModel.RecentFolders.Count);
     }
 
     private async void OnRecentFolderMenuItemClick(object? sender, RoutedEventArgs e)

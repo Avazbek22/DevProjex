@@ -151,7 +151,7 @@ public partial class MainWindow
             RemoveHandler(PointerWheelChangedEvent, OnWindowPointerWheelChanged);
             RemoveHandler(KeyDownEvent, OnKeyDown);
             RemoveHandler(MenuItem.SubmenuOpenedEvent, _themeBrushCoordinator.HandleSubmenuOpened);
-            RemoveHandler(MenuItem.SubmenuOpenedEvent, GitBranchMenuScrollBehavior.HandleSubmenuOpened);
+            RemoveHandler(MenuItem.SubmenuOpenedEvent, MenuScrollBehavior.HandleSubmenuOpened);
 
             // Unsubscribe from window lifecycle events
             Opened -= OnOpened;
