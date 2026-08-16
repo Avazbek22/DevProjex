@@ -38,7 +38,10 @@ The rule does not match:
 * single-label hosts such as `user@localhost`;
 * RFC 2606 documentation hosts: `example.com`, `example.net`, `example.org`, their
   subdomains, and domains under `.test`, `.example`, or `.invalid`;
-* the service local parts `git`, `noreply`, and `no-reply`;
+* placeholder and organizational role local parts such as `git`, `noreply`, `admin`, `dev`,
+  `qa`, `staging`, and `testing`;
+* attribution files such as `LICENSE`, `NOTICE`, `AUTHORS`, `CONTRIBUTORS`, and `.mailmap`,
+  where published addresses are intentionally part of the attribution;
 * non-ASCII local parts or IDN forms in this phase;
 * reference and placeholder forms such as `${EMAIL}`, `$(EMAIL)`, `{{email}}`, `<email>`,
   and `%EMAIL%`.
@@ -77,19 +80,24 @@ Path structure and the rest of the path remain visible. The following generic, o
 system, and CI identities stay visible: `Public`, `Default`, `Default User`, `All Users`,
 `user`, `username`, `example`, `demo`, `test`, `runner`, `runneradmin`,
 `ContainerAdministrator`, `ContainerUser`, `vagrant`, `jenkins`, and `root`.
+Common CI, cloud, container, and documentation identities such as `gitlab-runner`, `ubuntu`,
+`ec2-user`, `postgres`, `alice`, and `bob` also stay visible.
 Environment references such as `%USERPROFILE%` and the `~/` shorthand are outside this rule.
 
 ### MAC addresses (`mac-address`)
 
 Matches six hexadecimal pairs using one consistent `:` or `-` separator. The all-zero and
-broadcast values stay visible. Cisco dotted notation is intentionally not detected, and the
-boundaries reject substrings inside IPv6 addresses and UUIDs.
+broadcast values stay visible. Canonical examples such as `00:11:22:33:44:55`,
+`11:22:33:44:55:66`, and values beginning with `DE:AD:BE:EF` also stay visible. Cisco dotted
+notation is intentionally not detected, and the boundaries reject substrings inside IPv6
+addresses and UUIDs.
 
 ### International phone numbers (`phone-number`)
 
 Matches a leading `+` immediately followed by a digit and 8 to 15 digits in total. Spaces,
-hyphens, dots, and parentheses may separate groups; the complete span is limited to 20
-characters.
+hyphens, and parentheses may separate groups; the complete span is limited to 20 characters.
+Dot-separated forms are intentionally not detected because they collide with decimal values
+and added expressions in diffs.
 
 Documented fictional ranges stay visible:
 
@@ -97,7 +105,8 @@ Documented fictional ranges stay visible:
 * UK drama ranges beginning `+44 7700 900` or `+44 20 7946 0`.
 
 Short timezone offsets, diff hunk coordinates, `C++` tokens, and numbers longer than 15
-digits do not match.
+digits do not match. Repeated-digit and sequential placeholder numbers stay visible, as does a
+leading `+` at the start of a line in `.patch` and `.diff` files.
 
 ## Interaction with Hide Secrets
 
@@ -119,27 +128,36 @@ The phase-one rules keep several source-code forms visible to avoid repeatedly r
 common project metadata:
 
 * IPv4 values whose last octet is zero stay visible because they usually represent product
-  versions or network identifiers rather than hosts. An IPv4 candidate preceded by `version`
-  on the same line within the bounded context window is also kept. A real host ending in zero,
-  or a real address in such a version context, is an intentional false negative; an ambiguous
-  `1.2.3.4` without that context remains redacted and can be kept as-is in Preview.
+  versions or network identifiers rather than hosts. Adjacent package constraint operators and
+  the bounded same-line keywords `version`, `tag`, `release`, `build`, and `packages` also keep
+  version-shaped values visible. Files whose names begin with `CHANGELOG`, `HISTORY`, `RELEASES`,
+  `RELEASE_NOTES`, or `RELEASE-NOTES` disable IPv4 matching because release versions dominate
+  there. Real addresses in those contexts are intentional false negatives; an ambiguous
+  `1.2.3.4` elsewhere remains redacted and can be kept as-is in Preview.
 * Email-like tokens with a file-extension final label or a retina-style first domain label
   such as `icon@2x.png` stay visible. This intentionally accepts false negatives for colliding
   country-code domains such as `.md`, `.sh`, `.rs`, and `.py`, because file names using these
   extensions are substantially more common in project content.
 * Placeholder local parts, every local part beginning with `your`, and organizational role
-  mailboxes such as `admin`, `owner`, `support`, and `security` stay visible. Local-part
-  segments equal to `test` or `tests`, URI authority userinfo, and malformed multi-`@` tokens
-  are not treated as email. A real personal address using one of these names is therefore an
-  intentional false negative.
+  mailboxes such as `admin`, `owner`, `support`, `security`, `dev`, and `qa` stay visible.
+  Attribution-file names disable email matching because those addresses are intentionally
+  published. Local-part segments equal to `test` or `tests`, URI authority userinfo, and
+  malformed multi-`@` tokens are not treated as email. A real personal address using one of
+  these names or stored in an attribution file is therefore an intentional false negative.
 * An IPv6 candidate must contain at least one ASCII digit. This rejects language and shell
   scope operators such as `Db::Add` and `[List]::Add`; a valid address composed only of `a-f`
   words is an intentional false negative.
 * A local username segment is limited to Unicode letters, ASCII digits, `.`, `_`, and `-` and
   cannot be entirely numeric. Slash-form anchors preceded by a letter or digit are treated as
   URL routes rather than local paths. Usernames outside that character set, numeric usernames,
-  paths embedded in ambiguous route text, and generic documentation identities such as `me`,
-  `developer`, and `devuser` are intentional false negatives.
+  paths embedded in ambiguous route text, names beginning with `your` or `my`, and common CI,
+  cloud, container, or documentation identities are intentional false negatives.
+* Canonical MAC examples and values beginning with `DEADBEEF` stay visible because they are
+  overwhelmingly documentation fixtures; a real interface using one is an intentional false
+  negative.
+* Dot-separated international phone forms stay visible to avoid decimal-expression matches.
+  Repeated or sequential placeholder digits and diff-line markers also stay visible; real phone
+  values using those forms are intentional false negatives.
 
 ## Limits and fail-closed behavior
 

@@ -167,8 +167,8 @@ public sealed class PrivateDataRedactionCompositionTests
 	[Fact]
 	public void LocalUser_UsesOneValueIdentityAcrossFiles()
 	{
-		const string firstContent = "source=C:\\Users\\" + "alice\\first";
-		const string secondContent = "source=/home/" + "alice/second";
+		const string firstContent = "source=C:\\Users\\" + "avazb\\first";
+		const string secondContent = "source=/home/" + "avazb/second";
 		using var workspace = new TemporaryDirectory();
 		var firstPath = workspace.CreateFile("first.txt", firstContent);
 		var secondPath = workspace.CreateFile("second.txt", secondContent);

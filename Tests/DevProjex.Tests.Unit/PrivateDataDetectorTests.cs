@@ -139,6 +139,62 @@ public sealed class PrivateDataDetectorTests
 	}
 
 	[Theory]
+	[InlineData("legal/LICENSE", "ivan.petrov@corp.internal")]
+	[InlineData("legal/licence.md", "ivan.petrov@corp.internal")]
+	[InlineData("NOTICE.txt", "ivan.petrov@corp.internal")]
+	[InlineData("AUTHORS", "ivan.petrov@corp.internal")]
+	[InlineData("CONTRIBUTORS.md", "ivan.petrov@corp.internal")]
+	[InlineData("COPYING.third-party", "ivan.petrov@corp.internal")]
+	[InlineData("PATENTS", "ivan.petrov@corp.internal")]
+	[InlineData("THIRD-PARTY-NOTICES", "ivan.petrov@corp.internal")]
+	[InlineData("Citation.cff", "ivan.petrov@corp.internal")]
+	[InlineData(".mailmap", "ivan.petrov@corp.internal")]
+	public void Detect_Email_IsDisabledInAttributionFiles(string path, string content)
+	{
+		Assert.DoesNotContain(Detect(path, content), static finding => finding.RuleId == "email");
+	}
+
+	[Fact]
+	public void Detect_Email_InReadmeRemainsPrivate()
+	{
+		const string email = "ivan.petrov@corp.internal";
+
+		Assert.Equal(email, FindSingle("README.md", email, "email").Value);
+	}
+
+	[Fact]
+	public void Detect_AttributionFileDisablesOnlyEmailRule()
+	{
+		const string email = "ivan.petrov@corp.internal";
+		const string address = "51.15.23.7";
+		var findings = Detect("NOTICE.md", $"{email} {address}");
+
+		Assert.DoesNotContain(findings, static finding => finding.RuleId == "email");
+		Assert.Contains(findings, finding => finding.RuleId == "ipv4" && finding.Value == address);
+	}
+
+	[Theory]
+	[InlineData("dev")]
+	[InlineData("developer")]
+	[InlineData("qa")]
+	[InlineData("staging")]
+	[InlineData("testing")]
+	public void Detect_Email_AdditionalRoleMailboxesAreKept(string localPart)
+	{
+		Assert.DoesNotContain(
+			Detect($"{localPart}@company.com"),
+			static finding => finding.RuleId == "email");
+	}
+
+	[Fact]
+	public void Detect_Email_RolePrefixDoesNotSuppressPersonalMailbox()
+	{
+		const string email = "dev.person@company.com";
+
+		Assert.Equal(email, FindSingle(email, "email").Value);
+	}
+
+	[Theory]
 	[InlineData("address=93.184." + "216.34", "93.184." + "216.34")]
 	[InlineData("http://151.101." + "1.69:443/path", "151.101." + "1.69")]
 	[InlineData("dns=[2001:4860:4860:" + ":8888]:53", "2001:4860:4860:" + ":8888")]
@@ -220,7 +276,7 @@ public sealed class PrivateDataDetectorTests
 	[Fact]
 	public void Detect_Ipv4_VersionContextDoesNotCrossLineBoundary()
 	{
-		const string content = "version=1.2.3.4\nssh 51.15." + "23.7";
+		const string content = "version=1.2.3.4 tag=2.3.4.5\nssh 51.15." + "23.7";
 
 		Assert.Equal("51.15." + "23.7", FindSingle(content, "ipv4").Value);
 	}
@@ -234,12 +290,70 @@ public sealed class PrivateDataDetectorTests
 	}
 
 	[Theory]
+	[InlineData("package==2.31.0.1")]
+	[InlineData("package>=2.31.0.1")]
+	[InlineData("package<=2.31.0.1")]
+	[InlineData("package~=2.31.0.1")]
+	[InlineData("package!=2.31.0.1")]
+	public void Detect_Ipv4_RejectsAdjacentVersionConstraintOperators(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
+	}
+
+	[Fact]
+	public void Detect_Ipv4_SpacedEqualityContextStillRedactsAddress()
+	{
+		const string address = "51.15.23.7";
+
+		Assert.Equal(address, FindSingle($"ip == {address}", "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("tag: 1.16.0.2")]
+	[InlineData("release: 1.16.0.2")]
+	[InlineData("build: 1.16.0.2")]
+	[InlineData("packages/serilog/2.10.0.1/lib")]
+	public void Detect_Ipv4_RejectsExpandedVersionContexts(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
+	}
+
+	[Theory]
+	[InlineData("CHANGELOG.md")]
+	[InlineData("docs/history.txt")]
+	[InlineData("Releases")]
+	[InlineData("docs/RELEASE_NOTES-v2.md")]
+	[InlineData("docs/RELEASE-NOTES.md")]
+	public void Detect_Ipv4_IsDisabledInVersionHistoryFiles(string path)
+	{
+		Assert.DoesNotContain(
+			Detect(path, "## 1.2.3.4 (2026-08-16)"),
+			static finding => finding.RuleId == "ipv4");
+	}
+
+	[Fact]
+	public void Detect_Ipv4_InOrdinaryMarkdownRemainsPrivate()
+	{
+		Assert.Equal("1.2.3.4", FindSingle("README.md", "endpoint=1.2.3.4", "ipv4").Value);
+	}
+
+	[Fact]
+	public void Detect_VersionHistoryFileDisablesOnlyIpv4Rule()
+	{
+		const string email = "ivan.petrov@corp.internal";
+		var findings = Detect("CHANGELOG.md", $"## 1.2.3.4 - {email}");
+
+		Assert.DoesNotContain(findings, static finding => finding.RuleId == "ipv4");
+		Assert.Contains(findings, finding => finding.RuleId == "email" && finding.Value == email);
+	}
+
+	[Theory]
 	[InlineData("C:\\Users\\" + "avazb\\Projects\\DevProjex", "avazb")]
-	[InlineData("C:/Users/" + "Alice/Projects/App", "Alice")]
+	[InlineData("C:/Users/" + "Olivia/Projects/App", "Olivia")]
 	[InlineData("\"C:\\\\Users\\\\build-owner\\\\source\"", "build-owner")]
 	[InlineData("/home/" + "alexei/project", "alexei")]
 	[InlineData("/Users/" + "MacOwner/Code", "MacOwner")]
-	[InlineData("file:///home/" + "alice/.config", "alice")]
+	[InlineData("file:///home/" + "olivia/.config", "olivia")]
 	[InlineData("(/Users/" + "octocat)", "octocat")]
 	[InlineData("/home/" + "алиса/.config", "алиса")]
 	public void Detect_LocalUser_RedactsOnlyUserSegment(string content, string expected)
@@ -292,6 +406,41 @@ public sealed class PrivateDataDetectorTests
 		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "local-user");
 	}
 
+	[Fact]
+	public void Detect_LocalUser_KeepsCiCloudContainerAndDocumentationIdentities()
+	{
+		var identities = new[]
+		{
+			"vsts", "appveyor", "gitlab-runner", "circleci", "travis", "buildbot", "teamcity", "bamboo",
+			"ubuntu", "ec2-user", "azureuser", "centos", "debian", "fedora", "rocky", "alpine", "arch",
+			"core", "opc", "pi", "node", "git", "deploy", "app", "jovyan", "sagemaker-user", "postgres",
+			"mysql", "docker", "WDAGUtilityAccount", "defaultuser0", "alice", "bob"
+		};
+
+		foreach (var identity in identities)
+		{
+			Assert.DoesNotContain(
+				Detect($"/home/{identity}/project"),
+				static finding => finding.RuleId == "local-user");
+		}
+	}
+
+	[Theory]
+	[InlineData("/home/yourusername/project")]
+	[InlineData(@"C:\Users\my-account\project")]
+	public void Detect_LocalUser_KeepsYourAndMyPrefixes(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "local-user");
+	}
+
+	[Theory]
+	[InlineData("/home/avazb/project", "avazb")]
+	[InlineData(@"C:\Users\avazb\project", "avazb")]
+	public void Detect_LocalUser_PrefixRulesDoNotSuppressRealUser(string content, string expected)
+	{
+		Assert.Equal(expected, FindSingle(content, "local-user").Value);
+	}
+
 	[Theory]
 	[InlineData("DB::Add(...)")]
 	[InlineData("[List]::Add")]
@@ -325,9 +474,30 @@ public sealed class PrivateDataDetectorTests
 	}
 
 	[Theory]
+	[InlineData("00:11:22:33:44:55")]
+	[InlineData("00-11-22-33-44-55")]
+	[InlineData("11-22-33-44-55-66")]
+	[InlineData("01:23:45:67:89:ab")]
+	[InlineData("AA-BB-CC-DD-EE-FF")]
+	[InlineData("DE:AD:BE:EF:00:01")]
+	[InlineData("de-ad-be-ef-aa-bb")]
+	public void Detect_MacAddress_KeepsCanonicalDocumentationValues(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "mac-address");
+	}
+
+	[Fact]
+	public void Detect_MacAddress_OrdinaryDeviceAddressRemainsPrivate()
+	{
+		const string address = "3C:22:FB:12:34:56";
+
+		Assert.Equal(address, FindSingle(address, "mac-address").Value);
+	}
+
+	[Theory]
 	[InlineData("call +" + "79261234567", "+" + "79261234567")]
 	[InlineData("tel:+49 (30) " + "1234-5678", "+49 (30) " + "1234-5678")]
-	[InlineData("phone=+33.1.42." + "68.53.00", "+33.1.42." + "68.53.00")]
+	[InlineData("phone=+33 1 42 " + "68 53 00", "+33 1 42 " + "68 53 00")]
 	public void Detect_InternationalPhone_RedactsBoundedValue(string content, string expected)
 	{
 		Assert.Equal(expected, FindSingle(content, "phone-number").Value);
@@ -343,9 +513,40 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("+1234567890123456")]
 	[InlineData("x+12345678")]
 	[InlineData("x + 12345678")]
+	[InlineData("+12345678.90")]
+	[InlineData("+87654321.90")]
+	[InlineData("+1.2025550142")]
+	[InlineData("+99999999999")]
+	[InlineData("+1234567890")]
 	public void Detect_Phone_RejectsDocumentationAndAmbiguousTokens(string content)
 	{
 		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "phone-number");
+	}
+
+	[Theory]
+	[InlineData("change.patch")]
+	[InlineData("changes.DIFF")]
+	public void Detect_Phone_LeadingPlusInDiffFileIsKept(string path)
+	{
+		Assert.DoesNotContain(
+			Detect(path, "+79261234567"),
+			static finding => finding.RuleId == "phone-number");
+	}
+
+	[Fact]
+	public void Detect_Phone_NonLeadingValueInDiffFileRemainsPrivate()
+	{
+		Assert.Equal(
+			"+79261234567",
+			FindSingle("change.patch", "phone=+79261234567", "phone-number").Value);
+	}
+
+	[Fact]
+	public void Detect_Phone_LeadingValueInTextFileRemainsPrivate()
+	{
+		Assert.Equal(
+			"+79261234567",
+			FindSingle("phones.txt", "+79261234567", "phone-number").Value);
 	}
 
 	[Theory]
@@ -391,6 +592,49 @@ public sealed class PrivateDataDetectorTests
 		Assert.Equal(withoutPrescan, withPrescan);
 	}
 
+	[Theory]
+	[InlineData("docs/CHANGELOG.md", "## 1.2.3.4", "ipv4")]
+	[InlineData("legal/LICENSE.txt", "ivan.petrov@corp.internal", "email")]
+	[InlineData("changes/update.patch", "+79261234567", "phone-number")]
+	public void Prescan_PathAwareRulesMatchRunningEveryEligibleScanner(
+		string path,
+		string content,
+		string excludedRuleId)
+	{
+		var withPrescan = Detect(path, content);
+		var withoutPrescan = PrivateDataDetector.DetectWithoutPrescanForAnalysis(path, content);
+		var features = PrivateDataDetector.ComputeFeatureMaskForAnalysis(path, content);
+		var excludedFeature = excludedRuleId switch
+		{
+			"ipv4" => PrivateDataFeatureMask.Ipv4,
+			"email" => PrivateDataFeatureMask.Email,
+			"phone-number" => PrivateDataFeatureMask.PhoneNumber,
+			_ => throw new ArgumentOutOfRangeException(nameof(excludedRuleId))
+		};
+
+		Assert.Equal(PrivateDataFeatureMask.None, features & excludedFeature);
+		Assert.Equal(withoutPrescan, withPrescan);
+	}
+
+	[Fact]
+	public void Detect_PathAwareRulesUseOnlyTheLastPathSegment()
+	{
+		const string email = "ivan.petrov@corp.internal";
+		const string address = "1.2.3.4";
+		var findings = Detect("CHANGELOG/LICENSE-archive/README.md", $"{email} {address}");
+
+		Assert.Contains(findings, finding => finding.RuleId == "email" && finding.Value == email);
+		Assert.Contains(findings, finding => finding.RuleId == "ipv4" && finding.Value == address);
+	}
+
+	[Fact]
+	public void Detect_MailmapSuffixDoesNotDisableEmailRule()
+	{
+		const string email = "ivan.petrov@corp.internal";
+
+		Assert.Equal(email, FindSingle(".mailmap.bak", email, "email").Value);
+	}
+
 	[Fact]
 	public void Detect_RegistersFindingsAgainstSharedBudget()
 	{
@@ -434,8 +678,14 @@ public sealed class PrivateDataDetectorTests
 	private static IReadOnlyList<DetectedSecret> Detect(string content) =>
 		Detector.Detect("data.txt", content, TestContext.Current.CancellationToken);
 
+	private static IReadOnlyList<DetectedSecret> Detect(string path, string content) =>
+		Detector.Detect(path, content, TestContext.Current.CancellationToken);
+
 	private static DetectedSecret FindSingle(string content, string ruleId) =>
 		Assert.Single(Detect(content), finding => finding.RuleId == ruleId);
+
+	private static DetectedSecret FindSingle(string path, string content, string ruleId) =>
+		Assert.Single(Detect(path, content), finding => finding.RuleId == ruleId);
 
 	private static string Replace(string content, DetectedSecret finding) =>
 		string.Concat(

@@ -17,6 +17,28 @@ public sealed class PrivateDataDetector : ISecretDetector
 	private const int LocalUserOrder = -175;
 	private const int MacAddressOrder = -150;
 	private const int PhoneNumberOrder = -125;
+	private const string SequentialPhonePlaceholderDigits = "123456789012345";
+
+	private static readonly string[] Ipv4VersionContextKeywords =
+	[
+		"version", "tag", "release", "build", "packages"
+	];
+
+	private static readonly string[] Ipv4DisabledFilePrefixes =
+	[
+		"CHANGELOG", "HISTORY", "RELEASES", "RELEASE_NOTES", "RELEASE-NOTES"
+	];
+
+	private static readonly string[] EmailDisabledFilePrefixes =
+	[
+		"LICENSE", "LICENCE", "NOTICE", "AUTHORS", "CONTRIBUTORS", "COPYING", "PATENTS",
+		"THIRD-PARTY", "CITATION"
+	];
+
+	private static readonly string[] DocumentedMacAddresses =
+	[
+		"001122334455", "112233445566", "0123456789AB", "AABBCCDDEEFF"
+	];
 
 	private static readonly string[] NonPrivateLocalUsers =
 	[
@@ -45,7 +67,40 @@ public sealed class PrivateDataDetector : ISecretDetector
 		"someuser",
 		"me",
 		"developer",
-		"devuser"
+		"devuser",
+		"vsts",
+		"appveyor",
+		"gitlab-runner",
+		"circleci",
+		"travis",
+		"buildbot",
+		"teamcity",
+		"bamboo",
+		"ubuntu",
+		"ec2-user",
+		"azureuser",
+		"centos",
+		"debian",
+		"fedora",
+		"rocky",
+		"alpine",
+		"arch",
+		"core",
+		"opc",
+		"pi",
+		"node",
+		"git",
+		"deploy",
+		"app",
+		"jovyan",
+		"sagemaker-user",
+		"postgres",
+		"mysql",
+		"docker",
+		"WDAGUtilityAccount",
+		"defaultuser0",
+		"alice",
+		"bob"
 	];
 
 	private static readonly string[] NonPrivateEmailLocalParts =
@@ -117,7 +172,12 @@ public sealed class PrivateDataDetector : ISecretDetector
 		"do-not-reply",
 		"devops",
 		"ops",
-		"owner"
+		"owner",
+		"dev",
+		"developer",
+		"qa",
+		"staging",
+		"testing"
 	];
 
 	private static readonly string[] FileLikeEmailTopLevelLabels =
@@ -158,15 +218,17 @@ public sealed class PrivateDataDetector : ISecretDetector
 		if (content.IsEmpty)
 			return [];
 
-		var features = ComputeFeatureMask(content, budget, cancellationToken);
+		var fileRules = ResolveFileRules(repositoryRelativePath.AsSpan());
+		var features = ComputeFeatureMask(content, fileRules, budget, cancellationToken);
 		if (features == PrivateDataFeatureMask.None)
 			return [];
-		return DetectEnabledFeatures(content, features, budget, cancellationToken);
+		return DetectEnabledFeatures(content, features, fileRules, budget, cancellationToken);
 	}
 
 	private static IReadOnlyList<DetectedSecret> DetectEnabledFeatures(
 		ReadOnlySpan<char> content,
 		PrivateDataFeatureMask features,
+		PrivateDataFileRules fileRules,
 		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
@@ -182,28 +244,62 @@ public sealed class PrivateDataDetector : ISecretDetector
 		if ((features & PrivateDataFeatureMask.LocalUser) != 0)
 			DetectLocalUsers(content, findings, budget, cancellationToken);
 		if ((features & PrivateDataFeatureMask.PhoneNumber) != 0)
-			DetectPhoneNumbers(content, findings, budget, cancellationToken);
+			DetectPhoneNumbers(
+				content,
+				fileRules.LeadingPlusIsDiffMarker,
+				findings,
+				budget,
+				cancellationToken);
 		budget.Checkpoint(cancellationToken);
 		return findings;
 	}
 
 	internal static IReadOnlyList<DetectedSecret> DetectWithoutPrescanForAnalysis(
 		ReadOnlySpan<char> content) =>
-		DetectEnabledFeatures(
+		DetectWithoutPrescanForAnalysis("data.txt", content);
+
+	internal static IReadOnlyList<DetectedSecret> DetectWithoutPrescanForAnalysis(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content)
+	{
+		var fileRules = ResolveFileRules(repositoryRelativePath.AsSpan());
+		return DetectEnabledFeatures(
 			content,
-			PrivateDataFeatureMask.All,
+			fileRules.EnabledFeatures,
+			fileRules,
 			new SecretFileInspectionBudget(),
 			CancellationToken.None);
+	}
 
 	internal static PrivateDataFeatureMask ComputeFeatureMaskForAnalysis(ReadOnlySpan<char> content) =>
-		ComputeFeatureMask(content, new SecretFileInspectionBudget(), CancellationToken.None);
+		ComputeFeatureMaskForAnalysis("data.txt", content);
+
+	internal static PrivateDataFeatureMask ComputeFeatureMaskForAnalysis(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content)
+	{
+		var fileRules = ResolveFileRules(repositoryRelativePath.AsSpan());
+		return ComputeFeatureMask(
+			content,
+			fileRules,
+			new SecretFileInspectionBudget(),
+			CancellationToken.None);
+	}
 
 	private static PrivateDataFeatureMask ComputeFeatureMask(
 		ReadOnlySpan<char> content,
+		PrivateDataFileRules fileRules,
 		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
 	{
 		var result = PrivateDataFeatureMask.None;
+		var enabledFeatures = fileRules.EnabledFeatures;
+		var scanEmail = (enabledFeatures & PrivateDataFeatureMask.Email) != 0;
+		var scanPhoneNumber = (enabledFeatures & PrivateDataFeatureMask.PhoneNumber) != 0;
+		var scanIpv4 = (enabledFeatures & PrivateDataFeatureMask.Ipv4) != 0;
+		var scanIpv6 = (enabledFeatures & PrivateDataFeatureMask.Ipv6) != 0;
+		var scanMacAddress = (enabledFeatures & PrivateDataFeatureMask.MacAddress) != 0;
+		var scanLocalUser = (enabledFeatures & PrivateDataFeatureMask.LocalUser) != 0;
 		var numericDots = 0;
 		var inNumericSequence = false;
 		for (var index = 0; index < content.Length; index++)
@@ -211,45 +307,90 @@ public sealed class PrivateDataDetector : ISecretDetector
 			if ((index & BudgetCheckpointMask) == 0)
 				budget.Checkpoint(cancellationToken);
 			var character = content[index];
-			if (character == '@')
+			if (scanEmail && character == '@')
 				result |= PrivateDataFeatureMask.Email;
-			if (character == '+' && index + 1 < content.Length && char.IsAsciiDigit(content[index + 1]))
+			if (scanPhoneNumber && character == '+' && index + 1 < content.Length &&
+			    char.IsAsciiDigit(content[index + 1]) &&
+			    (!fileRules.LeadingPlusIsDiffMarker || !IsLineStart(content, index)))
+			{
 				result |= PrivateDataFeatureMask.PhoneNumber;
-			if (character == ':' && index + 1 < content.Length &&
+			}
+			if (scanIpv6 && character == ':' && index + 1 < content.Length &&
 			    (IsHex(content[index + 1]) || content[index + 1] == ':'))
 			{
 				result |= PrivateDataFeatureMask.Ipv6;
 			}
-			if (character is ':' or '-' && index >= 2 && index + 2 < content.Length &&
+			if (scanMacAddress && character is ':' or '-' && index >= 2 && index + 2 < content.Length &&
 			    IsHex(content[index - 2]) && IsHex(content[index - 1]) &&
 			    IsHex(content[index + 1]) && IsHex(content[index + 2]))
 			{
 				result |= PrivateDataFeatureMask.MacAddress;
 			}
 
-			if (char.IsAsciiDigit(character))
+			if (scanIpv4)
 			{
-				inNumericSequence = true;
-			}
-			else if (character == '.' && inNumericSequence &&
-			         index + 1 < content.Length && char.IsAsciiDigit(content[index + 1]))
-			{
-				if (++numericDots >= 3)
-					result |= PrivateDataFeatureMask.Ipv4;
-				inNumericSequence = false;
-			}
-			else
-			{
-				numericDots = 0;
-				inNumericSequence = false;
+				if (char.IsAsciiDigit(character))
+				{
+					inNumericSequence = true;
+				}
+				else if (character == '.' && inNumericSequence &&
+				         index + 1 < content.Length && char.IsAsciiDigit(content[index + 1]))
+				{
+					if (++numericDots >= 3)
+						result |= PrivateDataFeatureMask.Ipv4;
+					inNumericSequence = false;
+				}
+				else
+				{
+					numericDots = 0;
+					inNumericSequence = false;
+				}
 			}
 
-			if (TryFindLocalUserStart(content, index, out _))
+			if (scanLocalUser && TryFindLocalUserStart(content, index, out _))
 			{
 				result |= PrivateDataFeatureMask.LocalUser;
 			}
 		}
 		return result;
+	}
+
+	private static PrivateDataFileRules ResolveFileRules(ReadOnlySpan<char> repositoryRelativePath)
+	{
+		var fileName = GetRepositoryFileName(repositoryRelativePath);
+		var enabledFeatures = PrivateDataFeatureMask.All;
+		if (fileName.Equals(".mailmap", StringComparison.OrdinalIgnoreCase) ||
+		    StartsWithAny(fileName, EmailDisabledFilePrefixes))
+		{
+			enabledFeatures &= ~PrivateDataFeatureMask.Email;
+		}
+		if (StartsWithAny(fileName, Ipv4DisabledFilePrefixes))
+			enabledFeatures &= ~PrivateDataFeatureMask.Ipv4;
+
+		var leadingPlusIsDiffMarker =
+			fileName.EndsWith(".patch", StringComparison.OrdinalIgnoreCase) ||
+			fileName.EndsWith(".diff", StringComparison.OrdinalIgnoreCase);
+		return new PrivateDataFileRules(enabledFeatures, leadingPlusIsDiffMarker);
+	}
+
+	private static ReadOnlySpan<char> GetRepositoryFileName(ReadOnlySpan<char> repositoryRelativePath)
+	{
+		for (var index = repositoryRelativePath.Length - 1; index >= 0; index--)
+		{
+			if (repositoryRelativePath[index] is '/' or '\\')
+				return repositoryRelativePath[(index + 1)..];
+		}
+		return repositoryRelativePath;
+	}
+
+	private static bool StartsWithAny(ReadOnlySpan<char> value, string[] prefixes)
+	{
+		foreach (var prefix in prefixes)
+		{
+			if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+				return true;
+		}
+		return false;
 	}
 
 	private static void DetectEmails(
@@ -480,6 +621,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 				continue;
 			}
 			if ((address & byte.MaxValue) != 0 &&
+			    !HasAdjacentVersionConstraintOperator(content, start) &&
 			    !HasIpv4VersionContext(content, start) &&
 			    IsGlobalIpv4(address))
 			{
@@ -497,6 +639,11 @@ public sealed class PrivateDataDetector : ISecretDetector
 		}
 	}
 
+	private static bool HasAdjacentVersionConstraintOperator(ReadOnlySpan<char> content, int candidateStart) =>
+		candidateStart >= 2 &&
+		content[candidateStart - 1] == '=' &&
+		content[candidateStart - 2] is '=' or '>' or '<' or '~' or '!';
+
 	private static bool HasIpv4VersionContext(ReadOnlySpan<char> content, int candidateStart)
 	{
 		var windowStart = Math.Max(0, candidateStart - Ipv4VersionContextWindowLength);
@@ -507,9 +654,13 @@ public sealed class PrivateDataDetector : ISecretDetector
 			windowStart = index + 1;
 			break;
 		}
-		return content[windowStart..candidateStart].IndexOf(
-			"version",
-			StringComparison.OrdinalIgnoreCase) >= 0;
+		var context = content[windowStart..candidateStart];
+		foreach (var keyword in Ipv4VersionContextKeywords)
+		{
+			if (context.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+				return true;
+		}
+		return false;
 	}
 
 	private static bool TryParseIpv4(ReadOnlySpan<char> content, out int length, out uint address)
@@ -747,6 +898,11 @@ public sealed class PrivateDataDetector : ISecretDetector
 
 	private static bool IsNonPrivateLocalUser(ReadOnlySpan<char> value)
 	{
+		if (value.StartsWith("your", StringComparison.OrdinalIgnoreCase) ||
+		    value.StartsWith("my", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
 		foreach (var candidate in NonPrivateLocalUsers)
 		{
 			if (value.Equals(candidate, StringComparison.OrdinalIgnoreCase))
@@ -809,7 +965,8 @@ public sealed class PrivateDataDetector : ISecretDetector
 			{
 				continue;
 			}
-			if (IsUniformMac(candidate, '0') || IsUniformMac(candidate, 'F'))
+			if (IsUniformMac(candidate, '0') || IsUniformMac(candidate, 'F') ||
+			    IsDocumentedMacAddress(candidate))
 				continue;
 			AddFinding(
 				content,
@@ -854,8 +1011,35 @@ public sealed class PrivateDataDetector : ISecretDetector
 		return true;
 	}
 
+	private static bool IsDocumentedMacAddress(ReadOnlySpan<char> value)
+	{
+		foreach (var documentedAddress in DocumentedMacAddresses)
+		{
+			if (MacHexEquals(value, documentedAddress))
+				return true;
+		}
+		return MacHexStartsWith(value, "DEADBEEF");
+	}
+
+	private static bool MacHexEquals(ReadOnlySpan<char> value, ReadOnlySpan<char> normalized) =>
+		MacHexStartsWith(value, normalized) && normalized.Length == 12;
+
+	private static bool MacHexStartsWith(ReadOnlySpan<char> value, ReadOnlySpan<char> normalizedPrefix)
+	{
+		var normalizedIndex = 0;
+		for (var index = 0; index < value.Length && normalizedIndex < normalizedPrefix.Length; index++)
+		{
+			if (index % 3 == 2)
+				continue;
+			if (char.ToUpperInvariant(value[index]) != normalizedPrefix[normalizedIndex++])
+				return false;
+		}
+		return normalizedIndex == normalizedPrefix.Length;
+	}
+
 	private static void DetectPhoneNumbers(
 		ReadOnlySpan<char> content,
+		bool leadingPlusIsDiffMarker,
 		List<DetectedSecret> findings,
 		SecretFileInspectionBudget budget,
 		CancellationToken cancellationToken)
@@ -866,7 +1050,8 @@ public sealed class PrivateDataDetector : ISecretDetector
 		{
 			CheckpointPeriodically(ref checkpoint, budget, cancellationToken);
 			if (content[start] != '+' || !char.IsAsciiDigit(content[start + 1]) ||
-			    start > 0 && (char.IsLetterOrDigit(content[start - 1]) || content[start - 1] == '+'))
+			    start > 0 && (char.IsLetterOrDigit(content[start - 1]) || content[start - 1] == '+') ||
+			    leadingPlusIsDiffMarker && IsLineStart(content, start))
 			{
 				continue;
 			}
@@ -888,6 +1073,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 				end--;
 			if (end - start > 20 || digitCount is < 8 or > 15 ||
 			    end < content.Length && char.IsLetterOrDigit(content[end]) ||
+			    end + 1 < content.Length && content[end] == '.' && char.IsAsciiDigit(content[end + 1]) ||
 			    IsDocumentedPhoneNumber(digits[..Math.Min(digitCount, digits.Length)]))
 			{
 				continue;
@@ -909,7 +1095,19 @@ public sealed class PrivateDataDetector : ISecretDetector
 		digits.Length == 11 && digits[0] == '1' &&
 		digits.Slice(4, 3).SequenceEqual("555") && digits.Slice(7, 2).SequenceEqual("01") ||
 		digits.StartsWith("447700900", StringComparison.Ordinal) ||
-		digits.StartsWith("442079460", StringComparison.Ordinal);
+		digits.StartsWith("442079460", StringComparison.Ordinal) ||
+		IsPlaceholderPhoneNumber(digits);
+
+	private static bool IsPlaceholderPhoneNumber(ReadOnlySpan<char> digits)
+	{
+		var allDigitsEqual = true;
+		for (var index = 1; index < digits.Length; index++)
+			allDigitsEqual &= digits[index] == digits[0];
+		if (allDigitsEqual)
+			return true;
+		return digits.Length <= SequentialPhonePlaceholderDigits.Length &&
+		       digits.SequenceEqual(SequentialPhonePlaceholderDigits.AsSpan(0, digits.Length));
+	}
 
 	private static bool ContainsAtLeastTwoColons(
 		ReadOnlySpan<char> candidate,
@@ -994,7 +1192,14 @@ public sealed class PrivateDataDetector : ISecretDetector
 	private static bool IsLocalPathSeparator(char character) => character is '\\' or '/';
 
 	private static bool IsPhoneCharacter(char character) =>
-		char.IsAsciiDigit(character) || character is ' ' or '-' or '.' or '(' or ')';
+		char.IsAsciiDigit(character) || character is ' ' or '-' or '(' or ')';
+
+	private static bool IsLineStart(ReadOnlySpan<char> content, int index) =>
+		index == 0 || content[index - 1] is '\r' or '\n';
+
+	private readonly record struct PrivateDataFileRules(
+		PrivateDataFeatureMask EnabledFeatures,
+		bool LeadingPlusIsDiffMarker);
 }
 
 [Flags]
