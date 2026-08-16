@@ -8,7 +8,7 @@ public sealed class SecretRedactionCommandContractTests
 {
 	private const string GithubToken = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 	private const string ManuallyMarkedValue = "manualprojectvalue";
-	private const string PrivateEmail = "owner@corp.internal";
+	private const string PrivateEmail = "ivan.petrov@corp.internal";
 
 	[Fact]
 	public async Task ExportContext_LocalProfileAppliesPersistentManualSecretMarks()

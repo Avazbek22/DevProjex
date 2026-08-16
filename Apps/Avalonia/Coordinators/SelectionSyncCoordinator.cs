@@ -626,7 +626,12 @@ public sealed partial class SelectionSyncCoordinator(
 	    int? blankLineStrippedFilesCount = null,
 	    int? blankLineUnchangedFilesCount = null,
 	    int? privateDataRedactionsCount = null,
-	    int? privateDataMatchesCount = null)
+	    int? privateDataMatchesCount = null,
+	    bool hideSecretsApplied = false,
+	    bool hidePrivateDataApplied = false,
+	    bool compressCodeApplied = false,
+	    bool stripCommentsApplied = false,
+	    bool stripBlankLinesApplied = false)
     {
         if (viewModel.IgnoreOptions.Count == 0)
             return;
@@ -634,17 +639,6 @@ public sealed partial class SelectionSyncCoordinator(
 		var visibleIds = viewModel.IgnoreOptions
 			.Select(static option => option.Id)
 			.ToHashSet();
-		// Each redaction category owns its counters; neither row may inherit the other's results.
-		var hideSecretsIsChecked = viewModel.IgnoreOptions.Any(static option =>
-			option.Id == IgnoreOptionId.HideSecrets && option.IsChecked);
-		var hidePrivateDataIsChecked = viewModel.IgnoreOptions.Any(static option =>
-			option.Id == IgnoreOptionId.HidePrivateData && option.IsChecked);
-		var compressCodeIsChecked = viewModel.IgnoreOptions.Any(static option =>
-			option.Id == IgnoreOptionId.CompressCode && option.IsChecked);
-		var stripCommentsIsChecked = viewModel.IgnoreOptions.Any(static option =>
-			option.Id == IgnoreOptionId.StripComments && option.IsChecked);
-		var stripBlankLinesIsChecked = viewModel.IgnoreOptions.Any(static option =>
-			option.Id == IgnoreOptionId.StripBlankLines && option.IsChecked);
         var counts = _ignoreOptionCounts;
         var availability = new IgnoreOptionsAvailability(
             IncludeGitIgnore: visibleIds.Contains(IgnoreOptionId.UseGitIgnore),
@@ -664,16 +658,16 @@ public sealed partial class SelectionSyncCoordinator(
             IncludeEmptyFiles: visibleIds.Contains(IgnoreOptionId.EmptyFiles),
             EmptyFilesCount: counts.EmptyFiles,
 			IncludeTrackedGitFilesOnly: visibleIds.Contains(IgnoreOptionId.TrackedGitFilesOnly),
-			SecretRedactionsCount: hideSecretsIsChecked ? secretRedactionsCount : null,
-			SecretMatchesCount: hideSecretsIsChecked ? secretMatchesCount : null,
-			PrivateDataRedactionsCount: hidePrivateDataIsChecked ? privateDataRedactionsCount : null,
-			PrivateDataMatchesCount: hidePrivateDataIsChecked ? privateDataMatchesCount : null,
-			CompressedFilesCount: compressCodeIsChecked ? compressedFilesCount : null,
-			UncompressedFilesCount: compressCodeIsChecked ? uncompressedFilesCount : null,
-			CommentStrippedFilesCount: stripCommentsIsChecked ? commentStrippedFilesCount : null,
-			CommentUnchangedFilesCount: stripCommentsIsChecked ? commentUnchangedFilesCount : null,
-			BlankLineStrippedFilesCount: stripBlankLinesIsChecked ? blankLineStrippedFilesCount : null,
-			BlankLineUnchangedFilesCount: stripBlankLinesIsChecked ? blankLineUnchangedFilesCount : null,
+			SecretRedactionsCount: hideSecretsApplied ? secretRedactionsCount : null,
+			SecretMatchesCount: hideSecretsApplied ? secretMatchesCount : null,
+			PrivateDataRedactionsCount: hidePrivateDataApplied ? privateDataRedactionsCount : null,
+			PrivateDataMatchesCount: hidePrivateDataApplied ? privateDataMatchesCount : null,
+			CompressedFilesCount: compressCodeApplied ? compressedFilesCount : null,
+			UncompressedFilesCount: compressCodeApplied ? uncompressedFilesCount : null,
+			CommentStrippedFilesCount: stripCommentsApplied ? commentStrippedFilesCount : null,
+			CommentUnchangedFilesCount: stripCommentsApplied ? commentUnchangedFilesCount : null,
+			BlankLineStrippedFilesCount: stripBlankLinesApplied ? blankLineStrippedFilesCount : null,
+			BlankLineUnchangedFilesCount: stripBlankLinesApplied ? blankLineUnchangedFilesCount : null,
             ShowAdvancedCounts: showAdvancedCounts);
         var localizedDescriptors = ignoreOptionsService.GetOptions(availability);
         var descriptorsById = localizedDescriptors.ToDictionary(static descriptor => descriptor.Id);
@@ -687,7 +681,7 @@ public sealed partial class SelectionSyncCoordinator(
 				var isPrivateData = option.Id == IgnoreOptionId.HidePrivateData;
 				option.Label = ignoreOptionsService.FormatContentRedactionLabel(
 					option.Id,
-					(isPrivateData ? hidePrivateDataIsChecked : hideSecretsIsChecked)
+					(isPrivateData ? hidePrivateDataApplied : hideSecretsApplied)
 						? secretScanState
 						: SecretScanState.Disabled,
 					isPrivateData ? privateDataMatchesCount : secretMatchesCount,
@@ -1421,12 +1415,8 @@ public sealed partial class SelectionSyncCoordinator(
         var currentPath = currentPathProvider();
 		if (changedTransformation)
 		{
-			// Hide Secrets is an immediate scan request: toggling it starts or stops the scan and
-			// touches no tree state, so it notifies the output pipeline right away. Compress Code
-			// rewrites produced content and every counter reading it, so it stays a draft that
-			// «Apply settings» commits together with the other filter checkboxes.
-			if (changedOption!.Id is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData)
-				contentTransformationChanged?.Invoke(changedOption.Id);
+			// Every checkbox in this section is a draft until Apply. Programmatic redaction activation
+			// for a manual mark uses ApplyContentTransformationOverride and remains an explicit path.
 			return;
 		}
 		selectionContentChanged?.Invoke();

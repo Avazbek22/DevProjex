@@ -1314,6 +1314,23 @@ internal static class UiTestDriver
 			GetRequiredPrivateField<bool>(window, "_appliedStripBlankLinesEnabled")
 		);
 
+	public static (bool HideSecrets, bool HidePrivateData) GetAppliedContentRedactionState(
+		MainWindow window) =>
+		(
+			GetRequiredPrivateField<bool>(window, "_appliedHideSecretsEnabled"),
+			GetRequiredPrivateField<bool>(window, "_appliedHidePrivateDataEnabled")
+		);
+
+	public static (long Requested, long Completed, int Build) GetPreviewRefreshVersions(
+		MainWindow window)
+	{
+		var pipeline = GetRequiredPrivateField<PreviewWorkspacePipeline>(window, "_previewPipeline");
+		return (
+			GetRequiredPrivateField<long>(pipeline, "_requestedRefreshVersion"),
+			GetRequiredPrivateField<long>(pipeline, "_completedRefreshVersion"),
+			GetRequiredPrivateField<int>(pipeline, "_buildVersion"));
+	}
+
 	public static HashSet<string> GetCheckedTreePaths(MainWindow window)
 	{
 		var selected = new HashSet<string>(PathComparer.Default);

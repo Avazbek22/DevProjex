@@ -127,6 +127,7 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(
                 window,
                 IgnoreOptionId.HideSecrets);
+            await UiTestDriver.ClickApplySettingsAsync(window);
             await WaitForCompletedSecretScanAsync(window);
             await WaitForApplyCleanupCountAsync(window, sessionMetrics, expectedCount: 1);
         }
@@ -156,27 +157,32 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(
                 window,
                 IgnoreOptionId.HideSecrets);
+            await StartApplySettingsWithoutWaitingForBackgroundWorkAsync(window);
             await analyzer.FirstScanStarted.WaitAsync(
                 TimeSpan.FromSeconds(5),
                 TestContext.Current.CancellationToken);
 
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(
                 window,
-                IgnoreOptionId.HideSecrets);
+                IgnoreOptionId.HidePrivateData);
+            await StartApplySettingsWithoutWaitingForBackgroundWorkAsync(window);
             await analyzer.FirstScanCanceled.WaitAsync(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken);
+            await analyzer.SecondScanStarted.WaitAsync(
                 TimeSpan.FromSeconds(5),
                 TestContext.Current.CancellationToken);
             Assert.Equal(0, CountApplyCleanupRequests(sessionMetrics));
 
-            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(
-                window,
-                IgnoreOptionId.HideSecrets);
+            analyzer.ReleaseSecondScan();
             await WaitForCompletedSecretScanAsync(window);
             await WaitForApplyCleanupCountAsync(window, sessionMetrics, expectedCount: 1);
             Assert.Equal(1, CountApplyCleanupRequests(sessionMetrics));
         }
         finally
         {
+            analyzer.ReleaseFirstScan();
+            analyzer.ReleaseSecondScan();
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
@@ -205,6 +211,7 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
 		{
 			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await StartApplySettingsWithoutWaitingForBackgroundWorkAsync(window);
 			await analyzer.FirstScanStarted.WaitAsync(
 				TimeSpan.FromSeconds(5),
 				TestContext.Current.CancellationToken);
@@ -224,12 +231,13 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
 		{
 			viewModel.PropertyChanged -= noticeRecorder;
 			analyzer.ReleaseFirstScan();
+			analyzer.ReleaseSecondScan();
 			await UiTestDriver.CloseWindowAsync(window);
 		}
 	}
 
-    private static async Task<(MainWindow Window, SessionMetricsRecorder SessionMetrics)>
-        CreateMeasuredWindowAsync(
+	private static async Task<(MainWindow Window, SessionMetricsRecorder SessionMetrics)>
+		CreateMeasuredWindowAsync(
             UiTestProject project,
             Func<AvaloniaAppServices, AvaloniaAppServices>? configureServices = null)
     {
@@ -250,8 +258,19 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
                 ProjectPath: project.RootPath,
                 OutputPath: outputPath));
 
-        return (window, Assert.IsType<SessionMetricsRecorder>(sessionMetrics));
-    }
+		return (window, Assert.IsType<SessionMetricsRecorder>(sessionMetrics));
+	}
+
+	private static async Task StartApplySettingsWithoutWaitingForBackgroundWorkAsync(MainWindow window)
+	{
+		var previousApplyTask = window.LatestApplySettingsTask;
+		await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredApplySettingsButton(window));
+		await UiTestDriver.WaitForConditionAsync(
+			window,
+			() => !ReferenceEquals(window.LatestApplySettingsTask, previousApplyTask),
+			"the routed Apply command to publish its owned operation");
+		await window.LatestApplySettingsTask.WaitAsync(TimeSpan.FromSeconds(30));
+	}
 
     private static async Task WaitForCompletedSecretScanAsync(MainWindow window) =>
         await UiTestDriver.WaitForConditionAsync(
@@ -287,19 +306,29 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
 
     private sealed class FirstSecretScanCancellationAnalyzer : IFileContentAnalyzer
     {
+        private readonly object _sync = new();
         private readonly TaskCompletionSource _firstScanStarted =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _firstScanCanceled =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 		private readonly TaskCompletionSource _releaseFirstScan =
 			new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondScanStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseSecondScan =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         private IFileContentAnalyzer? _inner;
-        private int _secretScanReads;
+        private CancellationToken _firstScanToken;
+        private CancellationToken _secondScanToken;
+        private bool _hasFirstScanToken;
+        private bool _hasSecondScanToken;
 
         public Task FirstScanStarted => _firstScanStarted.Task;
         public Task FirstScanCanceled => _firstScanCanceled.Task;
+        public Task SecondScanStarted => _secondScanStarted.Task;
 
 		public void ReleaseFirstScan() => _releaseFirstScan.TrySetResult();
+        public void ReleaseSecondScan() => _releaseSecondScan.TrySetResult();
 
         public IFileContentAnalyzer Attach(IFileContentAnalyzer inner)
         {
@@ -341,18 +370,26 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
             long maximumBytes,
             CancellationToken cancellationToken = default)
         {
-            if (maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes &&
-                Interlocked.Increment(ref _secretScanReads) == 1)
+            if (maximumBytes == SecretRedactionOutputPreparer.MaximumScannableFileBytes)
             {
-                _firstScanStarted.TrySetResult();
-                try
+                var scanGeneration = ResolveScanGeneration(cancellationToken);
+                if (scanGeneration == 1)
                 {
-					await _releaseFirstScan.Task.WaitAsync(cancellationToken);
+                    _firstScanStarted.TrySetResult();
+                    try
+                    {
+						await _releaseFirstScan.Task.WaitAsync(cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        _firstScanCanceled.TrySetResult();
+                        throw;
+                    }
                 }
-                catch (OperationCanceledException)
+                else if (scanGeneration == 2)
                 {
-                    _firstScanCanceled.TrySetResult();
-                    throw;
+                    _secondScanStarted.TrySetResult();
+                    await _releaseSecondScan.Task.WaitAsync(cancellationToken);
                 }
             }
 
@@ -360,6 +397,31 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
                 path,
                 maximumBytes,
                 cancellationToken);
+        }
+
+        private int ResolveScanGeneration(CancellationToken cancellationToken)
+        {
+            lock (_sync)
+            {
+                if (!_hasFirstScanToken)
+                {
+                    _firstScanToken = cancellationToken;
+                    _hasFirstScanToken = true;
+                    return 1;
+                }
+
+                if (_firstScanToken == cancellationToken)
+                    return 1;
+
+                if (!_hasSecondScanToken)
+                {
+                    _secondScanToken = cancellationToken;
+                    _hasSecondScanToken = true;
+                    return 2;
+                }
+
+                return _secondScanToken == cancellationToken ? 2 : 0;
+            }
         }
 
         public ValueTask<TextFileContent?> TryReadAsTextAsync(

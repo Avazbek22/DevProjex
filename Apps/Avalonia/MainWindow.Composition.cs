@@ -97,7 +97,12 @@ public partial class MainWindow
 			_codeCompressionSnapshot?.BlankLineTransformedFiles,
 			_codeCompressionSnapshot?.UnchangedFiles,
 			privateDataRedactionsCount: _privateDataRedactionCount,
-			privateDataMatchesCount: _privateDataRedactionMatchedCount);
+			privateDataMatchesCount: _privateDataRedactionMatchedCount,
+			hideSecretsApplied: _appliedHideSecretsEnabled,
+			hidePrivateDataApplied: _appliedHidePrivateDataEnabled,
+			compressCodeApplied: _appliedCompressCodeEnabled,
+			stripCommentsApplied: _appliedStripCommentsEnabled,
+			stripBlankLinesApplied: _appliedStripBlankLinesEnabled);
 		_viewModel.SetCompressionStatus(
 			_codeCompressionSnapshot?.BodyTransformedFiles,
 			_codeCompressionSnapshot?.TotalFiles,
@@ -942,10 +947,9 @@ public partial class MainWindow
             TryElevateAndRestart,
             () => _currentPath,
             _statusOperations,
-            ApplyImmediateContentTransformationSelectionChange);
-        // Syntax rows and the section-wide content batch remain drafts until Apply. Individual Hide
-        // Secrets changes take the explicit callback above; tree publication is the boundary for all
-        // other parameter changes, avoiding scans against a tree that is about to be replaced.
+            ApplyProgrammaticContentTransformationSelectionChange);
+        // User changes in this section remain drafts until Apply. The callback is reserved for
+        // programmatic activation, such as enabling Hide Secrets for a manual mark.
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
         _projectLoadSnapshotPipeline = new ProjectLoadSnapshotPipeline(this);
         _projectProfiles = new ProjectProfilePersistenceCoordinator(

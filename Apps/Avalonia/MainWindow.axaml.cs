@@ -464,16 +464,15 @@ public partial class MainWindow : Window
 		RelabelIgnoreOptionsWithCurrentCounts();
 		if (_viewModel.IsAnyPreviewVisible)
 			_previewPipeline.ScheduleRefresh(immediate: true);
-		// The enabling click is an explicit request: its scan starts without a debounce and with
-		// visible progress, and it revalidates content because files may have changed while the
-		// option was off. Every other path keeps the delayed anti-flash presentation.
+		// Applying a redaction change is an explicit request: its scan starts without a debounce and
+		// with visible progress. Selection-driven refreshes keep the delayed anti-flash presentation.
 		ScheduleSecretRedactionCountRefresh(
 			changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData
 				? StatusOperationPresentation.Immediate
 				: StatusOperationPresentation.ExtendedDelay);
 	}
 
-	private void ApplyImmediateContentTransformationSelectionChange(IgnoreOptionId? changedOptionId)
+	private void ApplyProgrammaticContentTransformationSelectionChange(IgnoreOptionId? changedOptionId)
 	{
 		if (changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData)
 		{

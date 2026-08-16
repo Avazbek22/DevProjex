@@ -600,8 +600,8 @@ public partial class MainWindow
                         cancellationToken);
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
 
-                    // Redaction toggles are already live; the section-wide checkbox can stage both
-                    // together. Publish that deferred batch without rebuilding the tree.
+                    // Redaction changes do not affect the tree. Publish the draft as one operation
+                    // without rebuilding the tree.
                     if (_selectionCoordinator.TryAcceptContentRedactionOnlyChangeAsApplied(_currentPath))
                     {
                         ApplySelectedContentRedactionStates();

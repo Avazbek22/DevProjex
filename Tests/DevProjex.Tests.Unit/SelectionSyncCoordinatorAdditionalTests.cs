@@ -1,5 +1,6 @@
 using DevProjex.Application.Models;
 using DevProjex.Application.Context;
+using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Collections;
 using System.Collections.Specialized;
 
@@ -404,6 +405,50 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.False(option.IsChecked);
 		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
 		Assert.Equal(0, availabilityCalls);
+	}
+
+	[AvaloniaFact]
+	public void RelabelIgnoreOptions_UsesAppliedRedactionStateInsteadOfCheckboxDrafts()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel);
+		ApplySelectionRefreshSnapshot(coordinator, CreateReversibleSelectionRefreshSnapshot());
+		var hideSecrets = Assert.Single(
+			viewModel.IgnoreOptions,
+			static option => option.Id == IgnoreOptionId.HideSecrets);
+		var hidePrivateData = Assert.Single(
+			viewModel.IgnoreOptions,
+			static option => option.Id == IgnoreOptionId.HidePrivateData);
+		hideSecrets.IsChecked = false;
+		hidePrivateData.IsChecked = true;
+
+		coordinator.RelabelIgnoreOptions(
+			showAdvancedCounts: true,
+			secretRedactionsCount: 2,
+			secretScanState: SecretScanState.Completed,
+			secretMatchesCount: 3,
+			privateDataRedactionsCount: 5,
+			privateDataMatchesCount: 7,
+			hideSecretsApplied: true,
+			hidePrivateDataApplied: false);
+
+		Assert.Equal("Hide secrets (3/2)", hideSecrets.Label);
+		Assert.Equal("Hide private data", hidePrivateData.Label);
+
+		hideSecrets.IsChecked = true;
+		hidePrivateData.IsChecked = false;
+		coordinator.RelabelIgnoreOptions(
+			showAdvancedCounts: true,
+			secretRedactionsCount: 2,
+			secretScanState: SecretScanState.Completed,
+			secretMatchesCount: 3,
+			privateDataRedactionsCount: 5,
+			privateDataMatchesCount: 7,
+			hideSecretsApplied: false,
+			hidePrivateDataApplied: true);
+
+		Assert.Equal("Hide secrets", hideSecrets.Label);
+		Assert.Equal("Hide private data (7/5)", hidePrivateData.Label);
 	}
 
 	[AvaloniaFact]
@@ -1150,7 +1195,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[AvaloniaFact]
-	public void ContentTransformationCallback_IdentifiesTheChangedPipelineStage()
+	public void ProgrammaticContentTransformationOverrideCallback_IdentifiesTheChangedPipelineStage()
 	{
 		var changedOptions = new List<IgnoreOptionId?>();
 		var viewModel = CreateViewModel();
@@ -1186,6 +1231,32 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.True(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.StripComments));
 		Assert.True(MainWindow.RequiresCompressionRefresh(IgnoreOptionId.StripBlankLines));
 		Assert.True(MainWindow.RequiresCompressionRefresh(changedOptionId: null));
+	}
+
+	[AvaloniaTheory]
+	[InlineData(IgnoreOptionId.HideSecrets)]
+	[InlineData(IgnoreOptionId.HidePrivateData)]
+	public void IndividualContentRedactionCheckbox_StagesWithoutPublishingOrAdvancingRevision(
+		IgnoreOptionId optionId)
+	{
+		const string path = @"C:\Project";
+		var changedOptions = new List<IgnoreOptionId?>();
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => path,
+			contentTransformationChangedWithId: changedOptions.Add);
+		ApplySelectionRefreshSnapshot(coordinator, CreateReversibleSelectionRefreshSnapshot());
+		HookAllOptionListeners(coordinator, viewModel);
+		coordinator.AcceptCurrentSelectionsAsApplied(path);
+		var option = Assert.Single(viewModel.ContentProcessingOptions, candidate => candidate.Id == optionId);
+		var revisionBefore = coordinator.CurrentSelectionRevision;
+
+		option.IsChecked = !option.IsChecked;
+
+		Assert.Empty(changedOptions);
+		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
 	}
 
 	[AvaloniaFact]
@@ -2206,6 +2277,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.HidePrivateData"] = "Hide private data",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
@@ -2220,6 +2292,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Умное исключение",
 				["Settings.Ignore.HideSecrets"] = "Скрывать секреты",
+				["Settings.Ignore.HidePrivateData"] = "Скрывать приватные данные",
 				["Settings.Ignore.UseGitIgnore"] = "Использовать .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Только файлы под контролем Git",
 				["Settings.Ignore.HiddenFolders"] = "Скрытые папки",
