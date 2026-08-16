@@ -9,13 +9,19 @@ public sealed class SmartSecretsDetectorTests
 {
 	internal static readonly SmartSecretsDetector Detector = CreateDetector();
 
+	[Fact]
+	public void RulesIdentity_UsesVersionFourForStructuredCacheInvalidation()
+	{
+		Assert.EndsWith(":smart-secrets-v4", Detector.RulesIdentity, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData("postgres:" + "//admin:pass@db.local/app")]
 	[InlineData("mysql:" + "//admin:Admin123!@db.local/app")]
-	[InlineData("mongodb+srv:" + "//service:change-me-now@cluster.example/app")]
+	[InlineData("mongodb+srv:" + "//service:change-me-now@cluster.internal/app")]
 	[InlineData("redis:" + "//default:redis-pass@cache.local:6379")]
 	[InlineData("amqp:" + "//worker:rabbit-pass@queue.local/vhost")]
-	[InlineData("https:" + "//deploy:http-pass@example.test/artifact")]
+	[InlineData("https:" + "//deploy:http-pass@downloads.internal/artifact")]
 	public void Detect_CredentialUri_RedactsOnlyPassword(string uri)
 	{
 		var finding = Assert.Single(
@@ -26,6 +32,65 @@ public sealed class SmartSecretsDetectorTests
 		Assert.Contains(":DEVPROJEX_REDACTED[credential-uri-password#1]@", redacted, StringComparison.Ordinal);
 		Assert.Contains(uri[..uri.IndexOf("://", StringComparison.Ordinal)], redacted, StringComparison.Ordinal);
 		Assert.Contains("@", redacted, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("example.com")]
+	[InlineData("EXAMPLE.NET:443")]
+	[InlineData("api.example.org")]
+	[InlineData("db.test:5432")]
+	[InlineData("service.example")]
+	[InlineData("cache.invalid")]
+	public void Detect_CredentialUriOnRfc2606DocumentationHost_DoesNotRedact(string host)
+	{
+		var findings = Detector.Detect(
+			"settings.txt",
+			$"postgres://admin:live-password-42@{host}/app",
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(findings, static finding => finding.RuleId == "credential-uri-password");
+	}
+
+	[Theory]
+	[InlineData("localhost")]
+	[InlineData("db.localhost:5432")]
+	[InlineData("example.com.evil.io")]
+	[InlineData("prod.internal:443")]
+	[InlineData("test")]
+	[InlineData("[::1]:5432")]
+	public void Detect_CredentialUriOnOperationalHost_RedactsPassword(string host)
+	{
+		var finding = Assert.Single(
+			Detector.Detect(
+				"settings.txt",
+				$"postgres://admin:live-password-42@{host}/app",
+				TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "credential-uri-password");
+
+		Assert.Equal("live-password-42", finding.Value);
+	}
+
+	[Theory]
+	[InlineData("example.com", true)]
+	[InlineData("EXAMPLE.NET:443", true)]
+	[InlineData("api.example.org:8443", true)]
+	[InlineData("db.test", true)]
+	[InlineData("service.EXAMPLE", true)]
+	[InlineData("cache.invalid:6379", true)]
+	[InlineData("example.com.:443", true)]
+	[InlineData("test", false)]
+	[InlineData("example", false)]
+	[InlineData("invalid:6379", false)]
+	[InlineData("localhost:5432", false)]
+	[InlineData("db.localhost", false)]
+	[InlineData("example.com.evil.io:443", false)]
+	[InlineData("prod.internal", false)]
+	[InlineData("[2001:db8::1]:443", false)]
+	public void IsRfc2606DocumentationHost_NormalizesPortsAndIpv6Brackets(
+		string host,
+		bool expected)
+	{
+		Assert.Equal(expected, StructuredSecretDetector.IsRfc2606DocumentationHost(host));
 	}
 
 	[Theory]
@@ -59,6 +124,105 @@ public sealed class SmartSecretsDetectorTests
 	}
 
 	[Theory]
+	[InlineData("requests.http")]
+	[InlineData("REQUEST.REST")]
+	public void Detect_HttpCookieHeader_RedactsEveryNonEmptyValueAndPreservesNames(string path)
+	{
+		const string content =
+			"GET https://localhost/health\r\ncOoKiE : session = alpha-cookie ; theme=dark; encoded=abc==; empty= ; flag\r\n";
+
+		var findings = Detector.Detect(path, content, TestContext.Current.CancellationToken)
+			.Where(static finding => finding.RuleId == "http-cookie")
+			.OrderBy(static finding => finding.Start)
+			.ToArray();
+
+		Assert.Equal(["alpha-cookie", "dark", "abc=="], findings.Select(static finding => finding.Value));
+		Assert.All(findings, static finding => Assert.Equal(-325, finding.RuleOrder));
+		foreach (var finding in findings)
+			Assert.Equal(finding.Value, content.Substring(finding.Start, finding.Length));
+		Assert.DoesNotContain(findings, static finding => finding.Value.Contains('=') && finding.Value != "abc==");
+	}
+
+	[Fact]
+	public void Detect_HttpSetCookieHeader_RedactsOnlyTheInitialPairValue()
+	{
+		const string content =
+			"Set-Cookie: session = abc== ; Path=/private; HttpOnly; Max-Age=3600; SameSite=Strict; Partitioned\n";
+
+		var finding = Assert.Single(
+			Detector.Detect("requests.http", content, TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "http-cookie");
+
+		Assert.Equal("abc==", finding.Value);
+		Assert.Equal(content.IndexOf("abc==", StringComparison.Ordinal), finding.Start);
+		Assert.DoesNotContain("Path", finding.Value, StringComparison.Ordinal);
+		Assert.DoesNotContain("3600", finding.Value, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Detect_HttpCookieReferencesPlaceholdersAndEmptyValues_AreSkipped()
+	{
+		const string content =
+			"Cookie: reference={{token}}; literal=YOUR-API-KEY-HERE; empty= ; live=real-cookie-value\n";
+
+		var finding = Assert.Single(
+			Detector.Detect("requests.rest", content, TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "http-cookie");
+
+		Assert.Equal("real-cookie-value", finding.Value);
+	}
+
+	[Fact]
+	public void Detect_CookieHeaderOutsideHttpRequestFile_IsNotStructuredSecret()
+	{
+		var findings = Detector.Detect(
+			"notes.txt",
+			"Cookie: session=real-cookie-value",
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(findings, static finding => finding.RuleId == "http-cookie");
+	}
+
+	[Fact]
+	public void Detect_HttpCookieHeaders_EnforcesPerFileFindingBudget()
+	{
+		var pairs = Enumerable.Range(0, SecretInspectionLimits.MaximumFindingsPerFile + 1)
+			.Select(static index => $"name{index}=value{index}");
+		var content = $"Cookie: {string.Join(';', pairs)}";
+
+		var exception = Assert.Throws<SecretInspectionBudgetExceededException>(() =>
+			StructuredSecretDetector.Detect(
+				"requests.http",
+				content,
+				SmartSecretStack.None,
+				new SecretFileInspectionBudget(),
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(nameof(SecretInspectionLimits.MaximumFindingsPerFile), exception.LimitName);
+	}
+
+	[Fact]
+	public void Detect_HttpCookieRuleWinsAnExactConnectionStringOverlap()
+	{
+		const string content = "Cookie: Server=db; Password=cookie-password";
+		var rawFindings = StructuredSecretDetector.Detect(
+			"requests.http",
+			content,
+			SmartSecretStack.None,
+			TestContext.Current.CancellationToken);
+		var passwordStart = content.IndexOf("cookie-password", StringComparison.Ordinal);
+
+		Assert.Contains(rawFindings, finding =>
+			finding.RuleId == "connection-password" && finding.Start == passwordStart);
+		Assert.Contains(rawFindings, finding =>
+			finding.RuleId == "http-cookie" && finding.Start == passwordStart);
+		var resolved = SecretRedactionScope.ResolveNonOverlappingMatches(rawFindings);
+
+		Assert.DoesNotContain(resolved, static finding => finding.RuleId == "connection-password");
+		Assert.Equal(2, resolved.Count(static finding => finding.RuleId == "http-cookie"));
+	}
+
+	[Theory]
 	[InlineData("Host=db;Username=admin;Pass" + "word=postgres;Database=app", "postgres")]
 	[InlineData("Server=db;User Id=sa;P" + "wd=Admin123!;Initial Catalog=app", "Admin123!")]
 	[InlineData("Host = db; Username = admin; Pass" + "word = phrase with spaces; Database = app", "phrase with spaces")]
@@ -77,6 +241,19 @@ public sealed class SmartSecretsDetectorTests
 			connectionString[(finding.Start + finding.Length)..],
 			redacted,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Detect_ConnectionStringOnDocumentationHost_StillRedactsPassword()
+	{
+		var finding = Assert.Single(
+			Detector.Detect(
+				"appsettings.json",
+				"Host=example.com;Username=admin;Password=admin;Database=app",
+				TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "connection-password");
+
+		Assert.Equal("admin", finding.Value);
 	}
 
 	[Theory]
@@ -145,6 +322,40 @@ public sealed class SmartSecretsDetectorTests
 		var findings = Detector.Detect(path, content, TestContext.Current.CancellationToken);
 
 		Assert.DoesNotContain(findings, static finding => finding.RuleId == "config-secret");
+	}
+
+	[Theory]
+	[InlineData("your-api-key-here")]
+	[InlineData("your_api_key_here")]
+	[InlineData("your-token-here")]
+	[InlineData("your_token_here")]
+	[InlineData("insert-key-here")]
+	[InlineData("insert_key_here")]
+	[InlineData("enter-password-here")]
+	[InlineData("enter_password_here")]
+	public void Detect_NewWholeValueConfigurationPlaceholder_DoesNotRedact(string value)
+	{
+		var findings = Detector.Detect(
+			"appsettings.json",
+			$"{{ \"Password\": \"{value}\" }}",
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(findings, static finding => finding.RuleId == "config-secret");
+	}
+
+	[Theory]
+	[InlineData("test")]
+	[InlineData("admin")]
+	public void Detect_WeakConfigurationLiteral_IsNotTreatedAsPlaceholder(string value)
+	{
+		var finding = Assert.Single(
+			Detector.Detect(
+				"appsettings.json",
+				$"{{ \"Password\": \"{value}\" }}",
+				TestContext.Current.CancellationToken),
+			static finding => finding.RuleId == "config-secret");
+
+		Assert.Equal(value, finding.Value);
 	}
 
 	[Theory]
@@ -218,7 +429,7 @@ public sealed class SmartSecretsDetectorTests
 	[InlineData("vendor/private/config.txt")]
 	public void Detect_ProviderAllowlistedPathStillRunsHighConfidenceStructuredTier(string path)
 	{
-		const string content = "https://service:production-password@example.test/repository";
+		const string content = "https://service:production-password@packages.internal/repository";
 
 		var finding = Assert.Single(
 			Detector.Detect(path, content, TestContext.Current.CancellationToken),

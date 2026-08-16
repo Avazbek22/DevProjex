@@ -22,6 +22,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	private const string EnvironmentSecret = "this is my signing key";
 	private const string ContainerSecret = "container-pass-42";
 	private const string AuthorizationCredential = "sanitized.header.token";
+	private const string HttpSessionCookie = "opaque-session-value-41";
+	private const string HttpKeptCookie = "opaque-csrf-value-52";
 	private const string PrivateKeyBodyFragment =
 		"MIIEvQIBADANBgkq" +
 		"hkiG9w0BAQEFAASC" +
@@ -164,6 +166,95 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		using var archive = ZipFile.OpenRead(zip.DestinationPath);
 		AssertKeptOccurrence(ReadZipText(archive, "a-kept.cs"));
 		AssertRedactedOccurrence(ReadZipText(archive, "b-redacted.cs"));
+	}
+
+	[Fact]
+	public async Task HttpCookieHeaders_KeepOneOccurrenceAndUseDeterministicIndexesAcrossEveryOutput()
+	{
+		var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("http-cookie-project");
+		var exportRoot = temporary.CreateDirectory("http-cookie-exports");
+		const string relativePath = "requests/session.http";
+		var sourceContent =
+			$"GET https://localhost/health\n" +
+			$"Authorization: Bearer {AuthorizationCredential}\n" +
+			$"Cookie: session={HttpSessionCookie}; csrf={HttpKeptCookie}; theme=dark\n";
+		var sourcePath = temporary.CreateFile($"http-cookie-project/{relativePath}", sourceContent);
+		var sourceBytes = File.ReadAllBytes(sourcePath);
+		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, sourcePath);
+		var analyzer = new FileContentAnalyzer();
+		var session = new SecretRedactionSession(CreateDetector());
+		var context = new SecretRedactionContext(sourceRoot, session);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+		var previewBuilder = new PreviewDocumentBuilder(analyzer);
+
+		using (var initialPreview = await previewBuilder.BuildContentDocumentAsync(
+			       plan.IncludedFiles,
+			       TestContext.Current.CancellationToken,
+			       TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			       includeOmissionMarkers: false,
+			       transformationContext: context))
+		{
+			var cookieSpans = initialPreview!.Redactions
+				.Where(static span => span.RuleId == "http-cookie")
+				.OrderBy(static span => span.LineNumber)
+				.ThenBy(static span => span.StartColumn)
+				.ToArray();
+			Assert.Equal(3, cookieSpans.Length);
+			Assert.All(cookieSpans, static span => Assert.Equal(SecretPreviewSpanState.Redacted, span.State));
+			AssertHttpCookieOutput(
+				PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(initialPreview),
+				keepCsrfCookie: false);
+			Assert.True(session.ToggleKeepAsIs(cookieSpans[1].OccurrenceId));
+		}
+
+		using var decidedPreview = await previewBuilder.BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: false,
+			transformationContext: context);
+		var previewAndClipboard = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(decidedPreview);
+		var selectedContent = await new SelectedContentExportService(analyzer).BuildAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			context);
+		var firstContextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+		var secondContextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder);
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip);
+		var folderContent = File.ReadAllText(Path.Combine(folder.DestinationPath, "requests", "session.http"));
+		string zipContent;
+		using (var archive = ZipFile.OpenRead(zip.DestinationPath))
+			zipContent = ReadZipText(archive, relativePath);
+
+		Assert.Equal(4, decidedPreview!.Redactions.Count);
+		Assert.Equal(3, decidedPreview.Redactions.Count(static span => span.State == SecretPreviewSpanState.Redacted));
+		Assert.Single(decidedPreview.Redactions, static span =>
+			span.RuleId == "http-cookie" && span.State == SecretPreviewSpanState.KeptAsIs);
+		Assert.Equal(3, folder.RedactedValueCount);
+		Assert.Equal(3, zip.RedactedValueCount);
+		Assert.Equal(NormalizeForClipboard(selectedContent), previewAndClipboard);
+		Assert.Equal(folderContent, zipContent);
+		Assert.Equal(firstContextDocuments.Keys, secondContextDocuments.Keys);
+		foreach (var format in firstContextDocuments.Keys)
+			Assert.Equal(firstContextDocuments[format], secondContextDocuments[format]);
+
+		var outputs = new[] { previewAndClipboard, selectedContent, folderContent, zipContent }
+			.Concat(firstContextDocuments.Values);
+		Assert.All(outputs, static output => AssertHttpCookieOutput(output, keepCsrfCookie: true));
+		Assert.Equal(sourceBytes, File.ReadAllBytes(sourcePath));
 	}
 
 	[Fact]
@@ -1697,6 +1788,29 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Contains("DEVPROJEX_REDACTED[environment-secret#1]", text, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[container-secret#1]", text, StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED[authorization-bearer#1]", text, StringComparison.Ordinal);
+	}
+
+	private static void AssertHttpCookieOutput(string text, bool keepCsrfCookie)
+	{
+		var csrf = keepCsrfCookie
+			? HttpKeptCookie
+			: "DEVPROJEX_REDACTED[http-cookie#2]";
+		Assert.Contains(
+			"Authorization: Bearer DEVPROJEX_REDACTED[authorization-bearer#1]",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"Cookie: session=DEVPROJEX_REDACTED[http-cookie#1]; csrf={csrf}; " +
+			"theme=DEVPROJEX_REDACTED[http-cookie#3]",
+			text,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(AuthorizationCredential, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(HttpSessionCookie, text, StringComparison.Ordinal);
+		Assert.DoesNotContain("theme=dark", text, StringComparison.Ordinal);
+		if (keepCsrfCookie)
+			Assert.DoesNotContain("DEVPROJEX_REDACTED[http-cookie#2]", text, StringComparison.Ordinal);
+		else
+			Assert.DoesNotContain(HttpKeptCookie, text, StringComparison.Ordinal);
 	}
 
 	private static int CountOccurrences(string value, string search)
