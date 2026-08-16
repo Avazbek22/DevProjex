@@ -1,3 +1,5 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Application.Services;
 
 public enum ProjectCopyExportFormat
@@ -62,14 +64,17 @@ public sealed record ProjectCopyExportRequest(
 public sealed record ProjectCopyNoticeText(
 	string Redaction,
 	string Compression,
-	string ExcludedUnscannable = "");
+	string ExcludedUnscannable = "",
+	string TooLargeReason = "",
+	string UnsupportedEncodingReason = "");
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,
 	int CopiedFileCount,
 	int CreatedDirectoryCount,
 	long BytesWritten,
-	int RedactedValueCount = 0);
+	int RedactedValueCount = 0,
+	IReadOnlyList<UnscannableFile>? UnscannableFiles = null);
 
 public sealed record ProjectCopyExportProgress(
 	int ProcessedEntryCount,

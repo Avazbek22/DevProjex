@@ -367,10 +367,12 @@ documents; Markdown contains headings, a fenced tree, and fenced text-file
 content. Binary bytes are never embedded in context output. Machine documents
 mark binary entries with metadata.
 
-With `--hide-secrets` or `--hide-private-data`, detection failure fails closed and produces no complete output
-artifact. A selected text file above the supported scan limit is omitted from the
-context document, the same as without redaction; `export project` leaves it out
-of the copy and names it in `DEVPROJEX-NOTICE.txt`.
+With `--hide-secrets` or `--hide-private-data`, detector and budget failures fail closed and
+produce no complete output artifact. A text file above the supported scan limit or in an
+unsupported encoding does not abort the remaining analysis: its content is withheld from context
+and project-copy output, and stderr lists every affected relative path with the reason and total
+count. `export project` also records the same omissions in `DEVPROJEX-NOTICE.txt`. This
+continue-with-withholding behavior never emits undecoded or only partially inspected source text.
 
 When output is stdout, stdout contains only the context document. When output is a
 file, stdout contains one absolute result path. Existing files are conflicts

@@ -446,7 +446,8 @@ public partial class MainWindow : Window
 			ApplyRedactionStatus(
 				_secretRedactionScanState,
 				cachedRedactionSnapshot.SkippedFileCount,
-				cachedRedactionSnapshot.FailedFileCount);
+				cachedRedactionSnapshot.FailedFileCount,
+				cachedRedactionSnapshot.UnscannableFiles);
 		}
 		// A visible preview is already a complete measurement. Keep it until its replacement
 		// publishes so a session-to-durable mark transition cannot flash an empty status.

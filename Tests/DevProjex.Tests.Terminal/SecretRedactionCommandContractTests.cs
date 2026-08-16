@@ -236,6 +236,62 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
+	public async Task AnalyzeJson_ReportsUnsupportedEncodingWithoutFailingTheProject()
+	{
+		using var workspace = CreateWorkspace();
+		var legacyPath = Path.Combine(workspace.ProjectRoot, "legacy-windows-1250.txt");
+		File.WriteAllBytes(legacyPath, [0x4C, 0x45, 0x47, 0x41, 0x43, 0x59, 0x2D, 0xE9]);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--format", "json", "--git-mode", "none",
+				"--hide-secrets", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var inspection = document.RootElement.GetProperty("contentInspection");
+		Assert.Equal(1, inspection.GetProperty("unscannableCount").GetInt32());
+		var file = Assert.Single(inspection.GetProperty("unscannableFiles").EnumerateArray());
+		Assert.Equal("legacy-windows-1250.txt", file.GetProperty("path").GetString());
+		Assert.Equal("unsupported-encoding", file.GetProperty("reason").GetString());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task ExportContext_UnsupportedEncodingIsWithheldAndReportedOnDiagnosticsStream()
+	{
+		const string legacySentinel = "LEGACY-CONTENT-MUST-NOT-ESCAPE";
+		using var workspace = CreateWorkspace();
+		var legacyPath = Path.Combine(workspace.ProjectRoot, "legacy-windows-1250.txt");
+		File.WriteAllBytes(
+			legacyPath,
+			[.. Encoding.ASCII.GetBytes(legacySentinel + "-"), 0xE9]);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content", "--format", "text",
+				"--git-mode", "none", "--hide-secrets",
+				"--language", "en", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(legacySentinel, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Files excluded from content output: 1", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("legacy-windows-1250.txt", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Unsupported text encoding", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task AnalyzeText_ReportsSecretAndPrivateDataCountersOnSeparateRows()
 	{
 		using var workspace = CreateWorkspace();

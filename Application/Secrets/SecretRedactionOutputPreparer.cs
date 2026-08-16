@@ -62,7 +62,7 @@ public sealed class SecretRedactionOutputPreparer
 
 		SecretRedactionTempDirectory? workingDirectory = null;
 		var preparedFiles = new Dictionary<string, PreparedSecretFile>(PathComparer.Default);
-		var unscannablePaths = new List<string>();
+		var unscannableFiles = new List<UnscannableFile>();
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
 		var scope = transformationScope.Redaction;
 		var requiredInspectionScope = context.Compression is null ? scope : null;
@@ -98,19 +98,18 @@ public sealed class SecretRedactionOutputPreparer
 						preparedFiles[sourcePath] = PreparedSecretFile.Binary(sourcePath);
 						continue;
 					case FileContentClassification.TooLarge:
-						// A per-file limit degrades that file, not the whole run - the same rule the
-						// compressor already follows for text past its parse limit. Redaction cannot
-						// promise anything about text it never read, so the file is recorded as
-						// unscanned and its content is withheld: every document surface omits text
-						// this large anyway, so nothing that used to ship stops shipping. A project
-						// copy leaves it out and names it in the notice, because copying the bytes
-						// would hand over text the scanner never saw.
+					case FileContentClassification.UnsupportedEncoding:
+						// A per-file inspection limitation degrades that file, not the whole run.
+						// Redaction cannot promise anything about text it never decoded or fully read,
+						// so every output withholds the content and reports the exact reason.
 						if (scope is not null &&
 						    scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None)
 						{
-							scope.AnalyzeUnscannable(sourcePath, metadataAfterRead);
-							preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(sourcePath);
-							unscannablePaths.Add(sourcePath);
+							scope.AnalyzeUnscannable(sourcePath, metadataAfterRead, result.Classification);
+							preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(
+								sourcePath,
+								result.Classification);
+							unscannableFiles.Add(new UnscannableFile(sourcePath, result.Classification));
 							continue;
 						}
 
@@ -170,7 +169,10 @@ public sealed class SecretRedactionOutputPreparer
 					redactions);
 			}
 
-			var snapshot = scope?.Complete(unscannablePaths.Count, failedFileCount: 0);
+			var snapshot = scope?.Complete(
+				unscannableFiles.Count,
+				failedFileCount: 0,
+				unscannableFiles);
 			var compression = transformationScope.Compression?.Complete();
 			if (redactionContext is not null)
 			{
@@ -185,7 +187,7 @@ public sealed class SecretRedactionOutputPreparer
 				preparedFiles,
 				snapshot,
 				compression,
-				unscannablePaths);
+				unscannableFiles);
 		}
 		catch
 		{
@@ -304,6 +306,38 @@ public sealed class SecretRedactionOutputPreparer
 	}
 
 	private async Task<PreparedTransformationEntry> PrepareTransformationEntryAsync(
+		ContentTransformationContext context,
+		ContentTransformationScope transformationScope,
+		CompressionWorkItem item,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			return await PrepareTransformationEntryCoreAsync(
+					context,
+					transformationScope,
+					item,
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (DecoderFallbackException)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return CreateUnsupportedEncodingEntry(item);
+		}
+	}
+
+	private static PreparedTransformationEntry CreateUnsupportedEncodingEntry(CompressionWorkItem item) =>
+		new(
+			item.Index,
+			item.SourcePath,
+			SecretFileMetadata.Capture(item.SourcePath),
+			new FileContentReadResult(FileContentClassification.UnsupportedEncoding),
+			new CodeCompressionResult(string.Empty, ContentTransformMap.Identity),
+			sourceFingerprint: null,
+			contentLease: null);
+
+	private async Task<PreparedTransformationEntry> PrepareTransformationEntryCoreAsync(
 		ContentTransformationContext context,
 		ContentTransformationScope transformationScope,
 		CompressionWorkItem item,
@@ -539,6 +573,7 @@ public sealed class SecretRedactionOutputPreparer
 		await context.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		var scope = context.BeginOutput(orderedFilePaths);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
+		var unscannableFiles = new List<UnscannableFile>();
 		var parallelWork = new List<SecretScanWorkItem>();
 		var serialWork = new List<SecretScanWorkItem>();
 		for (var index = 0; index < orderedFilePaths.Count; index++)
@@ -610,10 +645,15 @@ public sealed class SecretRedactionOutputPreparer
 			}
 			scope.ProcessEntry(orderedFilePaths[index], entry);
 			if (entry.IsUnscannable)
+			{
 				skippedFileCount++;
+				unscannableFiles.Add(new UnscannableFile(
+					orderedFilePaths[index],
+					entry.UnscannableClassification!.Value));
+			}
 		}
 
-		var snapshot = scope.Complete(skippedFileCount, failedFileCount: 0);
+		var snapshot = scope.Complete(skippedFileCount, failedFileCount: 0, unscannableFiles);
 		await context.Session
 			.FlushPendingPersistentMarkMigrationsAsync(context.ProjectRoot, cancellationToken)
 			.ConfigureAwait(false);
@@ -650,6 +690,7 @@ public sealed class SecretRedactionOutputPreparer
 		var scope = context.BeginOutput(orderedFilePaths);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
 		var outcomes = new SecretDiscoveryFileOutcome[orderedFilePaths.Count];
+		var unscannableFiles = new List<UnscannableFile>();
 		var parallelWork = new List<SecretScanWorkItem>();
 		var serialWork = new List<SecretScanWorkItem>();
 
@@ -741,7 +782,12 @@ public sealed class SecretRedactionOutputPreparer
 					entry = null;
 				}
 				if (entry?.IsUnscannable == true)
+				{
 					outcomes[index] = SecretDiscoveryFileOutcome.SkippedByLimit;
+					unscannableFiles.Add(new UnscannableFile(
+						orderedFilePaths[index],
+						entry.UnscannableClassification!.Value));
+				}
 			}
 
 			switch (outcomes[index])
@@ -755,7 +801,7 @@ public sealed class SecretRedactionOutputPreparer
 			}
 		}
 
-		var snapshot = scope.Complete(skippedFileCount, failedFileCount);
+		var snapshot = scope.Complete(skippedFileCount, failedFileCount, unscannableFiles);
 		await context.Session
 			.FlushPendingPersistentMarkMigrationsAsync(context.ProjectRoot, cancellationToken)
 			.ConfigureAwait(false);
@@ -791,6 +837,7 @@ public sealed class SecretRedactionOutputPreparer
 		                     throw new InvalidOperationException(
 			                     "The transformation scope did not create secret redaction state.");
 		var skippedFileCount = 0;
+		var unscannableFiles = new List<UnscannableFile>();
 
 		await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
 		                   context,
@@ -806,8 +853,15 @@ public sealed class SecretRedactionOutputPreparer
 					redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
 					break;
 				case FileContentClassification.TooLarge:
-					redactionScope.AnalyzeUnscannable(prepared.SourcePath, prepared.Metadata);
+				case FileContentClassification.UnsupportedEncoding:
+					redactionScope.AnalyzeUnscannable(
+						prepared.SourcePath,
+						prepared.Metadata,
+						prepared.ReadResult.Classification);
 					skippedFileCount++;
+					unscannableFiles.Add(new UnscannableFile(
+						prepared.SourcePath,
+						prepared.ReadResult.Classification));
 					break;
 				case FileContentClassification.Text:
 					redactionScope.CreatePlan(
@@ -829,7 +883,10 @@ public sealed class SecretRedactionOutputPreparer
 
 		// Analysis borrows the compression pipeline but is not itself a transformed output. Publishing
 		// its auxiliary snapshot would make compression statistics appear before Preview or export ran.
-		var snapshot = redactionScope.Complete(skippedFileCount, failedFileCount: 0);
+		var snapshot = redactionScope.Complete(
+			skippedFileCount,
+			failedFileCount: 0,
+			unscannableFiles);
 		await redactionContext.Session
 			.FlushPendingPersistentMarkMigrationsAsync(redactionContext.ProjectRoot, cancellationToken)
 			.ConfigureAwait(false);
@@ -871,6 +928,7 @@ public sealed class SecretRedactionOutputPreparer
 			                     "The transformation scope did not create secret redaction state.");
 		var skippedFileCount = 0;
 		var failedFileCount = 0;
+		var unscannableFiles = new List<UnscannableFile>();
 
 		await foreach (var attempt in PrepareOrderedDiscoveryEntriesAsync(
 		                   context,
@@ -895,7 +953,12 @@ public sealed class SecretRedactionOutputPreparer
 					continue;
 				}
 				if (attempt.CachedEntry.IsUnscannable)
+				{
 					skippedFileCount++;
+					unscannableFiles.Add(new UnscannableFile(
+						attempt.SourcePath!,
+						attempt.CachedEntry.UnscannableClassification!.Value));
+				}
 				continue;
 			}
 
@@ -914,8 +977,15 @@ public sealed class SecretRedactionOutputPreparer
 						redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
 						break;
 					case FileContentClassification.TooLarge:
-						redactionScope.AnalyzeUnscannable(prepared.SourcePath, prepared.Metadata);
+					case FileContentClassification.UnsupportedEncoding:
+						redactionScope.AnalyzeUnscannable(
+							prepared.SourcePath,
+							prepared.Metadata,
+							prepared.ReadResult.Classification);
 						skippedFileCount++;
+						unscannableFiles.Add(new UnscannableFile(
+							prepared.SourcePath,
+							prepared.ReadResult.Classification));
 						break;
 					case FileContentClassification.Text:
 						redactionScope.CreatePlan(
@@ -939,7 +1009,7 @@ public sealed class SecretRedactionOutputPreparer
 			}
 		}
 
-		var snapshot = redactionScope.Complete(skippedFileCount, failedFileCount);
+		var snapshot = redactionScope.Complete(skippedFileCount, failedFileCount, unscannableFiles);
 		await redactionContext.Session
 			.FlushPendingPersistentMarkMigrationsAsync(redactionContext.ProjectRoot, cancellationToken)
 			.ConfigureAwait(false);
@@ -1119,6 +1189,11 @@ public sealed class SecretRedactionOutputPreparer
 				cancellationToken).ConfigureAwait(false);
 			return DiscoveryTransformationAttempt.Prepared(entry);
 		}
+		catch (DecoderFallbackException)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return DiscoveryTransformationAttempt.Prepared(CreateUnsupportedEncodingEntry(item));
+		}
 		catch (Exception exception) when (IsRecoverableDiscoveryFailure(exception))
 		{
 			return DiscoveryTransformationAttempt.Incomplete();
@@ -1156,8 +1231,20 @@ public sealed class SecretRedactionOutputPreparer
 		CancellationToken cancellationToken)
 	{
 		var sourcePath = workItem.SourcePath;
-		var coherentRead = await OpenCompleteTextBufferCoherentlyAsync(sourcePath, cancellationToken)
-			.ConfigureAwait(false);
+		CoherentSecretTextBuffer coherentRead;
+		try
+		{
+			coherentRead = await OpenCompleteTextBufferCoherentlyAsync(sourcePath, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (DecoderFallbackException)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return scope.StoreUnscannable(
+				sourcePath,
+				SecretFileMetadata.Capture(sourcePath),
+				FileContentClassification.UnsupportedEncoding);
+		}
 		await using var contentBuffer = coherentRead.Buffer;
 		var metadata = coherentRead.Metadata;
 
@@ -1166,10 +1253,11 @@ public sealed class SecretRedactionOutputPreparer
 			case FileContentClassification.Binary:
 				return scope.StoreBinary(sourcePath, metadata);
 			case FileContentClassification.TooLarge:
+			case FileContentClassification.UnsupportedEncoding:
 				// This scan only feeds the count on the checkbox. One file it may not read is a
 				// reason to leave that file out of the count, never to refuse the whole project -
 				// the user asked how many secrets are here, not for a guarantee about output.
-				return scope.StoreUnscannable(sourcePath, metadata);
+				return scope.StoreUnscannable(sourcePath, metadata, contentBuffer.Classification);
 			case FileContentClassification.Text:
 				using (scope.TrackFullContentBuffer())
 				{
@@ -1394,10 +1482,11 @@ public sealed record PreparedSecretFile(
 	public bool IsText => Classification == FileContentClassification.Text;
 
 	/// <summary>
-	/// The file is text, but larger than the scanner may read, so no redaction was ever planned for
-	/// it. Its content must not be served from the original at full size - see the analyzer below.
+	/// The file could not be decoded or fully read under the scanner's bounded contract, so no
+	/// redaction was ever planned for it. Its source content must not be served by prepared outputs.
 	/// </summary>
-	public bool IsUnscannable => Classification == FileContentClassification.TooLarge;
+	public bool IsUnscannable => Classification is FileContentClassification.TooLarge or
+		FileContentClassification.UnsupportedEncoding;
 
 	public int RedactedCount => Redactions.Count;
 
@@ -1422,9 +1511,18 @@ public sealed record PreparedSecretFile(
 	public static PreparedSecretFile Unchanged(string sourcePath) =>
 		new(sourcePath, sourcePath, FileContentClassification.Text, null, []);
 
-	/// <summary>Text past the scan limit: recorded, reported, and never served in full.</summary>
-	public static PreparedSecretFile Unscannable(string sourcePath) =>
-		new(sourcePath, sourcePath, FileContentClassification.TooLarge, null, []);
+	/// <summary>Uninspected text: recorded, reported, and withheld from every prepared output.</summary>
+	public static PreparedSecretFile Unscannable(
+		string sourcePath,
+		FileContentClassification classification)
+	{
+		if (classification is not (FileContentClassification.TooLarge or
+		    FileContentClassification.UnsupportedEncoding))
+		{
+			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
+		}
+		return new PreparedSecretFile(sourcePath, sourcePath, classification, null, []);
+	}
 }
 
 public sealed record PreparedSecretSpan(int Start, int Length)
@@ -1443,13 +1541,18 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 		IReadOnlyDictionary<string, PreparedSecretFile> files,
 		SecretRedactionSnapshot? snapshot,
 		Compression.CodeCompressionSnapshot? compressionSnapshot = null,
-		IReadOnlyList<string>? unscannablePaths = null)
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null)
 	{
 		_workingDirectory = workingDirectory;
 		_files = files;
 		Snapshot = snapshot;
 		CompressionSnapshot = compressionSnapshot;
-		UnscannablePaths = unscannablePaths ?? [];
+		UnscannableFiles = unscannableFiles is { Count: > 0 }
+			? unscannableFiles.ToArray()
+			: [];
+		UnscannablePaths = UnscannableFiles.Count == 0
+			? []
+			: UnscannableFiles.Select(static file => file.Path).ToArray();
 	}
 
 	/// <summary>
@@ -1460,6 +1563,8 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 	/// never saw - or refusing the whole copy over one file.
 	/// </summary>
 	public IReadOnlyList<string> UnscannablePaths { get; }
+
+	public IReadOnlyList<UnscannableFile> UnscannableFiles { get; }
 
 	/// <summary>Null when redaction was not part of this run - compression can be enabled alone.</summary>
 	public SecretRedactionSnapshot? Snapshot { get; }
@@ -1494,11 +1599,9 @@ public sealed class PreparedSecretFileContentAnalyzer(
 	PreparedSecretRedactionOutput prepared) : IFileContentAnalyzer
 {
 	/// <summary>
-	/// An unscannable file is read from its original path, exactly as it would be with Hide Secrets
-	/// off, but never with a larger budget than the scanner itself was given. The file is bigger
-	/// than that budget by definition, so every read comes back estimated with empty text: the
-	/// surfaces omit it for the same reason they already do, and no unscanned character can escape
-	/// through a caller that happened to ask for a generous limit.
+	/// An unscannable file retains its original classification but is never given a larger read
+	/// budget than the scanner. Too-large text stays estimated and unsupported text stays undecoded,
+	/// so no uninspected character can escape through a more permissive downstream caller.
 	/// </summary>
 	private long ClampReadLimit(PreparedSecretFile file, long requested) =>
 		file.IsUnscannable
@@ -1509,7 +1612,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 	{
 		var file = prepared.GetFile(path);
 		if (file.IsUnscannable)
-			return FileContentClassification.TooLarge;
+			return file.Classification;
 		return file.IsText ? null : FileContentClassification.Binary;
 	}
 
@@ -1567,6 +1670,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		if (file.IsUnscannable)
 		{
 			return new UnscannableSnapshot(
+				file.Classification,
 				await inner.GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
 					.ConfigureAwait(false));
 		}
@@ -1607,17 +1711,19 @@ public sealed class PreparedSecretFileContentAnalyzer(
 			: ValueTask.FromResult<TextFileContent?>(null);
 	}
 
-	private sealed class UnscannableSnapshot(FileContentMetricsResult result) : IFileContentSnapshot
+	private sealed class UnscannableSnapshot(
+		FileContentClassification classification,
+		FileContentMetricsResult result) : IFileContentSnapshot
 	{
 		public FileContentMetricsResult Result { get; } =
-			new(FileContentClassification.TooLarge, result.Metrics);
+			new(classification, result.Metrics);
 
 		public ValueTask CopyTextToAsync(
 			int maximumCharacters,
 			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
 			CancellationToken cancellationToken = default) =>
 			ValueTask.FromException(
-				new IOException("The file is past the Hide Secrets scan limit and was not read."));
+				new IOException("The file could not be inspected for content redaction and was withheld."));
 
 		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 	}

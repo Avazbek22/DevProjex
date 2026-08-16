@@ -30,6 +30,11 @@ public sealed record ProjectContextDocumentLimits(
 	int MaximumCharacters = 256 * 1024,
 	long MaximumFileBytes = 256 * 1024);
 
+public sealed record ProjectContextWriteResult(IReadOnlyList<UnscannableFile> UnscannableFiles)
+{
+	public static ProjectContextWriteResult Empty { get; } = new([]);
+}
+
 public sealed class ProjectContextDocumentService(
 	TreeExportService treeExportService,
 	IFileContentAnalyzer contentAnalyzer,
@@ -98,6 +103,24 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken = default,
 		bool plain = false)
 	{
+		_ = await WriteCompleteWithReportAsync(
+				plan,
+				view,
+				format,
+				destination,
+				cancellationToken,
+				plain)
+			.ConfigureAwait(false);
+	}
+
+	public async Task<ProjectContextWriteResult> WriteCompleteWithReportAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		Stream destination,
+		CancellationToken cancellationToken = default,
+		bool plain = false)
+	{
 		ArgumentNullException.ThrowIfNull(plan);
 		ArgumentNullException.ThrowIfNull(destination);
 		ValidateView(view);
@@ -106,7 +129,7 @@ public sealed class ProjectContextDocumentService(
 			throw new ArgumentException("Destination must be writable.", nameof(destination));
 		if (ShouldRedact(plan, view))
 		{
-			await WriteCompleteRedactedAsync(
+			return await WriteCompleteRedactedAsync(
 					plan,
 					view,
 					format,
@@ -114,7 +137,6 @@ public sealed class ProjectContextDocumentService(
 					cancellationToken,
 					plain)
 				.ConfigureAwait(false);
-			return;
 		}
 		using var cancellationDestination = new CancellationBoundWriteStream(
 			destination,
@@ -159,6 +181,7 @@ public sealed class ProjectContextDocumentService(
 			default:
 				throw new ArgumentOutOfRangeException(nameof(format), format, null);
 		}
+		return ProjectContextWriteResult.Empty;
 	}
 
 	// One gate for both transformations: whichever is enabled, the document is built from prepared
@@ -220,7 +243,7 @@ public sealed class ProjectContextDocumentService(
 			.ConfigureAwait(false);
 	}
 
-	private async Task WriteCompleteRedactedAsync(
+	private async Task<ProjectContextWriteResult> WriteCompleteRedactedAsync(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
@@ -248,6 +271,7 @@ public sealed class ProjectContextDocumentService(
 				cancellationToken,
 				plain)
 			.ConfigureAwait(false);
+		return new ProjectContextWriteResult(prepared.UnscannableFiles);
 	}
 
 	private async Task WriteCompleteTextAsync(

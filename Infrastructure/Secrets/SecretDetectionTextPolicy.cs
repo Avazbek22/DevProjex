@@ -2,6 +2,19 @@ namespace DevProjex.Infrastructure.Secrets;
 
 internal static class SecretDetectionTextPolicy
 {
+	private static readonly string[] FileLikeTopLevelLabels =
+	[
+		"png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico", "bmp", "tif", "tiff", "heic", "psd",
+		"css", "scss", "less", "js", "mjs", "cjs", "jsx", "ts", "tsx", "map", "json", "xml", "yml", "yaml",
+		"toml", "ini", "cfg", "conf", "lock", "cs", "csproj", "sln", "props", "targets", "py", "rb", "go", "rs",
+		"java", "kt", "kts", "scala", "php", "swift", "c", "h", "cpp", "hpp", "cc", "hh", "sh", "bash", "zsh",
+		"ps1", "psm1", "psd1", "bat", "cmd", "md", "markdown", "rst", "txt", "log", "pdf", "docx", "xlsx", "pptx",
+		"csv", "tsv", "zip", "gz", "tgz", "tar", "bz2", "xz", "7z", "rar", "jar", "exe", "dll", "so", "dylib",
+		"pdb", "nupkg", "snupkg", "dmg", "pkg", "msi", "msix", "deb", "rpm", "ttf", "otf", "woff", "woff2",
+		"eot", "mp3", "mp4", "wav", "ogg", "flac", "mov", "avi", "mkv", "webm", "wasm", "bin", "iso", "sql",
+		"db", "sqlite", "bak", "tmp"
+	];
+
 	private static readonly string[] LiteralPlaceholderValues =
 	[
 		"changeme",
@@ -83,6 +96,16 @@ internal static class SecretDetectionTextPolicy
 		       HasSurroundingWrapper(content, wrapperStart, wrapperEnd, "{{", "}}") ||
 		       HasSurroundingWrapper(content, wrapperStart, wrapperEnd, "<", ">") ||
 		       HasSurroundingWrapper(content, wrapperStart, wrapperEnd, "%", "%");
+	}
+
+	internal static bool IsFileLikeTopLevelLabel(ReadOnlySpan<char> value)
+	{
+		foreach (var extension in FileLikeTopLevelLabels)
+		{
+			if (value.Equals(extension, StringComparison.OrdinalIgnoreCase))
+				return true;
+		}
+		return false;
 	}
 
 	internal static bool IsRfc2606DocumentationHost(ReadOnlySpan<char> host)

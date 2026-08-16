@@ -104,15 +104,18 @@ public sealed class ProjectCopyExportService(
 			lines.Add(noticeText.Compression);
 		// Named, not merely counted: a copy that is missing a file has to say which one, or the
 		// reader cannot tell an omission from a file that was never in the project.
-		if (ShouldExcludeUnscannable(prepared) && prepared.UnscannablePaths.Count > 0)
+		if (ShouldExcludeUnscannable(prepared) && prepared.UnscannableFiles.Count > 0)
 		{
-			var relativePaths = prepared.UnscannablePaths
-				.Select(path => NormalizeNoticePath(plan.ProjectRootPath, path))
-				.OrderBy(static path => path, StringComparer.Ordinal);
+			var entries = prepared.UnscannableFiles
+				.Select(file => string.Concat(
+					NormalizeNoticePath(plan.ProjectRootPath, file.Path),
+					" - ",
+					ResolveUnscannableReason(noticeText, file.Classification)))
+				.OrderBy(static value => value, StringComparer.Ordinal);
 			lines.Add(
 				noticeText.ExcludedUnscannable +
 				Environment.NewLine +
-				string.Join(Environment.NewLine, relativePaths.Select(static path => "  " + path)));
+				string.Join(Environment.NewLine, entries.Select(static value => "  " + value)));
 		}
 
 		return lines.Count == 0
@@ -180,6 +183,15 @@ public sealed class ProjectCopyExportService(
 			: await preparer.PrepareAsync(context, files, cancellationToken).ConfigureAwait(false);
 	}
 
+	private static string ResolveUnscannableReason(
+		ProjectCopyNoticeText noticeText,
+		FileContentClassification classification) => classification switch
+	{
+		FileContentClassification.TooLarge => noticeText.TooLargeReason,
+		FileContentClassification.UnsupportedEncoding => noticeText.UnsupportedEncodingReason,
+		_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
+	};
+
 	private SecretRedactionContext? CreateRedactionContext(
 		string projectRoot,
 		ProjectCopyExportRequest request)
@@ -203,7 +215,9 @@ public sealed class ProjectCopyExportService(
 		new(
 			localization["Terminal.DryRun.ProjectCopy.RedactionWarning"],
 			localization["Compression.CopyNotice"],
-			localization["ProjectCopy.Notice.UnscannableExcluded"]);
+			localization["ProjectCopy.Notice.UnscannableExcluded"],
+			localization["Content.Redaction.Reason.TooLarge"],
+			localization["Content.Redaction.Reason.UnsupportedEncoding"]);
 
 	public static void EnsureDestinationOutsideProject(string projectRootPath, string destinationPath)
 	{
@@ -344,7 +358,8 @@ public sealed class ProjectCopyExportService(
 				processedFiles,
 				plan.DirectoryCount,
 				bytesWritten,
-				prepared?.Snapshot?.RedactedCount ?? 0);
+				prepared?.Snapshot?.RedactedCount ?? 0,
+				prepared?.UnscannableFiles ?? []);
 		}
 		catch (Exception exception)
 		{
@@ -492,7 +507,8 @@ public sealed class ProjectCopyExportService(
 				processedFiles,
 				plan.DirectoryCount,
 				bytesWritten,
-				prepared?.Snapshot?.RedactedCount ?? 0);
+				prepared?.Snapshot?.RedactedCount ?? 0,
+				prepared?.UnscannableFiles ?? []);
 		}
 		catch (Exception exception)
 		{

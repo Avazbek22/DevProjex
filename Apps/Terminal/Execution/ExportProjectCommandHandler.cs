@@ -52,7 +52,7 @@ public sealed class ExportProjectCommandHandler(
 				plan.Selection.HideSecrets == true,
 				plan.Selection.HidePrivateData == true);
 			var redactContent = redactionFeatures != SecretRedactionFeatures.None;
-			string? unscannablePath = null;
+			IReadOnlyList<UnscannableFile> unscannableFiles = [];
 			if (redactContent)
 			{
 				var preflight = await services.SecretRedactionOutputPreparer
@@ -64,7 +64,7 @@ public sealed class ExportProjectCommandHandler(
 						plan.IncludedFiles,
 						cancellationToken)
 					.ConfigureAwait(false);
-				unscannablePath = preflight.UnscannablePath;
+				unscannableFiles = preflight.UnscannableFiles;
 			}
 			DryRunRenderer.WritePlan(
 				environment,
@@ -74,13 +74,16 @@ public sealed class ExportProjectCommandHandler(
 			{
 				environment.Error.WriteLine(
 					services.Localization["Terminal.DryRun.ProjectCopy.RedactionWarning"]);
-				// A dry run has to predict the real run, and the real run now leaves such a file
-				// out rather than refusing, so this says which one instead of failing.
-				if (unscannablePath is not null)
+				if (unscannableFiles.Count > 0)
 				{
 					environment.Error.WriteLine(
 						services.Localization["ProjectCopy.Notice.UnscannableExcluded"]);
 				}
+				UnscannableFileOutput.Write(
+					environment.Error,
+					plan.SourceRoot,
+					unscannableFiles,
+					services.Localization);
 			}
 
 			if (plan.Selection.CompressCode == true)
@@ -114,6 +117,16 @@ public sealed class ExportProjectCommandHandler(
 					cancellationToken))
 			.ConfigureAwait(false);
 		environment.Output.WriteLine(Path.GetFullPath(result.DestinationPath));
+		if (result.UnscannableFiles is { Count: > 0 })
+		{
+			environment.Error.WriteLine(
+				services.Localization["ProjectCopy.Notice.UnscannableExcluded"]);
+		}
+		UnscannableFileOutput.Write(
+			environment.Error,
+			plan.SourceRoot,
+			result.UnscannableFiles ?? [],
+			services.Localization);
 		return CommandLineExitCodes.Success;
 	}
 

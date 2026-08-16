@@ -1,5 +1,6 @@
 using DevProjex.Avalonia.Collections;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Application.Secrets;
 using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
@@ -2105,7 +2106,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		int? detectedCount = null,
 		int? hiddenCount = null,
 		int? skippedFileCount = null,
-		int? failedFileCount = null) =>
+		int? failedFileCount = null,
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null) =>
 		SetRedactionStatus(
 			IgnoreOptionId.HideSecrets,
 			new ContentRedactionStatus(
@@ -2113,14 +2115,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 				detectedCount,
 				hiddenCount,
 				skippedFileCount,
-				failedFileCount));
+				failedFileCount,
+				unscannableFiles));
 
 	internal void SetPrivateDataProcessingStatus(
 		SecretScanState scanState,
 		int? detectedCount = null,
 		int? hiddenCount = null,
 		int? skippedFileCount = null,
-		int? failedFileCount = null) =>
+		int? failedFileCount = null,
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null) =>
 		SetRedactionStatus(
 			IgnoreOptionId.HidePrivateData,
 			new ContentRedactionStatus(
@@ -2128,7 +2132,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 				detectedCount,
 				hiddenCount,
 				skippedFileCount,
-				failedFileCount));
+				failedFileCount,
+				unscannableFiles));
 
 	private void SetRedactionStatus(IgnoreOptionId optionId, ContentRedactionStatus status)
 	{
@@ -2298,11 +2303,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			: _localization["Settings.Secrets.Status.Failed"]);
 		if (status.SkippedFileCount is int skipped and > 0)
 		{
+			var tooLargeCount = status.UnscannableFiles?.Count(static file =>
+				file.Classification == FileContentClassification.TooLarge) ?? skipped;
+			if (tooLargeCount > 0)
+			{
 			lines.Add(_localization.Format(
 				"Settings.Secrets.Status.SizeLimit",
-				skipped,
+				tooLargeCount,
 				SecretRedactionOutputPreparer.MaximumScannableFileBytes / (1024 * 1024)));
+			}
 		}
+		AppendUnscannableFiles(lines, status.UnscannableFiles);
 
 		lines.Add(_localization["Settings.Secrets.Status.Retry"]);
 		return string.Join(Environment.NewLine, lines);
@@ -2313,21 +2324,47 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		var skipped = status.SkippedFileCount.GetValueOrDefault();
 		var sizeLimitMegabytes = SecretRedactionOutputPreparer.MaximumScannableFileBytes /
 		                         (1024 * 1024);
-		var coverage = _localization.Format(
-			"Settings.Secrets.Status.SizeLimit",
-			skipped,
-			sizeLimitMegabytes);
-		if (status.DetectedCount is not { } detected ||
-		    status.HiddenCount is not { } hidden ||
-		    detected <= 0)
+		var lines = new List<string>(4);
+		if (status.DetectedCount is { } detected &&
+		    status.HiddenCount is { } hidden &&
+		    detected > 0)
 		{
-			return coverage;
+			lines.Add(_localization.Format("Settings.Secrets.Status.Applied", detected, hidden));
 		}
+		var tooLargeCount = status.UnscannableFiles?.Count(static file =>
+			file.Classification == FileContentClassification.TooLarge) ?? skipped;
+		if (tooLargeCount > 0)
+		{
+			lines.Add(_localization.Format(
+				"Settings.Secrets.Status.SizeLimit",
+				tooLargeCount,
+				sizeLimitMegabytes));
+		}
+		AppendUnscannableFiles(lines, status.UnscannableFiles);
+		return string.Join(Environment.NewLine, lines);
+	}
 
-		return string.Concat(
-			_localization.Format("Settings.Secrets.Status.Applied", detected, hidden),
-			Environment.NewLine,
-			coverage);
+	private void AppendUnscannableFiles(
+		List<string> lines,
+		IReadOnlyList<UnscannableFile>? unscannableFiles)
+	{
+		if (unscannableFiles is not { Count: > 0 })
+			return;
+		lines.Add(_localization.Format("Content.Redaction.UnscannableFiles", unscannableFiles.Count));
+		foreach (var file in unscannableFiles)
+		{
+			var reasonKey = file.Classification switch
+			{
+				FileContentClassification.TooLarge => "Content.Redaction.Reason.TooLarge",
+				FileContentClassification.UnsupportedEncoding =>
+					"Content.Redaction.Reason.UnsupportedEncoding",
+				_ => throw new ArgumentOutOfRangeException(
+					nameof(file.Classification),
+					file.Classification,
+					null)
+			};
+			lines.Add(string.Concat(file.Path, " - ", _localization[reasonKey]));
+		}
 	}
 
 	private void UpdateSettingsCompressionNotice()
@@ -2446,7 +2483,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		int? DetectedCount = null,
 		int? HiddenCount = null,
 		int? SkippedFileCount = null,
-		int? FailedFileCount = null);
+		int? FailedFileCount = null,
+		IReadOnlyList<UnscannableFile>? UnscannableFiles = null);
 
     /// <summary>
     /// Cleans up event subscriptions and resources to prevent memory leaks.

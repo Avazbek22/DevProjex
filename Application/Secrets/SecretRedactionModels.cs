@@ -27,13 +27,17 @@ public sealed record SecretTextRedactionResult(
 	int RedactedCount,
 	ContentTransformMap CoordinateMap);
 
+public sealed record UnscannableFile(
+	string Path,
+	FileContentClassification Classification);
+
 /// <param name="UnscannablePath">
 /// One selected text file the scanner was not allowed to read, or null. Documents omit such a file
 /// and report a count for everything else; a project copy leaves it out and names it. The dry run
 /// reads this to say the same thing before anything is written.
 /// </param>
 /// <param name="SkippedFileCount">
-/// Selected text files intentionally left uninspected because they exceed the bounded scan limit.
+/// Selected text files withheld because bounded inspection could not decode or fully read them.
 /// </param>
 /// <param name="FailedFileCount">
 /// Selected files discovery could not inspect because reading, decoding, or detection failed.
@@ -49,6 +53,7 @@ public sealed record SecretRedactionSnapshot(
 	int PrivateDataDetectedCount = 0,
 	int PrivateDataRedactedCount = 0)
 {
+	public IReadOnlyList<UnscannableFile> UnscannableFiles { get; init; } = [];
 	public int SecretDetectedCount => checked(DetectedCount - PrivateDataDetectedCount);
 	public int SecretRedactedCount => checked(RedactedCount - PrivateDataRedactedCount);
 	public int IncompleteFileCount => checked(SkippedFileCount + FailedFileCount);

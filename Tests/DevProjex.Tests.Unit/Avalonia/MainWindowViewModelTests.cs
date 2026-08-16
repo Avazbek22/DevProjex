@@ -441,6 +441,37 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(string.Empty, blankLines.StatusText);
     }
 
+	[Fact]
+	public void PrivateDataLimitedStatus_ListsEveryUnscannableFileWithItsReason()
+	{
+		var viewModel = CreateViewModel(new Dictionary<string, string>
+		{
+			["Settings.Secrets.Status.Applied"] = "Found {0}, hidden {1}",
+			["Settings.Secrets.Status.SizeLimit"] = "Too large: {0} over {1} MiB",
+			["Content.Redaction.UnscannableFiles"] = "Unscannable: {0}",
+			["Content.Redaction.Reason.TooLarge"] = "too large",
+			["Content.Redaction.Reason.UnsupportedEncoding"] = "unsupported encoding"
+		});
+		var legacyPath = Path.Combine("project", "legacy.txt");
+		var largePath = Path.Combine("project", "large.txt");
+
+		viewModel.SetPrivateDataProcessingStatus(
+			SecretScanState.Limited,
+			detectedCount: 2,
+			hiddenCount: 2,
+			skippedFileCount: 2,
+			failedFileCount: 0,
+			[
+				new UnscannableFile(legacyPath, FileContentClassification.UnsupportedEncoding),
+				new UnscannableFile(largePath, FileContentClassification.TooLarge)
+			]);
+
+		Assert.Contains("Found 2, hidden 2", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.Contains("Unscannable: 2", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.Contains($"{legacyPath} - unsupported encoding", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.Contains($"{largePath} - too large", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+	}
+
     [Fact]
     public void StatusPresentation_CanStayHiddenWhileOperationRemainsLogicallyBusy()
     {

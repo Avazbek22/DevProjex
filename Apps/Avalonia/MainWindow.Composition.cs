@@ -40,7 +40,8 @@ public partial class MainWindow
 		ApplyRedactionStatus(
 			_secretRedactionScanState,
 			snapshot.SkippedFileCount,
-			snapshot.FailedFileCount);
+			snapshot.FailedFileCount,
+			snapshot.UnscannableFiles);
 		RelabelIgnoreOptionsWithCurrentCounts();
 	}
 
@@ -567,20 +568,23 @@ public partial class MainWindow
 	private void ApplyRedactionStatus(
 		SecretScanState state,
 		int? skippedFileCount = null,
-		int? failedFileCount = null)
+		int? failedFileCount = null,
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null)
 	{
 		_viewModel.SetContentProcessingStatus(
 			_appliedHideSecretsEnabled ? state : SecretScanState.Disabled,
 			_appliedHideSecretsEnabled ? _secretRedactionMatchedCount : null,
 			_appliedHideSecretsEnabled ? _secretRedactionCount : null,
 			skippedFileCount,
-			failedFileCount);
+			failedFileCount,
+			unscannableFiles);
 		_viewModel.SetPrivateDataProcessingStatus(
 			_appliedHidePrivateDataEnabled ? state : SecretScanState.Disabled,
 			_appliedHidePrivateDataEnabled ? _privateDataRedactionMatchedCount : null,
 			_appliedHidePrivateDataEnabled ? _privateDataRedactionCount : null,
 			skippedFileCount,
-			failedFileCount);
+			failedFileCount,
+			unscannableFiles);
 	}
 
 	private static string ResolveRedactionScanningLocalizationKey(

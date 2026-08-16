@@ -40,8 +40,9 @@ The rule does not match:
   subdomains, and domains under `.test`, `.example`, or `.invalid`;
 * placeholder and organizational role local parts such as `git`, `noreply`, `admin`, `dev`,
   `qa`, `staging`, and `testing`;
-* attribution files such as `LICENSE`, `NOTICE`, `AUTHORS`, `CONTRIBUTORS`, and `.mailmap`,
-  where published addresses are intentionally part of the attribution;
+* attribution and contact files such as `LICENSE`, `NOTICE`, `AUTHORS`, `CONTRIBUTORS`,
+  `SECURITY`, `CODEOWNERS`, and `.mailmap`, and package manifests such as `package.json`,
+  `composer.json`, and `pyproject.toml`, where published addresses are intentional metadata;
 * non-ASCII local parts or IDN forms in this phase;
 * reference and placeholder forms such as `${EMAIL}`, `$(EMAIL)`, `{{email}}`, `<email>`,
   and `%EMAIL%`.
@@ -59,11 +60,15 @@ IPv4 exclusions:
 * TEST-NET-1/2/3 and `233.252.0.0/24` documentation ranges;
 * the public resolver addresses `8.8.8.8`, `8.8.4.4`, `1.1.1.1`, `1.0.0.1`, `9.9.9.9`,
   `149.112.112.112`, `208.67.222.222`, and `208.67.220.220`.
+* canonical repeated or sequential examples such as `2.2.2.2` and `1.2.3.4`, version syntax,
+  leading-zero octets, and values in recognized dependency lock files.
 
 IPv6 exclusions:
 
 * `::`, `::1`, `fe80::/10`, `fc00::/7`, and `ff00::/8`;
-* the documentation prefixes `2001:db8::/32` and `3fff::/20`.
+* the documentation prefixes `2001:db8::/32` and `3fff::/20`;
+* IANA special-purpose NAT64, discard, Teredo, ORCHID, 6to4, SRv6, reserved, and deprecated
+  site-local ranges.
 
 Malformed octets and address-like substrings inside longer identifiers or dotted sequences
 are not treated as addresses.
@@ -83,6 +88,8 @@ system, and CI identities stay visible: `Public`, `Default`, `Default User`, `Al
 Common CI, cloud, container, and documentation identities such as `gitlab-runner`, `ubuntu`,
 `ec2-user`, `postgres`, `alice`, and `bob` also stay visible.
 Environment references such as `%USERPROFILE%` and the `~/` shorthand are outside this rule.
+Relative documentation links, file-like path segments, numbered placeholders such as `user1`,
+and paths inside `.docset` bundles are also kept.
 
 ### MAC addresses (`mac-address`)
 
@@ -90,7 +97,7 @@ Matches six hexadecimal pairs using one consistent `:` or `-` separator. The all
 broadcast values stay visible. Canonical examples such as `00:11:22:33:44:55`,
 `11:22:33:44:55:66`, and values beginning with `DE:AD:BE:EF` also stay visible. Cisco dotted
 notation is intentionally not detected, and the boundaries reject substrings inside IPv6
-addresses and UUIDs.
+addresses and UUIDs. Fixture values whose final five octets are zero are kept as well.
 
 ### International phone numbers (`phone-number`)
 
@@ -103,10 +110,12 @@ Documented fictional ranges stay visible:
 
 * NANP `+1-XXX-555-01XX`;
 * UK drama ranges beginning `+44 7700 900` or `+44 20 7946 0`.
+* common `555` fixtures and sequential NANP placeholders.
 
 Short timezone offsets, diff hunk coordinates, `C++` tokens, and numbers longer than 15
-digits do not match. Repeated-digit and sequential placeholder numbers stay visible, as does a
-leading `+` at the start of a line in `.patch` and `.diff` files.
+digits do not match. Values with country code zero, date-shaped values, repeated-digit and
+sequential placeholder numbers stay visible, as does a leading `+` at the start of a line in
+`.patch` and `.diff` files.
 
 ## Interaction with Hide Secrets
 
@@ -127,44 +136,53 @@ rules found no match; it is not a privacy or safety guarantee.
 The phase-one rules keep several source-code forms visible to avoid repeatedly redacting
 common project metadata:
 
-* IPv4 values whose last octet is zero stay visible because they usually represent product
-  versions or network identifiers rather than hosts. Adjacent package constraint operators and
-  the bounded same-line keywords `version`, `tag`, `release`, `build`, and `packages` also keep
-  version-shaped values visible. Files whose names begin with `CHANGELOG`, `HISTORY`, `RELEASES`,
-  `RELEASE_NOTES`, or `RELEASE-NOTES` disable IPv4 matching because release versions dominate
-  there. Real addresses in those contexts are intentional false negatives; an ambiguous
-  `1.2.3.4` elsewhere remains redacted and can be kept as-is in Preview.
+* IPv4 values whose last octet is zero, whose octets repeat or increase sequentially, or whose
+  octets contain leading zeroes stay visible because they usually represent product versions,
+  canonical examples, or network identifiers rather than hosts. Adjacent package constraint
+  operators and bounded same-line version/specification keywords also keep version-shaped values
+  visible. Changelog-family and dependency lock files disable IPv4 matching because versions
+  dominate there. SVG asset files and SVG JSON catalogs disable IPv4 matching, while a nearby
+  naked fraction is treated as SVG/path geometry; consequently a real address in an SVG asset or
+  near text such as `.5` is an intentional false negative.
 * Email-like tokens with a file-extension final label or a retina-style first domain label
   such as `icon@2x.png` stay visible. This intentionally accepts false negatives for colliding
   country-code domains such as `.md`, `.sh`, `.rs`, and `.py`, because file names using these
-  extensions are substantially more common in project content.
+  extensions are substantially more common in project content. Two-letter country-code labels
+  remain eligible; longer labels must be in the detector's bounded public/internal TLD policy.
 * Placeholder local parts, every local part beginning with `your`, and organizational role
   mailboxes such as `admin`, `owner`, `support`, `security`, `dev`, and `qa` stay visible.
-  Attribution-file names disable email matching because those addresses are intentionally
-  published. Local-part segments equal to `test` or `tests`, URI authority userinfo, and
-  malformed multi-`@` tokens are not treated as email. A real personal address using one of
-  these names or stored in an attribution file is therefore an intentional false negative.
-* An IPv6 candidate must contain at least one ASCII digit. This rejects language and shell
-  scope operators such as `Db::Add` and `[List]::Add`; a valid address composed only of `a-f`
-  words is an intentional false negative.
+  Attribution/contact files, package manifests, and same-line attribution contexts disable email
+  matching because those addresses are intentionally published. UUID Message-IDs, language
+  binder/call syntax, URI authority userinfo, and malformed multi-`@` tokens are not treated as
+  email. A real personal address using one of these forms is therefore an intentional false
+  negative.
+* An IPv6 candidate must contain at least one ASCII digit and either four non-empty textual
+  groups or a group at least three characters long. This structural minimum rejects language and
+  shell scope operators while preserving allocated global `2000::/3` addresses, whose first
+  textual group has four hexadecimal digits. Valid shorthand outside that shape is an intentional
+  false negative.
 * A local username segment is limited to Unicode letters, ASCII digits, `.`, `_`, and `-` and
   cannot be entirely numeric. Slash-form anchors preceded by a letter or digit are treated as
   URL routes rather than local paths. Usernames outside that character set, numeric usernames,
-  paths embedded in ambiguous route text, names beginning with `your` or `my`, and common CI,
+  paths embedded in ambiguous route text, relative documentation links, file-like segments,
+  `.docset` bundles, numbered placeholders, names beginning with `your` or `my`, and common CI,
   cloud, container, or documentation identities are intentional false negatives.
-* Canonical MAC examples and values beginning with `DEADBEEF` stay visible because they are
-  overwhelmingly documentation fixtures; a real interface using one is an intentional false
-  negative.
+* Canonical MAC examples, sequential hexadecimal fixtures, values with five trailing zero octets,
+  and values beginning with `DEADBEEF` stay visible because they are overwhelmingly documentation
+  fixtures; a real interface using one is an intentional false negative.
 * Dot-separated international phone forms stay visible to avoid decimal-expression matches.
-  Repeated or sequential placeholder digits and diff-line markers also stay visible; real phone
-  values using those forms are intentional false negatives.
+  Country-code-zero values, date shapes, repeated/sequential placeholders, common `555` fixtures,
+  and diff-line markers also stay visible; real phone values using those forms are intentional
+  false negatives.
 
 ## Limits and fail-closed behavior
 
 Only decoded text files are inspected. Binary files are not inspected. A selected text file
-larger than the configured 16 MiB inspection limit cannot be silently included in a strict
-redacted output. Read, decoding, detector-budget, and inspection failures stop strict output
-instead of emitting uninspected text.
+larger than the configured 16 MiB inspection limit or using an unsupported encoding cannot be
+silently included in a strict redacted output. Its content is withheld while analysis continues;
+the UI and CLI report the count, path, and reason for every such file, and project copies record
+the same omissions in their notice. Decoder and size limitations therefore cannot leak raw or
+partially inspected text. Detector-budget and other inspection failures still stop strict output.
 
 The detector uses a feature prescan and starts only rule scanners whose required characters
 or path anchors occur in the file. Findings share the same per-file and per-output budgets as

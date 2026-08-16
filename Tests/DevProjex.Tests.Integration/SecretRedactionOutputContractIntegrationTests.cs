@@ -783,6 +783,105 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.False(prepared.GetFile(Path.Combine(sourceRoot, "contact.txt")).IsUnscannable);
 	}
 
+	[Theory]
+	[InlineData(true, false)]
+	[InlineData(false, true)]
+	public async Task UnsupportedEncoding_IsReportedAndWithheldAcrossContextFolderAndZip(
+		bool hideSecrets,
+		bool hidePrivateData)
+	{
+		const string legacySentinel = "LEGACY-CONTENT-MUST-NOT-ESCAPE";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("unsupported-encoding-project");
+		var exportRoot = temporary.CreateDirectory("unsupported-encoding-exports");
+		var normalPath = temporary.CreateFile(
+			"unsupported-encoding-project/config.txt",
+			$"token={GithubToken}\nowner={PrivateEmail}\n");
+		var legacyPath = Path.Combine(sourceRoot, "legacy-windows-1250.txt");
+		var legacyPrefix = Encoding.ASCII.GetBytes(legacySentinel + "-");
+		File.WriteAllBytes(legacyPath, [.. legacyPrefix, 0xE9, .. Encoding.ASCII.GetBytes("-END")]);
+		var binaryPath = Path.Combine(sourceRoot, "payload.bin");
+		var binaryBytes = new byte[] { 0x00, 0x01, 0xFF, 0x42 };
+		File.WriteAllBytes(binaryPath, binaryBytes);
+		using var workspace = new Workspace(
+			temporary,
+			sourceRoot,
+			exportRoot,
+			binaryPath,
+			ownsTemporary: false);
+		var analyzer = new FileContentAnalyzer();
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			CreateDetector(),
+			new PrivateDataDetector());
+		var features = SecretRedactionFeatureSelection.Resolve(hideSecrets, hidePrivateData);
+		var redaction = new SecretRedactionContext(sourceRoot, session, features);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets, hidePrivateData);
+		var preparer = new SecretRedactionOutputPreparer(analyzer);
+
+		var analysis = await preparer.AnalyzeAsync(
+			redaction,
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+		var unscannable = Assert.Single(analysis.UnscannableFiles);
+		Assert.Equal(legacyPath, unscannable.Path);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding, unscannable.Classification);
+		Assert.Equal(1, analysis.SkippedFileCount);
+		Assert.Equal(0, analysis.FailedFileCount);
+
+		var contextService = new ProjectContextDocumentService(
+			new TreeExportService(),
+			analyzer,
+			secretRedactionSession: session);
+		using var contextDestination = new MemoryStream();
+		var contextReport = await contextService.WriteCompleteWithReportAsync(
+			plan,
+			ProjectContextView.TreeContent,
+			ProjectContextDocumentFormat.Text,
+			contextDestination,
+			TestContext.Current.CancellationToken,
+			plain: true);
+		var contextText = Encoding.UTF8.GetString(contextDestination.ToArray());
+		Assert.Equal(FileContentClassification.UnsupportedEncoding,
+			Assert.Single(contextReport.UnscannableFiles).Classification);
+		Assert.Contains("DEVPROJEX_REDACTED[", contextText, StringComparison.Ordinal);
+		Assert.DoesNotContain(legacySentinel, contextText, StringComparison.Ordinal);
+
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder,
+			hideSecrets,
+			hidePrivateData);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding,
+			Assert.Single(folder.UnscannableFiles!).Classification);
+		Assert.False(File.Exists(Path.Combine(folder.DestinationPath, Path.GetFileName(legacyPath))));
+		Assert.Equal(binaryBytes, File.ReadAllBytes(Path.Combine(folder.DestinationPath, "payload.bin")));
+		Assert.Contains(
+			"DEVPROJEX_REDACTED[",
+			File.ReadAllText(Path.Combine(folder.DestinationPath, Path.GetFileName(normalPath))),
+			StringComparison.Ordinal);
+
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip,
+			hideSecrets,
+			hidePrivateData);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding,
+			Assert.Single(zip.UnscannableFiles!).Classification);
+		using var archive = ZipFile.OpenRead(zip.DestinationPath);
+		Assert.Null(archive.GetEntry(Path.GetFileName(legacyPath)));
+		Assert.Equal(binaryBytes, ReadZipBytes(archive, "payload.bin"));
+		Assert.Contains(
+			"DEVPROJEX_REDACTED[",
+			ReadZipText(archive, Path.GetFileName(normalPath)),
+			StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task StripComments_RemovesACommentSecretBeforeDetectionAndKeepsModeCachesIsolated()
 	{
@@ -1973,6 +2072,16 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			item.FullName.EndsWith(suffix, StringComparison.Ordinal));
 		using var reader = new StreamReader(entry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
 		return reader.ReadToEnd();
+	}
+
+	private static byte[] ReadZipBytes(ZipArchive archive, string suffix)
+	{
+		var entry = Assert.Single(archive.Entries, item =>
+			item.FullName.EndsWith(suffix, StringComparison.Ordinal));
+		using var source = entry.Open();
+		using var destination = new MemoryStream();
+		source.CopyTo(destination);
+		return destination.ToArray();
 	}
 
 	private static void AssertDecision(string text)

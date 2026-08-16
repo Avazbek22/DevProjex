@@ -4186,8 +4186,12 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
 			await UiTestDriver.ClickApplySettingsAsync(window);
-			var expectedStatus =
-				$"Found: 1. Hidden: 1.{Environment.NewLine}Files larger than 16 MiB were not checked: 1.";
+			var expectedStatus = string.Join(
+				Environment.NewLine,
+				"Found: 1. Hidden: 1.",
+				"Files larger than 16 MiB were not checked: 1.",
+				"Files excluded from content output: 1.",
+				$"{Path.Combine(project.RootPath, "README.md")} - Too large for bounded content inspection.");
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => string.Equals(viewModel.SettingsSecretsNotice, expectedStatus, StringComparison.Ordinal),

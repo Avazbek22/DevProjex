@@ -1738,6 +1738,7 @@ public sealed class SecretRedactionSession : IDisposable
 		string projectRoot,
 		string filePath,
 		SecretFileMetadata metadata,
+		FileContentClassification classification,
 		ISecretDetectionScope detectorScope,
 		bool includeAutomaticDetection,
 		int markedSecretsRevision,
@@ -1745,6 +1746,11 @@ public sealed class SecretRedactionSession : IDisposable
 		long generation,
 		CancellationToken generationToken)
 	{
+		if (classification is not (FileContentClassification.TooLarge or
+		    FileContentClassification.UnsupportedEncoding))
+		{
+			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
+		}
 		var normalizedPath = Path.GetFullPath(filePath);
 		var relativePath = NormalizeRelativePath(projectRoot, filePath);
 		var rulesIdentity = GetRulesIdentity(
@@ -1763,7 +1769,8 @@ public sealed class SecretRedactionSession : IDisposable
 			Findings: [],
 			ApproximateRetainedBytes: 96 +
 			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length) *
-			                          sizeof(char));
+			                          sizeof(char),
+			UnscannableClassification: classification);
 		lock (_sync)
 		{
 			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
@@ -2221,7 +2228,10 @@ public sealed class SecretRedactionScope
 			_generationToken);
 	}
 
-	internal SecretScanCacheEntry StoreUnscannable(string filePath, SecretFileMetadata metadata)
+	internal SecretScanCacheEntry StoreUnscannable(
+		string filePath,
+		SecretFileMetadata metadata,
+		FileContentClassification classification)
 	{
 		EnsureActive();
 		var inspectionMode = GetContentInspectionMode(filePath);
@@ -2232,6 +2242,7 @@ public sealed class SecretRedactionScope
 			_projectRoot,
 			filePath,
 			metadata,
+			classification,
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
@@ -2240,7 +2251,10 @@ public sealed class SecretRedactionScope
 			_generationToken);
 	}
 
-	internal void AnalyzeUnscannable(string filePath, SecretFileMetadata metadata)
+	internal void AnalyzeUnscannable(
+		string filePath,
+		SecretFileMetadata metadata,
+		FileContentClassification classification)
 	{
 		EnsureActive();
 		var inspectionMode = GetContentInspectionMode(filePath);
@@ -2251,6 +2265,7 @@ public sealed class SecretRedactionScope
 			_projectRoot,
 			filePath,
 			metadata,
+			classification,
 			_detectorScope,
 			inspectionMode == SecretContentInspectionMode.AutomaticAndManual,
 			_markedSecretsRevision,
@@ -2396,9 +2411,12 @@ public sealed class SecretRedactionScope
 	internal IDisposable TrackFullContentBuffer() => _session.TrackFullContentBuffer();
 
 	public SecretRedactionSnapshot Complete()
-		=> Complete(skippedFileCount: 0, failedFileCount: 0);
+		=> Complete(skippedFileCount: 0, failedFileCount: 0, unscannableFiles: null);
 
-	internal SecretRedactionSnapshot Complete(int skippedFileCount, int failedFileCount)
+	internal SecretRedactionSnapshot Complete(
+		int skippedFileCount,
+		int failedFileCount,
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null)
 	{
 		EnterOrderedConsumer();
 		try
@@ -2407,6 +2425,9 @@ public sealed class SecretRedactionScope
 			ArgumentOutOfRangeException.ThrowIfNegative(skippedFileCount);
 			ArgumentOutOfRangeException.ThrowIfNegative(failedFileCount);
 			_completed = true;
+			var capturedUnscannableFiles = unscannableFiles is { Count: > 0 }
+				? unscannableFiles.ToArray()
+				: [];
 			var snapshot = new SecretRedactionSnapshot(
 				SelectionKey,
 				_detectedCount,
@@ -2416,7 +2437,10 @@ public sealed class SecretRedactionScope
 				skippedFileCount,
 				failedFileCount,
 				_privateDataDetectedCount,
-				_privateDataRedactedCount);
+				_privateDataRedactedCount)
+			{
+				UnscannableFiles = capturedUnscannableFiles
+			};
 			_session.Publish(
 				snapshot,
 				_overrideRevision,

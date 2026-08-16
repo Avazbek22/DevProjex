@@ -82,7 +82,8 @@ public sealed class AnalyzeCommandHandler(
 						compression.BodyTransformedFiles,
 						compression.CommentTransformedFiles,
 						compression.BlankLineTransformedFiles)
-					: null
+					: null,
+				UnscannableFiles = prepared.UnscannableFiles
 			};
 		}
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
@@ -241,6 +242,12 @@ internal static class AnalysisTextFormatter
 					localization["Terminal.Analysis.PrivateDataScanNotice"],
 					localization["PrivateDataRedaction.NoFindingsNotice"]));
 			}
+		}
+		if (plan.UnscannableFiles is { Count: > 0 } unscannableFiles)
+		{
+			rows.Add(new AnalysisTextRow(
+				localization.Format("Content.Redaction.UnscannableFiles", unscannableFiles.Count),
+				UnscannableFileOutput.FormatSummary(plan.SourceRoot, unscannableFiles, localization)));
 		}
 		if (plan.Compression is { } compression)
 		{

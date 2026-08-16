@@ -38,13 +38,14 @@ public sealed class ExportContextCommandHandler(
 
 		if (request.DryRun)
 		{
+			SecretRedactionSnapshot? redactionSnapshot = null;
 			var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
 				plan.Selection.HideSecrets == true,
 				plan.Selection.HidePrivateData == true);
 			if (request.View is ProjectContextView.Content or ProjectContextView.TreeContent &&
 			    redactionFeatures != SecretRedactionFeatures.None)
 			{
-				await services.SecretRedactionOutputPreparer
+				redactionSnapshot = await services.SecretRedactionOutputPreparer
 					.AnalyzeAsync(
 						new SecretRedactionContext(
 							plan.SourceRoot,
@@ -58,19 +59,27 @@ public sealed class ExportContextCommandHandler(
 				environment,
 				services.Localization,
 				requestedOutputPath ?? "-");
+			if (redactionSnapshot is not null)
+			{
+				UnscannableFileOutput.Write(
+					environment.Error,
+					plan.SourceRoot,
+					redactionSnapshot.UnscannableFiles,
+					services.Localization);
+			}
 			return CommandLineExitCodes.Success;
 		}
 
 		if (request.OutputPath is null or "-")
 		{
-			await status.RunAsync(
+			var report = await status.RunAsync(
 					services.Localization["Terminal.Status.BuildingContext"],
 					async () =>
 					{
 						await using var destination = new Utf8TextWriterStream(
 							environment.Output,
 							cancellationToken);
-						await services.ContextDocumentService.WriteCompleteAsync(
+						var writeResult = await services.ContextDocumentService.WriteCompleteWithReportAsync(
 								plan,
 								request.View,
 								request.Format,
@@ -79,26 +88,34 @@ public sealed class ExportContextCommandHandler(
 								plain: request.Output.Plain)
 							.ConfigureAwait(false);
 						await destination.CompleteAsync(cancellationToken).ConfigureAwait(false);
-						return true;
+						return writeResult;
 					})
 				.ConfigureAwait(false);
 			await environment.Output.WriteLineAsync().ConfigureAwait(false);
+			UnscannableFileOutput.Write(
+				environment.Error,
+				plan.SourceRoot,
+				report.UnscannableFiles,
+				services.Localization);
 			return CommandLineExitCodes.Success;
 		}
 
+		ProjectContextWriteResult? writeReport = null;
 		var writtenPath = await status.RunAsync(
 				services.Localization["Terminal.Status.BuildingContext"],
 				() => AtomicOutputWriter.WriteAsync(
 					requestedOutputPath!,
 					request.Force,
-					(destination, token) =>
-						services.ContextDocumentService.WriteCompleteAsync(
+					async (destination, token) =>
+					{
+						writeReport = await services.ContextDocumentService.WriteCompleteWithReportAsync(
 							plan,
 							request.View,
 							request.Format,
 							destination,
 							token,
-							plain: request.Output.Plain),
+							plain: request.Output.Plain).ConfigureAwait(false);
+					},
 					cancellationToken,
 					path => ExactOutputDestinationValidator.ValidateContext(
 						plan.SourceRoot,
@@ -106,6 +123,14 @@ public sealed class ExportContextCommandHandler(
 						request.Force)))
 			.ConfigureAwait(false);
 		environment.Output.WriteLine(writtenPath);
+		if (writeReport is not null)
+		{
+			UnscannableFileOutput.Write(
+				environment.Error,
+				plan.SourceRoot,
+				writeReport.UnscannableFiles,
+				services.Localization);
+		}
 		return CommandLineExitCodes.Success;
 	}
 }

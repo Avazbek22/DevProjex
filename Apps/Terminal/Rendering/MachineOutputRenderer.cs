@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Nodes;
 using DevProjex.Application.Secrets;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Execution;
 
 namespace DevProjex.Terminal.Rendering;
 
@@ -114,6 +115,19 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 					["bodyTransformedFiles"] = compression.BodyTransformedFiles,
 					["commentTransformedFiles"] = compression.CommentTransformedFiles,
 					["blankLineTransformedFiles"] = compression.BlankLineTransformedFiles
+				};
+			}
+			if (plan.UnscannableFiles is { Count: > 0 } unscannableFiles)
+			{
+				root["contentInspection"] = new JsonObject
+				{
+					["unscannableCount"] = unscannableFiles.Count,
+					["unscannableFiles"] = new JsonArray(unscannableFiles.Select(file =>
+						(JsonNode)new JsonObject
+						{
+							["path"] = Path.GetRelativePath(plan.SourceRoot, file.Path).Replace('\\', '/'),
+							["reason"] = UnscannableFileOutput.ToReasonToken(file.Classification)
+						}).ToArray())
 				};
 			}
 			json = root.ToJsonString(JsonOptions);
