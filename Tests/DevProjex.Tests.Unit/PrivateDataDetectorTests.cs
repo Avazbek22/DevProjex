@@ -148,6 +148,7 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("PATENTS", "ivan.petrov@corp.internal")]
 	[InlineData("THIRD-PARTY-NOTICES", "ivan.petrov@corp.internal")]
 	[InlineData("Citation.cff", "ivan.petrov@corp.internal")]
+	[InlineData("vendor/COPYRIGHT", "ivan.petrov@corp.internal")]
 	[InlineData(".mailmap", "ivan.petrov@corp.internal")]
 	public void Detect_Email_IsDisabledInAttributionFiles(string path, string content)
 	{
@@ -163,13 +164,15 @@ public sealed class PrivateDataDetectorTests
 	}
 
 	[Fact]
-	public void Detect_AttributionFileDisablesOnlyEmailRule()
+	public void Detect_AttributionFileDisablesEmailAndPhoneRulesOnly()
 	{
 		const string email = "ivan.petrov@corp.internal";
+		const string phone = "+79261234567";
 		const string address = "51.15.23.7";
-		var findings = Detect("NOTICE.md", $"{email} {address}");
+		var findings = Detect("NOTICE.md", $"{email} {phone} {address}");
 
 		Assert.DoesNotContain(findings, static finding => finding.RuleId == "email");
+		Assert.DoesNotContain(findings, static finding => finding.RuleId == "phone-number");
 		Assert.Contains(findings, finding => finding.RuleId == "ipv4" && finding.Value == address);
 	}
 
@@ -184,6 +187,40 @@ public sealed class PrivateDataDetectorTests
 		Assert.DoesNotContain(
 			Detect($"{localPart}@company.com"),
 			static finding => finding.RuleId == "email");
+	}
+
+	[Theory]
+	[InlineData("to")]
+	[InlineData("cc")]
+	[InlineData("bcc")]
+	[InlineData("from")]
+	[InlineData("reply")]
+	[InlineData("sender")]
+	[InlineData("recipient")]
+	[InlineData("joe")]
+	public void Detect_Email_MessageRoleMailboxesAreKept(string localPart)
+	{
+		Assert.DoesNotContain(
+			Detect($"{localPart}@company.com"),
+			static finding => finding.RuleId == "email");
+	}
+
+	[Theory]
+	[InlineData("a@a.com")]
+	[InlineData("a@b.com")]
+	[InlineData("b@b.com")]
+	[InlineData("d@foo.com")]
+	public void Detect_Email_RejectsSingleCharacterLocalParts(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "email");
+	}
+
+	[Fact]
+	public void Detect_Email_SingleCharacterGuardPreservesTwoCharacterMailbox()
+	{
+		const string email = "al@company.com";
+
+		Assert.Equal(email, FindSingle(email, "email").Value);
 	}
 
 	[Fact]
@@ -240,9 +277,50 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("// written by Jane Doe <jane@company.com>")]
 	[InlineData("E-mail: jane@company.com")]
 	[InlineData("Send comments to jane@company.com")]
+	[InlineData("Email: cyan@fb.com")]
+	[InlineData("Conversion to float by Ian Lance Taylor, Cygnus Support, ian@cygnus.com.")]
+	[InlineData("#define PACKAGE_BUGREPORT \"mingw-w64-public@lists.sourceforge.net\"")]
+	[InlineData("Please forward all changes to rmk@arm.linux.org.uk")]
+	[InlineData("Please inform tcpdump-workers@lists.tcpdump.org if you use any")]
+	[InlineData("last edit: 1999/11/05 gwyn@arl.mil")]
 	public void Detect_Email_RejectsNarrowAttributionPhrases(string content)
 	{
 		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "email");
+	}
+
+	[Fact]
+	public void Detect_Email_RejectsLicenseBannerAttribution()
+	{
+		const string content =
+			"/* Copyright (c) 1994 Carnegie-Mellon University. All rights reserved.\n" +
+			" * Permission to use, copy, modify and distribute this software is hereby granted.\n" +
+			" * Software Distribution Coordinator or Software.Distribution@CS.CMU.EDU\n */";
+
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "email");
+	}
+
+	[Fact]
+	public void Detect_Email_RejectsSpdxCopyrightContinuation()
+	{
+		const string content =
+			"/* SPDX-License-Identifier: GPL-2.0\n" +
+			" * Copyright 2001 Intel (first.person@intel.com,\n" +
+			" * second.person@intel.com)\n */";
+
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "email");
+	}
+
+	[Fact]
+	public void Detect_ClosedLicenseBannerDoesNotSuppressOperationalValues()
+	{
+		const string email = "ivan.petrov@corp.local";
+		const string phone = "+79261234567";
+		var findings = Detect(
+			"/* Copyright 2026 Example. Permission to use this software is granted. */\n" +
+			$"*ptr = \"{email}\"; phone={phone}");
+
+		Assert.Contains(findings, finding => finding.RuleId == "email" && finding.Value == email);
+		Assert.Contains(findings, finding => finding.RuleId == "phone-number" && finding.Value == phone);
 	}
 
 	[Fact]
@@ -516,6 +594,89 @@ public sealed class PrivateDataDetectorTests
 	}
 
 	[Theory]
+	[InlineData("2.5.4.3")]
+	[InlineData("2.5.4.11")]
+	[InlineData("2.5.29.17")]
+	[InlineData("1.3.6.1")]
+	[InlineData("2.23.140.1")]
+	[InlineData("1.2.840.113549")]
+	public void Detect_Ipv4_RejectsAsn1ObjectIdentifiers(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
+	}
+
+	[Fact]
+	public void Detect_Ipv4_Asn1ObjectIdentifierRangesDoNotSuppressAdjacentPublicRange()
+	{
+		const string address = "2.6.4.3";
+
+		Assert.Equal(address, FindSingle(address, "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("$Id: lvm.h,v 2.5.1.1 2007/12/27 13:02:25 roberto Exp $")]
+	[InlineData("paragraph 4.7.20.1")]
+	[InlineData("clause 27.7.2.6")]
+	[InlineData("4.7.20.1 paragraph details")]
+	[InlineData("27.7.2.6 clause requirements")]
+	public void Detect_Ipv4_RejectsRevisionAndBidirectionalStandardContexts(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
+	}
+
+	[Theory]
+	[InlineData("// 27.7.2.6 Formatted output")]
+	[InlineData("/* 20.7.2.4 [util.smartptr]")]
+	[InlineData(" * 4.7.20.1 JVMS type annotation")]
+	[InlineData("/* C99 7.18.1.1 Exact-width integer types.")]
+	[InlineData("* functions. IEEE 802.3-2022 33.2.4.4 Variables")]
+	[InlineData("/* 7.12.3.1 */")]
+	[InlineData("// 2.2.1.2 - Mapped character")]
+	[InlineData("- [2.3.1.1. System PATH fallback](#2311-system-path-fallback)")]
+	[InlineData("As with [3.2.2.1](#3221-usable-as-tools), use the dependency")]
+	[InlineData(" * 4.7.20.1</a>).")]
+	[InlineData("Kernels 2.6.32.60 and newer are supported")]
+	[InlineData("* in an overload condition (see 33.2.7.6) for at least TCUT")]
+	[InlineData("char creation_date [ISODCL (814, 830)]; /* 8.4.26.1 */")]
+	[InlineData("#define szOID_DSALG_CRPT \"2.5.8.1\"")]
+	[InlineData("/* 23.1.6.2 (1) ACL Entry manipulation */")]
+	[InlineData("// 23.3.5.1 constructors:")]
+	[InlineData("/* 7.12.3.1 int fpclassify(real-floating x) */")]
+	public void Detect_Ipv4_RejectsCommentedStandardSectionHeadings(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
+	}
+
+	[Theory]
+	[InlineData("# server 51.15.23.7 Production")]
+	[InlineData("51.15.23.7 Production")]
+	[InlineData("see 51.15.23.7 Production")]
+	[InlineData("standard endpoint 51.15.23.7 Production")]
+	[InlineData("ACL gateway 51.15.23.7 Production")]
+	public void Detect_Ipv4_SectionHeadingGuardPreservesOperationalAddresses(string content)
+	{
+		const string address = "51.15.23.7";
+
+		Assert.Equal(address, FindSingle(content, "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("9.8.7.6")]
+	[InlineData("43.42.41.40")]
+	public void Detect_Ipv4_RejectsStrictlyDescendingExamples(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
+	}
+
+	[Fact]
+	public void Detect_Ipv4_DescendingExampleGuardPreservesNonSequentialAddress()
+	{
+		const string address = "9.8.7.5";
+
+		Assert.Equal(address, FindSingle(address, "ipv4").Value);
+	}
+
+	[Theory]
 	[InlineData("path M .45,71 51.15.23.7 Z")]
 	[InlineData("port .5 near 51.15.23.7")]
 	public void Detect_Ipv4_RejectsCandidatesNearNakedFractions(string content)
@@ -643,7 +804,13 @@ public sealed class PrivateDataDetectorTests
 			"vsts", "appveyor", "gitlab-runner", "circleci", "travis", "buildbot", "teamcity", "bamboo",
 			"ubuntu", "ec2-user", "azureuser", "centos", "debian", "fedora", "rocky", "alpine", "arch",
 			"core", "opc", "pi", "node", "git", "deploy", "app", "jovyan", "sagemaker-user", "postgres",
-			"mysql", "docker", "WDAGUtilityAccount", "defaultuser0", "alice", "bob", "jdoe", "jsmith"
+			"mysql", "docker", "WDAGUtilityAccount", "defaultuser0", "alice", "bob", "jdoe", "jsmith",
+			"www", "www-data", "html", "images", "media", "img", "files", "data", "shared", "common",
+			"private", "backup", "tmp", "temp", "cache", "logs", "log", "srv", "ftp", "sftp", "anon",
+			"absolute", "relative", "opam", "linuxbrew", "brew", "nginx", "apache", "httpd", "redis",
+			"mongo", "mongodb", "rabbitmq", "kafka", "elastic", "elasticsearch", "kibana", "grafana",
+			"prometheus", "laravel", "symfony", "django", "rails", "flask", "spring", "deno", "bun",
+			"zig", "dune", "cargo", "gradle", "maven", "composer"
 		};
 
 		foreach (var identity in identities)
@@ -652,6 +819,22 @@ public sealed class PrivateDataDetectorTests
 				Detect($"/home/{identity}/project"),
 				static finding => finding.RuleId == "local-user");
 		}
+	}
+
+	[Theory]
+	[InlineData("/home/polls.com/project")]
+	[InlineData("/home/special.polls.com/project")]
+	public void Detect_LocalUser_RejectsDomainLikeSegments(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "local-user");
+	}
+
+	[Theory]
+	[InlineData("/home/avazb", "avazb")]
+	[InlineData("/Users/j.doe", "j.doe")]
+	public void Detect_LocalUser_DomainGuardPreservesUserNames(string content, string expected)
+	{
+		Assert.Equal(expected, FindSingle(content, "local-user").Value);
 	}
 
 	[Theory]
@@ -781,6 +964,22 @@ public sealed class PrivateDataDetectorTests
 	public void Detect_Ipv6_RejectsScopeOperatorsAndLetterOnlyCandidates(string content)
 	{
 		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv6");
+	}
+
+	[Fact]
+	public void Detect_Ipv6_RejectsRstYearTarget()
+	{
+		const string content = "entries published in 2008::";
+
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv6");
+	}
+
+	[Theory]
+	[InlineData("2600::")]
+	[InlineData("2008::1")]
+	public void Detect_Ipv6_RstYearGuardPreservesOperationalAddresses(string address)
+	{
+		Assert.Equal(address, FindSingle(address, "ipv6").Value);
 	}
 
 	[Theory]
@@ -964,6 +1163,37 @@ public sealed class PrivateDataDetectorTests
 	}
 
 	[Theory]
+	[InlineData("+2147483647")]
+	[InlineData("+2147483648")]
+	[InlineData("+100000000")]
+	public void Detect_Phone_RejectsNumericTypeBoundaries(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "phone-number");
+	}
+
+	[Fact]
+	public void Detect_Phone_NumericBoundaryGuardPreservesOperationalNumber()
+	{
+		const string phone = "+79261234567";
+
+		Assert.Equal(phone, FindSingle(phone, "phone-number").Value);
+	}
+
+	[Theory]
+	[InlineData(
+		"/* Copyright 1998 Marshall Kirk McKusick. All Rights Reserved.\n" +
+		" * Further information can be obtained from:\n" +
+		" * Berkeley, CA 94709-1608 +1-510-843-9542\n */")]
+	[InlineData(
+		"/* Copyright (c) 1990 Regents of The University of Michigan.\n" +
+		" * Permission to use, copy, modify, and distribute this software is hereby granted.\n" +
+		" * Research Systems Unix Group\n * +1-313-764-2278\n */")]
+	public void Detect_Phone_RejectsLicenseBannerAttribution(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "phone-number");
+	}
+
+	[Theory]
 	[InlineData("${ 93.184.216.34 }", "ipv4")]
 	[InlineData("$(2001:4860::1)", "ipv6")]
 	[InlineData("{{AA:BB:CC:12:34:56}}", "mac-address")]
@@ -1009,6 +1239,8 @@ public sealed class PrivateDataDetectorTests
 	[Theory]
 	[InlineData("docs/CHANGELOG.md", "## 1.2.3.4", "ipv4")]
 	[InlineData("legal/LICENSE.txt", "ivan.petrov@corp.internal", "email")]
+	[InlineData("legal/COPYRIGHT", "ivan.petrov@corp.internal", "email")]
+	[InlineData("legal/NOTICE.txt", "+79261234567", "phone-number")]
 	[InlineData("changes/update.patch", "+79261234567", "phone-number")]
 	[InlineData("dependencies/package-lock.json", "1.2.3.5", "ipv4")]
 	[InlineData("docs/Framework.docset/page.html", "/home/maintainer", "local-user")]
@@ -1061,7 +1293,7 @@ public sealed class PrivateDataDetectorTests
 		var budget = new SecretFileInspectionBudget();
 		var findings = Detector.Detect(
 			"data.txt",
-			("a" + "@corp.io b" + "@corp.io 93.184." + "216.34").AsSpan(),
+			("amy" + "@corp.io ben" + "@corp.io 93.184." + "216.34").AsSpan(),
 			budget,
 			TestContext.Current.CancellationToken);
 

@@ -61,7 +61,8 @@ IPv4 exclusions:
 * the public resolver addresses `8.8.8.8`, `8.8.4.4`, `1.1.1.1`, `1.0.0.1`, `9.9.9.9`,
   `149.112.112.112`, `208.67.222.222`, and `208.67.220.220`.
 * canonical repeated or sequential examples such as `2.2.2.2` and `1.2.3.4`, version syntax,
-  leading-zero octets, and values in recognized dependency lock files.
+  leading-zero octets, ASN.1 OID prefixes, RCS revisions, and values in recognized dependency
+  lock files.
 
 IPv6 exclusions:
 
@@ -69,6 +70,7 @@ IPv6 exclusions:
 * the documentation prefixes `2001:db8::/32` and `3fff::/20`;
 * IANA special-purpose NAT64, discard, Teredo, ORCHID, 6to4, SRv6, reserved, and deprecated
   site-local ranges.
+* four-digit `1900::` through `2100::` forms without an address suffix, which are RST year targets.
 
 Malformed octets and address-like substrings inside longer identifiers or dotted sequences
 are not treated as addresses.
@@ -86,7 +88,7 @@ system, and CI identities stay visible: `Public`, `Default`, `Default User`, `Al
 `user`, `username`, `example`, `demo`, `test`, `runner`, `runneradmin`,
 `ContainerAdministrator`, `ContainerUser`, `vagrant`, `jenkins`, and `root`.
 Common CI, cloud, container, and documentation identities such as `gitlab-runner`, `ubuntu`,
-`ec2-user`, `postgres`, `alice`, and `bob` also stay visible.
+`ec2-user`, `postgres`, `redis`, `nginx`, `laravel`, `alice`, and `bob` also stay visible.
 Environment references such as `%USERPROFILE%` and the `~/` shorthand are outside this rule.
 Relative documentation links, file-like path segments, numbered placeholders such as `user1`,
 and paths inside `.docset` bundles are also kept.
@@ -111,6 +113,7 @@ Documented fictional ranges stay visible:
 * NANP `+1-XXX-555-01XX`;
 * UK drama ranges beginning `+44 7700 900` or `+44 20 7946 0`.
 * common `555` fixtures and sequential NANP placeholders.
+* numeric type boundaries (`2^n`, `2^n - 1`, and `10^n`) and published license contacts.
 
 Short timezone offsets, diff hunk coordinates, `C++` tokens, and numbers longer than 15
 digits do not match. Values with country code zero, date-shaped values, repeated-digit and
@@ -140,7 +143,10 @@ common project metadata:
   octets contain leading zeroes stay visible because they usually represent product versions,
   canonical examples, or network identifiers rather than hosts. Adjacent package constraint
   operators and bounded same-line version/specification keywords also keep version-shaped values
-  visible. Changelog-family and dependency lock files disable IPv4 matching because versions
+  visible. Standard section headings inside comments are recognized when the first component is
+  at most 43; this covers the practical C++/POSIX/JVMS section range but intentionally keeps some
+  commented addresses from `1.0.0.0/8` through `43.255.255.255` visible. Changelog-family and
+  dependency lock files disable IPv4 matching because versions
   dominate there. SVG asset files and SVG JSON catalogs disable IPv4 matching, while a nearby
   naked fraction is treated as SVG/path geometry; consequently a real address in an SVG asset or
   near text such as `.5` is an intentional false negative.
@@ -150,9 +156,12 @@ common project metadata:
   extensions are substantially more common in project content. Two-letter country-code labels
   remain eligible; longer labels must be in the detector's bounded public/internal TLD policy.
 * Placeholder local parts, every local part beginning with `your`, and organizational role
-  mailboxes such as `admin`, `owner`, `support`, `security`, `dev`, and `qa` stay visible.
+  mailboxes such as `admin`, `owner`, `support`, `security`, `sender`, `recipient`, `dev`, and `qa`
+  stay visible. Single-character local parts are treated as test syntax.
   Attribution/contact files, package manifests, and same-line attribution contexts disable email
-  matching because those addresses are intentionally published. UUID Message-IDs, language
+  matching because those addresses are intentionally published. Bounded license banners require
+  both copyright and a strong license phrase before suppressing published email and phone contacts.
+  UUID Message-IDs, language
   binder/call syntax, URI authority userinfo, and malformed multi-`@` tokens are not treated as
   email. A real personal address using one of these forms is therefore an intentional false
   negative.
@@ -165,15 +174,16 @@ common project metadata:
   cannot be entirely numeric. Slash-form anchors preceded by a letter or digit are treated as
   URL routes rather than local paths. Usernames outside that character set, numeric usernames,
   paths embedded in ambiguous route text, relative documentation links, file-like segments,
-  `.docset` bundles, numbered placeholders, names beginning with `your` or `my`, and common CI,
-  cloud, container, or documentation identities are intentional false negatives.
+  domain-like home segments, `.docset` bundles, numbered placeholders, names beginning with `your`
+  or `my`, and common CI, cloud, container, framework, or documentation identities are intentional
+  false negatives.
 * Canonical MAC examples, sequential hexadecimal fixtures, values with five trailing zero octets,
   and values beginning with `DEADBEEF` stay visible because they are overwhelmingly documentation
   fixtures; a real interface using one is an intentional false negative.
 * Dot-separated international phone forms stay visible to avoid decimal-expression matches.
   Country-code-zero values, date shapes, repeated/sequential placeholders, common `555` fixtures,
-  and diff-line markers also stay visible; real phone values using those forms are intentional
-  false negatives.
+  numeric type boundaries, license attribution, and diff-line markers also stay visible; real phone
+  values using those forms are intentional false negatives.
 
 ## Limits and fail-closed behavior
 
