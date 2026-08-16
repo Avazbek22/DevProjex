@@ -23,7 +23,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 	private static readonly string[] Ipv4VersionContextKeywords =
 	[
 		"version", "tag", "release", "build", "packages", "sec", "section", "chapter", "ch.", "ch", "rfc",
-		"jvms", "spec", "syntax", "$id:", ",v ", "paragraph", "clause", "kernel"
+		"jvms", "spec", "syntax", "$id:", ",v ", "paragraph", "clause", "kernel", "runtime", "otp"
 	];
 
 	private static readonly string[] Ipv4StandardReferenceContextKeywords =
@@ -54,12 +54,12 @@ public sealed class PrivateDataDetector : ISecretDetector
 
 	private static readonly string[] EmailDisabledFileNames =
 	[
-		"composer.json", "package.json", "pyproject.toml", "pom.xml", "Cargo.toml"
+		"composer.json", "composer.lock", "package.json", "pyproject.toml", "pom.xml", "Cargo.toml"
 	];
 
 	private static readonly string[] EmailDisabledFileExtensions =
 	[
-		".gemspec", ".podspec", ".nuspec"
+		".gemspec", ".podspec", ".nuspec", ".mdoc"
 	];
 
 	private static readonly string[] PopularEmailTopLevelLabels =
@@ -164,7 +164,8 @@ public sealed class PrivateDataDetector : ISecretDetector
 		"srv", "ftp", "sftp", "anon", "absolute", "relative", "opam", "linuxbrew", "brew", "nginx",
 		"apache", "httpd", "redis", "mongo", "mongodb", "rabbitmq", "kafka", "elastic", "elasticsearch",
 		"kibana", "grafana", "prometheus", "laravel", "symfony", "django", "rails", "flask", "spring",
-		"deno", "bun", "zig", "dune", "cargo", "gradle", "maven", "composer"
+		"deno", "bun", "zig", "dune", "cargo", "gradle", "maven", "composer", "sweet", "build",
+		"you", "projects", "project", "vapor", "foobar", "john", "jane"
 	];
 
 	private static readonly string[] NumberedLocalUserPlaceholderPrefixes =
@@ -175,6 +176,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 	private static readonly string[] NonPrivateEmailLocalParts =
 	[
 		"git",
+		"hg",
 		"noreply",
 		"no-reply",
 		"your",
@@ -426,12 +428,14 @@ public sealed class PrivateDataDetector : ISecretDetector
 		if (fileName.Equals(".mailmap", StringComparison.OrdinalIgnoreCase) ||
 		    StartsWithAny(fileName, EmailDisabledFilePrefixes) ||
 		    EqualsAny(fileName, EmailDisabledFileNames) ||
-		    EndsWithAny(fileName, EmailDisabledFileExtensions))
+		    EndsWithAny(fileName, EmailDisabledFileExtensions) ||
+		    fileName.IndexOf("publish", StringComparison.OrdinalIgnoreCase) >= 0)
 		{
 			enabledFeatures &= ~(PrivateDataFeatureMask.Email | PrivateDataFeatureMask.PhoneNumber);
 		}
 		if (StartsWithAny(fileName, Ipv4DisabledFilePrefixes) || EqualsAny(fileName, Ipv4DisabledFileNames) ||
-		    IsSvgAssetFile(fileName))
+		    fileName.IndexOf("version", StringComparison.OrdinalIgnoreCase) >= 0 ||
+		    IsVersionedReleaseNoteFileName(fileName) || IsSvgAssetFile(fileName))
 			enabledFeatures &= ~PrivateDataFeatureMask.Ipv4;
 		if (fileName.Equals("undocumented.json", StringComparison.OrdinalIgnoreCase) ||
 		    ContainsPathSegmentWithSuffix(repositoryRelativePath, ".docset"))
@@ -502,6 +506,21 @@ public sealed class PrivateDataDetector : ISecretDetector
 		fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
 		fileName.IndexOf("svg", StringComparison.OrdinalIgnoreCase) >= 0;
 
+	private static bool IsVersionedReleaseNoteFileName(ReadOnlySpan<char> fileName)
+	{
+		if (fileName.Length < 5 || fileName[0] is not ('v' or 'V') || !char.IsAsciiDigit(fileName[1]) ||
+		    !fileName.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+		for (var index = 2; index < fileName.Length - ".md".Length; index++)
+		{
+			if (!char.IsLetterOrDigit(fileName[index]) && fileName[index] is not ('_' or '.' or '-'))
+				return false;
+		}
+		return true;
+	}
+
 	private static void DetectEmails(
 		ReadOnlySpan<char> content,
 		List<DetectedSecret> findings,
@@ -528,21 +547,19 @@ public sealed class PrivateDataDetector : ISecretDetector
 			while (domainEnd > absoluteAt + 1 && content[domainEnd - 1] == '.')
 				domainEnd--;
 			var localPart = content[localStart..absoluteAt];
-			var eligibleLocalPart = localStart > 0 && content[localStart - 1] == '\\' &&
-			                        localPart.StartsWith("u003c", StringComparison.OrdinalIgnoreCase)
-				? localPart["u003c".Length..]
-				: localPart;
 
 			if (localStart < absoluteAt && domainEnd > absoluteAt + 1 &&
 			    (localStart == 0 ||
 			     !char.IsLetterOrDigit(content[localStart - 1]) && content[localStart - 1] != '@') &&
 			    (domainEnd == content.Length ||
 			     !char.IsLetterOrDigit(content[domainEnd]) && content[domainEnd] != '@') &&
+			    !HasEmailVariableOrEscapePrefix(content, localStart) &&
+			    !HasMdocMailToPrefix(content, localStart) &&
 			    !IsEmailInUriAuthority(content, localStart) &&
 			    !HasEmailCallOrLambdaSuffix(content, domainEnd) &&
 			    !HasEmailAttributionContext(content, localStart) &&
 			    !HasLicenseAttributionContext(content, localStart) &&
-			    IsEligibleEmailLocalPart(eligibleLocalPart) &&
+			    IsEligibleEmailLocalPart(localPart) &&
 			    IsEligibleEmailDomain(
 				    content[(absoluteAt + 1)..domainEnd],
 				    budget,
@@ -564,6 +581,25 @@ public sealed class PrivateDataDetector : ISecretDetector
 				break;
 			at = absoluteAt + 1 + next;
 		}
+	}
+
+	private static bool HasEmailVariableOrEscapePrefix(ReadOnlySpan<char> content, int localStart) =>
+		localStart > 0 && content[localStart - 1] is '$' or '\\';
+
+	private static bool HasMdocMailToPrefix(ReadOnlySpan<char> content, int localStart)
+	{
+		var lineStart = localStart;
+		while (lineStart > 0 && content[lineStart - 1] is not ('\r' or '\n'))
+			lineStart--;
+		var prefix = content[lineStart..localStart].TrimStart();
+		if (!prefix.StartsWith(".Mt", StringComparison.Ordinal) || prefix.Length == ".Mt".Length)
+			return false;
+		foreach (var character in prefix[".Mt".Length..])
+		{
+			if (!char.IsWhiteSpace(character))
+				return false;
+		}
+		return true;
 	}
 
 	private static bool IsEligibleEmailLocalPart(ReadOnlySpan<char> localPart)
@@ -874,6 +910,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 			}
 			if ((address & byte.MaxValue) != 0 &&
 			    !HasAdjacentVersionConstraintOperator(content, start) &&
+			    !HasDependencyResolutionArrowPrefix(content, start) &&
 			    !HasIpv4VersionContext(content, start, length, (byte)(address >> 24)) &&
 			    !IsIpv4StandardSectionHeading(content, start, length, (byte)(address >> 24)) &&
 			    !HasIpv4NakedFractionContext(content, start, length) &&
@@ -900,9 +937,19 @@ public sealed class PrivateDataDetector : ISecretDetector
 		var operatorEnd = candidateStart;
 		if (operatorEnd > 0 && content[operatorEnd - 1] == ' ')
 			operatorEnd--;
+		if (operatorEnd > 0 && content[operatorEnd - 1] is '~' or '^')
+			return true;
 		return operatorEnd >= 2 &&
-		       content[operatorEnd - 1] == '=' &&
-		       content[operatorEnd - 2] is '=' or '>' or '<' or '~' or '!';
+		       (content[operatorEnd - 1] == '=' && content[operatorEnd - 2] is '=' or '>' or '<' or '~' or '!' ||
+		        content[operatorEnd - 1] == '>' && content[operatorEnd - 2] == '~');
+	}
+
+	private static bool HasDependencyResolutionArrowPrefix(ReadOnlySpan<char> content, int candidateStart)
+	{
+		var arrowEnd = candidateStart;
+		while (arrowEnd > 0 && content[arrowEnd - 1] is ' ' or '\t')
+			arrowEnd--;
+		return arrowEnd >= 2 && content[arrowEnd - 2] == '-' && content[arrowEnd - 1] == '>';
 	}
 
 	private static bool HasIpv4VersionContext(
@@ -1046,6 +1093,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 		keyword.Equals("rfc", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("ch.", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("ch", StringComparison.OrdinalIgnoreCase) ||
+		keyword.Equals("otp", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("spec", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("build", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("see", StringComparison.OrdinalIgnoreCase) ||
@@ -1152,6 +1200,10 @@ public sealed class PrivateDataDetector : ISecretDetector
 		       !IsInIpv4Prefix(address, 0x02051D00, 24) &&
 		       !IsInIpv4Prefix(address, 0x01030600, 24) &&
 		       !IsInIpv4Prefix(address, 0x02178C00, 24) &&
+		       !IsInIpv4Prefix(address, 0x01036500, 24) &&
+		       !IsInIpv4Prefix(address, 0x01038400, 24) &&
+		       !IsInIpv4Prefix(address, 0x01030E00, 24) &&
+		       !IsInIpv4Prefix(address, 0x01032400, 24) &&
 		       !IsInIpv4Prefix(address, 0xE0000000, 4) &&
 		       !IsInIpv4Prefix(address, 0xF0000000, 4);
 	}
@@ -1279,9 +1331,11 @@ public sealed class PrivateDataDetector : ISecretDetector
 			allZero &= bytes[index] == 0;
 		if (allZero || bytes[..15].IndexOfAnyExcept((byte)0) < 0 && bytes[15] == 1)
 			return false;
-		if (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80 ||
+		if (IsKnownPublicIpv6Resolver(bytes) ||
+		    bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80 ||
 		    (bytes[0] & 0xFE) == 0xFC ||
 		    bytes[0] == 0xFF ||
+		    bytes[0] == 0x3F && bytes[1] == 0xFE ||
 		    bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8 ||
 		    bytes[0] == 0x3F && bytes[1] == 0xFF && (bytes[2] & 0xF0) == 0 ||
 		    IsInIpv6Prefix(bytes, [0x00, 0x64, 0xFF, 0x9B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], 96) ||
@@ -1299,6 +1353,17 @@ public sealed class PrivateDataDetector : ISecretDetector
 		}
 		return (bytes[0] & 0xE0) == 0x20;
 	}
+
+	private static bool IsKnownPublicIpv6Resolver(ReadOnlySpan<byte> address) =>
+		IsIpv6Address(address, [0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x88]) ||
+		IsIpv6Address(address, [0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x44]) ||
+		IsIpv6Address(address, [0x26, 0x06, 0x47, 0x00, 0x47, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x11]) ||
+		IsIpv6Address(address, [0x26, 0x06, 0x47, 0x00, 0x47, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x01]) ||
+		IsIpv6Address(address, [0x26, 0x20, 0x00, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFE]) ||
+		IsIpv6Address(address, [0x26, 0x20, 0x00, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09]);
+
+	private static bool IsIpv6Address(ReadOnlySpan<byte> address, ReadOnlySpan<byte> expected) =>
+		address.SequenceEqual(expected);
 
 	private static bool IsInIpv6Prefix(ReadOnlySpan<byte> address, ReadOnlySpan<byte> network, int prefixLength)
 	{

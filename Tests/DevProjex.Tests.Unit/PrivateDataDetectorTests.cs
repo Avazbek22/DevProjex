@@ -70,7 +70,7 @@ public sealed class PrivateDataDetectorTests
 			"png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico", "bmp", "tif", "tiff", "heic", "psd",
 			"css", "scss", "less", "js", "mjs", "cjs", "jsx", "ts", "tsx", "map", "json", "xml", "yml", "yaml",
 			"toml", "ini", "cfg", "conf", "lock", "cs", "csproj", "sln", "props", "targets", "py", "rb", "go", "rs",
-			"java", "kt", "kts", "scala", "php", "swift", "c", "h", "cpp", "hpp", "cc", "hh", "sh", "bash", "zsh",
+			"java", "kt", "kts", "scala", "php", "swift", "zig", "c", "h", "cpp", "hpp", "cc", "hh", "sh", "bash", "zsh",
 			"ps1", "psm1", "psd1", "bat", "cmd", "md", "markdown", "rst", "txt", "log", "pdf", "docx", "xlsx", "pptx",
 			"csv", "tsv", "zip", "gz", "tgz", "tar", "bz2", "xz", "7z", "rar", "jar", "exe", "dll", "so", "dylib",
 			"pdb", "nupkg", "snupkg", "dmg", "pkg", "msi", "msix", "deb", "rpm", "ttf", "otf", "woff", "woff2",
@@ -370,17 +370,53 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("third-party/go-licenses.csv")]
 	[InlineData("composer.json")]
 	[InlineData("package.json")]
+	[InlineData("composer.lock")]
 	[InlineData("pyproject.toml")]
 	[InlineData("pom.xml")]
 	[InlineData("Cargo.toml")]
 	[InlineData("library.gemspec")]
 	[InlineData("plugin.podspec")]
 	[InlineData("package.nuspec")]
+	[InlineData("manual.mdoc")]
+	[InlineData("junitbuild.publishing-conventions.gradle.kts")]
+	[InlineData("publish-android.gradle.kts")]
+	[InlineData("publishing.kt")]
 	public void Detect_Email_IsDisabledInContactAndPackageMetadataFiles(string path)
 	{
 		Assert.DoesNotContain(
 			Detect(path, "ivan.petrov@company.com"),
 			static finding => finding.RuleId == "email");
+	}
+
+	[Theory]
+	[InlineData("composer.lock", "\"email\": \"j.boggiano@seld.be\",")]
+	[InlineData("junitbuild.publishing-conventions.gradle.kts", "email = \"business@johanneslink.net\"")]
+	[InlineData("publish-android.gradle.kts", "email.set(\"arnaud@kotzilla.io\")")]
+	[InlineData("publishing.kt", "email.set(\"oleksiy.pylypenko@gmail.com\")")]
+	[InlineData("testColorSinglePageManual().mdoc", ".Mt johnappleseed@apple.com")]
+	public void Detect_Email_Audit3PublicMetadataExamplesAreKept(string path, string content)
+	{
+		Assert.DoesNotContain(Detect(path, content), static finding => finding.RuleId == "email");
+	}
+
+	[Theory]
+	[InlineData(".Mt johnappleseed@apple.com")]
+	[InlineData("  .Mt appleseeds@apple.com ,")]
+	public void Detect_Email_MdocMailToMacroIsKeptOutsideMdocFiles(string content)
+	{
+		Assert.DoesNotContain(
+			Detect("manual.snapshot", content),
+			static finding => finding.RuleId == "email");
+	}
+
+	[Theory]
+	[InlineData("ssh_host=\"$CI_USER@ci-s390x.caddyserver.com\"")]
+	[InlineData("git config user.email \"$GITHUB_ACTOR@users.noreply.github.com\"")]
+	[InlineData("\\xe9@blah.com")]
+	[InlineData("hg@bitbucket.org")]
+	public void Detect_Email_RejectsShellVariablesEscapesAndDvcsUserInfo(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "email");
 	}
 
 	[Theory]
@@ -396,8 +432,8 @@ public sealed class PrivateDataDetectorTests
 	[Theory]
 	[InlineData("address=93.184." + "216.34", "93.184." + "216.34")]
 	[InlineData("http://151.101." + "1.69:443/path", "151.101." + "1.69")]
-	[InlineData("dns=[2001:4860:4860:" + ":8888]:53", "2001:4860:4860:" + ":8888")]
-	[InlineData("peer=2606:4700:4700:" + ":1111", "2606:4700:4700:" + ":1111")]
+	[InlineData("dns=[2a02:6b8:" + ":2:242]:53", "2a02:6b8:" + ":2:242")]
+	[InlineData("peer=2a00:1450:4001:81f:" + ":200e", "2a00:1450:4001:81f:" + ":200e")]
 	[InlineData("mapped=[::ffff:93.184." + "216.34]:443", "::ffff:93.184." + "216.34")]
 	[InlineData("peer=[3fff:1000:" + ":1]:443", "3fff:1000:" + ":1")]
 	[InlineData("peer=3ff0:" + ":1", "3ff0:" + ":1")]
@@ -494,6 +530,9 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("package<=2.31.0.1")]
 	[InlineData("package~=2.31.0.1")]
 	[InlineData("package!=2.31.0.1")]
+	[InlineData("~2.2.3.1")]
+	[InlineData("^2.2.3.1")]
+	[InlineData("'~> 3.17.0.2'")]
 	public void Detect_Ipv4_RejectsAdjacentVersionConstraintOperators(string content)
 	{
 		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
@@ -533,6 +572,9 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("release: 1.16.0.2")]
 	[InlineData("build: 1.16.0.2")]
 	[InlineData("packages/serilog/2.10.0.1/lib")]
+	[InlineData("jackson-databind:2.12.7 -> 2.12.7.1")]
+	[InlineData("runtimeInformation: \"Mono 6.12.0.140")]
+	[InlineData("otp: \"25.3.2.21\"")]
 	public void Detect_Ipv4_RejectsExpandedVersionContexts(string content)
 	{
 		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
@@ -555,6 +597,37 @@ public sealed class PrivateDataDetectorTests
 	public void Detect_Ipv4_InOrdinaryMarkdownRemainsPrivate()
 	{
 		Assert.Equal("51.15.23.7", FindSingle("README.md", "endpoint=51.15.23.7", "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("src/VersionSelector.php")]
+	[InlineData("tests/VersionBumperTest.php")]
+	[InlineData("tests/PlatformVersionTest.php")]
+	[InlineData("docs/v1.34.0.md")]
+	[InlineData("relnotes/V1.52.1.MD")]
+	public void Detect_Ipv4_IsDisabledInVersionNamedAndVersionedReleaseFiles(string path)
+	{
+		Assert.DoesNotContain(
+			Detect(path, "release value 3.17.0.2"),
+			static finding => finding.RuleId == "ipv4");
+	}
+
+	[Theory]
+	[InlineData("src/Composer/Package/Version/VersionSelector.php", " *  * 1.2.1.2       -> ^1.2")]
+	[InlineData("tests/Composer/Test/Package/Version/VersionBumperTest.php", "['~2.2.3.1', '2.2.4', '~2.2.4.0']")]
+	[InlineData("relnotes/v1.34.0.md", "Require Parser 3.1.2.1 or higher.")]
+	public void Detect_Ipv4_Audit3VersionFileExamplesAreKept(string path, string content)
+	{
+		Assert.DoesNotContain(Detect(path, content), static finding => finding.RuleId == "ipv4");
+	}
+
+	[Theory]
+	[InlineData("route -> 51.15.23.7")]
+	[InlineData("route ->51.15.23.7")]
+	[InlineData("route ->\t51.15.23.7")]
+	public void Detect_Ipv4_DependencyArrowPolicyKeepsArrowTargetsVisible(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
 	}
 
 	[Theory]
@@ -599,6 +672,10 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("2.5.29.17")]
 	[InlineData("1.3.6.1")]
 	[InlineData("2.23.140.1")]
+	[InlineData("1.3.101.112")]
+	[InlineData("1.3.132.7")]
+	[InlineData("1.3.14.3")]
+	[InlineData("1.3.36.1")]
 	[InlineData("1.2.840.113549")]
 	public void Detect_Ipv4_RejectsAsn1ObjectIdentifiers(string content)
 	{
@@ -611,6 +688,14 @@ public sealed class PrivateDataDetectorTests
 		const string address = "2.6.4.3";
 
 		Assert.Equal(address, FindSingle(address, "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("50.19.103.36:5000", "50.19.103.36")]
+	[InlineData("65.54.227.120", "65.54.227.120")]
+	public void Detect_Ipv4_Audit3GuardsPreserveOperationalAddresses(string content, string expected)
+	{
+		Assert.Equal(expected, FindSingle(content, "ipv4").Value);
 	}
 
 	[Theory]
@@ -799,6 +884,15 @@ public sealed class PrivateDataDetectorTests
 	[InlineData(@"C:\Users\me\AppData\Local")]
 	[InlineData("/home/developer/project")]
 	[InlineData("/home/devuser/project")]
+	[InlineData("/home/sweet/project")]
+	[InlineData("/home/build/project")]
+	[InlineData("/home/you/project")]
+	[InlineData("/home/projects/project")]
+	[InlineData("/home/project/source")]
+	[InlineData("/home/vapor/project")]
+	[InlineData("/home/foobar/project")]
+	[InlineData("/Users/John/project")]
+	[InlineData("/Users/Jane/project")]
 	public void Detect_LocalUser_KeepListAndIndirectHomesAreNotMatched(string content)
 	{
 		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "local-user");
@@ -868,6 +962,7 @@ public sealed class PrivateDataDetectorTests
 	[InlineData(@"C:\Users\R&D")]
 	[InlineData(@"C:\Users\username.")]
 	[InlineData("/home/Projects.txt")]
+	[InlineData("/home/main.zig")]
 	[InlineData("/home/user1/project")]
 	[InlineData("/home/demo42/project")]
 	public void Detect_LocalUser_RejectsRelativeLinksFilesAndNumberedPlaceholders(string content)
@@ -896,6 +991,15 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("path=\"/home/avazb/project\"", "avazb")]
 	[InlineData(@"C:\Users\ivanov\source", "ivanov")]
 	public void Detect_LocalUser_NewAmbiguityGuardsPreserveRealPaths(string content, string expected)
+	{
+		Assert.Equal(expected, FindSingle(content, "local-user").Value);
+	}
+
+	[Theory]
+	[InlineData("/home/shark/project", "shark")]
+	[InlineData("/home/rad/project", "rad")]
+	[InlineData("/home/oleksiyp/project", "oleksiyp")]
+	public void Detect_LocalUser_Audit3KeepListPreservesRealUserNames(string content, string expected)
 	{
 		Assert.Equal(expected, FindSingle(content, "local-user").Value);
 	}
@@ -942,15 +1046,22 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("5f00::1")]
 	[InlineData("FE00::1")]
 	[InlineData("fec0::1")]
+	[InlineData("3ffe::1")]
+	[InlineData("2001:4860:4860::8888")]
+	[InlineData("2001:4860:4860::8844")]
+	[InlineData("2606:4700:4700::1111")]
+	[InlineData("2606:4700:4700::1001")]
+	[InlineData("2620:fe::fe")]
+	[InlineData("2620:fe::9")]
 	public void Detect_Ipv6_RejectsIanaSpecialPurposeRanges(string address)
 	{
 		Assert.DoesNotContain(Detect(address), static finding => finding.RuleId == "ipv6");
 	}
 
 	[Fact]
-	public void Detect_Ipv6_SpecialPurposeGuardsPreserveGlobalDnsAddress()
+	public void Detect_Ipv6_SpecialPurposeGuardsPreserveOperationalAddress()
 	{
-		const string address = "2001:4860:4860::8888";
+		const string address = "2a02:6b8::2:242";
 
 		Assert.Equal(address, FindSingle(address, "ipv6").Value);
 	}
@@ -1251,6 +1362,11 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("legal/NOTICE.txt", "+79261234567", "phone-number")]
 	[InlineData("changes/update.patch", "+79261234567", "phone-number")]
 	[InlineData("dependencies/package-lock.json", "1.2.3.5", "ipv4")]
+	[InlineData("src/VersionSelector.php", "51.15.23.7", "ipv4")]
+	[InlineData("relnotes/v1.34.0.md", "51.15.23.7", "ipv4")]
+	[InlineData("composer.lock", "ivan.petrov@corp.local", "email")]
+	[InlineData("build/publishing.kt", "ivan.petrov@corp.local", "email")]
+	[InlineData("snapshots/manual.mdoc", "ivan.petrov@corp.local", "email")]
 	[InlineData("docs/Framework.docset/page.html", "/home/maintainer", "local-user")]
 	[InlineData("docs/undocumented.json", "/Users/jshier/Code", "local-user")]
 	[InlineData("package.json", "ivan.petrov@corp.local", "email")]
@@ -1281,10 +1397,26 @@ public sealed class PrivateDataDetectorTests
 	{
 		const string email = "ivan.petrov@corp.internal";
 		const string address = "51.15.23.7";
-		var findings = Detect("CHANGELOG/LICENSE-archive/README.md", $"{email} {address}");
+		var findings = Detect("CHANGELOG/LICENSE-archive/version/publish/README.md", $"{email} {address}");
 
 		Assert.Contains(findings, finding => finding.RuleId == "email" && finding.Value == email);
 		Assert.Contains(findings, finding => finding.RuleId == "ipv4" && finding.Value == address);
+	}
+
+	[Theory]
+	[InlineData("docs/vulnerability.md")]
+	[InlineData("docs/victory.md")]
+	public void Detect_Ipv4_VersionedReleaseNotePatternRequiresVFollowedByDigit(string path)
+	{
+		Assert.Equal("51.15.23.7", FindSingle(path, "endpoint=51.15.23.7", "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("manual.mdoc.snapshot", "ivan.petrov@corp.internal")]
+	[InlineData("manual.snapshot", ".Mtx ivan.petrov@corp.internal")]
+	public void Detect_Email_MdocPoliciesRequireExactExtensionOrMacro(string path, string content)
+	{
+		Assert.Equal("ivan.petrov@corp.internal", FindSingle(path, content, "email").Value);
 	}
 
 	[Fact]

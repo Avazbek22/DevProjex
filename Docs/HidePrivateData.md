@@ -42,7 +42,8 @@ The rule does not match:
   `qa`, `staging`, and `testing`;
 * attribution and contact files such as `LICENSE`, `NOTICE`, `AUTHORS`, `CONTRIBUTORS`,
   `SECURITY`, `CODEOWNERS`, and `.mailmap`, and package manifests such as `package.json`,
-  `composer.json`, and `pyproject.toml`, where published addresses are intentional metadata;
+  `composer.json`, `composer.lock`, and `pyproject.toml`, where published addresses are intentional
+  metadata; publishing-named files and `.mdoc` manuals follow the same policy;
 * non-ASCII local parts or IDN forms in this phase;
 * reference and placeholder forms such as `${EMAIL}`, `$(EMAIL)`, `{{email}}`, `<email>`,
   and `%EMAIL%`.
@@ -61,13 +62,15 @@ IPv4 exclusions:
 * the public resolver addresses `8.8.8.8`, `8.8.4.4`, `1.1.1.1`, `1.0.0.1`, `9.9.9.9`,
   `149.112.112.112`, `208.67.222.222`, and `208.67.220.220`.
 * canonical repeated or sequential examples such as `2.2.2.2` and `1.2.3.4`, version syntax,
-  leading-zero octets, ASN.1 OID prefixes, RCS revisions, and values in recognized dependency
-  lock files.
+  dependency-resolution arrows, leading-zero octets, ASN.1 OID prefixes, RCS revisions, and values
+  in recognized dependency lock, version-named, or versioned release-note files.
 
 IPv6 exclusions:
 
 * `::`, `::1`, `fe80::/10`, `fc00::/7`, and `ff00::/8`;
-* the documentation prefixes `2001:db8::/32` and `3fff::/20`;
+* the documentation prefixes `2001:db8::/32` and `3fff::/20`, and the retired 6bone prefix
+  `3ffe::/16`;
+* the documented Google, Cloudflare, and Quad9 public resolver literals;
 * IANA special-purpose NAT64, discard, Teredo, ORCHID, 6to4, SRv6, reserved, and deprecated
   site-local ranges.
 * four-digit `1900::` through `2100::` forms without an address suffix, which are RST year targets.
@@ -90,8 +93,9 @@ system, and CI identities stay visible: `Public`, `Default`, `Default User`, `Al
 Common CI, cloud, container, and documentation identities such as `gitlab-runner`, `ubuntu`,
 `ec2-user`, `postgres`, `redis`, `nginx`, `laravel`, `alice`, and `bob` also stay visible.
 Environment references such as `%USERPROFILE%` and the `~/` shorthand are outside this rule.
-Relative documentation links, file-like path segments, numbered placeholders such as `user1`,
-and paths inside `.docset` bundles are also kept.
+Relative documentation links, file-like path segments including `.zig` source names, numbered
+placeholders such as `user1`, common example homes such as `sweet`, `build`, and `project`, and
+paths inside `.docset` bundles are also kept.
 
 ### MAC addresses (`mac-address`)
 
@@ -146,8 +150,10 @@ common project metadata:
   visible. Standard section headings inside comments are recognized when the first component is
   at most 43; this covers the practical C++/POSIX/JVMS section range but intentionally keeps some
   commented addresses from `1.0.0.0/8` through `43.255.255.255` visible. Changelog-family and
-  dependency lock files disable IPv4 matching because versions
-  dominate there. SVG asset files and SVG JSON catalogs disable IPv4 matching, while a nearby
+  dependency lock files, version-named files, and `v1.2.3.md`-style release notes disable IPv4
+  matching because versions dominate there. A target following `->` stays visible as dependency
+  resolution syntax; a real route written as `route -> 51.15.23.7` is therefore an intentional
+  false negative. SVG asset files and SVG JSON catalogs disable IPv4 matching, while a nearby
   naked fraction is treated as SVG/path geometry; consequently a real address in an SVG asset or
   near text such as `.5` is an intentional false negative.
 * Email-like tokens with a file-extension final label or a retina-style first domain label
@@ -158,9 +164,11 @@ common project metadata:
 * Placeholder local parts, every local part beginning with `your`, and organizational role
   mailboxes such as `admin`, `owner`, `support`, `security`, `sender`, `recipient`, `dev`, and `qa`
   stay visible. Single-character local parts are treated as test syntax.
-  Attribution/contact files, package manifests, and same-line attribution contexts disable email
-  matching because those addresses are intentionally published. Bounded license banners require
-  both copyright and a strong license phrase before suppressing published email and phone contacts.
+  Attribution/contact files, package manifests and locks, publishing files, `.mdoc` mail macros,
+  and same-line attribution contexts disable email matching because those addresses are
+  intentionally published. Shell-variable and escaped local parts also stay visible. Bounded
+  license banners require both copyright and a strong license phrase before suppressing published
+  email and phone contacts.
   UUID Message-IDs, language
   binder/call syntax, URI authority userinfo, and malformed multi-`@` tokens are not treated as
   email. A real personal address using one of these forms is therefore an intentional false
