@@ -642,6 +642,12 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("/* 23.1.6.2 (1) ACL Entry manipulation */")]
 	[InlineData("// 23.3.5.1 constructors:")]
 	[InlineData("/* 7.12.3.1 int fpclassify(real-floating x) */")]
+	[InlineData("// [iterator.traits]/3.2.3.4")]
+	[InlineData("// [format.string.escaped]/2.2.1.2")]
+	[InlineData("// [network.reference]/65.1.3.2")]
+	[InlineData("// 20.4.1.4, tuple helper classes:")]
+	[InlineData("// 20.4.1.4: tuple helper classes")]
+	[InlineData("/* usb 3.1 ch 9.6.2.5 */")]
 	public void Detect_Ipv4_RejectsCommentedStandardSectionHeadings(string content)
 	{
 		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
@@ -653,6 +659,8 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("see 51.15.23.7 Production")]
 	[InlineData("standard endpoint 51.15.23.7 Production")]
 	[InlineData("ACL gateway 51.15.23.7 Production")]
+	[InlineData("http://x/51.15.23.7")]
+	[InlineData("branch 51.15.23.7")]
 	public void Detect_Ipv4_SectionHeadingGuardPreservesOperationalAddresses(string content)
 	{
 		const string address = "51.15.23.7";

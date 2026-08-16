@@ -22,7 +22,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 
 	private static readonly string[] Ipv4VersionContextKeywords =
 	[
-		"version", "tag", "release", "build", "packages", "sec", "section", "chapter", "ch.", "rfc",
+		"version", "tag", "release", "build", "packages", "sec", "section", "chapter", "ch.", "ch", "rfc",
 		"jvms", "spec", "syntax", "$id:", ",v ", "paragraph", "clause", "kernel"
 	];
 
@@ -952,6 +952,8 @@ public sealed class PrivateDataDetector : ISecretDetector
 		int candidateLength,
 		byte firstOctet)
 	{
+		if (candidateStart >= 2 && content[candidateStart - 2] == ']' && content[candidateStart - 1] == '/')
+			return true;
 		if (firstOctet > 43)
 			return false;
 		var candidateEnd = candidateStart + candidateLength;
@@ -977,7 +979,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 		var suffixStart = candidateEnd;
 		if (content[suffixStart..].StartsWith("</a>", StringComparison.OrdinalIgnoreCase))
 			return true;
-		while (suffixStart < content.Length && content[suffixStart] is '.' or ':' or ')')
+		while (suffixStart < content.Length && content[suffixStart] is '.' or ',' or ':' or ')')
 			suffixStart++;
 		if (suffixStart >= content.Length || content[suffixStart] is '\r' or '\n')
 			return true;
@@ -1043,6 +1045,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 		keyword.Equals("tag", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("rfc", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("ch.", StringComparison.OrdinalIgnoreCase) ||
+		keyword.Equals("ch", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("spec", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("build", StringComparison.OrdinalIgnoreCase) ||
 		keyword.Equals("see", StringComparison.OrdinalIgnoreCase) ||
