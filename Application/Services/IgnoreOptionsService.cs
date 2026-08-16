@@ -7,11 +7,28 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	public string FormatHideSecretsLabel(
 		SecretScanState state,
 		int? matchedCount,
+		int? redactionCount) =>
+		FormatContentRedactionLabel(
+			IgnoreOptionId.HideSecrets,
+			state,
+			matchedCount,
+			redactionCount);
+
+	public string FormatContentRedactionLabel(
+		IgnoreOptionId optionId,
+		SecretScanState state,
+		int? matchedCount,
 		int? redactionCount)
 	{
-		var label = localization["Settings.Ignore.HideSecrets"];
-		// A clean scan keeps the plain label: the row's status indicator already says "no secrets
-		// found", and "(0/0)" next to it would read as a counter for something that is not there.
+		var labelKey = optionId switch
+		{
+			IgnoreOptionId.HideSecrets => "Settings.Ignore.HideSecrets",
+			IgnoreOptionId.HidePrivateData => "Settings.Ignore.HidePrivateData",
+			_ => throw new ArgumentOutOfRangeException(nameof(optionId), optionId, null)
+		};
+		var label = localization[labelKey];
+		// A clean scan keeps the plain label: the row's status indicator already reports no matches,
+		// and "(0/0)" next to it would read as a counter for something that is not there.
 		return state is SecretScanState.Completed or SecretScanState.Limited &&
 		       matchedCount is not null and > 0 &&
 		       redactionCount is not null
@@ -22,9 +39,9 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)
 	{
 		var options = new List<IgnoreOptionDescriptor>();
-		// Content-level protection belongs with the primary controllers, before Git modes.
-		// Unlike path filters, Hide Secrets is always offered because availability cannot
-		// be known without reading the selected content.
+		// Content-level transformations belong with the primary controllers, before Git modes.
+		// Unlike path filters, redaction is always offered because availability cannot be known
+		// without reading the selected content.
 		AppendPrimaryExclusionOptions(options, availability);
 		AppendContentTransformationOptions(options, availability);
 
@@ -135,6 +152,14 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 					availability.SecretMatchesCount is { } matchedCount &&
 					availability.SecretRedactionsCount is { } redactionCount =>
 					FormatHideSecretsLabel(SecretScanState.Completed, matchedCount, redactionCount),
+				IgnoreOptionId.HidePrivateData when
+					availability.PrivateDataMatchesCount is { } matchedCount &&
+					availability.PrivateDataRedactionsCount is { } redactionCount =>
+					FormatContentRedactionLabel(
+						IgnoreOptionId.HidePrivateData,
+						SecretScanState.Completed,
+						matchedCount,
+						redactionCount),
 				IgnoreOptionId.CompressCode =>
 					FormatCompressCodeLabel(availability.CompressedFilesCount, availability.UncompressedFilesCount),
 				IgnoreOptionId.StripComments =>

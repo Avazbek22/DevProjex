@@ -110,6 +110,7 @@ public static class SelectionRefreshPolicy
             and not IgnoreOptionId.TrackedGitFilesOnly
             and not IgnoreOptionId.SmartIgnore
             and not IgnoreOptionId.HideSecrets
+			and not IgnoreOptionId.HidePrivateData
 			and not IgnoreOptionId.CompressCode
 			and not IgnoreOptionId.StripComments
 			and not IgnoreOptionId.StripBlankLines;

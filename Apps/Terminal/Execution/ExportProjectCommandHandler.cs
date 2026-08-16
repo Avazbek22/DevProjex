@@ -48,13 +48,19 @@ public sealed class ExportProjectCommandHandler(
 		var requestedOutput = Path.GetFullPath(request.OutputPath);
 		if (request.DryRun)
 		{
-			var redactSecrets = plan.Selection.HideSecrets == true;
+			var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
+				plan.Selection.HideSecrets == true,
+				plan.Selection.HidePrivateData == true);
+			var redactContent = redactionFeatures != SecretRedactionFeatures.None;
 			string? unscannablePath = null;
-			if (redactSecrets)
+			if (redactContent)
 			{
 				var preflight = await services.SecretRedactionOutputPreparer
 					.AnalyzeAsync(
-						new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession),
+						new SecretRedactionContext(
+							plan.SourceRoot,
+							services.SecretRedactionSession,
+							redactionFeatures),
 						plan.IncludedFiles,
 						cancellationToken)
 					.ConfigureAwait(false);
@@ -64,7 +70,7 @@ public sealed class ExportProjectCommandHandler(
 				environment,
 				services.Localization,
 				requestedOutput);
-			if (redactSecrets)
+			if (redactContent)
 			{
 				environment.Error.WriteLine(
 					services.Localization["Terminal.DryRun.ProjectCopy.RedactionWarning"]);
@@ -95,6 +101,7 @@ public sealed class ExportProjectCommandHandler(
 				? ProjectCopyConflictPolicy.ReplaceAtomically
 				: ProjectCopyConflictPolicy.Fail,
 			RedactSecrets: plan.Selection.HideSecrets == true,
+			RedactPrivateData: plan.Selection.HidePrivateData == true,
 			CompressCode: plan.Selection.CompressCode == true,
 			StripComments: plan.Selection.StripComments == true,
 			StripBlankLines: plan.Selection.StripBlankLines == true,

@@ -18,6 +18,7 @@ public sealed class SecretRedactionSession : IDisposable
 	internal const int MaximumSnapshots = 32;
 
 	private readonly ISecretDetector _detector;
+	private readonly ISecretDetector? _privateDataDetector;
 	private readonly IPersistentSecretMarkStore? _persistentMarkStore;
 	private readonly IPersistentSecretIdentityProvider? _persistentIdentityProvider;
 	private readonly SecretScanCache _scanCache;
@@ -40,6 +41,7 @@ public sealed class SecretRedactionSession : IDisposable
 	private CancellationTokenSource? _previewMigrationFlushCancellation;
 	private Task? _previewMigrationFlushTask;
 	private Task? _detectorWarmUpTask;
+	private Task? _privateDataDetectorWarmUpTask;
 	private string? _activeProjectRoot;
 	private long _generation;
 	private long _overrideRevision;
@@ -55,17 +57,40 @@ public sealed class SecretRedactionSession : IDisposable
 		ISecretDetector detector,
 		IPersistentSecretMarkStore? persistentMarkStore = null,
 		IPersistentSecretIdentityProvider? persistentIdentityProvider = null)
-		: this(detector, new SecretScanCache(), persistentMarkStore, persistentIdentityProvider)
+		: this(detector, new SecretScanCache(), persistentMarkStore, persistentIdentityProvider, null)
 	{
 	}
+
+	public static SecretRedactionSession CreateWithPrivateData(
+		ISecretDetector detector,
+		ISecretDetector privateDataDetector,
+		IPersistentSecretMarkStore? persistentMarkStore = null,
+		IPersistentSecretIdentityProvider? persistentIdentityProvider = null) =>
+		new(
+			detector,
+			new SecretScanCache(),
+			persistentMarkStore,
+			persistentIdentityProvider,
+			privateDataDetector);
 
 	internal SecretRedactionSession(
 		ISecretDetector detector,
 		SecretScanCache scanCache,
 		IPersistentSecretMarkStore? persistentMarkStore = null,
 		IPersistentSecretIdentityProvider? persistentIdentityProvider = null)
+		: this(detector, scanCache, persistentMarkStore, persistentIdentityProvider, null)
+	{
+	}
+
+	private SecretRedactionSession(
+		ISecretDetector detector,
+		SecretScanCache scanCache,
+		IPersistentSecretMarkStore? persistentMarkStore,
+		IPersistentSecretIdentityProvider? persistentIdentityProvider,
+		ISecretDetector? privateDataDetector)
 	{
 		_detector = detector ?? throw new ArgumentNullException(nameof(detector));
+		_privateDataDetector = privateDataDetector;
 		_scanCache = scanCache ?? throw new ArgumentNullException(nameof(scanCache));
 		_persistentMarkStore = persistentMarkStore;
 		_persistentIdentityProvider = persistentIdentityProvider;
@@ -87,25 +112,52 @@ public sealed class SecretRedactionSession : IDisposable
 	/// Starts rule-engine initialization once for the process session. It retains compiled rules,
 	/// never project content, and can safely overlap selection and preview preparation.
 	/// </summary>
-	public Task BeginWarmUp()
+	public Task BeginWarmUp() => BeginWarmUp(SecretRedactionFeatures.Secrets);
+
+	public Task BeginWarmUp(SecretRedactionFeatures features)
 	{
+		ValidateFeatures(features);
 		lock (_sync)
 		{
 			ObjectDisposedException.ThrowIf(_disposed, this);
-			if (_detectorWarmUpTask is not null)
-				return _detectorWarmUpTask;
-			_detectorWarmUpTask = Task.Run(() => _detector.WarmUp(CancellationToken.None));
-			_ = _detectorWarmUpTask.ContinueWith(
-				static task => _ = task.Exception,
-				CancellationToken.None,
-				TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-				TaskScheduler.Default);
-			return _detectorWarmUpTask;
+			Task? secretsTask = null;
+			Task? privateDataTask = null;
+			if ((features & SecretRedactionFeatures.Secrets) != 0)
+				secretsTask = EnsureDetectorWarmUpLocked(_detector, ref _detectorWarmUpTask);
+			if ((features & SecretRedactionFeatures.PrivateData) != 0)
+			{
+				privateDataTask = EnsureDetectorWarmUpLocked(
+					_privateDataDetector!,
+					ref _privateDataDetectorWarmUpTask);
+			}
+			return secretsTask is null
+				? privateDataTask!
+				: privateDataTask is null
+					? secretsTask
+					: Task.WhenAll(secretsTask, privateDataTask);
 		}
 	}
 
 	internal Task EnsureWarmUpAsync(CancellationToken cancellationToken) =>
 		BeginWarmUp().WaitAsync(cancellationToken);
+
+	internal Task EnsureWarmUpAsync(
+		SecretRedactionFeatures features,
+		CancellationToken cancellationToken) =>
+		BeginWarmUp(features).WaitAsync(cancellationToken);
+
+	private static Task EnsureDetectorWarmUpLocked(ISecretDetector detector, ref Task? warmUpTask)
+	{
+		if (warmUpTask is not null)
+			return warmUpTask;
+		warmUpTask = Task.Run(() => detector.WarmUp(CancellationToken.None));
+		_ = warmUpTask.ContinueWith(
+			static task => _ = task.Exception,
+			CancellationToken.None,
+			TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+			TaskScheduler.Default);
+		return warmUpTask;
+	}
 
 	internal async ValueTask RefreshPersistentMarksAsync(
 		string projectRoot,
@@ -163,19 +215,23 @@ public sealed class SecretRedactionSession : IDisposable
 	public SecretRedactionScope BeginOutput(
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths,
-		string transformIdentity = "") =>
+		string transformIdentity = "",
+		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets) =>
 		BeginOutput(
 			projectRoot,
 			ContentSelectionSnapshot.Create(projectRoot, orderedFilePaths),
-			transformIdentity);
+			transformIdentity,
+			features);
 
 	public SecretRedactionScope BeginOutput(
 		string projectRoot,
 		ContentSelectionSnapshot selection,
-		string transformIdentity = "")
+		string transformIdentity = "",
+		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(selection);
+		ValidateFeatures(features);
 		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
 
 		HashSet<string> keptOccurrences;
@@ -207,20 +263,28 @@ public sealed class SecretRedactionSession : IDisposable
 			snapshotRevision = _snapshotRevision;
 			generation = _generation;
 			generationToken = _generationCancellation.Token;
-			markedSecretsRevision = _markedSecretsRevision;
-			markedSecretsMatcher = new MarkedSecretsMatcher(
-				_persistentMarks.Values,
-				_sessionMarks,
-				_persistentIdentityProvider,
-				(legacyMark, v2Identity) =>
-					QueueLegacyMarkMigration(legacyMark, v2Identity, generation));
+			if ((features & SecretRedactionFeatures.Secrets) != 0)
+			{
+				markedSecretsRevision = _markedSecretsRevision;
+				markedSecretsMatcher = new MarkedSecretsMatcher(
+					_persistentMarks.Values,
+					_sessionMarks,
+					_persistentIdentityProvider,
+					(legacyMark, v2Identity) =>
+						QueueLegacyMarkMigration(legacyMark, v2Identity, generation));
+			}
+			else
+			{
+				markedSecretsRevision = 0;
+				markedSecretsMatcher = new MarkedSecretsMatcher([], []);
+			}
 		}
 		CancelAndDispose(obsoleteGeneration);
 
 		return new SecretRedactionScope(
 			this,
 			normalizedProjectRoot,
-			selection.CreateTransformFingerprint(transformIdentity),
+			selection.CreateTransformFingerprint(GetSnapshotTransformIdentity(transformIdentity, features)),
 			keptOccurrences,
 			overrideRevision,
 			snapshotRevision,
@@ -228,7 +292,8 @@ public sealed class SecretRedactionSession : IDisposable
 			markedSecretsRevision,
 			generation,
 			generationToken,
-			transformIdentity);
+			transformIdentity,
+			features);
 	}
 
 	private void ClearProjectSpecificStateForSwitchLocked(string newProjectRoot)
@@ -1240,15 +1305,21 @@ public sealed class SecretRedactionSession : IDisposable
 	public int? GetRedactionCount(
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths,
-		string transformIdentity = "")
-		=> GetSnapshot(projectRoot, orderedFilePaths, transformIdentity)?.RedactedCount;
+		string transformIdentity = "",
+		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets)
+		=> GetSnapshot(projectRoot, orderedFilePaths, transformIdentity, features)?.RedactedCount;
 
 	public SecretRedactionSnapshot? GetSnapshot(
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths,
-		string transformIdentity = "")
+		string transformIdentity = "",
+		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets)
 	{
-		var key = GetOrComputeSelectionKey(projectRoot, orderedFilePaths, transformIdentity);
+		ValidateFeatures(features);
+		var key = GetOrComputeSelectionKey(
+			projectRoot,
+			orderedFilePaths,
+			GetSnapshotTransformIdentity(transformIdentity, features));
 		lock (_sync)
 		{
 			if (!_snapshots.TryGetValue(key, out var snapshot))
@@ -1571,7 +1642,8 @@ public sealed class SecretRedactionSession : IDisposable
 				finding.Source,
 				finding.PersistentMarkHash,
 				finding.SessionMarkId,
-				finding.PersistentMarkId);
+				finding.PersistentMarkId,
+				finding.Category);
 		}
 
 		var normalizedPath = Path.GetFullPath(filePath);
@@ -1712,8 +1784,23 @@ public sealed class SecretRedactionSession : IDisposable
 		return new FullContentBufferLease(this);
 	}
 
-	internal ISecretDetectionScope CreateDetectorScope(string projectRoot) =>
-		_detector.CreateScope(projectRoot);
+	internal ISecretDetectionScope CreateDetectorScope(
+		string projectRoot,
+		SecretRedactionFeatures features)
+	{
+		ValidateFeatures(features);
+		var secretsScope = (features & SecretRedactionFeatures.Secrets) != 0
+			? _detector.CreateScope(projectRoot)
+			: null;
+		var privateDataScope = (features & SecretRedactionFeatures.PrivateData) != 0
+			? _privateDataDetector!.CreateScope(projectRoot)
+			: null;
+		return secretsScope is null
+			? privateDataScope!
+			: privateDataScope is null
+				? secretsScope
+				: new CombinedSecretDetectionScope(secretsScope, privateDataScope);
+	}
 
 	private static string GetRulesIdentity(
 		ISecretDetectionScope detectorScope,
@@ -1748,10 +1835,36 @@ public sealed class SecretRedactionSession : IDisposable
 	internal static string BuildSelectionKey(
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths,
-		string transformIdentity = "") =>
+		string transformIdentity = "",
+		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets) =>
 		ContentSelectionSnapshot
 			.Create(projectRoot, orderedFilePaths)
-			.CreateTransformFingerprint(transformIdentity);
+			.CreateTransformFingerprint(GetSnapshotTransformIdentity(transformIdentity, features));
+
+	private static string GetSnapshotTransformIdentity(
+		string transformIdentity,
+		SecretRedactionFeatures features) =>
+		features switch
+		{
+			SecretRedactionFeatures.Secrets => transformIdentity,
+			SecretRedactionFeatures.PrivateData => $"{transformIdentity}\nredaction:private-data",
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData =>
+				$"{transformIdentity}\nredaction:secrets+private-data",
+			_ => throw new ArgumentOutOfRangeException(nameof(features), features, null)
+		};
+
+	private void ValidateFeatures(SecretRedactionFeatures features)
+	{
+		const SecretRedactionFeatures supported =
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData;
+		if (features == SecretRedactionFeatures.None || (features & ~supported) != 0)
+			throw new ArgumentOutOfRangeException(nameof(features), features, null);
+		if ((features & SecretRedactionFeatures.PrivateData) != 0 && _privateDataDetector is null)
+		{
+			throw new InvalidOperationException(
+				"Private-data redaction was requested without a configured detector.");
+		}
+	}
 
 	internal static string NormalizeRelativePath(string projectRoot, string filePath)
 	{
@@ -1933,6 +2046,8 @@ public sealed class SecretRedactionScope
 	private readonly SecretOutputInspectionBudget _outputInspectionBudget = new();
 	private int _detectedCount;
 	private int _redactedCount;
+	private int _privateDataDetectedCount;
+	private int _privateDataRedactedCount;
 	private int _publicConsumerActive;
 	// The count scan runs files in parallel, so "first" would depend on thread timing. Keeping the
 	// ordinally smallest path makes the reported file the same on every run.
@@ -1950,7 +2065,8 @@ public sealed class SecretRedactionScope
 		int markedSecretsRevision,
 		long generation,
 		CancellationToken generationToken,
-		string transformIdentity = "")
+		string transformIdentity = "",
+		SecretRedactionFeatures features = SecretRedactionFeatures.Secrets)
 	{
 		_session = session;
 		_transformIdentity = transformIdentity;
@@ -1962,7 +2078,7 @@ public sealed class SecretRedactionScope
 		_markedSecretsRevision = markedSecretsRevision;
 		_generation = generation;
 		_generationToken = generationToken;
-		_detectorScope = session.CreateDetectorScope(_projectRoot);
+		_detectorScope = session.CreateDetectorScope(_projectRoot, features);
 		SelectionKey = selectionKey;
 	}
 
@@ -2298,7 +2414,9 @@ public sealed class SecretRedactionScope
 				new Dictionary<string, int>(_markedSecretCounts, StringComparer.OrdinalIgnoreCase),
 				Volatile.Read(ref _unscannablePath),
 				skippedFileCount,
-				failedFileCount);
+				failedFileCount,
+				_privateDataDetectedCount,
+				_privateDataRedactedCount);
 			_session.Publish(
 				snapshot,
 				_overrideRevision,
@@ -2361,9 +2479,13 @@ public sealed class SecretRedactionScope
 				finding.PersistentMarkId);
 			outputDelta = checked(outputDelta + outputLength - finding.Length);
 			_detectedCount++;
+			if (finding.Category == RedactionFindingCategory.PrivateData)
+				_privateDataDetectedCount++;
 			if (!kept)
 			{
 				_redactedCount++;
+				if (finding.Category == RedactionFindingCategory.PrivateData)
+					_privateDataRedactedCount++;
 				redactedInFile++;
 				if (finding.PersistentMarkHash is { Length: > 0 } markHash)
 					_markedSecretCounts[markHash] = _markedSecretCounts.GetValueOrDefault(markHash) + 1;
@@ -2424,6 +2546,7 @@ public sealed class SecretRedactionScope
 		var candidates = mergedExactMatches
 			.OrderByDescending(static match =>
 				(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0)
+			.ThenBy(static match => match.Category)
 			.ThenBy(static match => IsGenericRule(match.RuleId))
 			.ThenBy(static match => match.RuleOrder)
 			.ThenBy(static match => match.Start)
@@ -2461,6 +2584,7 @@ public sealed class SecretRedactionScope
 		var winner = matches
 			.OrderByDescending(static match =>
 				(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0)
+			.ThenBy(static match => match.Category)
 			.ThenBy(static match => IsGenericRule(match.RuleId))
 			.ThenBy(static match => match.RuleOrder)
 			.First();

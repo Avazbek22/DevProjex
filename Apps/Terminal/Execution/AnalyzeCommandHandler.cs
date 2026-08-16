@@ -24,6 +24,9 @@ public sealed class AnalyzeCommandHandler(
 			plan.Selection.CompressCode == true,
 			plan.Selection.StripComments == true,
 			plan.Selection.StripBlankLines == true);
+		var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
+			plan.Selection.HideSecrets == true,
+			plan.Selection.HidePrivateData == true);
 		var transformationContext = ContentTransformationContext.For(
 			transformKinds != CodeTransformKinds.None
 				? new CodeCompressionContext(
@@ -31,8 +34,11 @@ public sealed class AnalyzeCommandHandler(
 					services.CodeCompressionSession,
 					transformKinds)
 				: null,
-			plan.Selection.HideSecrets == true
-				? new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession)
+			redactionFeatures != SecretRedactionFeatures.None
+				? new SecretRedactionContext(
+					plan.SourceRoot,
+					services.SecretRedactionSession,
+					redactionFeatures)
 				: null);
 		if (transformationContext is not null)
 		{
@@ -59,7 +65,13 @@ public sealed class AnalyzeCommandHandler(
 					}
 				},
 				Redaction = prepared.Snapshot is { } redaction
-					? new SecretRedactionSummary(redaction.DetectedCount, redaction.RedactedCount)
+					  && plan.Selection.HideSecrets == true
+					? new SecretRedactionSummary(redaction.SecretDetectedCount, redaction.SecretRedactedCount)
+					: null,
+				Privacy = prepared.Snapshot is { } privacy && plan.Selection.HidePrivateData == true
+					? new PrivateDataRedactionSummary(
+						privacy.PrivateDataDetectedCount,
+						privacy.PrivateDataRedactedCount)
 					: null,
 				Compression = prepared.CompressionSnapshot is { } compression
 					? new CodeCompressionSummary(
@@ -213,6 +225,21 @@ internal static class AnalysisTextFormatter
 				rows.Add(new AnalysisTextRow(
 					localization["Terminal.Analysis.SecretScanNotice"],
 					localization["SecretRedaction.NoFindingsNotice"]));
+			}
+		}
+		if (plan.Privacy is { } privacy)
+		{
+			rows.Add(new AnalysisTextRow(
+				localization["Terminal.Analysis.PrivateDataRuleMatches"],
+				privacy.MatchedCount.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+			rows.Add(new AnalysisTextRow(
+				localization["Terminal.Analysis.PrivateDataRedactedValues"],
+				privacy.RedactedCount.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+			if (privacy.MatchedCount == 0)
+			{
+				rows.Add(new AnalysisTextRow(
+					localization["Terminal.Analysis.PrivateDataScanNotice"],
+					localization["PrivateDataRedaction.NoFindingsNotice"]));
 			}
 		}
 		if (plan.Compression is { } compression)

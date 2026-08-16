@@ -176,9 +176,19 @@ public sealed class ProjectContextDocumentService(
 			codeCompressionSession is not null && kinds != CodeTransformKinds.None
 				? new CodeCompressionContext(plan.SourceRoot, codeCompressionSession, kinds)
 				: null,
-			secretRedactionSession is not null && plan.Selection.HideSecrets == true
-				? new SecretRedactionContext(plan.SourceRoot, secretRedactionSession)
-				: null);
+			CreateRedactionContext(plan));
+	}
+
+	private SecretRedactionContext? CreateRedactionContext(ProjectContextPlan plan)
+	{
+		if (secretRedactionSession is null)
+			return null;
+		var features = SecretRedactionFeatureSelection.Resolve(
+			plan.Selection.HideSecrets == true,
+			plan.Selection.HidePrivateData == true);
+		return features == SecretRedactionFeatures.None
+			? null
+			: new SecretRedactionContext(plan.SourceRoot, secretRedactionSession, features);
 	}
 
 	private async Task<string> BuildRedactedAsync(

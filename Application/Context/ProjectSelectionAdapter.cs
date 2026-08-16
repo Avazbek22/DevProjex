@@ -23,6 +23,8 @@ public static class ProjectSelectionAdapter
 			options.Add(ToIgnoreOption(exclusion));
 		if (selection.HideSecrets is true)
 			options.Add(IgnoreOptionId.HideSecrets);
+		if (selection.HidePrivateData is true)
+			options.Add(IgnoreOptionId.HidePrivateData);
 		if (selection.CompressCode is true)
 			options.Add(IgnoreOptionId.CompressCode);
 		if (selection.StripComments is true)
@@ -65,6 +67,7 @@ public static class ProjectSelectionAdapter
 			GitMode: GitFilteringModeResolver.Resolve(profile.SelectedIgnoreOptions),
 			Exclusions: ToExclusions(profile.SelectedIgnoreOptions),
 			HideSecrets: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets),
+			HidePrivateData: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData),
 			CompressCode: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.CompressCode),
 			StripComments: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.StripComments),
 			StripBlankLines: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.StripBlankLines),

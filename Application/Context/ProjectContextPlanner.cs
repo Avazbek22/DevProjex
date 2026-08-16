@@ -107,6 +107,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			GitMode = ResolveGitModeIntent(selection, refreshedLocalState, loaded),
 			Exclusions = ResolveExclusionIntent(selection, refreshedLocalState, loaded),
 			HideSecrets = ResolveHideSecretsIntent(selection, refreshedLocalState, loaded),
+			HidePrivateData = ResolveHidePrivateDataIntent(selection, refreshedLocalState, loaded),
 			CompressCode = ResolveCompressCodeIntent(selection, refreshedLocalState, loaded),
 			StripComments = ResolveStripCommentsIntent(selection, refreshedLocalState, loaded),
 			StripBlankLines = ResolveStripBlankLinesIntent(selection, refreshedLocalState, loaded),
@@ -238,12 +239,14 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		bool hideSecrets,
 		bool? compressCode = null,
 		bool? stripComments = null,
-		bool? stripBlankLines = null)
+		bool? stripBlankLines = null,
+		bool? hidePrivateData = null)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
 		var selection = baseline.Selection with
 		{
 			HideSecrets = hideSecrets,
+			HidePrivateData = hidePrivateData ?? baseline.Selection.HidePrivateData,
 			CompressCode = compressCode ?? baseline.Selection.CompressCode,
 			StripComments = stripComments ?? baseline.Selection.StripComments,
 			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines
@@ -255,7 +258,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		{
 			Selection = selection,
 			Fingerprint = BuildFingerprint(baseline.SourceRoot, selection, includedNodes),
-			Redaction = null
+			Redaction = null,
+			Privacy = null
 		};
 	}
 
@@ -390,6 +394,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				.OrderBy(static exclusion => (int)exclusion)
 				.ToArray(),
 			HideSecrets = selection.HideSecrets ?? legacyHideSecrets,
+			HidePrivateData = selection.HidePrivateData ?? false,
 			// Compression never had a v5 --exclude token, so there is nothing legacy to fall back to.
 			CompressCode = selection.CompressCode ?? false,
 			StripComments = selection.StripComments ?? false,
@@ -421,7 +426,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				                          selection.Exclusions,
 				                          ProjectSelectionAdapter.ToExclusions(profileIgnoreOptions),
 				                          EqualityComparer<ProjectExclusion>.Default) ||
-			                          selection.HideSecrets != profileIgnoreOptions.Contains(IgnoreOptionId.HideSecrets) ||
+				                          selection.HideSecrets != profileIgnoreOptions.Contains(IgnoreOptionId.HideSecrets) ||
+				                          selection.HidePrivateData != profileIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData) ||
 				                          selection.CompressCode != profileIgnoreOptions.Contains(IgnoreOptionId.CompressCode) ||
 				                          selection.StripComments != profileIgnoreOptions.Contains(IgnoreOptionId.StripComments) ||
 				                          selection.StripBlankLines != profileIgnoreOptions.Contains(IgnoreOptionId.StripBlankLines)
@@ -589,6 +595,16 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				? loaded.SelectedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets)
 				: selection.HideSecrets == true
 			: ResolveStoredIgnoreSelection(state.Profile).Contains(IgnoreOptionId.HideSecrets);
+
+	private static bool ResolveHidePrivateDataIntent(
+		ProjectSelectionSpec selection,
+		LocalProjectSelectionState? state,
+		LoadedProjectAnalysisRequest loaded) =>
+		state is null || state.IgnoreOptionsOverridden
+			? state is null
+				? loaded.SelectedIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData)
+				: selection.HidePrivateData == true
+			: ResolveStoredIgnoreSelection(state.Profile).Contains(IgnoreOptionId.HidePrivateData);
 
 	private static bool ResolveCompressCodeIntent(
 		ProjectSelectionSpec selection,
@@ -809,6 +825,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		foreach (var exclusion in selection.Exclusions!.OrderBy(static value => value))
 			Append(exclusion.ToString());
 		Append($"hide-secrets:{selection.HideSecrets == true}");
+		Append($"hide-private-data:{selection.HidePrivateData == true}");
 		Append($"compress-code:{selection.CompressCode == true}");
 		Append($"strip-comments:{selection.StripComments == true}");
 		Append($"strip-blank-lines:{selection.StripBlankLines == true}");

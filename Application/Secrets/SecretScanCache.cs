@@ -44,7 +44,8 @@ internal sealed record SecretFindingMetadata(
 	SecretFindingSource Source,
 	string? PersistentMarkHash,
 	string? SessionMarkId,
-	PersistentSecretMarkId? PersistentMarkId);
+	PersistentSecretMarkId? PersistentMarkId,
+	RedactionFindingCategory Category);
 
 internal sealed record SecretScanCacheEntry(
 	string NormalizedPath,

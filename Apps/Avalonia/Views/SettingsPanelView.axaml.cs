@@ -69,13 +69,10 @@ public partial class SettingsPanelView : UserControl
 		object? sender,
 		PointerReleasedEventArgs e)
 	{
-		// The warning triangle on Hide Secrets doubles as the retry control: a failure there is
+		// A redaction warning doubles as the retry control: a failure there is
 		// usually transient, and the status text invites this click. Informational indicators
 		// keep their tooltip-on-click behavior.
-		if (sender is Control
-		    {
-			    DataContext: IgnoreOptionViewModel { Id: IgnoreOptionId.HideSecrets, IsWarningStatus: true }
-		    })
+		if (IsRedactionRetryIndicator(sender))
 		{
 			SecretScanRetryRequested?.Invoke(this, EventArgs.Empty);
 			e.Handled = true;
@@ -87,6 +84,16 @@ public partial class SettingsPanelView : UserControl
 
 		e.Handled = true;
 	}
+
+	internal static bool IsRedactionRetryIndicator(object? sender) =>
+		sender is Control
+		{
+			DataContext: IgnoreOptionViewModel
+			{
+				Id: IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData,
+				IsWarningStatus: true
+			}
+		};
 
     public void RequestMinimumWidthRefresh()
         => QueueMinimumWidthRefresh(force: true);

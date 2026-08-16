@@ -110,6 +110,63 @@ public sealed class PortableProjectProfileServiceTests
 	}
 
 	[Fact]
+	public async Task HidePrivateDataRoundTripsWithoutLegacyExclusionToken()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var destination = Path.Combine(workspace.Path, "portable.json");
+		var service = new PortableProjectProfileService();
+
+		await service.SaveAsync(
+			sourceRoot,
+			destination,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				HidePrivateData: true),
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		using (var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+			       destination,
+			       TestContext.Current.CancellationToken)))
+		{
+			var selection = document.RootElement.GetProperty("selection");
+			Assert.True(selection.GetProperty("hidePrivateData").GetBoolean());
+			Assert.Empty(selection.GetProperty("exclusions").EnumerateArray());
+		}
+
+		var loaded = await service.LoadAsync(destination, TestContext.Current.CancellationToken);
+		Assert.True(loaded.HidePrivateData);
+	}
+
+	[Fact]
+	public async Task ProfileWithoutHidePrivateDataLoadsWithPrivacyRedactionDisabled()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = Path.Combine(workspace.Path, "profile.json");
+		await File.WriteAllTextAsync(
+			path,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""",
+			TestContext.Current.CancellationToken);
+
+		var selection = await new PortableProjectProfileService().LoadAsync(
+			path,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(selection.HidePrivateData);
+	}
+
+	[Fact]
 	public async Task CompressCodeRoundTripsAsAnIndependentContentTransformation()
 	{
 		using var workspace = new TemporaryDirectory();

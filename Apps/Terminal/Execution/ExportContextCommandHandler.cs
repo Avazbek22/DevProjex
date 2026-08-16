@@ -38,12 +38,18 @@ public sealed class ExportContextCommandHandler(
 
 		if (request.DryRun)
 		{
+			var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
+				plan.Selection.HideSecrets == true,
+				plan.Selection.HidePrivateData == true);
 			if (request.View is ProjectContextView.Content or ProjectContextView.TreeContent &&
-			    plan.Selection.HideSecrets == true)
+			    redactionFeatures != SecretRedactionFeatures.None)
 			{
 				await services.SecretRedactionOutputPreparer
 					.AnalyzeAsync(
-						new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession),
+						new SecretRedactionContext(
+							plan.SourceRoot,
+							services.SecretRedactionSession,
+							redactionFeatures),
 						plan.IncludedFiles,
 						cancellationToken)
 					.ConfigureAwait(false);

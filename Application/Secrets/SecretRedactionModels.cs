@@ -45,8 +45,12 @@ public sealed record SecretRedactionSnapshot(
 	IReadOnlyDictionary<string, int>? MarkedSecretCounts = null,
 	string? UnscannablePath = null,
 	int SkippedFileCount = 0,
-	int FailedFileCount = 0)
+	int FailedFileCount = 0,
+	int PrivateDataDetectedCount = 0,
+	int PrivateDataRedactedCount = 0)
 {
+	public int SecretDetectedCount => checked(DetectedCount - PrivateDataDetectedCount);
+	public int SecretRedactedCount => checked(RedactedCount - PrivateDataRedactedCount);
 	public int IncompleteFileCount => checked(SkippedFileCount + FailedFileCount);
 	public bool IsComplete => IncompleteFileCount == 0;
 	public bool HasFailures => FailedFileCount > 0;
@@ -75,7 +79,7 @@ public sealed class SecretScanLimitExceededException(
 	string path,
 	long sizeBytes,
 	long maximumSizeBytes)
-	: Exception($"The text file exceeds the Hide Secrets scan limit: {path}")
+	: Exception($"The text file exceeds the content-redaction scan limit: {path}")
 {
 	public string Path { get; } = path;
 	public long SizeBytes { get; } = sizeBytes;

@@ -107,6 +107,58 @@ internal sealed class UnscopedSecretDetectionScope(ISecretDetector detector) : I
 		detector.Detect(repositoryRelativePath, content, budget, cancellationToken);
 }
 
+internal sealed class CombinedSecretDetectionScope(
+	ISecretDetectionScope secrets,
+	ISecretDetectionScope privateData) : ISecretDetectionScope
+{
+	public string GetRulesIdentity(string fullPath, string repositoryRelativePath) =>
+		$"{secrets.GetRulesIdentity(fullPath, repositoryRelativePath)}+" +
+		privateData.GetRulesIdentity(fullPath, repositoryRelativePath);
+
+	public bool ShouldInspectPath(string fullPath, string repositoryRelativePath) =>
+		secrets.ShouldInspectPath(fullPath, repositoryRelativePath) ||
+		privateData.ShouldInspectPath(fullPath, repositoryRelativePath);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default) =>
+		Detect(
+			fullPath,
+			repositoryRelativePath,
+			content,
+			new SecretFileInspectionBudget(),
+			cancellationToken);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken = default)
+	{
+		var secretFindings = secrets.ShouldInspectPath(fullPath, repositoryRelativePath)
+			? secrets.Detect(fullPath, repositoryRelativePath, content, budget, cancellationToken)
+			: [];
+		var privateFindings = privateData.ShouldInspectPath(fullPath, repositoryRelativePath)
+			? privateData.Detect(fullPath, repositoryRelativePath, content, budget, cancellationToken)
+			: [];
+		budget.Checkpoint(cancellationToken);
+		if (secretFindings.Count == 0)
+			return privateFindings;
+		if (privateFindings.Count == 0)
+			return secretFindings;
+
+		var combined = new DetectedSecret[secretFindings.Count + privateFindings.Count];
+		for (var index = 0; index < secretFindings.Count; index++)
+			combined[index] = secretFindings[index];
+		for (var index = 0; index < privateFindings.Count; index++)
+			combined[secretFindings.Count + index] = privateFindings[index];
+		return combined;
+	}
+}
+
 /// <summary>
 /// A match identifies only the value that may be replaced, never the surrounding assignment.
 /// The value is intentionally short-lived and must not be persisted or logged.
@@ -120,7 +172,14 @@ public sealed record DetectedSecret(
 	SecretFindingSource Source = SecretFindingSource.Detector,
 	string? PersistentMarkHash = null,
 	string? SessionMarkId = null,
-	PersistentSecretMarkId? PersistentMarkId = null);
+	PersistentSecretMarkId? PersistentMarkId = null,
+	RedactionFindingCategory Category = RedactionFindingCategory.Secrets);
+
+public enum RedactionFindingCategory : byte
+{
+	Secrets = 0,
+	PrivateData = 1
+}
 
 [Flags]
 public enum SecretFindingSource

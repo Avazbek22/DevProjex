@@ -32,7 +32,7 @@ public sealed class ProjectCopyExportService(
 			ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
 
 			ValidateSources(plan, cancellationToken);
-			await using var prepared = request.RedactSecrets || request.CompressCode ||
+			await using var prepared = request.RedactSecrets || request.RedactPrivateData || request.CompressCode ||
 			                           request.StripComments || request.StripBlankLines
 				? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
 				: null;
@@ -152,7 +152,7 @@ public sealed class ProjectCopyExportService(
 		CancellationToken cancellationToken)
 	{
 		if (contentAnalyzer is null ||
-		    (request.RedactSecrets && secretRedactionSession is null) ||
+		    ((request.RedactSecrets || request.RedactPrivateData) && secretRedactionSession is null) ||
 		    ((request.CompressCode || request.StripComments || request.StripBlankLines) &&
 		     codeCompressionSession is null))
 		{
@@ -174,12 +174,24 @@ public sealed class ProjectCopyExportService(
 			transformKinds != CodeTransformKinds.None && codeCompressionSession is not null
 				? new CodeCompressionContext(plan.ProjectRootPath, codeCompressionSession, transformKinds)
 				: null,
-			request.RedactSecrets && secretRedactionSession is not null
-				? new SecretRedactionContext(plan.ProjectRootPath, secretRedactionSession)
-				: null);
+			CreateRedactionContext(plan.ProjectRootPath, request));
 		return context is null
 			? null
 			: await preparer.PrepareAsync(context, files, cancellationToken).ConfigureAwait(false);
+	}
+
+	private SecretRedactionContext? CreateRedactionContext(
+		string projectRoot,
+		ProjectCopyExportRequest request)
+	{
+		if (secretRedactionSession is null)
+			return null;
+		var features = SecretRedactionFeatureSelection.Resolve(
+			request.RedactSecrets,
+			request.RedactPrivateData);
+		return features == SecretRedactionFeatures.None
+			? null
+			: new SecretRedactionContext(projectRoot, secretRedactionSession, features);
 	}
 
 	/// <summary>

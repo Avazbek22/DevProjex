@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using System.Globalization;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.ProjectProfiles;
@@ -24,6 +25,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	private const string AuthorizationCredential = "sanitized.header.token";
 	private const string HttpSessionCookie = "opaque-session-value-41";
 	private const string HttpKeptCookie = "opaque-csrf-value-52";
+	private const string PrivateEmail = "employee" + "@corp.internal";
+	private const string PrivateIpv4 = "93.184." + "216.34";
 	private const string PrivateKeyBodyFragment =
 		"MIIEvQIBADANBgkq" +
 		"hkiG9w0BAQEFAASC" +
@@ -257,13 +260,197 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Equal(sourceBytes, File.ReadAllBytes(sourcePath));
 	}
 
+	[Theory]
+	[InlineData(true, false)]
+	[InlineData(false, true)]
+	[InlineData(true, true)]
+	public async Task RedactionFeatureModes_UseOneDecisionAcrossEveryOutputSurface(
+		bool hideSecrets,
+		bool hidePrivateData)
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("redaction-feature-project");
+		var exportRoot = temporary.CreateDirectory("redaction-feature-exports");
+		const string relativePath = "requests/private.http";
+		var content = $"GET https://localhost/health\n" +
+		              $"Authorization: Bearer {AuthorizationCredential}\n" +
+		              $"contact={PrivateEmail}\nserver={PrivateIpv4}\n";
+		var sourcePath = temporary.CreateFile($"redaction-feature-project/{relativePath}", content);
+		var sourceBytes = File.ReadAllBytes(sourcePath);
+		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, sourcePath);
+		var analyzer = new FileContentAnalyzer();
+		using var session = SecretRedactionSession.CreateWithPrivateData(CreateDetector(), new PrivateDataDetector());
+		var features = SecretRedactionFeatureSelection.Resolve(hideSecrets, hidePrivateData);
+		var context = new SecretRedactionContext(sourceRoot, session, features);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets, hidePrivateData);
+
+		using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: false,
+			transformationContext: context);
+		var clipboard = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
+		var selectedContent = await new SelectedContentExportService(analyzer).BuildAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			context);
+		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder,
+			hideSecrets,
+			hidePrivateData);
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip,
+			hideSecrets,
+			hidePrivateData);
+		var folderText = File.ReadAllText(Path.Combine(folder.DestinationPath, "requests", "private.http"));
+		using var archive = ZipFile.OpenRead(zip.DestinationPath);
+		var zipText = ReadZipText(archive, relativePath);
+		var outputs = new[] { clipboard, selectedContent, folderText, zipText }
+			.Concat(contextDocuments.Values)
+			.ToArray();
+
+		Assert.Equal(NormalizeForClipboard(selectedContent), clipboard);
+		Assert.Equal(folderText, zipText);
+		Assert.All(outputs, output =>
+		{
+			Assert.Equal(!hideSecrets, output.Contains(AuthorizationCredential, StringComparison.Ordinal));
+			Assert.Equal(!hidePrivateData, output.Contains(PrivateEmail, StringComparison.Ordinal));
+			Assert.Equal(!hidePrivateData, output.Contains(PrivateIpv4, StringComparison.Ordinal));
+		});
+		Assert.Equal(hideSecrets ? 1 : 0, preview!.Redactions.Count(span => span.RuleId == "authorization-bearer"));
+		Assert.Equal(hidePrivateData ? 1 : 0, preview.Redactions.Count(span => span.RuleId == "email"));
+		Assert.Equal(hidePrivateData ? 1 : 0, preview.Redactions.Count(span => span.RuleId == "ipv4"));
+		Assert.Equal(sourceBytes, File.ReadAllBytes(sourcePath));
+	}
+
+	[Fact]
+	public async Task CombinedRedaction_UsesOneFileReadAndOneContentFingerprint()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("single-pass-redaction-project");
+		var path = temporary.CreateFile(
+			"single-pass-redaction-project/request.http",
+			$"Authorization: Bearer {AuthorizationCredential}\ncontact={PrivateEmail}\n");
+		using var session = SecretRedactionSession.CreateWithPrivateData(CreateDetector(), new PrivateDataDetector());
+		var context = new SecretRedactionContext(
+			sourceRoot,
+			session,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		var snapshot = await new SecretRedactionOutputPreparer(new FileContentAnalyzer()).AnalyzeAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		var diagnostics = measurement.Capture();
+
+		Assert.Equal(1, snapshot.SecretDetectedCount);
+		Assert.Equal(1, snapshot.PrivateDataDetectedCount);
+		Assert.Equal(1, diagnostics.FullFileReads);
+		Assert.Equal(1, diagnostics.ContentFingerprintComputations);
+	}
+
+	[Fact]
+	public async Task PrivateDataKeepAsIs_IsSharedByPreviewClipboardContextFolderAndZip()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("private-keep-project");
+		var exportRoot = temporary.CreateDirectory("private-keep-exports");
+		const string relativePath = "contact.txt";
+		var content = $"contact={PrivateEmail}\nserver={PrivateIpv4}\n";
+		var sourcePath = temporary.CreateFile($"private-keep-project/{relativePath}", content);
+		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, sourcePath);
+		var analyzer = new FileContentAnalyzer();
+		using var session = SecretRedactionSession.CreateWithPrivateData(CreateDetector(), new PrivateDataDetector());
+		var context = new SecretRedactionContext(
+			sourceRoot,
+			session,
+			SecretRedactionFeatures.PrivateData);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: false, hidePrivateData: true);
+		var previewBuilder = new PreviewDocumentBuilder(analyzer);
+
+		using (var initial = await previewBuilder.BuildContentDocumentAsync(
+			       plan.IncludedFiles,
+			       TestContext.Current.CancellationToken,
+			       TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			       includeOmissionMarkers: false,
+			       transformationContext: context))
+		{
+			var email = Assert.Single(initial!.Redactions, static span => span.RuleId == "email");
+			Assert.True(session.ToggleKeepAsIs(email.OccurrenceId));
+		}
+
+		using var preview = await previewBuilder.BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: false,
+			transformationContext: context);
+		var clipboard = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
+		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder,
+			redactSecrets: false,
+			redactPrivateData: true);
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip,
+			redactSecrets: false,
+			redactPrivateData: true);
+		var folderText = File.ReadAllText(Path.Combine(folder.DestinationPath, relativePath));
+		using var archive = ZipFile.OpenRead(zip.DestinationPath);
+		var outputs = new[] { clipboard, folderText, ReadZipText(archive, relativePath) }
+			.Concat(contextDocuments.Values);
+
+		Assert.All(outputs, output =>
+		{
+			Assert.Contains(PrivateEmail, output, StringComparison.Ordinal);
+			Assert.DoesNotContain(PrivateIpv4, output, StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[ipv4#1]", output, StringComparison.Ordinal);
+		});
+		Assert.Single(preview!.Redactions, static span =>
+			span.RuleId == "email" && span.State == SecretPreviewSpanState.KeptAsIs);
+	}
+
+	[Fact]
+	public async Task ProjectPlanFingerprint_ChangesWithHidePrivateDataAndIsStableForSameSelection()
+	{
+		using var workspace = CreateWorkspace(repeatedGithubOnly: true);
+
+		var disabled = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: false, hidePrivateData: false);
+		var enabled = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: false, hidePrivateData: true);
+		var repeated = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: false, hidePrivateData: true);
+
+		Assert.NotEqual(disabled.Fingerprint, enabled.Fingerprint);
+		Assert.Equal(enabled.Fingerprint, repeated.Fingerprint);
+	}
+
 	[Fact]
 	public async Task DisabledRedaction_DoesNotInvokeDetectorOrChangeExistingOutput()
 	{
 		using var workspace = CreateWorkspace();
 		var analyzer = new FileContentAnalyzer();
 		var detector = new CountingDetector();
-		var session = new SecretRedactionSession(detector);
+		var privateDataDetector = new CountingDetector();
+		var session = SecretRedactionSession.CreateWithPrivateData(detector, privateDataDetector);
 		var plan = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: false);
 		var treeExporter = new TreeExportService();
 		var baselineService = new ProjectContextDocumentService(treeExporter, analyzer);
@@ -309,6 +496,7 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		using (var archive = ZipFile.OpenRead(zip.DestinationPath))
 			Assert.Contains(GithubToken, ReadZipText(archive, "src/app.cs"), StringComparison.Ordinal);
 		Assert.Equal(0, detector.CallCount);
+		Assert.Equal(0, privateDataDetector.CallCount);
 	}
 
 	[Fact(Timeout = 10_000)]
@@ -554,6 +742,45 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.EndsWith("oversized.txt", snapshot.UnscannablePath);
 		Assert.Equal(snapshot.SkippedFileCount, cached.SkippedFileCount);
 		Assert.Equal(snapshot.UnscannablePath, cached.UnscannablePath);
+	}
+
+	[Fact]
+	public async Task OversizedSelectedText_WithPrivateDataOnly_UsesTheSameLimitedCoverageContract()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("oversized-private-data-project");
+		await WriteOversizedProjectAsync(sourceRoot);
+		await File.WriteAllTextAsync(
+			Path.Combine(sourceRoot, "contact.txt"),
+			$"owner={PrivateEmail}\n",
+			TestContext.Current.CancellationToken);
+		using var session = SecretRedactionSession.CreateWithPrivateData(CreateDetector(), new PrivateDataDetector());
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: false, hidePrivateData: true);
+		var context = new SecretRedactionContext(
+			sourceRoot,
+			session,
+			SecretRedactionFeatures.PrivateData);
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		var snapshot = await preparer.AnalyzeAsync(
+			context,
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(null, context),
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, snapshot.SecretDetectedCount);
+		Assert.Equal(1, snapshot.PrivateDataDetectedCount);
+		Assert.Equal(1, snapshot.PrivateDataRedactedCount);
+		Assert.Equal(1, snapshot.SkippedFileCount);
+		Assert.Equal(0, snapshot.FailedFileCount);
+		Assert.EndsWith("oversized.txt", snapshot.UnscannablePath);
+		var oversized = prepared.GetFile(Path.Combine(sourceRoot, "oversized.txt"));
+		Assert.Equal(FileContentClassification.TooLarge, oversized.Classification);
+		Assert.True(oversized.IsUnscannable);
+		Assert.False(prepared.GetFile(Path.Combine(sourceRoot, "contact.txt")).IsUnscannable);
 	}
 
 	[Fact]
@@ -1474,7 +1701,10 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.DoesNotContain("must-not-enter", document, StringComparison.Ordinal);
 	}
 
-	private static async Task<ProjectContextPlan> BuildPlanAsync(string projectRoot, bool hideSecrets)
+	private static async Task<ProjectContextPlan> BuildPlanAsync(
+		string projectRoot,
+		bool hideSecrets,
+		bool hidePrivateData = false)
 	{
 		var analysisService = new ProjectAnalysisService(
 			new ScanOptionsUseCase(new FileSystemScanner()),
@@ -1490,7 +1720,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 				new ProjectSelectionSpec(
 					GitMode: GitFilteringMode.None,
 					Exclusions: [],
-					HideSecrets: hideSecrets)),
+					HideSecrets: hideSecrets,
+					HidePrivateData: hidePrivateData)),
 			TestContext.Current.CancellationToken);
 	}
 
@@ -1611,7 +1842,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		IFileContentAnalyzer analyzer,
 		SecretRedactionSession session,
 		ProjectCopyExportFormat format,
-		bool redactSecrets = true)
+		bool redactSecrets = true,
+		bool redactPrivateData = false)
 	{
 		var destination = format == ProjectCopyExportFormat.Folder
 			? Path.Combine(workspace.ExportRoot, $"folder-{Guid.NewGuid():N}")
@@ -1630,7 +1862,8 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 					format,
 					ProjectCopyDestinationMode.Exact,
 					ProjectCopyConflictPolicy.Fail,
-					RedactSecrets: redactSecrets),
+					RedactSecrets: redactSecrets,
+					RedactPrivateData: redactPrivateData),
 				cancellationToken: TestContext.Current.CancellationToken);
 	}
 

@@ -19,6 +19,16 @@ public sealed record ProjectExclusionDescriptor(
 	string LabelKey,
 	int Order)
 {
+	public ProjectExclusionDescriptor(
+		ProjectExclusion id,
+		IgnoreOptionId legacyOptionId,
+		string token,
+		string labelKey,
+		int order)
+		: this((ProjectExclusion?)id, legacyOptionId, token, labelKey, order)
+	{
+	}
+
 	/// <summary>
 	/// The v5 --exclude id. Path exclusions always have one; call this only where the descriptor
 	/// is known to come from <see cref="ProjectPresentationCatalog.Exclusions"/>.
@@ -130,22 +140,28 @@ public static class ProjectPresentationCatalog
 			0),
 		new(
 			null,
+			IgnoreOptionId.HidePrivateData,
+			"hide-private-data",
+			"Settings.Ignore.HidePrivateData",
+			1),
+		new(
+			null,
 			IgnoreOptionId.CompressCode,
 			"compress-code",
 			"Settings.Ignore.CompressCode",
-			1),
+			2),
 		new(
 			null,
 			IgnoreOptionId.StripComments,
 			"strip-comments",
 			"Settings.Ignore.StripComments",
-			2),
+			3),
 		new(
 			null,
 			IgnoreOptionId.StripBlankLines,
 			"strip-blank-lines",
 			"Settings.Ignore.StripBlankLines",
-			3)
+			4)
 	];
 
 	/// <summary>

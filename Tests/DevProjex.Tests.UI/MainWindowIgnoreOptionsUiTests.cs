@@ -3269,6 +3269,65 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				control.DataContext is IgnoreOptionViewModel { Id: var id } &&
 				id == optionId);
 
+	[AvaloniaFact]
+	public async Task HidePrivateData_UsesIndependentImmediateStatusAndSharedPreviewPipeline()
+	{
+		const string privateEmail = "owner@corp.internal";
+		const string secret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Contact.txt"),
+			$"contact={privateEmail}\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var privacy = Assert.IsType<IgnoreOptionViewModel>(viewModel.HidePrivateDataOption);
+			var privacyIndex = viewModel.ContentProcessingOptions.IndexOf(privacy);
+			Assert.True(privacyIndex > 0);
+			Assert.Equal(IgnoreOptionId.HideSecrets, viewModel.ContentProcessingOptions[privacyIndex - 1].Id);
+			Assert.False(privacy.IsChecked);
+			Assert.Equal(string.Empty, viewModel.SettingsPrivateDataNotice);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HidePrivateData,
+				"Hide private data (1/1)");
+			Assert.Equal("Found: 1. Hidden: 1.", viewModel.SettingsPrivateDataNotice);
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var privacyOnly = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.DoesNotContain(privateEmail, privacyOnly, StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[email#1]", privacyOnly, StringComparison.Ordinal);
+			Assert.Contains(secret, privacyOnly, StringComparison.Ordinal);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Hide secrets (1/1)");
+			var combined = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.DoesNotContain(privateEmail, combined, StringComparison.Ordinal);
+			Assert.DoesNotContain(secret, combined, StringComparison.Ordinal);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+			var secretsOnly = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.Contains(privateEmail, secretsOnly, StringComparison.Ordinal);
+			Assert.DoesNotContain(secret, secretsOnly, StringComparison.Ordinal);
+			Assert.Equal(string.Empty, viewModel.SettingsPrivateDataNotice);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task HideSecrets_IsRenderedInItsOwnSectionAndIsIndependentFromIgnoreAll()
     {
@@ -3993,6 +4052,34 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				static label => label.Text == "!");
 			Assert.False(Assert.IsType<Grid>(warningLabel.GetVisualParent()).IsVisible);
 			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task FailedPrivateDataDiscovery_WarningUsesTheSharedRetryContract()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = new FailingSecretScanContentAnalyzer(services.FileContentAnalyzer)
+			});
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.HidePrivateDataOption is { IsWarningStatus: true },
+				"the private-data discovery warning to appear");
+			var indicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HidePrivateData);
+
+			Assert.True(SettingsPanelView.IsRedactionRetryIndicator(indicator));
 		}
 		finally
 		{

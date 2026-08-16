@@ -57,7 +57,7 @@ public sealed class SecretRedactionOutputPreparer
 			await redactionContext.Session
 				.RefreshPersistentMarksAsync(redactionContext.ProjectRoot, cancellationToken)
 				.ConfigureAwait(false);
-			await redactionContext.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+			await redactionContext.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		}
 
 		SecretRedactionTempDirectory? workingDirectory = null;
@@ -536,7 +536,7 @@ public sealed class SecretRedactionOutputPreparer
 		{
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
 		}
-		await context.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+		await context.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		var scope = context.BeginOutput(orderedFilePaths);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
 		var parallelWork = new List<SecretScanWorkItem>();
@@ -606,7 +606,7 @@ public sealed class SecretRedactionOutputPreparer
 			if (entry is null)
 			{
 				throw new SecretDetectionException(
-					$"Hide Secrets produced no scan result for '{orderedFilePaths[index]}'.");
+					$"Content redaction produced no scan result for '{orderedFilePaths[index]}'.");
 			}
 			scope.ProcessEntry(orderedFilePaths[index], entry);
 			if (entry.IsUnscannable)
@@ -621,7 +621,7 @@ public sealed class SecretRedactionOutputPreparer
 	}
 
 	/// <summary>
-	/// Discovers whether the current selection contains secrets without weakening output safety.
+	/// Discovers whether the current selection contains redaction findings without weakening output safety.
 	/// Files that disappear, change, or cannot be read are counted as failures while the remaining
 	/// files are still inspected. Text beyond the interactive scan limit is reported separately as
 	/// skipped, because a deliberate resource bound is not an engine failure. Preview and export
@@ -646,7 +646,7 @@ public sealed class SecretRedactionOutputPreparer
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
-		await context.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+		await context.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		var scope = context.BeginOutput(orderedFilePaths);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
 		var outcomes = new SecretDiscoveryFileOutcome[orderedFilePaths.Count];
@@ -785,7 +785,7 @@ public sealed class SecretRedactionOutputPreparer
 		{
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
 		}
-		await redactionContext.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+		await redactionContext.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
 		var redactionScope = transformationScope.Redaction ??
 		                     throw new InvalidOperationException(
@@ -864,7 +864,7 @@ public sealed class SecretRedactionOutputPreparer
 				.ConfigureAwait(false);
 		}
 
-		await redactionContext.Session.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+		await redactionContext.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
 		var redactionScope = transformationScope.Redaction ??
 		                     throw new InvalidOperationException(

@@ -72,8 +72,8 @@ status, diagnostics, and Terminal Workspace labels.
 
 ## Common Selection Options
 
-`analyze`, `export context`, `export project`, and `open` accept the same typed
-selection. `open` additionally accepts `auto`:
+`analyze`, `export context`, and `export project` accept the same typed selection.
+`open` omits `--hide-private-data` in this phase and additionally accepts `auto`:
 
 ```text
 --profile <standard|local|FILE>
@@ -83,6 +83,7 @@ selection. `open` additionally accepts `auto`:
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>             repeatable
 --hide-secrets [<true|false>]
+--hide-private-data [<true|false>]
 --compress [<true|false>]
 --strip-comments [<true|false>]
 --strip-blank-lines [<true|false>]
@@ -134,6 +135,12 @@ selected text files and keeps their surrounding context. It is off in the
 `standard` profile. Binary
 files are not inspected, and no findings is not a security guarantee. See
 [HideSecrets.md](HideSecrets.md).
+
+`--hide-private-data` is another independent, opt-in transformation. It detects the
+phase-one email, global IP, local-user path, MAC-address, and international-phone
+rules in selected text files. An explicit `false` overrides a portable profile.
+No findings is not a privacy guarantee. See
+[HidePrivateData.md](HidePrivateData.md).
 
 `--compress` is also independent from path selection and is off in the
 `standard` profile. It replaces block bodies of named methods, functions, and
@@ -215,8 +222,9 @@ analysis and one validated edit plan:
 | `--strip-comments --strip-blank-lines` | Complete implementation without comments or unprotected blank lines |
 | All three | Bare declaration skeleton without comments, docstrings, or unprotected blank lines |
 
-When Hide Secrets is also enabled, syntax edits are applied first and secret detection runs
-over that exact transformed text. Unsupported languages such as Markdown remain
+When either redaction option is enabled, syntax edits are applied first and detection runs
+over that exact transformed text. When secret and private-data spans overlap, the secret
+finding wins. Unsupported languages such as Markdown remain
 byte-for-byte complete. Source files are never modified by any combination.
 
 Modern local profiles retain checked and unchecked states across roots, extensions,
@@ -359,9 +367,9 @@ documents; Markdown contains headings, a fenced tree, and fenced text-file
 content. Binary bytes are never embedded in context output. Machine documents
 mark binary entries with metadata.
 
-With `--hide-secrets`, detection failure fails closed and produces no complete output
+With `--hide-secrets` or `--hide-private-data`, detection failure fails closed and produces no complete output
 artifact. A selected text file above the supported scan limit is omitted from the
-context document, the same as without `--hide-secrets`; `export project` leaves it out
+context document, the same as without redaction; `export project` leaves it out
 of the copy and names it in `DEVPROJEX-NOTICE.txt`.
 
 When output is stdout, stdout contains only the context document. When output is a
@@ -382,6 +390,7 @@ devprojex export context . --view tree --format json -o -
 devprojex export context . --view content --format xml -o ../devprojex-context.xml
 devprojex export context . --format markdown -o ../devprojex-context.md --force
 devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
+devprojex export context . --hide-private-data --format markdown -o ../devprojex-private.md
 devprojex export context . --compress --format markdown -o ../devprojex-compact.md
 ```
 
@@ -410,7 +419,7 @@ structure, and included empty directories. Staging is cleaned after cancellation
 or failure. Canonical destination checks reject destinations equal to or inside
 the source, including paths reached through symlinks or junctions.
 
-With `--hide-secrets`, detected values in text files are replaced. Binary files remain
+With `--hide-secrets` or `--hide-private-data`, detected values in text files are replaced. Binary files remain
 unchanged. The result is intentionally not byte-for-byte faithful and may not
 build or run. `--dry-run` states this before any destination or staging path is
 created.

@@ -337,7 +337,12 @@ Jild yoki ZIP nusxasidagi mos matn ham o‘zgaradi, shu sababli natija yig‘ilm
 
 Hisoblagich faqat qoidalarga mos kelgan joylarni bildiradi. Nol loyiha xavfsiz degani emas. CLI’da `--hide-secrets` ishlatiladi; tafsilotlar `Docs/HideSecrets.md` faylida.
 
-### 12.4 .gitignore dan foydalanish
+### 12.4 Shaxsiy ma’lumotlarni yashirish
+“Shaxsiy ma’lumotlarni yashirish” odatda o‘chirilgan bo‘ladi. Bu parametr tanlangan matn fayllaridagi elektron pochta manzillari, global IP manzillar, yo‘llardagi mahalliy foydalanuvchi nomlari, MAC manzillar va xalqaro telefon raqamlarini aniqlaydi. Topilmalar uchun Sirlarni yashirishdagi kabi oldindan ko‘rish qarorlari va bir xil chiqish konveyeri ishlatiladi.
+
+Hujjat uchun ajratilgan diapazonlar va hostlar, odatiy CI foydalanuvchilari, taniqli ochiq DNS resolverlari hamda hujjatlashtirilgan uydirma raqamlar ko‘rinib qoladi. Nol moslik maxfiylik kafolati emas. CLI-da `--hide-private-data` ishlatiladi; to‘liq qoidalar va birinchi bosqich chegaralari `Docs/HidePrivateData.md` faylida berilgan.
+
+### 12.5 .gitignore dan foydalanish
 Yoqilganda DevProjex faqat root faylini emas, barcha yetib boriladigan `.gitignore` fayllarini qo‘llaydi. Har bir fayl o‘z papkasi va uning barcha ochiq ichki papkalariga ta’sir qiladi, lekin ota yoki qo‘shni papkalarga emas.
 
 Muayyan yo‘l uchun qoidalar ota `.gitignore` faylidan chuqurroq fayllarga, bitta fayl ichida esa yuqoridan pastga qarab ishlanadi. Oxirgi mos qoida Git natijasini belgilaydi.
@@ -350,7 +355,7 @@ Buzilgan yoki qo‘llanmaydigan satr alohida o‘tkazib yuboriladi, qolgan to‘
 
 Ichki `standard` profili `gitignore` rejimini va barcha sakkizta istisno guruhini tanlaydi: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` va `extensionless-files`.
 
-### 12.5 Faqat Git kuzatadigan fayllar
+### 12.6 Faqat Git kuzatadigan fayllar
 «Faqat Git kuzatadigan fayllar» daraxtning Git bosqichini har bir o‘qiladigan Git indeksida qayd etilgan, ishchi daraxtda mavjud fayllardan tuzadi. O‘zgartirilgan kuzatiladigan fayllar va indeksga qo‘shilgan yangi fayllar kiritiladi; kuzatilmaydigan fayllar chiqariladi. Bu `HEAD` yoki masofaviy repozitoriyaning tarixiy nusxasi emas, joriy ishchi daraxtdir.
 
 Har bir yetib boriladigan ichki repozitoriya va worktree istalgan erishiladigan chuqurlikda mustaqil qayta ishlanadi. Ichki repozitoriya ota yoki qo‘shni repozitoriyaning kuzatiladigan yo‘llarini meros qilib olmaydi. Bu rejim uchun Git CLI kerak; o‘qiladigan bo‘sh indeks yaroqli. Terminal ish maydoni (TUI) shu rejimda ishga tushirilib, hech bir mos indeks yuklanmasa, ish maydoni ochilmaydi. Rejim allaqachon ochiq TUI ish maydonida interaktiv tarzda tanlanib, hech bir mos indeks yuklanmasa, o‘zgarish rad etiladi va oxirgi ishlaydigan Git rejimi faol qoladi. Xuddi shu holatda to‘g‘ridan-to‘g‘ri buyruqlar siyosat yoki tekshiruv xatosi bilan tugaydi. DevProjex hech qachon yashirincha `.gitignore` ga o‘tmaydi. Boshqa mos indeks o‘qilsa, indeksini o‘qib bo‘lmaydigan ichki sohalar ogohlantirish bilan chiqariladi.
@@ -359,26 +364,26 @@ Allaqachon ochiq Desktop ish maydonida aniq tanlov ko‘rinib turadi va fail-clo
 
 «.gitignore dan foydalanish» va «Faqat Git kuzatadigan fayllar» yoqilganda bir-birini o‘chiradi. Git filtrlashni to‘liq o‘chirish uchun faol katak belgisini olib tashlash mumkin. Profillarni qo‘llaydigan mahalliy loyihalarda bu holat fayl turlari va boshqa istisno sozlamalari bilan birga saqlanadi.
 
-### 12.6 Git filtrlashi va Smart Ignore aloqasi
+### 12.7 Git filtrlashi va Smart Ignore aloqasi
 Tanlangan Git rejimi va Smart Ignore mustaqil boshqariladi. Avval har bir erishiladigan Git hududida Git rejimi, keyin qolgan elementlarga Smart Ignore, oxirida esa asosiy qoidalar qo‘llanadi.
 
 Tanlangan Git rejimi barcha Smart Ignore nomzodlarini qamrab turganda Smart Ignore yashirin bo‘lishi va Git rejimi o‘zgartirilgach yoki o‘chirilgach paydo bo‘lishi mumkin. Git repozitoriyasida ikkala Git katagi ham mavjud bo‘lib qoladi.
 
 `!` Git inkori faqat Git natijasini bekor qiladi; u Smart Ignore yoki asosiy qoidani o‘chirmaydi.
 
-### 12.7 Asosiy qoidalar
+### 12.8 Asosiy qoidalar
 Nuqta bilan boshlanish qoidalari nomni, yashirin element qoidalari esa tizimdagi Hidden atributini tekshiradi. Platformaga qarab ular bir xil yoki turli elementlarga tegishli bo‘lishi mumkin.
 
 «Bo‘sh fayllar» 0 baytli fayllarni, «Kengaytmasiz fayllar» esa `Dockerfile`, `Makefile`, `README` kabi fayllarni yashiradi.
 
 «Bo‘sh papkalar» mantiqan bo‘sh papkalarni yashiradi. Tanlangan fayl turlari va barcha boshqa qoidalar qo‘llangach ko‘rinadigan fayl yoki ichki papka qolmasa, papka mantiqan bo‘sh hisoblanadi. Shu sababli boshqa qoida o‘zgarganda uning hisoblagichi ham o‘zgarishi mumkin.
 
-### 12.8 Hisoblagichlar
+### 12.9 Hisoblagichlar
 Hisoblagich diskdagi fizik sonni emas, joriy sozlamalarda qoidaning bevosita hissasini ko‘rsatadi. Bir element bir vaqtning o‘zida bir nechta ustma-ust hisoblagichga yozilmaydi.
 
 Barqaror tartib: papkalar uchun `.gitignore`, Smart Ignore, nomdagi nuqta, Hidden atributi; fayllar uchun `.gitignore`, Smart Ignore, nomdagi nuqta, kengaytma yo‘qligi, bo‘sh fayl, Hidden atributi. Bu tartib faqat hisoblagichlarga ta’sir qiladi. Ko‘rinish uchun istalgan faol mexanizm elementni chiqarishi mumkin.
 
-### 12.9 O‘zgarishlarni qo‘llash
+### 12.10 O‘zgarishlarni qo‘llash
 Belgilarni almashtirish avval mavjud parametrlar va hisoblagichlarni yangilaydi. Yakuniy daraxt «Sozlamalarni qo‘llash» bosilgach qayta quriladi. Tayyorlash bekor qilinsa, DevProjex oxirgi to‘liq tugallangan holatga qaytadi; qisman hisoblangan qoidalar qo‘llanmaydi.
 
 ## 13) Daraxt va metrikalar qanday hisoblanadi

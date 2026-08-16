@@ -48,6 +48,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 				gitMode = ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value),
 				exclusions = plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken).ToArray(),
 				hideSecrets = plan.Selection.HideSecrets == true,
+				hidePrivateData = plan.Selection.HidePrivateData == true,
 				compressCode = plan.Selection.CompressCode == true,
 				stripComments = plan.Selection.StripComments == true,
 				stripBlankLines = plan.Selection.StripBlankLines == true,
@@ -76,7 +77,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			fingerprint = plan.Fingerprint
 		};
 		var json = JsonSerializer.Serialize(document, JsonOptions);
-		if (plan.Redaction is not null || plan.Compression is not null)
+		if (plan.Redaction is not null || plan.Privacy is not null || plan.Compression is not null)
 		{
 			var root = JsonNode.Parse(json)?.AsObject() ??
 			           throw new JsonException("The analysis document could not be materialized.");
@@ -89,6 +90,17 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 					["notice"] = redaction.MatchedCount == 0
 						? SecretRedactionLegendText.English.NoFindingsNotice
 						: SecretRedactionLegendText.English.Notice
+				};
+			}
+			if (plan.Privacy is { } privacy)
+			{
+				root["privacy"] = new JsonObject
+				{
+					["matchedCount"] = privacy.MatchedCount,
+					["redactedCount"] = privacy.RedactedCount,
+					["notice"] = privacy.MatchedCount == 0
+						? SecretRedactionLegendText.PrivacyEnglish.NoFindingsNotice
+						: SecretRedactionLegendText.PrivacyEnglish.Notice
 				};
 			}
 			if (plan.Compression is { } compression)

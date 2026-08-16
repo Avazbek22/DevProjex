@@ -393,7 +393,7 @@ internal static class UiTestDriver
         await WaitForControlReadyForPointerAsync(window, inputRoot, control);
 
         await ClickReadyControlAsync(inputRoot, control);
-    }
+	}
 
     public static async Task OpenToolTipThroughClickAsync(MainWindow window, Control control)
     {

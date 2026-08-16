@@ -4,6 +4,7 @@ namespace DevProjex.Terminal.CommandLine;
 
 internal sealed class SelectionOptions
 {
+	private readonly bool _includeHidePrivateData;
 	public Option<CliProfileValue> Profile { get; }
 
 	public Option<string[]> Roots { get; }
@@ -12,14 +13,18 @@ internal sealed class SelectionOptions
 	public Option<GitFilteringMode?> GitMode { get; }
 	public Option<CliExclusionValue[]> Exclusions { get; }
 	public Option<bool> HideSecrets { get; }
+	public Option<bool> HidePrivateData { get; }
 	public Option<bool> CompressCode { get; }
 	public Option<bool> StripComments { get; }
 	public Option<bool> StripBlankLines { get; }
+	public bool IncludesHidePrivateData => _includeHidePrivateData;
 
 	public SelectionOptions(
 		LocalizationService localization,
-		string defaultProfile = "standard")
+		string defaultProfile = "standard",
+		bool includeHidePrivateData = true)
 	{
+		_includeHidePrivateData = includeHidePrivateData;
 		Profile = CliChoiceSymbols.ProfileOption(
 			localization["Terminal.Option.Profile"],
 			defaultProfile,
@@ -49,6 +54,10 @@ internal sealed class SelectionOptions
 		{
 			Description = localization["Terminal.Option.HideSecrets"]
 		};
+		HidePrivateData = new Option<bool>("--hide-private-data")
+		{
+			Description = localization["Terminal.Option.HidePrivateData"]
+		};
 		CompressCode = new Option<bool>("--compress")
 		{
 			Description = localization["Terminal.Option.CompressCode"]
@@ -72,6 +81,8 @@ internal sealed class SelectionOptions
 		command.Options.Add(GitMode);
 		command.Options.Add(Exclusions);
 		command.Options.Add(HideSecrets);
+		if (_includeHidePrivateData)
+			command.Options.Add(HidePrivateData);
 		command.Options.Add(CompressCode);
 		command.Options.Add(StripComments);
 		command.Options.Add(StripBlankLines);
@@ -94,6 +105,10 @@ internal sealed class SelectionOptions
 		bool? hideSecrets = parseResult.GetResult(HideSecrets) is { Implicit: false }
 			? parseResult.GetValue(HideSecrets)
 			: null;
+		bool? hidePrivateData = _includeHidePrivateData &&
+		                        parseResult.GetResult(HidePrivateData) is { Implicit: false }
+			? parseResult.GetValue(HidePrivateData)
+			: null;
 		bool? compressCode = parseResult.GetResult(CompressCode) is { Implicit: false }
 			? parseResult.GetValue(CompressCode)
 			: null;
@@ -110,6 +125,7 @@ internal sealed class SelectionOptions
 			GitMode: gitMode,
 			Exclusions: exclusions,
 			HideSecrets: hideSecrets,
+			HidePrivateData: hidePrivateData,
 			CompressCode: compressCode,
 			StripComments: stripComments,
 			StripBlankLines: stripBlankLines,

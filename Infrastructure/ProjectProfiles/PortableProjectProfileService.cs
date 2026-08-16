@@ -205,6 +205,7 @@ public sealed class PortableProjectProfileService
 			GitMode: gitMode,
 			Exclusions: exclusions.OrderBy(static exclusion => exclusion).ToArray(),
 			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
+			HidePrivateData: document.Selection.HidePrivateData ?? false,
 			CompressCode: document.Selection.CompressCode ?? false,
 			StripComments: document.Selection.StripComments ?? false,
 			StripBlankLines: document.Selection.StripBlankLines ?? false,
@@ -236,6 +237,7 @@ public sealed class PortableProjectProfileService
 					.OrderBy(static value => value, StringComparer.Ordinal)
 					.ToArray(),
 				HideSecrets = selection.HideSecrets == true,
+				HidePrivateData = selection.HidePrivateData == true,
 				CompressCode = selection.CompressCode == true,
 				StripComments = selection.StripComments == true,
 				StripBlankLines = selection.StripBlankLines == true
@@ -308,6 +310,7 @@ public sealed class PortableProjectProfileService
 		public string? GitMode { get; set; }
 		public IReadOnlyList<string> Exclusions { get; set; } = [];
 		public bool? HideSecrets { get; set; }
+		public bool? HidePrivateData { get; set; }
 		public bool? CompressCode { get; set; }
 		public bool? StripComments { get; set; }
 		public bool? StripBlankLines { get; set; }

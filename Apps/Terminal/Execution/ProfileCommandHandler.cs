@@ -173,6 +173,8 @@ public sealed class ProfileCommandHandler(
 				(selection.Exclusions ?? []).Select(ProjectSelectionTokens.ToToken)));
 		output.Append(services.Localization["Settings.Ignore.HideSecrets"]).Append(": ")
 			.AppendLine((selection.HideSecrets == true).ToString(CultureInfo.InvariantCulture));
+		output.Append(services.Localization["Settings.Ignore.HidePrivateData"]).Append(": ")
+			.AppendLine((selection.HidePrivateData == true).ToString(CultureInfo.InvariantCulture));
 		output.Append(services.Localization["Settings.Ignore.CompressCode"]).Append(": ")
 			.AppendLine((selection.CompressCode == true).ToString(CultureInfo.InvariantCulture));
 		output.Append(services.Localization["Settings.Ignore.StripComments"]).Append(": ")
@@ -210,6 +212,7 @@ public sealed class ProfileCommandHandler(
 						.Select(ProjectSelectionTokens.ToToken)
 						.ToArray(),
 					hideSecrets = selection.HideSecrets == true,
+					hidePrivateData = selection.HidePrivateData == true,
 					compressCode = selection.CompressCode == true,
 					stripComments = selection.StripComments == true,
 					stripBlankLines = selection.StripBlankLines == true

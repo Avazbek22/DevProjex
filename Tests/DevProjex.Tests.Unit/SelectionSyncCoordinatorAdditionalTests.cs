@@ -1049,6 +1049,61 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void AcceptContentRedactionOnlyChange_AcceptsBothRedactionRowsWithoutTreeRefresh()
+	{
+		const string projectPath = @"C:\Project";
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => projectPath);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
+		HookAllOptionListeners(coordinator, viewModel);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+		var revisionBefore = coordinator.CurrentSelectionRevision;
+		var scansBefore = scanner.TotalScanCount;
+
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		Assert.True(coordinator.ApplyHidePrivateDataOverride(false));
+		Assert.True(coordinator.TryAcceptContentRedactionOnlyChangeAsApplied(projectPath));
+
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
+		Assert.Equal(scansBefore, scanner.TotalScanCount);
+		Assert.False(coordinator.TryAcceptContentRedactionOnlyChangeAsApplied(projectPath));
+	}
+
+	[AvaloniaFact]
+	public async Task ApplyHidePrivateDataOverride_IsImmediateAndDoesNotScanTheTree()
+	{
+		const string path = @"C:\Project";
+		var scanner = new CountingRootSelectionSnapshotScanner();
+		var changes = new List<IgnoreOptionId?>();
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			scanner,
+			() => path,
+			contentTransformationChangedWithId: changes.Add);
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HidePrivateData));
+		HookAllOptionListeners(coordinator, viewModel);
+		var revisionBefore = coordinator.CurrentSelectionRevision;
+		var scansBefore = scanner.TotalScanCount;
+
+		Assert.True(coordinator.ApplyHidePrivateDataOverride(true));
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+
+		Assert.True(viewModel.HidePrivateDataOption?.IsChecked);
+		Assert.Equal([IgnoreOptionId.HidePrivateData], changes);
+		Assert.Equal(revisionBefore, coordinator.CurrentSelectionRevision);
+		Assert.Equal(scansBefore, scanner.TotalScanCount);
+	}
+
+	[Fact]
 	public void ContentTransformationFastPath_AcceptsCodeAndHideSecretsDraftsTogether()
 	{
 		const string path = @"C:\Project";
