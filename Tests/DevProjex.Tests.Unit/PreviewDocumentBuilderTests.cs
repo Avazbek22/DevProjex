@@ -7,6 +7,27 @@ public sealed class PreviewDocumentBuilderTests
 {
     private const string BlankLine = "\u00A0";
 
+	[Fact]
+	public async Task BuildContentDocumentAsync_WithRootHeader_UsesRelativeSectionsAndKeepsCoordinatesAligned()
+	{
+		using var project = new TemporaryDirectory();
+		var path = project.CreateFile(Path.Combine("src", "Program.cs"), "class Program {}");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[path],
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(project.Path),
+			displayRootPath: project.Path);
+
+		Assert.NotNull(document);
+		Assert.Equal($"{project.Path}:", document.GetLineText(1));
+		var section = Assert.Single(document.Sections);
+		Assert.Equal("src/Program.cs", section.DisplayPath);
+		Assert.Equal("src/Program.cs:", document.GetLineText(section.StartLine));
+		Assert.Equal("class Program {}", document.GetLineText(section.ContentStartLine));
+	}
+
     [Fact]
     public async Task BuildContentDocumentAsync_NoReadableFiles_ReturnsNull()
     {

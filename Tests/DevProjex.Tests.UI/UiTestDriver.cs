@@ -810,46 +810,22 @@ internal static class UiTestDriver
         MainWindow window,
         CancellationToken cancellationToken = default)
     {
-        await WaitForSelectionRefreshIdleAsync(window);
+		await WaitForSelectionRefreshIdleAsync(window);
 
-        var currentTree = GetRequiredPrivateField<BuildTreeResult>(window, "_currentTree");
-        var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
-        var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
-        var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
-        var selectedPaths = InvokePrivateMethodAssignable<IReadOnlySet<string>>(
-            window,
-            "GetCheckedPaths");
-        var hasSelection = selectedPaths.Count > 0;
-        var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
-        var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
-
-        // UI workflow assertions must compare the status bar against the already-applied
-        // tree/export pipeline of the open window. Rebuilding a second tree from settings
-        // state looked cheaper, but it let CI drift away from the actual MainWindow state.
-        var treeText = hasSelection
-            ? treeExport.BuildSelectedTree(
-                currentPath,
-                currentTree.Root,
-                selectedPaths,
-                treeFormat,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName)
-            : treeExport.BuildFullTree(
-                currentPath,
-                currentTree.Root,
-                treeFormat,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName);
-        var treeMetrics = ExportOutputMetricsCalculator.FromText(treeText);
-
-        var orderedFilePaths = hasSelection
-            ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths)
-            : BuildOrderedAllFilePaths(currentTree.Root);
-        var contentText = await contentExport.BuildAsync(
-            orderedFilePaths,
-            cancellationToken,
-            pathPresentation?.MapFilePath);
-        var contentMetrics = ExportOutputMetricsCalculator.FromText(contentText);
+		var pipeline = GetRequiredPrivateField<ProjectTextOutputPipeline>(window, "_textOutputPipeline");
+		var snapshot = InvokePrivateMethod<ProjectTextOutputSnapshot>(
+			window,
+			"CaptureProjectTextOutputSnapshot");
+		var tree = await pipeline.BuildAsync(
+			ProjectTextOutputMode.Tree,
+			snapshot,
+			cancellationToken);
+		var content = await pipeline.BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			cancellationToken);
+		var treeMetrics = ExportOutputMetricsCalculator.FromText(tree.Content);
+		var contentMetrics = ExportOutputMetricsCalculator.FromText(content.Content);
 
         return new ProjectLoadWorkflowRuntime.ProjectLoadWorkflowMetrics(treeMetrics, contentMetrics);
     }
@@ -888,7 +864,8 @@ internal static class UiTestDriver
 
 	public static async Task<(string RelativePath, int SourceOffset)> RequestPersistentSecretMarkAsync(
 		MainWindow window,
-		string value)
+		string value,
+		bool persistent = true)
 	{
 		var viewModel = GetViewModel(window);
 		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
@@ -918,7 +895,7 @@ internal static class UiTestDriver
 		var request = new DevProjex.Avalonia.Controls.PreviewManualSecretMarkRequestedEventArgs(
 			markedValue,
 			selection,
-			persistent: true);
+			persistent);
 		var resolve = typeof(PreviewSurfaceController).GetMethod(
 			"TryResolveManualMarkLocation",
 			BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1115,6 +1092,34 @@ internal static class UiTestDriver
 		Assert.True(remove.IsVisible);
 		Assert.True(remove.IsEnabled);
 		await RaiseMenuItemClickAsync(remove);
+	}
+
+	public static async Task RequestBulkRedactionToggleThroughContextMenuAsync(
+		MainWindow window,
+		string occurrenceId,
+		bool ruleScope)
+	{
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
+		Assert.NotNull(document);
+		var redaction = document!.Redactions.First(span =>
+			string.Equals(span.OccurrenceId, occurrenceId, StringComparison.Ordinal));
+		InvokeRequiredPrivateMethod(textControl, "EnsureContextMenu");
+		var contextField = textControl.GetType().GetField(
+			"_contextDetectorRedaction",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(contextField);
+		contextField!.SetValue(textControl, redaction);
+		InvokeRequiredPrivateMethod(textControl, "PrepareBulkSecretMenuItems");
+		await WaitForSettledFramesAsync(frameCount: 2);
+		var item = GetRequiredPrivateField<MenuItem>(
+			textControl,
+			ruleScope ? "_bulkRuleRedactionMenuItem" : "_bulkFileRedactionMenuItem");
+		Assert.True(item.IsVisible);
+		Assert.True(item.IsEnabled);
+		await RaiseMenuItemClickAsync(item);
 	}
 
 	public static DevProjex.Avalonia.Services.ToastService GetToastService(MainWindow window) =>

@@ -1600,6 +1600,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	public string PreviewSecretAlwaysHideFormat { get; private set; } = string.Empty;
 	public string PreviewSecretHideHereFormat { get; private set; } = string.Empty;
 	public string PreviewSecretRemoveMark { get; private set; } = string.Empty;
+	public string PreviewSecretKeepAllRuleFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideAllRuleFormat { get; private set; } = string.Empty;
+	public string PreviewSecretKeepAllFileFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideAllFileFormat { get; private set; } = string.Empty;
 	public string PreviewSecretSelectionTooShort { get; private set; } = string.Empty;
 	public string PreviewSecretSelectionTooLong { get; private set; } = string.Empty;
 	public string PreviewSecretSelectionMultiline { get; private set; } = string.Empty;
@@ -1767,6 +1771,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Always"];
 		PreviewSecretHideHereFormat = _localization["Preview.Secret.Mark.Here"];
 		PreviewSecretRemoveMark = _localization["Preview.Secret.Mark.Remove"];
+		PreviewSecretKeepAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Keep"];
+		PreviewSecretHideAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Hide"];
+		PreviewSecretKeepAllFileFormat = _localization["Preview.Secret.Bulk.File.Keep"];
+		PreviewSecretHideAllFileFormat = _localization["Preview.Secret.Bulk.File.Hide"];
 		PreviewSecretSelectionTooShort = _localization["Preview.Secret.Mark.Validation.TooShort"];
 		PreviewSecretSelectionTooLong = _localization["Preview.Secret.Mark.Validation.TooLong"];
 		PreviewSecretSelectionMultiline = _localization["Preview.Secret.Mark.Validation.Multiline"];
@@ -1925,6 +1933,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		RaisePropertyChanged(nameof(PreviewSecretAlwaysHideFormat));
 		RaisePropertyChanged(nameof(PreviewSecretHideHereFormat));
 		RaisePropertyChanged(nameof(PreviewSecretRemoveMark));
+		RaisePropertyChanged(nameof(PreviewSecretKeepAllRuleFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideAllRuleFormat));
+		RaisePropertyChanged(nameof(PreviewSecretKeepAllFileFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideAllFileFormat));
 		RaisePropertyChanged(nameof(PreviewSecretSelectionTooShort));
 		RaisePropertyChanged(nameof(PreviewSecretSelectionTooLong));
 		RaisePropertyChanged(nameof(PreviewSecretSelectionMultiline));

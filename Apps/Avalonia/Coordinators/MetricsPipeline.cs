@@ -1356,10 +1356,15 @@ internal sealed class MetricsPipeline(
                 currentTree.Root,
                 selectedPaths);
         var effectiveHasSelection = hasSelection && !isFullTreeSelection;
-        var pathPresentation = exportPathPresentationProvider();
-        var pathPresentationIdentity = pathPresentation is null
-            ? 0
-            : HashCode.Combine(pathPresentation.DisplayRootPath, pathPresentation.DisplayRootName);
+		var pathPresentation = exportPathPresentationProvider();
+		var transformationContext = transformationContextProvider?.Invoke();
+		var displayRootPath = OutputRootPathPresentation.Resolve(
+			currentPath,
+			pathPresentation,
+			transformationContext);
+		var pathPresentationIdentity = HashCode.Combine(
+			displayRootPath,
+			pathPresentation?.DisplayRootName);
         var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
         var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
         var cacheKey = new TreeMetricsCacheKey(
@@ -1381,13 +1386,13 @@ internal sealed class MetricsPipeline(
                 currentTree.Root,
                 selectedPaths,
                 format,
-                pathPresentation?.DisplayRootPath,
+				displayRootPath,
                 pathPresentation?.DisplayRootName)
             : treeExport.CalculateFullTreeMetrics(
                 currentPath,
                 currentTree.Root,
                 format,
-                pathPresentation?.DisplayRootPath,
+				displayRootPath,
                 pathPresentation?.DisplayRootName);
 
         lock (_computationCacheLock)
@@ -1409,9 +1414,14 @@ internal sealed class MetricsPipeline(
         if (currentTree is null)
             return new ContentMetricsPair(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
 
-        var pathPresentation = exportPathPresentationProvider();
-        var contentOnlyPathMapper = pathPresentation?.MapFilePath;
-        var treeAndContentPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath);
+		var pathPresentation = exportPathPresentationProvider();
+		var transformationContext = transformationContextProvider?.Invoke();
+		var contentOnlyPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath);
+		var treeAndContentPathMapper = contentOnlyPathMapper;
+		var displayRootPath = OutputRootPathPresentation.Resolve(
+			currentPath,
+			pathPresentation,
+			transformationContext);
         var isFullTreeSelection =
             ProjectTreeSelectionProjection.CoversWholeTree(
                 currentTree.Root,
@@ -1426,7 +1436,9 @@ internal sealed class MetricsPipeline(
             TreeIdentity: RuntimeHelpers.GetHashCode(currentTree.Root),
             SelectedCount: selectedCount,
             SelectedHash: selectedHash,
-            ContentPathPresentationIdentity: BuildPathPresentationIdentity(pathPresentation),
+			ContentPathPresentationIdentity: HashCode.Combine(
+				displayRootPath,
+				RuntimeHelpers.GetHashCode(contentOnlyPathMapper)),
             TreeAndContentRootPathIdentity: BuildRootPathIdentity(currentPath),
             TransformIdentity: ResolveTransformIdentity());
 
@@ -1443,9 +1455,9 @@ internal sealed class MetricsPipeline(
         if (orderedPaths.Count == 0)
             return new ContentMetricsPair(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
 
-        var contentOnlyAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-        var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-        lock (_metricsLock)
+		var contentOnlyAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		lock (_metricsLock)
         {
             foreach (var path in orderedPaths)
             {
@@ -1459,7 +1471,7 @@ internal sealed class MetricsPipeline(
                 var metrics = variant.Metrics;
                 var contentOnlyPath = MapExportDisplayPath(path, contentOnlyPathMapper);
                 var treeAndContentPath = MapExportDisplayPath(path, treeAndContentPathMapper);
-                var fileMetrics = new ContentFileMetrics(
+				var fileMetrics = new ContentFileMetrics(
                     Path: contentOnlyPath,
                     SizeBytes: metrics.Size,
                     LineCount: metrics.LineCount,
@@ -1468,10 +1480,11 @@ internal sealed class MetricsPipeline(
                     IsWhitespaceOnly: metrics.IsWhitespaceOnly,
                     IsEstimated: metrics.IsEstimated,
                     CrLfPairCount: metrics.CrLfPairCount,
-                    TrailingNewlineChars: metrics.TrailingNewlineChars,
-                    TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks);
+					TrailingNewlineChars: metrics.TrailingNewlineChars,
+					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks);
 
-                contentOnlyAccumulator.AppendFile(fileMetrics);
+				contentOnlyAccumulator.AppendRootHeader(displayRootPath);
+				contentOnlyAccumulator.AppendFile(fileMetrics);
                 treeAndContentAccumulator.AppendFile(fileMetrics with { Path = treeAndContentPath });
             }
         }
@@ -1552,16 +1565,6 @@ internal sealed class MetricsPipeline(
 
     private bool ShouldUseCompactStatusMetrics() =>
         boundsWidthProvider() > 0 && boundsWidthProvider() <= CompactStatusMetricsThresholdWidth;
-
-    private static int BuildPathPresentationIdentity(ExportPathPresentation? pathPresentation)
-    {
-        return pathPresentation is null
-            ? 0
-            : HashCode.Combine(
-                pathPresentation.DisplayRootPath,
-                pathPresentation.DisplayRootName,
-                RuntimeHelpers.GetHashCode(pathPresentation.MapFilePath));
-    }
 
     private static int BuildRootPathIdentity(string rootPath)
     {

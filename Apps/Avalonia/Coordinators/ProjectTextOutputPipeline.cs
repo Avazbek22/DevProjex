@@ -60,11 +60,15 @@ internal sealed class ProjectTextOutputPipeline(
         if (files.Count == 0)
             return new ProjectTextOutputResult(string.Empty, CandidateFileCount: 0);
 
-        var content = await contentExport.BuildAsync(
-                files,
-                cancellationToken,
-				snapshot.PathPresentation?.MapFilePath,
-				snapshot.RedactionContext)
+		var content = await contentExport.BuildAsync(
+				files,
+				cancellationToken,
+				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(snapshot.RootPath),
+				snapshot.RedactionContext,
+				OutputRootPathPresentation.Resolve(
+					snapshot.RootPath,
+					snapshot.PathPresentation,
+					snapshot.RedactionContext))
             .ConfigureAwait(false);
 
         return new ProjectTextOutputResult(content, files.Count);
@@ -78,7 +82,10 @@ internal sealed class ProjectTextOutputPipeline(
         cancellationToken.ThrowIfCancellationRequested();
 
         snapshot = NormalizeSelection(snapshot);
-        var displayRootPath = snapshot.PathPresentation?.DisplayRootPath;
+		var displayRootPath = OutputRootPathPresentation.Resolve(
+			snapshot.RootPath,
+			snapshot.PathPresentation,
+			snapshot.RedactionContext);
         var displayRootName = snapshot.PathPresentation?.DisplayRootName;
         if (snapshot.SelectedPaths.Count == 0)
         {

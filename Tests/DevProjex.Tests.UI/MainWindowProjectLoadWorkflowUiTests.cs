@@ -701,12 +701,13 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         var allowedExtensions = CollectCheckedNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
         var selectedIgnoreOptions = UiTestDriver.GetSelectedIgnoreOptionIds(window);
 
-        return await ProjectLoadWorkflowRuntime.ComputeMetricsAsync(
-            rootPath,
-            scanRoots,
-            allowedExtensions,
-            selectedIgnoreOptions,
-            CancellationToken.None);
+		return await ProjectLoadWorkflowRuntime.ComputeMetricsAsync(
+			rootPath,
+			scanRoots,
+			allowedExtensions,
+			selectedIgnoreOptions,
+			CancellationToken.None,
+			useUnifiedContentHeaders: true);
     }
 
     private static void AssertMetricsChanged(

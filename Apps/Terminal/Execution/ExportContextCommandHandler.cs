@@ -85,7 +85,8 @@ public sealed class ExportContextCommandHandler(
 								request.Format,
 								destination,
 								cancellationToken,
-								plain: request.Output.Plain)
+								plain: request.Output.Plain,
+								useUnifiedContentHeaders: true)
 							.ConfigureAwait(false);
 						await destination.CompleteAsync(cancellationToken).ConfigureAwait(false);
 						return writeResult;
@@ -114,7 +115,8 @@ public sealed class ExportContextCommandHandler(
 							request.Format,
 							destination,
 							token,
-							plain: request.Output.Plain).ConfigureAwait(false);
+							plain: request.Output.Plain,
+							useUnifiedContentHeaders: true).ConfigureAwait(false);
 					},
 					cancellationToken,
 					path => ExactOutputDestinationValidator.ValidateContext(

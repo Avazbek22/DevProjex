@@ -30,8 +30,11 @@ selection:
 If Preview shows a placeholder, every later output contains that placeholder. A
 finding kept as-is in Preview returns only that occurrence to its original value;
 the decision then applies to every output for the rest of the application session.
+The Preview context menu can apply the same decision in bulk to every occurrence
+of the rule or to every detected occurrence in the same file, and can hide those
+occurrences again as one action.
 
-Keep-as-is decisions are intentionally session-only. They are not written to
+Individual and bulk keep-as-is decisions are intentionally session-only. They are not written to
 project profiles, so profiles never retain secret fingerprints or source
 locations. If a finding moves after a file change, it is treated as a new
 occurrence and redacted again.

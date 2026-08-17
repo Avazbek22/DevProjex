@@ -12,6 +12,7 @@ public sealed class LocalizationToastKeysTests
 		"Toast.Export.TreeAndContent",
 		"Toast.NoMatches",
 		"Toast.Tree.CheckedSelectionHidden",
+		"Toast.Secret.AlreadyHidden",
 		"Toast.Git.CloneSuccess",
 		"Toast.Git.CloneError",
 		"Toast.Git.CachedUpdateFailed",

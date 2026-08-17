@@ -208,10 +208,15 @@ public sealed class VirtualizedPreviewTextControlTests
 				item => separator = Assert.IsType<Separator>(item),
 				item => Assert.Same(GetMenuItem(control, "_alwaysHideSecretMenuItem"), item),
 				item => Assert.Same(GetMenuItem(control, "_hideSecretHereMenuItem"), item),
-				item => Assert.Same(GetMenuItem(control, "_removeSecretMarkMenuItem"), item));
+				item => Assert.Same(GetMenuItem(control, "_removeSecretMarkMenuItem"), item),
+				item => Assert.IsType<Separator>(item),
+				item => Assert.Same(GetMenuItem(control, "_bulkRuleRedactionMenuItem"), item),
+				item => Assert.Same(GetMenuItem(control, "_bulkFileRedactionMenuItem"), item));
 			var alwaysItem = GetMenuItem(control, "_alwaysHideSecretMenuItem");
 			Assert.Same(alwaysItem.Cursor, separator!.Cursor);
 			Assert.True(alwaysItem.IsEnabled);
+			Assert.False(GetMenuItem(control, "_bulkRuleRedactionMenuItem").IsVisible);
+			Assert.False(GetMenuItem(control, "_bulkFileRedactionMenuItem").IsVisible);
 			Assert.Contains('…', Assert.IsType<string>(alwaysItem.Header));
 			Assert.DoesNotContain(secret, Assert.IsType<string>(alwaysItem.Header), StringComparison.Ordinal);
 			flyout.Hide();
@@ -220,6 +225,191 @@ public sealed class VirtualizedPreviewTextControlTests
 		{
 			window.Close();
 		}
+	}
+
+	[AvaloniaFact]
+	public void DetectorContextMenu_BulkScopesCountDistinctOccurrencesAndRaiseOneRequest()
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[email#1]";
+		var lines = new[]
+		{
+			$"a={placeholder}",
+			$"b={placeholder}",
+			$"c={placeholder}",
+			$"d={placeholder}",
+			$"e={placeholder}"
+		};
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', lines),
+			redactions:
+			[
+				new PreviewRedactionSpan("multi", "email", 1, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/a.txt"),
+				new PreviewRedactionSpan("multi", "email", 2, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/a.txt"),
+				new PreviewRedactionSpan("same-rule-file", "email", 3, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/a.txt"),
+				new PreviewRedactionSpan("same-rule-other-file", "email", 4, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/b.txt"),
+				new PreviewRedactionSpan("other-rule-same-file", "ipv4", 5, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/a.txt")
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 220,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 280,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		var requests = new List<PreviewBulkRedactionToggleRequestedEventArgs>();
+		control.BulkRedactionToggleRequested += (_, eventArgs) => requests.Add(eventArgs);
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+			var typeface = ResolveTestTypeface(control);
+			var point = new Point(
+				origin.X + control.LeftPadding + MeasureRenderedPrefixWidth(control, lines[0], 4, typeface),
+				origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2));
+
+			InvokePrivate(control, "PrepareContextSelection", point);
+			InvokePrivate(control, "OpenContextMenu");
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			var ruleItem = GetMenuItem(control, "_bulkRuleRedactionMenuItem");
+			var fileItem = GetMenuItem(control, "_bulkFileRedactionMenuItem");
+			Assert.True(ruleItem.IsVisible);
+			Assert.True(fileItem.IsVisible);
+			Assert.Equal("Keep all occurrences \"email\" (3)", ruleItem.Header);
+			Assert.Equal("Keep all occurrences in \"a.txt\" (3)", fileItem.Header);
+
+			ruleItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+			fileItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		Assert.Collection(
+			requests,
+			request =>
+			{
+				Assert.True(request.Keep);
+				Assert.Equal(3, request.OccurrenceIds.Count);
+				Assert.Contains("multi", request.OccurrenceIds);
+				Assert.Contains("same-rule-file", request.OccurrenceIds);
+				Assert.Contains("same-rule-other-file", request.OccurrenceIds);
+			},
+			request =>
+			{
+				Assert.True(request.Keep);
+				Assert.Equal(3, request.OccurrenceIds.Count);
+				Assert.Contains("multi", request.OccurrenceIds);
+				Assert.Contains("same-rule-file", request.OccurrenceIds);
+				Assert.Contains("other-rule-same-file", request.OccurrenceIds);
+			});
+	}
+
+	[AvaloniaFact]
+	public void KeptDetectorContextMenu_OffersBulkHide()
+	{
+		const string value = "ivan.petrov@corp.local";
+		using var document = new InMemoryPreviewTextDocument(
+			value,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					"occurrence",
+					"email",
+					1,
+					0,
+					value.Length,
+					SecretPreviewSpanState.KeptAsIs,
+					RelativePath: "config/appsettings.json")
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 120,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 180,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		PreviewBulkRedactionToggleRequestedEventArgs? requested = null;
+		control.BulkRedactionToggleRequested += (_, eventArgs) => requested = eventArgs;
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			InvokePrivate(control, "EnsureContextMenu");
+			var contextField = typeof(VirtualizedPreviewTextControl).GetField(
+				"_contextDetectorRedaction",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(contextField);
+			contextField!.SetValue(control, Assert.Single(document.Redactions));
+			InvokePrivate(control, "PrepareBulkSecretMenuItems");
+
+			var item = GetMenuItem(control, "_bulkRuleRedactionMenuItem");
+			Assert.Equal("Hide all occurrences \"email\" (1)", item.Header);
+			item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		Assert.NotNull(requested);
+		Assert.False(requested!.Keep);
+		Assert.Equal(["occurrence"], requested.OccurrenceIds);
+	}
+
+	[AvaloniaFact]
+	public void ReplacingDocumentClearsPendingBulkContext()
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[email#1]";
+		using var firstDocument = new InMemoryPreviewTextDocument(
+			placeholder,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					"old-occurrence",
+					"email",
+					1,
+					0,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					RelativePath: "old.txt")
+			]);
+		using var secondDocument = new InMemoryPreviewTextDocument("replacement");
+		var control = new VirtualizedPreviewTextControl { Document = firstDocument };
+		InvokePrivate(control, "EnsureContextMenu");
+		var contextField = typeof(VirtualizedPreviewTextControl).GetField(
+			"_contextDetectorRedaction",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(contextField);
+		contextField!.SetValue(control, Assert.Single(firstDocument.Redactions));
+		InvokePrivate(control, "PrepareBulkSecretMenuItems");
+		Assert.True(GetMenuItem(control, "_bulkRuleRedactionMenuItem").IsVisible);
+
+		control.Document = secondDocument;
+		InvokePrivate(control, "PrepareBulkSecretMenuItems");
+
+		Assert.False(GetMenuItem(control, "_bulkRuleRedactionMenuItem").IsVisible);
+		Assert.False(GetMenuItem(control, "_bulkFileRedactionMenuItem").IsVisible);
 	}
 
 	[AvaloniaFact]
@@ -255,7 +445,7 @@ public sealed class VirtualizedPreviewTextControlTests
 			window.Show();
 			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
 			InvokePrivate(control, "EnsureContextMenu");
-			AssertRejected(new PreviewSelectionRange(1, 0, 1, "config.env".Length), "content only");
+			AssertHidden(new PreviewSelectionRange(1, 0, 1, "config.env".Length));
 			AssertRejected(new PreviewSelectionRange(3, 0, 3, "short".Length), "too short");
 			AssertRejected(
 				new PreviewSelectionRange(4, 0, 5, "second-valid-value".Length),
@@ -267,11 +457,20 @@ public sealed class VirtualizedPreviewTextControlTests
 			window.Close();
 		}
 
+		void AssertHidden(PreviewSelectionRange range)
+		{
+			SelectRange(window, control, range);
+			InvokePrivate(control, "PrepareManualSecretMenuItems");
+			Assert.False(GetMenuItem(control, "_hideSecretHereMenuItem").IsVisible);
+			Assert.False(GetMenuItem(control, "_alwaysHideSecretMenuItem").IsVisible);
+		}
+
 		void AssertRejected(PreviewSelectionRange range, string expectedReason)
 		{
 			SelectRange(window, control, range);
 			InvokePrivate(control, "PrepareManualSecretMenuItems");
 			var item = GetMenuItem(control, "_hideSecretHereMenuItem");
+			Assert.True(item.IsVisible);
 			Assert.False(item.IsEnabled);
 			Assert.Equal(expectedReason, ToolTip.GetTip(item));
 		}

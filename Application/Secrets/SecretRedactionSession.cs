@@ -1302,6 +1302,44 @@ public sealed class SecretRedactionSession : IDisposable
 		return kept;
 	}
 
+	public int SetKeepAsIs(IReadOnlyCollection<string> occurrenceIds, bool keep)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		ArgumentNullException.ThrowIfNull(occurrenceIds);
+		if (occurrenceIds.Count == 0)
+			return 0;
+
+		var distinctOccurrenceIds = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var occurrenceId in occurrenceIds)
+		{
+			ArgumentException.ThrowIfNullOrWhiteSpace(occurrenceId, nameof(occurrenceIds));
+			distinctOccurrenceIds.Add(occurrenceId);
+		}
+
+		var changedCount = 0;
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			foreach (var occurrenceId in distinctOccurrenceIds)
+			{
+				var changed = keep
+					? _keptOccurrenceIds.Add(occurrenceId)
+					: _keptOccurrenceIds.Remove(occurrenceId);
+				if (changed)
+					changedCount++;
+			}
+
+			if (changedCount == 0)
+				return 0;
+
+			_overrideRevision++;
+			InvalidateSnapshotsLocked();
+		}
+
+		OverridesChanged?.Invoke(this, EventArgs.Empty);
+		return changedCount;
+	}
+
 	public int? GetRedactionCount(
 		string projectRoot,
 		IReadOnlyList<string> orderedFilePaths,
@@ -2500,7 +2538,8 @@ public sealed class SecretRedactionScope
 				finding.Source,
 				finding.PersistentMarkHash,
 				finding.SessionMarkId,
-				finding.PersistentMarkId);
+				finding.PersistentMarkId,
+				relativePath);
 			outputDelta = checked(outputDelta + outputLength - finding.Length);
 			_detectedCount++;
 			if (finding.Category == RedactionFindingCategory.PrivateData)

@@ -119,6 +119,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         controls.TextControl.PreviewSelectionChanged +=
             OnSelectionChanged;
 		controls.TextControl.RedactionToggleRequested += OnRedactionToggleRequested;
+		controls.TextControl.BulkRedactionToggleRequested += OnBulkRedactionToggleRequested;
 		controls.TextControl.ManualSecretMarkRequested += OnManualSecretMarkRequested;
 		controls.TextControl.ManualSecretUnmarkRequested += OnManualSecretUnmarkRequested;
 		controls.TextControl.ManualSecretMarkRejected += OnManualSecretMarkRejected;
@@ -145,6 +146,25 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_requestRedactionRefresh();
 	}
 
+	private void OnBulkRedactionToggleRequested(
+		object? sender,
+		PreviewBulkRedactionToggleRequestedEventArgs e)
+	{
+		var context = _transformationContextProvider()?.Redaction;
+		if (context is null)
+			return;
+
+		var changedCount = context.Session.SetKeepAsIs(e.OccurrenceIds, e.Keep);
+		if (changedCount == 0)
+			return;
+
+		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+		_requestRedactionRefresh();
+		_toastService.Show(_localization.Format(
+			e.Keep ? "Toast.Secret.KeptCount" : "Toast.Secret.RehiddenCount",
+			changedCount));
+	}
+
 	private void OnManualSecretMarkRequested(
 		object? sender,
 		PreviewManualSecretMarkRequestedEventArgs e)
@@ -169,8 +189,14 @@ internal sealed class PreviewSurfaceController : IDisposable
 				return;
 			}
 
-			if (!ApplySessionOnlyManualMark(location, e.Value))
+			var sessionMarkAdded = TryApplySessionOnlyManualMark(location, e.Value);
+			if (!sessionMarkAdded && !e.Persistent)
+			{
+				_toastService.Show(_localization["Toast.Secret.AlreadyHidden"]);
 				return;
+			}
+			if (!sessionMarkAdded && !_ensureHideSecretsEnabled())
+				_requestRedactionRefresh();
 			await _persistProjectProfile(CancellationToken.None);
 			var mark = e.Persistent
 				? await _secretRedactionSession.CreatePersistentMarkedSecretAsync(
@@ -319,11 +345,11 @@ internal sealed class PreviewSurfaceController : IDisposable
 		ManualSecretLocation location,
 		MarkedSecretValue value)
 	{
-		ApplySessionOnlyManualMark(location, value);
+		TryApplySessionOnlyManualMark(location, value);
 		_secretRedactionSession.RollbackPendingPersistentMarkDelta(projectRoot, operationId);
 	}
 
-	private bool ApplySessionOnlyManualMark(
+	private bool TryApplySessionOnlyManualMark(
 		ManualSecretLocation location,
 		MarkedSecretValue value)
 	{
@@ -332,7 +358,6 @@ internal sealed class PreviewSurfaceController : IDisposable
 			    location.SourceOffset,
 			    value))
 		{
-			_toastService.Show(_localization.Format("Toast.Secret.HiddenCount", 1));
 			return false;
 		}
 
@@ -844,8 +869,14 @@ internal sealed class PreviewSurfaceController : IDisposable
                         PreviewWarmupMaxFileBytes,
                         PreviewWarmupMaxCharacters,
                         cancellationToken,
-                        pathPresentation?.MapFilePath,
-                        compressionContext)
+                        string.IsNullOrWhiteSpace(currentPath)
+							? pathPresentation?.MapFilePath
+							: TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath),
+                        compressionContext,
+						OutputRootPathPresentation.Resolve(
+							currentPath ?? string.Empty,
+							pathPresentation,
+							transformationContext))
                     .GetAwaiter()
                     .GetResult();
                 if (string.IsNullOrWhiteSpace(contentText))
@@ -873,7 +904,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     EmptySelectedPaths,
                     OrderedFilePaths: null,
                     treeFormat,
-                    pathPresentation),
+                    pathPresentation,
+					transformationContext),
                 cancellationToken);
             if (string.IsNullOrWhiteSpace(treeText))
                 return null;
@@ -930,10 +962,10 @@ internal sealed class PreviewSurfaceController : IDisposable
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+		var transformationContext = _transformationContextProvider();
 
         if (selectedMode == PreviewContentMode.Tree)
         {
-			var transformationContext = _transformationContextProvider();
 			if (transformationContext?.Redaction is not null && currentTreeRoot is not null)
 			{
 				var selectedFiles = ResolvePreviewFiles(
@@ -957,7 +989,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                             selectedPaths,
                             currentTreeOrderedFilePaths,
                             treeFormat,
-                            pathPresentation),
+                            pathPresentation,
+							transformationContext),
                         cancellationToken)
                     : string.Empty;
             var effectiveTreeText =
@@ -991,9 +1024,15 @@ internal sealed class PreviewSurfaceController : IDisposable
                 _previewDocumentBuilder.BuildContentDocumentAsync(
                         files,
                         cancellationToken,
-                        pathPresentation?.MapFilePath,
-                        transformationContext: _transformationContextProvider(),
-                        includeSourceCoordinateMaps: true)
+						string.IsNullOrWhiteSpace(currentPath)
+							? pathPresentation?.MapFilePath
+							: TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath),
+						transformationContext: transformationContext,
+						includeSourceCoordinateMaps: true,
+						displayRootPath: OutputRootPathPresentation.Resolve(
+							currentPath ?? string.Empty,
+							pathPresentation,
+							transformationContext))
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -1010,19 +1049,23 @@ internal sealed class PreviewSurfaceController : IDisposable
                     noTextContentText));
         }
 
-        var treeText = selectedPaths.Count > 0
+		var displayRootPath = OutputRootPathPresentation.Resolve(
+			currentPath,
+			pathPresentation,
+			transformationContext);
+		var treeText = selectedPaths.Count > 0
             ? _treeExport.BuildSelectedTree(
                 currentPath,
                 currentTreeRoot,
                 selectedPaths,
                 treeFormat,
-                pathPresentation?.DisplayRootPath,
+                displayRootPath,
                 pathPresentation?.DisplayRootName)
             : _treeExport.BuildFullTree(
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
-                pathPresentation?.DisplayRootPath,
+                displayRootPath,
                 pathPresentation?.DisplayRootName);
 
         if (selectedPaths.Count > 0 &&
@@ -1032,7 +1075,7 @@ internal sealed class PreviewSurfaceController : IDisposable
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
-                pathPresentation?.DisplayRootPath,
+                displayRootPath,
                 pathPresentation?.DisplayRootName);
         }
 
@@ -1057,7 +1100,7 @@ internal sealed class PreviewSurfaceController : IDisposable
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
                             currentPath),
-                    transformationContext: _transformationContextProvider(),
+                    transformationContext: transformationContext,
                     includeSourceCoordinateMaps: true)
                 .GetAwaiter()
                 .GetResult();
@@ -1167,14 +1210,14 @@ internal sealed class PreviewSurfaceController : IDisposable
             return;
 
         _disposed = true;
-        _controls.TextControl.CopyingToClipboard -=
-            OnCopyingToClipboard;
+		_controls.TextControl.CopyingToClipboard -=
+			OnCopyingToClipboard;
 		_controls.TextControl.RedactionToggleRequested -= OnRedactionToggleRequested;
-        _controls.TextControl.CopiedToClipboard -=
+		_controls.TextControl.BulkRedactionToggleRequested -= OnBulkRedactionToggleRequested;
+		_controls.TextControl.CopiedToClipboard -=
             OnCopiedToClipboard;
         _controls.TextControl.PreviewSelectionChanged -=
             OnSelectionChanged;
-		_controls.TextControl.RedactionToggleRequested -= OnRedactionToggleRequested;
 		_controls.TextControl.ManualSecretMarkRequested -= OnManualSecretMarkRequested;
 		_controls.TextControl.ManualSecretUnmarkRequested -= OnManualSecretUnmarkRequested;
 		_controls.TextControl.ManualSecretMarkRejected -= OnManualSecretMarkRejected;

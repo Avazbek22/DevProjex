@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Xml;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Services;
 
 namespace DevProjex.Application.Context;
 
@@ -101,7 +102,8 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextDocumentFormat format,
 		Stream destination,
 		CancellationToken cancellationToken = default,
-		bool plain = false)
+		bool plain = false,
+		bool useUnifiedContentHeaders = false)
 	{
 		_ = await WriteCompleteWithReportAsync(
 				plan,
@@ -109,7 +111,8 @@ public sealed class ProjectContextDocumentService(
 				format,
 				destination,
 				cancellationToken,
-				plain)
+				plain,
+				useUnifiedContentHeaders)
 			.ConfigureAwait(false);
 	}
 
@@ -119,7 +122,8 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextDocumentFormat format,
 		Stream destination,
 		CancellationToken cancellationToken = default,
-		bool plain = false)
+		bool plain = false,
+		bool useUnifiedContentHeaders = false)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		ArgumentNullException.ThrowIfNull(destination);
@@ -135,7 +139,8 @@ public sealed class ProjectContextDocumentService(
 					format,
 					destination,
 					cancellationToken,
-					plain)
+					plain,
+					useUnifiedContentHeaders)
 				.ConfigureAwait(false);
 		}
 		using var cancellationDestination = new CancellationBoundWriteStream(
@@ -150,6 +155,7 @@ public sealed class ProjectContextDocumentService(
 						view,
 						cancellationDestination,
 						plain,
+						useUnifiedContentHeaders,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -159,6 +165,7 @@ public sealed class ProjectContextDocumentService(
 						view,
 						cancellationDestination,
 						plain,
+						useUnifiedContentHeaders,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -167,6 +174,7 @@ public sealed class ProjectContextDocumentService(
 						plan,
 						view,
 						cancellationDestination,
+						useUnifiedContentHeaders,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -175,6 +183,7 @@ public sealed class ProjectContextDocumentService(
 						plan,
 						view,
 						cancellationDestination,
+						useUnifiedContentHeaders,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -249,7 +258,8 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextDocumentFormat format,
 		Stream destination,
 		CancellationToken cancellationToken,
-		bool plain)
+		bool plain,
+		bool useUnifiedContentHeaders)
 	{
 		var context = CreateTransformationContext(plan)!;
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
@@ -269,7 +279,8 @@ public sealed class ProjectContextDocumentService(
 				format,
 				destination,
 				cancellationToken,
-				plain)
+				plain,
+				useUnifiedContentHeaders)
 			.ConfigureAwait(false);
 		return new ProjectContextWriteResult(prepared.UnscannableFiles);
 	}
@@ -279,6 +290,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextView view,
 		Stream destination,
 		bool plain,
+		bool useUnifiedContentHeaders,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -290,6 +302,7 @@ public sealed class ProjectContextDocumentService(
 					writer,
 					plan,
 					plain,
+					useUnifiedContentHeaders,
 					includeFinalLineEnding: includesContent,
 					cancellationToken)
 				.ConfigureAwait(false);
@@ -298,6 +311,13 @@ public sealed class ProjectContextDocumentService(
 
 		if (includesContent)
 		{
+			if (!hasOutput && useUnifiedContentHeaders)
+			{
+				await writer.WriteAsync(GetDocumentRoot(plan, protectPrivateData: true).AsMemory(), cancellationToken)
+					.ConfigureAwait(false);
+				await writer.WriteAsync(":".AsMemory(), cancellationToken).ConfigureAwait(false);
+				hasOutput = true;
+			}
 			for (var index = 0; index < plan.IncludedFiles.Count; index++)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -357,6 +377,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextView view,
 		Stream destination,
 		bool plain,
+		bool useUnifiedContentHeaders,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -387,6 +408,7 @@ public sealed class ProjectContextDocumentService(
 					writer,
 					plan,
 					plain,
+					useUnifiedContentHeaders,
 					includeFinalLineEnding: false,
 					cancellationToken)
 				.ConfigureAwait(false);
@@ -449,6 +471,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		Stream destination,
+		bool useUnifiedContentHeaders,
 		CancellationToken cancellationToken)
 	{
 		using var writer = new Utf8JsonWriter(destination, new JsonWriterOptions
@@ -461,7 +484,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteNumber("schemaVersion", SchemaVersion);
 		writer.WriteString("kind", Kind);
 		writer.WriteStartObject("project");
-		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan)));
+		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan, useUnifiedContentHeaders)));
 		writer.WriteString("name", GetProjectName(plan));
 		WriteRepositorySource(writer, plan.SourceIdentity);
 		writer.WriteEndObject();
@@ -525,6 +548,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		Stream destination,
+		bool useUnifiedContentHeaders,
 		CancellationToken cancellationToken)
 	{
 		using var writer = XmlWriter.Create(destination, new XmlWriterSettings
@@ -541,7 +565,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteAttributeString("schemaVersion", XmlConvert.ToString(SchemaVersion));
 		writer.WriteAttributeString("kind", Kind);
 		writer.WriteStartElement("project");
-		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan)));
+		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan, useUnifiedContentHeaders)));
 		writer.WriteElementString("name", GetProjectName(plan));
 		WriteRepositorySourceXml(writer, plan.SourceIdentity);
 		writer.WriteEndElement();
@@ -636,6 +660,7 @@ public sealed class ProjectContextDocumentService(
 		TextWriter writer,
 		ProjectContextPlan plan,
 		bool plain,
+		bool protectPrivateData,
 		bool includeFinalLineEnding,
 		CancellationToken cancellationToken) =>
 		plain
@@ -643,7 +668,7 @@ public sealed class ProjectContextDocumentService(
 				writer,
 				plan.SourceRoot,
 				plan.ProjectedTree,
-				GetDocumentRoot(plan),
+				GetDocumentRoot(plan, protectPrivateData),
 				GetProjectName(plan),
 				includeFinalLineEnding: includeFinalLineEnding,
 				cancellationToken: cancellationToken)
@@ -651,7 +676,7 @@ public sealed class ProjectContextDocumentService(
 				writer,
 				plan.SourceRoot,
 				plan.ProjectedTree,
-				GetDocumentRoot(plan),
+				GetDocumentRoot(plan, protectPrivateData),
 				GetProjectName(plan),
 				includeFinalLineEnding: includeFinalLineEnding,
 				cancellationToken: cancellationToken);
@@ -794,7 +819,6 @@ public sealed class ProjectContextDocumentService(
 				GetDocumentRoot(plan),
 				GetProjectName(plan)));
 		}
-
 		AppendTextFiles(output, files);
 		AppendTruncationNotice(output, truncated);
 		return output.ToString().TrimEnd('\r', '\n');
@@ -1283,14 +1307,20 @@ public sealed class ProjectContextDocumentService(
 			? name
 			: "project";
 
-	private static string GetDocumentRoot(ProjectContextPlan plan) =>
-		plan.SourceIdentity is
+	private static string GetDocumentRoot(ProjectContextPlan plan, bool protectPrivateData = false)
+	{
+		var displayRootPath = plan.SourceIdentity is
 		{
 			SourceType: ProjectSourceType.GitClone,
 			SourceReference.Length: > 0
 		} identity
 			? identity.SourceReference
 			: plan.SourceRoot;
+		return OutputRootPathPresentation.Resolve(
+			plan.SourceRoot,
+			displayRootPath,
+			protectPrivateData && plan.Selection.HidePrivateData == true);
+	}
 
 	private static string EscapeMarkdownHeading(string value) =>
 		value.Replace("\\", "\\\\").Replace("#", "\\#").Replace("\r", " ").Replace("\n", " ");

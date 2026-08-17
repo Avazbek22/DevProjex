@@ -18,7 +18,8 @@ public sealed record SecretPreviewSpan(
 	SecretFindingSource Source = SecretFindingSource.Detector,
 	string? PersistentMarkHash = null,
 	string? SessionMarkId = null,
-	PersistentSecretMarkId? PersistentMarkId = null);
+	PersistentSecretMarkId? PersistentMarkId = null,
+	string RelativePath = "");
 
 public sealed record SecretTextRedactionResult(
 	string Text,

@@ -31,7 +31,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		ContentTransformationContext? transformationContext = null)
+		ContentTransformationContext? transformationContext = null,
+		string? displayRootPath = null)
 		=> (await BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -40,13 +41,15 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
 			transformationContext,
-			publishCompressionSnapshot: true).ConfigureAwait(false)).Text;
+			publishCompressionSnapshot: true,
+			displayRootPath).ConfigureAwait(false)).Text;
 
 	public Task<SelectedContentExportResult> BuildResultAsync(
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		ContentTransformationContext? transformationContext) =>
+		ContentTransformationContext? transformationContext,
+		string? displayRootPath = null) =>
 		BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -55,7 +58,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
 			transformationContext,
-			publishCompressionSnapshot: true);
+			publishCompressionSnapshot: true,
+			displayRootPath);
 
 	public async Task<string> BuildBoundedPreviewAsync(
 		IEnumerable<string> filePaths,
@@ -64,7 +68,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		int maxOutputCharacters,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		CodeCompressionContext? compressionContext = null)
+		CodeCompressionContext? compressionContext = null,
+		string? displayRootPath = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileCount);
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileSizeForFullRead);
@@ -78,7 +83,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileSizeForFullRead,
 			maxOutputCharacters,
 			ContentTransformationContext.For(compressionContext, redaction: null),
-			publishCompressionSnapshot: false).ConfigureAwait(false)).Text;
+			publishCompressionSnapshot: false,
+			displayRootPath).ConfigureAwait(false)).Text;
 	}
 
 	private async Task<SelectedContentExportResult> BuildCoreAsync(
@@ -89,7 +95,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		long? maxFileSizeForFullRead,
 		int? maxOutputCharacters,
 		ContentTransformationContext? transformationContext,
-		bool publishCompressionSnapshot)
+		bool publishCompressionSnapshot,
+		string? displayRootPath = null)
 	{
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
@@ -209,6 +216,12 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 					cancellationToken);
 
 			processedFileCount++;
+			if (!anyWritten && !string.IsNullOrWhiteSpace(displayRootPath))
+			{
+				sb.AppendLine($"{displayRootPath}:");
+				AppendClipboardBlankLine(sb);
+				AppendClipboardBlankLine(sb);
+			}
 			if (anyWritten)
 			{
 				AppendClipboardBlankLine(sb);

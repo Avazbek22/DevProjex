@@ -72,10 +72,11 @@ public sealed class PreviewDocumentBuilder(
     public async Task<IPreviewTextDocument?> BuildContentDocumentAsync(
         IEnumerable<string> filePaths,
         CancellationToken cancellationToken,
-        Func<string, string>? displayPathMapper,
-        bool includeOmissionMarkers = false,
+		Func<string, string>? displayPathMapper,
+		bool includeOmissionMarkers = false,
 		ContentTransformationContext? transformationContext = null,
-		bool includeSourceCoordinateMaps = false)
+		bool includeSourceCoordinateMaps = false,
+		string? displayRootPath = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
@@ -91,12 +92,18 @@ public sealed class PreviewDocumentBuilder(
 		var redactions = new List<PreviewRedactionSpan>();
 		using var transformationScope = transformationContext?.BeginOutput(orderedFiles);
 		var redactionScope = transformationScope?.Redaction;
-        var anyWritten = await AppendContentEntriesAsync(
+		var wroteRoot = false;
+		if (!string.IsNullOrWhiteSpace(displayRootPath))
+		{
+			builder.AppendLine($"{displayRootPath}:");
+			wroteRoot = true;
+		}
+		var anyWritten = await AppendContentEntriesAsync(
             builder,
             orderedFiles,
             sections,
             displayPathMapper,
-            prependSectionSeparator: false,
+			prependSectionSeparator: wroteRoot,
             includeOmissionMarkers,
 			redactionScope,
 			transformationScope,
@@ -542,7 +549,8 @@ public sealed class PreviewDocumentBuilder(
 						span.Source,
 						span.PersistentMarkHash,
 						span.SessionMarkId,
-						span.PersistentMarkId));
+						span.PersistentMarkId,
+						span.RelativePath));
 				}
 
 				if (index < spanText.Length)

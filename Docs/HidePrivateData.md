@@ -25,6 +25,12 @@ relative paths, enabled transformations, and the pinned rule versions. DevProjex
 the current OS username, machine name, locale, network, or another machine-local signal to
 guess private data.
 
+Content-only output prints the project root once and then uses relative file headers. When
+Hide private data is enabled, only the local username segment in that root is replaced with
+`[local-user-1]`, for example `C:\Users\[local-user-1]\project` or
+`/home/[local-user-1]/project`. Tree and Tree + Content output use the same root presentation;
+relative file headers do not repeat private path data.
+
 ## Phase-one rules
 
 ### Email (`email`)
