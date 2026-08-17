@@ -268,7 +268,7 @@ public sealed class PreviewDocumentBuilderTests
 		{
 			Assert.Equal("generated-path", span.OccurrenceId);
 			Assert.Equal(OutputRootPathPresentation.LocalUserRuleId, span.RuleId);
-			Assert.Equal((SecretFindingSource)0, span.Source);
+			Assert.Equal(SecretFindingSource.GeneratedPath, span.Source);
 			Assert.Equal(OutputRootPathPresentation.LocalUserPlaceholder.Length, span.Length);
 		});
 		Assert.Equal(2, document.GetLineRangeText(1, document.LineCount)

@@ -245,7 +245,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private Dictionary<int, PreviewRedactionSpan[]> _redactionsByLine = [];
 	private PreviewRedactionSpan[] _redactionOccurrences = [];
 	private string? _hoveredRedactionOccurrenceId;
-	private string? _activeRedactionOccurrenceId;
+	private RedactionNavigationTarget? _activeRedactionTarget;
     private string? _formattedLineCacheFontFamilyName;
     private string? _formattedLineCacheCultureName;
     private double _formattedLineCacheFontSize = double.NaN;
@@ -883,7 +883,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 					ResolveDistanceFromColumn(lineText, startColumn, typeface));
 				var y = origin.Y + ((lineNumber - firstLine) * lineHeight);
 				var isInteractive = span.OccurrenceId == _hoveredRedactionOccurrenceId ||
-				                    span.OccurrenceId == _activeRedactionOccurrenceId;
+				                    IsNavigationTarget(span, _activeRedactionTarget);
 				var (background, border) = ResolveRedactionBrushes(span.State, isInteractive);
 				context.DrawRectangle(
 					background,
@@ -1040,7 +1040,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var hitPosition = HitTestSelectionPosition(e.GetPosition(this));
 		if (TryGetRedactionAt(hitPosition, out var redaction))
 		{
-			_activeRedactionOccurrenceId = redaction.OccurrenceId;
+			_activeRedactionTarget = CreateNavigationTarget(redaction);
 			InvalidateVisual();
 			RedactionToggleRequested?.Invoke(
 				this,
@@ -1049,9 +1049,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 			return;
 		}
 
-		if (_activeRedactionOccurrenceId is not null)
+		if (_activeRedactionTarget is not null)
 		{
-			_activeRedactionOccurrenceId = null;
+			_activeRedactionTarget = null;
 			InvalidateVisual();
 		}
         CaptureSelectionPointer(e);
@@ -1129,10 +1129,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 		if (e.Key == Key.Escape &&
 		    (_selectionAnchor is not null ||
 		     _selectionActive is not null ||
-		     _activeRedactionOccurrenceId is not null))
+		     _activeRedactionTarget is not null))
         {
             ClearSelection();
-			_activeRedactionOccurrenceId = null;
+			_activeRedactionTarget = null;
 			InvalidateVisual();
             e.Handled = true;
 			return;
@@ -1157,9 +1157,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 	private bool TryGetActiveRedaction(out PreviewRedactionSpan redaction)
 	{
-		if (_activeRedactionOccurrenceId is { } occurrenceId)
+		if (_activeRedactionTarget is { } target)
 		{
-			redaction = _redactionOccurrences.FirstOrDefault(span => span.OccurrenceId == occurrenceId)!;
+			redaction = FindRedaction(target)!;
 			if (redaction is not null)
 				return true;
 		}
@@ -1205,22 +1205,63 @@ public sealed class VirtualizedPreviewTextControl : Control
 			.ToDictionary(
 				static group => group.Key,
 				static group => group.OrderBy(static span => span.StartColumn).ToArray());
-		_redactionOccurrences = redactions
-			.GroupBy(static span => span.OccurrenceId, StringComparer.Ordinal)
-			.Select(static group => group
-				.OrderBy(static span => span.LineNumber)
-				.ThenBy(static span => span.StartColumn)
-				.First())
-			.OrderBy(static span => span.LineNumber)
-			.ThenBy(static span => span.StartColumn)
-			.ToArray();
-		if (_activeRedactionOccurrenceId is { } active &&
-		    !_redactionOccurrences.Any(span => span.OccurrenceId == active))
-		{
-			_activeRedactionOccurrenceId = null;
-		}
+		_redactionOccurrences = BuildRedactionNavigationStops(redactions);
+		if (_activeRedactionTarget is { } active && FindRedaction(active) is null)
+			_activeRedactionTarget = null;
 		UpdateHoveredRedaction(null);
 	}
+
+	private static PreviewRedactionSpan[] BuildRedactionNavigationStops(
+		IReadOnlyList<PreviewRedactionSpan> redactions)
+	{
+		var firstSegments = new Dictionary<string, PreviewRedactionSpan>(StringComparer.Ordinal);
+		var stops = new List<PreviewRedactionSpan>(redactions.Count);
+		foreach (var span in redactions)
+		{
+			if (span.Source.HasFlag(SecretFindingSource.GeneratedPath))
+			{
+				stops.Add(span);
+				continue;
+			}
+
+			if (!firstSegments.TryGetValue(span.OccurrenceId, out var first) ||
+			    CompareRedactionPositions(span, first) < 0)
+			{
+				firstSegments[span.OccurrenceId] = span;
+			}
+		}
+
+		stops.AddRange(firstSegments.Values);
+		stops.Sort(CompareRedactionPositions);
+		return stops.ToArray();
+	}
+
+	private PreviewRedactionSpan? FindRedaction(RedactionNavigationTarget target)
+	{
+		if (!_redactionsByLine.TryGetValue(target.LineNumber, out var lineRedactions))
+			return null;
+
+		return lineRedactions.FirstOrDefault(span => IsNavigationTarget(span, target));
+	}
+
+	private static int CompareRedactionPositions(PreviewRedactionSpan left, PreviewRedactionSpan right)
+	{
+		var lineComparison = left.LineNumber.CompareTo(right.LineNumber);
+		return lineComparison != 0
+			? lineComparison
+			: left.StartColumn.CompareTo(right.StartColumn);
+	}
+
+	private static RedactionNavigationTarget CreateNavigationTarget(PreviewRedactionSpan span) =>
+		new(span.OccurrenceId, span.LineNumber, span.StartColumn);
+
+	private static bool IsNavigationTarget(
+		PreviewRedactionSpan span,
+		RedactionNavigationTarget? target) =>
+		target is { } value &&
+		string.Equals(span.OccurrenceId, value.OccurrenceId, StringComparison.Ordinal) &&
+		span.LineNumber == value.LineNumber &&
+		span.StartColumn == value.StartColumn;
 
 	private void UpdateHoveredRedaction(PreviewRedactionSpan? redaction)
 	{
@@ -1274,7 +1315,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 		var nextIndex = ResolveRedactionNavigationIndex(forward);
 		var redaction = _redactionOccurrences[nextIndex];
-		_activeRedactionOccurrenceId = redaction.OccurrenceId;
+		_activeRedactionTarget = CreateNavigationTarget(redaction);
 		_selectionAnchor = new SelectionPosition(redaction.LineNumber, redaction.StartColumn);
 		_selectionActive = _selectionAnchor;
 		UpdateHoveredRedaction(null);
@@ -1285,11 +1326,11 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 	private int ResolveRedactionNavigationIndex(bool forward)
 	{
-		var currentIndex = _activeRedactionOccurrenceId is null
+		var currentIndex = _activeRedactionTarget is null
 			? -1
 			: Array.FindIndex(
 				_redactionOccurrences,
-				span => span.OccurrenceId == _activeRedactionOccurrenceId);
+				span => IsNavigationTarget(span, _activeRedactionTarget));
 		var scrollViewer = GetOwnerScrollViewer();
 		if (currentIndex >= 0 &&
 		    (scrollViewer is null || IsRedactionVisible(_redactionOccurrences[currentIndex], scrollViewer)))
@@ -1377,7 +1418,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         _isSelecting = false;
         ReleaseSelectionAutoScrollTimer();
         _ownerScrollViewer = null;
-		_activeRedactionOccurrenceId = null;
+		_activeRedactionTarget = null;
 		UpdateHoveredRedaction(null);
 		ToolTip.SetTip(this, null);
         CloseContextMenu();
@@ -2760,6 +2801,11 @@ public sealed class VirtualizedPreviewTextControl : Control
     }
 
     private readonly record struct SelectionHitResult(SelectionPosition Position, SelectionHitKind Kind);
+	private readonly record struct RedactionNavigationTarget(
+		string OccurrenceId,
+		int LineNumber,
+		int StartColumn);
+
     private readonly record struct SelectionPosition(int Line, int Column);
     private sealed record FormattedLineCacheEntry(
         string Text,

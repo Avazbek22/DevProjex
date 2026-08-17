@@ -617,7 +617,7 @@ public sealed class PreviewDocumentBuilder(
 			presentation.SegmentLength,
 			presentation.State,
 			presentation.SourceLength,
-			(SecretFindingSource)0));
+			SecretFindingSource.GeneratedPath));
 	}
 
 	private static void AppendGeneratedPathRedactionFromText(
@@ -646,7 +646,7 @@ public sealed class PreviewDocumentBuilder(
 			presentation.SegmentLength,
 			presentation.State,
 			presentation.SourceLength,
-			(SecretFindingSource)0));
+			SecretFindingSource.GeneratedPath));
 	}
 
 	private static void AdvancePosition(ReadOnlySpan<char> text, ref int line, ref int column)

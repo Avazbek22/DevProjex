@@ -186,7 +186,8 @@ public enum SecretFindingSource
 {
 	Detector = 1,
 	PersistentMark = 2,
-	SessionMark = 4
+	SessionMark = 4,
+	GeneratedPath = 8
 }
 
 public class SecretDetectionException(

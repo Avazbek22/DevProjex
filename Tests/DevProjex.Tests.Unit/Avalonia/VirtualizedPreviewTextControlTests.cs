@@ -443,7 +443,7 @@ public sealed class VirtualizedPreviewTextControlTests
 					placeholder.Length,
 					SecretPreviewSpanState.Redacted,
 					SourceLength: "alice".Length,
-					Source: (SecretFindingSource)0)
+					Source: SecretFindingSource.GeneratedPath)
 			]);
 		var control = new VirtualizedPreviewTextControl
 		{
@@ -885,6 +885,171 @@ public sealed class VirtualizedPreviewTextControlTests
 	}
 
 	[AvaloniaFact]
+	public void KeyboardNavigation_VisitsEveryGeneratedPathButCollapsesMultilineOccurrences()
+	{
+		const string generatedOccurrence = "generated-path";
+		const string multilineOccurrence = "multiline-value";
+		const string placeholder = "[local-user-1]";
+		var lines = new[]
+		{
+			$"a={placeholder}",
+			$"first={placeholder}",
+			$"second={placeholder}",
+			$"b={placeholder}",
+			$"c={placeholder}"
+		};
+		var generatedSpans = new[]
+		{
+			new PreviewRedactionSpan(
+				generatedOccurrence,
+				"local-user",
+				1,
+				"a=".Length,
+				placeholder.Length,
+				SecretPreviewSpanState.Redacted,
+				Source: SecretFindingSource.GeneratedPath),
+			new PreviewRedactionSpan(
+				generatedOccurrence,
+				"local-user",
+				4,
+				"b=".Length,
+				placeholder.Length,
+				SecretPreviewSpanState.Redacted,
+				Source: SecretFindingSource.GeneratedPath),
+			new PreviewRedactionSpan(
+				generatedOccurrence,
+				"local-user",
+				5,
+				"c=".Length,
+				placeholder.Length,
+				SecretPreviewSpanState.Redacted,
+				Source: SecretFindingSource.GeneratedPath)
+		};
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', lines),
+			redactions:
+			[
+				generatedSpans[0],
+				new PreviewRedactionSpan(
+					multilineOccurrence,
+					"multi-line",
+					2,
+					"first=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					multilineOccurrence,
+					"multi-line",
+					3,
+					"second=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted),
+				generatedSpans[1],
+				generatedSpans[2]
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 180,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 240,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		string? requestedOccurrence = null;
+		control.RedactionToggleRequested += (_, eventArgs) => requestedOccurrence = eventArgs.OccurrenceId;
+
+		try
+		{
+			window.Show();
+			control.Focus();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			Navigate(Key.Down, expectedLine: 1);
+			Navigate(Key.Down, expectedLine: 2);
+			Navigate(Key.Down, expectedLine: 4);
+			Navigate(Key.Down, expectedLine: 5);
+			Navigate(Key.Down, expectedLine: 1);
+			Navigate(Key.Up, expectedLine: 5);
+			Navigate(Key.Up, expectedLine: 4);
+
+			Assert.False(IsActiveRedactionStop(control, generatedSpans[0]));
+			Assert.True(IsActiveRedactionStop(control, generatedSpans[1]));
+			Assert.False(IsActiveRedactionStop(control, generatedSpans[2]));
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			Assert.Equal(generatedOccurrence, requestedOccurrence);
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		void Navigate(Key key, int expectedLine)
+		{
+			window.KeyPress(key, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(key, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(expectedLine, GetActiveRedactionLineNumber(control));
+		}
+	}
+
+	[AvaloniaFact]
+	public void RebuildRedactionIndex_DropsAStaleGeneratedPathPositionWithTheSameOccurrenceId()
+	{
+		const string occurrenceId = "generated-path";
+		const string placeholder = "[local-user-1]";
+		using var firstDocument = new InMemoryPreviewTextDocument(
+			$"a={placeholder}\nplain\nb={placeholder}",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					occurrenceId,
+					"local-user",
+					1,
+					2,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					Source: SecretFindingSource.GeneratedPath),
+				new PreviewRedactionSpan(
+					occurrenceId,
+					"local-user",
+					3,
+					2,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					Source: SecretFindingSource.GeneratedPath)
+			]);
+		using var replacement = new InMemoryPreviewTextDocument(
+			$"a={placeholder}",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					occurrenceId,
+					"local-user",
+					1,
+					2,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					Source: SecretFindingSource.GeneratedPath)
+			]);
+		var control = new VirtualizedPreviewTextControl { Document = firstDocument };
+
+		InvokePrivate(control, "MoveToRedaction", true);
+		InvokePrivate(control, "MoveToRedaction", true);
+		Assert.Equal(3, GetActiveRedactionLineNumber(control));
+
+		control.Document = replacement;
+
+		Assert.False(HasActiveRedactionTarget(control));
+	}
+
+	[AvaloniaFact]
 	public void KeyboardNavigation_AfterManualScroll_ContinuesFromViewportInsteadOfHiddenActiveFinding()
 	{
 		const string firstOccurrence = "first-occurrence";
@@ -1288,11 +1453,54 @@ public sealed class VirtualizedPreviewTextControlTests
 		VirtualizedPreviewTextControl control)
 	{
 		var field = typeof(VirtualizedPreviewTextControl).GetField(
-			"_activeRedactionOccurrenceId",
+			"_activeRedactionTarget",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 
 		Assert.NotNull(field);
-		return Assert.IsType<string>(field!.GetValue(control));
+		var target = field!.GetValue(control);
+		Assert.NotNull(target);
+		var property = target!.GetType().GetProperty("OccurrenceId");
+		Assert.NotNull(property);
+		return Assert.IsType<string>(property!.GetValue(target));
+	}
+
+	private static int GetActiveRedactionLineNumber(VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionTarget",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		var target = field!.GetValue(control);
+		Assert.NotNull(target);
+		var property = target!.GetType().GetProperty("LineNumber");
+		Assert.NotNull(property);
+		return Assert.IsType<int>(property!.GetValue(target));
+	}
+
+	private static bool HasActiveRedactionTarget(VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionTarget",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return field!.GetValue(control) is not null;
+	}
+
+	private static bool IsActiveRedactionStop(
+		VirtualizedPreviewTextControl control,
+		PreviewRedactionSpan span)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionTarget",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		var target = field!.GetValue(control);
+		Assert.NotNull(target);
+		var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+			"IsNavigationTarget",
+			BindingFlags.Static | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		return Assert.IsType<bool>(method!.Invoke(null, [span, target]));
 	}
 
 	private static void SelectRange(

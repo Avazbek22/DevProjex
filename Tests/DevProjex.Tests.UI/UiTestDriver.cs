@@ -1150,6 +1150,24 @@ internal static class UiTestDriver
 		await WaitForSettledFramesAsync(frameCount: 4);
 	}
 
+	public static (string OccurrenceId, int LineNumber, int StartColumn)? GetActiveRedactionTarget(
+		VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionTarget",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		var target = field!.GetValue(control);
+		if (target is null)
+			return null;
+
+		var targetType = target.GetType();
+		return (
+			Assert.IsType<string>(targetType.GetProperty("OccurrenceId")!.GetValue(target)),
+			Assert.IsType<int>(targetType.GetProperty("LineNumber")!.GetValue(target)),
+			Assert.IsType<int>(targetType.GetProperty("StartColumn")!.GetValue(target)));
+	}
+
 	public static DevProjex.Avalonia.Services.ToastService GetToastService(MainWindow window) =>
 		GetRequiredPrivateField<DevProjex.Avalonia.Services.ToastService>(window, "_toastService");
 

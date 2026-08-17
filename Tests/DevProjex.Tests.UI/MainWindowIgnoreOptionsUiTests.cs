@@ -72,20 +72,42 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var generatedPathSpans = control.Document!.Redactions
 				.Where(static span =>
 					span.RuleId == OutputRootPathPresentation.LocalUserRuleId &&
-					span.Source == (SecretFindingSource)0)
+					span.Source == SecretFindingSource.GeneratedPath)
 				.ToArray();
 			Assert.True(generatedPathSpans.Length > 1);
 			var generatedOccurrenceId = Assert.Single(
 				generatedPathSpans
 					.Select(static span => span.OccurrenceId)
 					.Distinct(StringComparer.Ordinal));
+			var navigationTarget = generatedPathSpans
+				.OrderBy(static span => span.LineNumber)
+				.ThenBy(static span => span.StartColumn)
+				.Skip(1)
+				.First();
+			control.Focus();
+			for (var attempt = 0; attempt <= control.Document.Redactions.Count; attempt++)
+			{
+				await UiTestDriver.PressKeyAsync(window, Key.Down, RawInputModifiers.Alt);
+				var activeTarget = UiTestDriver.GetActiveRedactionTarget(control);
+				if (activeTarget is { } active &&
+				    active.OccurrenceId == navigationTarget.OccurrenceId &&
+				    active.LineNumber == navigationTarget.LineNumber &&
+				    active.StartColumn == navigationTarget.StartColumn)
+				{
+					break;
+				}
+			}
+			Assert.Equal(
+				(generatedOccurrenceId, navigationTarget.LineNumber, navigationTarget.StartColumn),
+				UiTestDriver.GetActiveRedactionTarget(control));
 
-			await UiTestDriver.RequestRedactionToggleAsync(window, generatedOccurrenceId);
+			await UiTestDriver.PressKeyAsync(window, Key.Enter);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
-					programPath,
-					StringComparison.Ordinal),
+				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(programPath, StringComparison.Ordinal) &&
+				      control.Document!.Redactions
+					      .Where(static span => span.Source == SecretFindingSource.GeneratedPath)
+					      .All(static span => span.State == SecretPreviewSpanState.KeptAsIs),
 				"the generated path occurrence to be kept as-is");
 			var keptContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
 				window,
@@ -95,13 +117,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal(keptContent, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
 			await UiTestDriver.CopyContentToClipboardAsync(window, keptContent);
 
-			await UiTestDriver.RequestRedactionToggleAsync(window, generatedOccurrenceId);
+			await UiTestDriver.PressKeyAsync(window, Key.Enter);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => string.Equals(
 					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
 					protectedContent,
-					StringComparison.Ordinal),
+					StringComparison.Ordinal) &&
+				      control.Document!.Redactions
+					      .Where(static span => span.Source == SecretFindingSource.GeneratedPath)
+					      .All(static span => span.State == SecretPreviewSpanState.Redacted),
 				"the generated path occurrence to be hidden again");
 
 			foreach (var mode in new[]
