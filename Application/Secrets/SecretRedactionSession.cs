@@ -1725,31 +1725,48 @@ public sealed class SecretRedactionSession : IDisposable
 			transformMap,
 			inspectionBudget,
 			cancellationToken);
-		var detected = SecretRedactionScope.ResolveNonOverlappingMatches(
-			detectorFindings.Count == 0
-				? markedFindings
-				: markedFindings.Count == 0
-					? detectorFindings
-					: [..markedFindings, ..detectorFindings]);
+		IReadOnlyList<DetectedSecret> rawFindings = detectorFindings.Count == 0
+			? markedFindings
+			: markedFindings.Count == 0
+				? detectorFindings
+				: [..markedFindings, ..detectorFindings];
+		foreach (var finding in rawFindings)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			generationToken.ThrowIfCancellationRequested();
+			if (finding.Start < 0 || finding.Length <= 0 || finding.Start > content.Length - finding.Length)
+				throw new SecretDetectionException($"Secret detector returned an invalid span for '{relativePath}'.");
+		}
+
+		var detected = SecretRedactionScope.ResolveNonOverlappingFindingGroups(rawFindings);
 		var findings = new SecretFindingMetadata[detected.Count];
 		for (var index = 0; index < detected.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			generationToken.ThrowIfCancellationRequested();
 			var finding = detected[index];
-			if (finding.Start < 0 || finding.Length <= 0 || finding.Start > content.Length - finding.Length)
-				throw new SecretDetectionException($"Secret detector returned an invalid span for '{relativePath}'.");
+			var valueFingerprint = HashValue(content.Slice(finding.Start, finding.Length));
+			var candidates = new SecretFindingCandidateMetadata[finding.Candidates.Count];
+			var source = (SecretFindingSource)0;
+			for (var candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
+			{
+				var candidate = finding.Candidates[candidateIndex];
+				source |= candidate.Source;
+				candidates[candidateIndex] = new SecretFindingCandidateMetadata(
+					candidate.RuleId,
+					valueFingerprint,
+					candidate.RuleOrder,
+					candidate.Source,
+					candidate.PersistentMarkHash,
+					candidate.SessionMarkId,
+					candidate.PersistentMarkId,
+					candidate.Category);
+			}
 			findings[index] = new SecretFindingMetadata(
-				finding.RuleId,
 				finding.Start,
 				finding.Length,
-				HashValue(content.Slice(finding.Start, finding.Length)),
-				finding.RuleOrder,
-				finding.Source,
-				finding.PersistentMarkHash,
-				finding.SessionMarkId,
-				finding.PersistentMarkId,
-				finding.Category);
+				source,
+				candidates);
 		}
 
 		var normalizedPath = Path.GetFullPath(filePath);
@@ -2024,9 +2041,13 @@ public sealed class SecretRedactionSession : IDisposable
 		              transformIdentity.Length) * sizeof(char);
 		foreach (var finding in findings)
 		{
-			bytes += 64 + (finding.RuleId.Length + finding.ValueFingerprint.Length) * sizeof(char);
-			if (finding.PersistentMarkId is { RelativePath: { } relativePath })
-				bytes += relativePath.Length * sizeof(char);
+			bytes += 40;
+			foreach (var candidate in finding.Candidates)
+			{
+				bytes += 64 + (candidate.RuleId.Length + candidate.ValueFingerprint.Length) * sizeof(char);
+				if (candidate.PersistentMarkId is { RelativePath: { } relativePath })
+					bytes += relativePath.Length * sizeof(char);
+			}
 		}
 		return bytes;
 	}
@@ -2591,21 +2612,44 @@ public sealed class SecretRedactionScope
 		for (var index = 0; index < findings.Count; index++)
 		{
 			var finding = findings[index];
-			var identity = $"{finding.RuleId}:{finding.ValueFingerprint}";
-			if (!_identityIndexes.TryGetValue(identity, out var identityIndex))
+			var coordinateIdentity = ResolveOccurrenceCoordinateIdentity(
+				finding.Start,
+				finding.Length,
+				transformMap);
+			var candidateOccurrenceIds = finding.Candidates.Count == 1
+				? null
+				: new string[finding.Candidates.Count];
+			var activeCandidateIndex = -1;
+			var activeIdentityIndex = 0;
+			string? singleOccurrenceId = null;
+			for (var candidateIndex = 0; candidateIndex < finding.Candidates.Count; candidateIndex++)
 			{
-				identityIndex = _ruleIdentityCounts.GetValueOrDefault(finding.RuleId) + 1;
-				_ruleIdentityCounts[finding.RuleId] = identityIndex;
-				_identityIndexes.Add(identity, identityIndex);
+				var candidate = finding.Candidates[candidateIndex];
+				var identityIndex = GetOrCreateIdentityIndex(candidate);
+				var candidateOccurrenceId = CreateOccurrenceId(
+					relativePath,
+					candidate,
+					coordinateIdentity);
+				if (candidateOccurrenceIds is null)
+					singleOccurrenceId = candidateOccurrenceId;
+				else
+					candidateOccurrenceIds[candidateIndex] = candidateOccurrenceId;
+				if (activeCandidateIndex < 0 && !_keptOccurrenceIds.Contains(candidateOccurrenceId))
+				{
+					activeCandidateIndex = candidateIndex;
+					activeIdentityIndex = identityIndex;
+				}
 			}
 
-			var coordinateIdentity = ResolveOccurrenceCoordinateIdentity(finding, transformMap);
-			var occurrenceId = SecretRedactionSession.HashValue(
-				$"{_projectRoot}\n{relativePath}\n{finding.RuleId}\n{finding.ValueFingerprint}\n{coordinateIdentity}".AsSpan());
-			var kept = _keptOccurrenceIds.Contains(occurrenceId);
+			var kept = activeCandidateIndex < 0;
+			var displayCandidateIndex = kept ? 0 : activeCandidateIndex;
+			var displayCandidate = finding.Candidates[displayCandidateIndex];
+			var occurrenceId = candidateOccurrenceIds is null
+				? singleOccurrenceId!
+				: candidateOccurrenceIds[displayCandidateIndex];
 			var replacement = kept
 				? null
-				: SecretRedactionLegend.CreatePlaceholder(finding.RuleId, identityIndex);
+				: SecretRedactionLegend.CreatePlaceholder(displayCandidate.RuleId, activeIdentityIndex);
 			var outputStart = checked(finding.Start + outputDelta);
 			var outputLength = replacement?.Length ?? finding.Length;
 			replacements[index] = new SecretReplacement(
@@ -2614,27 +2658,28 @@ public sealed class SecretRedactionScope
 				replacement);
 			spans[index] = new SecretPreviewSpan(
 				occurrenceId,
-				finding.RuleId,
+				displayCandidate.RuleId,
 				outputStart,
 				outputLength,
 				kept ? SecretPreviewSpanState.KeptAsIs : SecretPreviewSpanState.Redacted,
 				finding.Length,
 				finding.Source,
-				finding.PersistentMarkHash,
-				finding.SessionMarkId,
-				finding.PersistentMarkId,
-				relativePath);
+				displayCandidate.PersistentMarkHash,
+				displayCandidate.SessionMarkId,
+				displayCandidate.PersistentMarkId,
+				relativePath,
+				kept ? candidateOccurrenceIds : null);
 			outputDelta = checked(outputDelta + outputLength - finding.Length);
 			_detectedCount++;
-			if (finding.Category == RedactionFindingCategory.PrivateData)
+			if (displayCandidate.Category == RedactionFindingCategory.PrivateData)
 				_privateDataDetectedCount++;
 			if (!kept)
 			{
 				_redactedCount++;
-				if (finding.Category == RedactionFindingCategory.PrivateData)
+				if (displayCandidate.Category == RedactionFindingCategory.PrivateData)
 					_privateDataRedactedCount++;
 				redactedInFile++;
-				if (finding.PersistentMarkHash is { Length: > 0 } markHash)
+				if (displayCandidate.PersistentMarkHash is { Length: > 0 } markHash)
 					_markedSecretCounts[markHash] = _markedSecretCounts.GetValueOrDefault(markHash) + 1;
 			}
 		}
@@ -2642,15 +2687,35 @@ public sealed class SecretRedactionScope
 		return new SecretFileRedactionPlan(replacements, spans, findings.Count, redactedInFile);
 	}
 
+	private int GetOrCreateIdentityIndex(SecretFindingCandidateMetadata finding)
+	{
+		var identity = $"{finding.RuleId}:{finding.ValueFingerprint}";
+		if (_identityIndexes.TryGetValue(identity, out var identityIndex))
+			return identityIndex;
+
+		identityIndex = _ruleIdentityCounts.GetValueOrDefault(finding.RuleId) + 1;
+		_ruleIdentityCounts[finding.RuleId] = identityIndex;
+		_identityIndexes.Add(identity, identityIndex);
+		return identityIndex;
+	}
+
+	private string CreateOccurrenceId(
+		string relativePath,
+		SecretFindingCandidateMetadata finding,
+		string coordinateIdentity) =>
+		SecretRedactionSession.HashValue(
+			$"{_projectRoot}\n{relativePath}\n{finding.RuleId}\n{finding.ValueFingerprint}\n{coordinateIdentity}".AsSpan());
+
 	private string ResolveOccurrenceCoordinateIdentity(
-		SecretFindingMetadata finding,
+		int start,
+		int length,
 		ContentTransformMap? transformMap)
 	{
 		if (transformMap is null or { IsIdentity: true })
-			return $"source:{finding.Start}:{finding.Length}";
+			return $"source:{start}:{length}";
 		if (transformMap.TryMapSourceBackedRange(
-			    finding.Start,
-			    finding.Length,
+			    start,
+			    length,
 			    out var sourceStart,
 			    out var sourceLength))
 		{
@@ -2659,7 +2724,7 @@ public sealed class SecretRedactionScope
 
 		// Replacement-only text has no source coordinate. Its namespace includes the exact
 		// transform identity so it can never inherit a keep decision from source content.
-		return $"transform:{_transformIdentity}:{finding.Start}:{finding.Length}";
+		return $"transform:{_transformIdentity}:{start}:{length}";
 	}
 
 	private void EnsureActive()
@@ -2683,21 +2748,40 @@ public sealed class SecretRedactionScope
 	internal static IReadOnlyList<DetectedSecret> ResolveNonOverlappingMatches(
 		IReadOnlyList<DetectedSecret> matches)
 	{
-		if (matches.Count <= 1)
-			return matches;
+		var groups = ResolveNonOverlappingFindingGroups(matches);
+		if (groups.Count == 0)
+			return [];
+		var resolved = new DetectedSecret[groups.Count];
+		for (var index = 0; index < groups.Count; index++)
+		{
+			var group = groups[index];
+			var winner = MergeExactMatches(group.Candidates);
+			var valueOffset = group.Start - winner.Start;
+			resolved[index] = winner with
+			{
+				Start = group.Start,
+				Length = group.Length,
+				Value = winner.Value.Substring(valueOffset, group.Length)
+			};
+		}
+		return resolved;
+	}
 
-		var mergedExactMatches = matches
+	internal static IReadOnlyList<ResolvedSecretFinding> ResolveNonOverlappingFindingGroups(
+		IReadOnlyList<DetectedSecret> matches)
+	{
+		if (matches.Count == 0)
+			return [];
+
+		var candidates = matches
 			.GroupBy(static match => (match.Start, match.Length))
-			.Select(static group => MergeExactMatches(group))
-			.ToArray();
-		var candidates = mergedExactMatches
-			.OrderByDescending(static match =>
-				(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0)
-			.ThenBy(static match => match.Category)
-			.ThenBy(static match => IsGenericRule(match.RuleId))
-			.ThenBy(static match => match.RuleOrder)
-			.ThenBy(static match => match.Start)
-			.ThenByDescending(static match => match.Length)
+			.Select(static group => new ResolvedSecretFinding(
+				group.Key.Start,
+				group.Key.Length,
+				OrderCandidates(group)))
+			.OrderBy(static group => group.Candidates[0], DetectedSecretPriorityComparer.Instance)
+			.ThenBy(static group => group.Start)
+			.ThenByDescending(static group => group.Length)
 			.ToArray();
 		var accepted = new SortedSet<AcceptedInterval>(AcceptedIntervalStartComparer.Instance);
 		var minimum = new AcceptedInterval(int.MinValue, int.MinValue, null);
@@ -2705,46 +2789,103 @@ public sealed class SecretRedactionScope
 		foreach (var candidate in candidates)
 		{
 			var candidateEnd = candidate.Start + candidate.Length;
-			var predecessorView = accepted.GetViewBetween(
+			var overlaps = FindOverlaps(
+				accepted,
+				candidate.Start,
+				candidateEnd,
 				minimum,
-				new AcceptedInterval(candidate.Start, candidate.Start, null));
-			var predecessor = predecessorView.Max;
-			if (predecessor is not null && predecessor.End > candidate.Start)
-				continue;
-
-			var successorView = accepted.GetViewBetween(
-				new AcceptedInterval(candidate.Start, candidate.Start, null),
 				maximum);
-			var successor = successorView.Min;
-			if (successor is not null && successor.Start < candidateEnd)
+			if (overlaps.Count == 0)
+			{
+				accepted.Add(new AcceptedInterval(candidate.Start, candidateEnd, candidate));
+				continue;
+			}
+
+			var category = candidate.Candidates[0].Category;
+			if (overlaps.Any(interval => interval.Match!.Candidates[0].Category == category))
 				continue;
 
-			accepted.Add(new AcceptedInterval(candidate.Start, candidateEnd, candidate));
+			var residualStart = candidate.Start;
+			foreach (var overlap in overlaps)
+			{
+				if (overlap.Start > residualStart)
+				{
+					var residualEnd = Math.Min(overlap.Start, candidateEnd);
+					AddResidual(accepted, candidate, residualStart, residualEnd);
+				}
+				residualStart = Math.Max(residualStart, overlap.End);
+				if (residualStart >= candidateEnd)
+					break;
+			}
+			AddResidual(accepted, candidate, residualStart, candidateEnd);
 		}
 
 		return accepted.Select(static interval => interval.Match!).ToArray();
 	}
 
+	private static IReadOnlyList<AcceptedInterval> FindOverlaps(
+		SortedSet<AcceptedInterval> accepted,
+		int start,
+		int end,
+		AcceptedInterval minimum,
+		AcceptedInterval maximum)
+	{
+		if (accepted.Count == 0)
+			return [];
+		var overlaps = new List<AcceptedInterval>();
+		var predecessor = accepted.GetViewBetween(
+			minimum,
+			new AcceptedInterval(start, start, null)).Max;
+		if (predecessor is not null && predecessor.End > start)
+			overlaps.Add(predecessor);
+		foreach (var interval in accepted.GetViewBetween(
+			         new AcceptedInterval(start, start, null),
+			         maximum))
+		{
+			if (interval.Start >= end)
+				break;
+			if (overlaps.Count == 0 || !ReferenceEquals(overlaps[^1], interval))
+				overlaps.Add(interval);
+		}
+		return overlaps;
+	}
+
+	private static void AddResidual(
+		ISet<AcceptedInterval> accepted,
+		ResolvedSecretFinding candidate,
+		int start,
+		int end)
+	{
+		if (start >= end)
+			return;
+		var residual = candidate with { Start = start, Length = end - start };
+		accepted.Add(new AcceptedInterval(start, end, residual));
+	}
+
+	private static IReadOnlyList<DetectedSecret> OrderCandidates(IEnumerable<DetectedSecret> candidates) =>
+		candidates
+			.GroupBy(static candidate => candidate.Category)
+			.Select(static category => MergeExactMatches(category))
+			.Order(DetectedSecretPriorityComparer.Instance)
+			.ToArray();
+
 	private static DetectedSecret MergeExactMatches(IEnumerable<DetectedSecret> group)
 	{
 		var matches = group.ToArray();
-		var winner = matches
-			.OrderByDescending(static match =>
-				(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0)
-			.ThenBy(static match => match.Category)
-			.ThenBy(static match => IsGenericRule(match.RuleId))
-			.ThenBy(static match => match.RuleOrder)
-			.First();
+		var winner = matches.Order(DetectedSecretPriorityComparer.Instance).First();
 		var source = matches.Aggregate(
 			(SecretFindingSource)0,
 			static (current, match) => current | match.Source);
-		var persistentHash = matches
+		var winnerSources = matches.Where(match =>
+			match.Category == winner.Category &&
+			string.Equals(match.RuleId, winner.RuleId, StringComparison.Ordinal));
+		var persistentHash = winnerSources
 			.Select(static match => match.PersistentMarkHash)
 			.FirstOrDefault(static hash => !string.IsNullOrWhiteSpace(hash));
-		var sessionMarkId = matches
+		var sessionMarkId = winnerSources
 			.Select(static match => match.SessionMarkId)
 			.FirstOrDefault(static id => !string.IsNullOrWhiteSpace(id));
-		var persistentMarkId = matches
+		var persistentMarkId = winnerSources
 			.Select(static match => match.PersistentMarkId)
 			.FirstOrDefault(static id => id is not null);
 		return winner with
@@ -2759,7 +2900,43 @@ public sealed class SecretRedactionScope
 	private static bool IsGenericRule(string ruleId) =>
 		ruleId.Equals("generic-api-key", StringComparison.Ordinal);
 
-	private sealed record AcceptedInterval(int Start, int End, DetectedSecret? Match);
+	internal sealed record ResolvedSecretFinding(
+		int Start,
+		int Length,
+		IReadOnlyList<DetectedSecret> Candidates);
+
+	private sealed record AcceptedInterval(int Start, int End, ResolvedSecretFinding? Match);
+
+	private sealed class DetectedSecretPriorityComparer : IComparer<DetectedSecret>
+	{
+		public static DetectedSecretPriorityComparer Instance { get; } = new();
+
+		public int Compare(DetectedSecret? left, DetectedSecret? right)
+		{
+			if (ReferenceEquals(left, right))
+				return 0;
+			if (left is null)
+				return 1;
+			if (right is null)
+				return -1;
+			var result = IsMarked(right).CompareTo(IsMarked(left));
+			if (result != 0)
+				return result;
+			result = left.Category.CompareTo(right.Category);
+			if (result != 0)
+				return result;
+			result = IsGenericRule(left.RuleId).CompareTo(IsGenericRule(right.RuleId));
+			if (result != 0)
+				return result;
+			result = left.RuleOrder.CompareTo(right.RuleOrder);
+			if (result != 0)
+				return result;
+			return string.Compare(left.RuleId, right.RuleId, StringComparison.Ordinal);
+		}
+
+		private static bool IsMarked(DetectedSecret match) =>
+			(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0;
+	}
 
 	private sealed class AcceptedIntervalStartComparer : IComparer<AcceptedInterval>
 	{

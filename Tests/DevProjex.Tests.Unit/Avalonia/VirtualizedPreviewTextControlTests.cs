@@ -885,6 +885,29 @@ public sealed class VirtualizedPreviewTextControlTests
 	}
 
 	[AvaloniaFact]
+	public void FullyKeptExactCascade_RequestsRestoringEveryCandidate()
+	{
+		var occurrenceIds = new[] { "secret-occurrence", "private-occurrence" };
+		var span = new PreviewRedactionSpan(
+			occurrenceIds[0],
+			"secret-rule",
+			1,
+			0,
+			12,
+			SecretPreviewSpanState.KeptAsIs,
+			CascadedOccurrenceIds: occurrenceIds);
+		var control = new VirtualizedPreviewTextControl();
+		PreviewRedactionToggleRequestedEventArgs? requested = null;
+		control.RedactionToggleRequested += (_, eventArgs) => requested = eventArgs;
+
+		InvokePrivate(control, "RaiseRedactionToggleRequested", span);
+
+		Assert.NotNull(requested);
+		Assert.Equal(occurrenceIds[0], requested!.OccurrenceId);
+		Assert.Equal(occurrenceIds, requested.RestoreOccurrenceIds);
+	}
+
+	[AvaloniaFact]
 	public void KeyboardNavigation_VisitsEveryGeneratedPathButCollapsesMultilineOccurrences()
 	{
 		const string generatedOccurrence = "generated-path";

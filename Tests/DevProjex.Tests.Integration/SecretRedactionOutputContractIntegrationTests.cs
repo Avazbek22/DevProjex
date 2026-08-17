@@ -431,6 +431,90 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task ExactOverlapCascade_UsesThePrivateFallbackIdenticallyAcrossEveryOutputSurface()
+	{
+		const string value = "shared-overlap-value";
+		const string content = "value=" + value + "\n";
+		const string relativePath = "overlap.txt";
+		const string privatePlaceholder = "DEVPROJEX_REDACTED[private-overlap#1]";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("overlap-project");
+		var exportRoot = temporary.CreateDirectory("overlap-exports");
+		var sourcePath = temporary.CreateFile($"overlap-project/{relativePath}", content);
+		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, sourcePath);
+		var analyzer = new FileContentAnalyzer();
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new CategorizedExactValueDetector(
+				value,
+				"secret-overlap",
+				"catalog:smart-secrets-v4",
+				RedactionFindingCategory.Secrets),
+			new CategorizedExactValueDetector(
+				value,
+				"private-overlap",
+				"private-data-v1",
+				RedactionFindingCategory.PrivateData));
+		var context = new SecretRedactionContext(
+			sourceRoot,
+			session,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true, hidePrivateData: true);
+		var previewBuilder = new PreviewDocumentBuilder(analyzer);
+
+		using (var initial = await previewBuilder.BuildContentDocumentAsync(
+			       plan.IncludedFiles,
+			       TestContext.Current.CancellationToken,
+			       TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			       includeOmissionMarkers: false,
+			       transformationContext: context))
+		{
+			var secret = Assert.Single(initial!.Redactions, static span => span.RuleId == "secret-overlap");
+			Assert.True(session.ToggleKeepAsIs(secret.OccurrenceId));
+		}
+
+		using var preview = await previewBuilder.BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: false,
+			transformationContext: context);
+		var clipboard = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
+		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder,
+			redactSecrets: true,
+			redactPrivateData: true);
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip,
+			redactSecrets: true,
+			redactPrivateData: true);
+		var folderText = File.ReadAllText(Path.Combine(folder.DestinationPath, relativePath));
+		using var archive = ZipFile.OpenRead(zip.DestinationPath);
+		var outputs = new[] { clipboard, folderText, ReadZipText(archive, relativePath) }
+			.Concat(contextDocuments.Values)
+			.ToArray();
+
+		Assert.All(outputs, output =>
+		{
+			Assert.Contains(privatePlaceholder, output, StringComparison.Ordinal);
+			Assert.DoesNotContain(value, output, StringComparison.Ordinal);
+			Assert.DoesNotContain("DEVPROJEX_REDACTED[secret-overlap", output, StringComparison.Ordinal);
+		});
+		Assert.Equal(folderText, ReadZipText(archive, relativePath));
+		var privateSpan = Assert.Single(preview!.Redactions);
+		Assert.Equal("private-overlap", privateSpan.RuleId);
+		Assert.Equal(SecretPreviewSpanState.Redacted, privateSpan.State);
+	}
+
+	[Fact]
 	public async Task ProjectPlanFingerprint_ChangesWithHidePrivateDataAndIsStableForSameSelection()
 	{
 		using var workspace = CreateWorkspace(repeatedGithubOnly: true);
@@ -2157,6 +2241,26 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			item.FullName.EndsWith(suffix, StringComparison.Ordinal));
 		using var reader = new StreamReader(entry.Open(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
 		return reader.ReadToEnd();
+	}
+
+	private sealed class CategorizedExactValueDetector(
+		string value,
+		string ruleId,
+		string rulesIdentity,
+		RedactionFindingCategory category) : ISecretDetector
+	{
+		public string RulesIdentity => rulesIdentity;
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default)
+		{
+			var index = content.IndexOf(value, StringComparison.Ordinal);
+			return index < 0
+				? []
+				: [new DetectedSecret(ruleId, index, value.Length, value, 0, Category: category)];
+		}
 	}
 
 	private static byte[] ReadZipBytes(ZipArchive archive, string suffix)

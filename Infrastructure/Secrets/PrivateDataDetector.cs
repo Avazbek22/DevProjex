@@ -1274,7 +1274,9 @@ public sealed class PrivateDataDetector : ISecretDetector
 		       !IsInIpv4Prefix(address, 0xAC100000, 12) &&
 		       !IsInIpv4Prefix(address, 0xC0A80000, 16) &&
 		       !IsInIpv4Prefix(address, 0x64400000, 10) &&
+		       !IsInIpv4Prefix(address, 0xC0000000, 24) &&
 		       !IsInIpv4Prefix(address, 0xC0000200, 24) &&
+		       !IsInIpv4Prefix(address, 0xC0586300, 24) &&
 		       !IsInIpv4Prefix(address, 0xC6336400, 24) &&
 		       !IsInIpv4Prefix(address, 0xCB007100, 24) &&
 		       !IsInIpv4Prefix(address, 0xE9FC0000, 24) &&
@@ -1426,6 +1428,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 		    IsInIpv6Prefix(bytes, [0x00, 0x64, 0xFF, 0x9B, 0x00, 0x01], 48) ||
 		    IsInIpv6Prefix(bytes, [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], 64) ||
 		    IsInIpv6Prefix(bytes, [0x20, 0x01, 0x00, 0x00], 32) ||
+		    IsInIpv6Prefix(bytes, [0x20, 0x01, 0x00, 0x02, 0x00, 0x00], 48) ||
 		    IsInIpv6Prefix(bytes, [0x20, 0x01, 0x00, 0x10], 28) ||
 		    IsInIpv6Prefix(bytes, [0x20, 0x01, 0x00, 0x20], 28) ||
 		    IsInIpv6Prefix(bytes, [0x20, 0x02], 16) ||

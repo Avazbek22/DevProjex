@@ -455,6 +455,8 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("192.168.1.2")]
 	[InlineData("100.127.1.2")]
 	[InlineData("192.0.2.25")]
+	[InlineData("192.0.0.25")]
+	[InlineData("192.88.99.25")]
 	[InlineData("198.51.100.25")]
 	[InlineData("203.0.113.25")]
 	[InlineData("233.252.0.25")]
@@ -477,6 +479,7 @@ public sealed class PrivateDataDetectorTests
 	[InlineData("fd12:3456::1")]
 	[InlineData("ff02::1")]
 	[InlineData("2001:db8::1")]
+	[InlineData("2001:2::1")]
 	[InlineData("3fff:0fff::1")]
 	[InlineData("::ffff:192.168.1.1")]
 	public void Detect_NonPrivateOrDocumentationIp_IsKept(string address)
@@ -484,6 +487,16 @@ public sealed class PrivateDataDetectorTests
 		Assert.DoesNotContain(
 			Detect($"endpoint=[{address}]:443"),
 			static finding => finding.RuleId is "ipv4" or "ipv6");
+	}
+
+	[Theory]
+	[InlineData("191.255.255.254")]
+	[InlineData("192.0.1.1")]
+	[InlineData("192.88.98.255")]
+	[InlineData("192.88.100.1")]
+	public void Detect_Ipv4_IanaExclusionsDoNotCrossPrefixBoundaries(string address)
+	{
+		Assert.Equal(address, FindSingle($"host={address}", "ipv4").Value);
 	}
 
 	[Theory]
@@ -1177,6 +1190,14 @@ public sealed class PrivateDataDetectorTests
 	{
 		const string address = "2a02:6b8::2:242";
 
+		Assert.Equal(address, FindSingle(address, "ipv6").Value);
+	}
+
+	[Theory]
+	[InlineData("2001:1:ffff::1")]
+	[InlineData("2001:3::1")]
+	public void Detect_Ipv6_BenchmarkingExclusionDoesNotCrossPrefixBoundaries(string address)
+	{
 		Assert.Equal(address, FindSingle(address, "ipv6").Value);
 	}
 

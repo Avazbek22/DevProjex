@@ -35,10 +35,8 @@ internal readonly record struct SecretFileMetadata(long Length, long LastWriteUt
 	}
 }
 
-internal sealed record SecretFindingMetadata(
+internal sealed record SecretFindingCandidateMetadata(
 	string RuleId,
-	int Start,
-	int Length,
 	string ValueFingerprint,
 	int RuleOrder,
 	SecretFindingSource Source,
@@ -46,6 +44,12 @@ internal sealed record SecretFindingMetadata(
 	string? SessionMarkId,
 	PersistentSecretMarkId? PersistentMarkId,
 	RedactionFindingCategory Category);
+
+internal sealed record SecretFindingMetadata(
+	int Start,
+	int Length,
+	SecretFindingSource Source,
+	IReadOnlyList<SecretFindingCandidateMetadata> Candidates);
 
 internal sealed record SecretScanCacheEntry(
 	string NormalizedPath,

@@ -81,6 +81,8 @@ IPv4 exclusions:
 
 * unspecified, loopback, link-local, private, shared-address, benchmarking, multicast, and
   reserved ranges;
+* IETF protocol assignments in `192.0.0.0/24` and deprecated 6to4 anycast in
+  `192.88.99.0/24`;
 * TEST-NET-1/2/3 and `233.252.0.0/24` documentation ranges;
 * the public resolver addresses `8.8.8.8`, `8.8.4.4`, `1.1.1.1`, `1.0.0.1`, `9.9.9.9`,
   `149.112.112.112`, `208.67.222.222`, and `208.67.220.220`.
@@ -95,7 +97,7 @@ IPv6 exclusions:
   `3ffe::/16`;
 * the documented Google, Cloudflare, and Quad9 public resolver literals;
 * IANA special-purpose NAT64, discard, Teredo, ORCHID, 6to4, SRv6, reserved, and deprecated
-  site-local ranges.
+  site-local ranges, including the `2001:2::/48` benchmarking prefix.
 * four-digit `1900::` through `2100::` forms without an address suffix, which are RST year targets.
 
 Malformed octets and address-like substrings inside longer identifiers or dotted sequences
@@ -153,13 +155,22 @@ Hide private data and Hide Secrets share one file read, content fingerprint, cac
 scope, placeholder allocator, and Preview decision model. Enabling both does not create a
 second output pipeline.
 
-When findings overlap, a Hide Secrets finding always wins. Keeping that secret occurrence
-as-is does not reveal a private-data finding that was suppressed by the overlap decision.
-This rule keeps output stable and prevents one byte range from receiving competing
-placeholders.
+When findings have the same range, the output keeps an ordered decision cascade: manual marks,
+Hide Secrets, Hide private data, non-generic rules, then rule order. Keeping the active candidate
+reveals the next non-kept candidate instead of disclosing the source value. Keeping every
+candidate reveals the original value; clicking that fully revealed span restores the entire
+cascade to its highest-priority state. Every candidate keeps its own stable occurrence identity,
+so repeated transitions reproduce the same placeholder indexes. Exact matches within one
+category retain the existing single-winner behavior; the cascade preserves the winning candidate
+from each category. For a partial cross-category overlap, the Hide Secrets interval wins and any
+private-data portions outside it remain separate redactions. Overlap resolution within one
+category is unchanged.
 
-Each option has its own detected and redacted counters. Zero means only that the enabled
-rules found no match; it is not a privacy or safety guarantee.
+Each option has its own detected and redacted counters. They count the effective,
+non-overlapping candidate currently represented in the output, not every suppressed raw detector
+candidate. A fully kept cascade remains represented by its highest-priority candidate, preserving
+the existing found-but-not-redacted counter semantics. Zero means only that the enabled rules
+found no effective match; it is not a privacy or safety guarantee.
 
 ## Intentionally visible ambiguous forms
 

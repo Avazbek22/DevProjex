@@ -18,4 +18,5 @@ public sealed record PreviewRedactionSpan(
 	string? PersistentMarkHash = null,
 	string? SessionMarkId = null,
 	PersistentSecretMarkId? PersistentMarkId = null,
-	string RelativePath = "");
+	string RelativePath = "",
+	IReadOnlyList<string>? CascadedOccurrenceIds = null);

@@ -583,7 +583,8 @@ public sealed class PreviewDocumentBuilder(
 						span.PersistentMarkHash,
 						span.SessionMarkId,
 						span.PersistentMarkId,
-						span.RelativePath));
+						span.RelativePath,
+						span.CascadedOccurrenceIds));
 				}
 
 				if (index < spanText.Length)

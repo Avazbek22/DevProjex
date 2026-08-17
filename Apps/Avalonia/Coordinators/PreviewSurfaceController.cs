@@ -142,7 +142,10 @@ internal sealed class PreviewSurfaceController : IDisposable
 			return;
 
 		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
-		context.Session.ToggleKeepAsIs(e.OccurrenceId);
+		if (e.RestoreOccurrenceIds is { Count: > 0 })
+			context.Session.SetKeepAsIs(e.RestoreOccurrenceIds, keep: false);
+		else
+			context.Session.ToggleKeepAsIs(e.OccurrenceId);
 		_requestRedactionRefresh();
 	}
 

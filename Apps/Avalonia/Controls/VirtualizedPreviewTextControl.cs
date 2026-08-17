@@ -4,9 +4,12 @@ using DevProjex.Application.Secrets;
 
 namespace DevProjex.Avalonia.Controls;
 
-public sealed class PreviewRedactionToggleRequestedEventArgs(string occurrenceId) : EventArgs
+public sealed class PreviewRedactionToggleRequestedEventArgs(
+	string occurrenceId,
+	IReadOnlyCollection<string>? restoreOccurrenceIds = null) : EventArgs
 {
 	public string OccurrenceId { get; } = occurrenceId;
+	public IReadOnlyCollection<string>? RestoreOccurrenceIds { get; } = restoreOccurrenceIds;
 }
 
 public sealed class PreviewBulkRedactionToggleRequestedEventArgs(
@@ -1042,9 +1045,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		{
 			_activeRedactionTarget = CreateNavigationTarget(redaction);
 			InvalidateVisual();
-			RedactionToggleRequested?.Invoke(
-				this,
-				new PreviewRedactionToggleRequestedEventArgs(redaction.OccurrenceId));
+			RaiseRedactionToggleRequested(redaction);
 			e.Handled = true;
 			return;
 		}
@@ -1141,9 +1142,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		if (e.Key is Key.Enter or Key.Space &&
 		    TryGetActiveRedaction(out var redaction))
 		{
-			RedactionToggleRequested?.Invoke(
-				this,
-				new PreviewRedactionToggleRequestedEventArgs(redaction.OccurrenceId));
+			RaiseRedactionToggleRequested(redaction);
 			e.Handled = true;
 			return;
 		}
@@ -1209,6 +1208,18 @@ public sealed class VirtualizedPreviewTextControl : Control
 		if (_activeRedactionTarget is { } active && FindRedaction(active) is null)
 			_activeRedactionTarget = null;
 		UpdateHoveredRedaction(null);
+	}
+
+	private void RaiseRedactionToggleRequested(PreviewRedactionSpan redaction)
+	{
+		var restoreOccurrenceIds = redaction.State == SecretPreviewSpanState.KeptAsIs
+			? redaction.CascadedOccurrenceIds
+			: null;
+		RedactionToggleRequested?.Invoke(
+			this,
+			new PreviewRedactionToggleRequestedEventArgs(
+				redaction.OccurrenceId,
+				restoreOccurrenceIds));
 	}
 
 	private static PreviewRedactionSpan[] BuildRedactionNavigationStops(

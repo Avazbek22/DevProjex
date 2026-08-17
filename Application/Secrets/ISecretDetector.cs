@@ -145,6 +145,8 @@ internal sealed class CombinedSecretDetectionScope(
 			? privateData.Detect(fullPath, repositoryRelativePath, content, budget, cancellationToken)
 			: [];
 		budget.Checkpoint(cancellationToken);
+		if (secretFindings.Count + privateFindings.Count > 1)
+			EnsureRuleIdsBelongToOneCategory(secretFindings, privateFindings);
 		if (secretFindings.Count == 0)
 			return privateFindings;
 		if (privateFindings.Count == 0)
@@ -156,6 +158,27 @@ internal sealed class CombinedSecretDetectionScope(
 		for (var index = 0; index < privateFindings.Count; index++)
 			combined[secretFindings.Count + index] = privateFindings[index];
 		return combined;
+	}
+
+	private static void EnsureRuleIdsBelongToOneCategory(
+		IReadOnlyList<DetectedSecret> secretFindings,
+		IReadOnlyList<DetectedSecret> privateFindings)
+	{
+		var categories = new Dictionary<string, RedactionFindingCategory>(StringComparer.Ordinal);
+		foreach (var finding in secretFindings)
+			Add(finding);
+		foreach (var finding in privateFindings)
+			Add(finding);
+
+		void Add(DetectedSecret finding)
+		{
+			if (categories.TryGetValue(finding.RuleId, out var category) && category != finding.Category)
+			{
+				throw new SecretDetectionException(
+					$"Redaction rule '{finding.RuleId}' produced findings in multiple categories.");
+			}
+			categories.TryAdd(finding.RuleId, finding.Category);
+		}
 	}
 }
 
