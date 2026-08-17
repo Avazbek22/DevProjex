@@ -687,7 +687,7 @@ public sealed class PrivateDataDetectorTests
 	{
 		const string address = "2.6.4.3";
 
-		Assert.Equal(address, FindSingle(address, "ipv4").Value);
+		Assert.Equal(address, FindSingle($"ip {address}", "ipv4").Value);
 	}
 
 	[Theory]
@@ -696,6 +696,120 @@ public sealed class PrivateDataDetectorTests
 	public void Detect_Ipv4_Audit3GuardsPreserveOperationalAddresses(string content, string expected)
 	{
 		Assert.Equal(expected, FindSingle(content, "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("rails (7.1.3.2)")]
+	[InlineData("Require Parser 3.1.2.1 or")]
+	[InlineData("Present in 1.4.2.1 (Oct 2021)")]
+	[InlineData("# \"5.0.0.1\"   --> \"5.0.1\"")]
+	[InlineData("['1.2.3a', '1.2.3.1']")]
+	[InlineData("logger.rb/1.5.2.9")]
+	[InlineData("23.41.13.37")]
+	public void Detect_Ipv4_AllSmallOctetsWithoutNetworkContextAreKept(string content)
+	{
+		Assert.DoesNotContain(
+			Detect("examples/config.txt", content),
+			static finding => finding.RuleId == "ipv4");
+	}
+
+	[Theory]
+	[InlineData("\"ip\": \"3.8.37.2\"", "3.8.37.2")]
+	[InlineData("ping 23.41.13.37", "23.41.13.37")]
+	[InlineData("allow 23.41.13.37/32", "23.41.13.37")]
+	[InlineData("23.41.13.37:8080", "23.41.13.37")]
+	[InlineData("ssh root@40.30.20.10", "40.30.20.10")]
+	[InlineData("http://23.41.13.37/path", "23.41.13.37")]
+	[InlineData("51.15.23.7", "51.15.23.7")]
+	public void Detect_Ipv4_NetworkContextPreservesAddresses(string content, string expected)
+	{
+		Assert.Equal(expected, FindSingle(content, "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("ip")]
+	[InlineData("host")]
+	[InlineData("addr")]
+	[InlineData("address")]
+	[InlineData("server")]
+	[InlineData("dns")]
+	[InlineData("proxy")]
+	[InlineData("gateway")]
+	[InlineData("endpoint")]
+	[InlineData("remote")]
+	[InlineData("connect")]
+	[InlineData("listen")]
+	[InlineData("bind")]
+	[InlineData("ping")]
+	[InlineData("ssh")]
+	[InlineData("curl")]
+	[InlineData("http")]
+	[InlineData("network")]
+	[InlineData("subnet")]
+	[InlineData("netmask")]
+	[InlineData("mask")]
+	[InlineData("route")]
+	[InlineData("nat")]
+	[InlineData("firewall")]
+	[InlineData("vpn")]
+	[InlineData("port")]
+	[InlineData("socket")]
+	[InlineData("nameserver")]
+	[InlineData("resolver")]
+	[InlineData("peer")]
+	[InlineData("client")]
+	[InlineData("upstream")]
+	[InlineData("forwarded")]
+	public void Detect_Ipv4_EachNetworkKeywordPreservesAllSmallAddress(string keyword)
+	{
+		const string address = "23.41.13.37";
+
+		Assert.Equal(address, FindSingle($"{keyword} {address}", "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("23.41.13.37 upstream")]
+	[InlineData("23.41.13.37 DNS")]
+	[InlineData("23.41.13.37/8")]
+	public void Detect_Ipv4_NetworkSignalsAreBidirectionalAndCaseInsensitive(string content)
+	{
+		Assert.Equal("23.41.13.37", FindSingle(content, "ipv4").Value);
+	}
+
+	[Theory]
+	[InlineData("43.41.13.37", false)]
+	[InlineData("44.41.13.37", true)]
+	public void Detect_Ipv4_VersionFormThresholdIsInclusive(string address, bool shouldDetect)
+	{
+		Assert.Equal(
+			shouldDetect,
+			Detect(address).Any(static finding => finding.RuleId == "ipv4"));
+	}
+
+	[Fact]
+	public void Detect_Ipv4_NetworkSignalDoesNotOverrideVersionGuard()
+	{
+		Assert.DoesNotContain(
+			Detect("version ip 3.8.37.2"),
+			static finding => finding.RuleId == "ipv4");
+	}
+
+	[Theory]
+	[InlineData("shipping 23.41.13.37")]
+	[InlineData("ghost 23.41.13.37")]
+	[InlineData("http://example.invalid\n23.41.13.37")]
+	[InlineData("23.41.13.37/320")]
+	public void Detect_Ipv4_NetworkSignalsRespectTokenAndLineBoundaries(string content)
+	{
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
+	}
+
+	[Fact]
+	public void Detect_Ipv4_NetworkSignalIsBounded()
+	{
+		var content = $"host {new string('x', 161)} 23.41.13.37";
+
+		Assert.DoesNotContain(Detect(content), static finding => finding.RuleId == "ipv4");
 	}
 
 	[Theory]
@@ -766,7 +880,7 @@ public sealed class PrivateDataDetectorTests
 	{
 		const string address = "9.8.7.5";
 
-		Assert.Equal(address, FindSingle(address, "ipv4").Value);
+		Assert.Equal(address, FindSingle($"host={address}", "ipv4").Value);
 	}
 
 	[Theory]

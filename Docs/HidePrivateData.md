@@ -143,6 +143,14 @@ rules found no match; it is not a privacy or safety guarantee.
 The phase-one rules keep several source-code forms visible to avoid repeatedly redacting
 common project metadata:
 
+Four-part decimal forms whose octets are all at most 43 are structurally ambiguous with software
+versions. Instead of extending an open-ended version blocklist, the detector treats such a form as
+an IPv4 address only when the same bounded line contains a network keyword or URL, or when the
+candidate has an immediate port or one-to-two-digit CIDR suffix. For a privacy feature the cost of
+a false positive is higher than the cost of this bounded omission, and this detector is not a
+privacy guarantee. A bare all-small address such as `23.41.13.37` without a network signal is an
+intentional false negative.
+
 * IPv4 values whose last octet is zero, whose octets repeat or increase sequentially, or whose
   octets contain leading zeroes stay visible because they usually represent product versions,
   canonical examples, or network identifiers rather than hosts. Adjacent package constraint

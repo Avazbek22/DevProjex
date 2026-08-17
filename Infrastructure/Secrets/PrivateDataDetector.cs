@@ -10,6 +10,8 @@ public sealed class PrivateDataDetector : ISecretDetector
 	private const int BudgetCheckpointMask = 0x3FF;
 	private const int EmailUriContextWindowLength = 256;
 	private const int Ipv4VersionContextWindowLength = 160;
+	// Dotted forms whose octets all stay within this range are dominated by software versions.
+	private const byte Ipv4VersionFormMaximumOctet = 43;
 	// Conventional source license banners fit in this window without requiring a whole-file rescan.
 	private const int LicenseAttributionContextWindowLength = 4096;
 	private const int MaximumIpv6TextLength = 45;
@@ -31,6 +33,13 @@ public sealed class PrivateDataDetector : ISecretDetector
 		"c99", "c11", "c17", "c23", "c++", "iso/iec", "ieee", "posix", "standard", "specification", "sctp", "ibta",
 		"papr", "dwarf", "oid", "see", "isodcl", "802.", "1003.", "revision", "classification",
 		"mapping", "described", "sdm", "applicable", "supplement", "std", "acl", "capabilities"
+	];
+
+	private static readonly string[] Ipv4NetworkContextKeywords =
+	[
+		"ip", "host", "addr", "address", "server", "dns", "proxy", "gateway", "endpoint", "remote", "connect",
+		"listen", "bind", "ping", "ssh", "curl", "http", "network", "subnet", "netmask", "mask", "route", "nat",
+		"firewall", "vpn", "port", "socket", "nameserver", "resolver", "peer", "client", "upstream", "forwarded"
 	];
 
 	private static readonly string[] Ipv4DisabledFilePrefixes =
@@ -916,7 +925,8 @@ public sealed class PrivateDataDetector : ISecretDetector
 			    !HasIpv4NakedFractionContext(content, start, length) &&
 			    !HasIpv4HyphenatedPrefix(content, start) &&
 			    !HasIpv4PrereleaseSuffix(content, start + length) &&
-			    IsGlobalIpv4(address))
+			    IsGlobalIpv4(address) &&
+			    (!IsIpv4VersionForm(address) || HasIpv4NetworkContext(content, start, length)))
 			{
 				AddFinding(
 					content,
@@ -952,11 +962,99 @@ public sealed class PrivateDataDetector : ISecretDetector
 		return arrowEnd >= 2 && content[arrowEnd - 2] == '-' && content[arrowEnd - 1] == '>';
 	}
 
+	private static bool IsIpv4VersionForm(uint address) =>
+		(byte)(address >> 24) <= Ipv4VersionFormMaximumOctet &&
+		(byte)(address >> 16) <= Ipv4VersionFormMaximumOctet &&
+		(byte)(address >> 8) <= Ipv4VersionFormMaximumOctet &&
+		(byte)address <= Ipv4VersionFormMaximumOctet;
+
+	private static bool HasIpv4NetworkContext(ReadOnlySpan<char> content, int candidateStart, int candidateLength)
+	{
+		var candidateEnd = candidateStart + candidateLength;
+		if (HasIpv4PortSuffix(content, candidateEnd) || HasIpv4CidrSuffix(content, candidateEnd))
+			return true;
+
+		GetIpv4LineContext(content, candidateStart, candidateLength, out var prefix, out var suffix);
+		if (prefix.IndexOf("://", StringComparison.Ordinal) >= 0)
+			return true;
+		foreach (var keyword in Ipv4NetworkContextKeywords)
+		{
+			if (ContainsIpv4NetworkKeyword(prefix, keyword) || ContainsIpv4NetworkKeyword(suffix, keyword))
+				return true;
+		}
+		return false;
+	}
+
+	private static bool HasIpv4PortSuffix(ReadOnlySpan<char> content, int candidateEnd) =>
+		candidateEnd + 1 < content.Length && content[candidateEnd] == ':' &&
+		char.IsAsciiDigit(content[candidateEnd + 1]);
+
+	private static bool HasIpv4CidrSuffix(ReadOnlySpan<char> content, int candidateEnd)
+	{
+		if (candidateEnd + 1 >= content.Length || content[candidateEnd] != '/' ||
+		    !char.IsAsciiDigit(content[candidateEnd + 1]))
+		{
+			return false;
+		}
+		var suffixEnd = candidateEnd + 2;
+		if (suffixEnd < content.Length && char.IsAsciiDigit(content[suffixEnd]))
+			suffixEnd++;
+		return suffixEnd >= content.Length || !char.IsAsciiDigit(content[suffixEnd]);
+	}
+
+	private static bool ContainsIpv4NetworkKeyword(ReadOnlySpan<char> context, string keyword)
+	{
+		var searchStart = 0;
+		while (searchStart <= context.Length - keyword.Length)
+		{
+			var relativeIndex = context[searchStart..].IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
+			if (relativeIndex < 0)
+				return false;
+			var start = searchStart + relativeIndex;
+			var end = start + keyword.Length;
+			if (keyword.Length >= 5 ||
+			    (start == 0 || !IsIpv4ContextWordCharacter(context[start - 1])) &&
+			    (end == context.Length || !IsIpv4ContextWordCharacter(context[end])))
+			{
+				return true;
+			}
+			searchStart = start + 1;
+		}
+		return false;
+	}
+
+	private static bool IsIpv4ContextWordCharacter(char character) =>
+		char.IsLetterOrDigit(character) || character == '_';
+
 	private static bool HasIpv4VersionContext(
 		ReadOnlySpan<char> content,
 		int candidateStart,
 		int candidateLength,
 		byte firstOctet)
+	{
+		GetIpv4LineContext(content, candidateStart, candidateLength, out var prefix, out var suffix);
+		foreach (var keyword in Ipv4VersionContextKeywords)
+		{
+			if (ContainsIpv4VersionKeyword(prefix, keyword) || ContainsIpv4VersionKeyword(suffix, keyword))
+				return true;
+		}
+		if (firstOctet <= Ipv4VersionFormMaximumOctet)
+		{
+			foreach (var keyword in Ipv4StandardReferenceContextKeywords)
+			{
+				if (ContainsIpv4VersionKeyword(prefix, keyword) || ContainsIpv4VersionKeyword(suffix, keyword))
+					return true;
+			}
+		}
+		return false;
+	}
+
+	private static void GetIpv4LineContext(
+		ReadOnlySpan<char> content,
+		int candidateStart,
+		int candidateLength,
+		out ReadOnlySpan<char> prefix,
+		out ReadOnlySpan<char> suffix)
 	{
 		var windowStart = Math.Max(0, candidateStart - Ipv4VersionContextWindowLength);
 		for (var index = candidateStart - 1; index >= windowStart; index--)
@@ -975,22 +1073,8 @@ public sealed class PrivateDataDetector : ISecretDetector
 			windowEnd = index;
 			break;
 		}
-		var prefix = content[windowStart..candidateStart];
-		var suffix = content[candidateEnd..windowEnd];
-		foreach (var keyword in Ipv4VersionContextKeywords)
-		{
-			if (ContainsIpv4VersionKeyword(prefix, keyword) || ContainsIpv4VersionKeyword(suffix, keyword))
-				return true;
-		}
-		if (firstOctet <= 43)
-		{
-			foreach (var keyword in Ipv4StandardReferenceContextKeywords)
-			{
-				if (ContainsIpv4VersionKeyword(prefix, keyword) || ContainsIpv4VersionKeyword(suffix, keyword))
-					return true;
-			}
-		}
-		return false;
+		prefix = content[windowStart..candidateStart];
+		suffix = content[candidateEnd..windowEnd];
 	}
 
 	private static bool IsIpv4StandardSectionHeading(
@@ -1001,7 +1085,7 @@ public sealed class PrivateDataDetector : ISecretDetector
 	{
 		if (candidateStart >= 2 && content[candidateStart - 2] == ']' && content[candidateStart - 1] == '/')
 			return true;
-		if (firstOctet > 43)
+		if (firstOctet > Ipv4VersionFormMaximumOctet)
 			return false;
 		var candidateEnd = candidateStart + candidateLength;
 		if (IsMarkdownSectionReference(content, candidateStart, candidateEnd))
