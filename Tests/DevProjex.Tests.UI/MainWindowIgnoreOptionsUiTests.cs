@@ -31,7 +31,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	[AvaloniaFact]
 	public async Task ContentHeaders_UseFullPerFilePathsAndOneInteractivePrivateDataDecision()
 	{
-		using var project = UiTestProject.CreateDefault();
+		using var project = UiTestProject.CreateDefaultUnderUserProfile();
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
 		try
 		{
