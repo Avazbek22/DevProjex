@@ -1,3 +1,5 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class OutputRootPathPresentationTests
@@ -21,6 +23,26 @@ public sealed class OutputRootPathPresentationTests
 		var result = OutputRootPathPresentation.Resolve("ignored", displayRoot, hidePrivateData: false);
 
 		Assert.Same(displayRoot, result);
+	}
+
+	[Fact]
+	public void ResolvePath_UsesOneStableOccurrenceForRedactedAndKeptPresentations()
+	{
+		const string path = @"C:\Users\alice\repo\src\Program.cs";
+		var redactedDecision = new OutputPathRedactionDecision("generated-path", Keep: false);
+		var keptDecision = redactedDecision with { Keep = true };
+
+		var redacted = OutputRootPathPresentation.ResolvePath(path, redactedDecision);
+		var kept = OutputRootPathPresentation.ResolvePath(path, keptDecision);
+
+		Assert.Equal(@"C:\Users\[local-user-1]\repo\src\Program.cs", redacted.Text);
+		Assert.Equal(path, kept.Text);
+		Assert.Equal("generated-path", redacted.OccurrenceId);
+		Assert.Equal(redacted.OccurrenceId, kept.OccurrenceId);
+		Assert.Equal(SecretPreviewSpanState.Redacted, redacted.State);
+		Assert.Equal(SecretPreviewSpanState.KeptAsIs, kept.State);
+		Assert.Equal("alice".Length, redacted.SourceLength);
+		Assert.Equal("alice".Length, kept.SegmentLength);
 	}
 
 	[Fact]

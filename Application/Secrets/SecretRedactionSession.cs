@@ -263,12 +263,16 @@ public sealed class SecretRedactionSession : IDisposable
 			snapshotRevision = _snapshotRevision;
 			generation = _generation;
 			generationToken = _generationCancellation.Token;
-			if ((features & SecretRedactionFeatures.Secrets) != 0)
+			if (features != SecretRedactionFeatures.None)
 			{
+				var persistentMarks = _persistentMarks.Values
+					.Where(mark => IsManualRedactionClassEnabled(mark.Class, features));
+				var sessionMarks = _sessionMarks
+					.Where(mark => IsManualRedactionClassEnabled(mark.Class, features));
 				markedSecretsRevision = _markedSecretsRevision;
 				markedSecretsMatcher = new MarkedSecretsMatcher(
-					_persistentMarks.Values,
-					_sessionMarks,
+					persistentMarks,
+					sessionMarks,
 					_persistentIdentityProvider,
 					(legacyMark, v2Identity) =>
 						QueueLegacyMarkMigration(legacyMark, v2Identity, generation));
@@ -566,9 +570,11 @@ public sealed class SecretRedactionSession : IDisposable
 	public bool TryCreatePersistentMarkedSecret(
 		MarkedSecretValue value,
 		string? key,
-		out MarkedSecretProfileEntry mark)
+		out MarkedSecretProfileEntry mark,
+		ManualRedactionClass classification = ManualRedactionClass.Secret)
 	{
 		ArgumentNullException.ThrowIfNull(value);
+		ValidateManualRedactionClass(classification);
 		string identity;
 		lock (_sync)
 		{
@@ -583,7 +589,11 @@ public sealed class SecretRedactionSession : IDisposable
 			}
 		}
 
-		mark = NormalizePersistentMark(new MarkedSecretProfileEntry(identity, key, value.Length));
+		mark = NormalizePersistentMark(new MarkedSecretProfileEntry(
+			identity,
+			key,
+			value.Length,
+			Class: classification));
 		return true;
 	}
 
@@ -591,12 +601,24 @@ public sealed class SecretRedactionSession : IDisposable
 		MarkedSecretValue value,
 		string? key,
 		CancellationToken cancellationToken = default) =>
+		CreatePersistentMarkedSecretAsync(
+			value,
+			key,
+			ManualRedactionClass.Secret,
+			cancellationToken);
+
+	public ValueTask<MarkedSecretProfileEntry?> CreatePersistentMarkedSecretAsync(
+		MarkedSecretValue value,
+		string? key,
+		ManualRedactionClass classification,
+		CancellationToken cancellationToken = default) =>
 		CreatePersistentMarkedSecretCoreAsync(
 			value,
 			key,
 			relativePath: null,
 			sourceOffset: null,
-			cancellationToken);
+			classification: classification,
+			cancellationToken: cancellationToken);
 
 	public ValueTask<MarkedSecretProfileEntry?> CreatePersistentSourceMarkedSecretAsync(
 		MarkedSecretValue value,
@@ -604,14 +626,31 @@ public sealed class SecretRedactionSession : IDisposable
 		string relativePath,
 		int sourceOffset,
 		CancellationToken cancellationToken = default)
+		=> CreatePersistentSourceMarkedSecretAsync(
+			value,
+			key,
+			relativePath,
+			sourceOffset,
+			ManualRedactionClass.Secret,
+			cancellationToken);
+
+	public ValueTask<MarkedSecretProfileEntry?> CreatePersistentSourceMarkedSecretAsync(
+		MarkedSecretValue value,
+		string? key,
+		string relativePath,
+		int sourceOffset,
+		ManualRedactionClass classification,
+		CancellationToken cancellationToken = default)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
 		ArgumentOutOfRangeException.ThrowIfNegative(sourceOffset);
+		ValidateManualRedactionClass(classification);
 		return CreatePersistentMarkedSecretCoreAsync(
 			value,
 			key,
 			relativePath,
 			sourceOffset,
+			classification,
 			cancellationToken);
 	}
 
@@ -620,9 +659,11 @@ public sealed class SecretRedactionSession : IDisposable
 		string? key,
 		string? relativePath,
 		int? sourceOffset,
+		ManualRedactionClass classification,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(value);
+		ValidateManualRedactionClass(classification);
 		if (_persistentIdentityProvider is null ||
 		    await _persistentIdentityProvider
 			    .EnsureAvailableAsync(cancellationToken)
@@ -647,7 +688,8 @@ public sealed class SecretRedactionSession : IDisposable
 				key,
 				value.Length,
 				relativePath,
-				sourceOffset);
+				sourceOffset,
+				classification);
 			return TryNormalizePersistentMark(candidate, out var normalized)
 				? normalized
 				: null;
@@ -674,13 +716,21 @@ public sealed class SecretRedactionSession : IDisposable
 	}
 
 	internal ValueTask<PersistentSecretIdentityAvailability> EnsureCurrentPersistentIdentityReadyAsync(
+		CancellationToken cancellationToken = default) =>
+		EnsureCurrentPersistentIdentityReadyAsync(SecretRedactionFeatures.Secrets, cancellationToken);
+
+	internal ValueTask<PersistentSecretIdentityAvailability> EnsureCurrentPersistentIdentityReadyAsync(
+		SecretRedactionFeatures features,
 		CancellationToken cancellationToken = default)
 	{
+		ValidateFeatures(features);
 		MarkedSecretProfileEntry[] marks;
 		lock (_sync)
 		{
 			ObjectDisposedException.ThrowIf(_disposed, this);
-			marks = _persistentMarks.Values.ToArray();
+			marks = _persistentMarks.Values
+				.Where(mark => IsManualRedactionClassEnabled(mark.Class, features))
+				.ToArray();
 		}
 		return EnsurePersistentIdentityReadyAsync(marks, cancellationToken);
 	}
@@ -705,7 +755,8 @@ public sealed class SecretRedactionSession : IDisposable
 			relativePath.Replace('\\', '/'),
 			sourceOffset,
 			value.Length,
-			value.Hash);
+			value.Hash,
+			delta.Mark!.Class);
 		lock (_sync)
 		{
 			ObjectDisposedException.ThrowIf(_disposed, this);
@@ -765,6 +816,7 @@ public sealed class SecretRedactionSession : IDisposable
 		out MarkedSecretProfileEntry normalized)
 	{
 		if (mark is null ||
+		    !Enum.IsDefined(mark.Class) ||
 		    !PersistentSecretIdentity.IsSupported(mark.H) ||
 		    mark.Length is < MarkedSecretValueNormalizer.MinimumLength or
 			    > MarkedSecretValueNormalizer.MaximumLength ||
@@ -874,6 +926,7 @@ public sealed class SecretRedactionSession : IDisposable
 		CreatePersistentMarkId(mark) == NormalizeMarkId(markId);
 
 	private static bool IsValidPersistentMarkId(PersistentSecretMarkId markId) =>
+		Enum.IsDefined(markId.Class) &&
 		PersistentSecretIdentity.IsSupported(markId.Hash) &&
 		markId.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength &&
 		TryNormalizePersistentMarkScope(
@@ -946,11 +999,12 @@ public sealed class SecretRedactionSession : IDisposable
 				identity.Hash.ToLowerInvariant(),
 				identity.Length,
 				relativePath,
-				sourceOffset)
+				sourceOffset,
+				identity.Class)
 			: identity;
 
 	private static PersistentSecretMarkId CreatePersistentMarkId(MarkedSecretProfileEntry mark) =>
-		new(mark.H.ToLowerInvariant(), mark.Length, mark.RelativePath, mark.SourceOffset);
+		new(mark.H.ToLowerInvariant(), mark.Length, mark.RelativePath, mark.SourceOffset, mark.Class);
 
 	private static Dictionary<PersistentSecretMarkId, long> NormalizeAppliedRevisions(
 		IReadOnlyDictionary<PersistentSecretMarkId, long>? revisions)
@@ -1180,17 +1234,20 @@ public sealed class SecretRedactionSession : IDisposable
 	public bool AddSessionMarkedSecret(
 		string relativePath,
 		int sourceOffset,
-		MarkedSecretValue value)
+		MarkedSecretValue value,
+		ManualRedactionClass classification = ManualRedactionClass.Secret)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
 		ArgumentOutOfRangeException.ThrowIfNegative(sourceOffset);
 		ArgumentNullException.ThrowIfNull(value);
+		ValidateManualRedactionClass(classification);
 		var mark = new SessionMarkedSecret(
 			relativePath.Replace('\\', '/'),
 			sourceOffset,
 			value.Length,
-			value.Hash);
+			value.Hash,
+			classification);
 		bool added;
 		lock (_sync)
 		{
@@ -1300,6 +1357,17 @@ public sealed class SecretRedactionSession : IDisposable
 
 		OverridesChanged?.Invoke(this, EventArgs.Empty);
 		return kept;
+	}
+
+	internal bool IsKeptAsIs(string occurrenceId)
+	{
+		ObjectDisposedException.ThrowIf(_disposed, this);
+		ArgumentException.ThrowIfNullOrWhiteSpace(occurrenceId);
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			return _keptOccurrenceIds.Contains(occurrenceId);
+		}
 	}
 
 	public int SetKeepAsIs(IReadOnlyCollection<string> occurrenceIds, bool keep)
@@ -1909,6 +1977,22 @@ public sealed class SecretRedactionSession : IDisposable
 			throw new InvalidOperationException(
 				"Private-data redaction was requested without a configured detector.");
 		}
+	}
+
+	private static bool IsManualRedactionClassEnabled(
+		ManualRedactionClass classification,
+		SecretRedactionFeatures features) =>
+		classification switch
+		{
+			ManualRedactionClass.Secret => (features & SecretRedactionFeatures.Secrets) != 0,
+			ManualRedactionClass.PrivateData => (features & SecretRedactionFeatures.PrivateData) != 0,
+			_ => false
+		};
+
+	private static void ValidateManualRedactionClass(ManualRedactionClass classification)
+	{
+		if (!Enum.IsDefined(classification))
+			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
 	}
 
 	internal static string NormalizeRelativePath(string projectRoot, string filePath)

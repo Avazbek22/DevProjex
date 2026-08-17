@@ -29,13 +29,18 @@ internal sealed class ProjectTextOutputPipeline(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+		var outputPathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
+			snapshot.RedactionContext);
 
         return mode switch
         {
             ProjectTextOutputMode.Tree => new ProjectTextOutputResult(
-                BuildTree(snapshot, cancellationToken),
+				BuildTree(snapshot, cancellationToken, outputPathRedaction),
                 CandidateFileCount: 0),
-            ProjectTextOutputMode.Content => await BuildContentAsync(snapshot, cancellationToken)
+			ProjectTextOutputMode.Content => await BuildContentAsync(
+				snapshot,
+				outputPathRedaction,
+				cancellationToken)
                 .ConfigureAwait(false),
             ProjectTextOutputMode.TreeAndContent => new ProjectTextOutputResult(
                 await treeAndContentExport.BuildAsync(
@@ -45,7 +50,8 @@ internal sealed class ProjectTextOutputPipeline(
                         snapshot.TreeFormat,
                         cancellationToken,
 						snapshot.PathPresentation,
-						snapshot.RedactionContext)
+						snapshot.RedactionContext,
+						outputPathRedaction)
                     .ConfigureAwait(false),
                 CandidateFileCount: 0),
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported project text output mode.")
@@ -54,6 +60,7 @@ internal sealed class ProjectTextOutputPipeline(
 
     private async Task<ProjectTextOutputResult> BuildContentAsync(
         ProjectTextOutputSnapshot snapshot,
+		OutputPathRedactionDecision? outputPathRedaction,
         CancellationToken cancellationToken)
     {
         var files = ResolveContentFiles(snapshot);
@@ -63,12 +70,10 @@ internal sealed class ProjectTextOutputPipeline(
 		var content = await contentExport.BuildAsync(
 				files,
 				cancellationToken,
-				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(snapshot.RootPath),
+				snapshot.PathPresentation?.MapFilePath,
 				snapshot.RedactionContext,
-				OutputRootPathPresentation.Resolve(
-					snapshot.RootPath,
-					snapshot.PathPresentation,
-					snapshot.RedactionContext))
+				displayRootPath: null,
+				outputPathRedaction: outputPathRedaction)
             .ConfigureAwait(false);
 
         return new ProjectTextOutputResult(content, files.Count);
@@ -76,16 +81,19 @@ internal sealed class ProjectTextOutputPipeline(
 
     public string BuildTree(
         ProjectTextOutputSnapshot snapshot,
-        CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		OutputPathRedactionDecision? outputPathRedaction = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         cancellationToken.ThrowIfCancellationRequested();
 
         snapshot = NormalizeSelection(snapshot);
+		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(
+			snapshot.RedactionContext);
 		var displayRootPath = OutputRootPathPresentation.Resolve(
 			snapshot.RootPath,
 			snapshot.PathPresentation,
-			snapshot.RedactionContext);
+			outputPathRedaction);
         var displayRootName = snapshot.PathPresentation?.DisplayRootName;
         if (snapshot.SelectedPaths.Count == 0)
         {

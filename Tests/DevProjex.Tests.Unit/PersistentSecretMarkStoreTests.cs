@@ -16,7 +16,7 @@ public sealed class PersistentSecretMarkStoreTests
 		var backupPath = primaryPath + ".bak";
 		await File.WriteAllTextAsync(
 			primaryPath,
-			"{\"schemaVersion\":4,\"projects\":{\"future\":{}}}",
+			"{\"schemaVersion\":5,\"projects\":{\"future\":{}}}",
 			TestContext.Current.CancellationToken);
 		await File.WriteAllTextAsync(
 			backupPath,
@@ -108,8 +108,55 @@ public sealed class PersistentSecretMarkStoreTests
 		var json = await File.ReadAllTextAsync(
 			Path.Combine(temporary.Path, "DevProjex", "project-secret-marks.json"),
 			TestContext.Current.CancellationToken);
-		Assert.Contains("\"schemaVersion\": 3", json, StringComparison.Ordinal);
+		Assert.Contains("\"schemaVersion\": 4", json, StringComparison.Ordinal);
 		Assert.DoesNotContain("abcdefghij", json, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SchemaThreeMarks_MigrateToSecretClassAndClassIdentityRemainsIndependent()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var directory = temporary.CreateFolder("DevProjex");
+		var normalizedProject = PathUtility.Normalize(project).Replace("\\", "\\\\", StringComparison.Ordinal);
+		var operationId = Guid.NewGuid();
+		var json = $$"""
+			{
+			  "schemaVersion": 3,
+			  "projects": {
+			    "{{normalizedProject}}": {
+			      "appliedRevision": 1,
+			      "states": [
+			        { "hash": "{{V2Hash}}", "length": 12, "key": "TOKEN", "removed": false, "issuedUtcTicks": 1, "operationId": "{{operationId}}", "appliedRevision": 1 }
+			      ]
+			    }
+			  }
+			}
+			""";
+		var path = Path.Combine(directory, "project-secret-marks.json");
+		await File.WriteAllTextAsync(path, json, TestContext.Current.CancellationToken);
+		var store = new ProjectProfileStore(() => temporary.Path);
+
+		var migrated = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+		var legacy = Assert.Single(migrated.Snapshot!.Marks);
+		Assert.Equal(ManualRedactionClass.Secret, legacy.Class);
+		Assert.Contains(
+			"\"schemaVersion\": 4",
+			await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken),
+			StringComparison.Ordinal);
+
+		var privateMark = legacy with { Class = ManualRedactionClass.PrivateData };
+		var added = await store.AddMarkAsync(project, privateMark, TestContext.Current.CancellationToken);
+		Assert.True(added.Succeeded);
+		Assert.Equal(2, added.Snapshot!.Marks.Count);
+		var removed = await store.RemoveMarkAsync(
+			project,
+			new PersistentSecretMarkId(
+				legacy.H,
+				legacy.Length,
+				Class: ManualRedactionClass.Secret),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(ManualRedactionClass.PrivateData, Assert.Single(removed.Snapshot!.Marks).Class);
 	}
 
 	[Fact]
@@ -576,7 +623,7 @@ public sealed class PersistentSecretMarkStoreTests
 			migrated.Snapshot.StateAppliedRevisions!.OrderBy(static pair => pair.Key.Hash),
 			loadedAgain.Snapshot.StateAppliedRevisions!.OrderBy(static pair => pair.Key.Hash));
 		Assert.Equal(firstBytes, secondBytes);
-		Assert.Contains("\"schemaVersion\": 3", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);
+		Assert.Contains("\"schemaVersion\": 4", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);
 		Assert.Contains("\"appliedRevision\"", Encoding.UTF8.GetString(firstBytes), StringComparison.Ordinal);
 		Assert.Empty(afterStale.Snapshot!.Marks);
 		Assert.Equal(migrated.Snapshot.Revision, afterStale.Snapshot.Revision);
@@ -616,7 +663,7 @@ public sealed class PersistentSecretMarkStoreTests
 			17,
 			loaded.Snapshot.StateAppliedRevisions![new PersistentSecretMarkId(FirstHash, 12)]);
 		Assert.Contains(
-			"\"schemaVersion\": 3",
+			"\"schemaVersion\": 4",
 			await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken),
 			StringComparison.Ordinal);
 	}

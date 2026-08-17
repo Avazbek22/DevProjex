@@ -29,7 +29,7 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowIgnoreOptionsUiTests
 {
 	[AvaloniaFact]
-	public async Task ContentHeaders_UseOneProtectedRootAndRelativeFilesAcrossPreviewClipboardAndExport()
+	public async Task ContentHeaders_UseFullPerFilePathsAndOneInteractivePrivateDataDecision()
 	{
 		using var project = UiTestProject.CreateDefault();
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
@@ -42,11 +42,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				PreviewContentMode.Content,
 				TestContext.Current.CancellationToken);
 			Assert.Equal(unprotected, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
-			Assert.StartsWith($"{project.RootPath}:{Environment.NewLine}", unprotected, StringComparison.Ordinal);
-			const string relativeContentPath = "src/AppHost/Program.cs";
-			Assert.Contains($"{relativeContentPath}:", unprotected, StringComparison.Ordinal);
+			var programPath = Path.Combine(project.RootPath, "src", "AppHost", "Program.cs");
+			Assert.Contains($"{programPath}:", unprotected, StringComparison.Ordinal);
 			Assert.DoesNotContain(
-				$"{Path.Combine(project.RootPath, "src", "AppHost", "Program.cs")}:",
+				$"{project.RootPath}:{Environment.NewLine}",
 				unprotected,
 				StringComparison.Ordinal);
 			await UiTestDriver.CopyContentToClipboardAsync(window, unprotected);
@@ -54,9 +53,59 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
 			await UiTestDriver.ClickApplySettingsAsync(window);
 			var protectedRoot = OutputRootPathPresentation.MaskLocalUserSegment(project.RootPath);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var protectedContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+				window,
+				PreviewContentMode.Content,
+				TestContext.Current.CancellationToken);
+			Assert.Contains(
+				$"{OutputRootPathPresentation.MaskLocalUserSegment(programPath)}:",
+				protectedContent,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain($"{programPath}:", protectedContent, StringComparison.Ordinal);
+			Assert.Equal(protectedContent, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+			await UiTestDriver.CopyContentToClipboardAsync(window, protectedContent);
+
+			var control = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+				window,
+				"PreviewTextControl");
+			var generatedPathSpans = control.Document!.Redactions
+				.Where(static span =>
+					span.RuleId == OutputRootPathPresentation.LocalUserRuleId &&
+					span.Source == (SecretFindingSource)0)
+				.ToArray();
+			Assert.True(generatedPathSpans.Length > 1);
+			var generatedOccurrenceId = Assert.Single(
+				generatedPathSpans
+					.Select(static span => span.OccurrenceId)
+					.Distinct(StringComparer.Ordinal));
+
+			await UiTestDriver.RequestRedactionToggleAsync(window, generatedOccurrenceId);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					programPath,
+					StringComparison.Ordinal),
+				"the generated path occurrence to be kept as-is");
+			var keptContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+				window,
+				PreviewContentMode.Content,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(unprotected, keptContent);
+			Assert.Equal(keptContent, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+			await UiTestDriver.CopyContentToClipboardAsync(window, keptContent);
+
+			await UiTestDriver.RequestRedactionToggleAsync(window, generatedOccurrenceId);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					protectedContent,
+					StringComparison.Ordinal),
+				"the generated path occurrence to be hidden again");
+
 			foreach (var mode in new[]
 			{
-				PreviewContentMode.Content,
 				PreviewContentMode.Tree,
 				PreviewContentMode.TreeAndContent
 			})
@@ -3415,6 +3464,133 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		}
 		finally
 		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PrivateDataAlwaysHide_CreatesValueMarkAndAutoEnablesOnlyItsClass()
+	{
+		const string manualValue = "privdata42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Contact.txt"),
+			$"contact={manualValue}; visible-tail\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			Assert.Equal((false, false), UiTestDriver.GetAppliedContentRedactionState(window));
+
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(
+				window,
+				manualValue,
+				persistent: true,
+				classification: ManualRedactionClass.PrivateData);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetAppliedContentRedactionState(window) == (false, true) &&
+				      UiTestDriver.GetViewModel(window).HidePrivateDataOption is
+				      {
+				          IsChecked: true,
+				          Label: var label
+				      } &&
+				      label.EndsWith("(1/1)", StringComparison.Ordinal) &&
+				      UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					      "DEVPROJEX_REDACTED[manual-private-data#1]",
+					      StringComparison.Ordinal),
+				"the private-data mark to enable and redact only its own class");
+			Assert.False(UiTestDriver.GetViewModel(window).HideSecretsOption!.IsChecked);
+			var store = new ProjectProfileStore(() => UiTestDriver.GetWindowAppDataPath(window));
+			MarkedSecretProfileEntry? persistedMark = null;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var loaded = store.LoadMarksAsync(project.RootPath).AsTask().GetAwaiter().GetResult();
+					if (!loaded.Succeeded || loaded.Snapshot!.Marks.Count != 1)
+						return false;
+					persistedMark = loaded.Snapshot.Marks.Single();
+					return true;
+				},
+				"the private-data value mark to become durable");
+			Assert.NotNull(persistedMark);
+			Assert.Equal(ManualRedactionClass.PrivateData, persistedMark!.Class);
+			Assert.Null(persistedMark.RelativePath);
+			Assert.Null(persistedMark.SourceOffset);
+
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var loaded = store.LoadMarksAsync(project.RootPath).AsTask().GetAwaiter().GetResult();
+					return loaded.Succeeded &&
+					       loaded.Snapshot!.Marks.Count == 0 &&
+					       UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+						       manualValue,
+						       StringComparison.Ordinal);
+				},
+				"removing the private-data mark to restore Preview content");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData((int)ManualRedactionClass.Secret)]
+	[InlineData((int)ManualRedactionClass.PrivateData)]
+	public async Task ManualMark_AutoEnablesItsClassWithoutPublishingPendingApplyState(int classValue)
+	{
+		var classification = (ManualRedactionClass)classValue;
+		const string manualValue = "atomic-manual-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Atomic.txt"),
+			$"value=prefix{manualValue}suffix\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var observedPendingStates = new List<bool>();
+		PropertyChangedEventHandler? propertyChanged = null;
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.False(viewModel.HasPendingFilterSettingsChanges);
+			propertyChanged = (_, args) =>
+			{
+				if (args.PropertyName == nameof(MainWindowViewModel.HasPendingFilterSettingsChanges))
+					observedPendingStates.Add(viewModel.HasPendingFilterSettingsChanges);
+			};
+			viewModel.PropertyChanged += propertyChanged;
+
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(
+				window,
+				manualValue,
+				persistent: true,
+				classification: classification);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => classification == ManualRedactionClass.Secret
+					? UiTestDriver.GetAppliedContentRedactionState(window).HideSecrets
+					: UiTestDriver.GetAppliedContentRedactionState(window).HidePrivateData,
+				"the manual mark class to become applied");
+
+			Assert.DoesNotContain(true, observedPendingStates);
+			Assert.False(viewModel.HasPendingFilterSettingsChanges);
+			Assert.False(viewModel.IsApplySettingsAttentionActive);
+			var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+			Assert.DoesNotContain("apply-attention", applyButton.Classes);
+		}
+		finally
+		{
+			if (propertyChanged is not null)
+				UiTestDriver.GetViewModel(window).PropertyChanged -= propertyChanged;
 			await UiTestDriver.CloseWindowAsync(window);
 		}
 	}

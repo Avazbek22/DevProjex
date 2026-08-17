@@ -39,6 +39,15 @@ project profiles, so profiles never retain secret fingerprints or source
 locations. If a finding moves after a file change, it is treated as a new
 occurrence and redacted again.
 
+## Manual mark classes
+
+A manual mark belongs to exactly one redaction class: Secret or Private data. The
+corresponding switch controls the whole class, including detector findings and manual marks;
+turning Hide Secrets off reveals Secret marks without changing Private-data marks. Creating a
+Secret mark in Preview enables Hide Secrets automatically. Persistent marks store only a keyed
+value identity and their class, never the original value. Store schema v4 migrates every mark
+created by schema v3 to the Secret class, preserving the behavior it had before classes existed.
+
 ## Placeholders and identity
 
 Each removed value is replaced with a deterministic placeholder:

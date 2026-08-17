@@ -43,12 +43,14 @@ public sealed class TreeAndContentExportService(
 		TreeTextFormat format,
 		CancellationToken cancellationToken,
 		ExportPathPresentation? pathPresentation = null,
-		ContentTransformationContext? transformationContext = null)
+		ContentTransformationContext? transformationContext = null,
+		OutputPathRedactionDecision? outputPathRedaction = null)
 	{
+		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		var displayRootPath = OutputRootPathPresentation.Resolve(
 			rootPath,
 			pathPresentation,
-			transformationContext);
+			outputPathRedaction);
 		var displayRootName = pathPresentation?.DisplayRootName;
 		bool hasSelection = selectedPaths.Count > 0 && TreeExportService.HasSelectedDescendantOrSelf(root, selectedPaths);
 
@@ -69,7 +71,9 @@ public sealed class TreeAndContentExportService(
 			files,
 			cancellationToken,
 			contentPathMapper,
-			transformationContext).ConfigureAwait(false);
+			transformationContext,
+			displayRootPath: null,
+			outputPathRedaction: outputPathRedaction).ConfigureAwait(false);
 		var content = contentResult.Text;
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;

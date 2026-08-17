@@ -53,4 +53,50 @@ public sealed class LocalizationSecretProgressKeysTests
 
 		Assert.Equal(expected, catalog.Get(language)["Settings.Ignore.HidePrivateData.Scanning"]);
 	}
+
+	[Fact]
+	public void ManualMarkMenuFormats_KeepOneMaskedValueAndThreeDistinctScopeTooltipsInEveryLanguage()
+	{
+		const string maskedValue = "value…tail";
+		var catalog = new JsonLocalizationCatalog();
+		foreach (var language in Enum.GetValues<AppLanguage>())
+		{
+			var values = catalog.Get(language);
+			foreach (var key in new[]
+			{
+				"Preview.Secret.Mark.Secret.Here",
+				"Preview.Secret.Mark.Secret.Always",
+				"Preview.Secret.Mark.PrivateData.Always"
+			})
+			{
+				var formatted = string.Format(CultureInfo.InvariantCulture, values[key], maskedValue);
+				Assert.Equal(1, formatted.Split(maskedValue, StringSplitOptions.None).Length - 1);
+			}
+
+			var tooltips = new[]
+			{
+				values["Preview.Secret.Mark.Tooltip.Here"],
+				values["Preview.Secret.Mark.Tooltip.Persistent"],
+				values["Preview.Secret.Mark.Tooltip.PrivateData"]
+			};
+			Assert.All(tooltips, static tooltip => Assert.False(string.IsNullOrWhiteSpace(tooltip)));
+			Assert.Equal(3, tooltips.Distinct(StringComparer.Ordinal).Count());
+		}
+	}
+
+	[Theory]
+	[InlineData(AppLanguage.En, "Hide \"{0}\" here", "Always hide \"{0}\"", "Hide \"{0}\" as private data")]
+	[InlineData(AppLanguage.Ru, "Скрыть \"{0}\" здесь", "Всегда скрывать \"{0}\"", "Скрывать \"{0}\" как приватные данные")]
+	public void ManualMarkMenuFormats_UseTheCanonicalEnglishAndRussianWording(
+		AppLanguage language,
+		string hideHere,
+		string hideAlways,
+		string privateDataAlways)
+	{
+		var values = new JsonLocalizationCatalog().Get(language);
+
+		Assert.Equal(hideHere, values["Preview.Secret.Mark.Secret.Here"]);
+		Assert.Equal(hideAlways, values["Preview.Secret.Mark.Secret.Always"]);
+		Assert.Equal(privateDataAlways, values["Preview.Secret.Mark.PrivateData.Always"]);
+	}
 }

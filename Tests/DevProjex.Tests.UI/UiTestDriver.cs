@@ -1,6 +1,7 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
 using Avalonia.Media;
+using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Context;
 using DevProjex.Application.Compression;
@@ -865,7 +866,8 @@ internal static class UiTestDriver
 	public static async Task<(string RelativePath, int SourceOffset)> RequestPersistentSecretMarkAsync(
 		MainWindow window,
 		string value,
-		bool persistent = true)
+		bool persistent = true,
+		ManualRedactionClass classification = ManualRedactionClass.Secret)
 	{
 		var viewModel = GetViewModel(window);
 		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
@@ -895,6 +897,7 @@ internal static class UiTestDriver
 		var request = new DevProjex.Avalonia.Controls.PreviewManualSecretMarkRequestedEventArgs(
 			markedValue,
 			selection,
+			classification,
 			persistent);
 		var resolve = typeof(PreviewSurfaceController).GetMethod(
 			"TryResolveManualMarkLocation",
@@ -925,7 +928,8 @@ internal static class UiTestDriver
 		MainWindow window,
 		string value,
 		bool persistent = false,
-		int clickCount = 1)
+		int clickCount = 1,
+		ManualRedactionClass classification = ManualRedactionClass.Secret)
 	{
 		Assert.True(clickCount > 0);
 		await WaitForPreviewReadyAsync(window);
@@ -999,7 +1003,13 @@ internal static class UiTestDriver
 		Assert.True(flyout.IsOpen);
 		var menuItem = GetRequiredPrivateField<MenuItem>(
 			textControl,
-			persistent ? "_alwaysHideSecretMenuItem" : "_hideSecretHereMenuItem");
+			(classification, persistent) switch
+			{
+				(ManualRedactionClass.Secret, false) => "_secretHideHereMenuItem",
+				(ManualRedactionClass.Secret, true) => "_secretAlwaysHideMenuItem",
+				(ManualRedactionClass.PrivateData, true) => "_privateDataAlwaysHideMenuItem",
+				_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
+			});
 		Assert.True(menuItem.IsVisible);
 		Assert.True(menuItem.IsEnabled);
 		for (var click = 0; click < clickCount; click++)
@@ -1079,7 +1089,9 @@ internal static class UiTestDriver
 		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
 			window,
 			"PreviewTextControl");
-		var redaction = Assert.Single((textControl.Document ?? GetViewModel(window).PreviewDocument)!.Redactions);
+		var redaction = Assert.Single(
+			(textControl.Document ?? GetViewModel(window).PreviewDocument)!.Redactions,
+			static span => span.PersistentMarkId is not null || !string.IsNullOrWhiteSpace(span.SessionMarkId));
 		InvokeRequiredPrivateMethod(textControl, "EnsureContextMenu");
 		var contextField = textControl.GetType().GetField(
 			"_contextManualRedaction",
@@ -1120,6 +1132,22 @@ internal static class UiTestDriver
 		Assert.True(item.IsVisible);
 		Assert.True(item.IsEnabled);
 		await RaiseMenuItemClickAsync(item);
+	}
+
+	public static async Task RequestRedactionToggleAsync(MainWindow window, string occurrenceId)
+	{
+		var textControl = GetRequiredControl<VirtualizedPreviewTextControl>(window, "PreviewTextControl");
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(window, "_previewSurfaceController");
+		var handler = typeof(PreviewSurfaceController).GetMethod(
+			"OnRedactionToggleRequested",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(handler);
+		await window.Dispatcher.InvokeAsync(
+			() => handler!.Invoke(
+				controller,
+				[textControl, new PreviewRedactionToggleRequestedEventArgs(occurrenceId)]),
+			DispatcherPriority.Normal);
+		await WaitForSettledFramesAsync(frameCount: 4);
 	}
 
 	public static DevProjex.Avalonia.Services.ToastService GetToastService(MainWindow window) =>

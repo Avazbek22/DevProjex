@@ -1599,6 +1599,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretAlwaysHideFormat { get; private set; } = string.Empty;
 	public string PreviewSecretHideHereFormat { get; private set; } = string.Empty;
+	public string PreviewPrivateDataAlwaysHideFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideHereTooltip { get; private set; } = string.Empty;
+	public string PreviewSecretAlwaysHideTooltip { get; private set; } = string.Empty;
+	public string PreviewPrivateDataAlwaysHideTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretRemoveMark { get; private set; } = string.Empty;
 	public string PreviewSecretKeepAllRuleFormat { get; private set; } = string.Empty;
 	public string PreviewSecretHideAllRuleFormat { get; private set; } = string.Empty;
@@ -1768,8 +1772,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		UpdateSettingsBlankLineStripNotice();
 		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
 		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
-		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Always"];
-		PreviewSecretHideHereFormat = _localization["Preview.Secret.Mark.Here"];
+		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Secret.Always"];
+		PreviewSecretHideHereFormat = _localization["Preview.Secret.Mark.Secret.Here"];
+		PreviewPrivateDataAlwaysHideFormat = _localization["Preview.Secret.Mark.PrivateData.Always"];
+		PreviewSecretHideHereTooltip = _localization["Preview.Secret.Mark.Tooltip.Here"];
+		PreviewSecretAlwaysHideTooltip = _localization["Preview.Secret.Mark.Tooltip.Persistent"];
+		PreviewPrivateDataAlwaysHideTooltip = _localization["Preview.Secret.Mark.Tooltip.PrivateData"];
 		PreviewSecretRemoveMark = _localization["Preview.Secret.Mark.Remove"];
 		PreviewSecretKeepAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Keep"];
 		PreviewSecretHideAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Hide"];
@@ -1932,6 +1940,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		RaisePropertyChanged(nameof(PreviewSecretKeptTooltip));
 		RaisePropertyChanged(nameof(PreviewSecretAlwaysHideFormat));
 		RaisePropertyChanged(nameof(PreviewSecretHideHereFormat));
+		RaisePropertyChanged(nameof(PreviewPrivateDataAlwaysHideFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideHereTooltip));
+		RaisePropertyChanged(nameof(PreviewSecretAlwaysHideTooltip));
+		RaisePropertyChanged(nameof(PreviewPrivateDataAlwaysHideTooltip));
 		RaisePropertyChanged(nameof(PreviewSecretRemoveMark));
 		RaisePropertyChanged(nameof(PreviewSecretKeepAllRuleFormat));
 		RaisePropertyChanged(nameof(PreviewSecretHideAllRuleFormat));

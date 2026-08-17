@@ -7,7 +7,7 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class ProjectTextOutputPipelineTests
 {
 	[Fact]
-	public async Task BuildAsync_ContentStartsWithDisplayRootAndUsesRelativeFileHeaders()
+	public async Task BuildAsync_ContentUsesTheOriginalPerFilePathFormat()
 	{
 		using var project = new TemporaryDirectory();
 		var sourceFile = project.CreateFile(Path.Combine("src", "Program.cs"), "class Program {}");
@@ -15,7 +15,9 @@ public sealed class ProjectTextOutputPipelineTests
 		var displayRoot = "https://github.com/owner/repository";
 		var snapshot = CreateSnapshot(project.Path, root, new HashSet<string>(PathComparer.Default)) with
 		{
-			PathPresentation = new ExportPathPresentation(displayRoot, path => path)
+			PathPresentation = new ExportPathPresentation(
+				displayRoot,
+				_ => $"{displayRoot}/src/Program.cs")
 		};
 
 		var result = await CreatePipeline().BuildAsync(
@@ -23,9 +25,11 @@ public sealed class ProjectTextOutputPipelineTests
 			snapshot,
 			TestContext.Current.CancellationToken);
 
-		Assert.StartsWith($"{displayRoot}:{Environment.NewLine}", result.Content, StringComparison.Ordinal);
-		Assert.Contains("src/Program.cs:", result.Content, StringComparison.Ordinal);
-		Assert.DoesNotContain($"{sourceFile}:", result.Content, StringComparison.Ordinal);
+		Assert.Equal(
+			$"{displayRoot}/src/Program.cs:{Environment.NewLine}" +
+			$"\u00A0{Environment.NewLine}" +
+			"class Program {}",
+			result.Content);
 	}
 
 	[Theory]
@@ -43,7 +47,9 @@ public sealed class ProjectTextOutputPipelineTests
 		var displayRoot = @"C:\Users\alice\repository";
 		var snapshot = CreateSnapshot(project.Path, root, new HashSet<string>(PathComparer.Default)) with
 		{
-			PathPresentation = new ExportPathPresentation(displayRoot, path => path),
+			PathPresentation = new ExportPathPresentation(
+				displayRoot,
+				_ => $@"{displayRoot}\Program.cs"),
 			RedactionContext = new ContentTransformationContext(
 				Compression: null,
 				Redaction: new SecretRedactionContext(
@@ -70,7 +76,7 @@ public sealed class ProjectTextOutputPipelineTests
 		var displayRoot = @"C:\Users\alice\repository";
 		var snapshot = CreateSnapshot(project.Path, root, new HashSet<string>(PathComparer.Default)) with
 		{
-			PathPresentation = new ExportPathPresentation(displayRoot, path => path)
+			PathPresentation = new ExportPathPresentation(displayRoot, _ => $@"{displayRoot}\Program.cs")
 		};
 
 		var result = await CreatePipeline().BuildAsync(
@@ -78,7 +84,7 @@ public sealed class ProjectTextOutputPipelineTests
 			snapshot,
 			TestContext.Current.CancellationToken);
 
-		Assert.StartsWith($"{displayRoot}:{Environment.NewLine}", result.Content, StringComparison.Ordinal);
+		Assert.StartsWith($@"{displayRoot}\Program.cs:{Environment.NewLine}", result.Content, StringComparison.Ordinal);
 		Assert.DoesNotContain("[local-user-1]", result.Content, StringComparison.Ordinal);
 	}
     [Theory]

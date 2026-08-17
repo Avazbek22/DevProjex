@@ -167,17 +167,80 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Equal(!enabled, environment.StandardOutput.Contains(PrivateEmail, StringComparison.Ordinal));
 		Assert.Equal(enabled, environment.StandardOutput.Contains("DEVPROJEX_REDACTED[email#1]", StringComparison.Ordinal));
-		var expectedRoot = OutputRootPathPresentation.Resolve(
-			workspace.ProjectRoot,
-			displayRootPath: null,
-			hidePrivateData: enabled);
-		Assert.StartsWith($"{expectedRoot}:{Environment.NewLine}", environment.StandardOutput, StringComparison.Ordinal);
-		Assert.Contains("src/contact.txt:", environment.StandardOutput, StringComparison.Ordinal);
+		var contactPath = Path.Combine(workspace.ProjectRoot, "src", "contact.txt");
+		var expectedPath = enabled
+			? OutputRootPathPresentation.MaskLocalUserSegment(contactPath)
+			: contactPath;
+		Assert.Contains($"{expectedPath}:", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain(
-			$"{Path.Combine(workspace.ProjectRoot, "src", "contact.txt")}:",
+			$"{workspace.ProjectRoot}:{Environment.NewLine}",
 			environment.StandardOutput,
 			StringComparison.Ordinal);
+		if (enabled && !string.Equals(expectedPath, contactPath, StringComparison.Ordinal))
+			Assert.DoesNotContain($"{contactPath}:", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData(
+		ManualRedactionClass.Secret,
+		"--hide-secrets",
+		"--hide-private-data",
+		"manual-secret")]
+	[InlineData(
+		ManualRedactionClass.PrivateData,
+		"--hide-private-data",
+		"--hide-secrets",
+		"manual-private-data")]
+	public async Task ExportContext_ManualMarkClassFollowsOnlyItsOwnCliFlag(
+		ManualRedactionClass classification,
+		string enabledFlag,
+		string disabledFlag,
+		string expectedRuleId)
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		await AddPersistentManualSecretAsync(workspace, classification: classification);
+		var enabled = new TestTerminalEnvironment();
+
+		var enabledExitCode = await RunAsync(
+			workspace,
+			enabled,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", "local",
+				enabledFlag, "true",
+				disabledFlag, "false",
+				"--view", "content",
+				"--format", "text",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, enabledExitCode);
+		Assert.DoesNotContain(ManuallyMarkedValue, enabled.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains(
+			$"DEVPROJEX_REDACTED[{expectedRuleId}#1]",
+			enabled.StandardOutput,
+			StringComparison.Ordinal);
+
+		var disabled = new TestTerminalEnvironment();
+		var disabledExitCode = await RunAsync(
+			workspace,
+			disabled,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", "local",
+				enabledFlag, "false",
+				disabledFlag, "true",
+				"--view", "content",
+				"--format", "text",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, disabledExitCode);
+		Assert.Contains(ManuallyMarkedValue, disabled.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("DEVPROJEX_REDACTED[manual-", disabled.StandardOutput, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -872,7 +935,8 @@ public sealed class SecretRedactionCommandContractTests
 		Workspace workspace,
 		string? relativePath = null,
 		int? sourceOffset = null,
-		bool writeSource = true)
+		bool writeSource = true,
+		ManualRedactionClass classification = ManualRedactionClass.Secret)
 	{
 		if (writeSource)
 		{
@@ -881,15 +945,18 @@ public sealed class SecretRedactionCommandContractTests
 				$"setting={ManuallyMarkedValue}\n");
 		}
 		var store = new ProjectProfileStore(() => workspace.AppDataRoot);
+		var optionId = classification == ManualRedactionClass.Secret
+			? IgnoreOptionId.HideSecrets
+			: IgnoreOptionId.HidePrivateData;
 		store.SaveProfile(
 			workspace.ProjectRoot,
 			new ProjectSelectionProfile(
 				SelectedRootFolders: [],
 				SelectedExtensions: [],
-				SelectedIgnoreOptions: [IgnoreOptionId.HideSecrets],
+				SelectedIgnoreOptions: [optionId],
 				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
 				{
-					[IgnoreOptionId.HideSecrets] = true
+					[optionId] = true
 				}));
 		using var identityProvider = new PersistentSecretIdentityProvider(() => workspace.AppDataRoot);
 		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
@@ -904,7 +971,8 @@ public sealed class SecretRedactionCommandContractTests
 				"setting",
 				ManuallyMarkedValue.Length,
 				relativePath,
-				sourceOffset),
+				sourceOffset,
+				classification),
 			TestContext.Current.CancellationToken);
 		Assert.True(result.Succeeded);
 	}

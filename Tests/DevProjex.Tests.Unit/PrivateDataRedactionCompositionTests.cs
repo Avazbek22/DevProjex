@@ -223,6 +223,63 @@ public sealed class PrivateDataRedactionCompositionTests
 		Assert.Equal(1, secretsOnly.Snapshot.SecretDetectedCount);
 	}
 
+	[Fact]
+	public void ManualMarkClasses_AreScopedCountedAndPlaceholderedByEnabledFeatureSet()
+	{
+		const string secretValue = "manual-secret-value";
+		const string privateValue = "manual-private-value";
+		var content = $"secret={secretValue}\nprivate={privateValue}";
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", content);
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new NeedleDetector("catalog:smart-secrets-v4", "not-present", "unused", RedactionFindingCategory.Secrets),
+			new NeedleDetector("private-data-v1", "also-not-present", "unused", RedactionFindingCategory.PrivateData));
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(secretValue, out var secret, out _));
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(privateValue, out var privateData, out _));
+		Assert.True(session.AddSessionMarkedSecret(
+			"data.txt",
+			"secret=".Length,
+			secret,
+			ManualRedactionClass.Secret));
+		Assert.True(session.AddSessionMarkedSecret(
+			"data.txt",
+			content.IndexOf(privateValue, StringComparison.Ordinal),
+			privateData,
+			ManualRedactionClass.PrivateData));
+
+		var secretsOnly = Redact(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.Secrets);
+		var privateOnly = Redact(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.PrivateData);
+		var combined = Redact(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+
+		Assert.Contains("DEVPROJEX_REDACTED[manual-secret#1]", secretsOnly.Result.Text, StringComparison.Ordinal);
+		Assert.Contains(privateValue, secretsOnly.Result.Text, StringComparison.Ordinal);
+		Assert.Equal((1, 0), (secretsOnly.Snapshot.SecretDetectedCount, secretsOnly.Snapshot.PrivateDataDetectedCount));
+		Assert.Contains(secretValue, privateOnly.Result.Text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[manual-private-data#1]", privateOnly.Result.Text, StringComparison.Ordinal);
+		Assert.Equal((0, 1), (privateOnly.Snapshot.SecretDetectedCount, privateOnly.Snapshot.PrivateDataDetectedCount));
+		Assert.DoesNotContain(secretValue, combined.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(privateValue, combined.Result.Text, StringComparison.Ordinal);
+		Assert.Equal((1, 1), (combined.Snapshot.SecretDetectedCount, combined.Snapshot.PrivateDataDetectedCount));
+		Assert.Equal(3, new HashSet<string>(
+			[secretsOnly.Snapshot.SelectionKey, privateOnly.Snapshot.SelectionKey, combined.Snapshot.SelectionKey],
+			StringComparer.Ordinal).Count);
+	}
+
 	private static void AssertSnapshot(
 		SecretRedactionSession session,
 		string projectRoot,

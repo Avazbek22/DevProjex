@@ -512,10 +512,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				mark.H,
 				mark.Length,
 				mark.RelativePath,
-				mark.SourceOffset))
+				mark.SourceOffset,
+				mark.Class))
 			.Select(static group => group.First())
 			.OrderBy(static mark => mark.H, StringComparer.Ordinal)
 			.ThenBy(static mark => mark.Length)
+			.ThenBy(static mark => mark.Class)
 			.ThenBy(static mark => mark.RelativePath, StringComparer.Ordinal)
 			.ThenBy(static mark => mark.SourceOffset)
 			.Take(ProjectProfileStorageLimits.MaximumPersistentMarksPerProject)
@@ -527,6 +529,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		out MarkedSecretProfileEntry normalized)
 	{
 		if (mark is null ||
+		    !Enum.IsDefined(mark.Class) ||
 		    !PersistentSecretIdentity.IsSupported(mark.H) ||
 		    mark.Length is < MarkedSecretValueNormalizer.MinimumLength or
 			    > MarkedSecretValueNormalizer.MaximumLength)

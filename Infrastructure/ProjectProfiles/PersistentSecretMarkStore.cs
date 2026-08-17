@@ -8,7 +8,7 @@ internal sealed class PersistentSecretMarkStore(
 	Func<string> appDataPathProvider,
 	TimeSpan? lockTimeout = null)
 {
-	private const int CurrentSchemaVersion = 3;
+	private const int CurrentSchemaVersion = 4;
 	private const int AppliedRevisionSchemaVersion = 2;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-secret-marks.json";
@@ -300,6 +300,7 @@ internal sealed class PersistentSecretMarkStore(
 
 		state.Hash = delta.MarkId.Hash.ToLowerInvariant();
 		state.Length = delta.MarkId.Length;
+		state.Class = delta.MarkId.Class;
 		state.RelativePath = delta.MarkId.RelativePath;
 		state.SourceOffset = delta.MarkId.SourceOffset;
 		state.Key = delta.Kind == PersistentSecretMarkDeltaKind.Add
@@ -355,6 +356,7 @@ internal sealed class PersistentSecretMarkStore(
 		}
 		target.Hash = replacement.H.ToLowerInvariant();
 		target.Length = replacement.Length;
+		target.Class = replacement.Class;
 		target.Key = replacement.Key;
 		target.RelativePath = replacement.RelativePath;
 		target.SourceOffset = replacement.SourceOffset;
@@ -582,7 +584,8 @@ internal sealed class PersistentSecretMarkStore(
 				database.InvalidProjects.Add(normalizedPath);
 			}
 			value.States = normalizedStates
-				.OrderBy(static state => state.Hash, StringComparer.Ordinal)
+				.OrderBy(static state => state.Class)
+				.ThenBy(static state => state.Hash, StringComparer.Ordinal)
 				.ThenBy(static state => state.Length)
 				.ThenBy(static state => state.RelativePath, StringComparer.Ordinal)
 				.ThenBy(static state => state.SourceOffset)
@@ -610,6 +613,7 @@ internal sealed class PersistentSecretMarkStore(
 			.Select(static group => group.First())
 			.OrderBy(static mark => mark.H, StringComparer.Ordinal)
 			.ThenBy(static mark => mark.Length)
+			.ThenBy(static mark => mark.Class)
 			.ThenBy(static mark => mark.RelativePath, StringComparer.Ordinal)
 			.ThenBy(static mark => mark.SourceOffset)
 			.ToList();
@@ -620,6 +624,7 @@ internal sealed class PersistentSecretMarkStore(
 		out MarkedSecretProfileEntry normalized)
 	{
 		if (mark is null ||
+		    !Enum.IsDefined(mark.Class) ||
 		    !PersistentSecretIdentity.IsSupported(mark.H) ||
 		    mark.Length is < MarkedSecretValueNormalizer.MinimumLength or
 			    > MarkedSecretValueNormalizer.MaximumLength ||
@@ -665,6 +670,7 @@ internal sealed class PersistentSecretMarkStore(
 		out PersistentSecretMarkId normalized)
 	{
 		if (!PersistentSecretIdentity.IsSupported(identity.Hash) ||
+		    !Enum.IsDefined(identity.Class) ||
 		    identity.Length is < MarkedSecretValueNormalizer.MinimumLength or
 			    > MarkedSecretValueNormalizer.MaximumLength ||
 		    !TryNormalizeScope(
@@ -682,7 +688,8 @@ internal sealed class PersistentSecretMarkStore(
 			identity.Hash.ToLowerInvariant(),
 			identity.Length,
 			relativePath,
-			sourceOffset);
+			sourceOffset,
+			identity.Class);
 		return true;
 	}
 
@@ -714,12 +721,13 @@ internal sealed class PersistentSecretMarkStore(
 	}
 
 	private static PersistentSecretMarkId CreateIdentity(MarkedSecretProfileEntry mark) =>
-		new(mark.H.ToLowerInvariant(), mark.Length, mark.RelativePath, mark.SourceOffset);
+		new(mark.H.ToLowerInvariant(), mark.Length, mark.RelativePath, mark.SourceOffset, mark.Class);
 
 	private static PersistentSecretMarkId CreateIdentity(PersistedSecretMarkState state) =>
-		new(state.Hash.ToLowerInvariant(), state.Length, state.RelativePath, state.SourceOffset);
+		new(state.Hash.ToLowerInvariant(), state.Length, state.RelativePath, state.SourceOffset, state.Class);
 
 	private static bool IsValidState(PersistedSecretMarkState state, bool migrateLegacyOrdering) =>
+		Enum.IsDefined(state.Class) &&
 		PersistentSecretIdentity.IsSupported(state.Hash) &&
 		state.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength &&
 		TryNormalizeScope(state.RelativePath, state.SourceOffset, out _, out _) &&
@@ -752,7 +760,8 @@ internal sealed class PersistentSecretMarkStore(
 				state.Key,
 				state.Length,
 				state.RelativePath,
-				state.SourceOffset))
+				state.SourceOffset,
+				state.Class))
 			.ToArray();
 		var stateAppliedRevisions = project.States.ToDictionary(
 			CreateIdentity,

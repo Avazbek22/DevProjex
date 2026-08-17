@@ -484,8 +484,26 @@ public partial class MainWindow : Window
 		ScheduleContentTransformationRefresh(changedOptionId);
 	}
 
-	private bool TryApplySelectedHideSecretsState()
-		=> TryApplySelectedContentRedactionState(IgnoreOptionId.HideSecrets);
+	private bool EnsureManualRedactionClassEnabled(ManualRedactionClass classification)
+	{
+		var optionId = classification switch
+		{
+			ManualRedactionClass.Secret => IgnoreOptionId.HideSecrets,
+			ManualRedactionClass.PrivateData => IgnoreOptionId.HidePrivateData,
+			_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
+		};
+		var wasApplied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		_selectionCoordinator.ApplyContentRedactionOverrideAsApplied(
+			_currentPath,
+			optionId,
+			enabled: true);
+		var isApplied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		return !wasApplied && isApplied || TryApplySelectedContentRedactionState(optionId);
+	}
 
 	private void ApplySelectedContentRedactionStates()
 	{

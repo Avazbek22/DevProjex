@@ -565,7 +565,7 @@ public sealed class SecretRedactionOutputPreparer
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 		if (await context.Session
-			    .EnsureCurrentPersistentIdentityReadyAsync(cancellationToken)
+			    .EnsureCurrentPersistentIdentityReadyAsync(context.Features, cancellationToken)
 			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
 		{
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
@@ -826,7 +826,7 @@ public sealed class SecretRedactionOutputPreparer
 		}
 
 		if (await redactionContext.Session
-			    .EnsureCurrentPersistentIdentityReadyAsync(cancellationToken)
+			    .EnsureCurrentPersistentIdentityReadyAsync(redactionContext.Features, cancellationToken)
 			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
 		{
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");

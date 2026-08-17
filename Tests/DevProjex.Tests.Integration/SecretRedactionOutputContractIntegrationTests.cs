@@ -1353,6 +1353,91 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Equal($"const string value = \"{manuallyMarked}\";", File.ReadAllText(sourcePath));
 	}
 
+	[Theory]
+	[InlineData(ManualRedactionClass.Secret, "manual-secret")]
+	[InlineData(ManualRedactionClass.PrivateData, "manual-private-data")]
+	public async Task ManualMarkClass_IsByteEquivalentAcrossPreviewClipboardContextFolderAndZip(
+		ManualRedactionClass classification,
+		string expectedRuleId)
+	{
+		const string manuallyMarked = "class-scoped-manual-value-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("manual-class-project");
+		var exportRoot = temporary.CreateDirectory("manual-class-exports");
+		var sourcePath = temporary.CreateFile(
+			"manual-class-project/src/config.cs",
+			$"const string value = \"{manuallyMarked}\";");
+		using var workspace = new Workspace(
+			temporary,
+			sourceRoot,
+			exportRoot,
+			sourcePath,
+			ownsTemporary: false);
+		var analyzer = new FileContentAnalyzer();
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new NoFindingsDetector(),
+			new NoFindingsDetector());
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(manuallyMarked, out var normalized, out _));
+		session.ReplaceMarkedSecrets([
+			new MarkedSecretProfileEntry(
+				normalized.Hash,
+				"value",
+				normalized.Length,
+				Class: classification)
+		]);
+		var hideSecrets = classification == ManualRedactionClass.Secret;
+		var hidePrivateData = classification == ManualRedactionClass.PrivateData;
+		var features = SecretRedactionFeatureSelection.Resolve(hideSecrets, hidePrivateData);
+		var context = new SecretRedactionContext(sourceRoot, session, features);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets, hidePrivateData);
+
+		using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: false,
+			transformationContext: context);
+		var previewAndClipboard = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
+		var selectedContent = await new SelectedContentExportService(analyzer).BuildAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			context);
+		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder,
+			hideSecrets,
+			hidePrivateData);
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip,
+			hideSecrets,
+			hidePrivateData);
+		var placeholder = $"DEVPROJEX_REDACTED[{expectedRuleId}#1]";
+
+		Assert.Equal(NormalizeForClipboard(selectedContent), previewAndClipboard);
+		Assert.All(
+			new[] { previewAndClipboard, selectedContent }.Concat(contextDocuments.Values),
+			output => AssertClassScopedOutput(output));
+		AssertClassScopedOutput(File.ReadAllText(Path.Combine(folder.DestinationPath, "src", "config.cs")));
+		using var archive = ZipFile.OpenRead(zip.DestinationPath);
+		AssertClassScopedOutput(ReadZipText(archive, "src/config.cs"));
+		Assert.Equal($"const string value = \"{manuallyMarked}\";", File.ReadAllText(sourcePath));
+
+		void AssertClassScopedOutput(string output)
+		{
+			Assert.DoesNotContain(manuallyMarked, output, StringComparison.Ordinal);
+			Assert.Contains(placeholder, output, StringComparison.Ordinal);
+		}
+	}
+
 	[Fact]
 	public async Task PersistentManualMark_AfterStoreRestartRedactsEveryOutputSurface()
 	{

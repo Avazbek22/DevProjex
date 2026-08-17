@@ -25,11 +25,28 @@ relative paths, enabled transformations, and the pinned rule versions. DevProjex
 the current OS username, machine name, locale, network, or another machine-local signal to
 guess private data.
 
-Content-only output prints the project root once and then uses relative file headers. When
-Hide private data is enabled, only the local username segment in that root is replaced with
-`[local-user-1]`, for example `C:\Users\[local-user-1]\project` or
-`/home/[local-user-1]/project`. Tree and Tree + Content output use the same root presentation;
-relative file headers do not repeat private path data.
+## Manual mark classes
+
+A manual mark belongs to exactly one redaction class: Secret or Private data. The
+corresponding switch controls the whole class, including detector findings and manual marks;
+turning Hide private data off reveals Private-data marks without changing Secret marks. Creating
+a Private-data mark in Preview enables Hide private data automatically. Persistent marks store
+only a keyed value identity and their class, never the original value. Store schema v4 treats all
+marks migrated from schema v3 as Secret marks, because that was the only class available when
+they were created.
+
+Content-only output keeps the original per-file header format: every file is preceded by its
+full local path or repository web path. When Hide private data is enabled, only the local
+username segment in each local header is replaced with `[local-user-1]`, for example
+`C:\Users\[local-user-1]\project\src\app.cs` or
+`/home/[local-user-1]/project/src/app.cs`. Tree and Tree + Content output keep their native
+layout: the root appears once in the tree and content headers remain relative.
+
+Generated username masks in file headers and tree roots share one synthetic `local-user`
+occurrence for the whole output. Preview highlights that occurrence like a detected value;
+clicking it keeps every generated path segment visible for the current session, and clicking
+again restores the masks. The decision is shared by Preview, clipboard, context export, and
+other output surfaces, but is never persisted.
 
 ## Phase-one rules
 

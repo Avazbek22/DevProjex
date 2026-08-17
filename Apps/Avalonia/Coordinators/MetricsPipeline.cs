@@ -1416,12 +1416,10 @@ internal sealed class MetricsPipeline(
 
 		var pathPresentation = exportPathPresentationProvider();
 		var transformationContext = transformationContextProvider?.Invoke();
-		var contentOnlyPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath);
-		var treeAndContentPathMapper = contentOnlyPathMapper;
-		var displayRootPath = OutputRootPathPresentation.Resolve(
-			currentPath,
-			pathPresentation,
+		var outputPathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
 			transformationContext);
+		var contentOnlyPathMapper = pathPresentation?.MapFilePath;
+		var treeAndContentPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(currentPath);
         var isFullTreeSelection =
             ProjectTreeSelectionProjection.CoversWholeTree(
                 currentTree.Root,
@@ -1437,8 +1435,10 @@ internal sealed class MetricsPipeline(
             SelectedCount: selectedCount,
             SelectedHash: selectedHash,
 			ContentPathPresentationIdentity: HashCode.Combine(
-				displayRootPath,
-				RuntimeHelpers.GetHashCode(contentOnlyPathMapper)),
+				pathPresentation?.DisplayRootPath,
+				contentOnlyPathMapper is null ? 0 : RuntimeHelpers.GetHashCode(contentOnlyPathMapper),
+				outputPathRedaction?.OccurrenceId,
+				outputPathRedaction?.Keep),
             TreeAndContentRootPathIdentity: BuildRootPathIdentity(currentPath),
             TransformIdentity: ResolveTransformIdentity());
 
@@ -1469,7 +1469,9 @@ internal sealed class MetricsPipeline(
                 }
 
                 var metrics = variant.Metrics;
-                var contentOnlyPath = MapExportDisplayPath(path, contentOnlyPathMapper);
+                var contentOnlyPath = OutputRootPathPresentation.ResolvePath(
+					MapExportDisplayPath(path, contentOnlyPathMapper),
+					outputPathRedaction).Text;
                 var treeAndContentPath = MapExportDisplayPath(path, treeAndContentPathMapper);
 				var fileMetrics = new ContentFileMetrics(
                     Path: contentOnlyPath,
@@ -1483,7 +1485,6 @@ internal sealed class MetricsPipeline(
 					TrailingNewlineChars: metrics.TrailingNewlineChars,
 					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks);
 
-				contentOnlyAccumulator.AppendRootHeader(displayRootPath);
 				contentOnlyAccumulator.AppendFile(fileMetrics);
                 treeAndContentAccumulator.AppendFile(fileMetrics with { Path = treeAndContentPath });
             }

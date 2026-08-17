@@ -142,9 +142,6 @@ public static class ProjectLoadWorkflowRuntime
             return ExportOutputMetrics.Empty;
 
 		var analyzer = new FileContentAnalyzer();
-		var mapper = useUnifiedContentHeaders
-			? TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(rootPath)
-			: null;
 		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 		foreach (var path in orderedPaths)
 		{
@@ -153,10 +150,8 @@ public static class ProjectLoadWorkflowRuntime
             if (metrics is null)
                 continue;
 
-			if (useUnifiedContentHeaders)
-				accumulator.AppendRootHeader(rootPath);
 			accumulator.AppendFile(new ContentFileMetrics(
-				Path: mapper?.Invoke(path) ?? path,
+				Path: path,
                 SizeBytes: metrics.SizeBytes,
                 LineCount: metrics.LineCount,
                 CharCount: metrics.CharCount,

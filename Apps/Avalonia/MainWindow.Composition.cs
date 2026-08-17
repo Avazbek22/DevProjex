@@ -1139,14 +1139,7 @@ public partial class MainWindow
 			() => _currentPath,
 			CreateContentTransformationContext,
 			() => ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets),
-			() =>
-			{
-				var wasApplied = _appliedHideSecretsEnabled;
-				_selectionCoordinator.ApplyHideSecretsOverride(true);
-				_selectionCoordinator.AcceptHideSecretsOverrideAsApplied(_currentPath);
-				var activationScheduled = !wasApplied && _appliedHideSecretsEnabled;
-				return activationScheduled || TryApplySelectedHideSecretsState();
-			},
+			EnsureManualRedactionClassEnabled,
 			delta => _projectProfiles.ApplyMarkDeltaAsync(_currentPath, delta),
 			cancellationToken => _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken));
         _previewWorkspaceController = new PreviewWorkspaceController(

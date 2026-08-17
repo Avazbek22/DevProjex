@@ -14,19 +14,22 @@ public readonly record struct PersistentSecretMarkId(
 	string Hash,
 	int Length,
 	string? RelativePath = null,
-	int? SourceOffset = null)
+	int? SourceOffset = null,
+	ManualRedactionClass Class = ManualRedactionClass.Secret)
 {
 	public bool Equals(PersistentSecretMarkId other) =>
 		StringComparer.OrdinalIgnoreCase.Equals(Hash, other.Hash) &&
 		Length == other.Length &&
 		PathComparer.Default.Equals(RelativePath, other.RelativePath) &&
-		SourceOffset == other.SourceOffset;
+		SourceOffset == other.SourceOffset &&
+		Class == other.Class;
 
 	public override int GetHashCode() => HashCode.Combine(
 		StringComparer.OrdinalIgnoreCase.GetHashCode(Hash ?? string.Empty),
 		Length,
 		RelativePath is null ? 0 : PathComparer.Default.GetHashCode(RelativePath),
-		SourceOffset);
+		SourceOffset,
+		Class);
 }
 
 public enum PersistentSecretMarkDeltaKind
@@ -64,7 +67,8 @@ public sealed record PersistentSecretMarkDelta(
 				mark.H,
 				mark.Length,
 				mark.RelativePath,
-				mark.SourceOffset),
+				mark.SourceOffset,
+				mark.Class),
 			mark);
 	}
 

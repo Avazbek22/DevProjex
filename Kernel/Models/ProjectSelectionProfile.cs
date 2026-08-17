@@ -15,4 +15,5 @@ public sealed record MarkedSecretProfileEntry(
 	string? Key,
 	int Length,
 	string? RelativePath = null,
-	int? SourceOffset = null);
+	int? SourceOffset = null,
+	ManualRedactionClass Class = ManualRedactionClass.Secret);

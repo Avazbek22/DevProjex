@@ -144,6 +144,27 @@ public sealed partial class SelectionSyncCoordinator(
     internal void AcceptHidePrivateDataOverrideAsApplied(string? projectPath)
         => AcceptContentRedactionOverrideAsApplied(projectPath, IgnoreOptionId.HidePrivateData);
 
+	internal bool ApplyContentRedactionOverrideAsApplied(
+		string? projectPath,
+		IgnoreOptionId optionId,
+		bool enabled)
+	{
+		if (optionId is not (IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData))
+			throw new ArgumentOutOfRangeException(nameof(optionId), optionId, null);
+
+		BeginPendingApplyEvaluationDeferral();
+		try
+		{
+			var changed = ApplyContentTransformationOverride(optionId, enabled);
+			AcceptContentRedactionOverrideAsApplied(projectPath, optionId);
+			return changed;
+		}
+		finally
+		{
+			EndPendingApplyEvaluationDeferral();
+		}
+	}
+
     private void AcceptContentRedactionOverrideAsApplied(
         string? projectPath,
         IgnoreOptionId optionId)
