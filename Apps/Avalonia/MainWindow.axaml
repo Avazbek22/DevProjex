@@ -777,12 +777,19 @@
                             Spacing="5">
                   <Button Name="PreviewSearchButton"
                           Classes="menu-icon-button preview-copy-button"
-                          ToolTip.Tip="{Binding PreviewSearchTooltip}"
+                          ToolTip.ShowDelay="700"
+                          ToolTip.Placement="BottomEdgeAlignedRight"
+                          ToolTip.VerticalOffset="5"
                           Width="32"
                           Height="32"
                           Opacity="0"
                           IsHitTestVisible="False"
                           Click="OnTogglePreviewSearch">
+                    <ToolTip.Tip>
+                      <ToolTip>
+                        <TextBlock Text="{Binding PreviewSearchTooltip}" />
+                      </ToolTip>
+                    </ToolTip.Tip>
                     <Viewbox Name="PreviewSearchIcon"
                              Width="16"
                              Height="16"

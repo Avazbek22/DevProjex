@@ -3,6 +3,8 @@ using Avalonia.Media;
 using Avalonia.Styling;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Views;
+using DevProjex.Application.Services;
+using DevProjex.Kernel.Models;
 using System.Reflection;
 
 namespace DevProjex.Tests.UI;
@@ -366,7 +368,7 @@ public sealed class MainWindowPreviewSearchUiTests
 			var searchButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewSearchButton");
 			var searchIcon = UiTestDriver.GetRequiredControl<Viewbox>(window, "PreviewSearchIcon");
 			var viewModel = UiTestDriver.GetViewModel(window);
-			Assert.Equal(viewModel.PreviewSearchTooltip, ToolTip.GetTip(searchButton));
+			Assert.IsType<ToolTip>(ToolTip.GetTip(searchButton));
 			AssertSearchIconFitsButton(searchIcon, searchButton);
 
 			await UiTestDriver.ClickAsync(window, searchButton);
@@ -425,6 +427,52 @@ public sealed class MainWindowPreviewSearchUiTests
 				"TreeSearchCurrentBrush",
 				"#F9A825");
 			AssertSearchTextBrush(preview, application, theme, "#000000");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task SearchButtonTooltip_RemainsInsideMinimumWidthWindow()
+	{
+		using var project = UiTestProject.CreateWithPreviewSearchWorkspace();
+		LocalizationService? localization = null;
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services =>
+			{
+				localization = services.Localization;
+				return services;
+			});
+
+		try
+		{
+			window.Width = window.MinWidth;
+			Assert.IsType<LocalizationService>(localization).SetLanguage(AppLanguage.Ru);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var searchButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewSearchButton");
+
+			await UiTestDriver.OpenToolTipThroughPointerAsync(window, searchButton);
+			var toolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(searchButton));
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(
+				UiTestDriver.GetViewModel(window).PreviewSearchTooltip,
+				Assert.IsType<TextBlock>(toolTip.Content).Text);
+
+			var windowLeft = window.PointToScreen(default).X;
+			var windowRight = window.PointToScreen(new Point(window.ClientSize.Width, 0)).X;
+			var toolTipLeft = toolTip.PointToScreen(default).X;
+			var toolTipRight = toolTip.PointToScreen(new Point(toolTip.Bounds.Width, 0)).X;
+			Assert.True(
+				toolTipLeft >= windowLeft,
+				$"The preview-search tooltip extends beyond the left window edge: tooltip={toolTipLeft}, window={windowLeft}.");
+			Assert.True(
+				toolTipRight <= windowRight,
+				$"The preview-search tooltip extends beyond the right window edge: tooltip={toolTipRight}, window={windowRight}.");
+			Assert.Equal(PlacementMode.BottomEdgeAlignedRight, ToolTip.GetPlacement(searchButton));
 		}
 		finally
 		{
