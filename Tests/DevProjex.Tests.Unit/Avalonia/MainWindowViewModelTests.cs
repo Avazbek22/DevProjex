@@ -479,7 +479,7 @@ public sealed class MainWindowViewModelTests
     }
 
 	[Fact]
-	public void PrivateDataLimitedStatus_ListsEveryUnscannableFileWithItsReason()
+	public void PrivateDataLimitedStatus_ShowsOnlyAppliedCounts()
 	{
 		var viewModel = CreateViewModel(new Dictionary<string, string>
 		{
@@ -503,10 +503,47 @@ public sealed class MainWindowViewModelTests
 				new UnscannableFile(largePath, FileContentClassification.TooLarge)
 			]);
 
-		Assert.Contains("Found 2, hidden 2", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
-		Assert.Contains("Unscannable: 2", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
-		Assert.Contains($"{legacyPath} - unsupported encoding", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
-		Assert.Contains($"{largePath} - too large", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.Equal("Found 2, hidden 2", viewModel.SettingsPrivateDataNotice);
+		Assert.DoesNotContain("Too large", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain("Unscannable", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain(legacyPath, viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain(largePath, viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SecretsFailedStatus_OmitsUnscannableFileDetails()
+	{
+		var viewModel = CreateViewModel(new Dictionary<string, string>
+		{
+			["Settings.Secrets.Status.Applied"] = "Found {0}, hidden {1}",
+			["Settings.Secrets.Status.FailedFiles"] = "Failed files: {0}",
+			["Settings.Secrets.Status.Retry"] = "Retry",
+			["Settings.Secrets.Status.SizeLimit"] = "Too large: {0} over {1} MiB",
+			["Content.Redaction.UnscannableFiles"] = "Unscannable: {0}",
+			["Content.Redaction.Reason.TooLarge"] = "too large",
+			["Content.Redaction.Reason.UnsupportedEncoding"] = "unsupported encoding"
+		});
+		var legacyPath = Path.Combine("project", "legacy.txt");
+		var largePath = Path.Combine("project", "large.txt");
+
+		viewModel.SetContentProcessingStatus(
+			SecretScanState.Failed,
+			detectedCount: 3,
+			hiddenCount: 2,
+			skippedFileCount: 2,
+			failedFileCount: 1,
+			[
+				new UnscannableFile(legacyPath, FileContentClassification.UnsupportedEncoding),
+				new UnscannableFile(largePath, FileContentClassification.TooLarge)
+			]);
+
+		Assert.Equal(
+			string.Join(Environment.NewLine, "Found 3, hidden 2", "Failed files: 1", "Retry"),
+			viewModel.SettingsSecretsNotice);
+		Assert.DoesNotContain("Too large", viewModel.SettingsSecretsNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain("Unscannable", viewModel.SettingsSecretsNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain(legacyPath, viewModel.SettingsSecretsNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain(largePath, viewModel.SettingsSecretsNotice, StringComparison.Ordinal);
 	}
 
     [Fact]
