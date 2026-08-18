@@ -187,6 +187,8 @@ Si apre con il pulsante con icona a forma di occhio nella barra superiore o con 
 
 I pulsanti laterali del mouse seguono la navigazione del browser: Avanti apre la modalità anteprima, Indietro la chiude. Ripetere la direzione già attiva non produce effetti.
 
+Ctrl+Shift+F apre o chiude la ricerca nel contenuto dei file dell’anteprima. Enter o F3 passa al risultato successivo; Shift+Enter o Shift+F3 a quello precedente.
+
 Mostra il risultato finale in un’area di lavoro separata accanto all’albero. Questa modalità non copia nulla negli appunti e non esporta nulla su file: serve solo per la visualizzazione.
 
 Per impostazione predefinita l’area di lavoro si apre così:

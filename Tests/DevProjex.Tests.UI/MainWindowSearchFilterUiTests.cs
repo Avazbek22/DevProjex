@@ -1,6 +1,8 @@
 using DevProjex.Kernel.Contracts;
+using Avalonia.Controls.Documents;
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using System.Reflection;
@@ -114,6 +116,53 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
                 window,
                 () => !UiTestDriver.GetViewModel(window).FilterVisible,
                 "filter bar to close");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchHighlights_UseMasterPaletteForRegularAndCurrentMatches()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenSearchAsync(window);
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+            var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+            await UiTestDriver.EnterTextAsync(window, searchBox, "app");
+            await UiTestDriver.WaitForSearchAppliedAsync(window, "app");
+
+            var highlightedNodes = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes)
+                .Flatten()
+                .Where(static node => node.HasHighlightedDisplay)
+                .ToArray();
+            Assert.Contains(highlightedNodes, static node => node.IsCurrentSearchMatch);
+            Assert.Contains(highlightedNodes, static node => !node.IsCurrentSearchMatch);
+
+            foreach (var node in highlightedNodes)
+            {
+                var expectedBackground = node.IsCurrentSearchMatch ? "#F9A825" : "#FFEB3B";
+                var highlightedRuns = node.DisplayInlines!
+                    .OfType<Run>()
+                    .Where(static run => run.Background is not null)
+                    .ToArray();
+                Assert.NotEmpty(highlightedRuns);
+                Assert.All(
+                    highlightedRuns,
+                    run =>
+                    {
+                        Assert.Equal(
+                            Color.Parse(expectedBackground),
+                            Assert.IsType<SolidColorBrush>(run.Background).Color);
+                        Assert.Equal(
+                            Color.Parse("#000000"),
+                            Assert.IsType<SolidColorBrush>(run.Foreground).Color);
+                    });
+            }
         }
         finally
         {

@@ -187,6 +187,8 @@ Yuqori paneldagi ko‘zcha ikonali tugma yoki Ctrl+B orqali ochiladi.
 
 Sichqonchaning yon tugmalari brauzerdagi kabi ishlaydi: «Oldinga» Preview rejimini ochadi, «Orqaga» esa yopadi. Joriy yo‘nalishni qayta bosish hech narsani o‘zgartirmaydi.
 
+Ctrl+Shift+F previewdagi fayllar mazmunidan qidirishni ochadi yoki yopadi. Enter yoki F3 keyingi moslikka, Shift+Enter yoki Shift+F3 oldingi moslikka o‘tadi.
+
 Yakuniy natijani daraxt yonidagi alohida ishchi hududda ko‘rsatadi. Bu rejim o‘zi hech narsani clipboardga nusxalamaydi va faylga eksport qilmaydi — u faqat ko‘rish uchun xizmat qiladi.
 
 Standart holatda ishchi hudud quyidagicha ochiladi:

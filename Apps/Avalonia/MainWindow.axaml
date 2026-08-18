@@ -698,7 +698,7 @@
 
             <Grid Grid.Column="1"
                   Name="PreviewPaneRoot"
-                  RowDefinitions="Auto,*">
+                  RowDefinitions="Auto,Auto,*">
             <!-- Animated preview bar container -->
             <Border Grid.Row="0"
                     Name="PreviewBarContainer"
@@ -772,20 +772,74 @@
                             Click="OnPreviewTreeAndContentModeClick" />
                   </Grid>
                 </Border>
-                <Button Grid.Column="2"
-                        Name="PreviewCloseButton"
-                        Classes="menu-icon-button preview-close-button"
-                        Width="32"
-                        Height="32"
-                        Margin="5,0,0,0"
-                        Content="✕"
-                        Click="OnPreviewClose" />
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="5">
+                  <Button Name="PreviewSearchButton"
+                          Classes="menu-icon-button preview-copy-button"
+                          ToolTip.ShowDelay="700"
+                          ToolTip.Placement="BottomEdgeAlignedRight"
+                          ToolTip.VerticalOffset="5"
+                          Width="32"
+                          Height="32"
+                          Opacity="0"
+                          IsHitTestVisible="False"
+                          Click="OnTogglePreviewSearch">
+                    <ToolTip.Tip>
+                      <ToolTip>
+                        <TextBlock Text="{Binding PreviewSearchTooltip}" />
+                      </ToolTip>
+                    </ToolTip.Tip>
+                    <Viewbox Name="PreviewSearchIcon"
+                             Width="16"
+                             Height="16"
+                             Stretch="Uniform">
+					  <Canvas Width="18" Height="18">
+						<Ellipse Canvas.Left="2.25"
+						         Canvas.Top="2.25"
+						         Width="10"
+						         Height="10"
+						         Stroke="{DynamicResource AppTextBrush}"
+						         StrokeThickness="1.75" />
+						<Path Classes="preview-icon"
+						      Data="M 10.5,10.5 L 15.75,15.75"
+						      Stroke="{DynamicResource AppTextBrush}"
+						      StrokeThickness="1.75"
+						      StrokeLineCap="Round" />
+					  </Canvas>
+                    </Viewbox>
+                  </Button>
+                  <Button Name="PreviewCloseButton"
+                          Classes="menu-icon-button preview-close-button"
+                          Width="32"
+                          Height="32"
+                          Content="✕"
+                          Click="OnPreviewClose" />
+                </StackPanel>
               </Grid>
               </Border>
             </Border>
 
-            <!-- Preview content island -->
             <Border Grid.Row="1"
+                    Name="PreviewSearchBarContainer"
+                    UseLayoutRounding="True"
+                    ClipToBounds="True"
+                    Height="0">
+              <views:PreviewSearchBarView Name="PreviewSearchBar"
+                                          IsEnabled="{Binding IsPreviewSearchAvailable}"
+                                          RenderTransformOrigin="50%,0%"
+                                          SearchKeyDown="OnPreviewSearchKeyDown"
+                                          SearchPrevRequested="OnPreviewSearchPrev"
+                                          SearchNextRequested="OnPreviewSearchNext"
+                                          SearchCloseRequested="OnPreviewSearchClose">
+                <views:PreviewSearchBarView.RenderTransform>
+                  <TranslateTransform Y="0" />
+                </views:PreviewSearchBarView.RenderTransform>
+              </views:PreviewSearchBarView>
+            </Border>
+
+            <!-- Preview content island -->
+            <Border Grid.Row="2"
                     Name="PreviewIsland"
                     Classes="island-panel content-island"
                     IsVisible="{Binding IsPreviewPaneVisible}">

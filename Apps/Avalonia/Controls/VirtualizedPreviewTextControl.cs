@@ -74,6 +74,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	public event EventHandler<PreviewManualSecretMarkRequestedEventArgs>? ManualSecretMarkRequested;
 	public event EventHandler<PreviewManualSecretUnmarkRequestedEventArgs>? ManualSecretUnmarkRequested;
 	internal event EventHandler<PreviewManualSecretMarkRejectedEventArgs>? ManualSecretMarkRejected;
+	internal event EventHandler? SearchDocumentChanged;
 
     public static readonly StyledProperty<string> TextProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(Text), string.Empty);
@@ -247,6 +248,9 @@ public sealed class VirtualizedPreviewTextControl : Control
     private readonly Queue<int> _formattedLineCacheOrder = [];
 	private Dictionary<int, PreviewRedactionSpan[]> _redactionsByLine = [];
 	private PreviewRedactionSpan[] _redactionOccurrences = [];
+	private PreviewSearchMatch[] _searchMatches = [];
+	private int _activeSearchMatchIndex = -1;
+	private bool _selectionOwnedBySearch;
 	private string? _hoveredRedactionOccurrenceId;
 	private RedactionNavigationTarget? _activeRedactionTarget;
     private string? _formattedLineCacheFontFamilyName;
@@ -263,6 +267,10 @@ public sealed class VirtualizedPreviewTextControl : Control
     private ThemeVariant? _cachedSelectionTheme;
     private IBrush? _cachedSelectionBackground;
     private IBrush? _cachedSelectionForeground;
+	private ThemeVariant? _cachedSearchTheme;
+	private IBrush? _cachedSearchHighlightBrush;
+	private IBrush? _cachedSearchCurrentBrush;
+	private IBrush? _cachedSearchHighlightTextBrush;
     private StickyHeaderTrimCacheKey? _cachedStickyHeaderTrimKey;
     private string? _cachedStickyHeaderTrimText;
 	private MenuFlyout? _contextFlyout;
@@ -363,8 +371,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         DocumentProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
         {
+			control.ClearSearchMatches();
             control.RebuildRedactionIndex();
             control.RebuildTextLayoutMetadata();
+			control.SearchDocumentChanged?.Invoke(control, EventArgs.Empty);
         });
 
         CopyMenuHeaderProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
@@ -707,6 +717,59 @@ public sealed class VirtualizedPreviewTextControl : Control
         return true;
     }
 
+	internal int SearchMatchCount => _searchMatches.Length;
+
+	internal int ActiveSearchMatchIndex => _activeSearchMatchIndex;
+
+	internal int SetSearchMatches(
+		PreviewSearchMatch[] matches,
+		bool activateNearestToViewport,
+		bool scrollIntoView)
+	{
+		ArgumentNullException.ThrowIfNull(matches);
+		_searchMatches = matches;
+		if (matches.Length == 0)
+		{
+			_activeSearchMatchIndex = -1;
+			ClearSearchSelection();
+			InvalidateVisual();
+			return 0;
+		}
+
+		var nextIndex = activateNearestToViewport
+			? ResolveNearestSearchMatchIndexFromViewportTop()
+			: Math.Clamp(_activeSearchMatchIndex, 0, matches.Length - 1);
+		ActivateSearchMatch(nextIndex, scrollIntoView);
+		return nextIndex + 1;
+	}
+
+	internal int NavigateSearchMatch(int step)
+	{
+		if (_searchMatches.Length == 0 || step == 0)
+			return _activeSearchMatchIndex + 1;
+
+		var currentIndex = _activeSearchMatchIndex;
+		if (currentIndex < 0 || currentIndex >= _searchMatches.Length)
+			currentIndex = ResolveNearestSearchMatchIndexFromViewportTop();
+		var nextIndex = step > 0
+			? (currentIndex + 1) % _searchMatches.Length
+			: (currentIndex - 1 + _searchMatches.Length) % _searchMatches.Length;
+		ActivateSearchMatch(nextIndex, scrollIntoView: true);
+		return nextIndex + 1;
+	}
+
+	internal void NavigateRedaction(bool forward) => MoveToRedaction(forward);
+
+	internal void ClearSearchMatches()
+	{
+		var hadMatches = _searchMatches.Length > 0 || _activeSearchMatchIndex >= 0;
+		_searchMatches = [];
+		_activeSearchMatchIndex = -1;
+		ClearSearchSelection();
+		if (hadMatches)
+			InvalidateVisual();
+	}
+
     public bool TryHandleViewportSelectionStart(IPointer pointer, Point viewportPoint, KeyModifiers keyModifiers)
     {
         Focus();
@@ -794,6 +857,12 @@ public sealed class VirtualizedPreviewTextControl : Control
 
             if (!TryGetVisibleSelectionRange(visibleWindow, out _, out _))
             {
+				DrawVisibleSearchHighlights(
+					context,
+					visibleWindow,
+					origin,
+					typeface,
+					lineHeight);
                 DrawVisibleTextLines(
                     context,
                     visibleWindow,
@@ -811,8 +880,21 @@ public sealed class VirtualizedPreviewTextControl : Control
                     typeface,
                     lineHeight,
                     viewportTop);
+				DrawVisibleSearchHighlights(
+					context,
+					visibleWindow,
+					origin,
+					typeface,
+					lineHeight);
                 DrawVisibleTextLinesWithSelection(context, visibleWindow, origin, typeface, lineHeight, selectionForeground);
             }
+
+			DrawVisibleSearchHighlightText(
+				context,
+				visibleWindow,
+				origin,
+				typeface,
+				lineHeight);
         }
 
         DrawStickyHeader(context, typeface);
@@ -894,6 +976,164 @@ public sealed class VirtualizedPreviewTextControl : Control
 					new RoundedRect(new Rect(x, y + 1, width, Math.Max(1, lineHeight - 2)), 3));
 			}
 		}
+	}
+
+	private void DrawVisibleSearchHighlightText(
+		DrawingContext context,
+		VisibleTextWindow visibleWindow,
+		Point origin,
+		Typeface typeface,
+		double lineHeight)
+	{
+		if (_searchMatches.Length == 0)
+			return;
+
+		var highlightTextBrush = ResolveSearchHighlightTextBrush();
+		var firstMatchIndex = FindFirstSearchMatchOnOrAfterLine(visibleWindow.FirstLine);
+		var currentLineNumber = -1;
+		var lineText = string.Empty;
+		FormattedText? formattedLine = null;
+		for (var matchIndex = firstMatchIndex;
+		     matchIndex < _searchMatches.Length;
+		     matchIndex++)
+		{
+			var match = _searchMatches[matchIndex];
+			if (match.LineNumber > visibleWindow.LastLine)
+				break;
+			if (match.LineNumber < visibleWindow.FirstLine || match.Length <= 0)
+				continue;
+
+			if (currentLineNumber != match.LineNumber)
+			{
+				currentLineNumber = match.LineNumber;
+				lineText = GetLineText(match.LineNumber);
+				formattedLine = BuildFormattedText(lineText, typeface);
+				formattedLine.SetForegroundBrush(highlightTextBrush);
+			}
+
+			var startColumn = Math.Clamp(match.StartColumn, 0, lineText.Length);
+			var endColumn = Math.Clamp(match.StartColumn + match.Length, startColumn, lineText.Length);
+			if (endColumn <= startColumn || formattedLine is null)
+				continue;
+
+			var left = origin.X + ResolveDistanceFromColumn(lineText, startColumn, typeface);
+			var right = origin.X + ResolveDistanceFromColumn(lineText, endColumn, typeface);
+			var top = origin.Y + ((match.LineNumber - visibleWindow.FirstLine) * lineHeight);
+			using (context.PushClip(new Rect(left, top, Math.Max(1, right - left), lineHeight)))
+			{
+				context.DrawText(
+					formattedLine,
+					new Point(origin.X, top));
+			}
+		}
+	}
+
+	private void DrawVisibleSearchHighlights(
+		DrawingContext context,
+		VisibleTextWindow visibleWindow,
+		Point origin,
+		Typeface typeface,
+		double lineHeight)
+	{
+		if (_searchMatches.Length == 0)
+			return;
+
+		var firstMatchIndex = FindFirstSearchMatchOnOrAfterLine(visibleWindow.FirstLine);
+		var currentLineNumber = -1;
+		var currentLineText = string.Empty;
+		for (var matchIndex = firstMatchIndex;
+		     matchIndex < _searchMatches.Length;
+		     matchIndex++)
+		{
+			var match = _searchMatches[matchIndex];
+			if (match.LineNumber > visibleWindow.LastLine)
+				break;
+			if (match.LineNumber < visibleWindow.FirstLine || match.Length <= 0)
+				continue;
+
+			if (currentLineNumber != match.LineNumber)
+			{
+				currentLineNumber = match.LineNumber;
+				currentLineText = GetLineText(match.LineNumber);
+			}
+
+			var lineText = currentLineText;
+			var startColumn = Math.Clamp(match.StartColumn, 0, lineText.Length);
+			var endColumn = Math.Clamp(match.StartColumn + match.Length, startColumn, lineText.Length);
+			if (endColumn <= startColumn)
+				continue;
+
+			var left = origin.X + ResolveDistanceFromColumn(lineText, startColumn, typeface);
+			var right = origin.X + ResolveDistanceFromColumn(lineText, endColumn, typeface);
+			var top = origin.Y + ((match.LineNumber - visibleWindow.FirstLine) * lineHeight);
+			context.FillRectangle(
+				ResolveSearchBrush(matchIndex == _activeSearchMatchIndex),
+				new Rect(left, top + 1, Math.Max(1, right - left), Math.Max(1, lineHeight - 2)));
+		}
+	}
+
+	private int FindFirstSearchMatchOnOrAfterLine(int lineNumber)
+	{
+		var low = 0;
+		var high = _searchMatches.Length;
+		while (low < high)
+		{
+			var middle = low + ((high - low) / 2);
+			if (_searchMatches[middle].LineNumber < lineNumber)
+				low = middle + 1;
+			else
+				high = middle;
+		}
+
+		return low;
+	}
+
+	private IBrush ResolveSearchBrush(bool current)
+	{
+		var application = global::Avalonia.Application.Current;
+		var theme = application?.ActualThemeVariant ?? ThemeVariant.Light;
+		if (_cachedSearchTheme != theme ||
+		    _cachedSearchHighlightBrush is null ||
+		    _cachedSearchCurrentBrush is null ||
+		    _cachedSearchHighlightTextBrush is null)
+		{
+			_cachedSearchTheme = theme;
+			_cachedSearchHighlightBrush = ResolveSearchBrushResource(
+				application,
+				theme,
+				"TreeSearchHighlightBrush",
+				"#FFEB3B");
+			_cachedSearchCurrentBrush = ResolveSearchBrushResource(
+				application,
+				theme,
+				"TreeSearchCurrentBrush",
+				"#F9A825");
+			_cachedSearchHighlightTextBrush = ResolveSearchBrushResource(
+				application,
+				theme,
+				"TreeSearchHighlightTextBrush",
+				"#000000");
+		}
+
+		return current ? _cachedSearchCurrentBrush : _cachedSearchHighlightBrush;
+	}
+
+	private IBrush ResolveSearchHighlightTextBrush()
+	{
+		_ = ResolveSearchBrush(current: false);
+		return _cachedSearchHighlightTextBrush!;
+	}
+
+	private static IBrush ResolveSearchBrushResource(
+		global::Avalonia.Application? application,
+		ThemeVariant theme,
+		string resourceKey,
+		string fallbackColor)
+	{
+		return application?.TryFindResource(resourceKey, theme, out var resource) == true &&
+		       resource is IBrush brush
+			? brush
+			: new SolidColorBrush(Color.Parse(fallbackColor));
 	}
 
 	private static (IBrush Background, IBrush Border) ResolveRedactionBrushes(
@@ -1327,6 +1567,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var nextIndex = ResolveRedactionNavigationIndex(forward);
 		var redaction = _redactionOccurrences[nextIndex];
 		_activeRedactionTarget = CreateNavigationTarget(redaction);
+		_selectionOwnedBySearch = false;
 		_selectionAnchor = new SelectionPosition(redaction.LineNumber, redaction.StartColumn);
 		_selectionActive = _selectionAnchor;
 		UpdateHoveredRedaction(null);
@@ -1423,6 +1664,83 @@ public sealed class VirtualizedPreviewTextControl : Control
 			Math.Clamp(targetY, 0, maximumY));
 	}
 
+	private int ResolveNearestSearchMatchIndexFromViewportTop()
+	{
+		if (_searchMatches.Length == 0)
+			return -1;
+
+		var scrollViewer = GetOwnerScrollViewer();
+		if (scrollViewer is null)
+			return 0;
+
+		var topLine = GetLineNumberAtVerticalOffset(scrollViewer.Offset.Y);
+		var index = FindFirstSearchMatchOnOrAfterLine(topLine);
+		return index < _searchMatches.Length ? index : 0;
+	}
+
+	private void ActivateSearchMatch(int index, bool scrollIntoView)
+	{
+		if (index < 0 || index >= _searchMatches.Length)
+			return;
+
+		_activeSearchMatchIndex = index;
+		var match = _searchMatches[index];
+		_selectionAnchor = new SelectionPosition(match.LineNumber, match.StartColumn);
+		_selectionActive = new SelectionPosition(
+			match.LineNumber,
+			match.StartColumn + match.Length);
+		_selectionOwnedBySearch = true;
+		_activeRedactionTarget = null;
+		UpdateHoveredRedaction(null);
+		if (scrollIntoView)
+			ScrollSearchMatchIntoView(match);
+
+		InvalidateVisual();
+		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private void ScrollSearchMatchIntoView(PreviewSearchMatch match)
+	{
+		var scrollViewer = GetOwnerScrollViewer();
+		if (scrollViewer is null)
+			return;
+
+		var lineHeight = ResolveLineHeight();
+		var lineTop = ResolveContentTopPadding() + ((match.LineNumber - 1) * lineHeight);
+		var lineBottom = lineTop + lineHeight;
+		var offset = scrollViewer.Offset;
+		var targetY = offset.Y;
+		if (lineTop < offset.Y || lineBottom > offset.Y + scrollViewer.Viewport.Height)
+			targetY = lineTop - (scrollViewer.Viewport.Height * 0.35);
+
+		var lineText = GetLineText(match.LineNumber);
+		var typeface = ResolveTypeface();
+		var spanLeft = LeftPadding + ResolveDistanceFromColumn(lineText, match.StartColumn, typeface);
+		var spanRight = LeftPadding + ResolveDistanceFromColumn(
+			lineText,
+			match.StartColumn + match.Length,
+			typeface);
+		var targetX = offset.X;
+		if (spanLeft < offset.X)
+			targetX = spanLeft - LeftPadding;
+		else if (spanRight > offset.X + scrollViewer.Viewport.Width)
+			targetX = spanRight - scrollViewer.Viewport.Width + RightPadding;
+
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+		scrollViewer.Offset = new Vector(
+			Math.Clamp(targetX, 0, maximumX),
+			Math.Clamp(targetY, 0, maximumY));
+	}
+
+	private void ClearSearchSelection()
+	{
+		if (!_selectionOwnedBySearch)
+			return;
+
+		ClearSelectionState(invalidateVisual: false);
+	}
+
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
@@ -1444,6 +1762,10 @@ public sealed class VirtualizedPreviewTextControl : Control
         _cachedSelectionTheme = null;
         _cachedSelectionBackground = null;
         _cachedSelectionForeground = null;
+		_cachedSearchTheme = null;
+		_cachedSearchHighlightBrush = null;
+		_cachedSearchCurrentBrush = null;
+		_cachedSearchHighlightTextBrush = null;
 
         if (Document is { } document)
         {
@@ -1804,6 +2126,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         var hadState = _selectionAnchor is not null || _selectionActive is not null;
         _selectionAnchor = null;
         _selectionActive = null;
+		_selectionOwnedBySearch = false;
 
         if (invalidateVisual && hadState)
             InvalidateVisual();
@@ -1888,6 +2211,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         _selectionAnchor = new SelectionPosition(1, 0);
         _selectionActive = new SelectionPosition(lastLine, lastLineLength);
+		_selectionOwnedBySearch = false;
         InvalidateVisual();
         PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -2560,6 +2884,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 		_selectionAnchor = new SelectionPosition(position.Line, start);
 		_selectionActive = new SelectionPosition(position.Line, end);
+		_selectionOwnedBySearch = false;
 		InvalidateVisual();
 		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
 	}
@@ -2647,6 +2972,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     {
         var previousAnchor = _selectionAnchor;
         var previousActive = _selectionActive;
+		_selectionOwnedBySearch = false;
         var hit = HitTestSelection(documentPoint);
         if (!keyModifiers.HasFlag(KeyModifiers.Shift) &&
             (hit.Kind == SelectionHitKind.Empty ||

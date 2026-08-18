@@ -187,6 +187,8 @@ Wird über die Schaltfläche mit dem Auge in der oberen Leiste oder mit Ctrl+B g
 
 Die seitlichen Maustasten funktionieren wie die Browsernavigation: Vorwärts öffnet den Vorschaumodus, Zurück schließt ihn. Ein erneuter Druck in der bereits aktiven Richtung hat keine Wirkung.
 
+Ctrl+Shift+F öffnet oder schließt die Suche in den Dateiinhalten der Vorschau. Enter oder F3 geht zum nächsten Treffer, Shift+Enter oder Shift+F3 zum vorherigen.
+
 Zeigt das Endergebnis in einem separaten Arbeitsbereich neben dem Baum. Dieser Modus kopiert nichts in die Zwischenablage und exportiert nichts in eine Datei — er dient nur zur Vorschau.
 
 Standardmäßig wird folgender Arbeitsbereich geöffnet:

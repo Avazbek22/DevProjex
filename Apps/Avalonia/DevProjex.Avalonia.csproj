@@ -49,6 +49,7 @@
 
   <ItemGroup>
     <AvaloniaXaml Update="Views\FilterBarView.axaml" />
+    <AvaloniaXaml Update="Views\PreviewSearchBarView.axaml" />
     <AvaloniaXaml Update="Views\UpdatePopoverView.axaml" />
   </ItemGroup>
 
