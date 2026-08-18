@@ -71,8 +71,9 @@ public static class AvaloniaCompositionRoot
         var fileContentAnalyzer = new FileContentAnalyzer();
 		var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
 		var persistentSecretIdentity = new PersistentSecretIdentityProvider(appDataPathProvider);
-		var secretRedactionSession = new SecretRedactionSession(
+		var secretRedactionSession = SecretRedactionSession.CreateWithPrivateData(
 			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService),
+			new PrivateDataDetector(),
 			projectProfileStore,
 			persistentSecretIdentity);
 		var codeCompressionSession = CodeCompressionFactory.CreateSession();

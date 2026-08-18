@@ -337,7 +337,12 @@ Une copie en dossier ou ZIP modifie également le texte correspondant et peut ne
 
 Le compteur indique seulement les correspondances aux règles. Zéro ne signifie pas que le projet est sûr. La CLI utilise `--hide-secrets` ; les détails figurent dans `Docs/HideSecrets.md`.
 
-### 12.4 Utiliser .gitignore
+### 12.4 Masquer les données privées
+« Masquer les données privées » est désactivé par défaut. Cette option détecte les adresses e-mail, les adresses IP globales, les noms d’utilisateur locaux dans les chemins, les adresses MAC et les numéros de téléphone internationaux dans les fichiers texte sélectionnés. Les résultats utilisent les mêmes décisions d’aperçu et le même pipeline de sortie que Masquer les secrets.
+
+Les plages et hôtes de documentation, les noms d’utilisateur CI courants, les résolveurs DNS publics connus et les numéros fictifs documentés restent visibles. Zéro correspondance ne garantit pas la confidentialité. La CLI utilise `--hide-private-data` ; les règles complètes et les limites de la première phase figurent dans `Docs/HidePrivateData.md`.
+
+### 12.5 Utiliser .gitignore
 Lorsqu’elle est activée, l’option applique chaque `.gitignore` accessible, et pas seulement celui de la racine. Chaque fichier s’applique à son propre dossier et à tous ses sous-dossiers accessibles, jamais aux dossiers parents ou voisins.
 
 Pour un chemin donné, les règles sont évaluées du `.gitignore` parent vers les fichiers plus profonds ; dans un même fichier, de haut en bas. La dernière règle correspondante détermine le résultat Git.
@@ -350,7 +355,7 @@ Un lien symbolique nommé `.gitignore` n’est pas suivi, conformément au compo
 
 Le profil intégré `standard` sélectionne `gitignore` et les huit groupes d’exclusion : `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` et `extensionless-files`.
 
-### 12.5 Uniquement les fichiers suivis par Git
+### 12.6 Uniquement les fichiers suivis par Git
 « Uniquement les fichiers suivis par Git » construit l’étape Git de l’arbre à partir des fichiers existants de l’arbre de travail enregistrés dans chaque index Git lisible. Les fichiers suivis modifiés et les nouveaux fichiers ajoutés à l’index restent inclus ; les fichiers non suivis sont exclus. Il s’agit de l’arbre de travail actuel, et non d’un instantané historique de `HEAD` ou d’un dépôt distant.
 
 Chaque dépôt imbriqué et chaque worktree accessible sont traités indépendamment à chaque niveau d’imbrication accessible. Un dépôt enfant n’hérite pas des chemins suivis de son parent ni d’un dépôt voisin. Ce mode nécessite la CLI Git ; un index vide mais lisible est valide. Si l’espace de travail interactif du terminal (TUI) démarre dans ce mode et qu’aucun index applicable ne peut être chargé, l’espace de travail ne s’ouvre pas. Si ce mode est sélectionné de manière interactive dans un espace de travail TUI déjà ouvert et qu’aucun index applicable ne peut être chargé, la modification est refusée et le dernier mode Git utilisable reste actif. Dans la même situation, les commandes directes renvoient une erreur de stratégie ou de vérification. DevProjex ne bascule jamais silencieusement vers `.gitignore`. Lorsqu’un autre index applicable est lisible, les zones imbriquées indisponibles sont exclues avec un avertissement.
@@ -359,26 +364,26 @@ Dans un espace de travail Desktop déjà ouvert, la sélection explicite reste v
 
 « Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » s’excluent lors de l’activation. La case active peut aussi être décochée pour désactiver le filtrage Git. Pour les projets locaux prenant en charge les profils, cet état est enregistré avec les types de fichiers et les autres règles d’exclusion.
 
-### 12.6 Relation entre le filtrage Git et Smart Ignore
+### 12.7 Relation entre le filtrage Git et Smart Ignore
 Le mode Git sélectionné et Smart Ignore sont contrôlés indépendamment. Le mode Git est appliqué en premier dans chaque zone Git accessible, puis Smart Ignore traite les éléments restants et les règles de base s’appliquent en dernier.
 
 Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déjà tous ses candidats, puis apparaître après un changement ou une désactivation du mode. Les deux cases Git restent disponibles dans le dépôt.
 
 Une négation Git avec `!` annule uniquement le résultat Git. Elle ne désactive ni Smart Ignore ni une règle de base.
 
-### 12.7 Règles de base
+### 12.8 Règles de base
 Les règles « commençant par un point » vérifient le nom ; les règles « caché » vérifient l’attribut système Hidden. Selon la plateforme, elles peuvent viser le même élément ou des éléments différents.
 
 « Fichiers vides » masque les fichiers de 0 octet. « Fichiers sans extension » masque par exemple `Dockerfile`, `Makefile` et `README`.
 
 « Dossiers vides » masque les dossiers logiquement vides. Un dossier est logiquement vide lorsqu’aucun fichier ou sous-dossier visible ne reste après l’application des types sélectionnés et de toutes les autres règles. Son compteur peut donc changer lorsqu’une autre règle est modifiée.
 
-### 12.8 Compteurs
+### 12.9 Compteurs
 Un compteur indique la contribution directe d’une règle avec les paramètres actuels, et non le nombre physique d’éléments similaires sur le disque. Un élément n’est pas attribué simultanément à plusieurs compteurs qui se recouvrent.
 
 L’ordre stable d’attribution est : pour les dossiers, `.gitignore`, Smart Ignore, nom commençant par un point, attribut Hidden ; pour les fichiers, `.gitignore`, Smart Ignore, nom commençant par un point, absence d’extension, fichier vide, attribut Hidden. Cet ordre ne concerne que les compteurs. Pour la visibilité, tout mécanisme actif peut exclure l’élément.
 
-### 12.9 Application des modifications
+### 12.10 Application des modifications
 Les cases à cocher mettent d’abord à jour les options disponibles et leurs compteurs. L’arbre final est reconstruit après « Appliquer les paramètres ». Si la préparation est annulée, DevProjex revient au dernier état entièrement terminé ; aucune règle partiellement calculée n’est appliquée.
 
 ## 13) Comment l'arbre et les métriques sont calculés

@@ -413,15 +413,17 @@ public partial class MainWindow : Window
 				? GetCompressionSnapshotForCurrentSelection()
 				: null;
 		}
-		if (!_appliedHideSecretsEnabled)
+		if (!IsAnyContentRedactionEnabled)
 		{
-			// Secret scanning is strictly opt-in: with the checkbox off no discovery may run, not
+			// Redaction scanning is strictly opt-in: with both checkboxes off no discovery may run, not
 			// even in the background. Cancel anything in flight and return the row to neutral.
 			CancelSecretRedactionDiscovery();
 			_secretRedactionMatchedCount = null;
 			_secretRedactionCount = null;
+			_privateDataRedactionMatchedCount = null;
+			_privateDataRedactionCount = null;
 			_secretRedactionScanState = SecretScanState.Disabled;
-			_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
+			ApplyRedactionStatus(SecretScanState.Disabled);
 			RelabelIgnoreOptionsWithCurrentCounts();
 			if (_viewModel.IsAnyPreviewVisible)
 				_previewPipeline.ScheduleRefresh(immediate: true);
@@ -429,22 +431,23 @@ public partial class MainWindow : Window
 		}
 		// Start detector-only initialization before Preview and count pipelines read any
 		// selected content. This is engine warm-up; it never accesses the project tree.
-		_ = _secretRedactionSession.BeginWarmUp();
+		_ = _secretRedactionSession.BeginWarmUp(AppliedRedactionFeatures);
 		// A canceled option refresh may restore the exact selection that was already scanned.
 		// Reuse that snapshot synchronously so rollback also restores the measured label.
 		var discoveryActive = IsSecretDiscoveryActiveForCurrentSelection();
 		var cachedRedactionSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
 		if (cachedRedactionSnapshot is not null)
 		{
-			_secretRedactionMatchedCount = cachedRedactionSnapshot.DetectedCount;
-			_secretRedactionCount = cachedRedactionSnapshot.RedactedCount;
+			_secretRedactionMatchedCount = cachedRedactionSnapshot.SecretDetectedCount;
+			_secretRedactionCount = cachedRedactionSnapshot.SecretRedactedCount;
+			_privateDataRedactionMatchedCount = cachedRedactionSnapshot.PrivateDataDetectedCount;
+			_privateDataRedactionCount = cachedRedactionSnapshot.PrivateDataRedactedCount;
 			_secretRedactionScanState = ResolveSecretScanState(cachedRedactionSnapshot);
-			_viewModel.SetContentProcessingStatus(
+			ApplyRedactionStatus(
 				_secretRedactionScanState,
-				cachedRedactionSnapshot.DetectedCount,
-				cachedRedactionSnapshot.RedactedCount,
 				cachedRedactionSnapshot.SkippedFileCount,
-				cachedRedactionSnapshot.FailedFileCount);
+				cachedRedactionSnapshot.FailedFileCount,
+				cachedRedactionSnapshot.UnscannableFiles);
 		}
 		// A visible preview is already a complete measurement. Keep it until its replacement
 		// publishes so a session-to-durable mark transition cannot flash an empty status.
@@ -452,44 +455,88 @@ public partial class MainWindow : Window
 		{
 			_secretRedactionMatchedCount = null;
 			_secretRedactionCount = null;
+			_privateDataRedactionMatchedCount = null;
+			_privateDataRedactionCount = null;
 			_secretRedactionScanState = discoveryActive
 				? SecretScanState.Scanning
 				: SecretScanState.Pending;
-			_viewModel.SetContentProcessingStatus(_secretRedactionScanState);
+			ApplyRedactionStatus(_secretRedactionScanState);
 		}
 		RelabelIgnoreOptionsWithCurrentCounts();
 		if (_viewModel.IsAnyPreviewVisible)
 			_previewPipeline.ScheduleRefresh(immediate: true);
-		// The enabling click is an explicit request: its scan starts without a debounce and with
-		// visible progress, and it revalidates content because files may have changed while the
-		// option was off. Every other path keeps the delayed anti-flash presentation.
+		// Applying a redaction change is an explicit request: its scan starts without a debounce and
+		// with visible progress. Selection-driven refreshes keep the delayed anti-flash presentation.
 		ScheduleSecretRedactionCountRefresh(
-			changedOptionId == IgnoreOptionId.HideSecrets
+			changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData
 				? StatusOperationPresentation.Immediate
 				: StatusOperationPresentation.ExtendedDelay);
 	}
 
-	private void ApplyImmediateContentTransformationSelectionChange(IgnoreOptionId? changedOptionId)
+	private void ApplyProgrammaticContentTransformationSelectionChange(IgnoreOptionId? changedOptionId)
 	{
-		if (changedOptionId == IgnoreOptionId.HideSecrets)
+		if (changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData)
 		{
-			TryApplySelectedHideSecretsState();
+			TryApplySelectedContentRedactionState(changedOptionId.Value);
 			return;
 		}
 
 		ScheduleContentTransformationRefresh(changedOptionId);
 	}
 
-	private bool TryApplySelectedHideSecretsState()
+	private bool EnsureManualRedactionClassEnabled(ManualRedactionClass classification)
+	{
+		var optionId = classification switch
+		{
+			ManualRedactionClass.Secret => IgnoreOptionId.HideSecrets,
+			ManualRedactionClass.PrivateData => IgnoreOptionId.HidePrivateData,
+			_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
+		};
+		var wasApplied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		_selectionCoordinator.ApplyContentRedactionOverrideAsApplied(
+			_currentPath,
+			optionId,
+			enabled: true);
+		var isApplied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		return !wasApplied && isApplied || TryApplySelectedContentRedactionState(optionId);
+	}
+
+	private void ApplySelectedContentRedactionStates()
+	{
+		var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
+		var hideSecrets = selected.Contains(IgnoreOptionId.HideSecrets);
+		var hidePrivateData = selected.Contains(IgnoreOptionId.HidePrivateData);
+		if (_appliedHideSecretsEnabled == hideSecrets &&
+		    _appliedHidePrivateDataEnabled == hidePrivateData)
+		{
+			return;
+		}
+
+		_appliedHideSecretsEnabled = hideSecrets;
+		_appliedHidePrivateDataEnabled = hidePrivateData;
+		ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets);
+	}
+
+	private bool TryApplySelectedContentRedactionState(IgnoreOptionId optionId)
 	{
 		var selected = _selectionCoordinator
 			.GetSelectedIgnoreOptionIds()
-			.Contains(IgnoreOptionId.HideSecrets);
-		if (_appliedHideSecretsEnabled == selected)
+			.Contains(optionId);
+		var applied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		if (applied == selected)
 			return false;
 
-		_appliedHideSecretsEnabled = selected;
-		ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets);
+		if (optionId == IgnoreOptionId.HideSecrets)
+			_appliedHideSecretsEnabled = selected;
+		else
+			_appliedHidePrivateDataEnabled = selected;
+		ScheduleContentTransformationRefresh(optionId);
 		return true;
 	}
 
@@ -511,13 +558,15 @@ public partial class MainWindow : Window
 	{
 		CancelSecretRedactionDiscovery();
 		_secretRedactionSession.InvalidateSnapshots();
-		_secretRedactionScanState = _appliedHideSecretsEnabled
+		_secretRedactionScanState = IsAnyContentRedactionEnabled
 			? SecretScanState.Pending
 			: SecretScanState.Disabled;
-		_viewModel.SetContentProcessingStatus(_secretRedactionScanState);
+		ApplyRedactionStatus(_secretRedactionScanState);
 		if (_secretRedactionCount is not null)
 			_secretRedactionCount = null;
 		_secretRedactionMatchedCount = null;
+		_privateDataRedactionCount = null;
+		_privateDataRedactionMatchedCount = null;
 		RelabelIgnoreOptionsWithCurrentCounts();
 
 		if (scheduleRefreshImmediately)
@@ -1349,10 +1398,13 @@ public partial class MainWindow : Window
         _memoryCleanup.CancelPreview();
 		_secretRedactionCount = null;
 		_secretRedactionMatchedCount = null;
+		_privateDataRedactionCount = null;
+		_privateDataRedactionMatchedCount = null;
 		_secretRedactionScanState = SecretScanState.Disabled;
-		_viewModel.SetContentProcessingStatus(SecretScanState.Disabled);
+		ApplyRedactionStatus(SecretScanState.Disabled);
 		_secretRedactionSession.Reset();
 		_appliedHideSecretsEnabled = false;
+		_appliedHidePrivateDataEnabled = false;
 		_appliedCompressCodeEnabled = false;
 		_appliedStripCommentsEnabled = false;
 		_appliedStripBlankLinesEnabled = false;
@@ -1831,7 +1883,9 @@ public partial class MainWindow : Window
 		{
 			ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled,
 			SecretRedactionsCount = _secretRedactionCount,
-			SecretMatchesCount = _secretRedactionMatchedCount
+			SecretMatchesCount = _secretRedactionMatchedCount,
+			PrivateDataRedactionsCount = _privateDataRedactionCount,
+			PrivateDataMatchesCount = _privateDataRedactionMatchedCount
 		};
     }
 

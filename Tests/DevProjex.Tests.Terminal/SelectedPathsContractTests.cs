@@ -10,7 +10,7 @@ public sealed class SelectedPathsContractTests
 		using var document = await ExportJsonAsync(workspace.Path);
 
 		Assert.Equal(
-			["docs/readme.md", "src/a.cs", "src/nested/b.cs"],
+			FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs", "src/nested/b.cs"),
 			ReadFilePaths(document));
 	}
 
@@ -21,7 +21,7 @@ public sealed class SelectedPathsContractTests
 
 		using var document = await ExportJsonAsync(workspace.Path, "--select", "src");
 
-		Assert.Equal(["src/a.cs", "src/nested/b.cs"], ReadFilePaths(document));
+		Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs", "src/nested/b.cs"), ReadFilePaths(document));
 		Assert.Equal(["src"], ReadSelectedPaths(document));
 	}
 
@@ -35,7 +35,7 @@ public sealed class SelectedPathsContractTests
 			workspace.Path,
 			"--select", "src/a.cs");
 
-		Assert.Equal(["src/a.cs"], ReadFilePaths(document));
+		Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs"), ReadFilePaths(document));
 		Assert.Equal(
 			new FileInfo(selectedPath).Length,
 			document.RootElement.GetProperty("metrics").GetProperty("bytes").GetInt64());
@@ -52,7 +52,7 @@ public sealed class SelectedPathsContractTests
 			"--select", "src/nested/b.cs",
 			"--select", "src");
 
-		Assert.Equal(["src/a.cs", "src/nested/b.cs"], ReadFilePaths(document));
+		Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs", "src/nested/b.cs"), ReadFilePaths(document));
 		Assert.Equal(["src"], ReadSelectedPaths(document));
 	}
 
@@ -64,7 +64,7 @@ public sealed class SelectedPathsContractTests
 		using var document = await ExportJsonAsync(workspace.Path, "--select", ".");
 
 		Assert.Equal(
-			["docs/readme.md", "src/a.cs", "src/nested/b.cs"],
+			FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs", "src/nested/b.cs"),
 			ReadFilePaths(document));
 		Assert.Empty(ReadSelectedPaths(document));
 	}
@@ -146,7 +146,7 @@ public sealed class SelectedPathsContractTests
 			workspace.Path,
 			"--select", "данные/привет.cs");
 
-		Assert.Equal(["данные/привет.cs"], ReadFilePaths(document));
+		Assert.Equal(FullContentPaths(workspace.Path, "данные/привет.cs"), ReadFilePaths(document));
 		Assert.Equal(["данные/привет.cs"], ReadSelectedPaths(document));
 	}
 
@@ -162,7 +162,7 @@ public sealed class SelectedPathsContractTests
 			"--select", "src/a.cs",
 			"--select", "docs/readme.md");
 
-		Assert.Equal(["docs/readme.md", "src/a.cs"], ReadFilePaths(document));
+		Assert.Equal(FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs"), ReadFilePaths(document));
 		Assert.Equal(["docs/readme.md", "src/a.cs"], ReadSelectedPaths(document));
 	}
 
@@ -179,7 +179,7 @@ public sealed class SelectedPathsContractTests
 				"--select", "SRC/A.CS");
 
 		if (OperatingSystem.IsWindows())
-			Assert.Equal(["src/a.cs"], ReadFilePaths(document));
+			Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs"), ReadFilePaths(document));
 		else
 			Assert.Empty(ReadFilePaths(document));
 	}
@@ -293,5 +293,11 @@ public sealed class SelectedPathsContractTests
 			.GetProperty("selectedPaths")
 			.EnumerateArray()
 			.Select(static item => item.GetString() ?? string.Empty)
+			.ToArray();
+
+	private static string[] FullContentPaths(string rootPath, params string[] relativePaths) =>
+		relativePaths
+			.Select(path => Path.Combine(rootPath, path.Replace('/', Path.DirectorySeparatorChar)))
+			.OrderBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
 }

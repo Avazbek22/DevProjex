@@ -12,10 +12,11 @@ internal sealed record SessionMarkedSecret(
 	string RelativePath,
 	int SourceOffset,
 	int Length,
-	string Hash)
+	string Hash,
+	ManualRedactionClass Class = ManualRedactionClass.Secret)
 {
 	public string Id { get; } = SecretRedactionSession.HashValue(
-		$"{NormalizePath(RelativePath)}\n{SourceOffset}\n{Length}\n{Hash}".AsSpan());
+		$"{NormalizePath(RelativePath)}\n{SourceOffset}\n{Length}\n{Hash}\n{Class}".AsSpan());
 
 	private static string NormalizePath(string path) => path.Replace('\\', '/');
 }
@@ -23,6 +24,7 @@ internal sealed record SessionMarkedSecret(
 internal sealed class MarkedSecretsMatcher
 {
 	internal const string RuleId = "manual-secret";
+	internal const string PrivateDataRuleId = "manual-private-data";
 	internal const int RuleOrder = int.MinValue;
 	private const int CancellationCheckMask = 0xFFF;
 
@@ -49,21 +51,32 @@ internal sealed class MarkedSecretsMatcher
 			.ToArray();
 		if (normalizedPersistentMarks.Length > SecretInspectionLimits.MaximumPersistentMarksPerProject)
 			throw SecretInspectionBudgetExceededException.PersistentMarks();
+		var distinctPersistentMarkLengths = normalizedPersistentMarks
+			.Where(static mark => mark.RelativePath is null)
+			.Select(static mark => mark.Length)
+			.Distinct()
+			.Take(SecretInspectionLimits.MaximumDistinctPersistentMarkLengths + 1)
+			.Count();
+		if (distinctPersistentMarkLengths > SecretInspectionLimits.MaximumDistinctPersistentMarkLengths)
+			throw SecretInspectionBudgetExceededException.DistinctPersistentMarkLengths();
 
 		_persistentHashGroups = normalizedPersistentMarks
 			.Where(static mark => mark.RelativePath is null)
-			.GroupBy(static mark => mark.Length)
+			.GroupBy(static mark => (mark.Length, mark.Class))
 			.Select(static group => new PersistentHashGroup(
-				group.Key,
+				group.Key.Length,
+				group.Key.Class,
 				group
 					.GroupBy(
-						static mark => new PersistentSecretMarkId(mark.H.ToLowerInvariant(), mark.Length))
+						static mark => new PersistentSecretMarkId(
+							mark.H.ToLowerInvariant(),
+							mark.Length,
+							Class: mark.Class))
 					.Select(static marks => PersistentHash.Create(marks.First()))
 					.ToArray()))
 			.OrderBy(static group => group.Length)
+			.ThenBy(static group => group.Class)
 			.ToArray();
-		if (_persistentHashGroups.Length > SecretInspectionLimits.MaximumDistinctPersistentMarkLengths)
-			throw SecretInspectionBudgetExceededException.DistinctPersistentMarkLengths();
 		if (normalizedPersistentMarks.Any(static mark => PersistentSecretIdentity.IsV2(mark.H)) &&
 		    identityProvider is not { IsAvailable: true })
 		{
@@ -206,12 +219,14 @@ internal sealed class MarkedSecretsMatcher
 					mark.H,
 					mark.Length,
 					mark.RelativePath,
-					mark.SourceOffset);
+					mark.SourceOffset,
+					mark.Class);
 				findings.Add(CreateFinding(
 					content,
 					start,
 					mark.Length,
 					mark.H,
+					mark.Class,
 					SecretFindingSource.PersistentMark,
 					persistentMarkId: markId));
 			}
@@ -307,10 +322,12 @@ internal sealed class MarkedSecretsMatcher
 					start,
 					group.Length,
 					resolvedMark.H,
+					resolvedMark.Class,
 					SecretFindingSource.PersistentMark,
 					persistentMarkId: new PersistentSecretMarkId(
 						resolvedMark.H,
-						resolvedMark.Length)));
+						resolvedMark.Length,
+						Class: resolvedMark.Class)));
 			}
 		}
 	}
@@ -365,6 +382,7 @@ internal sealed class MarkedSecretsMatcher
 				start,
 				mark.Length,
 				mark.Hash,
+				mark.Class,
 				SecretFindingSource.SessionMark,
 				mark.Id));
 		}
@@ -402,11 +420,12 @@ internal sealed class MarkedSecretsMatcher
 		int start,
 		int length,
 		string hash,
+		ManualRedactionClass classification,
 		SecretFindingSource source,
 		string? sessionMarkId = null,
 		PersistentSecretMarkId? persistentMarkId = null) =>
 		new(
-			RuleId,
+			classification == ManualRedactionClass.Secret ? RuleId : PrivateDataRuleId,
 			start,
 			length,
 			content.Slice(start, length).ToString(),
@@ -414,9 +433,13 @@ internal sealed class MarkedSecretsMatcher
 			source,
 			source == SecretFindingSource.PersistentMark ? hash : null,
 			sessionMarkId,
-			persistentMarkId);
+			persistentMarkId,
+			classification == ManualRedactionClass.Secret
+				? RedactionFindingCategory.Secrets
+				: RedactionFindingCategory.PrivateData);
 
 	private static bool IsValid(MarkedSecretProfileEntry mark) =>
+		Enum.IsDefined(mark.Class) &&
 		mark.Length is >= MarkedSecretValueNormalizer.MinimumLength and <= MarkedSecretValueNormalizer.MaximumLength &&
 		PersistentSecretIdentity.IsSupported(mark.H) &&
 		(mark.RelativePath is null && mark.SourceOffset is null ||
@@ -431,7 +454,10 @@ internal sealed class MarkedSecretsMatcher
 
 	private static string NormalizePath(string path) => path.Replace('\\', '/');
 
-	private sealed record PersistentHashGroup(int Length, PersistentHash[] Hashes);
+	private sealed record PersistentHashGroup(
+		int Length,
+		ManualRedactionClass Class,
+		PersistentHash[] Hashes);
 
 	private sealed record PersistentHash(
 		MarkedSecretProfileEntry Mark,

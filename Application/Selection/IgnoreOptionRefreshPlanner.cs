@@ -40,6 +40,7 @@ public static class IgnoreOptionRefreshPlanner
             IgnoreOptionId.EmptyFiles => IgnoreOptionRefreshImpact.FileVisibility,
             IgnoreOptionId.ExtensionlessFiles => IgnoreOptionRefreshImpact.FileVisibility,
 			IgnoreOptionId.HideSecrets => IgnoreOptionRefreshImpact.None,
+			IgnoreOptionId.HidePrivateData => IgnoreOptionRefreshImpact.None,
 			IgnoreOptionId.CompressCode => IgnoreOptionRefreshImpact.None,
 			IgnoreOptionId.StripComments => IgnoreOptionRefreshImpact.None,
 			IgnoreOptionId.StripBlankLines => IgnoreOptionRefreshImpact.None,

@@ -8,7 +8,12 @@ public sealed class TreeAndContentExportService(
 	SelectedContentExportService contentExport)
 {
 	private const string ClipboardBlankLine = "\u00A0"; // NBSP: looks empty but won't collapse on paste
+	private const int MaximumCachedRelativePathMappers = 32;
 	private static readonly IReadOnlySet<string> EmptySelection = new HashSet<string>(PathComparer.Default);
+	private static readonly object RelativePathMapperSync = new();
+	private static readonly Dictionary<string, RelativePathMapperCacheEntry> RelativePathMappers =
+		new(PathComparer.Default);
+	private static readonly LinkedList<string> RelativePathMapperLru = new();
 
 	public string Build(string rootPath, TreeNodeDescriptor root, IReadOnlySet<string> selectedPaths)
 		=> Build(rootPath, root, selectedPaths, TreeTextFormat.Ascii);
@@ -38,9 +43,14 @@ public sealed class TreeAndContentExportService(
 		TreeTextFormat format,
 		CancellationToken cancellationToken,
 		ExportPathPresentation? pathPresentation = null,
-		ContentTransformationContext? transformationContext = null)
+		ContentTransformationContext? transformationContext = null,
+		OutputPathRedactionDecision? outputPathRedaction = null)
 	{
-		var displayRootPath = pathPresentation?.DisplayRootPath;
+		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
+		var displayRootPath = OutputRootPathPresentation.Resolve(
+			rootPath,
+			pathPresentation,
+			outputPathRedaction);
 		var displayRootName = pathPresentation?.DisplayRootName;
 		bool hasSelection = selectedPaths.Count > 0 && TreeExportService.HasSelectedDescendantOrSelf(root, selectedPaths);
 
@@ -61,7 +71,9 @@ public sealed class TreeAndContentExportService(
 			files,
 			cancellationToken,
 			contentPathMapper,
-			transformationContext).ConfigureAwait(false);
+			transformationContext,
+			displayRootPath: null,
+			outputPathRedaction: outputPathRedaction).ConfigureAwait(false);
 		var content = contentResult.Text;
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;
@@ -91,7 +103,28 @@ public sealed class TreeAndContentExportService(
 			normalizedRootPath = null;
 		}
 
-		return filePath => MapRelativeContentHeaderPathFromNormalizedRoot(normalizedRootPath, filePath);
+		var cacheKey = normalizedRootPath ?? rootPath;
+		lock (RelativePathMapperSync)
+		{
+			if (RelativePathMappers.TryGetValue(cacheKey, out var cached))
+			{
+				RelativePathMapperLru.Remove(cached.Node);
+				RelativePathMapperLru.AddFirst(cached.Node);
+				return cached.Mapper;
+			}
+
+			Func<string, string> mapper = filePath =>
+				MapRelativeContentHeaderPathFromNormalizedRoot(normalizedRootPath, filePath);
+			var node = RelativePathMapperLru.AddFirst(cacheKey);
+			RelativePathMappers.Add(cacheKey, new RelativePathMapperCacheEntry(mapper, node));
+			if (RelativePathMappers.Count > MaximumCachedRelativePathMappers &&
+			    RelativePathMapperLru.Last is { } oldest)
+			{
+				RelativePathMappers.Remove(oldest.Value);
+				RelativePathMapperLru.RemoveLast();
+			}
+			return mapper;
+		}
 	}
 
 	public static string MapRelativeContentHeaderPath(string rootPath, string filePath)
@@ -148,4 +181,8 @@ public sealed class TreeAndContentExportService(
 		relativePath.StartsWith(@"..\", StringComparison.Ordinal);
 
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
+
+	private sealed record RelativePathMapperCacheEntry(
+		Func<string, string> Mapper,
+		LinkedListNode<string> Node);
 }

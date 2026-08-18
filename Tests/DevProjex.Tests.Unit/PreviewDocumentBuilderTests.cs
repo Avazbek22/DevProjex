@@ -1,11 +1,33 @@
 using DevProjex.Application.Compression;
 using DevProjex.Application.Preview;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Unit;
 
 public sealed class PreviewDocumentBuilderTests
 {
     private const string BlankLine = "\u00A0";
+
+	[Fact]
+	public async Task BuildContentDocumentAsync_WithRootHeader_UsesRelativeSectionsAndKeepsCoordinatesAligned()
+	{
+		using var project = new TemporaryDirectory();
+		var path = project.CreateFile(Path.Combine("src", "Program.cs"), "class Program {}");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[path],
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(project.Path),
+			displayRootPath: project.Path);
+
+		Assert.NotNull(document);
+		Assert.Equal($"{project.Path}:", document.GetLineText(1));
+		var section = Assert.Single(document.Sections);
+		Assert.Equal("src/Program.cs", section.DisplayPath);
+		Assert.Equal("src/Program.cs:", document.GetLineText(section.StartLine));
+		Assert.Equal("class Program {}", document.GetLineText(section.ContentStartLine));
+	}
 
     [Fact]
     public async Task BuildContentDocumentAsync_NoReadableFiles_ReturnsNull()
@@ -222,6 +244,35 @@ public sealed class PreviewDocumentBuilderTests
 		var map = Assert.IsType<PreviewContentCoordinateMap>(section.CoordinateMap);
 		Assert.True(map.TryToSourceOffset(1, "TOKEN=".Length, out var sourceOffset));
 		Assert.Equal("first\r\nTOKEN=".Length, sourceOffset);
+	}
+
+	[Fact]
+	public async Task BuildContentDocumentAsync_GeneratedPathMaskUsesOneOccurrenceAcrossFileHeaders()
+	{
+		using var temp = new TemporaryDirectory();
+		var first = temp.CreateFile("first.txt", "first");
+		var second = temp.CreateFile("second.txt", "second");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+		var decision = new OutputPathRedactionDecision("generated-path", Keep: false);
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[first, second],
+			TestContext.Current.CancellationToken,
+			path => $@"C:\Users\alice\repo\{Path.GetFileName(path)}",
+			outputPathRedaction: decision);
+
+		Assert.NotNull(document);
+		var redactions = document!.Redactions;
+		Assert.Equal(2, redactions.Count);
+		Assert.All(redactions, span =>
+		{
+			Assert.Equal("generated-path", span.OccurrenceId);
+			Assert.Equal(OutputRootPathPresentation.LocalUserRuleId, span.RuleId);
+			Assert.Equal(SecretFindingSource.GeneratedPath, span.Source);
+			Assert.Equal(OutputRootPathPresentation.LocalUserPlaceholder.Length, span.Length);
+		});
+		Assert.Equal(2, document.GetLineRangeText(1, document.LineCount)
+			.Split(OutputRootPathPresentation.LocalUserPlaceholder, StringSplitOptions.None).Length - 1);
 	}
 
     [Fact]

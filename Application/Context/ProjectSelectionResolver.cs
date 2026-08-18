@@ -34,6 +34,7 @@ public sealed class ProjectSelectionResolver(
 			GitMode = overrides.GitMode ?? baseline.GitMode,
 			Exclusions = resolvedExclusions,
 			HideSecrets = hideSecrets,
+			HidePrivateData = overrides.HidePrivateData ?? baseline.HidePrivateData,
 			// Compression has no legacy exclusion form, so it resolves as a plain override.
 			CompressCode = overrides.CompressCode ?? baseline.CompressCode,
 			StripComments = overrides.StripComments ?? baseline.StripComments,
@@ -64,6 +65,10 @@ public sealed class ProjectSelectionResolver(
 					overrides.HideSecrets is not null,
 					applyProfileValues,
 					resolved.HideSecrets),
+				HidePrivateData: ResolveApplicationMode(
+					overrides.HidePrivateData is not null,
+					applyProfileValues,
+					resolved.HidePrivateData),
 				CompressCode: ResolveApplicationMode(
 					overrides.CompressCode is not null,
 					applyProfileValues,
@@ -89,7 +94,8 @@ public sealed class ProjectSelectionResolver(
 					IgnoreOptionsOverridden = overrides.GitMode is not null ||
 					                          overrides.Exclusions is not null ||
 					                          overrides.HideSecrets is not null ||
-						                          overrides.CompressCode is not null ||
+					                          overrides.HidePrivateData is not null ||
+					                          overrides.CompressCode is not null ||
 						                          overrides.StripComments is not null ||
 						                          overrides.StripBlankLines is not null
 				}

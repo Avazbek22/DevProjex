@@ -28,6 +28,129 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowIgnoreOptionsUiTests
 {
+	[AvaloniaFact]
+	public async Task ContentHeaders_UseFullPerFilePathsAndOneInteractivePrivateDataDecision()
+	{
+		using var project = UiTestProject.CreateDefaultUnderUserProfile();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var unprotected = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+				window,
+				PreviewContentMode.Content,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(unprotected, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+			var programPath = Path.Combine(project.RootPath, "src", "AppHost", "Program.cs");
+			Assert.Contains($"{programPath}:", unprotected, StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				$"{project.RootPath}:{Environment.NewLine}",
+				unprotected,
+				StringComparison.Ordinal);
+			await UiTestDriver.CopyContentToClipboardAsync(window, unprotected);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			var protectedRoot = OutputRootPathPresentation.MaskLocalUserSegment(project.RootPath);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var protectedContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+				window,
+				PreviewContentMode.Content,
+				TestContext.Current.CancellationToken);
+			Assert.Contains(
+				$"{OutputRootPathPresentation.MaskLocalUserSegment(programPath)}:",
+				protectedContent,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain($"{programPath}:", protectedContent, StringComparison.Ordinal);
+			Assert.Equal(protectedContent, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+			await UiTestDriver.CopyContentToClipboardAsync(window, protectedContent);
+
+			var control = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+				window,
+				"PreviewTextControl");
+			var generatedPathSpans = control.Document!.Redactions
+				.Where(static span =>
+					span.RuleId == OutputRootPathPresentation.LocalUserRuleId &&
+					span.Source == SecretFindingSource.GeneratedPath)
+				.ToArray();
+			Assert.True(generatedPathSpans.Length > 1);
+			var generatedOccurrenceId = Assert.Single(
+				generatedPathSpans
+					.Select(static span => span.OccurrenceId)
+					.Distinct(StringComparer.Ordinal));
+			var navigationTarget = generatedPathSpans
+				.OrderBy(static span => span.LineNumber)
+				.ThenBy(static span => span.StartColumn)
+				.Skip(1)
+				.First();
+			control.Focus();
+			for (var attempt = 0; attempt <= control.Document.Redactions.Count; attempt++)
+			{
+				await UiTestDriver.PressKeyAsync(window, Key.Down, RawInputModifiers.Alt);
+				var activeTarget = UiTestDriver.GetActiveRedactionTarget(control);
+				if (activeTarget is { } active &&
+				    active.OccurrenceId == navigationTarget.OccurrenceId &&
+				    active.LineNumber == navigationTarget.LineNumber &&
+				    active.StartColumn == navigationTarget.StartColumn)
+				{
+					break;
+				}
+			}
+			Assert.Equal(
+				(generatedOccurrenceId, navigationTarget.LineNumber, navigationTarget.StartColumn),
+				UiTestDriver.GetActiveRedactionTarget(control));
+
+			await UiTestDriver.PressKeyAsync(window, Key.Enter);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(programPath, StringComparison.Ordinal) &&
+				      control.Document!.Redactions
+					      .Where(static span => span.Source == SecretFindingSource.GeneratedPath)
+					      .All(static span => span.State == SecretPreviewSpanState.KeptAsIs),
+				"the generated path occurrence to be kept as-is");
+			var keptContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+				window,
+				PreviewContentMode.Content,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(unprotected, keptContent);
+			Assert.Equal(keptContent, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+			await UiTestDriver.CopyContentToClipboardAsync(window, keptContent);
+
+			await UiTestDriver.PressKeyAsync(window, Key.Enter);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					protectedContent,
+					StringComparison.Ordinal) &&
+				      control.Document!.Redactions
+					      .Where(static span => span.Source == SecretFindingSource.GeneratedPath)
+					      .All(static span => span.State == SecretPreviewSpanState.Redacted),
+				"the generated path occurrence to be hidden again");
+
+			foreach (var mode in new[]
+			{
+				PreviewContentMode.Tree,
+				PreviewContentMode.TreeAndContent
+			})
+			{
+				await UiTestDriver.SwitchPreviewModeAsync(window, mode);
+				var output = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+					window,
+					mode,
+					TestContext.Current.CancellationToken);
+				Assert.Contains(protectedRoot, output, StringComparison.Ordinal);
+				if (!string.Equals(protectedRoot, project.RootPath, StringComparison.Ordinal))
+					Assert.DoesNotContain(project.RootPath, output, StringComparison.Ordinal);
+			}
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	[AvaloniaTheory]
 	[InlineData(0, false)]
 	[InlineData(1, false)]
@@ -75,7 +198,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			if (transformMode != 0)
 				await UiTestDriver.ClickApplySettingsAsync(window);
 			if (hideSecretsInitiallyEnabled)
+			{
 				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+				await UiTestDriver.ClickApplySettingsAsync(window);
+			}
 			await UiTestDriver.OpenPreviewAsync(window);
 			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
 			hideSecretsOption = UiTestDriver.GetViewModel(window).HideSecretsOption;
@@ -161,7 +287,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					StringComparison.Ordinal),
 				"the repeated session mark to redact Preview");
 			Assert.Contains(
-				"Hidden in 1 places",
+				"Value is already hidden",
 				observedToastMessages);
 
 			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(window);
@@ -957,6 +1083,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.OpenPreviewAsync(window);
 			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.ClickApplySettingsAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => UiTestDriver
@@ -1379,6 +1506,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.HideSecrets,
                 visible: true,
                 isChecked: true);
+			Assert.Equal(originalPreview, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+			await UiTestDriver.ClickApplySettingsAsync(window);
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () =>
@@ -1462,6 +1591,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				Math.Abs(previewScrollViewer.Offset.Y - viewportBeforeOverride.Y),
 				0,
 				1);
+			var previewBeforeDisableDraft = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			var documentBeforeDisableDraft = previewControl.Document;
 
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
@@ -1469,6 +1600,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 IgnoreOptionId.HideSecrets,
                 visible: true,
                 isChecked: false);
+			Assert.Same(documentBeforeDisableDraft, previewControl.Document);
+			Assert.Equal(previewBeforeDisableDraft, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+			await UiTestDriver.ClickApplySettingsAsync(window);
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () => string.Equals(
@@ -1608,6 +1742,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.ClickApplySettingsAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => viewModel.IsAnyPreviewVisible &&
@@ -1676,6 +1811,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				Assert.False(viewModel.HideSecretsOption?.IsChecked);
 				Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+				await UiTestDriver.ClickApplySettingsAsync(window);
 				await UiTestDriver.WaitForConditionAsync(
 					window,
 					() => viewModel.ContentProcessingOptions.Any(
@@ -1697,6 +1833,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					"Hide secrets");
 				Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 				await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+				await UiTestDriver.ClickApplySettingsAsync(window);
 				await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 					window,
 					IgnoreOptionId.HideSecrets,
@@ -1729,6 +1866,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					IgnoreOptionId.HideSecrets,
 					visible: true,
 					isChecked: false);
+				await UiTestDriver.ClickApplySettingsAsync(window);
 				await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 					window,
 					IgnoreOptionId.HideSecrets,
@@ -3269,6 +3407,494 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				control.DataContext is IgnoreOptionViewModel { Id: var id } &&
 				id == optionId);
 
+	[AvaloniaFact]
+	public async Task PreviewBulkKeep_ByRuleKeepsAndRehidesAllOccurrencesWithOneRefresh()
+	{
+		const string firstSecret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+		const string secondSecret = firstSecret;
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "SecondSecret.cs"),
+			$"const string awsAccessKey = \"{secondSecret}\";\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.HideSecrets, isChecked: true);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var document = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+						window,
+						"PreviewTextControl").Document;
+					return document?.Redactions
+						.Select(static span => span.OccurrenceId)
+						.Distinct(StringComparer.Ordinal)
+						.Count() == 2;
+				},
+				"both secret occurrences to be published in Preview");
+
+			var control = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+				window,
+				"PreviewTextControl");
+			var initialSpans = control.Document!.Redactions
+				.GroupBy(static span => span.OccurrenceId, StringComparer.Ordinal)
+				.Select(static group => group.First())
+				.ToArray();
+			Assert.Equal(2, initialSpans.Length);
+			Assert.Single(initialSpans.Select(static span => span.RuleId).Distinct(StringComparer.Ordinal));
+			Assert.All(initialSpans, span => Assert.False(string.IsNullOrWhiteSpace(span.RelativePath)));
+			var refreshBeforeKeep = UiTestDriver.GetPreviewRefreshVersions(window);
+
+			await UiTestDriver.RequestBulkRedactionToggleThroughContextMenuAsync(
+				window,
+				initialSpans[0].OccurrenceId,
+				ruleScope: true);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var payload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+					var firstIndex = payload.IndexOf(firstSecret, StringComparison.Ordinal);
+					return firstIndex >= 0 &&
+					       payload.IndexOf(secondSecret, firstIndex + firstSecret.Length, StringComparison.Ordinal) >= 0;
+				},
+				"the rule-scoped bulk keep to publish both source values");
+			var refreshAfterKeep = UiTestDriver.GetPreviewRefreshVersions(window);
+			Assert.Equal(refreshBeforeKeep.Requested + 1, refreshAfterKeep.Requested);
+			Assert.Contains(
+				UiTestDriver.GetToastService(window).Items,
+				toast => string.Equals(toast.Message, "Kept values: 2", StringComparison.Ordinal));
+
+			await UiTestDriver.RequestBulkRedactionToggleThroughContextMenuAsync(
+				window,
+				initialSpans[0].OccurrenceId,
+				ruleScope: true);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var payload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+					return !payload.Contains(firstSecret, StringComparison.Ordinal) &&
+					       !payload.Contains(secondSecret, StringComparison.Ordinal);
+				},
+				"the rule-scoped bulk hide to redact both values again");
+			Assert.Contains(
+				UiTestDriver.GetToastService(window).Items,
+				toast => string.Equals(toast.Message, "Hidden again: 2", StringComparison.Ordinal));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PrivateDataAlwaysHide_CreatesValueMarkAndAutoEnablesOnlyItsClass()
+	{
+		const string manualValue = "privdata42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Contact.txt"),
+			$"contact={manualValue}; visible-tail\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			Assert.Equal((false, false), UiTestDriver.GetAppliedContentRedactionState(window));
+
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(
+				window,
+				manualValue,
+				persistent: true,
+				classification: ManualRedactionClass.PrivateData);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetAppliedContentRedactionState(window) == (false, true) &&
+				      UiTestDriver.GetViewModel(window).HidePrivateDataOption is
+				      {
+				          IsChecked: true,
+				          Label: var label
+				      } &&
+				      label.EndsWith("(1/1)", StringComparison.Ordinal) &&
+				      UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					      "DEVPROJEX_REDACTED[manual-private-data#1]",
+					      StringComparison.Ordinal),
+				"the private-data mark to enable and redact only its own class");
+			Assert.False(UiTestDriver.GetViewModel(window).HideSecretsOption!.IsChecked);
+			var store = new ProjectProfileStore(() => UiTestDriver.GetWindowAppDataPath(window));
+			MarkedSecretProfileEntry? persistedMark = null;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var loaded = store.LoadMarksAsync(project.RootPath).AsTask().GetAwaiter().GetResult();
+					if (!loaded.Succeeded || loaded.Snapshot!.Marks.Count != 1)
+						return false;
+					persistedMark = loaded.Snapshot.Marks.Single();
+					return true;
+				},
+				"the private-data value mark to become durable");
+			Assert.NotNull(persistedMark);
+			Assert.Equal(ManualRedactionClass.PrivateData, persistedMark!.Class);
+			Assert.Null(persistedMark.RelativePath);
+			Assert.Null(persistedMark.SourceOffset);
+
+			await UiTestDriver.RequestManualSecretUnmarkThroughContextMenuAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var loaded = store.LoadMarksAsync(project.RootPath).AsTask().GetAwaiter().GetResult();
+					return loaded.Succeeded &&
+					       loaded.Snapshot!.Marks.Count == 0 &&
+					       UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+						       manualValue,
+						       StringComparison.Ordinal);
+				},
+				"removing the private-data mark to restore Preview content");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData((int)ManualRedactionClass.Secret)]
+	[InlineData((int)ManualRedactionClass.PrivateData)]
+	public async Task ManualMark_AutoEnablesItsClassWithoutPublishingPendingApplyState(int classValue)
+	{
+		var classification = (ManualRedactionClass)classValue;
+		const string manualValue = "atomic-manual-value-42";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Atomic.txt"),
+			$"value=prefix{manualValue}suffix\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var observedPendingStates = new List<bool>();
+		PropertyChangedEventHandler? propertyChanged = null;
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.False(viewModel.HasPendingFilterSettingsChanges);
+			propertyChanged = (_, args) =>
+			{
+				if (args.PropertyName == nameof(MainWindowViewModel.HasPendingFilterSettingsChanges))
+					observedPendingStates.Add(viewModel.HasPendingFilterSettingsChanges);
+			};
+			viewModel.PropertyChanged += propertyChanged;
+
+			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(
+				window,
+				manualValue,
+				persistent: true,
+				classification: classification);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => classification == ManualRedactionClass.Secret
+					? UiTestDriver.GetAppliedContentRedactionState(window).HideSecrets
+					: UiTestDriver.GetAppliedContentRedactionState(window).HidePrivateData,
+				"the manual mark class to become applied");
+
+			Assert.DoesNotContain(true, observedPendingStates);
+			Assert.False(viewModel.HasPendingFilterSettingsChanges);
+			Assert.False(viewModel.IsApplySettingsAttentionActive);
+			var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+			Assert.DoesNotContain("apply-attention", applyButton.Classes);
+		}
+		finally
+		{
+			if (propertyChanged is not null)
+				UiTestDriver.GetViewModel(window).PropertyChanged -= propertyChanged;
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task AlwaysHide_ExistingSessionAnchorPromotesItAndEnablesRedaction()
+	{
+		const string manualValue = "promote-existing-session-value-42";
+		const string relativePath = "src/Secrets.cs";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var sourcePath = Path.Combine(project.RootPath, relativePath);
+		var source = $"const string value = \"{manualValue}\";\n";
+		await File.WriteAllTextAsync(sourcePath, source, TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			Assert.True(MarkedSecretValueNormalizer.TryCreate(manualValue, out var markedValue, out _));
+			var session = UiTestDriver.GetSecretRedactionSession(window);
+			Assert.True(session.AddSessionMarkedSecret(
+				relativePath,
+				source.IndexOf(manualValue, StringComparison.Ordinal),
+				markedValue));
+
+			await UiTestDriver.RequestPersistentSecretMarkAsync(window, manualValue);
+			var store = new ProjectProfileStore(() => UiTestDriver.GetWindowAppDataPath(window));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => store.LoadMarksAsync(project.RootPath).AsTask().GetAwaiter().GetResult() is
+					{ Succeeded: true, Snapshot.Marks.Count: 1 },
+				"the existing session anchor to become durable");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					manualValue,
+					StringComparison.Ordinal),
+				"the promoted mark to redact Preview");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HideHere_ExistingSessionAnchorShowsAlreadyHiddenToastWithoutPersisting()
+	{
+		const string manualValue = "duplicate-session-value-42";
+		const string relativePath = "src/Secrets.cs";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var sourcePath = Path.Combine(project.RootPath, relativePath);
+		var source = $"const string value = \"{manualValue}\";\n";
+		await File.WriteAllTextAsync(sourcePath, source, TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			Assert.True(MarkedSecretValueNormalizer.TryCreate(manualValue, out var markedValue, out _));
+			Assert.True(UiTestDriver.GetSecretRedactionSession(window).AddSessionMarkedSecret(
+				relativePath,
+				source.IndexOf(manualValue, StringComparison.Ordinal),
+				markedValue));
+
+			await UiTestDriver.RequestPersistentSecretMarkAsync(window, manualValue, persistent: false);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetToastService(window).Items.Any(
+					static item => item.Message == "Value is already hidden"),
+				"the duplicate manual mark toast");
+			var loaded = await new ProjectProfileStore(() => UiTestDriver.GetWindowAppDataPath(window))
+				.LoadMarksAsync(project.RootPath);
+			Assert.True(loaded.Succeeded);
+			Assert.Empty(loaded.Snapshot!.Marks);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(IgnoreOptionId.HideSecrets)]
+	[InlineData(IgnoreOptionId.HidePrivateData)]
+	public async Task ContentRedactionCheckbox_IsDraftUntilApplyWithoutTouchingPreviewOrDetector(
+		IgnoreOptionId optionId)
+	{
+		const string secret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+		const string privateEmail = "ivan.petrov@gmail.com";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Contact.txt"),
+			$"contact={privateEmail}\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var previewControl = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+				window,
+				"PreviewTextControl");
+			Assert.NotNull(previewControl.Document);
+			var documentBefore = previewControl.Document;
+			var payloadBefore = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			var refreshVersionsBefore = UiTestDriver.GetPreviewRefreshVersions(window);
+			var cacheBefore = UiTestDriver.GetSecretRedactionSession(window).GetCacheDiagnostics();
+			var appliedBefore = UiTestDriver.GetAppliedContentRedactionState(window);
+			var treeBefore = UiTestDriver.GetCurrentTreeIdentity(window);
+			var inventoryBefore = UiTestDriver.GetCurrentTreeInventoryIdentity(window);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				optionId,
+				visible: true,
+				isChecked: true);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				optionId,
+				visible: true,
+				isChecked: false);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				optionId,
+				visible: true,
+				isChecked: true);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			Assert.Equal(refreshVersionsBefore, UiTestDriver.GetPreviewRefreshVersions(window));
+			Assert.Same(documentBefore, previewControl.Document);
+			Assert.Equal(payloadBefore, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+			Assert.Equal(
+				cacheBefore.DetectionRuns,
+				UiTestDriver.GetSecretRedactionSession(window).GetCacheDiagnostics().DetectionRuns);
+			Assert.Equal(appliedBefore, UiTestDriver.GetAppliedContentRedactionState(window));
+			Assert.True(UiTestDriver.GetViewModel(window).HasPendingFilterSettingsChanges);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			var valueToHide = optionId == IgnoreOptionId.HideSecrets ? secret : privateEmail;
+			var valueToKeep = optionId == IgnoreOptionId.HideSecrets ? privateEmail : secret;
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					valueToHide,
+					StringComparison.Ordinal),
+				"the applied redaction option to publish exactly at the Apply boundary");
+			Assert.Contains(
+				valueToKeep,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+			var appliedAfter = UiTestDriver.GetAppliedContentRedactionState(window);
+			Assert.Equal(optionId == IgnoreOptionId.HideSecrets, appliedAfter.HideSecrets);
+			Assert.Equal(optionId == IgnoreOptionId.HidePrivateData, appliedAfter.HidePrivateData);
+			Assert.False(UiTestDriver.GetViewModel(window).HasPendingFilterSettingsChanges);
+			Assert.Same(treeBefore, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Same(inventoryBefore, UiTestDriver.GetCurrentTreeInventoryIdentity(window));
+			var firstApplyRefreshVersions = UiTestDriver.GetPreviewRefreshVersions(window);
+			Assert.Equal(refreshVersionsBefore.Requested + 1, firstApplyRefreshVersions.Requested);
+			Assert.Equal(firstApplyRefreshVersions.Requested, firstApplyRefreshVersions.Completed);
+
+			var appliedDocument = previewControl.Document;
+			var appliedPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			var appliedRefreshVersions = UiTestDriver.GetPreviewRefreshVersions(window);
+			var appliedCache = UiTestDriver.GetSecretRedactionSession(window).GetCacheDiagnostics();
+			var appliedNotice = optionId == IgnoreOptionId.HideSecrets
+				? UiTestDriver.GetViewModel(window).SettingsSecretsNotice
+				: UiTestDriver.GetViewModel(window).SettingsPrivateDataNotice;
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, optionId);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				optionId,
+				visible: true,
+				isChecked: false);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			Assert.Equal(appliedRefreshVersions, UiTestDriver.GetPreviewRefreshVersions(window));
+			Assert.Same(appliedDocument, previewControl.Document);
+			Assert.Equal(appliedPayload, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
+			Assert.Equal(
+				appliedCache.DetectionRuns,
+				UiTestDriver.GetSecretRedactionSession(window).GetCacheDiagnostics().DetectionRuns);
+			Assert.Equal(appliedAfter, UiTestDriver.GetAppliedContentRedactionState(window));
+			Assert.Equal(
+				appliedNotice,
+				optionId == IgnoreOptionId.HideSecrets
+					? UiTestDriver.GetViewModel(window).SettingsSecretsNotice
+					: UiTestDriver.GetViewModel(window).SettingsPrivateDataNotice);
+
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
+					valueToHide,
+					StringComparison.Ordinal),
+				"the disabled redaction option to publish exactly at the Apply boundary");
+			Assert.Equal((false, false), UiTestDriver.GetAppliedContentRedactionState(window));
+			Assert.False(UiTestDriver.GetViewModel(window).HasPendingFilterSettingsChanges);
+			Assert.Same(treeBefore, UiTestDriver.GetCurrentTreeIdentity(window));
+			Assert.Same(inventoryBefore, UiTestDriver.GetCurrentTreeInventoryIdentity(window));
+			var secondApplyRefreshVersions = UiTestDriver.GetPreviewRefreshVersions(window);
+			Assert.Equal(firstApplyRefreshVersions.Requested + 1, secondApplyRefreshVersions.Requested);
+			Assert.Equal(secondApplyRefreshVersions.Requested, secondApplyRefreshVersions.Completed);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task HidePrivateData_UsesIndependentAppliedStatusAndSharedPreviewPipeline()
+	{
+		const string privateEmail = "ivan.petrov@gmail.com";
+		const string secret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "src", "Contact.txt"),
+			$"contact={privateEmail}\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var privacy = Assert.IsType<IgnoreOptionViewModel>(viewModel.HidePrivateDataOption);
+			var privacyIndex = viewModel.ContentProcessingOptions.IndexOf(privacy);
+			Assert.True(privacyIndex > 0);
+			Assert.Equal(IgnoreOptionId.HideSecrets, viewModel.ContentProcessingOptions[privacyIndex - 1].Id);
+			Assert.False(privacy.IsChecked);
+			Assert.Equal(string.Empty, viewModel.SettingsPrivateDataNotice);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
+			Assert.Equal(string.Empty, viewModel.SettingsPrivateDataNotice);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HidePrivateData,
+				"Hide private data (1/1)");
+			Assert.Equal("Found: 1. Hidden: 1.", viewModel.SettingsPrivateDataNotice);
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var privacyOnly = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.DoesNotContain(privateEmail, privacyOnly, StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[email#1]", privacyOnly, StringComparison.Ordinal);
+			Assert.Contains(secret, privacyOnly, StringComparison.Ordinal);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			Assert.Contains(secret, UiTestDriver.ComputeCurrentPreviewCopyPayload(window), StringComparison.Ordinal);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				"Hide secrets (1/1)");
+			var combined = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.DoesNotContain(privateEmail, combined, StringComparison.Ordinal);
+			Assert.DoesNotContain(secret, combined, StringComparison.Ordinal);
+
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
+			Assert.DoesNotContain(privateEmail, UiTestDriver.ComputeCurrentPreviewCopyPayload(window), StringComparison.Ordinal);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForPreviewReadyAsync(window);
+			var secretsOnly = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.Contains(privateEmail, secretsOnly, StringComparison.Ordinal);
+			Assert.DoesNotContain(secret, secretsOnly, StringComparison.Ordinal);
+			Assert.Equal(string.Empty, viewModel.SettingsPrivateDataNotice);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task HideSecrets_IsRenderedInItsOwnSectionAndIsIndependentFromIgnoreAll()
     {
@@ -3901,6 +4527,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var viewModel = UiTestDriver.GetViewModel(window);
 			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
+			await UiTestDriver.ClickApplySettingsAsync(window);
 			var expectedFailureStatus =
 				$"Files that could not be checked: 2.{Environment.NewLine}Click to run the check again.";
 			await UiTestDriver.WaitForConditionAsync(
@@ -3971,8 +4599,13 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		{
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
-			var expectedStatus =
-				$"Found: 1. Hidden: 1.{Environment.NewLine}Files larger than 16 MiB were not checked: 1.";
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			var expectedStatus = string.Join(
+				Environment.NewLine,
+				"Found: 1. Hidden: 1.",
+				"Files larger than 16 MiB were not checked: 1.",
+				"Files excluded from content output: 1.",
+				$"{Path.Combine(project.RootPath, "README.md")} - Too large for bounded content inspection.");
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => string.Equals(viewModel.SettingsSecretsNotice, expectedStatus, StringComparison.Ordinal),
@@ -4001,6 +4634,35 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task FailedPrivateDataDiscovery_WarningUsesTheSharedRetryContract()
+	{
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				FileContentAnalyzer = new FailingSecretScanContentAnalyzer(services.FileContentAnalyzer)
+			});
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.HidePrivateDataOption is { IsWarningStatus: true },
+				"the private-data discovery warning to appear");
+			var indicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HidePrivateData);
+
+			Assert.True(SettingsPanelView.IsRedactionRetryIndicator(indicator));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task PartialSecretDiscovery_PreservesFindingsAndBecomesCompleteForNarrowerSelection()
 	{
 		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
@@ -4016,6 +4678,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		{
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.ClickApplySettingsAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => viewModel.HideSecretsOption is { IsWarningStatus: true },
@@ -4065,6 +4728,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		{
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.ClickApplySettingsAsync(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => string.Equals(
@@ -4116,7 +4780,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
-	public async Task EnablingHideSecrets_StartsScanWithImmediateActionAndIndeterminateProgress()
+	public async Task ApplyingHideSecrets_StartsScanWithImmediateActionAndIndeterminateProgress()
 	{
 		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
 		var analyzer = new BlockingSecretScanContentAnalyzer();
@@ -4137,6 +4801,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			Assert.False(analyzer.Started.Task.IsCompleted);
+			Assert.False(viewModel.StatusOperationVisible);
+
+			var previousApplyTask = window.LatestApplySettingsTask;
+			await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredApplySettingsButton(window));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !ReferenceEquals(window.LatestApplySettingsTask, previousApplyTask),
+				"the Apply request to start");
 			await analyzer.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
@@ -4156,6 +4830,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				static progress => progress.IsVisible && progress.IsIndeterminate);
 
 			analyzer.Release();
+			await window.LatestApplySettingsTask.WaitAsync(TestContext.Current.CancellationToken);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => !viewModel.StatusBusy,
@@ -4172,7 +4847,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
 	[AvaloniaFact]
-	public async Task EnablingHideSecrets_ImmediateApplyKeepsTheActiveScanAndTree()
+	public async Task ApplyingHideSecrets_UsesFastPathAndKeepsTheActiveScanAndTree()
 	{
 		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
 		var analyzer = new BlockingSecretScanContentAnalyzer();
@@ -4191,8 +4866,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var inventory = UiTestDriver.GetCurrentTreeInventoryIdentity(window);
 
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
-			await analyzer.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
 			Assert.True(viewModel.HasPendingFilterSettingsChanges);
+			Assert.False(analyzer.Started.Task.IsCompleted);
 
 			var applyButton = UiTestDriver.GetRequiredApplySettingsButton(window);
 			var previousApplyTask = window.LatestApplySettingsTask;
@@ -4201,7 +4876,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => !ReferenceEquals(window.LatestApplySettingsTask, previousApplyTask),
-				"the immediate Apply request to start");
+				"the Apply request to start");
+			await analyzer.Started.Task.WaitAsync(TestContext.Current.CancellationToken);
 			await window.LatestApplySettingsTask.WaitAsync(TestContext.Current.CancellationToken);
 
 			Assert.False(viewModel.HasPendingFilterSettingsChanges);

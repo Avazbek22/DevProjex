@@ -31,7 +31,9 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		ContentTransformationContext? transformationContext = null)
+		ContentTransformationContext? transformationContext = null,
+		string? displayRootPath = null,
+		OutputPathRedactionDecision? outputPathRedaction = null)
 		=> (await BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -40,13 +42,17 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
 			transformationContext,
-			publishCompressionSnapshot: true).ConfigureAwait(false)).Text;
+			publishCompressionSnapshot: true,
+			displayRootPath,
+			outputPathRedaction).ConfigureAwait(false)).Text;
 
 	public Task<SelectedContentExportResult> BuildResultAsync(
 		IEnumerable<string> filePaths,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		ContentTransformationContext? transformationContext) =>
+		ContentTransformationContext? transformationContext,
+		string? displayRootPath = null,
+		OutputPathRedactionDecision? outputPathRedaction = null) =>
 		BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -55,7 +61,9 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileSizeForFullRead: null,
 			maxOutputCharacters: null,
 			transformationContext,
-			publishCompressionSnapshot: true);
+			publishCompressionSnapshot: true,
+			displayRootPath,
+			outputPathRedaction);
 
 	public async Task<string> BuildBoundedPreviewAsync(
 		IEnumerable<string> filePaths,
@@ -64,7 +72,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		int maxOutputCharacters,
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
-		CodeCompressionContext? compressionContext = null)
+		CodeCompressionContext? compressionContext = null,
+		string? displayRootPath = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileCount);
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileSizeForFullRead);
@@ -78,7 +87,9 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			maxFileSizeForFullRead,
 			maxOutputCharacters,
 			ContentTransformationContext.For(compressionContext, redaction: null),
-			publishCompressionSnapshot: false).ConfigureAwait(false)).Text;
+			publishCompressionSnapshot: false,
+			displayRootPath,
+			outputPathRedaction: null).ConfigureAwait(false)).Text;
 	}
 
 	private async Task<SelectedContentExportResult> BuildCoreAsync(
@@ -89,7 +100,9 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		long? maxFileSizeForFullRead,
 		int? maxOutputCharacters,
 		ContentTransformationContext? transformationContext,
-		bool publishCompressionSnapshot)
+		bool publishCompressionSnapshot,
+		string? displayRootPath = null,
+		OutputPathRedactionDecision? outputPathRedaction = null)
 	{
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
@@ -106,6 +119,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		var files = new List<string>(uniqueFiles);
 		files.Sort(PathComparer.Default);
 		var redactionContext = transformationContext?.Redaction;
+		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		if (redactionContext is not null)
 		{
 			await redactionContext.Session
@@ -183,18 +197,19 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			// showed, and the secret counter must describe the text that actually leaves.
 			// Estimated content is an empty string standing in for text nobody read - transforming
 			// it would record a clean scan of a file that was never opened.
+			var rawDisplayPath = MapDisplayPath(file, displayPathMapper);
 			var compression = content.IsEstimated
 				? null
 				: contentFingerprint is { } fingerprint
 					? transformationScope?.Compress(
 						file,
-						MapDisplayPath(file, displayPathMapper),
+						rawDisplayPath,
 						content.Content,
 						fingerprint,
 						cancellationToken)
 					: transformationScope?.Compress(
 						file,
-						MapDisplayPath(file, displayPathMapper),
+						rawDisplayPath,
 						content.Content,
 						cancellationToken);
 			var transformedText = compression?.Text ?? content.Content;
@@ -209,6 +224,12 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 					cancellationToken);
 
 			processedFileCount++;
+			if (!anyWritten && !string.IsNullOrWhiteSpace(displayRootPath))
+			{
+				sb.AppendLine($"{displayRootPath}:");
+				AppendClipboardBlankLine(sb);
+				AppendClipboardBlankLine(sb);
+			}
 			if (anyWritten)
 			{
 				AppendClipboardBlankLine(sb);
@@ -217,7 +238,9 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 
 			anyWritten = true;
 
-			var displayPath = MapDisplayPath(file, displayPathMapper);
+			var displayPath = OutputRootPathPresentation
+				.ResolvePath(rawDisplayPath, outputPathRedaction)
+				.Text;
 			sb.AppendLine($"{displayPath}:");
 			AppendClipboardBlankLine(sb);
 

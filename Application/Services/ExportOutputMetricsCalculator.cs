@@ -74,14 +74,31 @@ public static class ExportOutputMetricsCalculator
 		private long _lineBreaks;
 		private long _trailingLineBreakChars;
 		private long _trailingLineBreaks;
-		private bool _anyWritten;
+		private bool _hasRootHeader;
+		private bool _anyFileWritten;
+
+		public void AppendRootHeader(string displayRootPath)
+		{
+			if (_hasRootHeader || _anyFileWritten || string.IsNullOrWhiteSpace(displayRootPath))
+				return;
+
+			AppendRenderedLine(
+				renderedChars: displayRootPath.Length + 1,
+				internalLineBreaks: 0,
+				newLineChars: NormalizedNewLineChars,
+				chars: ref _chars,
+				lineBreaks: ref _lineBreaks,
+				trailingLineBreakChars: ref _trailingLineBreakChars,
+				trailingLineBreaks: ref _trailingLineBreaks);
+			_hasRootHeader = true;
+		}
 
 		public void AppendFile(ContentFileMetrics file)
 		{
 			if (string.IsNullOrWhiteSpace(file.Path))
 				return;
 
-			if (_anyWritten)
+			if (_hasRootHeader || _anyFileWritten)
 			{
 				AppendLiteralLine(
 					ClipboardBlankLine,
@@ -99,7 +116,7 @@ public static class ExportOutputMetricsCalculator
 					ref _trailingLineBreaks);
 			}
 
-			_anyWritten = true;
+			_anyFileWritten = true;
 
 			// Metrics need the rendered header length, not a materialized "<path>:"
 			// string. Avoiding that allocation matters when thousands of files are

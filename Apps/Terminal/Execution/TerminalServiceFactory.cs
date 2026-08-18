@@ -43,8 +43,9 @@ public sealed class TerminalServiceFactory(
 		var contentAnalyzer = new FileContentAnalyzer();
 		var localProfiles = new ProjectProfileStore(resolvedAppDataPathProvider);
 		var persistentSecretIdentity = new PersistentSecretIdentityProvider(resolvedAppDataPathProvider);
-		var secretRedactionSession = new SecretRedactionSession(
+		var secretRedactionSession = SecretRedactionSession.CreateWithPrivateData(
 			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore),
+			new PrivateDataDetector(),
 			localProfiles,
 			persistentSecretIdentity);
 		var codeCompressionSession = CodeCompressionFactory.CreateSession();

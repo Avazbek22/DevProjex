@@ -48,33 +48,42 @@ public sealed class ExportProjectCommandHandler(
 		var requestedOutput = Path.GetFullPath(request.OutputPath);
 		if (request.DryRun)
 		{
-			var redactSecrets = plan.Selection.HideSecrets == true;
-			string? unscannablePath = null;
-			if (redactSecrets)
+			var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
+				plan.Selection.HideSecrets == true,
+				plan.Selection.HidePrivateData == true);
+			var redactContent = redactionFeatures != SecretRedactionFeatures.None;
+			IReadOnlyList<UnscannableFile> unscannableFiles = [];
+			if (redactContent)
 			{
 				var preflight = await services.SecretRedactionOutputPreparer
 					.AnalyzeAsync(
-						new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession),
+						new SecretRedactionContext(
+							plan.SourceRoot,
+							services.SecretRedactionSession,
+							redactionFeatures),
 						plan.IncludedFiles,
 						cancellationToken)
 					.ConfigureAwait(false);
-				unscannablePath = preflight.UnscannablePath;
+				unscannableFiles = preflight.UnscannableFiles;
 			}
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,
 				requestedOutput);
-			if (redactSecrets)
+			if (redactContent)
 			{
 				environment.Error.WriteLine(
 					services.Localization["Terminal.DryRun.ProjectCopy.RedactionWarning"]);
-				// A dry run has to predict the real run, and the real run now leaves such a file
-				// out rather than refusing, so this says which one instead of failing.
-				if (unscannablePath is not null)
+				if (unscannableFiles.Count > 0)
 				{
 					environment.Error.WriteLine(
 						services.Localization["ProjectCopy.Notice.UnscannableExcluded"]);
 				}
+				UnscannableFileOutput.Write(
+					environment.Error,
+					plan.SourceRoot,
+					unscannableFiles,
+					services.Localization);
 			}
 
 			if (plan.Selection.CompressCode == true)
@@ -95,6 +104,7 @@ public sealed class ExportProjectCommandHandler(
 				? ProjectCopyConflictPolicy.ReplaceAtomically
 				: ProjectCopyConflictPolicy.Fail,
 			RedactSecrets: plan.Selection.HideSecrets == true,
+			RedactPrivateData: plan.Selection.HidePrivateData == true,
 			CompressCode: plan.Selection.CompressCode == true,
 			StripComments: plan.Selection.StripComments == true,
 			StripBlankLines: plan.Selection.StripBlankLines == true,
@@ -107,6 +117,16 @@ public sealed class ExportProjectCommandHandler(
 					cancellationToken))
 			.ConfigureAwait(false);
 		environment.Output.WriteLine(Path.GetFullPath(result.DestinationPath));
+		if (result.UnscannableFiles is { Count: > 0 })
+		{
+			environment.Error.WriteLine(
+				services.Localization["ProjectCopy.Notice.UnscannableExcluded"]);
+		}
+		UnscannableFileOutput.Write(
+			environment.Error,
+			plan.SourceRoot,
+			result.UnscannableFiles ?? [],
+			services.Localization);
 		return CommandLineExitCodes.Success;
 	}
 

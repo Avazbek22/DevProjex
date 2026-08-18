@@ -7,6 +7,50 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class ProjectContextStreamingRegressionTests
 {
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task CompleteContentHeadersHonorTheGeneratedPathOccurrenceDecision(bool keep)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var sourcePath = workspace.WriteFile("project/src/app.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				HidePrivateData: true),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var documentService = new ProjectContextDocumentService(
+			services.TreeExportService,
+			new FileContentAnalyzer(),
+			outputPathRedactionDecision: new OutputPathRedactionDecision("generated-path", keep));
+		await using var destination = new MemoryStream();
+
+		await documentService.WriteCompleteAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			TestContext.Current.CancellationToken,
+			plain: true,
+			useUnifiedContentHeaders: true);
+
+		var payload = Encoding.UTF8.GetString(destination.ToArray());
+		var expectedPath = keep
+			? sourcePath
+			: OutputRootPathPresentation.MaskLocalUserSegment(sourcePath);
+		var firstLine = payload.Split(["\r\n", "\n"], 2, StringSplitOptions.None)[0];
+		Assert.Equal(
+			$"{expectedPath}:".Replace('\\', '/'),
+			firstLine.Replace('\\', '/'));
+		Assert.DoesNotContain($"{project}:{Environment.NewLine}", payload, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task DocumentServiceRejectsUnknownFormatBeforeWritingAnyBytes()
 	{

@@ -33,6 +33,7 @@ public sealed class LegacySecretMarkPreviewMigrationTests
 			       transformationContext: context))
 		{
 			Assert.DoesNotContain(Secret, preview!.GetFullText(), StringComparison.Ordinal);
+			Assert.Equal("config.txt", Assert.Single(preview.Redactions).RelativePath);
 		}
 		await session.WaitForPreviewMigrationFlushAsync().WaitAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(1, store.WriteCount);

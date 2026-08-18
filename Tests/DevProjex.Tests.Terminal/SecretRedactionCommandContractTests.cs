@@ -8,6 +8,7 @@ public sealed class SecretRedactionCommandContractTests
 {
 	private const string GithubToken = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 	private const string ManuallyMarkedValue = "manualprojectvalue";
+	private const string PrivateEmail = "ivan.petrov@corp.internal";
 
 	[Fact]
 	public async Task ExportContext_LocalProfileAppliesPersistentManualSecretMarks()
@@ -139,6 +140,276 @@ public sealed class SecretRedactionCommandContractTests
 			environment.StandardOutput,
 			StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public async Task ExportContext_HidePrivateDataHonorsExplicitBoolean(bool enabled)
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile("project/src/contact.txt", $"contact={PrivateEmail}\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content",
+				"--format", "text",
+				"--git-mode", "none",
+				"--hide-private-data", enabled.ToString().ToLowerInvariant(),
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(!enabled, environment.StandardOutput.Contains(PrivateEmail, StringComparison.Ordinal));
+		Assert.Equal(enabled, environment.StandardOutput.Contains("DEVPROJEX_REDACTED[email#1]", StringComparison.Ordinal));
+		var contactPath = Path.Combine(workspace.ProjectRoot, "src", "contact.txt");
+		var expectedPath = enabled
+			? OutputRootPathPresentation.MaskLocalUserSegment(contactPath)
+			: contactPath;
+		Assert.Contains($"{expectedPath}:", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			$"{workspace.ProjectRoot}:{Environment.NewLine}",
+			environment.StandardOutput,
+			StringComparison.Ordinal);
+		if (enabled && !string.Equals(expectedPath, contactPath, StringComparison.Ordinal))
+			Assert.DoesNotContain($"{contactPath}:", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData(
+		ManualRedactionClass.Secret,
+		"--hide-secrets",
+		"--hide-private-data",
+		"manual-secret")]
+	[InlineData(
+		ManualRedactionClass.PrivateData,
+		"--hide-private-data",
+		"--hide-secrets",
+		"manual-private-data")]
+	public async Task ExportContext_ManualMarkClassFollowsOnlyItsOwnCliFlag(
+		ManualRedactionClass classification,
+		string enabledFlag,
+		string disabledFlag,
+		string expectedRuleId)
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		await AddPersistentManualSecretAsync(workspace, classification: classification);
+		var enabled = new TestTerminalEnvironment();
+
+		var enabledExitCode = await RunAsync(
+			workspace,
+			enabled,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", "local",
+				enabledFlag, "true",
+				disabledFlag, "false",
+				"--view", "content",
+				"--format", "text",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, enabledExitCode);
+		Assert.DoesNotContain(ManuallyMarkedValue, enabled.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains(
+			$"DEVPROJEX_REDACTED[{expectedRuleId}#1]",
+			enabled.StandardOutput,
+			StringComparison.Ordinal);
+
+		var disabled = new TestTerminalEnvironment();
+		var disabledExitCode = await RunAsync(
+			workspace,
+			disabled,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", "local",
+				enabledFlag, "false",
+				disabledFlag, "true",
+				"--view", "content",
+				"--format", "text",
+				"--plain",
+				"-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, disabledExitCode);
+		Assert.Contains(ManuallyMarkedValue, disabled.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("DEVPROJEX_REDACTED[manual-", disabled.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ExportContext_HidePrivateDataTriStateInheritsAndOverridesLocalProfile()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile("project/src/contact.txt", $"contact={PrivateEmail}\n");
+		var store = new ProjectProfileStore(() => workspace.AppDataRoot);
+		store.SaveProfile(
+			workspace.ProjectRoot,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions: [IgnoreOptionId.HidePrivateData],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.HidePrivateData] = true
+				}));
+		var inherited = new TestTerminalEnvironment();
+		var overridden = new TestTerminalEnvironment();
+
+		var inheritedExit = await RunAsync(
+			workspace,
+			inherited,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", "local", "--view", "content", "--format", "text", "--plain", "-o", "-"
+			]);
+		var overriddenExit = await RunAsync(
+			workspace,
+			overridden,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--profile", "local", "--hide-private-data", "false",
+				"--view", "content", "--format", "text", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, inheritedExit);
+		Assert.DoesNotContain(PrivateEmail, inherited.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(CommandLineExitCodes.Success, overriddenExit);
+		Assert.Contains(PrivateEmail, overridden.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task AnalyzeJson_ReportsPrivateDataSeparatelyFromSecretRedaction()
+	{
+		using var workspace = CreateWorkspace();
+		workspace.Temporary.WriteFile("project/src/contact.txt", $"contact={PrivateEmail}\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--format", "json", "--git-mode", "none",
+				"--hide-secrets", "--hide-private-data", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.True(document.RootElement.GetProperty("selection").GetProperty("hidePrivateData").GetBoolean());
+		Assert.Equal(1, document.RootElement.GetProperty("redaction").GetProperty("matchedCount").GetInt32());
+		Assert.Equal(1, document.RootElement.GetProperty("privacy").GetProperty("matchedCount").GetInt32());
+		Assert.Equal(1, document.RootElement.GetProperty("privacy").GetProperty("redactedCount").GetInt32());
+	}
+
+	[Fact]
+	public async Task AnalyzeJson_ReportsUnsupportedEncodingWithoutFailingTheProject()
+	{
+		using var workspace = CreateWorkspace();
+		var legacyPath = Path.Combine(workspace.ProjectRoot, "legacy-windows-1250.txt");
+		File.WriteAllBytes(legacyPath, [0x4C, 0x45, 0x47, 0x41, 0x43, 0x59, 0x2D, 0xE9]);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--format", "json", "--git-mode", "none",
+				"--hide-secrets", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var inspection = document.RootElement.GetProperty("contentInspection");
+		Assert.Equal(1, inspection.GetProperty("unscannableCount").GetInt32());
+		var file = Assert.Single(inspection.GetProperty("unscannableFiles").EnumerateArray());
+		Assert.Equal("legacy-windows-1250.txt", file.GetProperty("path").GetString());
+		Assert.Equal("unsupported-encoding", file.GetProperty("reason").GetString());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task ExportContext_UnsupportedEncodingIsWithheldAndReportedOnDiagnosticsStream()
+	{
+		const string legacySentinel = "LEGACY-CONTENT-MUST-NOT-ESCAPE";
+		using var workspace = CreateWorkspace();
+		var legacyPath = Path.Combine(workspace.ProjectRoot, "legacy-windows-1250.txt");
+		File.WriteAllBytes(
+			legacyPath,
+			[.. Encoding.ASCII.GetBytes(legacySentinel + "-"), 0xE9]);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "context", workspace.ProjectRoot,
+				"--view", "content", "--format", "text",
+				"--git-mode", "none", "--hide-secrets",
+				"--language", "en", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(legacySentinel, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Files excluded from content output: 1", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("legacy-windows-1250.txt", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Unsupported text encoding", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task AnalyzeText_ReportsSecretAndPrivateDataCountersOnSeparateRows()
+	{
+		using var workspace = CreateWorkspace();
+		workspace.Temporary.WriteFile("project/src/contact.txt", $"contact={PrivateEmail}\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--format", "text", "--git-mode", "none",
+				"--language", "en",
+				"--hide-secrets", "--hide-private-data", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("Rule matches: 1", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Redacted values: 1", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Private-data matches: 1", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Redacted private values: 1", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task AnalyzeText_ZeroPrivateMatchesReportsLimitedClaimInsteadOfSafety()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--format", "text", "--git-mode", "none",
+				"--language", "en",
+				"--hide-private-data", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("Private-data matches: 0", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains(
+			"The private-data rules matched nothing; this is not a privacy guarantee.",
+			environment.StandardOutput,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -283,8 +554,60 @@ public sealed class SecretRedactionCommandContractTests
 		}
 	}
 
-	[Fact]
-	public async Task ExportProjectDryRun_ExplainsThatRedactedCopyIsNotFaithfulAndCreatesNothing()
+	[Theory]
+	[InlineData("folder")]
+	[InlineData("zip")]
+	public async Task ExportProject_HidePrivateDataRedactsPhysicalCopyWithoutAddingFiles(string kind)
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile("project/src/contact.txt", $"contact={PrivateEmail}\n");
+		var environment = new TestTerminalEnvironment();
+		var destination = kind == "folder"
+			? Path.Combine(workspace.OutputRoot, "redacted-private")
+			: Path.Combine(workspace.OutputRoot, "redacted-private.zip");
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"export", "project", workspace.ProjectRoot,
+				"--as", kind,
+				"--git-mode", "none",
+				"--hide-private-data",
+				"-o", destination
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		string content;
+		if (kind == "folder")
+		{
+			content = await File.ReadAllTextAsync(
+				Path.Combine(destination, "src", "contact.txt"),
+				TestContext.Current.CancellationToken);
+			Assert.False(File.Exists(Path.Combine(destination, "DEVPROJEX_REDACTIONS.txt")));
+		}
+		else
+		{
+			using var archive = System.IO.Compression.ZipFile.OpenRead(destination);
+			var source = Assert.Single(archive.Entries, entry =>
+				entry.FullName.EndsWith("src/contact.txt", StringComparison.Ordinal));
+			await using var stream = source.Open();
+			using var reader = new StreamReader(stream, Encoding.UTF8);
+			content = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+			Assert.DoesNotContain(archive.Entries, entry =>
+				entry.FullName.EndsWith("DEVPROJEX_REDACTIONS.txt", StringComparison.Ordinal));
+		}
+
+		Assert.DoesNotContain(PrivateEmail, content, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[email#1]", content, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("--hide-secrets")]
+	[InlineData("--hide-private-data")]
+	public async Task ExportProjectDryRun_ExplainsThatRedactedCopyIsNotFaithfulAndCreatesNothing(
+		string redactionOption)
 	{
 		using var workspace = CreateWorkspace();
 		var environment = new TestTerminalEnvironment();
@@ -297,7 +620,7 @@ public sealed class SecretRedactionCommandContractTests
 				"export", "project", workspace.ProjectRoot,
 				"--as", "folder",
 				"--git-mode", "none",
-				"--hide-secrets",
+				redactionOption,
 				"--dry-run",
 				"--language", "en",
 				"-o", destination
@@ -354,9 +677,13 @@ public sealed class SecretRedactionCommandContractTests
 	/// omits an unreadable file and still ships, a project copy refuses because it reproduces bytes.
 	/// </summary>
 	[Theory]
-	[InlineData("context")]
-	[InlineData("project")]
-	public async Task DryRun_HideSecretsPerformsScanPreflightBeforeReportingReadiness(string command)
+	[InlineData("context", "--hide-secrets")]
+	[InlineData("context", "--hide-private-data")]
+	[InlineData("project", "--hide-secrets")]
+	[InlineData("project", "--hide-private-data")]
+	public async Task DryRun_RedactionPerformsScanPreflightBeforeReportingReadiness(
+		string command,
+		string redactionOption)
 	{
 		using var workspace = CreateWorkspace(includeSecret: false);
 		var environment = new TestTerminalEnvironment();
@@ -374,7 +701,7 @@ public sealed class SecretRedactionCommandContractTests
 				"--view", "content",
 				"--format", "text",
 				"--git-mode", "none",
-				"--hide-secrets",
+				redactionOption,
 				"--dry-run",
 				"-o", destination
 			}
@@ -383,7 +710,7 @@ public sealed class SecretRedactionCommandContractTests
 				"export", "project", workspace.ProjectRoot,
 				"--as", "folder",
 				"--git-mode", "none",
-				"--hide-secrets",
+				redactionOption,
 				"--dry-run",
 				"-o", destination
 			};
@@ -559,6 +886,7 @@ public sealed class SecretRedactionCommandContractTests
 			CommandLineExitCodes.Success,
 			await RunAsync(workspace, help, ["export", "context", "--language", "en", "--help"]));
 		Assert.Contains("--hide-secrets", help.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--hide-private-data", help.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain(
 			"none|smart-ignore|hide-secrets",
 			help.StandardOutput,
@@ -579,6 +907,21 @@ public sealed class SecretRedactionCommandContractTests
 			completion.StandardOutput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
 	}
 
+	[Fact]
+	public async Task OpenHelp_DoesNotExposeHidePrivateDataDuringPhaseOne()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			["open", "--language", "en", "--help"]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain("--hide-private-data", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
 	private static Task<int> RunAsync(
 		Workspace workspace,
 		TestTerminalEnvironment environment,
@@ -592,7 +935,8 @@ public sealed class SecretRedactionCommandContractTests
 		Workspace workspace,
 		string? relativePath = null,
 		int? sourceOffset = null,
-		bool writeSource = true)
+		bool writeSource = true,
+		ManualRedactionClass classification = ManualRedactionClass.Secret)
 	{
 		if (writeSource)
 		{
@@ -601,15 +945,18 @@ public sealed class SecretRedactionCommandContractTests
 				$"setting={ManuallyMarkedValue}\n");
 		}
 		var store = new ProjectProfileStore(() => workspace.AppDataRoot);
+		var optionId = classification == ManualRedactionClass.Secret
+			? IgnoreOptionId.HideSecrets
+			: IgnoreOptionId.HidePrivateData;
 		store.SaveProfile(
 			workspace.ProjectRoot,
 			new ProjectSelectionProfile(
 				SelectedRootFolders: [],
 				SelectedExtensions: [],
-				SelectedIgnoreOptions: [IgnoreOptionId.HideSecrets],
+				SelectedIgnoreOptions: [optionId],
 				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
 				{
-					[IgnoreOptionId.HideSecrets] = true
+					[optionId] = true
 				}));
 		using var identityProvider = new PersistentSecretIdentityProvider(() => workspace.AppDataRoot);
 		Assert.Equal(PersistentSecretIdentityAvailability.Ready, await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
@@ -624,7 +971,8 @@ public sealed class SecretRedactionCommandContractTests
 				"setting",
 				ManuallyMarkedValue.Length,
 				relativePath,
-				sourceOffset),
+				sourceOffset,
+				classification),
 			TestContext.Current.CancellationToken);
 		Assert.True(result.Succeeded);
 	}

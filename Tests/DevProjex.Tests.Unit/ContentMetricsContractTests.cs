@@ -42,6 +42,28 @@ public sealed class ContentMetricsContractTests
 	}
 
 	[Fact]
+	public async Task ContentMetricsPipeline_RootHeaderMatchesRenderedContentWithoutMaterializingIt()
+	{
+		using var project = new TemporaryDirectory();
+		var file = project.CreateFile(Path.Combine("src", "Program.cs"), "line1\r\nline2\r\n");
+		var analyzer = new FileContentAnalyzer();
+		var mapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(project.Path);
+		var inputs = await BuildMetricsInputsAsync([file], analyzer, mapper);
+		var rendered = await new SelectedContentExportService(analyzer).BuildAsync(
+			[file],
+			TestContext.Current.CancellationToken,
+			mapper,
+			transformationContext: null,
+			displayRootPath: project.Path);
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		accumulator.AppendRootHeader(project.Path);
+		foreach (var input in inputs)
+			accumulator.AppendFile(input);
+
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(rendered), accumulator.ToMetrics());
+	}
+
+	[Fact]
 	public async Task ContentMetricsPipeline_EqualsRenderedExportMetrics_ForEstimatedLargeFile()
 	{
 		using var temp = new TemporaryDirectory();

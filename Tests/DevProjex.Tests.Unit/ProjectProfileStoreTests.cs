@@ -74,6 +74,29 @@ public sealed class ProjectProfileStoreTests
 	}
 
 	[Fact]
+	public void SaveProfile_HidePrivateDataStateRoundTripsAsGenericIgnoreOption()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("project");
+		var store = new ProjectProfileStore(() => temporary.Path);
+
+		store.SaveProfile(
+			projectPath,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions: [IgnoreOptionId.HidePrivateData],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.HidePrivateData] = true
+				}));
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Contains(IgnoreOptionId.HidePrivateData, loaded.SelectedIgnoreOptions);
+		Assert.True(loaded.IgnoreOptionStates![IgnoreOptionId.HidePrivateData]);
+	}
+
+	[Fact]
 	public void SaveProfile_ConflictingGitModesRoundTripAsTrackedOnly()
 	{
 		var tempRoot = CreateTempDirectory();

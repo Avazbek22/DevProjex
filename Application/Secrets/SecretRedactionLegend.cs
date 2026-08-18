@@ -15,4 +15,8 @@ public sealed record SecretRedactionLegendText(
 	public static SecretRedactionLegendText English { get; } = new(
 		"Do not treat placeholder text as a real value.",
 		"The configured rules matched nothing; this is not a safety guarantee.");
+
+	public static SecretRedactionLegendText PrivacyEnglish { get; } = new(
+		"Do not treat placeholder text as a real value.",
+		"The private-data rules matched nothing; this is not a privacy guarantee.");
 }

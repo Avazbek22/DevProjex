@@ -565,7 +565,11 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Equal(2, analyzer.GetClassifiedReadCallCount(textFile));
 		Assert.Equal(0, analyzer.GetMetricsCallCount(textFile));
 		var renderedContent = await new SelectedContentExportService(new FileContentAnalyzer())
-			.BuildAsync([textFile], TestContext.Current.CancellationToken);
+			.BuildAsync(
+				[textFile],
+				TestContext.Current.CancellationToken,
+				displayPathMapper: null,
+				transformationContext: transformation);
 		var expectedMetrics = ExportOutputMetricsCalculator.FromText(renderedContent);
 		using var document = new InMemoryPreviewTextDocument("x");
 		Assert.True(pipeline.TryGetCachedPreviewSelectionMetrics(
@@ -1017,8 +1021,10 @@ public sealed class MetricsPipelineWarmupTests
                 () => pipeline.HasStatusMetricsSnapshot,
                 TimeSpan.FromSeconds(5));
 
-            var renderedContent = await new SelectedContentExportService(new FileContentAnalyzer())
-                .BuildAsync(orderedPaths, TestContext.Current.CancellationToken);
+			var renderedContent = await new SelectedContentExportService(new FileContentAnalyzer())
+				.BuildAsync(
+					orderedPaths,
+					TestContext.Current.CancellationToken);
             var expectedMetrics = ExportOutputMetricsCalculator.FromText(renderedContent);
             using var document = new InMemoryPreviewTextDocument("x");
 

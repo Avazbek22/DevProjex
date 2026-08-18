@@ -4,18 +4,39 @@ using DevProjex.Application.Secrets;
 
 namespace DevProjex.Avalonia.Controls;
 
-public sealed class PreviewRedactionToggleRequestedEventArgs(string occurrenceId) : EventArgs
+public sealed class PreviewRedactionToggleRequestedEventArgs(
+	string occurrenceId,
+	IReadOnlyCollection<string>? restoreOccurrenceIds = null) : EventArgs
 {
 	public string OccurrenceId { get; } = occurrenceId;
+	public IReadOnlyCollection<string>? RestoreOccurrenceIds { get; } = restoreOccurrenceIds;
+}
+
+public sealed class PreviewBulkRedactionToggleRequestedEventArgs(
+	IReadOnlyCollection<string> occurrenceIds,
+	bool keep) : EventArgs
+{
+	public IReadOnlyCollection<string> OccurrenceIds { get; } = occurrenceIds;
+	public bool Keep { get; } = keep;
 }
 
 public sealed class PreviewManualSecretMarkRequestedEventArgs(
 	MarkedSecretValue value,
 	PreviewSelectionRange selection,
+	ManualRedactionClass classification,
 	bool persistent) : EventArgs
 {
+	public PreviewManualSecretMarkRequestedEventArgs(
+		MarkedSecretValue value,
+		PreviewSelectionRange selection,
+		bool persistent)
+		: this(value, selection, ManualRedactionClass.Secret, persistent)
+	{
+	}
+
 	public MarkedSecretValue Value { get; } = value;
 	public PreviewSelectionRange Selection { get; } = selection;
+	public ManualRedactionClass Class { get; } = classification;
 	public bool Persistent { get; } = persistent;
 }
 
@@ -49,6 +70,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     public event EventHandler? CopiedToClipboard;
     public event EventHandler? PreviewSelectionChanged;
 	public event EventHandler<PreviewRedactionToggleRequestedEventArgs>? RedactionToggleRequested;
+	public event EventHandler<PreviewBulkRedactionToggleRequestedEventArgs>? BulkRedactionToggleRequested;
 	public event EventHandler<PreviewManualSecretMarkRequestedEventArgs>? ManualSecretMarkRequested;
 	public event EventHandler<PreviewManualSecretUnmarkRequestedEventArgs>? ManualSecretUnmarkRequested;
 	internal event EventHandler<PreviewManualSecretMarkRejectedEventArgs>? ManualSecretMarkRejected;
@@ -134,17 +156,57 @@ public sealed class VirtualizedPreviewTextControl : Control
 	public static readonly StyledProperty<string> AlwaysHideSecretFormatProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(AlwaysHideSecretFormat),
-			"Always hide \"{0}\"");
+			"Always hide secret \"{0}\"");
 
 	public static readonly StyledProperty<string> HideSecretHereFormatProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(HideSecretHereFormat),
 			"Hide \"{0}\" here");
 
+	public static readonly StyledProperty<string> PrivateDataAlwaysHideFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(PrivateDataAlwaysHideFormat),
+			"Hide \"{0}\" as private data");
+
+	public static readonly StyledProperty<string> HideHereSecretToolTipProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(HideHereSecretToolTip),
+			"Only this occurrence");
+
+	public static readonly StyledProperty<string> AlwaysHideValueToolTipProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(AlwaysHideValueToolTip),
+			"All occurrences of this value");
+
+	public static readonly StyledProperty<string> PrivateDataAlwaysHideToolTipProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(PrivateDataAlwaysHideToolTip),
+			"All occurrences; controlled by Hide private data");
+
 	public static readonly StyledProperty<string> RemoveSecretMarkHeaderProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(RemoveSecretMarkHeader),
-			"Remove secret mark");
+			"Remove mark");
+
+	public static readonly StyledProperty<string> KeepAllRuleOccurrencesFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(KeepAllRuleOccurrencesFormat),
+			"Keep all occurrences \"{0}\" ({1})");
+
+	public static readonly StyledProperty<string> HideAllRuleOccurrencesFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(HideAllRuleOccurrencesFormat),
+			"Hide all occurrences \"{0}\" ({1})");
+
+	public static readonly StyledProperty<string> KeepAllFileOccurrencesFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(KeepAllFileOccurrencesFormat),
+			"Keep all occurrences in \"{0}\" ({1})");
+
+	public static readonly StyledProperty<string> HideAllFileOccurrencesFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(HideAllFileOccurrencesFormat),
+			"Hide all occurrences in \"{0}\" ({1})");
 
 	public static readonly StyledProperty<string> SecretSelectionTooShortProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
@@ -186,7 +248,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private Dictionary<int, PreviewRedactionSpan[]> _redactionsByLine = [];
 	private PreviewRedactionSpan[] _redactionOccurrences = [];
 	private string? _hoveredRedactionOccurrenceId;
-	private string? _activeRedactionOccurrenceId;
+	private RedactionNavigationTarget? _activeRedactionTarget;
     private string? _formattedLineCacheFontFamilyName;
     private string? _formattedLineCacheCultureName;
     private double _formattedLineCacheFontSize = double.NaN;
@@ -204,9 +266,14 @@ public sealed class VirtualizedPreviewTextControl : Control
     private StickyHeaderTrimCacheKey? _cachedStickyHeaderTrimKey;
     private string? _cachedStickyHeaderTrimText;
 	private MenuFlyout? _contextFlyout;
-	private MenuItem? _alwaysHideSecretMenuItem;
-	private MenuItem? _hideSecretHereMenuItem;
+	private MenuItem? _secretHideHereMenuItem;
+	private MenuItem? _secretAlwaysHideMenuItem;
+	private MenuItem? _privateDataAlwaysHideMenuItem;
 	private MenuItem? _removeSecretMarkMenuItem;
+	private Separator? _manualRedactionSeparator;
+	private Separator? _bulkRedactionSeparator;
+	private MenuItem? _bulkRuleRedactionMenuItem;
+	private MenuItem? _bulkFileRedactionMenuItem;
     private MenuItem? _copyMenuItem;
     private MenuItem? _selectAllMenuItem;
 	private ToolTip? _redactionToolTip;
@@ -215,6 +282,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private PreviewSelectionRange _contextSelectionRange;
 	private string? _contextSecretMarkRejectionMessage;
 	private PreviewRedactionSpan? _contextManualRedaction;
+	private PreviewRedactionSpan? _contextDetectorRedaction;
+	private IReadOnlyCollection<string> _contextRuleOccurrenceIds = [];
+	private IReadOnlyCollection<string> _contextFileOccurrenceIds = [];
+	private bool _contextBulkKeep;
     private static Cursor? _previewTextCursor;
     private static Cursor? _previewMenuCursor;
 	private static Cursor? _previewActionCursor;
@@ -260,7 +331,15 @@ public sealed class VirtualizedPreviewTextControl : Control
 			KeptSecretToolTipFormatProperty,
 			AlwaysHideSecretFormatProperty,
 			HideSecretHereFormatProperty,
+			PrivateDataAlwaysHideFormatProperty,
+			HideHereSecretToolTipProperty,
+			AlwaysHideValueToolTipProperty,
+			PrivateDataAlwaysHideToolTipProperty,
 			RemoveSecretMarkHeaderProperty,
+			KeepAllRuleOccurrencesFormatProperty,
+			HideAllRuleOccurrencesFormatProperty,
+			KeepAllFileOccurrencesFormatProperty,
+			HideAllFileOccurrencesFormatProperty,
 			SecretSelectionTooShortProperty,
 			SecretSelectionTooLongProperty,
 			SecretSelectionMultilineProperty,
@@ -308,7 +387,47 @@ public sealed class VirtualizedPreviewTextControl : Control
 			control.UpdateContextMenuHeaders();
 		});
 
+		PrivateDataAlwaysHideFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		HideHereSecretToolTipProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		AlwaysHideValueToolTipProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		PrivateDataAlwaysHideToolTipProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
 		RemoveSecretMarkHeaderProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		KeepAllRuleOccurrencesFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		HideAllRuleOccurrencesFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		KeepAllFileOccurrencesFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		HideAllFileOccurrencesFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
 		{
 			control.UpdateContextMenuHeaders();
 		});
@@ -470,10 +589,58 @@ public sealed class VirtualizedPreviewTextControl : Control
 		set => SetValue(HideSecretHereFormatProperty, value);
 	}
 
+	public string PrivateDataAlwaysHideFormat
+	{
+		get => GetValue(PrivateDataAlwaysHideFormatProperty);
+		set => SetValue(PrivateDataAlwaysHideFormatProperty, value);
+	}
+
+	public string HideHereSecretToolTip
+	{
+		get => GetValue(HideHereSecretToolTipProperty);
+		set => SetValue(HideHereSecretToolTipProperty, value);
+	}
+
+	public string AlwaysHideValueToolTip
+	{
+		get => GetValue(AlwaysHideValueToolTipProperty);
+		set => SetValue(AlwaysHideValueToolTipProperty, value);
+	}
+
+	public string PrivateDataAlwaysHideToolTip
+	{
+		get => GetValue(PrivateDataAlwaysHideToolTipProperty);
+		set => SetValue(PrivateDataAlwaysHideToolTipProperty, value);
+	}
+
 	public string RemoveSecretMarkHeader
 	{
 		get => GetValue(RemoveSecretMarkHeaderProperty);
 		set => SetValue(RemoveSecretMarkHeaderProperty, value);
+	}
+
+	public string KeepAllRuleOccurrencesFormat
+	{
+		get => GetValue(KeepAllRuleOccurrencesFormatProperty);
+		set => SetValue(KeepAllRuleOccurrencesFormatProperty, value);
+	}
+
+	public string HideAllRuleOccurrencesFormat
+	{
+		get => GetValue(HideAllRuleOccurrencesFormatProperty);
+		set => SetValue(HideAllRuleOccurrencesFormatProperty, value);
+	}
+
+	public string KeepAllFileOccurrencesFormat
+	{
+		get => GetValue(KeepAllFileOccurrencesFormatProperty);
+		set => SetValue(KeepAllFileOccurrencesFormatProperty, value);
+	}
+
+	public string HideAllFileOccurrencesFormat
+	{
+		get => GetValue(HideAllFileOccurrencesFormatProperty);
+		set => SetValue(HideAllFileOccurrencesFormatProperty, value);
 	}
 
 	public string SecretSelectionTooShort
@@ -719,7 +886,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 					ResolveDistanceFromColumn(lineText, startColumn, typeface));
 				var y = origin.Y + ((lineNumber - firstLine) * lineHeight);
 				var isInteractive = span.OccurrenceId == _hoveredRedactionOccurrenceId ||
-				                    span.OccurrenceId == _activeRedactionOccurrenceId;
+				                    IsNavigationTarget(span, _activeRedactionTarget);
 				var (background, border) = ResolveRedactionBrushes(span.State, isInteractive);
 				context.DrawRectangle(
 					background,
@@ -876,18 +1043,16 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var hitPosition = HitTestSelectionPosition(e.GetPosition(this));
 		if (TryGetRedactionAt(hitPosition, out var redaction))
 		{
-			_activeRedactionOccurrenceId = redaction.OccurrenceId;
+			_activeRedactionTarget = CreateNavigationTarget(redaction);
 			InvalidateVisual();
-			RedactionToggleRequested?.Invoke(
-				this,
-				new PreviewRedactionToggleRequestedEventArgs(redaction.OccurrenceId));
+			RaiseRedactionToggleRequested(redaction);
 			e.Handled = true;
 			return;
 		}
 
-		if (_activeRedactionOccurrenceId is not null)
+		if (_activeRedactionTarget is not null)
 		{
-			_activeRedactionOccurrenceId = null;
+			_activeRedactionTarget = null;
 			InvalidateVisual();
 		}
         CaptureSelectionPointer(e);
@@ -965,10 +1130,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 		if (e.Key == Key.Escape &&
 		    (_selectionAnchor is not null ||
 		     _selectionActive is not null ||
-		     _activeRedactionOccurrenceId is not null))
+		     _activeRedactionTarget is not null))
         {
             ClearSelection();
-			_activeRedactionOccurrenceId = null;
+			_activeRedactionTarget = null;
 			InvalidateVisual();
             e.Handled = true;
 			return;
@@ -977,9 +1142,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		if (e.Key is Key.Enter or Key.Space &&
 		    TryGetActiveRedaction(out var redaction))
 		{
-			RedactionToggleRequested?.Invoke(
-				this,
-				new PreviewRedactionToggleRequestedEventArgs(redaction.OccurrenceId));
+			RaiseRedactionToggleRequested(redaction);
 			e.Handled = true;
 			return;
 		}
@@ -993,9 +1156,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 	private bool TryGetActiveRedaction(out PreviewRedactionSpan redaction)
 	{
-		if (_activeRedactionOccurrenceId is { } occurrenceId)
+		if (_activeRedactionTarget is { } target)
 		{
-			redaction = _redactionOccurrences.FirstOrDefault(span => span.OccurrenceId == occurrenceId)!;
+			redaction = FindRedaction(target)!;
 			if (redaction is not null)
 				return true;
 		}
@@ -1031,28 +1194,85 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 	private void RebuildRedactionIndex()
 	{
+		_contextDetectorRedaction = null;
+		_contextRuleOccurrenceIds = [];
+		_contextFileOccurrenceIds = [];
+		_contextFlyout?.Hide();
 		var redactions = Document?.Redactions ?? Array.Empty<PreviewRedactionSpan>();
 		_redactionsByLine = redactions
 			.GroupBy(static span => span.LineNumber)
 			.ToDictionary(
 				static group => group.Key,
 				static group => group.OrderBy(static span => span.StartColumn).ToArray());
-		_redactionOccurrences = redactions
-			.GroupBy(static span => span.OccurrenceId, StringComparer.Ordinal)
-			.Select(static group => group
-				.OrderBy(static span => span.LineNumber)
-				.ThenBy(static span => span.StartColumn)
-				.First())
-			.OrderBy(static span => span.LineNumber)
-			.ThenBy(static span => span.StartColumn)
-			.ToArray();
-		if (_activeRedactionOccurrenceId is { } active &&
-		    !_redactionOccurrences.Any(span => span.OccurrenceId == active))
-		{
-			_activeRedactionOccurrenceId = null;
-		}
+		_redactionOccurrences = BuildRedactionNavigationStops(redactions);
+		if (_activeRedactionTarget is { } active && FindRedaction(active) is null)
+			_activeRedactionTarget = null;
 		UpdateHoveredRedaction(null);
 	}
+
+	private void RaiseRedactionToggleRequested(PreviewRedactionSpan redaction)
+	{
+		var restoreOccurrenceIds = redaction.State == SecretPreviewSpanState.KeptAsIs
+			? redaction.CascadedOccurrenceIds
+			: null;
+		RedactionToggleRequested?.Invoke(
+			this,
+			new PreviewRedactionToggleRequestedEventArgs(
+				redaction.OccurrenceId,
+				restoreOccurrenceIds));
+	}
+
+	private static PreviewRedactionSpan[] BuildRedactionNavigationStops(
+		IReadOnlyList<PreviewRedactionSpan> redactions)
+	{
+		var firstSegments = new Dictionary<string, PreviewRedactionSpan>(StringComparer.Ordinal);
+		var stops = new List<PreviewRedactionSpan>(redactions.Count);
+		foreach (var span in redactions)
+		{
+			if (span.Source.HasFlag(SecretFindingSource.GeneratedPath))
+			{
+				stops.Add(span);
+				continue;
+			}
+
+			if (!firstSegments.TryGetValue(span.OccurrenceId, out var first) ||
+			    CompareRedactionPositions(span, first) < 0)
+			{
+				firstSegments[span.OccurrenceId] = span;
+			}
+		}
+
+		stops.AddRange(firstSegments.Values);
+		stops.Sort(CompareRedactionPositions);
+		return stops.ToArray();
+	}
+
+	private PreviewRedactionSpan? FindRedaction(RedactionNavigationTarget target)
+	{
+		if (!_redactionsByLine.TryGetValue(target.LineNumber, out var lineRedactions))
+			return null;
+
+		return lineRedactions.FirstOrDefault(span => IsNavigationTarget(span, target));
+	}
+
+	private static int CompareRedactionPositions(PreviewRedactionSpan left, PreviewRedactionSpan right)
+	{
+		var lineComparison = left.LineNumber.CompareTo(right.LineNumber);
+		return lineComparison != 0
+			? lineComparison
+			: left.StartColumn.CompareTo(right.StartColumn);
+	}
+
+	private static RedactionNavigationTarget CreateNavigationTarget(PreviewRedactionSpan span) =>
+		new(span.OccurrenceId, span.LineNumber, span.StartColumn);
+
+	private static bool IsNavigationTarget(
+		PreviewRedactionSpan span,
+		RedactionNavigationTarget? target) =>
+		target is { } value &&
+		string.Equals(span.OccurrenceId, value.OccurrenceId, StringComparison.Ordinal) &&
+		span.LineNumber == value.LineNumber &&
+		span.StartColumn == value.StartColumn;
 
 	private void UpdateHoveredRedaction(PreviewRedactionSpan? redaction)
 	{
@@ -1106,7 +1326,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 		var nextIndex = ResolveRedactionNavigationIndex(forward);
 		var redaction = _redactionOccurrences[nextIndex];
-		_activeRedactionOccurrenceId = redaction.OccurrenceId;
+		_activeRedactionTarget = CreateNavigationTarget(redaction);
 		_selectionAnchor = new SelectionPosition(redaction.LineNumber, redaction.StartColumn);
 		_selectionActive = _selectionAnchor;
 		UpdateHoveredRedaction(null);
@@ -1117,11 +1337,11 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 	private int ResolveRedactionNavigationIndex(bool forward)
 	{
-		var currentIndex = _activeRedactionOccurrenceId is null
+		var currentIndex = _activeRedactionTarget is null
 			? -1
 			: Array.FindIndex(
 				_redactionOccurrences,
-				span => span.OccurrenceId == _activeRedactionOccurrenceId);
+				span => IsNavigationTarget(span, _activeRedactionTarget));
 		var scrollViewer = GetOwnerScrollViewer();
 		if (currentIndex >= 0 &&
 		    (scrollViewer is null || IsRedactionVisible(_redactionOccurrences[currentIndex], scrollViewer)))
@@ -1209,7 +1429,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         _isSelecting = false;
         ReleaseSelectionAutoScrollTimer();
         _ownerScrollViewer = null;
-		_activeRedactionOccurrenceId = null;
+		_activeRedactionTarget = null;
 		UpdateHoveredRedaction(null);
 		ToolTip.SetTip(this, null);
         CloseContextMenu();
@@ -1947,11 +2167,17 @@ public sealed class VirtualizedPreviewTextControl : Control
 		if (_contextFlyout is not null)
             return;
 
-		_alwaysHideSecretMenuItem = CreateContextMenuItem(OnAlwaysHideSecretMenuItemClick);
-		_hideSecretHereMenuItem = CreateContextMenuItem(OnHideSecretHereMenuItemClick);
+		_secretHideHereMenuItem = CreateContextMenuItem(OnSecretHideHereMenuItemClick);
+		_secretAlwaysHideMenuItem = CreateContextMenuItem(OnSecretAlwaysHideMenuItemClick);
+		_privateDataAlwaysHideMenuItem = CreateContextMenuItem(OnPrivateDataAlwaysHideMenuItemClick);
 		_removeSecretMarkMenuItem = CreateContextMenuItem(OnRemoveSecretMarkMenuItemClick);
-		ToolTip.SetShowOnDisabled(_alwaysHideSecretMenuItem, true);
-		ToolTip.SetShowOnDisabled(_hideSecretHereMenuItem, true);
+		_bulkRuleRedactionMenuItem = CreateContextMenuItem(OnBulkRuleRedactionMenuItemClick);
+		_bulkFileRedactionMenuItem = CreateContextMenuItem(OnBulkFileRedactionMenuItemClick);
+		_manualRedactionSeparator = new Separator { Cursor = PreviewMenuCursor };
+		_bulkRedactionSeparator = new Separator { Cursor = PreviewMenuCursor };
+		ToolTip.SetShowOnDisabled(_secretHideHereMenuItem, true);
+		ToolTip.SetShowOnDisabled(_secretAlwaysHideMenuItem, true);
+		ToolTip.SetShowOnDisabled(_privateDataAlwaysHideMenuItem, true);
 
 		_copyMenuItem = CreateContextMenuItem(OnCopyMenuItemClick);
 
@@ -1960,10 +2186,14 @@ public sealed class VirtualizedPreviewTextControl : Control
 		_contextFlyout = new MenuFlyout();
 		_contextFlyout.Items.Add(_copyMenuItem);
 		_contextFlyout.Items.Add(_selectAllMenuItem);
-		_contextFlyout.Items.Add(new Separator { Cursor = PreviewMenuCursor });
-		_contextFlyout.Items.Add(_alwaysHideSecretMenuItem);
-		_contextFlyout.Items.Add(_hideSecretHereMenuItem);
+		_contextFlyout.Items.Add(_manualRedactionSeparator);
+		_contextFlyout.Items.Add(_secretHideHereMenuItem);
+		_contextFlyout.Items.Add(_secretAlwaysHideMenuItem);
+		_contextFlyout.Items.Add(_privateDataAlwaysHideMenuItem);
 		_contextFlyout.Items.Add(_removeSecretMarkMenuItem);
+		_contextFlyout.Items.Add(_bulkRedactionSeparator);
+		_contextFlyout.Items.Add(_bulkRuleRedactionMenuItem);
+		_contextFlyout.Items.Add(_bulkFileRedactionMenuItem);
 		_contextFlyout.Opening += OnContextMenuOpening;
 		_contextFlyout.Opened += OnContextMenuOpened;
 		ContextFlyout = _contextFlyout;
@@ -1988,6 +2218,8 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 		if (_removeSecretMarkMenuItem is not null)
 			_removeSecretMarkMenuItem.Header = RemoveSecretMarkHeader;
+
+		PrepareBulkSecretMenuItems();
     }
 
     private void OpenContextMenu()
@@ -2001,16 +2233,18 @@ public sealed class VirtualizedPreviewTextControl : Control
 		_contextFlyout?.Hide();
     }
 
-    private void OnContextMenuOpening(object? sender, EventArgs e)
-    {
+	private void OnContextMenuOpening(object? sender, EventArgs e)
+	{
 		PrepareManualSecretMenuItems();
+		PrepareBulkSecretMenuItems();
 
         if (_copyMenuItem is not null)
             _copyMenuItem.IsEnabled = HasSelection;
 
-        if (_selectAllMenuItem is not null)
-            _selectAllMenuItem.IsEnabled = ResolveLineCount() > 0 && (ResolveLineCount() > 1 || GetLineText(1).Length > 0);
+		if (_selectAllMenuItem is not null)
+			_selectAllMenuItem.IsEnabled = ResolveLineCount() > 0 && (ResolveLineCount() > 1 || GetLineText(1).Length > 0);
 
+		UpdateContextMenuSeparatorVisibility();
 	}
 
 	private void OnContextMenuOpened(object? sender, EventArgs e)
@@ -2035,11 +2269,14 @@ public sealed class VirtualizedPreviewTextControl : Control
         SelectAll();
     }
 
-	private void OnAlwaysHideSecretMenuItemClick(object? sender, RoutedEventArgs e) =>
-		RaiseManualSecretMarkRequested(persistent: true);
+	private void OnSecretHideHereMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseManualSecretMarkRequested(ManualRedactionClass.Secret, persistent: false);
 
-	private void OnHideSecretHereMenuItemClick(object? sender, RoutedEventArgs e) =>
-		RaiseManualSecretMarkRequested(persistent: false);
+	private void OnSecretAlwaysHideMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseManualSecretMarkRequested(ManualRedactionClass.Secret, persistent: true);
+
+	private void OnPrivateDataAlwaysHideMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseManualSecretMarkRequested(ManualRedactionClass.PrivateData, persistent: true);
 
 	private void OnRemoveSecretMarkMenuItemClick(object? sender, RoutedEventArgs e)
 	{
@@ -2055,7 +2292,25 @@ public sealed class VirtualizedPreviewTextControl : Control
 				redaction.PersistentMarkId));
 	}
 
-	private void RaiseManualSecretMarkRequested(bool persistent)
+	private void OnBulkRuleRedactionMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseBulkRedactionToggleRequested(_contextRuleOccurrenceIds);
+
+	private void OnBulkFileRedactionMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseBulkRedactionToggleRequested(_contextFileOccurrenceIds);
+
+	private void RaiseBulkRedactionToggleRequested(IReadOnlyCollection<string> occurrenceIds)
+	{
+		if (occurrenceIds.Count == 0)
+			return;
+
+		BulkRedactionToggleRequested?.Invoke(
+			this,
+			new PreviewBulkRedactionToggleRequestedEventArgs(occurrenceIds, _contextBulkKeep));
+	}
+
+	private void RaiseManualSecretMarkRequested(
+		ManualRedactionClass classification,
+		bool persistent)
 	{
 		if (_contextMarkedSecret is null || _contextSelectionRange.IsCollapsed)
 		{
@@ -2070,15 +2325,19 @@ public sealed class VirtualizedPreviewTextControl : Control
 			new PreviewManualSecretMarkRequestedEventArgs(
 				_contextMarkedSecret,
 				_contextSelectionRange,
+				classification,
 				persistent));
 	}
 
 	private void PrepareContextSelection(Point point)
 	{
 		_contextManualRedaction = null;
+		_contextDetectorRedaction = null;
 		var hit = HitTestSelectionPosition(point);
 		if (TryGetRedactionAt(hit, out var redaction))
 		{
+			if (redaction.Source.HasFlag(SecretFindingSource.Detector))
+				_contextDetectorRedaction = redaction;
 			if (HasManualMarkIdentity(redaction))
 			{
 				_contextManualRedaction = redaction;
@@ -2099,10 +2358,73 @@ public sealed class VirtualizedPreviewTextControl : Control
 		SelectTokenAt(hit);
 	}
 
+	private void PrepareBulkSecretMenuItems()
+	{
+		if (_bulkRedactionSeparator is null ||
+		    _bulkRuleRedactionMenuItem is null ||
+		    _bulkFileRedactionMenuItem is null)
+		{
+			return;
+		}
+
+		_contextRuleOccurrenceIds = [];
+		_contextFileOccurrenceIds = [];
+		var visible = _contextDetectorRedaction is not null && Document is not null;
+		_bulkRuleRedactionMenuItem.IsVisible = visible;
+		_bulkFileRedactionMenuItem.IsVisible = visible;
+		if (!visible)
+			return;
+
+		var target = _contextDetectorRedaction!;
+		(_contextRuleOccurrenceIds, _contextFileOccurrenceIds) = CollectBulkOccurrenceIds(target);
+		_contextBulkKeep = target.State == SecretPreviewSpanState.Redacted;
+		_bulkRuleRedactionMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			_contextBulkKeep ? KeepAllRuleOccurrencesFormat : HideAllRuleOccurrencesFormat,
+			target.RuleId,
+			_contextRuleOccurrenceIds.Count);
+		_bulkFileRedactionMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			_contextBulkKeep ? KeepAllFileOccurrencesFormat : HideAllFileOccurrencesFormat,
+			GetRelativeFileName(target.RelativePath),
+			_contextFileOccurrenceIds.Count);
+	}
+
+	private (IReadOnlyCollection<string> Rule, IReadOnlyCollection<string> File)
+		CollectBulkOccurrenceIds(PreviewRedactionSpan target)
+	{
+		if (Document is not { } document)
+			return ([], []);
+
+		var ruleOccurrenceIds = new HashSet<string>(StringComparer.Ordinal);
+		var fileOccurrenceIds = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var span in document.Redactions)
+		{
+			if (!span.Source.HasFlag(SecretFindingSource.Detector))
+				continue;
+
+			if (string.Equals(span.RuleId, target.RuleId, StringComparison.Ordinal))
+				ruleOccurrenceIds.Add(span.OccurrenceId);
+			if (string.Equals(span.RelativePath, target.RelativePath, StringComparison.Ordinal))
+				fileOccurrenceIds.Add(span.OccurrenceId);
+		}
+
+		return (ruleOccurrenceIds, fileOccurrenceIds);
+	}
+
+	private static string GetRelativeFileName(string relativePath)
+	{
+		var separatorIndex = relativePath.LastIndexOfAny('/', '\\');
+		return separatorIndex >= 0 && separatorIndex < relativePath.Length - 1
+			? relativePath[(separatorIndex + 1)..]
+			: relativePath;
+	}
+
 	private void PrepareManualSecretMenuItems()
 	{
-		if (_alwaysHideSecretMenuItem is null ||
-		    _hideSecretHereMenuItem is null ||
+		if (_secretHideHereMenuItem is null ||
+		    _secretAlwaysHideMenuItem is null ||
+		    _privateDataAlwaysHideMenuItem is null ||
 		    _removeSecretMarkMenuItem is null)
 		{
 			return;
@@ -2110,8 +2432,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 		var removeVisible = _contextManualRedaction is { } redaction && HasManualMarkIdentity(redaction);
 		_removeSecretMarkMenuItem.IsVisible = removeVisible;
-		_alwaysHideSecretMenuItem.IsVisible = !removeVisible && HasSelection;
-		_hideSecretHereMenuItem.IsVisible = !removeVisible && HasSelection;
+		_secretHideHereMenuItem.IsVisible = false;
+		_secretAlwaysHideMenuItem.IsVisible = false;
+		_privateDataAlwaysHideMenuItem.IsVisible = false;
 		_contextMarkedSecret = null;
 		_contextSelectionRange = default;
 		_contextSecretMarkRejectionMessage = null;
@@ -2121,6 +2444,11 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var selectedText = GetSelectedText();
 		var hasRange = TryGetSelectionRange(out _contextSelectionRange);
 		var isContentSelection = hasRange && IsFileContentSelection(_contextSelectionRange);
+		if (!isContentSelection)
+			return;
+		_secretHideHereMenuItem.IsVisible = true;
+		_secretAlwaysHideMenuItem.IsVisible = true;
+		_privateDataAlwaysHideMenuItem.IsVisible = true;
 		var isValid = MarkedSecretValueNormalizer.TryCreate(
 			selectedText,
 			out var candidate,
@@ -2132,24 +2460,49 @@ public sealed class VirtualizedPreviewTextControl : Control
 			.Replace('\r', ' ')
 			.Replace('\n', ' ');
 		var masked = MaskSecretValue(displayValue);
-		_alwaysHideSecretMenuItem.Header = string.Format(
-			CultureInfo.CurrentCulture,
-			AlwaysHideSecretFormat,
-			masked);
-		_hideSecretHereMenuItem.Header = string.Format(
+		_secretHideHereMenuItem.Header = string.Format(
 			CultureInfo.CurrentCulture,
 			HideSecretHereFormat,
 			masked);
+		_secretAlwaysHideMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			AlwaysHideSecretFormat,
+			masked);
+		_privateDataAlwaysHideMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			PrivateDataAlwaysHideFormat,
+			masked);
 
-		var enabled = isValid && isContentSelection;
-		_alwaysHideSecretMenuItem.IsEnabled = enabled;
-		_hideSecretHereMenuItem.IsEnabled = enabled;
-		var reason = !isValid
-			? GetValidationMessage(validationError)
-			: SecretSelectionContentOnly;
+		var enabled = isValid;
+		_secretHideHereMenuItem.IsEnabled = enabled;
+		_secretAlwaysHideMenuItem.IsEnabled = enabled;
+		_privateDataAlwaysHideMenuItem.IsEnabled = enabled;
+		var reason = GetValidationMessage(validationError);
 		_contextSecretMarkRejectionMessage = enabled ? null : reason;
-		ToolTip.SetTip(_alwaysHideSecretMenuItem, enabled ? null : reason);
-		ToolTip.SetTip(_hideSecretHereMenuItem, enabled ? null : reason);
+		ToolTip.SetTip(_secretHideHereMenuItem, enabled ? HideHereSecretToolTip : reason);
+		ToolTip.SetTip(_secretAlwaysHideMenuItem, enabled ? AlwaysHideValueToolTip : reason);
+		ToolTip.SetTip(_privateDataAlwaysHideMenuItem, enabled ? PrivateDataAlwaysHideToolTip : reason);
+	}
+
+	private void UpdateContextMenuSeparatorVisibility()
+	{
+		if (_contextFlyout is null)
+			return;
+
+		var hasVisibleItemInGroup = false;
+		for (var index = _contextFlyout.Items.Count - 1; index >= 0; index--)
+		{
+			switch (_contextFlyout.Items[index])
+			{
+				case MenuItem menuItem:
+					hasVisibleItemInGroup |= menuItem.IsVisible;
+					break;
+				case Separator separator:
+					separator.IsVisible = hasVisibleItemInGroup;
+					hasVisibleItemInGroup = false;
+					break;
+			}
+		}
 	}
 
 	private static bool HasManualMarkIdentity(PreviewRedactionSpan redaction) =>
@@ -2158,13 +2511,14 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 	private bool IsFileContentSelection(PreviewSelectionRange selection)
 	{
-		if (selection.StartLine != selection.EndLine || Document is not { } document)
+		if (Document is not { } document)
 			return false;
 		var section = PreviewDocumentSectionLookup.FindContainingSection(
 			document.Sections,
 			selection.StartLine);
 		return section is not null &&
 		       selection.StartLine >= section.ContentStartLine &&
+		       selection.EndLine >= section.ContentStartLine &&
 		       selection.EndLine <= section.EndLine;
 	}
 
@@ -2458,6 +2812,11 @@ public sealed class VirtualizedPreviewTextControl : Control
     }
 
     private readonly record struct SelectionHitResult(SelectionPosition Position, SelectionHitKind Kind);
+	private readonly record struct RedactionNavigationTarget(
+		string OccurrenceId,
+		int LineNumber,
+		int StartColumn);
+
     private readonly record struct SelectionPosition(int Line, int Column);
     private sealed record FormattedLineCacheEntry(
         string Text,

@@ -365,7 +365,12 @@ Uma cópia em pasta ou ZIP também altera o texto correspondente e pode deixar d
 
 O contador informa apenas correspondências com as regras. Zero não significa que o projeto é seguro. Na CLI, use `--hide-secrets`; os detalhes estão em `Docs/HideSecrets.md`.
 
-### 12.4 Usar .gitignore
+### 12.4 Ocultar dados privados
+“Ocultar dados privados” fica desativado por padrão. A opção detecta endereços de e-mail, endereços IP globais, nomes de usuários locais em caminhos, endereços MAC e telefones internacionais nos arquivos de texto selecionados. Os resultados usam as mesmas decisões da visualização e o mesmo fluxo de saída de Ocultar segredos.
+
+Faixas e hosts de documentação, usuários comuns de CI, resolvedores DNS públicos conhecidos e telefones fictícios documentados permanecem visíveis. Zero correspondências não garante privacidade. A CLI usa `--hide-private-data`; as regras completas e os limites da primeira fase estão em `Docs/HidePrivateData.md`.
+
+### 12.5 Usar .gitignore
 Quando ativado, o DevProjex aplica todos os `.gitignore` acessíveis, não apenas o arquivo na raiz da pasta aberta.
 
 Cada `.gitignore` se aplica:
@@ -388,7 +393,7 @@ Um link simbólico chamado `.gitignore` não é seguido, de acordo com o comport
 
 O perfil integrado `standard` seleciona `gitignore` e os oito grupos de exclusão: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` e `extensionless-files`.
 
-### 12.5 Somente arquivos rastreados pelo Git
+### 12.6 Somente arquivos rastreados pelo Git
 "Somente arquivos rastreados pelo Git" constrói a etapa Git da árvore com os arquivos existentes na árvore de trabalho registrados em cada índice Git legível. Arquivos rastreados modificados e novos arquivos adicionados ao índice continuam incluídos; arquivos não rastreados são excluídos. Essa é a árvore de trabalho atual, não uma captura histórica do `HEAD` nem de um repositório remoto.
 
 Cada repositório aninhado e cada worktree acessível são processados de forma independente em qualquer nível de aninhamento acessível. Um repositório filho não herda os caminhos rastreados do repositório pai nem de um repositório irmão. Este modo requer a CLI do Git; um índice vazio, mas legível, é válido. Se o espaço de trabalho no terminal (TUI) for iniciado neste modo e nenhum índice aplicável puder ser carregado, o espaço de trabalho não será aberto. Se o modo for selecionado interativamente em um espaço de trabalho TUI já aberto e nenhum índice aplicável puder ser carregado, a alteração será rejeitada e o último modo Git utilizável permanecerá ativo. Na mesma situação, os comandos diretos falham com um erro de política ou verificação. O DevProjex nunca passa silenciosamente para `.gitignore`. Quando outro índice aplicável é legível, os escopos aninhados indisponíveis são excluídos com um aviso.
@@ -397,14 +402,14 @@ Em um espaço de trabalho Desktop já aberto, a seleção explícita permanece v
 
 "Use .gitignore" e "Somente arquivos rastreados pelo Git" são exclusivos ao serem ativados. A caixa ativa também pode ser desmarcada para desativar a filtragem Git. Nos projetos locais compatíveis com perfis, este estado é salvo junto com os tipos de arquivo e as demais regras de exclusão.
 
-### 12.6 Relação entre a filtragem Git e o Smart Ignore
+### 12.7 Relação entre a filtragem Git e o Smart Ignore
 O modo Git selecionado e o Smart Ignore são controles independentes. O modo Git é aplicado primeiro em cada escopo Git acessível; depois, o Smart Ignore processa os itens restantes; por fim, entram as regras básicas.
 
 O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já cobre todos os seus candidatos e aparecer depois que esse modo for alterado ou desativado. As duas caixas Git permanecem disponíveis no repositório.
 
 Uma regra de negação do Git iniciada por `!` cancela apenas o resultado do Git. Ela não desativa o Smart Ignore nem uma regra básica.
 
-### 12.7 Regras básicas
+### 12.8 Regras básicas
 "Pastas com prefixo de ponto" e "Arquivos com prefixo de ponto" inspecionam o nome do item.
 
 "Pastas ocultas" e "Arquivos ocultos" inspecionam o atributo oculto do sistema. Em algumas plataformas, um nome com prefixo de ponto e o atributo do sistema podem descrever o mesmo item ou itens diferentes.
@@ -417,7 +422,7 @@ Uma regra de negação do Git iniciada por `!` cancela apenas o resultado do Git
 
 A contagem de pastas vazias pode, portanto, mudar depois que outra regra for alterada: ocultar arquivos pode tornar as pastas que os contêm logicamente vazias.
 
-### 12.8 Contadores
+### 12.9 Contadores
 A contagem próxima a uma regra mostra sua contribuição direta nas configurações atuais, e não o número físico de itens semelhantes no disco.
 
 Um item não é atribuído a vários contadores sobrepostos ao mesmo tempo. Por exemplo, a pasta `.git` pode ter um nome com prefixo de ponto e o atributo Oculto do sistema, mas sua exclusão é atribuída a apenas uma regra.
@@ -429,7 +434,7 @@ Uma ordem estável é usada para selecionar o proprietário de uma exclusão:
 
 Esta ordem afeta apenas os contadores. A visibilidade final segue uma regra mais simples: um item fica oculto se algum mecanismo habilitado o excluir.
 
-### 12.9 Aplicando alterações
+### 12.10 Aplicando alterações
 A troca das caixas de seleção primeiro atualiza as configurações e contadores disponíveis no painel. A árvore final é reconstruída após a seleção de "Aplicar configurações".
 
 Se a preparação das configurações for cancelada, o DevProjex retorna o painel ao último estado totalmente concluído. Regras parcialmente calculadas não são aplicadas.

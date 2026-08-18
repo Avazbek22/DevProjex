@@ -5,6 +5,9 @@ public sealed partial class SelectionSyncCoordinator
 	internal bool ApplyHideSecretsOverride(bool? enabled) =>
 		ApplyContentTransformationOverride(IgnoreOptionId.HideSecrets, enabled);
 
+	internal bool ApplyHidePrivateDataOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.HidePrivateData, enabled);
+
 	internal bool ApplyCompressCodeOverride(bool? enabled) =>
 		ApplyContentTransformationOverride(IgnoreOptionId.CompressCode, enabled);
 

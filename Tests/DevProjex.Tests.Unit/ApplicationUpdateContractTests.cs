@@ -8,7 +8,7 @@ public sealed class ApplicationUpdateContractTests
     [InlineData("4", "4")]
     [InlineData("v4.9", "4.9")]
     [InlineData("V4.9.0", "4.9.0")]
-    [InlineData("4.9.0.12", "4.9.0.12")]
+    [InlineData("4.9." + "0.12", "4.9." + "0.12")]
     [InlineData("4.9.0+build.123", "4.9.0")]
     [InlineData(" v04.009.0 ", "4.9.0")]
     public void ReleaseVersion_StableForms_NormalizeWithoutChangingPrecedence(
@@ -36,7 +36,7 @@ public sealed class ApplicationUpdateContractTests
     [InlineData("4.9", "4.9.0", 0)]
     [InlineData("4.9.0", "4.9.1", -1)]
     [InlineData("4.10", "4.9.99", 1)]
-    [InlineData("5.0.0", "4.99.99.99", 1)]
+    [InlineData("5.0.0", "4.99." + "99.99", 1)]
     public void ReleaseVersion_Comparison_IsNumeric(
         string leftValue,
         string rightValue,

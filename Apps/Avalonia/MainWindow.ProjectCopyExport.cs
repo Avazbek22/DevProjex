@@ -110,11 +110,12 @@ public partial class MainWindow
             selectedPaths,
             destinationPath,
 			format,
-			RedactSecrets: CreateSecretRedactionContext() is not null,
+			RedactSecrets: _appliedHideSecretsEnabled,
 			CompressCode: _appliedCompressCodeEnabled,
 			StripComments: _appliedStripCommentsEnabled,
 			StripBlankLines: _appliedStripBlankLinesEnabled,
-			NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(_localization));
+			NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(_localization),
+			RedactPrivateData: _appliedHidePrivateDataEnabled);
         var cancellation = new CancellationTokenSource();
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _projectCopyExportCts = cancellation;
@@ -129,7 +130,7 @@ public partial class MainWindow
 				_localization["Status.Operation.ExportingProjectCopy"],
 				// Secret inspection has no honest item total. The first measured copy
 				// progress event switches this operation to determinate automatically.
-				indeterminate: request.RedactSecrets,
+				indeterminate: request.RedactSecrets || request.RedactPrivateData,
                 operationType: StatusOperationType.ProjectCopyExport,
                 cancelAction: cancellation.Cancel);
             var progress = new Progress<ProjectCopyExportProgress>(value =>
@@ -185,8 +186,7 @@ public partial class MainWindow
 		if (context is null)
 			return true;
 
-		// Both transformations make the copy something other than the project, and the user is told
-		// about each one that is actually enabled rather than about the pair.
+		// Redaction and compression independently make the exported copy differ from the project.
 		var reasons = new List<string>(2);
 		if (context.HasRedaction)
 			reasons.Add(_localization["Dialog.ProjectCopy.Redaction.Message"]);

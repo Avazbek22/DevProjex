@@ -131,6 +131,22 @@ public sealed class SecretInspectionBudgetTests
 		Assert.Equal(
 			nameof(SecretInspectionLimits.MaximumDistinctPersistentMarkLengths),
 			lengthException.LimitName);
+
+		var sameLengthsAcrossClasses = Enumerable
+			.Range(
+				MarkedSecretValueNormalizer.MinimumLength,
+				SecretInspectionLimits.MaximumDistinctPersistentMarkLengths)
+			.SelectMany((length, index) => new[]
+			{
+				new MarkedSecretProfileEntry($"{index:X12}", null, length),
+				new MarkedSecretProfileEntry(
+					$"{index + 0x1000:X12}",
+					null,
+					length,
+					Class: ManualRedactionClass.PrivateData)
+			})
+			.ToArray();
+		_ = new MarkedSecretsMatcher(sameLengthsAcrossClasses, []);
 	}
 
 	[Fact]

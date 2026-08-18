@@ -1,5 +1,6 @@
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Compression;
+using System.Text;
 
 namespace DevProjex.Tests.Unit;
 
@@ -7,6 +8,84 @@ public sealed class SecretRedactionCacheTests
 {
 	private const string Secret = "cache-secret-value-0123456789";
 	private const string SameLengthPublicValue = "cache-public-value-0123456789";
+
+	[Fact]
+	public async Task OutputPreparer_UnsupportedEncoding_IsWithheldAndReportedWithItsReason()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/legacy.txt", "legacy content must not escape");
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		var context = new SecretRedactionContext(workspace.Path, session);
+		var preparer = new SecretRedactionOutputPreparer(
+			new ClassifiedContentAnalyzer(FileContentClassification.UnsupportedEncoding));
+
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(null, context),
+			[path],
+			TestContext.Current.CancellationToken);
+
+		var file = prepared.GetFile(path);
+		Assert.True(file.IsUnscannable);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding, file.Classification);
+		var unscannable = Assert.Single(prepared.UnscannableFiles);
+		Assert.Equal(path, unscannable.Path);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding, unscannable.Classification);
+		Assert.Equal(1, prepared.Snapshot!.SkippedFileCount);
+		var preparedRead = await preparer
+			.CreatePreparedAnalyzer(prepared)
+			.ReadClassifiedAsync(path, long.MaxValue, TestContext.Current.CancellationToken);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding, preparedRead.Classification);
+		Assert.Null(preparedRead.Content);
+	}
+
+	[Fact]
+	public async Task OutputPreparer_DecoderFallback_IsClassifiedAsUnsupportedEncoding()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/late-decode.txt", "source bytes remain operation-owned");
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		var context = new SecretRedactionContext(workspace.Path, session);
+		var preparer = new SecretRedactionOutputPreparer(new ThrowingDecodeContentAnalyzer());
+
+		var discovery = await preparer.DiscoverAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(null, context),
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.UnsupportedEncoding,
+			Assert.Single(discovery.UnscannableFiles).Classification);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding,
+			Assert.Single(prepared.UnscannableFiles).Classification);
+		Assert.True(prepared.GetFile(path).IsUnscannable);
+	}
+
+	[Fact]
+	public void Snapshot_CapturesUnscannableDetailsInsteadOfRetainingMutableOperationList()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/legacy.txt", "legacy");
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		var scope = session.BeginOutput(workspace.Path, [path]);
+		scope.AnalyzeUnscannable(
+			path,
+			SecretFileMetadata.Capture(path),
+			FileContentClassification.UnsupportedEncoding);
+		var details = new List<UnscannableFile>
+		{
+			new(path, FileContentClassification.UnsupportedEncoding)
+		};
+
+		var snapshot = scope.Complete(skippedFileCount: 1, failedFileCount: 0, details);
+		details.Clear();
+
+		var captured = Assert.Single(snapshot.UnscannableFiles);
+		Assert.Equal(path, captured.Path);
+		Assert.Equal(FileContentClassification.UnsupportedEncoding, captured.Classification);
+	}
 
 	[Fact]
 	public async Task OutputPreparer_RevalidatesContentWhenLengthAndTimestampAreUnchanged()
@@ -667,6 +746,79 @@ public sealed class SecretRedactionCacheTests
 			string repositoryRelativePath,
 			string content,
 			CancellationToken cancellationToken = default) => [];
+	}
+
+	private sealed class ClassifiedContentAnalyzer(FileContentClassification classification)
+		: IFileContentAnalyzer
+	{
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(false);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileMetrics?>(null);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileContent?>(null);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileContent?>(null);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(new FileContentReadResult(classification));
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(new ContentReadFact(null, classification, null, null));
+	}
+
+	private sealed class ThrowingDecodeContentAnalyzer : IFileContentAnalyzer
+	{
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromException<bool>(new DecoderFallbackException("late decode failure"));
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromException<TextFileMetrics?>(new DecoderFallbackException("late decode failure"));
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromException<TextFileContent?>(new DecoderFallbackException("late decode failure"));
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromException<TextFileContent?>(new DecoderFallbackException("late decode failure"));
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromException<FileContentReadResult>(new DecoderFallbackException("late decode failure"));
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromException<ContentReadFact>(new DecoderFallbackException("late decode failure"));
 	}
 
 	public enum GenerationInvalidation

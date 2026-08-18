@@ -600,12 +600,11 @@ public partial class MainWindow
                         cancellationToken);
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
 
-                    // An individual Hide Secrets toggle is already live; the section-wide checkbox
-                    // stages it with the syntax modes. Synchronization is therefore a no-op for the
-                    // common case and publishes the deferred batch case without rebuilding the tree.
-                    if (_selectionCoordinator.TryAcceptHideSecretsOnlyChangeAsApplied(_currentPath))
+                    // Redaction changes do not affect the tree. Publish the draft as one operation
+                    // without rebuilding the tree.
+                    if (_selectionCoordinator.TryAcceptContentRedactionOnlyChangeAsApplied(_currentPath))
                     {
-                        ApplyImmediateContentTransformationSelectionChange(IgnoreOptionId.HideSecrets);
+                        ApplySelectedContentRedactionStates();
                         await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
                         return;
                     }

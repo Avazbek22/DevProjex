@@ -43,7 +43,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 	private readonly Func<ContentTransformationContext?> _transformationContextProvider;
 	private readonly Func<string?> _projectRootProvider;
 	private readonly Action _requestRedactionRefresh;
-	private readonly Func<bool> _ensureHideSecretsEnabled;
+	private readonly Func<ManualRedactionClass, bool> _ensureManualRedactionClassEnabled;
 	private readonly Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> _applyPersistentMarkDelta;
 	private readonly Func<CancellationToken, Task> _persistProjectProfile;
 	private readonly object _manualMarkOperationsSync = new();
@@ -81,7 +81,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		Func<string?> projectRootProvider,
 		Func<ContentTransformationContext?> transformationContextProvider,
 		Action requestRedactionRefresh,
-		Func<bool> ensureHideSecretsEnabled,
+		Func<ManualRedactionClass, bool> ensureManualRedactionClassEnabled,
 		Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> applyPersistentMarkDelta,
 		Func<CancellationToken, Task> persistProjectProfile)
     {
@@ -104,7 +104,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_projectRootProvider = projectRootProvider;
 		_transformationContextProvider = transformationContextProvider;
 		_requestRedactionRefresh = requestRedactionRefresh;
-		_ensureHideSecretsEnabled = ensureHideSecretsEnabled;
+		_ensureManualRedactionClassEnabled = ensureManualRedactionClassEnabled;
 		_applyPersistentMarkDelta = applyPersistentMarkDelta;
 		_persistProjectProfile = persistProjectProfile;
 
@@ -119,6 +119,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         controls.TextControl.PreviewSelectionChanged +=
             OnSelectionChanged;
 		controls.TextControl.RedactionToggleRequested += OnRedactionToggleRequested;
+		controls.TextControl.BulkRedactionToggleRequested += OnBulkRedactionToggleRequested;
 		controls.TextControl.ManualSecretMarkRequested += OnManualSecretMarkRequested;
 		controls.TextControl.ManualSecretUnmarkRequested += OnManualSecretUnmarkRequested;
 		controls.TextControl.ManualSecretMarkRejected += OnManualSecretMarkRejected;
@@ -141,8 +142,30 @@ internal sealed class PreviewSurfaceController : IDisposable
 			return;
 
 		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
-		context.Session.ToggleKeepAsIs(e.OccurrenceId);
+		if (e.RestoreOccurrenceIds is { Count: > 0 })
+			context.Session.SetKeepAsIs(e.RestoreOccurrenceIds, keep: false);
+		else
+			context.Session.ToggleKeepAsIs(e.OccurrenceId);
 		_requestRedactionRefresh();
+	}
+
+	private void OnBulkRedactionToggleRequested(
+		object? sender,
+		PreviewBulkRedactionToggleRequestedEventArgs e)
+	{
+		var context = _transformationContextProvider()?.Redaction;
+		if (context is null)
+			return;
+
+		var changedCount = context.Session.SetKeepAsIs(e.OccurrenceIds, e.Keep);
+		if (changedCount == 0)
+			return;
+
+		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+		_requestRedactionRefresh();
+		_toastService.Show(_localization.Format(
+			e.Keep ? "Toast.Secret.KeptCount" : "Toast.Secret.RehiddenCount",
+			changedCount));
 	}
 
 	private void OnManualSecretMarkRequested(
@@ -169,19 +192,27 @@ internal sealed class PreviewSurfaceController : IDisposable
 				return;
 			}
 
-			if (!ApplySessionOnlyManualMark(location, e.Value))
+			var sessionMarkAdded = TryApplySessionOnlyManualMark(location, e.Value, e.Class);
+			if (!sessionMarkAdded && !e.Persistent)
+			{
+				_toastService.Show(_localization["Toast.Secret.AlreadyHidden"]);
 				return;
+			}
+			if (!sessionMarkAdded && !_ensureManualRedactionClassEnabled(e.Class))
+				_requestRedactionRefresh();
 			await _persistProjectProfile(CancellationToken.None);
 			var mark = e.Persistent
 				? await _secretRedactionSession.CreatePersistentMarkedSecretAsync(
 					e.Value,
 					location.Key,
+					e.Class,
 					CancellationToken.None)
 				: await _secretRedactionSession.CreatePersistentSourceMarkedSecretAsync(
 					e.Value,
 					location.Key,
 					location.RelativePath,
 					location.SourceOffset,
+					e.Class,
 					CancellationToken.None);
 			if (mark is null)
 			{
@@ -227,7 +258,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 						operationProjectRoot,
 						delta.OperationId,
 						location,
-						e.Value);
+						e.Value,
+						e.Class);
 				throw;
 			}
 			if (_disposed)
@@ -240,7 +272,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 						mark.H,
 						mark.Length,
 						mark.RelativePath,
-						mark.SourceOffset);
+						mark.SourceOffset,
+						mark.Class);
 					_requestRedactionRefresh();
 				}
 				return;
@@ -251,7 +284,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 					operationProjectRoot,
 					delta.OperationId,
 					location,
-					e.Value);
+					e.Value,
+					e.Class);
 			if (IsCurrentProject(operationProjectRoot))
 				await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
 		}
@@ -317,27 +351,29 @@ internal sealed class PreviewSurfaceController : IDisposable
 		string projectRoot,
 		Guid operationId,
 		ManualSecretLocation location,
-		MarkedSecretValue value)
+		MarkedSecretValue value,
+		ManualRedactionClass classification)
 	{
-		ApplySessionOnlyManualMark(location, value);
+		TryApplySessionOnlyManualMark(location, value, classification);
 		_secretRedactionSession.RollbackPendingPersistentMarkDelta(projectRoot, operationId);
 	}
 
-	private bool ApplySessionOnlyManualMark(
+	private bool TryApplySessionOnlyManualMark(
 		ManualSecretLocation location,
-		MarkedSecretValue value)
+		MarkedSecretValue value,
+		ManualRedactionClass classification)
 	{
 		if (!_secretRedactionSession.AddSessionMarkedSecret(
 			    location.RelativePath,
 			    location.SourceOffset,
-			    value))
+			    value,
+			    classification))
 		{
-			_toastService.Show(_localization.Format("Toast.Secret.HiddenCount", 1));
 			return false;
 		}
 
 		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
-		if (!_ensureHideSecretsEnabled())
+		if (!_ensureManualRedactionClassEnabled(classification))
 			_requestRedactionRefresh();
 		return true;
 	}
@@ -844,8 +880,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                         PreviewWarmupMaxFileBytes,
                         PreviewWarmupMaxCharacters,
                         cancellationToken,
-                        pathPresentation?.MapFilePath,
-                        compressionContext)
+						pathPresentation?.MapFilePath,
+						compressionContext)
                     .GetAwaiter()
                     .GetResult();
                 if (string.IsNullOrWhiteSpace(contentText))
@@ -873,7 +909,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     EmptySelectedPaths,
                     OrderedFilePaths: null,
                     treeFormat,
-                    pathPresentation),
+                    pathPresentation,
+					transformationContext),
                 cancellationToken);
             if (string.IsNullOrWhiteSpace(treeText))
                 return null;
@@ -930,10 +967,12 @@ internal sealed class PreviewSurfaceController : IDisposable
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+		var transformationContext = _transformationContextProvider();
+		var outputPathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
+			transformationContext);
 
         if (selectedMode == PreviewContentMode.Tree)
         {
-			var transformationContext = _transformationContextProvider();
 			if (transformationContext?.Redaction is not null && currentTreeRoot is not null)
 			{
 				var selectedFiles = ResolvePreviewFiles(
@@ -947,7 +986,11 @@ internal sealed class PreviewSurfaceController : IDisposable
 					.GetResult();
 			}
 
-            var treePreviewText =
+			var treeRootPresentation = OutputRootPathPresentation.ResolveWithRedaction(
+				currentPath ?? string.Empty,
+				pathPresentation,
+				outputPathRedaction);
+			var treePreviewText =
                 !string.IsNullOrWhiteSpace(currentPath) &&
                 currentTreeRoot is not null
                     ? _textOutputPipeline.BuildTree(
@@ -957,16 +1000,19 @@ internal sealed class PreviewSurfaceController : IDisposable
                             selectedPaths,
                             currentTreeOrderedFilePaths,
                             treeFormat,
-                            pathPresentation),
-                        cancellationToken)
+                            pathPresentation,
+							transformationContext),
+						cancellationToken,
+						outputPathRedaction)
                     : string.Empty;
             var effectiveTreeText =
                 string.IsNullOrEmpty(treePreviewText)
                     ? noDataText
                     : treePreviewText;
             return new PreviewBuildResult(
-                _previewDocumentBuilder.CreateInMemory(
-                    effectiveTreeText));
+				_previewDocumentBuilder.CreateInMemoryWithGeneratedPathRedaction(
+					effectiveTreeText,
+					treeRootPresentation));
         }
 
         var files = ResolvePreviewFiles(
@@ -987,13 +1033,15 @@ internal sealed class PreviewSurfaceController : IDisposable
                         fallbackText));
             }
 
-            var contentDocument =
+			var contentDocument =
                 _previewDocumentBuilder.BuildContentDocumentAsync(
                         files,
                         cancellationToken,
-                        pathPresentation?.MapFilePath,
-                        transformationContext: _transformationContextProvider(),
-                        includeSourceCoordinateMaps: true)
+						pathPresentation?.MapFilePath,
+						transformationContext: transformationContext,
+						includeSourceCoordinateMaps: true,
+						displayRootPath: null,
+						outputPathRedaction: outputPathRedaction)
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -1010,19 +1058,24 @@ internal sealed class PreviewSurfaceController : IDisposable
                     noTextContentText));
         }
 
-        var treeText = selectedPaths.Count > 0
+		var treeRootPathPresentation = OutputRootPathPresentation.ResolveWithRedaction(
+			currentPath,
+			pathPresentation,
+			outputPathRedaction);
+		var displayRootPath = treeRootPathPresentation.Text;
+		var treeText = selectedPaths.Count > 0
             ? _treeExport.BuildSelectedTree(
                 currentPath,
                 currentTreeRoot,
                 selectedPaths,
                 treeFormat,
-                pathPresentation?.DisplayRootPath,
+                displayRootPath,
                 pathPresentation?.DisplayRootName)
             : _treeExport.BuildFullTree(
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
-                pathPresentation?.DisplayRootPath,
+                displayRootPath,
                 pathPresentation?.DisplayRootName);
 
         if (selectedPaths.Count > 0 &&
@@ -1032,7 +1085,7 @@ internal sealed class PreviewSurfaceController : IDisposable
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
-                pathPresentation?.DisplayRootPath,
+                displayRootPath,
                 pathPresentation?.DisplayRootName);
         }
 
@@ -1045,7 +1098,9 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (files.Count == 0)
         {
             return new PreviewBuildResult(
-                _previewDocumentBuilder.CreateInMemory(treeText));
+				_previewDocumentBuilder.CreateInMemoryWithGeneratedPathRedaction(
+					treeText,
+					treeRootPathPresentation));
         }
 
         var document =
@@ -1057,8 +1112,10 @@ internal sealed class PreviewSurfaceController : IDisposable
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
                             currentPath),
-                    transformationContext: _transformationContextProvider(),
-                    includeSourceCoordinateMaps: true)
+                    transformationContext: transformationContext,
+					includeSourceCoordinateMaps: true,
+					outputPathRedaction: outputPathRedaction,
+					treeRootPresentation: treeRootPathPresentation)
                 .GetAwaiter()
                 .GetResult();
         return new PreviewBuildResult(document);
@@ -1167,14 +1224,14 @@ internal sealed class PreviewSurfaceController : IDisposable
             return;
 
         _disposed = true;
-        _controls.TextControl.CopyingToClipboard -=
-            OnCopyingToClipboard;
+		_controls.TextControl.CopyingToClipboard -=
+			OnCopyingToClipboard;
 		_controls.TextControl.RedactionToggleRequested -= OnRedactionToggleRequested;
-        _controls.TextControl.CopiedToClipboard -=
+		_controls.TextControl.BulkRedactionToggleRequested -= OnBulkRedactionToggleRequested;
+		_controls.TextControl.CopiedToClipboard -=
             OnCopiedToClipboard;
         _controls.TextControl.PreviewSelectionChanged -=
             OnSelectionChanged;
-		_controls.TextControl.RedactionToggleRequested -= OnRedactionToggleRequested;
 		_controls.TextControl.ManualSecretMarkRequested -= OnManualSecretMarkRequested;
 		_controls.TextControl.ManualSecretUnmarkRequested -= OnManualSecretUnmarkRequested;
 		_controls.TextControl.ManualSecretMarkRejected -= OnManualSecretMarkRejected;

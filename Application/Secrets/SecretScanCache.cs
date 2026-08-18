@@ -35,16 +35,21 @@ internal readonly record struct SecretFileMetadata(long Length, long LastWriteUt
 	}
 }
 
-internal sealed record SecretFindingMetadata(
+internal sealed record SecretFindingCandidateMetadata(
 	string RuleId,
-	int Start,
-	int Length,
 	string ValueFingerprint,
 	int RuleOrder,
 	SecretFindingSource Source,
 	string? PersistentMarkHash,
 	string? SessionMarkId,
-	PersistentSecretMarkId? PersistentMarkId);
+	PersistentSecretMarkId? PersistentMarkId,
+	RedactionFindingCategory Category);
+
+internal sealed record SecretFindingMetadata(
+	int Start,
+	int Length,
+	SecretFindingSource Source,
+	IReadOnlyList<SecretFindingCandidateMetadata> Candidates);
 
 internal sealed record SecretScanCacheEntry(
 	string NormalizedPath,
@@ -55,14 +60,15 @@ internal sealed record SecretScanCacheEntry(
 	int MarkedSecretsRevision,
 	bool IsBinary,
 	IReadOnlyList<SecretFindingMetadata> Findings,
-	long ApproximateRetainedBytes)
+	long ApproximateRetainedBytes,
+	FileContentClassification? UnscannableClassification = null)
 {
 	/// <summary>
 	/// Text the scanner was not allowed to read. Every entry produced from real text carries a
 	/// fingerprint of that text, so an empty one on a non-binary entry is what distinguishes
 	/// "never looked" from "looked and found nothing" - the two must not read alike.
 	/// </summary>
-	public bool IsUnscannable => !IsBinary && ContentFingerprint.Length == 0;
+	public bool IsUnscannable => UnscannableClassification is not null;
 }
 
 internal sealed class SecretScanCache

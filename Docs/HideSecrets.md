@@ -1,5 +1,11 @@
 # Smart Secrets and Hide Secrets
 
+Hide Secrets and [Hide private data](HidePrivateData.md) share one redaction pipeline and
+one set of Preview decisions. When their findings cover the same range, the secret finding
+is redacted first; keeping it as-is reveals the private-data placeholder rather than the
+original value, which appears only after every candidate in the cascade is kept. The full
+overlap contract is described in [HidePrivateData.md](HidePrivateData.md).
+
 **Smart Secrets** is DevProjex's local, deterministic credential-detection engine.
 **Hide Secrets** is the opt-in switch that applies its decisions to produced output.
 It is off by default and adds no scan cost until enabled.
@@ -26,11 +32,23 @@ selection:
 If Preview shows a placeholder, every later output contains that placeholder. A
 finding kept as-is in Preview returns only that occurrence to its original value;
 the decision then applies to every output for the rest of the application session.
+The Preview context menu can apply the same decision in bulk to every occurrence
+of the rule or to every detected occurrence in the same file, and can hide those
+occurrences again as one action.
 
-Keep-as-is decisions are intentionally session-only. They are not written to
+Individual and bulk keep-as-is decisions are intentionally session-only. They are not written to
 project profiles, so profiles never retain secret fingerprints or source
 locations. If a finding moves after a file change, it is treated as a new
 occurrence and redacted again.
+
+## Manual mark classes
+
+A manual mark belongs to exactly one redaction class: Secret or Private data. The
+corresponding switch controls the whole class, including detector findings and manual marks;
+turning Hide Secrets off reveals Secret marks without changing Private-data marks. Creating a
+Secret mark in Preview enables Hide Secrets automatically. Persistent marks store only a keyed
+value identity and their class, never the original value. Store schema v4 migrates every mark
+created by schema v3 to the Secret class, preserving the behavior it had before classes existed.
 
 ## Placeholders and identity
 

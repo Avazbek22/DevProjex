@@ -1,7 +1,92 @@
+using DevProjex.Application.Compression;
+using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Secrets;
+
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class ProjectTextOutputPipelineTests
 {
+	[Fact]
+	public async Task BuildAsync_ContentUsesTheOriginalPerFilePathFormat()
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile(Path.Combine("src", "Program.cs"), "class Program {}");
+		var root = DirectoryNode(project.Path, DirectoryNode(Path.GetDirectoryName(sourceFile)!, FileNode(sourceFile)));
+		var displayRoot = "https://github.com/owner/repository";
+		var snapshot = CreateSnapshot(project.Path, root, new HashSet<string>(PathComparer.Default)) with
+		{
+			PathPresentation = new ExportPathPresentation(
+				displayRoot,
+				_ => $"{displayRoot}/src/Program.cs")
+		};
+
+		var result = await CreatePipeline().BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			$"{displayRoot}/src/Program.cs:{Environment.NewLine}" +
+			$"\u00A0{Environment.NewLine}" +
+			"class Program {}",
+			result.Content);
+	}
+
+	[Theory]
+	[InlineData((int)ProjectTextOutputMode.Tree)]
+	[InlineData((int)ProjectTextOutputMode.Content)]
+	[InlineData((int)ProjectTextOutputMode.TreeAndContent)]
+	public async Task BuildAsync_PrivateDataMasksDisplayRootInEveryMode(int modeValue)
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile("Program.cs", "class Program {}");
+		var root = DirectoryNode(project.Path, FileNode(sourceFile));
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new NoFindingsDetector(),
+			new PrivateDataDetector());
+		var displayRoot = @"C:\Users\alice\repository";
+		var snapshot = CreateSnapshot(project.Path, root, new HashSet<string>(PathComparer.Default)) with
+		{
+			PathPresentation = new ExportPathPresentation(
+				displayRoot,
+				_ => $@"{displayRoot}\Program.cs"),
+			RedactionContext = new ContentTransformationContext(
+				Compression: null,
+				Redaction: new SecretRedactionContext(
+					project.Path,
+					session,
+					SecretRedactionFeatures.PrivateData))
+		};
+
+		var result = await CreatePipeline().BuildAsync(
+			(ProjectTextOutputMode)modeValue,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(@"C:\Users\[local-user-1]\repository", result.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain(displayRoot, result.Content, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BuildAsync_DisabledPrivateDataLeavesDisplayRootUnchanged()
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile("Program.cs", "class Program {}");
+		var root = DirectoryNode(project.Path, FileNode(sourceFile));
+		var displayRoot = @"C:\Users\alice\repository";
+		var snapshot = CreateSnapshot(project.Path, root, new HashSet<string>(PathComparer.Default)) with
+		{
+			PathPresentation = new ExportPathPresentation(displayRoot, _ => $@"{displayRoot}\Program.cs")
+		};
+
+		var result = await CreatePipeline().BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.StartsWith($@"{displayRoot}\Program.cs:{Environment.NewLine}", result.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain("[local-user-1]", result.Content, StringComparison.Ordinal);
+	}
     [Theory]
     [InlineData((int)ProjectTextOutputMode.Tree)]
     [InlineData((int)ProjectTextOutputMode.Content)]
@@ -173,4 +258,12 @@ public sealed class ProjectTextOutputPipelineTests
             IsAccessDenied: false,
             IconKey: "file",
             Children: []);
+
+	private sealed class NoFindingsDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+	}
 }

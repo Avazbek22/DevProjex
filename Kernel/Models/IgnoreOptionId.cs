@@ -15,5 +15,6 @@ public enum IgnoreOptionId
 	HideSecrets,
 	CompressCode,
 	StripComments,
-	StripBlankLines
+	StripBlankLines,
+	HidePrivateData
 }

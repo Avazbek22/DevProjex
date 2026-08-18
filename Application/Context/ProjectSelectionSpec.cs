@@ -42,7 +42,8 @@ public sealed record ProjectSelectionSpec(
 	bool? CompressCode = null,
 	bool? StripComments = null,
 	bool? StripBlankLines = null,
-	ProjectProfileReference? ProfileSource = null)
+	ProjectProfileReference? ProfileSource = null,
+	bool? HidePrivateData = null)
 {
 	/// <summary>
 	/// Preserves which resolved components came from explicit/profile intent when a selection
@@ -72,6 +73,7 @@ public sealed record ProjectSelectionSpec(
 		GitMode: GitFilteringMode.RespectGitIgnore,
 		Exclusions: StandardExclusions,
 		HideSecrets: false,
+		HidePrivateData: false,
 		CompressCode: false,
 		StripComments: false,
 		StripBlankLines: false,
@@ -93,7 +95,8 @@ public sealed record ProjectSelectionApplicationIntent(
 	ProjectSelectionApplicationMode HideSecrets = ProjectSelectionApplicationMode.Preserve,
 	ProjectSelectionApplicationMode CompressCode = ProjectSelectionApplicationMode.Preserve,
 	ProjectSelectionApplicationMode StripComments = ProjectSelectionApplicationMode.Preserve,
-	ProjectSelectionApplicationMode StripBlankLines = ProjectSelectionApplicationMode.Preserve);
+	ProjectSelectionApplicationMode StripBlankLines = ProjectSelectionApplicationMode.Preserve,
+	ProjectSelectionApplicationMode HidePrivateData = ProjectSelectionApplicationMode.Preserve);
 
 internal sealed record LocalProjectSelectionState(
 	ProjectSelectionProfile Profile,

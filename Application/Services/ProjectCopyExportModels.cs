@@ -1,3 +1,5 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Application.Services;
 
 public enum ProjectCopyExportFormat
@@ -48,27 +50,31 @@ public sealed record ProjectCopyExportRequest(
 	bool CompressCode = false,
 	bool StripComments = false,
 	bool StripBlankLines = false,
-	ProjectCopyNoticeText? NoticeText = null);
+	ProjectCopyNoticeText? NoticeText = null,
+	bool RedactPrivateData = false);
 
 /// <summary>
 /// Localized text for the notice a transformed copy carries in its root. Passed in rather than
 /// resolved here so the Application layer keeps no opinion about the user's language.
 /// </summary>
 /// <param name="ExcludedUnscannable">
-/// Header for the list of files left out because Hide Secrets could not read them. The paths
+/// Header for the list of files left out because content redaction could not inspect them. The paths
 /// follow on their own lines, so the reader can tell an omission from a file that never existed.
 /// </param>
 public sealed record ProjectCopyNoticeText(
 	string Redaction,
 	string Compression,
-	string ExcludedUnscannable = "");
+	string ExcludedUnscannable = "",
+	string TooLargeReason = "",
+	string UnsupportedEncodingReason = "");
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,
 	int CopiedFileCount,
 	int CreatedDirectoryCount,
 	long BytesWritten,
-	int RedactedValueCount = 0);
+	int RedactedValueCount = 0,
+	IReadOnlyList<UnscannableFile>? UnscannableFiles = null);
 
 public sealed record ProjectCopyExportProgress(
 	int ProcessedEntryCount,

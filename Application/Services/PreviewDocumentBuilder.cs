@@ -27,8 +27,11 @@ public sealed class PreviewDocumentBuilder(
     private const long MaximumParallelPreparationFileBytes = 1024 * 1024;
     private const int MaximumParallelPreparations = 8;
 
-    public IPreviewTextDocument CreateInMemory(string? text, IReadOnlyList<PreviewDocumentSection>? sections = null)
-        => new InMemoryPreviewTextDocument(text, sections);
+    public IPreviewTextDocument CreateInMemory(
+		string? text,
+		IReadOnlyList<PreviewDocumentSection>? sections = null,
+		IReadOnlyList<PreviewRedactionSpan>? redactions = null)
+        => new InMemoryPreviewTextDocument(text, sections, redactions);
 
     public IPreviewTextDocument CreateDocument(
         string? text,
@@ -42,6 +45,15 @@ public sealed class PreviewDocumentBuilder(
         builder.AppendExactText(value.AsSpan());
         return builder.BuildDocument(sections);
     }
+
+	public IPreviewTextDocument CreateInMemoryWithGeneratedPathRedaction(
+		string text,
+		OutputPathPresentationResult pathPresentation)
+	{
+		var redactions = new List<PreviewRedactionSpan>(1);
+		AppendGeneratedPathRedactionFromText(redactions, text, pathPresentation);
+		return CreateInMemory(text, redactions: redactions);
+	}
 
     public async Task<IPreviewTextDocument> CreateDocumentAsync(
         Func<Stream, CancellationToken, Task> writeAsync,
@@ -72,12 +84,15 @@ public sealed class PreviewDocumentBuilder(
     public async Task<IPreviewTextDocument?> BuildContentDocumentAsync(
         IEnumerable<string> filePaths,
         CancellationToken cancellationToken,
-        Func<string, string>? displayPathMapper,
-        bool includeOmissionMarkers = false,
+		Func<string, string>? displayPathMapper,
+		bool includeOmissionMarkers = false,
 		ContentTransformationContext? transformationContext = null,
-		bool includeSourceCoordinateMaps = false)
+		bool includeSourceCoordinateMaps = false,
+		string? displayRootPath = null,
+		OutputPathRedactionDecision? outputPathRedaction = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
+		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
         if (orderedFiles.Count == 0)
         {
@@ -91,17 +106,29 @@ public sealed class PreviewDocumentBuilder(
 		var redactions = new List<PreviewRedactionSpan>();
 		using var transformationScope = transformationContext?.BeginOutput(orderedFiles);
 		var redactionScope = transformationScope?.Redaction;
-        var anyWritten = await AppendContentEntriesAsync(
+		var wroteRoot = false;
+		if (!string.IsNullOrWhiteSpace(displayRootPath))
+		{
+			var rootPresentation = OutputRootPathPresentation.ResolvePath(
+				displayRootPath,
+				outputPathRedaction);
+			var rootLine = builder.LineCount + 1;
+			builder.AppendLine($"{rootPresentation.Text}:");
+			AppendGeneratedPathRedaction(redactions, rootPresentation, rootLine);
+			wroteRoot = true;
+		}
+		var anyWritten = await AppendContentEntriesAsync(
             builder,
             orderedFiles,
             sections,
             displayPathMapper,
-            prependSectionSeparator: false,
+			prependSectionSeparator: wroteRoot,
             includeOmissionMarkers,
 			redactionScope,
 			transformationScope,
 			redactions,
 			includeSourceCoordinateMaps,
+			outputPathRedaction,
             cancellationToken).ConfigureAwait(false);
 
 		CompleteTransformation(transformationScope, transformationContext);
@@ -116,11 +143,14 @@ public sealed class PreviewDocumentBuilder(
         IEnumerable<string> filePaths,
         CancellationToken cancellationToken,
         Func<string, string>? displayPathMapper,
-        bool includeOmissionMarkers = false,
+		bool includeOmissionMarkers = false,
 		ContentTransformationContext? transformationContext = null,
-		bool includeSourceCoordinateMaps = false)
+		bool includeSourceCoordinateMaps = false,
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		OutputPathPresentationResult? treeRootPresentation = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
+		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
         var normalizedTreeText = treeText.TrimEnd('\r', '\n');
 
@@ -137,6 +167,8 @@ public sealed class PreviewDocumentBuilder(
 		using var transformationScope = transformationContext?.BeginOutput(orderedFiles);
 		var redactionScope = transformationScope?.Redaction;
         var wroteTree = AppendMultilineText(builder, normalizedTreeText.AsSpan());
+		if (treeRootPresentation is { } rootPresentation)
+			AppendGeneratedPathRedactionFromText(redactions, normalizedTreeText, rootPresentation);
         var wroteContent = await AppendContentEntriesAsync(
             builder,
             orderedFiles,
@@ -148,6 +180,7 @@ public sealed class PreviewDocumentBuilder(
 			transformationScope,
 			redactions,
 			includeSourceCoordinateMaps,
+			outputPathRedaction,
             cancellationToken).ConfigureAwait(false);
 		CompleteTransformation(transformationScope, transformationContext);
 
@@ -171,9 +204,11 @@ public sealed class PreviewDocumentBuilder(
 		ContentTransformationContext? transformationContext,
 		CancellationToken cancellationToken)
 	{
-		var session = transformationContext?.Redaction?.Session;
-		if (session is not null &&
-		    await session.EnsureCurrentPersistentIdentityReadyAsync(cancellationToken).ConfigureAwait(false) !=
+		var redaction = transformationContext?.Redaction;
+		if (redaction is not null &&
+		    await redaction.Session
+			    .EnsureCurrentPersistentIdentityReadyAsync(redaction.Features, cancellationToken)
+			    .ConfigureAwait(false) !=
 		    PersistentSecretIdentityAvailability.Ready)
 		{
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
@@ -191,6 +226,7 @@ public sealed class PreviewDocumentBuilder(
 		ContentTransformationScope? transformationScope,
 		ICollection<PreviewRedactionSpan> redactions,
 		bool includeSourceCoordinateMaps,
+		OutputPathRedactionDecision? outputPathRedaction,
         CancellationToken cancellationToken)
     {
         var anyWritten = false;
@@ -236,9 +272,13 @@ public sealed class PreviewDocumentBuilder(
             anyWritten = true;
             trimTrailingEstimatedLine = false;
 
-            var displayPath = prepared.DisplayPath;
+			var displayPathPresentation = OutputRootPathPresentation.ResolvePath(
+				prepared.DisplayPath,
+				outputPathRedaction);
+			var displayPath = displayPathPresentation.Text;
             var sectionStartLine = builder.LineCount + 1;
             builder.AppendLine($"{displayPath}:");
+			AppendGeneratedPathRedaction(redactions, displayPathPresentation, sectionStartLine);
             builder.AppendLine(ClipboardBlankLine);
 
             if (!readResult.IsText || content is null)
@@ -542,7 +582,9 @@ public sealed class PreviewDocumentBuilder(
 						span.Source,
 						span.PersistentMarkHash,
 						span.SessionMarkId,
-						span.PersistentMarkId));
+						span.PersistentMarkId,
+						span.RelativePath,
+						span.CascadedOccurrenceIds));
 				}
 
 				if (index < spanText.Length)
@@ -558,6 +600,54 @@ public sealed class PreviewDocumentBuilder(
 			}
 			sourcePosition = span.Start + span.Length;
 		}
+	}
+
+	private static void AppendGeneratedPathRedaction(
+		ICollection<PreviewRedactionSpan> destination,
+		OutputPathPresentationResult presentation,
+		int lineNumber)
+	{
+		if (!presentation.HasRedaction)
+			return;
+
+		destination.Add(new PreviewRedactionSpan(
+			presentation.OccurrenceId!,
+			OutputRootPathPresentation.LocalUserRuleId,
+			lineNumber,
+			presentation.SegmentStart,
+			presentation.SegmentLength,
+			presentation.State,
+			presentation.SourceLength,
+			SecretFindingSource.GeneratedPath));
+	}
+
+	private static void AppendGeneratedPathRedactionFromText(
+		ICollection<PreviewRedactionSpan> destination,
+		string text,
+		OutputPathPresentationResult presentation)
+	{
+		if (!presentation.HasRedaction)
+			return;
+
+		var segment = presentation.Text.AsSpan(
+			presentation.SegmentStart,
+			presentation.SegmentLength);
+		var segmentStart = text.AsSpan().IndexOf(segment);
+		if (segmentStart < 0)
+			return;
+
+		var line = 1;
+		var column = 0;
+		AdvancePosition(text.AsSpan(0, segmentStart), ref line, ref column);
+		destination.Add(new PreviewRedactionSpan(
+			presentation.OccurrenceId!,
+			OutputRootPathPresentation.LocalUserRuleId,
+			line,
+			column,
+			presentation.SegmentLength,
+			presentation.State,
+			presentation.SourceLength,
+			SecretFindingSource.GeneratedPath));
 	}
 
 	private static void AdvancePosition(ReadOnlySpan<char> text, ref int line, ref int column)

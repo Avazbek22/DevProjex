@@ -301,33 +301,6 @@ internal static class StructuredSecretDetector
 	private const int ContainerValueOrder = -150;
 	private const int EnvironmentValueOrder = -100;
 
-	private static readonly string[] LiteralPlaceholderValues =
-	[
-		"changeme",
-		"change_me",
-		"change-me",
-		"your-password-here",
-		"your_password_here",
-		"your-api-key-here",
-		"your_api_key_here",
-		"your-token-here",
-		"your_token_here",
-		"insert-key-here",
-		"insert_key_here",
-		"enter-password-here",
-		"enter_password_here",
-		"replace_me",
-		"replaceme",
-		"todo",
-		"tbd",
-		"placeholder",
-		"n/a",
-		"na",
-		"null",
-		"none",
-		"unset"
-	];
-
 	private static readonly string[] CredentialSchemes =
 	[
 		"postgres://",
@@ -510,57 +483,7 @@ internal static class StructuredSecretDetector
 	}
 
 	internal static bool IsRfc2606DocumentationHost(ReadOnlySpan<char> host)
-	{
-		host = host.Trim();
-		if (host.IsEmpty)
-			return false;
-
-		if (host[0] == '[')
-		{
-			var closingBracket = host.IndexOf(']');
-			if (closingBracket <= 0)
-				return false;
-			var portSeparator = host.LastIndexOf(':');
-			if (portSeparator > closingBracket)
-				host = host[..portSeparator];
-			if (host.Length <= 2 || host[^1] != ']')
-				return false;
-			host = host[1..^1];
-		}
-		else
-		{
-			var portSeparator = host.LastIndexOf(':');
-			if (portSeparator >= 0)
-				host = host[..portSeparator];
-		}
-
-		if (host.IsEmpty)
-			return false;
-		if (host[^1] == '.')
-			host = host[..^1];
-		if (host.IsEmpty)
-			return false;
-		if (IsHostOrSubdomainOf(host, "example.com") ||
-		    IsHostOrSubdomainOf(host, "example.net") ||
-		    IsHostOrSubdomainOf(host, "example.org"))
-		{
-			return true;
-		}
-
-		var lastLabelSeparator = host.LastIndexOf('.');
-		if (lastLabelSeparator <= 0)
-			return false;
-		var lastLabel = host[(lastLabelSeparator + 1)..];
-		return lastLabel.Equals("test", StringComparison.OrdinalIgnoreCase) ||
-		       lastLabel.Equals("example", StringComparison.OrdinalIgnoreCase) ||
-		       lastLabel.Equals("invalid", StringComparison.OrdinalIgnoreCase);
-	}
-
-	private static bool IsHostOrSubdomainOf(ReadOnlySpan<char> host, string domain) =>
-		host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
-		host.Length > domain.Length &&
-		host[host.Length - domain.Length - 1] == '.' &&
-		host.EndsWith(domain, StringComparison.OrdinalIgnoreCase);
+		=> SecretDetectionTextPolicy.IsRfc2606DocumentationHost(host);
 
 	private static int FindUriAuthorityEnd(
 		ReadOnlySpan<char> content,
@@ -1513,41 +1436,7 @@ internal static class StructuredSecretDetector
 	}
 
 	internal static bool IsReferenceOrPlaceholder(ReadOnlySpan<char> value)
-	{
-		value = value.Trim();
-		if (value.IsEmpty)
-			return true;
-		if (IsWrapped(value, "${", "}") ||
-		       IsWrapped(value, "$(", ")") ||
-		       IsWrapped(value, "{{", "}}") ||
-		       IsWrapped(value, "<", ">") ||
-		       value.Length > 2 && value[0] == '%' && value[^1] == '%')
-		{
-			return true;
-		}
-
-		foreach (var placeholder in LiteralPlaceholderValues)
-		{
-			if (value.Equals(placeholder, StringComparison.OrdinalIgnoreCase))
-				return true;
-		}
-
-		// Numeric repeats remain valid weak credentials (0000 is common). Repeated
-		// non-digit sentinels are template material when the entire value is the run.
-		if (value.Length < 4 || char.IsDigit(value[0]))
-			return false;
-		for (var index = 1; index < value.Length; index++)
-		{
-			if (value[index] != value[0])
-				return false;
-		}
-		return true;
-	}
-
-	private static bool IsWrapped(ReadOnlySpan<char> value, string prefix, string suffix) =>
-		value.Length > prefix.Length + suffix.Length &&
-		value.StartsWith(prefix, StringComparison.Ordinal) &&
-		value.EndsWith(suffix, StringComparison.Ordinal);
+		=> SecretDetectionTextPolicy.IsReferenceOrPlaceholder(value);
 
 	private static bool IsSensitiveKey(ReadOnlySpan<char> key, SmartSecretStack stack)
 	{

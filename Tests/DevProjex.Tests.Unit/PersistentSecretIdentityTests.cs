@@ -120,6 +120,54 @@ public sealed class PersistentSecretIdentityTests
 	}
 
 	[Fact]
+	public async Task IdentityReadiness_IgnoresPersistentMarksFromDisabledClass()
+	{
+		var available = new TestIdentityProvider();
+		Assert.True(PersistentSecretIdentity.TryCreateV2(available, Secret, out var identity));
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("config.txt", "ordinary content");
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new EmptyDetector(),
+			new EmptyDetector(),
+			persistentIdentityProvider: new UnavailableIdentityProvider());
+		session.ReplaceMarkedSecrets([
+			new MarkedSecretProfileEntry(
+				identity,
+				null,
+				Secret.Length,
+				Class: ManualRedactionClass.PrivateData)
+		]);
+
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.Ready,
+			await session.EnsureCurrentPersistentIdentityReadyAsync(
+				SecretRedactionFeatures.Secrets,
+				TestContext.Current.CancellationToken));
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.PermanentlyUnavailable,
+			await session.EnsureCurrentPersistentIdentityReadyAsync(
+				SecretRedactionFeatures.PrivateData,
+				TestContext.Current.CancellationToken));
+
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+		var secretsOnly = await preparer.AnalyzeAsync(
+			new SecretRedactionContext(
+				workspace.Path,
+				session,
+				SecretRedactionFeatures.Secrets),
+			[path],
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, secretsOnly.DetectedCount);
+		await Assert.ThrowsAsync<SecretDetectionException>(() => preparer.AnalyzeAsync(
+			new SecretRedactionContext(
+				workspace.Path,
+				session,
+				SecretRedactionFeatures.PrivateData),
+			[path],
+			TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public async Task LegacyMatch_IsAtomicallyMigratedToV2Once()
 	{
 		using var workspace = new TemporaryDirectory();

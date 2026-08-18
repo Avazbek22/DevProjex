@@ -48,12 +48,15 @@ internal sealed class StartupInteractionController(
 		var gitMode = applicationIntent?.GitMode ?? ResolveLegacyMode(selectionSpec.GitMode);
 		var exclusionMode = applicationIntent?.Exclusions ?? ResolveLegacyMode(selectionSpec.Exclusions);
 		var hideSecretsMode = applicationIntent?.HideSecrets ?? ResolveLegacyMode(selectionSpec.HideSecrets);
+		var hidePrivateDataMode = applicationIntent?.HidePrivateData ??
+		                          ResolveLegacyMode(selectionSpec.HidePrivateData);
 		var compressCodeMode = applicationIntent?.CompressCode ?? ResolveLegacyMode(selectionSpec.CompressCode);
 		var stripCommentsMode = applicationIntent?.StripComments ?? ResolveLegacyMode(selectionSpec.StripComments);
 		var stripBlankLinesMode = applicationIntent?.StripBlankLines ?? ResolveLegacyMode(selectionSpec.StripBlankLines);
 		var applyGitMode = gitMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyExclusions = exclusionMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyHideSecrets = hideSecretsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+		var applyHidePrivateData = hidePrivateDataMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyCompressCode = compressCodeMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyStripComments = stripCommentsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
 		var applyStripBlankLines = stripBlankLinesMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
@@ -80,6 +83,7 @@ internal sealed class StartupInteractionController(
 					GitMode = applyGitMode ? selectionSpec.GitMode : null,
 					Exclusions = applyExclusions ? selectionSpec.Exclusions : null,
 					HideSecrets = null,
+					HidePrivateData = null,
 					CompressCode = null,
 					StripComments = null,
 					StripBlankLines = null
@@ -96,6 +100,8 @@ internal sealed class StartupInteractionController(
 				extensionMode == ProjectSelectionApplicationMode.ResetToDefaults);
 		if (applyHideSecrets)
 			selection.ApplyHideSecretsOverride(selectionSpec.HideSecrets);
+		if (applyHidePrivateData)
+			selection.ApplyHidePrivateDataOverride(selectionSpec.HidePrivateData);
 		if (applyCompressCode)
 			selection.ApplyCompressCodeOverride(selectionSpec.CompressCode);
 		if (applyStripComments)
@@ -132,13 +138,16 @@ internal sealed class StartupInteractionController(
                                  ProjectSelectionAdapter.ToExclusions(inheritedIgnoreOptions);
 		var resolvedHideSecrets = selectionSpec.HideSecrets ??
 		                          inheritedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets);
+		var resolvedHidePrivateData = selectionSpec.HidePrivateData ??
+		                              inheritedIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData);
         return new HashSet<IgnoreOptionId>(
             ProjectSelectionAdapter.ToIgnoreOptions(
                 selectionSpec with
                 {
                     GitMode = resolvedGitMode,
 					Exclusions = resolvedExclusions,
-					HideSecrets = resolvedHideSecrets
+					HideSecrets = resolvedHideSecrets,
+					HidePrivateData = resolvedHidePrivateData
                 }));
     }
 

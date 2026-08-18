@@ -1,5 +1,6 @@
 using DevProjex.Avalonia.Collections;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Application.Secrets;
 using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
@@ -69,11 +70,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _allIgnoreChecked;
 	private bool _allContentProcessingChecked;
 	private IgnoreOptionViewModel? _hideSecretsOption;
-	private SecretScanState _contentProcessingScanState;
-	private int? _contentProcessingDetectedCount;
-	private int? _contentProcessingHiddenCount;
-	private int? _contentProcessingSkippedFileCount;
-	private int? _contentProcessingFailedFileCount;
+	private IgnoreOptionViewModel? _hidePrivateDataOption;
+	private ContentRedactionStatus _secretsRedactionStatus;
+	private ContentRedactionStatus _privateDataRedactionStatus;
 	private int? _compressedFilesCount;
 	private int? _compressionTotalFilesCount;
 	private long? _compressionSourceCharacters;
@@ -224,6 +223,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		}
 	}
 	public bool HasHideSecretsOption => HideSecretsOption is not null;
+	public IgnoreOptionViewModel? HidePrivateDataOption
+	{
+		get => _hidePrivateDataOption;
+		private set
+		{
+			if (ReferenceEquals(_hidePrivateDataOption, value)) return;
+			_hidePrivateDataOption = value;
+			RaisePropertyChanged();
+		}
+	}
 	public bool HasContentProcessingOptions => ContentProcessingOptions.Count > 0;
     public ObservableCollection<FontFamily> FontFamilies { get; } = [];
     public ObservableCollection<RecentProjectEntryViewModel> RecentFolders { get; } = [];
@@ -1582,6 +1591,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string SettingsIgnoreTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsTitle { get; private set; } = string.Empty;
 	public string SettingsSecretsNotice { get; private set; } = string.Empty;
+	public string SettingsPrivateDataNotice { get; private set; } = string.Empty;
 	public string SettingsCompressionNotice { get; private set; } = string.Empty;
 	public string SettingsCommentStripNotice { get; private set; } = string.Empty;
 	public string SettingsBlankLineStripNotice { get; private set; } = string.Empty;
@@ -1589,7 +1599,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	public string PreviewSecretKeptTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretAlwaysHideFormat { get; private set; } = string.Empty;
 	public string PreviewSecretHideHereFormat { get; private set; } = string.Empty;
+	public string PreviewPrivateDataAlwaysHideFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideHereTooltip { get; private set; } = string.Empty;
+	public string PreviewSecretAlwaysHideTooltip { get; private set; } = string.Empty;
+	public string PreviewPrivateDataAlwaysHideTooltip { get; private set; } = string.Empty;
 	public string PreviewSecretRemoveMark { get; private set; } = string.Empty;
+	public string PreviewSecretKeepAllRuleFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideAllRuleFormat { get; private set; } = string.Empty;
+	public string PreviewSecretKeepAllFileFormat { get; private set; } = string.Empty;
+	public string PreviewSecretHideAllFileFormat { get; private set; } = string.Empty;
 	public string PreviewSecretSelectionTooShort { get; private set; } = string.Empty;
 	public string PreviewSecretSelectionTooLong { get; private set; } = string.Empty;
 	public string PreviewSecretSelectionMultiline { get; private set; } = string.Empty;
@@ -1748,14 +1766,23 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
 		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
 		UpdateSettingsSecretsNotice();
+		UpdateSettingsPrivateDataNotice();
 		UpdateSettingsCompressionNotice();
 		UpdateSettingsCommentStripNotice();
 		UpdateSettingsBlankLineStripNotice();
 		PreviewSecretRedactedTooltip = _localization["Preview.Secret.Redacted.Tooltip"];
 		PreviewSecretKeptTooltip = _localization["Preview.Secret.Kept.Tooltip"];
-		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Always"];
-		PreviewSecretHideHereFormat = _localization["Preview.Secret.Mark.Here"];
+		PreviewSecretAlwaysHideFormat = _localization["Preview.Secret.Mark.Secret.Always"];
+		PreviewSecretHideHereFormat = _localization["Preview.Secret.Mark.Secret.Here"];
+		PreviewPrivateDataAlwaysHideFormat = _localization["Preview.Secret.Mark.PrivateData.Always"];
+		PreviewSecretHideHereTooltip = _localization["Preview.Secret.Mark.Tooltip.Here"];
+		PreviewSecretAlwaysHideTooltip = _localization["Preview.Secret.Mark.Tooltip.Persistent"];
+		PreviewPrivateDataAlwaysHideTooltip = _localization["Preview.Secret.Mark.Tooltip.PrivateData"];
 		PreviewSecretRemoveMark = _localization["Preview.Secret.Mark.Remove"];
+		PreviewSecretKeepAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Keep"];
+		PreviewSecretHideAllRuleFormat = _localization["Preview.Secret.Bulk.Rule.Hide"];
+		PreviewSecretKeepAllFileFormat = _localization["Preview.Secret.Bulk.File.Keep"];
+		PreviewSecretHideAllFileFormat = _localization["Preview.Secret.Bulk.File.Hide"];
 		PreviewSecretSelectionTooShort = _localization["Preview.Secret.Mark.Validation.TooShort"];
 		PreviewSecretSelectionTooLong = _localization["Preview.Secret.Mark.Validation.TooLong"];
 		PreviewSecretSelectionMultiline = _localization["Preview.Secret.Mark.Validation.Multiline"];
@@ -1908,11 +1935,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(SettingsIgnoreTitle));
 		RaisePropertyChanged(nameof(SettingsSecretsTitle));
 		RaisePropertyChanged(nameof(SettingsSecretsNotice));
+		RaisePropertyChanged(nameof(SettingsPrivateDataNotice));
 		RaisePropertyChanged(nameof(PreviewSecretRedactedTooltip));
 		RaisePropertyChanged(nameof(PreviewSecretKeptTooltip));
 		RaisePropertyChanged(nameof(PreviewSecretAlwaysHideFormat));
 		RaisePropertyChanged(nameof(PreviewSecretHideHereFormat));
+		RaisePropertyChanged(nameof(PreviewPrivateDataAlwaysHideFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideHereTooltip));
+		RaisePropertyChanged(nameof(PreviewSecretAlwaysHideTooltip));
+		RaisePropertyChanged(nameof(PreviewPrivateDataAlwaysHideTooltip));
 		RaisePropertyChanged(nameof(PreviewSecretRemoveMark));
+		RaisePropertyChanged(nameof(PreviewSecretKeepAllRuleFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideAllRuleFormat));
+		RaisePropertyChanged(nameof(PreviewSecretKeepAllFileFormat));
+		RaisePropertyChanged(nameof(PreviewSecretHideAllFileFormat));
 		RaisePropertyChanged(nameof(PreviewSecretSelectionTooShort));
 		RaisePropertyChanged(nameof(PreviewSecretSelectionTooLong));
 		RaisePropertyChanged(nameof(PreviewSecretSelectionMultiline));
@@ -2051,6 +2087,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			IgnoreOptions.Where(option => !contentTransformationIds.Contains(option.Id)));
 		HideSecretsOption = IgnoreOptions.FirstOrDefault(
 			static option => option.Id == IgnoreOptionId.HideSecrets);
+		HidePrivateDataOption = IgnoreOptions.FirstOrDefault(
+			static option => option.Id == IgnoreOptionId.HidePrivateData);
 		SynchronizeContentProcessingOptions(contentTransformationIds);
 		RaisePropertyChanged(nameof(HasContentProcessingOptions));
 	}
@@ -2058,16 +2096,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private void SynchronizeContentProcessingOptions(IReadOnlySet<IgnoreOptionId>? transformationIds = null)
 	{
 		transformationIds ??= ProjectPresentationCatalog.ContentTransformationOptionIds;
-		// Both transformation rows are always offered: scanning and compression are opt-in, so the
+		// Transformation rows are always offered: scanning and compression are opt-in, so the
 		// user must be able to reach an unchecked checkbox before any result exists for it.
 		var desiredOptions = IgnoreOptions.Where(option =>
 				transformationIds.Contains(option.Id))
 			.ToArray();
 		if (!ContentProcessingOptions.SequenceEqual(desiredOptions, ReferenceEqualityComparer.Instance))
 		{
-			// The Hide Secrets row appears the moment its first scan finishes, while the user may
-			// already be interacting with the compression row below. Removing and inserting single
-			// rows keeps every other row's control alive; a collection reset would regenerate all
+			// Rows can be relabeled while the user interacts with another transformation below.
+			// Removing and inserting single rows keeps every other row's control alive; a reset would regenerate all
 			// containers and can swallow a click aimed at a checkbox that was just rebuilt.
 			var collection = ContentProcessingOptions;
 			for (var index = collection.Count - 1; index >= 0; index--)
@@ -2093,23 +2130,42 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		int? detectedCount = null,
 		int? hiddenCount = null,
 		int? skippedFileCount = null,
-		int? failedFileCount = null)
-	{
-		if (_contentProcessingScanState == scanState &&
-		    _contentProcessingDetectedCount == detectedCount &&
-		    _contentProcessingHiddenCount == hiddenCount &&
-		    _contentProcessingSkippedFileCount == skippedFileCount &&
-		    _contentProcessingFailedFileCount == failedFileCount)
-		{
-			return;
-		}
+		int? failedFileCount = null,
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null) =>
+		SetRedactionStatus(
+			IgnoreOptionId.HideSecrets,
+			new ContentRedactionStatus(
+				scanState,
+				detectedCount,
+				hiddenCount,
+				skippedFileCount,
+				failedFileCount,
+				unscannableFiles));
 
-		_contentProcessingScanState = scanState;
-		_contentProcessingDetectedCount = detectedCount;
-		_contentProcessingHiddenCount = hiddenCount;
-		_contentProcessingSkippedFileCount = skippedFileCount;
-		_contentProcessingFailedFileCount = failedFileCount;
-		UpdateSettingsSecretsNotice();
+	internal void SetPrivateDataProcessingStatus(
+		SecretScanState scanState,
+		int? detectedCount = null,
+		int? hiddenCount = null,
+		int? skippedFileCount = null,
+		int? failedFileCount = null,
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null) =>
+		SetRedactionStatus(
+			IgnoreOptionId.HidePrivateData,
+			new ContentRedactionStatus(
+				scanState,
+				detectedCount,
+				hiddenCount,
+				skippedFileCount,
+				failedFileCount,
+				unscannableFiles));
+
+	private void SetRedactionStatus(IgnoreOptionId optionId, ContentRedactionStatus status)
+	{
+		ref var current = ref GetRedactionStatus(optionId);
+		if (current == status)
+			return;
+		current = status;
+		UpdateRedactionNotice(optionId);
 	}
 
 	internal void SetCompressionStatus(
@@ -2205,28 +2261,48 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	}
 
 	private void UpdateSettingsSecretsNotice()
+		=> UpdateRedactionNotice(IgnoreOptionId.HideSecrets);
+
+	private void UpdateSettingsPrivateDataNotice()
+		=> UpdateRedactionNotice(IgnoreOptionId.HidePrivateData);
+
+	private void UpdateRedactionNotice(IgnoreOptionId optionId)
 	{
-		var secrets = _contentProcessingScanState switch
+		var status = GetRedactionStatus(optionId);
+		var notice = status.ScanState switch
 		{
-			SecretScanState.Failed => FormatFailedSecretScanStatus(),
-			SecretScanState.Limited => FormatLimitedSecretScanStatus(),
+			SecretScanState.Failed => FormatFailedRedactionStatus(status),
+			SecretScanState.Limited => FormatLimitedRedactionStatus(status),
 			SecretScanState.Completed when
-				_contentProcessingDetectedCount is { } detected &&
-				_contentProcessingHiddenCount is { } hidden &&
+				status.DetectedCount is { } detected &&
+				status.HiddenCount is { } hidden &&
 				detected > 0 =>
 				_localization.Format("Settings.Secrets.Status.Applied", detected, hidden),
-			SecretScanState.Completed when _contentProcessingDetectedCount == 0 =>
-				_localization["Settings.Ignore.HideSecrets.NoMatches"],
+			SecretScanState.Completed when status.DetectedCount == 0 =>
+				_localization[optionId == IgnoreOptionId.HideSecrets
+					? "Settings.Ignore.HideSecrets.NoMatches"
+					: "Settings.Ignore.HidePrivateData.NoMatches"],
 			_ => string.Empty
 		};
-		if (string.Equals(SettingsSecretsNotice, secrets, StringComparison.Ordinal))
+		var current = optionId == IgnoreOptionId.HideSecrets
+			? SettingsSecretsNotice
+			: SettingsPrivateDataNotice;
+		if (string.Equals(current, notice, StringComparison.Ordinal))
 		{
 			UpdateContentProcessingOptionStatuses();
 			return;
 		}
 
-		SettingsSecretsNotice = secrets;
-		RaisePropertyChanged(nameof(SettingsSecretsNotice));
+		if (optionId == IgnoreOptionId.HideSecrets)
+		{
+			SettingsSecretsNotice = notice;
+			RaisePropertyChanged(nameof(SettingsSecretsNotice));
+		}
+		else
+		{
+			SettingsPrivateDataNotice = notice;
+			RaisePropertyChanged(nameof(SettingsPrivateDataNotice));
+		}
 		UpdateContentProcessingOptionStatuses();
 	}
 
@@ -2236,51 +2312,83 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	/// line tells the user the warning indicator retries the scan, because a failure here is
 	/// usually transient - a file locked by an editor or a scanner - and worth one more attempt.
 	/// </summary>
-	private string FormatFailedSecretScanStatus()
+	private string FormatFailedRedactionStatus(ContentRedactionStatus status)
 	{
 		var lines = new List<string>(4);
-		if (_contentProcessingDetectedCount is { } detected &&
-		    _contentProcessingHiddenCount is { } hidden &&
+		if (status.DetectedCount is { } detected &&
+		    status.HiddenCount is { } hidden &&
 		    detected > 0)
 		{
 			lines.Add(_localization.Format("Settings.Secrets.Status.Applied", detected, hidden));
 		}
 
-		lines.Add(_contentProcessingFailedFileCount is int failed and > 0
+		lines.Add(status.FailedFileCount is int failed and > 0
 			? _localization.Format("Settings.Secrets.Status.FailedFiles", failed)
 			: _localization["Settings.Secrets.Status.Failed"]);
-		if (_contentProcessingSkippedFileCount is int skipped and > 0)
+		if (status.SkippedFileCount is int skipped and > 0)
 		{
+			var tooLargeCount = status.UnscannableFiles?.Count(static file =>
+				file.Classification == FileContentClassification.TooLarge) ?? skipped;
+			if (tooLargeCount > 0)
+			{
 			lines.Add(_localization.Format(
 				"Settings.Secrets.Status.SizeLimit",
-				skipped,
+				tooLargeCount,
 				SecretRedactionOutputPreparer.MaximumScannableFileBytes / (1024 * 1024)));
+			}
 		}
+		AppendUnscannableFiles(lines, status.UnscannableFiles);
 
 		lines.Add(_localization["Settings.Secrets.Status.Retry"]);
 		return string.Join(Environment.NewLine, lines);
 	}
 
-	private string FormatLimitedSecretScanStatus()
+	private string FormatLimitedRedactionStatus(ContentRedactionStatus status)
 	{
-		var skipped = _contentProcessingSkippedFileCount.GetValueOrDefault();
+		var skipped = status.SkippedFileCount.GetValueOrDefault();
 		var sizeLimitMegabytes = SecretRedactionOutputPreparer.MaximumScannableFileBytes /
 		                         (1024 * 1024);
-		var coverage = _localization.Format(
-			"Settings.Secrets.Status.SizeLimit",
-			skipped,
-			sizeLimitMegabytes);
-		if (_contentProcessingDetectedCount is not { } detected ||
-		    _contentProcessingHiddenCount is not { } hidden ||
-		    detected <= 0)
+		var lines = new List<string>(4);
+		if (status.DetectedCount is { } detected &&
+		    status.HiddenCount is { } hidden &&
+		    detected > 0)
 		{
-			return coverage;
+			lines.Add(_localization.Format("Settings.Secrets.Status.Applied", detected, hidden));
 		}
+		var tooLargeCount = status.UnscannableFiles?.Count(static file =>
+			file.Classification == FileContentClassification.TooLarge) ?? skipped;
+		if (tooLargeCount > 0)
+		{
+			lines.Add(_localization.Format(
+				"Settings.Secrets.Status.SizeLimit",
+				tooLargeCount,
+				sizeLimitMegabytes));
+		}
+		AppendUnscannableFiles(lines, status.UnscannableFiles);
+		return string.Join(Environment.NewLine, lines);
+	}
 
-		return string.Concat(
-			_localization.Format("Settings.Secrets.Status.Applied", detected, hidden),
-			Environment.NewLine,
-			coverage);
+	private void AppendUnscannableFiles(
+		List<string> lines,
+		IReadOnlyList<UnscannableFile>? unscannableFiles)
+	{
+		if (unscannableFiles is not { Count: > 0 })
+			return;
+		lines.Add(_localization.Format("Content.Redaction.UnscannableFiles", unscannableFiles.Count));
+		foreach (var file in unscannableFiles)
+		{
+			var reasonKey = file.Classification switch
+			{
+				FileContentClassification.TooLarge => "Content.Redaction.Reason.TooLarge",
+				FileContentClassification.UnsupportedEncoding =>
+					"Content.Redaction.Reason.UnsupportedEncoding",
+				_ => throw new ArgumentOutOfRangeException(
+					nameof(file.Classification),
+					file.Classification,
+					null)
+			};
+			lines.Add(string.Concat(file.Path, " - ", _localization[reasonKey]));
+		}
 	}
 
 	private void UpdateSettingsCompressionNotice()
@@ -2368,15 +2476,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	{
 		foreach (var option in IgnoreOptions)
 		{
-			option.IsWarningStatus =
-				option.Id == IgnoreOptionId.HideSecrets &&
-				_contentProcessingScanState == SecretScanState.Failed;
+			option.IsWarningStatus = (option.Id is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData) &&
+				GetRedactionStatus(option.Id).ScanState == SecretScanState.Failed;
 			// The notice is already empty for every state without something to say (Pending,
 			// Scanning, Disabled), so it can feed the indicator directly. This is what lets a clean
-			// completed scan show its "no secrets found" confirmation instead of an empty section.
+			// completed scan show its "no matches" confirmation instead of an empty section.
 			option.StatusText = option.Id switch
 			{
 				IgnoreOptionId.HideSecrets => SettingsSecretsNotice,
+				IgnoreOptionId.HidePrivateData => SettingsPrivateDataNotice,
 				IgnoreOptionId.CompressCode when _appliedCompressCodeEnabled => SettingsCompressionNotice,
 				IgnoreOptionId.StripComments when _appliedStripCommentsEnabled => SettingsCommentStripNotice,
 				IgnoreOptionId.StripBlankLines when _appliedStripBlankLinesEnabled => SettingsBlankLineStripNotice,
@@ -2384,6 +2492,23 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			};
 		}
 	}
+
+	private ref ContentRedactionStatus GetRedactionStatus(IgnoreOptionId optionId)
+	{
+		if (optionId == IgnoreOptionId.HideSecrets)
+			return ref _secretsRedactionStatus;
+		if (optionId == IgnoreOptionId.HidePrivateData)
+			return ref _privateDataRedactionStatus;
+		throw new ArgumentOutOfRangeException(nameof(optionId), optionId, null);
+	}
+
+	private readonly record struct ContentRedactionStatus(
+		SecretScanState ScanState,
+		int? DetectedCount = null,
+		int? HiddenCount = null,
+		int? SkippedFileCount = null,
+		int? FailedFileCount = null,
+		IReadOnlyList<UnscannableFile>? UnscannableFiles = null);
 
     /// <summary>
     /// Cleans up event subscriptions and resources to prevent memory leaks.
@@ -2410,12 +2535,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         IgnoreOptions.Clear();
 		PathIgnoreOptions.Clear();
 		ContentProcessingOptions.Clear();
-		_contentProcessingScanState = SecretScanState.Disabled;
-		_contentProcessingDetectedCount = null;
-		_contentProcessingHiddenCount = null;
-		_contentProcessingSkippedFileCount = null;
-		_contentProcessingFailedFileCount = null;
+		_secretsRedactionStatus = default;
+		_privateDataRedactionStatus = default;
 		HideSecretsOption = null;
+		HidePrivateDataOption = null;
         Extensions.Clear();
         FontFamilies.Clear();
 		GitBranches.Clear();

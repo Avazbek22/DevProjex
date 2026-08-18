@@ -19,6 +19,7 @@ internal sealed class PersistedSecretMarkState
 {
 	public string Hash { get; set; } = string.Empty;
 	public int Length { get; set; }
+	public ManualRedactionClass Class { get; set; }
 	public string? Key { get; set; }
 	public string? RelativePath { get; set; }
 	public int? SourceOffset { get; set; }

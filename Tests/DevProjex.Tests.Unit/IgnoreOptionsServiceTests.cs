@@ -1,4 +1,6 @@
 using DevProjex.Application.Presentation;
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class IgnoreOptionsServiceTests
@@ -12,6 +14,7 @@ public sealed class IgnoreOptionsServiceTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.HidePrivateData"] = "Hide private data",
 				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
@@ -27,6 +30,14 @@ public sealed class IgnoreOptionsServiceTests
 
 		Assert.Equal(5 + IgnoreOptionOrder.Count - 1, options.Count);
 		Assert.False(options.Single(option => option.Id == IgnoreOptionId.HideSecrets).DefaultChecked);
+		Assert.False(options.Single(option => option.Id == IgnoreOptionId.HidePrivateData).DefaultChecked);
+		var hideSecretsIndex = options
+			.Select(static option => option.Id)
+			.ToList()
+			.IndexOf(IgnoreOptionId.HideSecrets);
+		Assert.Equal(
+			IgnoreOptionId.HidePrivateData,
+			options[hideSecretsIndex + 1].Id);
 		Assert.All(
 			options.Where(option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id)),
 			option => Assert.True(option.DefaultChecked));
@@ -43,6 +54,7 @@ public sealed class IgnoreOptionsServiceTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.HidePrivateData"] = "Hide private data",
 				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
@@ -72,6 +84,7 @@ public sealed class IgnoreOptionsServiceTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.HidePrivateData"] = "Hide private data",
 				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
@@ -96,6 +109,7 @@ public sealed class IgnoreOptionsServiceTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.HidePrivateData"] = "Hide private data",
 				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "HiddenFolders",
@@ -114,5 +128,29 @@ public sealed class IgnoreOptionsServiceTests
 		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[IgnoreOptionOrder.Count].Id);
 		Assert.Equal("Use GitIgnore", options[IgnoreOptionOrder.Count].Label);
 		Assert.True(options[IgnoreOptionOrder.Count].DefaultChecked);
+	}
+
+	[Fact]
+	public void FormatContentRedactionLabel_KeepsSecretAndPrivacyCountersSeparate()
+	{
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>
+			{
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.HidePrivateData"] = "Hide private data"
+			}
+		});
+		var service = new IgnoreOptionsService(new LocalizationService(catalog, AppLanguage.En));
+
+		Assert.Equal(
+			"Hide secrets (3/2)",
+			service.FormatContentRedactionLabel(IgnoreOptionId.HideSecrets, SecretScanState.Completed, 3, 2));
+		Assert.Equal(
+			"Hide private data (7/5)",
+			service.FormatContentRedactionLabel(IgnoreOptionId.HidePrivateData, SecretScanState.Completed, 7, 5));
+		Assert.Equal(
+			"Hide private data",
+			service.FormatContentRedactionLabel(IgnoreOptionId.HidePrivateData, SecretScanState.Completed, 0, 0));
 	}
 }

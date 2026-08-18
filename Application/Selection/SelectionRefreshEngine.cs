@@ -788,6 +788,7 @@ public sealed class SelectionRefreshEngine(
             IgnoreOptionId.TrackedGitFilesOnly => true,
             IgnoreOptionId.SmartIgnore => controllerImpactCounts.SmartIgnore > 0,
 			IgnoreOptionId.HideSecrets => true,
+			IgnoreOptionId.HidePrivateData => true,
 			IgnoreOptionId.CompressCode => true,
 			IgnoreOptionId.StripComments => true,
 			IgnoreOptionId.StripBlankLines => true,

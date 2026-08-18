@@ -81,6 +81,19 @@ public sealed partial class SelectionSyncCoordinator
             IReadOnlyDictionary<string, bool>? currentExtensionStates,
             IReadOnlyDictionary<IgnoreOptionId, bool>? currentIgnoreStates,
             IgnoreOptionId ignoredOption)
+            => MatchesExceptIgnoreOptions(
+                currentProjectPath,
+                viewModel,
+                currentExtensionStates,
+                currentIgnoreStates,
+                [ignoredOption]);
+
+        public bool MatchesExceptIgnoreOptions(
+            string? currentProjectPath,
+            MainWindowViewModel viewModel,
+            IReadOnlyDictionary<string, bool>? currentExtensionStates,
+            IReadOnlyDictionary<IgnoreOptionId, bool>? currentIgnoreStates,
+            IReadOnlyCollection<IgnoreOptionId> ignoredOptions)
         {
             if (string.IsNullOrWhiteSpace(currentProjectPath) ||
                 !PathComparer.Default.Equals(projectPath, currentProjectPath))
@@ -89,9 +102,9 @@ public sealed partial class SelectionSyncCoordinator
             }
 
             return MatchesSelectedExtensions(viewModel.Extensions) &&
-                   MatchesSelectedIgnoreOptionsExcept(viewModel.IgnoreOptions, ignoredOption) &&
+                   MatchesSelectedIgnoreOptionsExcept(viewModel.IgnoreOptions, ignoredOptions) &&
                    DictionaryStatesMatch(extensionOptionStates, currentExtensionStates) &&
-                   DictionaryStatesMatchExcept(ignoreOptionStates, currentIgnoreStates, [ignoredOption]);
+                   DictionaryStatesMatchExcept(ignoreOptionStates, currentIgnoreStates, ignoredOptions);
         }
 
         public bool MatchesExceptContentTransformations(

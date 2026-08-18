@@ -396,6 +396,83 @@ public sealed class SecretRedactionSessionTests
 	}
 
 	[Fact]
+	public void SetKeepAsIs_BatchesChangesIntoOneRevisionAndOneNotification()
+	{
+		var detector = new StubDetector("telegram-bot-api-token", StubDetector.Secret);
+		using var workspace = new TemporaryDirectory();
+		var paths = new[]
+		{
+			workspace.CreateFile("a.cs", $"a={StubDetector.Secret}"),
+			workspace.CreateFile("b.cs", $"b={StubDetector.Secret}")
+		};
+		using var session = new SecretRedactionSession(detector);
+		var firstScope = session.BeginOutput(workspace.Path, paths);
+		var first = firstScope.Redact(paths[0], $"a={StubDetector.Secret}", TestContext.Current.CancellationToken);
+		var second = firstScope.Redact(paths[1], $"b={StubDetector.Secret}", TestContext.Current.CancellationToken);
+		firstScope.Complete();
+		var occurrenceIds = new[]
+		{
+			Assert.Single(first.Spans).OccurrenceId,
+			Assert.Single(second.Spans).OccurrenceId
+		};
+		var initialRevision = session.OutputRevision;
+		var notificationCount = 0;
+		session.OverridesChanged += (_, _) => notificationCount++;
+
+		var changedCount = session.SetKeepAsIs(occurrenceIds, keep: true);
+
+		Assert.Equal(2, changedCount);
+		Assert.Equal(initialRevision + 1, session.OutputRevision);
+		Assert.Equal(1, notificationCount);
+		Assert.Null(session.GetSnapshot(workspace.Path, paths));
+		var keptScope = session.BeginOutput(workspace.Path, paths);
+		Assert.Equal(
+			SecretPreviewSpanState.KeptAsIs,
+			Assert.Single(keptScope.Redact(paths[0], $"a={StubDetector.Secret}", TestContext.Current.CancellationToken).Spans).State);
+		Assert.Equal(
+			SecretPreviewSpanState.KeptAsIs,
+			Assert.Single(keptScope.Redact(paths[1], $"b={StubDetector.Secret}", TestContext.Current.CancellationToken).Spans).State);
+		keptScope.Complete();
+	}
+
+	[Fact]
+	public void SetKeepAsIs_NoOpAndMixedSetsCountOnlyActualChanges()
+	{
+		using var session = new SecretRedactionSession(new StubDetector("test-rule", StubDetector.Secret));
+		var initialRevision = session.OutputRevision;
+		var notificationCount = 0;
+		session.OverridesChanged += (_, _) => notificationCount++;
+
+		Assert.Equal(0, session.SetKeepAsIs([], keep: true));
+		Assert.Equal(1, session.SetKeepAsIs(["first"], keep: true));
+		var afterFirstRevision = session.OutputRevision;
+		Assert.Equal(1, session.SetKeepAsIs(["first", "second", "second"], keep: true));
+		Assert.Equal(0, session.SetKeepAsIs(["first", "second"], keep: true));
+		Assert.Equal(1, session.SetKeepAsIs(["missing", "first"], keep: false));
+		Assert.Equal(0, session.SetKeepAsIs(["first"], keep: false));
+
+		Assert.Equal(initialRevision + 1, afterFirstRevision);
+		Assert.Equal(initialRevision + 3, session.OutputRevision);
+		Assert.Equal(3, notificationCount);
+	}
+
+	[Fact]
+	public void SetKeepAsIs_InvalidBatchDoesNotPartiallyApply()
+	{
+		using var session = new SecretRedactionSession(new StubDetector("test-rule", StubDetector.Secret));
+		var initialRevision = session.OutputRevision;
+		var notificationCount = 0;
+		session.OverridesChanged += (_, _) => notificationCount++;
+
+		Assert.Throws<ArgumentException>(() =>
+			session.SetKeepAsIs(["valid-occurrence", " "], keep: true));
+
+		Assert.Equal(initialRevision, session.OutputRevision);
+		Assert.Equal(0, notificationCount);
+		Assert.Equal(0, session.SetKeepAsIs(["valid-occurrence"], keep: false));
+	}
+
+	[Fact]
 	public void KeepAsIsOverride_IsDeliberatelyScopedToOneApplicationSession()
 	{
 		var detector = new StubDetector("telegram-bot-api-token", StubDetector.Secret);

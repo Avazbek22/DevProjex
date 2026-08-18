@@ -1,3 +1,5 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Application.Context;
 
 public enum ContextDiagnosticSeverity
@@ -85,6 +87,8 @@ public sealed record ProjectSourceIdentity(
 
 public sealed record SecretRedactionSummary(int MatchedCount, int RedactedCount);
 
+public sealed record PrivateDataRedactionSummary(int MatchedCount, int RedactedCount);
+
 public sealed record CodeCompressionSummary(
 	int CompressedFiles,
 	int UnchangedFiles,
@@ -114,7 +118,9 @@ public sealed record ProjectContextPlan(
 	IReadOnlyDictionary<string, long>? EffectiveFileSizes = null,
 	ProjectSourceIdentity? SourceIdentity = null,
 	SecretRedactionSummary? Redaction = null,
-	CodeCompressionSummary? Compression = null)
+	CodeCompressionSummary? Compression = null,
+	PrivateDataRedactionSummary? Privacy = null,
+	IReadOnlyList<UnscannableFile>? UnscannableFiles = null)
 {
 	public bool HasErrors => Diagnostics.Any(static diagnostic =>
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);

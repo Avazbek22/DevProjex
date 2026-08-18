@@ -7,6 +7,26 @@ using DevProjex.Infrastructure.Secrets;
 
 public sealed class SelectedContentExportServiceTests
 {
+	[Fact]
+	public async Task BuildAsync_WithRootHeader_WritesRootOnceAndUsesRelativeFileHeaders()
+	{
+		using var project = new TemporaryDirectory();
+		var file = project.CreateFile(Path.Combine("src", "Program.cs"), "class Program {}");
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
+
+		var result = await service.BuildAsync(
+			[file],
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(project.Path),
+			transformationContext: null,
+			displayRootPath: project.Path);
+
+		Assert.StartsWith($"{project.Path}:{Environment.NewLine}", result, StringComparison.Ordinal);
+		Assert.Equal(1, result.Split($"{project.Path}:", StringSplitOptions.None).Length - 1);
+		Assert.Contains("src/Program.cs:", result, StringComparison.Ordinal);
+		Assert.DoesNotContain($"{file}:", result, StringComparison.Ordinal);
+	}
+
 	// Verifies missing or empty files are ignored when exporting content.
 	[Fact]
 	public void Build_SkipsMissingAndEmptyFiles()

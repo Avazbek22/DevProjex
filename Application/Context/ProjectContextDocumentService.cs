@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Xml;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Services;
 
 namespace DevProjex.Application.Context;
 
@@ -30,16 +31,23 @@ public sealed record ProjectContextDocumentLimits(
 	int MaximumCharacters = 256 * 1024,
 	long MaximumFileBytes = 256 * 1024);
 
+public sealed record ProjectContextWriteResult(IReadOnlyList<UnscannableFile> UnscannableFiles)
+{
+	public static ProjectContextWriteResult Empty { get; } = new([]);
+}
+
 public sealed class ProjectContextDocumentService(
 	TreeExportService treeExportService,
 	IFileContentAnalyzer contentAnalyzer,
 	Func<FileContentClassification, string>? omissionMessageProvider = null,
 	SecretRedactionSession? secretRedactionSession = null,
-	CodeCompressionSession? codeCompressionSession = null)
+	CodeCompressionSession? codeCompressionSession = null,
+	OutputPathRedactionDecision? outputPathRedactionDecision = null)
 {
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+	private static readonly RepositoryWebPathPresentationService WebPathPresentation = new();
 
 	public async Task<string> BuildAsync(
 		ProjectContextPlan plan,
@@ -96,7 +104,28 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextDocumentFormat format,
 		Stream destination,
 		CancellationToken cancellationToken = default,
-		bool plain = false)
+		bool plain = false,
+		bool useUnifiedContentHeaders = false)
+	{
+		_ = await WriteCompleteWithReportAsync(
+				plan,
+				view,
+				format,
+				destination,
+				cancellationToken,
+				plain,
+				useUnifiedContentHeaders)
+			.ConfigureAwait(false);
+	}
+
+	public async Task<ProjectContextWriteResult> WriteCompleteWithReportAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		Stream destination,
+		CancellationToken cancellationToken = default,
+		bool plain = false,
+		bool useUnifiedContentHeaders = false)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		ArgumentNullException.ThrowIfNull(destination);
@@ -104,17 +133,24 @@ public sealed class ProjectContextDocumentService(
 		ValidateDocumentFormat(format);
 		if (!destination.CanWrite)
 			throw new ArgumentException("Destination must be writable.", nameof(destination));
+		var effectivePathRedaction = outputPathRedactionDecision ??
+			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
+		var contentPathMapper = CreateContentPathMapper(
+			plan,
+			useUnifiedContentHeaders,
+			view);
 		if (ShouldRedact(plan, view))
 		{
-			await WriteCompleteRedactedAsync(
+			return await WriteCompleteRedactedAsync(
 					plan,
 					view,
 					format,
 					destination,
 					cancellationToken,
-					plain)
+					plain,
+					useUnifiedContentHeaders,
+					effectivePathRedaction)
 				.ConfigureAwait(false);
-			return;
 		}
 		using var cancellationDestination = new CancellationBoundWriteStream(
 			destination,
@@ -128,6 +164,8 @@ public sealed class ProjectContextDocumentService(
 						view,
 						cancellationDestination,
 						plain,
+						effectivePathRedaction,
+						contentPathMapper,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -137,6 +175,8 @@ public sealed class ProjectContextDocumentService(
 						view,
 						cancellationDestination,
 						plain,
+						effectivePathRedaction,
+						contentPathMapper,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -145,6 +185,8 @@ public sealed class ProjectContextDocumentService(
 						plan,
 						view,
 						cancellationDestination,
+						effectivePathRedaction,
+						contentPathMapper,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -153,12 +195,15 @@ public sealed class ProjectContextDocumentService(
 						plan,
 						view,
 						cancellationDestination,
+						effectivePathRedaction,
+						contentPathMapper,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
 			default:
 				throw new ArgumentOutOfRangeException(nameof(format), format, null);
 		}
+		return ProjectContextWriteResult.Empty;
 	}
 
 	// One gate for both transformations: whichever is enabled, the document is built from prepared
@@ -176,9 +221,19 @@ public sealed class ProjectContextDocumentService(
 			codeCompressionSession is not null && kinds != CodeTransformKinds.None
 				? new CodeCompressionContext(plan.SourceRoot, codeCompressionSession, kinds)
 				: null,
-			secretRedactionSession is not null && plan.Selection.HideSecrets == true
-				? new SecretRedactionContext(plan.SourceRoot, secretRedactionSession)
-				: null);
+			CreateRedactionContext(plan));
+	}
+
+	private SecretRedactionContext? CreateRedactionContext(ProjectContextPlan plan)
+	{
+		if (secretRedactionSession is null)
+			return null;
+		var features = SecretRedactionFeatureSelection.Resolve(
+			plan.Selection.HideSecrets == true,
+			plan.Selection.HidePrivateData == true);
+		return features == SecretRedactionFeatures.None
+			? null
+			: new SecretRedactionContext(plan.SourceRoot, secretRedactionSession, features);
 	}
 
 	private async Task<string> BuildRedactedAsync(
@@ -210,13 +265,15 @@ public sealed class ProjectContextDocumentService(
 			.ConfigureAwait(false);
 	}
 
-	private async Task WriteCompleteRedactedAsync(
+	private async Task<ProjectContextWriteResult> WriteCompleteRedactedAsync(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
 		Stream destination,
 		CancellationToken cancellationToken,
-		bool plain)
+		bool plain,
+		bool useUnifiedContentHeaders,
+		OutputPathRedactionDecision? pathRedaction)
 	{
 		var context = CreateTransformationContext(plan)!;
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
@@ -229,15 +286,18 @@ public sealed class ProjectContextDocumentService(
 			analyzer,
 			omissionMessageProvider,
 			secretRedactionSession: null,
-			codeCompressionSession: null);
+			codeCompressionSession: null,
+			outputPathRedactionDecision: pathRedaction);
 		await service.WriteCompleteAsync(
 				plan,
 				view,
 				format,
 				destination,
 				cancellationToken,
-				plain)
+				plain,
+				useUnifiedContentHeaders)
 			.ConfigureAwait(false);
+		return new ProjectContextWriteResult(prepared.UnscannableFiles);
 	}
 
 	private async Task WriteCompleteTextAsync(
@@ -245,6 +305,8 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextView view,
 		Stream destination,
 		bool plain,
+		OutputPathRedactionDecision? pathRedaction,
+		Func<string, string>? contentPathMapper,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -256,6 +318,7 @@ public sealed class ProjectContextDocumentService(
 					writer,
 					plan,
 					plain,
+					pathRedaction,
 					includeFinalLineEnding: includesContent,
 					cancellationToken)
 				.ConfigureAwait(false);
@@ -272,9 +335,10 @@ public sealed class ProjectContextDocumentService(
 					.OpenCompleteSnapshotAsync(path, cancellationToken)
 					.ConfigureAwait(false);
 				var file = CreateCompleteFileDocument(
-					plan.SourceRoot,
 					path,
-					snapshot.Result);
+					snapshot.Result,
+					contentPathMapper,
+					pathRedaction);
 				if (hasOutput)
 				{
 					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
@@ -323,6 +387,8 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextView view,
 		Stream destination,
 		bool plain,
+		OutputPathRedactionDecision? pathRedaction,
+		Func<string, string>? contentPathMapper,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -344,7 +410,7 @@ public sealed class ProjectContextDocumentService(
 					treeExportService.CalculateFullTreeLongestBacktickRun(
 						plan.SourceRoot,
 						plan.ProjectedTree,
-						GetDocumentRoot(plan),
+						GetDocumentRoot(plan, pathRedaction),
 						GetProjectName(plan),
 						cancellationToken: cancellationToken) + 1));
 			await writer.WriteAsync(fence.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -353,6 +419,7 @@ public sealed class ProjectContextDocumentService(
 					writer,
 					plan,
 					plain,
+					pathRedaction,
 					includeFinalLineEnding: false,
 					cancellationToken)
 				.ConfigureAwait(false);
@@ -369,9 +436,10 @@ public sealed class ProjectContextDocumentService(
 					.OpenCompleteSnapshotAsync(path, cancellationToken)
 					.ConfigureAwait(false);
 				var file = CreateCompleteFileDocument(
-					plan.SourceRoot,
 					path,
-					snapshot.Result);
+					snapshot.Result,
+					contentPathMapper,
+					pathRedaction);
 				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 				await writer.WriteAsync("## ".AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -415,6 +483,8 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		Stream destination,
+		OutputPathRedactionDecision? pathRedaction,
+		Func<string, string>? contentPathMapper,
 		CancellationToken cancellationToken)
 	{
 		using var writer = new Utf8JsonWriter(destination, new JsonWriterOptions
@@ -427,7 +497,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteNumber("schemaVersion", SchemaVersion);
 		writer.WriteString("kind", Kind);
 		writer.WriteStartObject("project");
-		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan)));
+		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan, pathRedaction)));
 		writer.WriteString("name", GetProjectName(plan));
 		WriteRepositorySource(writer, plan.SourceIdentity);
 		writer.WriteEndObject();
@@ -448,9 +518,10 @@ public sealed class ProjectContextDocumentService(
 					.OpenCompleteSnapshotAsync(path, cancellationToken)
 					.ConfigureAwait(false);
 				var file = CreateCompleteFileDocument(
-					plan.SourceRoot,
 					path,
-					snapshot.Result);
+					snapshot.Result,
+					contentPathMapper,
+					pathRedaction);
 				writer.WriteStartObject();
 				writer.WriteString("path", file.Path);
 				writer.WriteBoolean("isBinary", file.IsBinary);
@@ -491,6 +562,8 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		Stream destination,
+		OutputPathRedactionDecision? pathRedaction,
+		Func<string, string>? contentPathMapper,
 		CancellationToken cancellationToken)
 	{
 		using var writer = XmlWriter.Create(destination, new XmlWriterSettings
@@ -507,7 +580,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteAttributeString("schemaVersion", XmlConvert.ToString(SchemaVersion));
 		writer.WriteAttributeString("kind", Kind);
 		writer.WriteStartElement("project");
-		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan)));
+		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan, pathRedaction)));
 		writer.WriteElementString("name", GetProjectName(plan));
 		WriteRepositorySourceXml(writer, plan.SourceIdentity);
 		writer.WriteEndElement();
@@ -527,9 +600,10 @@ public sealed class ProjectContextDocumentService(
 					.OpenCompleteSnapshotAsync(path, cancellationToken)
 					.ConfigureAwait(false);
 				var file = CreateCompleteFileDocument(
-					plan.SourceRoot,
 					path,
-					snapshot.Result);
+					snapshot.Result,
+					contentPathMapper,
+					pathRedaction);
 				writer.WriteStartElement("file");
 				writer.WriteAttributeString("path", file.Path);
 				writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
@@ -583,16 +657,33 @@ public sealed class ProjectContextDocumentService(
 	}
 
 	private static ContextFileDocument CreateCompleteFileDocument(
-		string sourceRoot,
 		string path,
-		FileContentMetricsResult result)
+		FileContentMetricsResult result,
+		Func<string, string>? contentPathMapper,
+		OutputPathRedactionDecision? pathRedaction)
 	{
-		var relativePath = NormalizeRelativePath(sourceRoot, path);
+		var displayPath = contentPathMapper is null
+			? path
+			: MapContentPath(contentPathMapper, path);
+		displayPath = OutputRootPathPresentation.ResolvePath(displayPath, pathRedaction).Text;
 		return new ContextFileDocument(
-			relativePath,
+			displayPath,
 			result.Classification,
 			Content: null,
 			Metrics: result.Metrics);
+	}
+
+	private static string MapContentPath(Func<string, string> contentPathMapper, string path)
+	{
+		try
+		{
+			var mapped = contentPathMapper(path);
+			return string.IsNullOrWhiteSpace(mapped) ? path : mapped;
+		}
+		catch
+		{
+			return path;
+		}
 	}
 
 	private static StreamWriter CreateStreamWriter(Stream destination) =>
@@ -602,6 +693,7 @@ public sealed class ProjectContextDocumentService(
 		TextWriter writer,
 		ProjectContextPlan plan,
 		bool plain,
+		OutputPathRedactionDecision? pathRedaction,
 		bool includeFinalLineEnding,
 		CancellationToken cancellationToken) =>
 		plain
@@ -609,7 +701,7 @@ public sealed class ProjectContextDocumentService(
 				writer,
 				plan.SourceRoot,
 				plan.ProjectedTree,
-				GetDocumentRoot(plan),
+				GetDocumentRoot(plan, pathRedaction),
 				GetProjectName(plan),
 				includeFinalLineEnding: includeFinalLineEnding,
 				cancellationToken: cancellationToken)
@@ -617,7 +709,7 @@ public sealed class ProjectContextDocumentService(
 				writer,
 				plan.SourceRoot,
 				plan.ProjectedTree,
-				GetDocumentRoot(plan),
+				GetDocumentRoot(plan, pathRedaction),
 				GetProjectName(plan),
 				includeFinalLineEnding: includeFinalLineEnding,
 				cancellationToken: cancellationToken);
@@ -760,7 +852,6 @@ public sealed class ProjectContextDocumentService(
 				GetDocumentRoot(plan),
 				GetProjectName(plan)));
 		}
-
 		AppendTextFiles(output, files);
 		AppendTruncationNotice(output, truncated);
 		return output.ToString().TrimEnd('\r', '\n');
@@ -1249,14 +1340,56 @@ public sealed class ProjectContextDocumentService(
 			? name
 			: "project";
 
-	private static string GetDocumentRoot(ProjectContextPlan plan) =>
-		plan.SourceIdentity is
+	private static string GetDocumentRoot(ProjectContextPlan plan, bool protectPrivateData = false)
+	{
+		var displayRootPath = plan.SourceIdentity is
 		{
 			SourceType: ProjectSourceType.GitClone,
 			SourceReference.Length: > 0
 		} identity
 			? identity.SourceReference
 			: plan.SourceRoot;
+		return OutputRootPathPresentation.Resolve(
+			plan.SourceRoot,
+			displayRootPath,
+			protectPrivateData && plan.Selection.HidePrivateData == true);
+	}
+
+	private static string GetDocumentRoot(
+		ProjectContextPlan plan,
+		OutputPathRedactionDecision? pathRedaction)
+	{
+		var displayRootPath = plan.SourceIdentity is
+		{
+			SourceType: ProjectSourceType.GitClone,
+			SourceReference.Length: > 0
+		} identity
+			? identity.SourceReference
+			: plan.SourceRoot;
+		return OutputRootPathPresentation.ResolvePath(displayRootPath, pathRedaction).Text;
+	}
+
+	private static Func<string, string>? CreateContentPathMapper(
+		ProjectContextPlan plan,
+		bool useUnifiedContentHeaders,
+		ProjectContextView view)
+	{
+		if (!useUnifiedContentHeaders || view != ProjectContextView.Content)
+			return TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot);
+
+		if (plan.SourceIdentity is not
+		    {
+			    SourceType: ProjectSourceType.GitClone,
+			    SourceReference.Length: > 0
+		    } identity)
+		{
+			return null;
+		}
+
+		return WebPathPresentation
+			.TryCreate(plan.SourceRoot, identity.SourceReference)
+			?.MapFilePath;
+	}
 
 	private static string EscapeMarkdownHeading(string value) =>
 		value.Replace("\\", "\\\\").Replace("#", "\\#").Replace("\r", " ").Replace("\n", " ");

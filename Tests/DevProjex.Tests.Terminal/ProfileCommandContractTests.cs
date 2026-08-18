@@ -27,6 +27,7 @@ public sealed class ProfileCommandContractTests
 		Assert.False(selection.GetProperty("compressCode").GetBoolean());
 		Assert.False(selection.GetProperty("stripComments").GetBoolean());
 		Assert.False(selection.GetProperty("stripBlankLines").GetBoolean());
+		Assert.False(selection.GetProperty("hidePrivateData").GetBoolean());
 	}
 
 	[Fact]
@@ -181,7 +182,8 @@ public sealed class ProfileCommandContractTests
 			    "extensions": [".cs"],
 			    "selectedPaths": [],
 			    "gitMode": "none",
-			    "exclusions": ["empty-files"]
+			    "exclusions": ["empty-files"],
+			    "hidePrivateData": true
 			  }
 			}
 			""");
@@ -206,6 +208,7 @@ public sealed class ProfileCommandContractTests
 			Assert.Equal("none", selection.GetProperty("gitMode").GetString());
 			Assert.Equal(["empty-files"], selection.GetProperty("exclusions")
 				.EnumerateArray().Select(static value => value.GetString()));
+			Assert.True(selection.GetProperty("hidePrivateData").GetBoolean());
 		}
 
 		Assert.Equal(

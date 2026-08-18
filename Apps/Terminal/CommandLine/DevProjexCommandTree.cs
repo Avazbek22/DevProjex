@@ -447,7 +447,10 @@ public sealed class DevProjexCommandTree
 		{
 			Hidden = true
 		};
-		var selection = new SelectionOptions(_localization, "auto");
+		var selection = new SelectionOptions(
+			_localization,
+			"auto",
+			includeHidePrivateData: false);
 		command.Arguments.Add(project);
 		command.Options.Add(last);
 		command.Options.Add(newWindow);
@@ -1142,6 +1145,8 @@ public sealed class DevProjexCommandTree
 		result.GetResult(selection.GitMode) is { Implicit: false } ||
 		result.GetResult(selection.Exclusions) is { Implicit: false } ||
 		result.GetResult(selection.HideSecrets) is { Implicit: false } ||
+		selection.IncludesHidePrivateData &&
+		result.GetResult(selection.HidePrivateData) is { Implicit: false } ||
 		result.GetResult(selection.CompressCode) is { Implicit: false } ||
 		result.GetResult(selection.StripComments) is { Implicit: false } ||
 		result.GetResult(selection.StripBlankLines) is { Implicit: false };
