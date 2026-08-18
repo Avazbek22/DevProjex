@@ -1465,26 +1465,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private static PreviewRedactionSpan[] BuildRedactionNavigationStops(
 		IReadOnlyList<PreviewRedactionSpan> redactions)
 	{
-		var firstSegments = new Dictionary<string, PreviewRedactionSpan>(StringComparer.Ordinal);
-		var stops = new List<PreviewRedactionSpan>(redactions.Count);
-		foreach (var span in redactions)
-		{
-			if (span.Source.HasFlag(SecretFindingSource.GeneratedPath))
-			{
-				stops.Add(span);
-				continue;
-			}
-
-			if (!firstSegments.TryGetValue(span.OccurrenceId, out var first) ||
-			    CompareRedactionPositions(span, first) < 0)
-			{
-				firstSegments[span.OccurrenceId] = span;
-			}
-		}
-
-		stops.AddRange(firstSegments.Values);
-		stops.Sort(CompareRedactionPositions);
-		return stops.ToArray();
+		var stops = redactions.ToArray();
+		Array.Sort(stops, CompareRedactionPositions);
+		return stops;
 	}
 
 	private PreviewRedactionSpan? FindRedaction(RedactionNavigationTarget target)

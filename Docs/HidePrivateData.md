@@ -155,23 +155,32 @@ Hide private data and Hide Secrets share one file read, content fingerprint, cac
 scope, placeholder allocator, and Preview decision model. Enabling both does not create a
 second output pipeline.
 
-When findings have the same range, the output keeps an ordered decision cascade: manual marks,
-Hide Secrets, Hide private data, non-generic rules, then rule order. Keeping the active candidate
-reveals the next non-kept candidate instead of disclosing the source value. Keeping every
-candidate reveals the original value; clicking that fully revealed span restores the entire
-cascade to its highest-priority state. Every candidate keeps its own stable occurrence identity,
-so repeated transitions reproduce the same placeholder indexes. Exact matches within one
-category retain the existing single-winner behavior; the cascade preserves the winning candidate
-from each category. For a partial cross-category overlap, the Hide Secrets interval wins and any
-private-data portions outside it remain separate redactions. Overlap resolution within one
-category is unchanged: a conflict removes only the candidate from that category, while
-candidates from other categories retain their residual coverage.
+Surviving findings are split at every finding boundary into non-overlapping output segments. Each
+segment keeps an ordered candidate stack: manual marks, Hide Secrets, Hide private data,
+non-generic rules, then rule order. Keeping the active candidate reveals the next non-kept
+candidate on that segment instead of disclosing text still covered by another finding. Keeping
+every candidate reveals the original segment; clicking that fully revealed segment restores its
+entire stack to the highest-priority state.
 
-Each option has its own detected and redacted counters. They count the effective,
-non-overlapping candidate currently represented in the output, not every suppressed raw detector
-candidate. A fully kept cascade remains represented by its highest-priority candidate, preserving
-the existing found-but-not-redacted counter semantics. Zero means only that the enabled rules
-found no effective match; it is not a privacy or safety guarantee.
+A finding split across several segments remains one occurrence. All fragments share one stable
+occurrence identity and repeat the same placeholder index; keeping or restoring any fragment
+changes the complete finding. Exact overlaps therefore preserve the existing cascade behavior.
+Partial cross-category overlaps keep their residual coverage on both sides and fall back to the
+other category inside the overlap when the higher-priority candidate is kept.
+
+Within one category, two overlapping detector-only findings retain the existing narrowing rule:
+the higher-priority detector finding wins and the other is removed as a whole. Manual and
+persistent marks neither suppress nor are suppressed by another candidate, so adding a mark can
+never reduce redaction coverage. A same-category detector conflict removes only that detector
+candidate; candidates from the other category and overlapping marks remain in their segment
+stacks.
+
+Each option has its own detected and redacted counters. They count each surviving candidate at
+most once when it is visibly represented by one or more segments, never once per fragment and
+never for a suppressed detector candidate. A fully kept segment remains represented by the top
+candidate in its stack, preserving the existing found-but-not-redacted counter semantics. Zero
+means only that the enabled rules found no effective match; it is not a privacy or safety
+guarantee.
 
 ## Intentionally visible ambiguous forms
 

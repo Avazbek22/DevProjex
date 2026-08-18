@@ -908,7 +908,7 @@ public sealed class VirtualizedPreviewTextControlTests
 	}
 
 	[AvaloniaFact]
-	public void KeyboardNavigation_VisitsEveryGeneratedPathButCollapsesMultilineOccurrences()
+	public void KeyboardNavigation_VisitsEveryVisualSegmentOfSharedOccurrences()
 	{
 		const string generatedOccurrence = "generated-path";
 		const string multilineOccurrence = "multiline-value";
@@ -996,6 +996,11 @@ public sealed class VirtualizedPreviewTextControlTests
 
 			Navigate(Key.Down, expectedLine: 1);
 			Navigate(Key.Down, expectedLine: 2);
+			Navigate(Key.Down, expectedLine: 3);
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			Assert.Equal(multilineOccurrence, requestedOccurrence);
+			requestedOccurrence = null;
 			Navigate(Key.Down, expectedLine: 4);
 			Navigate(Key.Down, expectedLine: 5);
 			Navigate(Key.Down, expectedLine: 1);
