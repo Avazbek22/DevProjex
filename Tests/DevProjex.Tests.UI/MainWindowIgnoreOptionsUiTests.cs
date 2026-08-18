@@ -3957,9 +3957,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				hiddenCount: 2,
 				skippedFileCount: 2);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
-			Assert.Equal(
-				$"Found: 3. Hidden: 2.{Environment.NewLine}Files larger than 16 MiB were not checked: 2.",
-				hideSecrets.StatusText);
+			// Unscannable files are reported in place (marked document entries, copy notices),
+			// not in this status - it stays a plain counters line.
+			Assert.Equal("Found: 3. Hidden: 2.", hideSecrets.StatusText);
 			Assert.False(hideSecrets.IsWarningStatus);
 			Assert.True(hideSecrets.IsInformationStatus);
 			Assert.Equal(0, processingCollectionChanges);
@@ -3970,8 +3970,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				hiddenCount: 0,
 				skippedFileCount: 2);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
-			Assert.Equal("Files larger than 16 MiB were not checked: 2.", hideSecrets.StatusText);
-			Assert.DoesNotContain("found no secrets", hideSecrets.StatusText, StringComparison.OrdinalIgnoreCase);
+			Assert.Equal(string.Empty, hideSecrets.StatusText);
 			Assert.Contains(
 				viewModel.ContentProcessingOptions,
 				static option => option.Id == IgnoreOptionId.HideSecrets);
@@ -4600,12 +4599,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
 			await UiTestDriver.ClickApplySettingsAsync(window);
-			var expectedStatus = string.Join(
-				Environment.NewLine,
-				"Found: 1. Hidden: 1.",
-				"Files larger than 16 MiB were not checked: 1.",
-				"Files excluded from content output: 1.",
-				$"{Path.Combine(project.RootPath, "README.md")} - Too large for bounded content inspection.");
+			// The oversized file is reported in place (marked document entry, copy notice);
+			// the status carries only the counters.
+			var expectedStatus = "Found: 1. Hidden: 1.";
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => string.Equals(viewModel.SettingsSecretsNotice, expectedStatus, StringComparison.Ordinal),

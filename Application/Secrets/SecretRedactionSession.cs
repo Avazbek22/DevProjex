@@ -1738,36 +1738,32 @@ public sealed class SecretRedactionSession : IDisposable
 				throw new SecretDetectionException($"Secret detector returned an invalid span for '{relativePath}'.");
 		}
 
-		var detected = SecretRedactionScope.ResolveNonOverlappingFindingGroups(rawFindings);
-		var findings = new SecretFindingMetadata[detected.Count];
-		for (var index = 0; index < detected.Count; index++)
+		var resolved = SecretRedactionScope.ResolveSegmentedFindings(rawFindings);
+		var candidates = new SecretFindingCandidateMetadata[resolved.Candidates.Count];
+		for (var index = 0; index < resolved.Candidates.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			generationToken.ThrowIfCancellationRequested();
-			var finding = detected[index];
+			var finding = resolved.Candidates[index];
 			var valueFingerprint = HashValue(content.Slice(finding.Start, finding.Length));
-			var candidates = new SecretFindingCandidateMetadata[finding.Candidates.Count];
-			var source = (SecretFindingSource)0;
-			for (var candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
-			{
-				var candidate = finding.Candidates[candidateIndex];
-				source |= candidate.Source;
-				candidates[candidateIndex] = new SecretFindingCandidateMetadata(
-					candidate.RuleId,
-					valueFingerprint,
-					candidate.RuleOrder,
-					candidate.Source,
-					candidate.PersistentMarkHash,
-					candidate.SessionMarkId,
-					candidate.PersistentMarkId,
-					candidate.Category);
-			}
-			findings[index] = new SecretFindingMetadata(
+			candidates[index] = new SecretFindingCandidateMetadata(
 				finding.Start,
 				finding.Length,
-				source,
-				candidates);
+				finding.RuleId,
+				valueFingerprint,
+				finding.RuleOrder,
+				finding.Source,
+				finding.PersistentMarkHash,
+				finding.SessionMarkId,
+				finding.PersistentMarkId,
+				finding.Category);
 		}
+		var segments = resolved.Segments
+			.Select(static segment => new SecretFindingSegmentMetadata(
+				segment.Start,
+				segment.Length,
+				segment.CandidateIndexes))
+			.ToArray();
 
 		var normalizedPath = Path.GetFullPath(filePath);
 		var entry = new SecretScanCacheEntry(
@@ -1778,13 +1774,15 @@ public sealed class SecretRedactionSession : IDisposable
 			transformIdentity,
 			markedSecretsRevision,
 			IsBinary: false,
-			findings,
+			candidates,
+			segments,
 			EstimateRetainedBytes(
 				normalizedPath,
 				contentFingerprint,
 				rulesIdentity,
 				transformIdentity,
-				findings));
+				candidates,
+				segments));
 		lock (_sync)
 		{
 			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
@@ -1807,7 +1805,8 @@ public sealed class SecretRedactionSession : IDisposable
 				source.ContentFingerprint,
 				source.RulesIdentity,
 				transformIdentity,
-				source.Findings)
+				source.Candidates,
+				source.Segments)
 		};
 		_scanCache.Store(alias, detectionExecuted: false);
 	}
@@ -1838,7 +1837,8 @@ public sealed class SecretRedactionSession : IDisposable
 			transformIdentity,
 			markedSecretsRevision,
 			IsBinary: true,
-			Findings: [],
+			Candidates: [],
+			Segments: [],
 			ApproximateRetainedBytes: 96 +
 			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length) *
 			                          sizeof(char));
@@ -1889,7 +1889,8 @@ public sealed class SecretRedactionSession : IDisposable
 			transformIdentity,
 			markedSecretsRevision,
 			IsBinary: false,
-			Findings: [],
+			Candidates: [],
+			Segments: [],
 			ApproximateRetainedBytes: 96 +
 			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length) *
 			                          sizeof(char),
@@ -2034,21 +2035,20 @@ public sealed class SecretRedactionSession : IDisposable
 		string contentFingerprint,
 		string rulesIdentity,
 		string transformIdentity,
-		IReadOnlyList<SecretFindingMetadata> findings)
+		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
+		IReadOnlyList<SecretFindingSegmentMetadata> segments)
 	{
 		long bytes = 160 +
 		             (normalizedPath.Length + contentFingerprint.Length + rulesIdentity.Length +
 		              transformIdentity.Length) * sizeof(char);
-		foreach (var finding in findings)
+		foreach (var candidate in candidates)
 		{
-			bytes += 40;
-			foreach (var candidate in finding.Candidates)
-			{
-				bytes += 64 + (candidate.RuleId.Length + candidate.ValueFingerprint.Length) * sizeof(char);
-				if (candidate.PersistentMarkId is { RelativePath: { } relativePath })
-					bytes += relativePath.Length * sizeof(char);
-			}
+			bytes += 72 + (candidate.RuleId.Length + candidate.ValueFingerprint.Length) * sizeof(char);
+			if (candidate.PersistentMarkId is { RelativePath: { } relativePath })
+				bytes += relativePath.Length * sizeof(char);
 		}
+		foreach (var segment in segments)
+			bytes += 40 + segment.CandidateIndexes.Count * sizeof(int);
 		return bytes;
 	}
 
@@ -2439,7 +2439,7 @@ public sealed class SecretRedactionScope
 			// same unchanged file would otherwise forget that it was never read.
 			if (entry.IsUnscannable)
 				RecordUnscannable(filePath);
-			ProcessFindings(filePath, entry.Findings, transformMap: null);
+			ProcessFindings(filePath, entry.Candidates, entry.Segments, transformMap: null);
 		}
 		finally
 		{
@@ -2519,7 +2519,7 @@ public sealed class SecretRedactionScope
 		EnsureActive();
 		var inspectionMode = GetContentInspectionMode(filePath);
 		if (inspectionMode == SecretContentInspectionMode.None)
-			return ProcessFindings(filePath, [], transformMap);
+			return ProcessFindings(filePath, [], [], transformMap);
 		// Measured on the text this scope was handed, not on the file on disk. Compression runs
 		// first and the plan describes its output, so gating on the on-disk size would refuse work
 		// the scanner is about to do on a fraction of that text - the limit would fight the very
@@ -2548,7 +2548,7 @@ public sealed class SecretRedactionScope
 			knownFingerprint,
 			allowIdentityTransformFallback:
 				knownFingerprint is not null && transformMap?.IsIdentity == true);
-		return ProcessFindings(filePath, entry.Findings, transformMap);
+		return ProcessFindings(filePath, entry.Candidates, entry.Segments, transformMap);
 	}
 
 	internal IDisposable TrackFullContentBuffer() => _session.TrackFullContentBuffer();
@@ -2600,91 +2600,107 @@ public sealed class SecretRedactionScope
 
 	private SecretFileRedactionPlan ProcessFindings(
 		string filePath,
-		IReadOnlyList<SecretFindingMetadata> findings,
+		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
+		IReadOnlyList<SecretFindingSegmentMetadata> segments,
 		ContentTransformMap? transformMap)
 	{
-		_outputInspectionBudget.RegisterFindings(findings.Count);
+		_outputInspectionBudget.RegisterFindings(segments.Count);
 		var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
-		var replacements = new SecretReplacement[findings.Count];
-		var spans = new SecretPreviewSpan[findings.Count];
-		var outputDelta = 0;
-		var redactedInFile = 0;
-		for (var index = 0; index < findings.Count; index++)
+		var occurrenceIds = new string[candidates.Count];
+		var identityIndexes = new int[candidates.Count];
+		for (var index = 0; index < candidates.Count; index++)
 		{
-			var finding = findings[index];
+			var candidate = candidates[index];
+			identityIndexes[index] = GetOrCreateIdentityIndex(candidate);
 			var coordinateIdentity = ResolveOccurrenceCoordinateIdentity(
-				finding.Start,
-				finding.Length,
+				candidate.RawStart,
+				candidate.RawLength,
 				transformMap);
-			var candidateOccurrenceIds = finding.Candidates.Count == 1
-				? null
-				: new string[finding.Candidates.Count];
+			occurrenceIds[index] = CreateOccurrenceId(relativePath, candidate, coordinateIdentity);
+		}
+
+		var replacements = new SecretReplacement[segments.Count];
+		var spans = new SecretPreviewSpan[segments.Count];
+		var representedCandidates = new bool[candidates.Count];
+		var redactedCandidates = new bool[candidates.Count];
+		var outputDelta = 0;
+		for (var index = 0; index < segments.Count; index++)
+		{
+			var segment = segments[index];
 			var activeCandidateIndex = -1;
-			var activeIdentityIndex = 0;
-			string? singleOccurrenceId = null;
-			for (var candidateIndex = 0; candidateIndex < finding.Candidates.Count; candidateIndex++)
+			foreach (var candidateIndex in segment.CandidateIndexes)
 			{
-				var candidate = finding.Candidates[candidateIndex];
-				var identityIndex = GetOrCreateIdentityIndex(candidate);
-				var candidateOccurrenceId = CreateOccurrenceId(
-					relativePath,
-					candidate,
-					coordinateIdentity);
-				if (candidateOccurrenceIds is null)
-					singleOccurrenceId = candidateOccurrenceId;
-				else
-					candidateOccurrenceIds[candidateIndex] = candidateOccurrenceId;
-				if (activeCandidateIndex < 0 && !_keptOccurrenceIds.Contains(candidateOccurrenceId))
+				if (!_keptOccurrenceIds.Contains(occurrenceIds[candidateIndex]))
 				{
 					activeCandidateIndex = candidateIndex;
-					activeIdentityIndex = identityIndex;
+					break;
 				}
 			}
 
 			var kept = activeCandidateIndex < 0;
-			var displayCandidateIndex = kept ? 0 : activeCandidateIndex;
-			var displayCandidate = finding.Candidates[displayCandidateIndex];
-			var occurrenceId = candidateOccurrenceIds is null
-				? singleOccurrenceId!
-				: candidateOccurrenceIds[displayCandidateIndex];
+			var displayCandidateIndex = kept ? segment.CandidateIndexes[0] : activeCandidateIndex;
+			var displayCandidate = candidates[displayCandidateIndex];
+			representedCandidates[displayCandidateIndex] = true;
+			if (!kept)
+				redactedCandidates[displayCandidateIndex] = true;
 			var replacement = kept
 				? null
-				: SecretRedactionLegend.CreatePlaceholder(displayCandidate.RuleId, activeIdentityIndex);
-			var outputStart = checked(finding.Start + outputDelta);
-			var outputLength = replacement?.Length ?? finding.Length;
+				: SecretRedactionLegend.CreatePlaceholder(
+					displayCandidate.RuleId,
+					identityIndexes[displayCandidateIndex]);
+			var outputStart = checked(segment.Start + outputDelta);
+			var outputLength = replacement?.Length ?? segment.Length;
 			replacements[index] = new SecretReplacement(
-				finding.Start,
-				finding.Length,
+				segment.Start,
+				segment.Length,
 				replacement);
+			IReadOnlyList<string>? cascadedOccurrenceIds = null;
+			if (kept && segment.CandidateIndexes.Count > 1)
+			{
+				var ids = new string[segment.CandidateIndexes.Count];
+				for (var candidateIndex = 0; candidateIndex < ids.Length; candidateIndex++)
+					ids[candidateIndex] = occurrenceIds[segment.CandidateIndexes[candidateIndex]];
+				cascadedOccurrenceIds = ids;
+			}
 			spans[index] = new SecretPreviewSpan(
-				occurrenceId,
+				occurrenceIds[displayCandidateIndex],
 				displayCandidate.RuleId,
 				outputStart,
 				outputLength,
 				kept ? SecretPreviewSpanState.KeptAsIs : SecretPreviewSpanState.Redacted,
-				finding.Length,
-				finding.Source,
+				segment.Length,
+				displayCandidate.Source,
 				displayCandidate.PersistentMarkHash,
 				displayCandidate.SessionMarkId,
 				displayCandidate.PersistentMarkId,
 				relativePath,
-				kept ? candidateOccurrenceIds : null);
-			outputDelta = checked(outputDelta + outputLength - finding.Length);
+				cascadedOccurrenceIds);
+			outputDelta = checked(outputDelta + outputLength - segment.Length);
+		}
+
+		var detectedInFile = 0;
+		var redactedInFile = 0;
+		for (var index = 0; index < candidates.Count; index++)
+		{
+			if (!representedCandidates[index])
+				continue;
+			detectedInFile++;
 			_detectedCount++;
-			if (displayCandidate.Category == RedactionFindingCategory.PrivateData)
+			var candidate = candidates[index];
+			if (candidate.Category == RedactionFindingCategory.PrivateData)
 				_privateDataDetectedCount++;
-			if (!kept)
+			if (redactedCandidates[index])
 			{
 				_redactedCount++;
-				if (displayCandidate.Category == RedactionFindingCategory.PrivateData)
+				if (candidate.Category == RedactionFindingCategory.PrivateData)
 					_privateDataRedactedCount++;
 				redactedInFile++;
-				if (displayCandidate.PersistentMarkHash is { Length: > 0 } markHash)
+				if (candidate.PersistentMarkHash is { Length: > 0 } markHash)
 					_markedSecretCounts[markHash] = _markedSecretCounts.GetValueOrDefault(markHash) + 1;
 			}
 		}
 
-		return new SecretFileRedactionPlan(replacements, spans, findings.Count, redactedInFile);
+		return new SecretFileRedactionPlan(replacements, spans, detectedInFile, redactedInFile);
 	}
 
 	private int GetOrCreateIdentityIndex(SecretFindingCandidateMetadata finding)
@@ -2748,20 +2764,20 @@ public sealed class SecretRedactionScope
 	internal static IReadOnlyList<DetectedSecret> ResolveNonOverlappingMatches(
 		IReadOnlyList<DetectedSecret> matches)
 	{
-		var groups = ResolveNonOverlappingFindingGroups(matches);
-		if (groups.Count == 0)
+		var resolvedSet = ResolveSegmentedFindings(matches);
+		if (resolvedSet.Segments.Count == 0)
 			return [];
-		var resolved = new DetectedSecret[groups.Count];
-		for (var index = 0; index < groups.Count; index++)
+		var resolved = new DetectedSecret[resolvedSet.Segments.Count];
+		for (var index = 0; index < resolvedSet.Segments.Count; index++)
 		{
-			var group = groups[index];
-			var winner = MergeExactMatches(group.Candidates);
-			var valueOffset = group.Start - winner.Start;
+			var segment = resolvedSet.Segments[index];
+			var winner = resolvedSet.Candidates[segment.CandidateIndexes[0]];
+			var valueOffset = segment.Start - winner.Start;
 			resolved[index] = winner with
 			{
-				Start = group.Start,
-				Length = group.Length,
-				Value = winner.Value.Substring(valueOffset, group.Length)
+				Start = segment.Start,
+				Length = segment.Length,
+				Value = winner.Value.Substring(valueOffset, segment.Length)
 			};
 		}
 		return resolved;
@@ -2770,110 +2786,129 @@ public sealed class SecretRedactionScope
 	internal static IReadOnlyList<ResolvedSecretFinding> ResolveNonOverlappingFindingGroups(
 		IReadOnlyList<DetectedSecret> matches)
 	{
+		var resolvedSet = ResolveSegmentedFindings(matches);
+		return resolvedSet.Segments
+			.Select(segment => new ResolvedSecretFinding(
+				segment.Start,
+				segment.Length,
+				segment.CandidateIndexes.Select(index => resolvedSet.Candidates[index]).ToArray()))
+			.ToArray();
+	}
+
+	internal static ResolvedSecretFindingSet ResolveSegmentedFindings(
+		IReadOnlyList<DetectedSecret> matches)
+	{
 		if (matches.Count == 0)
-			return [];
+			return ResolvedSecretFindingSet.Empty;
 
-		var candidates = matches
-			.GroupBy(static match => (match.Start, match.Length))
-			.Select(static group => new ResolvedSecretFinding(
-				group.Key.Start,
-				group.Key.Length,
-				OrderCandidates(group)))
-			.OrderBy(static group => group.Candidates[0], DetectedSecretPriorityComparer.Instance)
-			.ThenBy(static group => group.Start)
-			.ThenByDescending(static group => group.Length)
-			.ToArray();
-		var accepted = new SortedSet<AcceptedInterval>(AcceptedIntervalStartComparer.Instance);
-		var minimum = new AcceptedInterval(int.MinValue, int.MinValue, null);
-		var maximum = new AcceptedInterval(int.MaxValue, int.MaxValue, null);
-		foreach (var candidate in candidates)
-		{
-			var candidateEnd = candidate.Start + candidate.Length;
-			var overlaps = FindOverlaps(
-				accepted,
-				candidate.Start,
-				candidateEnd,
-				minimum,
-				maximum);
-			if (overlaps.Count == 0)
-			{
-				accepted.Add(new AcceptedInterval(candidate.Start, candidateEnd, candidate));
-				continue;
-			}
-
-			var blockedCategories = overlaps
-				.Select(static interval => interval.Match!.Candidates[0].Category)
-				.ToHashSet();
-			var survivingCandidates = candidate.Candidates
-				.Where(match => !blockedCategories.Contains(match.Category))
-				.ToArray();
-			if (survivingCandidates.Length == 0)
-				continue;
-			var residualCandidate = candidate with { Candidates = survivingCandidates };
-
-			var residualStart = candidate.Start;
-			foreach (var overlap in overlaps)
-			{
-				if (overlap.Start > residualStart)
-				{
-					var residualEnd = Math.Min(overlap.Start, candidateEnd);
-					AddResidual(accepted, residualCandidate, residualStart, residualEnd);
-				}
-				residualStart = Math.Max(residualStart, overlap.End);
-				if (residualStart >= candidateEnd)
-					break;
-			}
-			AddResidual(accepted, residualCandidate, residualStart, candidateEnd);
-		}
-
-		return accepted.Select(static interval => interval.Match!).ToArray();
-	}
-
-	private static IReadOnlyList<AcceptedInterval> FindOverlaps(
-		SortedSet<AcceptedInterval> accepted,
-		int start,
-		int end,
-		AcceptedInterval minimum,
-		AcceptedInterval maximum)
-	{
-		if (accepted.Count == 0)
-			return [];
-		var overlaps = new List<AcceptedInterval>();
-		var predecessor = accepted.GetViewBetween(
-			minimum,
-			new AcceptedInterval(start, start, null)).Max;
-		if (predecessor is not null && predecessor.End > start)
-			overlaps.Add(predecessor);
-		foreach (var interval in accepted.GetViewBetween(
-			         new AcceptedInterval(start, start, null),
-			         maximum))
-		{
-			if (interval.Start >= end)
-				break;
-			if (overlaps.Count == 0 || !ReferenceEquals(overlaps[^1], interval))
-				overlaps.Add(interval);
-		}
-		return overlaps;
-	}
-
-	private static void AddResidual(
-		ISet<AcceptedInterval> accepted,
-		ResolvedSecretFinding candidate,
-		int start,
-		int end)
-	{
-		if (start >= end)
-			return;
-		var residual = candidate with { Start = start, Length = end - start };
-		accepted.Add(new AcceptedInterval(start, end, residual));
-	}
-
-	private static IReadOnlyList<DetectedSecret> OrderCandidates(IEnumerable<DetectedSecret> candidates) =>
-		candidates
-			.GroupBy(static candidate => candidate.Category)
-			.Select(static category => MergeExactMatches(category))
+		var merged = matches
+			.GroupBy(static match => (match.Start, match.Length, match.Category))
+			.Select(static group => MergeExactMatches(group))
 			.Order(DetectedSecretPriorityComparer.Instance)
+			.ThenBy(static match => match.Start)
+			.ThenByDescending(static match => match.Length)
 			.ToArray();
+		var survivors = new List<DetectedSecret>(merged.Length);
+		var acceptedDetectorIntervals = new Dictionary<RedactionFindingCategory, SortedSet<DetectorInterval>>();
+		foreach (var candidate in merged)
+		{
+			if (!IsMarked(candidate))
+			{
+				if (!acceptedDetectorIntervals.TryGetValue(candidate.Category, out var intervals))
+				{
+					intervals = new SortedSet<DetectorInterval>(DetectorIntervalStartComparer.Instance);
+					acceptedDetectorIntervals.Add(candidate.Category, intervals);
+				}
+				var interval = new DetectorInterval(
+					candidate.Start,
+					checked(candidate.Start + candidate.Length));
+				if (HasOverlap(intervals, interval))
+					continue;
+				intervals.Add(interval);
+			}
+			survivors.Add(candidate);
+		}
+
+		var candidates = survivors.ToArray();
+		var starts = new Dictionary<int, List<int>>();
+		var ends = new Dictionary<int, List<int>>();
+		var boundaries = new int[candidates.Length * 2];
+		for (var index = 0; index < candidates.Length; index++)
+		{
+			var candidate = candidates[index];
+			var end = checked(candidate.Start + candidate.Length);
+			boundaries[index * 2] = candidate.Start;
+			boundaries[index * 2 + 1] = end;
+			AddBoundaryEvent(starts, candidate.Start, index);
+			AddBoundaryEvent(ends, end, index);
+		}
+		Array.Sort(boundaries);
+
+		var active = new SortedSet<int>();
+		var segments = new List<ResolvedSecretSegment>(Math.Max(1, candidates.Length * 2 - 1));
+		var boundaryIndex = 0;
+		while (boundaryIndex < boundaries.Length)
+		{
+			var boundary = boundaries[boundaryIndex];
+			while (boundaryIndex < boundaries.Length && boundaries[boundaryIndex] == boundary)
+				boundaryIndex++;
+			if (ends.TryGetValue(boundary, out var ending))
+			{
+				foreach (var candidateIndex in ending)
+					active.Remove(candidateIndex);
+			}
+			if (starts.TryGetValue(boundary, out var starting))
+			{
+				foreach (var candidateIndex in starting)
+					active.Add(candidateIndex);
+			}
+			if (active.Count == 0 || boundaryIndex >= boundaries.Length)
+				continue;
+			var nextBoundary = boundaries[boundaryIndex];
+			if (nextBoundary > boundary)
+			{
+				segments.Add(new ResolvedSecretSegment(
+					boundary,
+					nextBoundary - boundary,
+					active.ToArray()));
+			}
+		}
+
+		return new ResolvedSecretFindingSet(candidates, segments);
+	}
+
+	private static void AddBoundaryEvent(
+		IDictionary<int, List<int>> events,
+		int position,
+		int candidateIndex)
+	{
+		if (!events.TryGetValue(position, out var candidates))
+		{
+			candidates = [];
+			events.Add(position, candidates);
+		}
+		candidates.Add(candidateIndex);
+	}
+
+	private static bool HasOverlap(
+		SortedSet<DetectorInterval> intervals,
+		DetectorInterval candidate)
+	{
+		if (intervals.Count == 0)
+			return false;
+		var predecessors = intervals.GetViewBetween(
+			DetectorInterval.Minimum,
+			new DetectorInterval(candidate.Start, int.MaxValue));
+		if (predecessors.Count > 0 && predecessors.Max.End > candidate.Start)
+			return true;
+		var successors = intervals.GetViewBetween(
+			new DetectorInterval(candidate.Start, int.MinValue),
+			DetectorInterval.Maximum);
+		return successors.Count > 0 && successors.Min.Start < candidate.End;
+	}
+
+	private static bool IsMarked(DetectedSecret match) =>
+		(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0;
 
 	private static DetectedSecret MergeExactMatches(IEnumerable<DetectedSecret> group)
 	{
@@ -2911,7 +2946,23 @@ public sealed class SecretRedactionScope
 		int Length,
 		IReadOnlyList<DetectedSecret> Candidates);
 
-	private sealed record AcceptedInterval(int Start, int End, ResolvedSecretFinding? Match);
+	internal sealed record ResolvedSecretSegment(
+		int Start,
+		int Length,
+		IReadOnlyList<int> CandidateIndexes);
+
+	internal sealed record ResolvedSecretFindingSet(
+		IReadOnlyList<DetectedSecret> Candidates,
+		IReadOnlyList<ResolvedSecretSegment> Segments)
+	{
+		public static ResolvedSecretFindingSet Empty { get; } = new([], []);
+	}
+
+	private readonly record struct DetectorInterval(int Start, int End)
+	{
+		public static DetectorInterval Minimum { get; } = new(int.MinValue, int.MinValue);
+		public static DetectorInterval Maximum { get; } = new(int.MaxValue, int.MaxValue);
+	}
 
 	private sealed class DetectedSecretPriorityComparer : IComparer<DetectedSecret>
 	{
@@ -2944,21 +2995,17 @@ public sealed class SecretRedactionScope
 			(match.Source & (SecretFindingSource.PersistentMark | SecretFindingSource.SessionMark)) != 0;
 	}
 
-	private sealed class AcceptedIntervalStartComparer : IComparer<AcceptedInterval>
+	private sealed class DetectorIntervalStartComparer : IComparer<DetectorInterval>
 	{
-		public static AcceptedIntervalStartComparer Instance { get; } = new();
+		public static DetectorIntervalStartComparer Instance { get; } = new();
 
-		public int Compare(AcceptedInterval? left, AcceptedInterval? right)
+		public int Compare(DetectorInterval left, DetectorInterval right)
 		{
-			if (ReferenceEquals(left, right))
-				return 0;
-			if (left is null)
-				return -1;
-			if (right is null)
-				return 1;
-			return left.Start.CompareTo(right.Start);
+			var startComparison = left.Start.CompareTo(right.Start);
+			return startComparison != 0 ? startComparison : left.End.CompareTo(right.End);
 		}
 	}
+
 }
 
 internal enum SecretContentInspectionMode : byte

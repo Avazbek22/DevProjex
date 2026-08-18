@@ -2411,13 +2411,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
 	/// <summary>
 	/// A failed pass is described by what it still delivered: partial counts when any files were
-	/// read, the number of files it could not check, and remaining size-limit skips. The closing
-	/// line tells the user the warning indicator retries the scan, because a failure here is
-	/// usually transient - a file locked by an editor or a scanner - and worth one more attempt.
+	/// read and the number of files it could not check. The closing line tells the user the warning
+	/// indicator retries the scan, because a failure here is usually transient - a file locked by
+	/// an editor or a scanner - and worth one more attempt.
 	/// </summary>
 	private string FormatFailedRedactionStatus(ContentRedactionStatus status)
 	{
-		var lines = new List<string>(4);
+		var lines = new List<string>(3);
 		if (status.DetectedCount is { } detected &&
 		    status.HiddenCount is { } hidden &&
 		    detected > 0)
@@ -2428,19 +2428,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		lines.Add(status.FailedFileCount is int failed and > 0
 			? _localization.Format("Settings.Secrets.Status.FailedFiles", failed)
 			: _localization["Settings.Secrets.Status.Failed"]);
-		if (status.SkippedFileCount is int skipped and > 0)
-		{
-			var tooLargeCount = status.UnscannableFiles?.Count(static file =>
-				file.Classification == FileContentClassification.TooLarge) ?? skipped;
-			if (tooLargeCount > 0)
-			{
-			lines.Add(_localization.Format(
-				"Settings.Secrets.Status.SizeLimit",
-				tooLargeCount,
-				SecretRedactionOutputPreparer.MaximumScannableFileBytes / (1024 * 1024)));
-			}
-		}
-		AppendUnscannableFiles(lines, status.UnscannableFiles);
 
 		lines.Add(_localization["Settings.Secrets.Status.Retry"]);
 		return string.Join(Environment.NewLine, lines);
@@ -2448,50 +2435,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
 	private string FormatLimitedRedactionStatus(ContentRedactionStatus status)
 	{
-		var skipped = status.SkippedFileCount.GetValueOrDefault();
-		var sizeLimitMegabytes = SecretRedactionOutputPreparer.MaximumScannableFileBytes /
-		                         (1024 * 1024);
-		var lines = new List<string>(4);
 		if (status.DetectedCount is { } detected &&
 		    status.HiddenCount is { } hidden &&
 		    detected > 0)
 		{
-			lines.Add(_localization.Format("Settings.Secrets.Status.Applied", detected, hidden));
+			return _localization.Format("Settings.Secrets.Status.Applied", detected, hidden);
 		}
-		var tooLargeCount = status.UnscannableFiles?.Count(static file =>
-			file.Classification == FileContentClassification.TooLarge) ?? skipped;
-		if (tooLargeCount > 0)
-		{
-			lines.Add(_localization.Format(
-				"Settings.Secrets.Status.SizeLimit",
-				tooLargeCount,
-				sizeLimitMegabytes));
-		}
-		AppendUnscannableFiles(lines, status.UnscannableFiles);
-		return string.Join(Environment.NewLine, lines);
-	}
-
-	private void AppendUnscannableFiles(
-		List<string> lines,
-		IReadOnlyList<UnscannableFile>? unscannableFiles)
-	{
-		if (unscannableFiles is not { Count: > 0 })
-			return;
-		lines.Add(_localization.Format("Content.Redaction.UnscannableFiles", unscannableFiles.Count));
-		foreach (var file in unscannableFiles)
-		{
-			var reasonKey = file.Classification switch
-			{
-				FileContentClassification.TooLarge => "Content.Redaction.Reason.TooLarge",
-				FileContentClassification.UnsupportedEncoding =>
-					"Content.Redaction.Reason.UnsupportedEncoding",
-				_ => throw new ArgumentOutOfRangeException(
-					nameof(file.Classification),
-					file.Classification,
-					null)
-			};
-			lines.Add(string.Concat(file.Path, " - ", _localization[reasonKey]));
-		}
+		return string.Empty;
 	}
 
 	private void UpdateSettingsCompressionNotice()

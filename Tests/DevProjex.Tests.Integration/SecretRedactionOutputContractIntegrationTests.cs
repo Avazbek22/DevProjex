@@ -515,6 +515,82 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task SegmentedOverlap_ReusesOneCandidateIdentityAcrossEveryOutputSurface()
+	{
+		const string value = "private-prefix-SECRET-private-suffix";
+		const string secretValue = "SECRET";
+		const string content = "value=" + value + "\n";
+		const string relativePath = "segmented-overlap.txt";
+		const string privatePlaceholder = "DEVPROJEX_REDACTED[private-overlap#1]";
+		const string secretPlaceholder = "DEVPROJEX_REDACTED[secret-overlap#1]";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("segmented-project");
+		var exportRoot = temporary.CreateDirectory("segmented-exports");
+		var sourcePath = temporary.CreateFile($"segmented-project/{relativePath}", content);
+		using var workspace = new Workspace(temporary, sourceRoot, exportRoot, sourcePath);
+		var analyzer = new FileContentAnalyzer();
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new CategorizedExactValueDetector(
+				secretValue,
+				"secret-overlap",
+				"catalog:smart-secrets-v4",
+				RedactionFindingCategory.Secrets),
+			new CategorizedExactValueDetector(
+				value,
+				"private-overlap",
+				"private-data-v1",
+				RedactionFindingCategory.PrivateData));
+		var context = new SecretRedactionContext(
+			sourceRoot,
+			session,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true, hidePrivateData: true);
+		var previewBuilder = new PreviewDocumentBuilder(analyzer);
+		using var preview = await previewBuilder.BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: false,
+			transformationContext: context);
+		var clipboard = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(preview);
+		var contextDocuments = await BuildContextDocumentsAsync(plan, analyzer, session);
+		var folder = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Folder,
+			redactSecrets: true,
+			redactPrivateData: true);
+		var zip = await ExportProjectAsync(
+			workspace,
+			plan,
+			analyzer,
+			session,
+			ProjectCopyExportFormat.Zip,
+			redactSecrets: true,
+			redactPrivateData: true);
+		var folderText = File.ReadAllText(Path.Combine(folder.DestinationPath, relativePath));
+		using var archive = ZipFile.OpenRead(zip.DestinationPath);
+		var zipText = ReadZipText(archive, relativePath);
+		var outputs = new[] { clipboard, folderText, zipText }
+			.Concat(contextDocuments.Values)
+			.ToArray();
+
+		Assert.All(outputs, output =>
+		{
+			Assert.Equal(2, CountOccurrences(output, privatePlaceholder));
+			Assert.Equal(1, CountOccurrences(output, secretPlaceholder));
+			Assert.DoesNotContain(value, output, StringComparison.Ordinal);
+		});
+		Assert.Equal(folderText, zipText);
+		Assert.Equal(3, preview!.Redactions.Count);
+		var privateSpans = preview.Redactions.Where(static span => span.RuleId == "private-overlap").ToArray();
+		Assert.Equal(2, privateSpans.Length);
+		Assert.Single(privateSpans.Select(static span => span.OccurrenceId).Distinct(StringComparer.Ordinal));
+	}
+
+	[Fact]
 	public async Task ProjectPlanFingerprint_ChangesWithHidePrivateDataAndIsStableForSameSelection()
 	{
 		using var workspace = CreateWorkspace(repeatedGithubOnly: true);

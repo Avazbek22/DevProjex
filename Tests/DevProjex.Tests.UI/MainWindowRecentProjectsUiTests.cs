@@ -144,7 +144,7 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 				popupRoot.GetVisualDescendants().OfType<Border>(),
 				border => border.Classes.Contains("menu-scroll-indicator-thumb"));
 
-			Assert.Equal(ScrollBarVisibility.Visible, scrollViewer.VerticalScrollBarVisibility);
+			Assert.Equal(ScrollBarVisibility.Hidden, scrollViewer.VerticalScrollBarVisibility);
 			Assert.True(scrollViewer.Bounds.Height <= 520);
 			Assert.Equal(2, nativeHoverScrollButtons.Length);
 			Assert.All(nativeHoverScrollButtons, static button =>
@@ -211,6 +211,128 @@ public sealed class MainWindowRecentProjectsUiTests(UiWorkspaceFixture workspace
 			Assert.Equal(maximumOffset, scrollViewer.Offset.Y, precision: 3);
 			Assert.True(upButton.IsEnabled);
 			Assert.False(downButton.IsEnabled);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task FileMenu_RecentFolders_ScrollIndicatorHitZoneSupportsClickDragAndRelease()
+	{
+		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var db = recentStore.Load();
+		for (var index = 0; index < 20; index++)
+		{
+			var folderPath = Path.Combine(workspace.Project.RootPath, "history", $"pointer-{index:D2}");
+			Directory.CreateDirectory(folderPath);
+			db = recentStore.AddFolder(db, folderPath);
+		}
+
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath);
+
+		try
+		{
+			var recentMenu = await OpenRecentMenuAsync(window);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 12);
+			var popup = Assert.Single(
+				recentMenu.GetVisualDescendants().OfType<Popup>(),
+				static candidate => candidate.IsOpen);
+			var popupRoot = Assert.IsAssignableFrom<Visual>(popup.Child);
+			var scrollViewer = Assert.Single(popupRoot.GetVisualDescendants().OfType<ScrollViewer>());
+			var indicator = Assert.IsType<Grid>(Assert.Single(
+				popupRoot.GetVisualDescendants().OfType<Control>(),
+				control => control.Classes.Contains(MenuScrollBehavior.ExternalScrollBarClass)));
+			var trackHost = Assert.Single(
+				indicator.Children.OfType<Grid>(),
+				static child => Grid.GetRow(child) == 1);
+			var inputRoot = Assert.IsAssignableFrom<TopLevel>(TopLevel.GetTopLevel(indicator));
+			var thumb = Assert.Single(
+				trackHost.Children.OfType<Border>(),
+				static child => child.Classes.Contains(MenuScrollBehavior.IndicatorThumbClass));
+
+			Assert.Equal(ScrollBarVisibility.Hidden, scrollViewer.VerticalScrollBarVisibility);
+			Assert.NotNull(trackHost.Background);
+			Assert.True(trackHost.Bounds.Width >= 12);
+			Assert.True(trackHost.Bounds.Height > 1);
+			var pressPoint = Assert.IsType<Point>(trackHost.TranslatePoint(
+				new Point(trackHost.Bounds.Width - 1, trackHost.Bounds.Height * 0.45),
+				inputRoot));
+			var dragPoint = Assert.IsType<Point>(trackHost.TranslatePoint(
+				new Point(trackHost.Bounds.Width - 1, trackHost.Bounds.Height * 0.75),
+				inputRoot));
+			var releasedMovePoint = Assert.IsType<Point>(trackHost.TranslatePoint(
+				new Point(trackHost.Bounds.Width - 1, trackHost.Bounds.Height * 0.2),
+				inputRoot));
+			var hit = Assert.IsAssignableFrom<Visual>(inputRoot.InputHitTest(pressPoint));
+			Assert.True(
+				ReferenceEquals(hit, trackHost) || hit.GetVisualAncestors().Contains(trackHost),
+				"The pointer probe must land in the wide track host rather than the narrow track or thumb.");
+
+			Assert.Equal(MenuScrollBehavior.IndicatorThumbWidth, thumb.Width);
+			inputRoot.MouseMove(pressPoint, RawInputModifiers.None);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => Math.Abs(thumb.Width - MenuScrollBehavior.IndicatorThumbHotWidth) < 0.01,
+				"the scroll indicator thumb to grow on hover");
+
+			// Pressing and dragging the scrollbar must not flash the parent menu items:
+			// an item with an open submenu keeps one steady highlight.
+			var recentMenuRoot = recentMenu
+				.GetVisualDescendants()
+				.OfType<Border>()
+				.First(static border => border.Name == "PART_LayoutRoot");
+			var highlightWhileHovering = recentMenuRoot.Background;
+
+			inputRoot.MouseDown(pressPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			// The press lands on the thumb: grabbing it must not jump the scroll position.
+			var offsetAfterPress = scrollViewer.Offset.Y;
+			Assert.Equal(0, offsetAfterPress, precision: 3);
+			Assert.True(recentMenu.IsSubMenuOpen);
+
+			inputRoot.MouseMove(dragPoint, RawInputModifiers.LeftMouseButton);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			var offsetAfterDrag = scrollViewer.Offset.Y;
+			Assert.True(offsetAfterDrag > offsetAfterPress + 0.5);
+			Assert.True(recentMenu.IsSubMenuOpen);
+			Assert.Same(highlightWhileHovering, recentMenuRoot.Background);
+
+			inputRoot.MouseUp(dragPoint, MouseButton.Left, RawInputModifiers.None);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			// Dragging is continuous; the release settles the offset onto the nearest whole row.
+			var menuItems = popupRoot.GetVisualDescendants().OfType<MenuItem>().ToArray();
+			var rowStep =
+				Assert.IsType<Point>(menuItems[1].TranslatePoint(default, scrollViewer)).Y -
+				Assert.IsType<Point>(menuItems[0].TranslatePoint(default, scrollViewer)).Y;
+			var offsetAfterRelease = scrollViewer.Offset.Y;
+			Assert.True(Math.Abs(offsetAfterRelease - offsetAfterDrag) <= (rowStep / 2) + 0.5);
+
+			inputRoot.MouseMove(releasedMovePoint, RawInputModifiers.None);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.Equal(offsetAfterRelease, scrollViewer.Offset.Y, precision: 3);
+			Assert.True(recentMenu.IsSubMenuOpen);
+
+			// A held-button move over the track adopts the drag even when the initial press
+			// was consumed by the menu's own pointer handling.
+			inputRoot.MouseMove(releasedMovePoint, RawInputModifiers.LeftMouseButton);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			Assert.True(scrollViewer.Offset.Y < offsetAfterDrag - 0.5);
+			inputRoot.MouseUp(releasedMovePoint, MouseButton.Left, RawInputModifiers.None);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+			var awayPoint = Assert.IsType<Point>(scrollViewer.TranslatePoint(
+				new Point(10, 10),
+				inputRoot));
+			inputRoot.MouseMove(awayPoint, RawInputModifiers.None);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => Math.Abs(thumb.Width - MenuScrollBehavior.IndicatorThumbWidth) < 0.01,
+				"the scroll indicator thumb to shrink after the pointer leaves");
 		}
 		finally
 		{

@@ -138,10 +138,10 @@ public sealed class PrivateDataRedactionCompositionTests
 	}
 
 	[Theory]
-	[InlineData("AASECRETBB", "SECRET", "AASECRETBB", 1, 2)]
+	[InlineData("AASECRETBB", "SECRET", "AASECRETBB", 1, 1)]
 	[InlineData("AASECRETBB", "AASECRETBB", "SECRET", 1, 0)]
 	[InlineData("AASECRETBB", "AASECRET", "SECRETBB", 1, 1)]
-	public void CrossCategoryOverlap_PreservesOnlyPrivateResidualSegments(
+	public void CrossCategoryOverlap_SegmentsCoverageWithoutDuplicatingCandidateCounts(
 		string content,
 		string secretValue,
 		string privateValue,
@@ -171,14 +171,23 @@ public sealed class PrivateDataRedactionCompositionTests
 
 		Assert.Equal(expectedSecretCount, scan.Snapshot.SecretDetectedCount);
 		Assert.Equal(expectedPrivateCount, scan.Snapshot.PrivateDataDetectedCount);
-		Assert.Equal(expectedSecretCount + expectedPrivateCount, scan.Result.Spans.Count);
-		Assert.Equal(expectedSecretCount, scan.Result.Spans.Count(static span => span.RuleId == "secret-rule"));
-		Assert.Equal(expectedPrivateCount, scan.Result.Spans.Count(static span => span.RuleId == "private-rule"));
+		Assert.Equal(3, scan.Result.Spans.Count);
+		Assert.Single(scan.Result.Spans
+			.Where(static span => span.RuleId == "secret-rule")
+			.Select(static span => span.OccurrenceId)
+			.Distinct(StringComparer.Ordinal));
+		Assert.Equal(
+			expectedPrivateCount,
+			scan.Result.Spans
+				.Where(static span => span.RuleId == "private-rule")
+				.Select(static span => span.OccurrenceId)
+				.Distinct(StringComparer.Ordinal)
+				.Count());
 		Assert.DoesNotContain(secretValue, scan.Result.Text, StringComparison.Ordinal);
 	}
 
 	[Fact]
-	public void ExactCrossCategoryGroup_InsideManualSecretMark_PreservesPrivateDataFlanks()
+	public void ManualSecretMark_InsideWiderSecretFinding_PreservesFindingFlanksAndSharedIdentity()
 	{
 		const string value = "left-private-flank-MANUAL-SECRET-right-private-flank";
 		const string manualValue = "MANUAL-SECRET";
@@ -193,7 +202,7 @@ public sealed class PrivateDataRedactionCompositionTests
 				RedactionFindingCategory.Secrets),
 			new NeedleDetector(
 				"private-data-v1",
-				value,
+				"not-present",
 				"private-rule",
 				RedactionFindingCategory.PrivateData));
 		Assert.True(MarkedSecretValueNormalizer.TryCreate(manualValue, out var mark, out _));
@@ -211,17 +220,42 @@ public sealed class PrivateDataRedactionCompositionTests
 			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
 
 		Assert.Equal(3, scan.Result.Spans.Count);
-		Assert.Single(scan.Result.Spans, static span => span.RuleId == "manual-secret");
-		Assert.Equal(2, scan.Result.Spans.Count(static span => span.RuleId == "private-rule"));
+		var manualSpan = Assert.Single(scan.Result.Spans, static span => span.RuleId == "manual-secret");
+		var detectorSpans = scan.Result.Spans.Where(static span => span.RuleId == "secret-rule").ToArray();
+		Assert.Equal(2, detectorSpans.Length);
+		Assert.Single(detectorSpans.Select(static span => span.OccurrenceId).Distinct(StringComparer.Ordinal));
+		Assert.All(detectorSpans, static span => Assert.Equal(SecretFindingSource.Detector, span.Source));
+		Assert.True(manualSpan.Source.HasFlag(SecretFindingSource.SessionMark));
+		Assert.False(manualSpan.Source.HasFlag(SecretFindingSource.Detector));
 		Assert.Equal(
-			"value=DEVPROJEX_REDACTED[private-rule#1]" +
+			"value=DEVPROJEX_REDACTED[secret-rule#1]" +
 			"DEVPROJEX_REDACTED[manual-secret#1]" +
-			"DEVPROJEX_REDACTED[private-rule#2]",
+			"DEVPROJEX_REDACTED[secret-rule#1]",
 			scan.Result.Text);
 		Assert.DoesNotContain("left-private-flank", scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain(manualValue, scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain("right-private-flank", scan.Result.Text, StringComparison.Ordinal);
-		Assert.Equal((1, 2), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+		Assert.Equal((2, 0), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+
+		Assert.Equal(1, session.SetKeepAsIs([detectorSpans[0].OccurrenceId], keep: true));
+		var keptFinding = Redact(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+		Assert.Equal(
+			"value=left-private-flank-" +
+			"DEVPROJEX_REDACTED[manual-secret#1]" +
+			"-right-private-flank",
+			keptFinding.Result.Text);
+		Assert.Equal(1, session.SetKeepAsIs([detectorSpans[0].OccurrenceId], keep: false));
+		Assert.Equal(scan.Result.Text, Redact(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData).Result.Text);
 	}
 
 	[Fact]
@@ -263,18 +297,18 @@ public sealed class PrivateDataRedactionCompositionTests
 		Assert.Equal(
 			"value=DEVPROJEX_REDACTED[secret-rule#1]" +
 			"DEVPROJEX_REDACTED[manual-private-data#1]" +
-			"DEVPROJEX_REDACTED[secret-rule#2]",
+			"DEVPROJEX_REDACTED[secret-rule#1]",
 			scan.Result.Text);
 		Assert.DoesNotContain("left-secret-flank", scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain(manualValue, scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain("right-secret-flank", scan.Result.Text, StringComparison.Ordinal);
-		Assert.Equal((2, 1), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+		Assert.Equal((1, 1), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
 
 		var secretOccurrenceIds = scan.Result.Spans
 			.Where(static span => span.RuleId == "secret-rule")
 			.Select(static span => span.OccurrenceId)
 			.ToArray();
-		Assert.Equal(2, session.SetKeepAsIs(secretOccurrenceIds, keep: true));
+		Assert.Equal(1, session.SetKeepAsIs(secretOccurrenceIds, keep: true));
 		var keptFlanks = Redact(
 			session,
 			workspace.Path,
@@ -282,11 +316,12 @@ public sealed class PrivateDataRedactionCompositionTests
 			content,
 			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
 		Assert.Equal(
-			"value=left-secret-flank-" +
+			"value=DEVPROJEX_REDACTED[private-rule#1]" +
 			"DEVPROJEX_REDACTED[manual-private-data#1]" +
-			"-right-secret-flank",
+			"DEVPROJEX_REDACTED[private-rule#1]",
 			keptFlanks.Result.Text);
-		Assert.DoesNotContain("DEVPROJEX_REDACTED[private-rule", keptFlanks.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("left-secret-flank", keptFlanks.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("right-secret-flank", keptFlanks.Result.Text, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -322,13 +357,13 @@ public sealed class PrivateDataRedactionCompositionTests
 		Assert.Equal(
 			"DEVPROJEX_REDACTED[private-rule#1]" +
 			"DEVPROJEX_REDACTED[priority-secret#1]" +
-			"DEVPROJEX_REDACTED[private-rule#2]",
+			"DEVPROJEX_REDACTED[private-rule#1]",
 			scan.Result.Text);
 		Assert.DoesNotContain("left-private-flank", scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain(priorityValue, scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain("right-private-flank", scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain("DEVPROJEX_REDACTED[generic-api-key", scan.Result.Text, StringComparison.Ordinal);
-		Assert.Equal((1, 2), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+		Assert.Equal((1, 1), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
 	}
 
 	[Fact]
@@ -365,20 +400,209 @@ public sealed class PrivateDataRedactionCompositionTests
 			value,
 			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
 
-		Assert.Equal(3, scan.Result.Spans.Count);
+		Assert.Equal(5, scan.Result.Spans.Count);
 		Assert.Single(scan.Result.Spans, static span => span.RuleId == "manual-secret");
 		Assert.Equal(2, scan.Result.Spans.Count(static span => span.RuleId == "private-rule"));
+		Assert.Equal(2, scan.Result.Spans.Count(static span => span.RuleId == "priority-secret"));
 		Assert.Equal(
 			"DEVPROJEX_REDACTED[private-rule#1]" +
+			"DEVPROJEX_REDACTED[priority-secret#1]" +
 			"DEVPROJEX_REDACTED[manual-secret#1]" +
-			"DEVPROJEX_REDACTED[private-rule#2]",
+			"DEVPROJEX_REDACTED[priority-secret#1]" +
+			"DEVPROJEX_REDACTED[private-rule#1]",
 			scan.Result.Text);
 		Assert.DoesNotContain("left-private-flank", scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain(priorityValue, scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain("right-private-flank", scan.Result.Text, StringComparison.Ordinal);
-		Assert.DoesNotContain("DEVPROJEX_REDACTED[priority-secret", scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain("DEVPROJEX_REDACTED[generic-api-key", scan.Result.Text, StringComparison.Ordinal);
-		Assert.Equal((1, 2), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+		Assert.Equal((2, 1), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+	}
+
+	[Fact]
+	public void PartialCrossCategoryOverlap_KeepFallsBackAndFullyKeptSegmentRestoresWholeStack()
+	{
+		const string content = "private-prefix-SECRET-private-suffix";
+		const string secretValue = "SECRET";
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", content);
+		var findings = new[]
+		{
+			CreateFinding(content, secretValue, "secret-rule", RedactionFindingCategory.Secrets),
+			CreateFinding(content, content, "private-rule", RedactionFindingCategory.PrivateData)
+		};
+		using var session = CreateSessionWithFixedFindings(findings);
+		var features = SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData;
+
+		var initial = Redact(session, workspace.Path, path, content, features);
+		var secretSpan = Assert.Single(initial.Result.Spans, static span => span.RuleId == "secret-rule");
+		var privateSpans = initial.Result.Spans.Where(static span => span.RuleId == "private-rule").ToArray();
+		Assert.Equal(2, privateSpans.Length);
+		Assert.Single(privateSpans.Select(static span => span.OccurrenceId).Distinct(StringComparer.Ordinal));
+		Assert.Equal(2, CountOccurrences(initial.Result.Text, "DEVPROJEX_REDACTED[private-rule#1]"));
+
+		Assert.True(session.ToggleKeepAsIs(secretSpan.OccurrenceId));
+		var secretKept = Redact(session, workspace.Path, path, content, features);
+		Assert.Equal(3, secretKept.Result.Spans.Count);
+		Assert.All(secretKept.Result.Spans, static span => Assert.Equal("private-rule", span.RuleId));
+		Assert.DoesNotContain(secretValue, secretKept.Result.Text, StringComparison.Ordinal);
+
+		var privateOccurrenceId = secretKept.Result.Spans[0].OccurrenceId;
+		Assert.True(session.ToggleKeepAsIs(privateOccurrenceId));
+		var fullyKept = Redact(session, workspace.Path, path, content, features);
+		Assert.Equal(content, fullyKept.Result.Text);
+		var cascade = Assert.Single(
+			fullyKept.Result.Spans,
+			static span => span.CascadedOccurrenceIds is { Count: 2 });
+		Assert.Equal(2, session.SetKeepAsIs(cascade.CascadedOccurrenceIds!, keep: false));
+		Assert.Equal(initial.Result.Text, Redact(session, workspace.Path, path, content, features).Result.Text);
+	}
+
+	[Fact]
+	public void DetectorOnlySameCategoryOverlap_NarrowSpecificSuppressesWideGenericEntirely()
+	{
+		const string content = "name=left-SPECIFIC-right";
+		const string specific = "SPECIFIC";
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", content);
+		using var session = CreateSessionWithFixedFindings(
+		[
+			CreateFinding(content, content, "generic-api-key", RedactionFindingCategory.Secrets),
+			CreateFinding(content, specific, "specific-secret", RedactionFindingCategory.Secrets)
+		]);
+
+		var scan = Redact(session, workspace.Path, path, content, SecretRedactionFeatures.Secrets);
+
+		Assert.Equal("name=left-DEVPROJEX_REDACTED[specific-secret#1]-right", scan.Result.Text);
+		Assert.Single(scan.Result.Spans);
+		Assert.Equal(1, scan.Snapshot.SecretRedactedCount);
+		Assert.DoesNotContain("generic-api-key", scan.Result.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void OverlappingManualMarks_SameCategoryStackWithoutOpeningEachOther()
+	{
+		const string content = "value=ABCDEFGHIJKLMN";
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", content);
+		using var session = CreateSessionWithFixedFindings([]);
+		Assert.True(MarkedSecretValueNormalizer.TryCreate("BCDEFGHI", out var firstMark, out _));
+		Assert.True(MarkedSecretValueNormalizer.TryCreate("FGHIJKLM", out var secondMark, out _));
+		Assert.True(session.AddSessionMarkedSecret("data.txt", 7, firstMark, ManualRedactionClass.Secret));
+		Assert.True(session.AddSessionMarkedSecret("data.txt", 11, secondMark, ManualRedactionClass.Secret));
+
+		var initial = Redact(session, workspace.Path, path, content, SecretRedactionFeatures.Secrets);
+		Assert.Equal(3, initial.Result.Spans.Count);
+		var occurrenceIds = initial.Result.Spans
+			.Select(static span => span.OccurrenceId)
+			.Distinct(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(2, occurrenceIds.Length);
+
+		Assert.True(session.ToggleKeepAsIs(occurrenceIds[0]));
+		var oneKept = Redact(session, workspace.Path, path, content, SecretRedactionFeatures.Secrets);
+		Assert.Equal(
+			"value=ABCDE" +
+			"DEVPROJEX_REDACTED[manual-secret#2]" +
+			"DEVPROJEX_REDACTED[manual-secret#2]N",
+			oneKept.Result.Text);
+		Assert.DoesNotContain("FGHIJKLM", oneKept.Result.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void AddingManualMark_NeverShrinksResolvedCoverage_ForDeterministicRandomInputs()
+	{
+		var random = new Random(0x5EED_41);
+		const string content = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";
+		for (var iteration = 0; iteration < 128; iteration++)
+		{
+			var findings = CreateRandomFindings(random, content, iteration, random.Next(1, 18));
+			var before = SecretRedactionScope.ResolveSegmentedFindings(findings);
+			var markStart = random.Next(0, content.Length - 1);
+			var markLength = random.Next(1, content.Length - markStart + 1);
+			var markCategory = random.Next(2) == 0
+				? RedactionFindingCategory.Secrets
+				: RedactionFindingCategory.PrivateData;
+			var mark = new DetectedSecret(
+				markCategory == RedactionFindingCategory.Secrets ? "manual-secret" : "manual-private-data",
+				markStart,
+				markLength,
+				content.Substring(markStart, markLength),
+				int.MinValue,
+				SecretFindingSource.SessionMark,
+				Category: markCategory);
+			var after = SecretRedactionScope.ResolveSegmentedFindings([..findings, mark]);
+
+			var beforeCoverage = GetCoverage(content.Length, before.Segments);
+			var afterCoverage = GetCoverage(content.Length, after.Segments);
+			for (var position = 0; position < content.Length; position++)
+				Assert.False(beforeCoverage[position] && !afterCoverage[position]);
+		}
+	}
+
+	[Fact]
+	public void RandomKeepCombinations_NeverExposeSegmentsCoveredBySurvivingCandidates()
+	{
+		var random = new Random(0x51A7_2026);
+		const string content = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", content);
+		var findings = CreateRandomFindings(random, content, iteration: 0, count: 24);
+		var resolved = SecretRedactionScope.ResolveSegmentedFindings(findings);
+		using var session = CreateSessionWithFixedFindings(findings);
+		var features = SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData;
+		var occurrenceIdsByRule = RevealAllCandidateOccurrenceIds(
+			session,
+			workspace.Path,
+			path,
+			content,
+			features,
+			resolved.Candidates.Count);
+
+		Assert.Equal(resolved.Candidates.Count, occurrenceIdsByRule.Count);
+		for (var state = 0; state < 64; state++)
+		{
+			session.SetKeepAsIs(occurrenceIdsByRule.Values.ToArray(), keep: true);
+			var redactedRules = resolved.Candidates
+				.Where(_ => random.Next(2) == 0)
+				.Select(static candidate => candidate.RuleId)
+				.ToHashSet(StringComparer.Ordinal);
+			session.SetKeepAsIs(
+				redactedRules.Select(rule => occurrenceIdsByRule[rule]).ToArray(),
+				keep: false);
+
+			var scope = session.BeginOutput(workspace.Path, [path], features: features);
+			var plan = scope.CreatePlan(path, content, TestContext.Current.CancellationToken);
+			scope.Complete();
+			Assert.Equal(resolved.Segments.Count, plan.Replacements.Count);
+			for (var segmentIndex = 0; segmentIndex < resolved.Segments.Count; segmentIndex++)
+			{
+				var segment = resolved.Segments[segmentIndex];
+				var mustBeRedacted = segment.CandidateIndexes.Any(
+					index => redactedRules.Contains(resolved.Candidates[index].RuleId));
+				Assert.Equal(mustBeRedacted, plan.Replacements[segmentIndex].Replacement is not null);
+			}
+		}
+	}
+
+	[Fact]
+	public void SegmentedResolution_IsDeterministicAcrossSessionsForSeededRandomInputs()
+	{
+		var random = new Random(unchecked((int)0xD371_2026));
+		const string content = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", content);
+		var findings = CreateRandomFindings(random, content, iteration: 7, count: 32);
+		var features = SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData;
+
+		using var firstSession = CreateSessionWithFixedFindings(findings);
+		using var secondSession = CreateSessionWithFixedFindings(findings);
+		var first = Redact(firstSession, workspace.Path, path, content, features);
+		var second = Redact(secondSession, workspace.Path, path, content, features);
+
+		Assert.Equal(first.Result.Text, second.Result.Text);
+		Assert.Equal(first.Result.Spans, second.Result.Spans);
+		Assert.Equal(first.Snapshot.SecretDetectedCount, second.Snapshot.SecretDetectedCount);
+		Assert.Equal(first.Snapshot.PrivateDataDetectedCount, second.Snapshot.PrivateDataDetectedCount);
 	}
 
 	[Fact]
@@ -700,6 +924,91 @@ public sealed class PrivateDataRedactionCompositionTests
 		Assert.Equal(3, new HashSet<string>(
 			[secretsOnly.Snapshot.SelectionKey, privateOnly.Snapshot.SelectionKey, combined.Snapshot.SelectionKey],
 			StringComparer.Ordinal).Count);
+	}
+
+	private static SecretRedactionSession CreateSessionWithFixedFindings(
+		IReadOnlyList<DetectedSecret> findings) =>
+		SecretRedactionSession.CreateWithPrivateData(
+			new FixedFindingsDetector(
+				"catalog:smart-secrets-v4",
+				findings.Where(static finding => finding.Category == RedactionFindingCategory.Secrets).ToArray()),
+			new FixedFindingsDetector(
+				"private-data-v1",
+				findings.Where(static finding => finding.Category == RedactionFindingCategory.PrivateData).ToArray()));
+
+	private static DetectedSecret[] CreateRandomFindings(
+		Random random,
+		string content,
+		int iteration,
+		int count)
+	{
+		var findings = new DetectedSecret[count];
+		for (var index = 0; index < findings.Length; index++)
+		{
+			var start = random.Next(0, content.Length - 1);
+			var length = random.Next(1, Math.Min(20, content.Length - start) + 1);
+			var category = random.Next(2) == 0
+				? RedactionFindingCategory.Secrets
+				: RedactionFindingCategory.PrivateData;
+			findings[index] = new DetectedSecret(
+				$"{(category == RedactionFindingCategory.Secrets ? "secret" : "private")}-{iteration}-{index}",
+				start,
+				length,
+				content.Substring(start, length),
+				-1_000 + index,
+				SecretFindingSource.Detector,
+				Category: category);
+		}
+		return findings;
+	}
+
+	private static bool[] GetCoverage(
+		int length,
+		IReadOnlyList<SecretRedactionScope.ResolvedSecretSegment> segments)
+	{
+		var coverage = new bool[length];
+		foreach (var segment in segments)
+			Array.Fill(coverage, true, segment.Start, segment.Length);
+		return coverage;
+	}
+
+	private static Dictionary<string, string> RevealAllCandidateOccurrenceIds(
+		SecretRedactionSession session,
+		string projectRoot,
+		string path,
+		string content,
+		SecretRedactionFeatures features,
+		int expectedCount)
+	{
+		var occurrenceIdsByRule = new Dictionary<string, string>(StringComparer.Ordinal);
+		for (var pass = 0; pass <= expectedCount; pass++)
+		{
+			var scan = Redact(session, projectRoot, path, content, features);
+			foreach (var span in scan.Result.Spans)
+				occurrenceIdsByRule.TryAdd(span.RuleId, span.OccurrenceId);
+			if (occurrenceIdsByRule.Count == expectedCount)
+				break;
+			var activeOccurrenceIds = scan.Result.Spans
+				.Where(static span => span.State == SecretPreviewSpanState.Redacted)
+				.Select(static span => span.OccurrenceId)
+				.Distinct(StringComparer.Ordinal)
+				.ToArray();
+			if (session.SetKeepAsIs(activeOccurrenceIds, keep: true) == 0)
+				break;
+		}
+		return occurrenceIdsByRule;
+	}
+
+	private static int CountOccurrences(string value, string search)
+	{
+		var count = 0;
+		var offset = 0;
+		while ((offset = value.IndexOf(search, offset, StringComparison.Ordinal)) >= 0)
+		{
+			count++;
+			offset += search.Length;
+		}
+		return count;
 	}
 
 	private static void AssertSnapshot(
