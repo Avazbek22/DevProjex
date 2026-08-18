@@ -33,6 +33,43 @@ public sealed class MainWindowViewModelTests
 		CanDelete: true,
 		DeleteToolTip: null);
 
+	[Fact]
+	public void PreviewSearchAvailability_FollowsLoadedPreviewPane()
+	{
+		var viewModel = CreateViewModel();
+
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+		viewModel.IsProjectLoaded = true;
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+
+		viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+		viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+		Assert.True(viewModel.IsPreviewSearchAvailable);
+		viewModel.SelectedPreviewContentMode = PreviewContentMode.Tree;
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+		viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+		Assert.True(viewModel.IsPreviewSearchAvailable);
+
+		viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.Off;
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+	}
+
+	[Fact]
+	public void PreviewSearchSummary_ReportsZeroAndCappedResults()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.PreviewSearchVisible = true;
+		viewModel.PreviewSearchQuery = "match";
+
+		viewModel.UpdatePreviewSearchMatchSummary(0, 0, matchesCapped: false);
+		Assert.Equal("(0 / 0)", viewModel.PreviewSearchMatchSummaryText);
+
+		viewModel.UpdatePreviewSearchMatchSummary(4, 10_000, matchesCapped: true);
+		Assert.StartsWith("(4 / ", viewModel.PreviewSearchMatchSummaryText, StringComparison.Ordinal);
+		Assert.EndsWith("+)", viewModel.PreviewSearchMatchSummaryText, StringComparison.Ordinal);
+	}
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

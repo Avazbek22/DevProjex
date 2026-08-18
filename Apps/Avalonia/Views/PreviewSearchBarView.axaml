@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:DevProjex.Avalonia.ViewModels"
+             x:Class="DevProjex.Avalonia.Views.PreviewSearchBarView"
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
+  <Border Classes="search-panel"
+          IsEnabled="{Binding IsPreviewSearchAvailable}"
+          UseLayoutRounding="True">
+    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="12,6">
+      <TextBox Name="PreviewSearchBox"
+               Grid.Column="0"
+               PlaceholderText="{Binding MenuSearch}"
+               Text="{Binding PreviewSearchQuery, Mode=TwoWay}"
+               MinWidth="96"
+               FocusAdorner="{x:Null}"
+               KeyDown="OnSearchKeyDown" />
+      <TextBlock Grid.Column="1"
+                 Text="{Binding PreviewSearchMatchSummaryText}"
+                 IsVisible="{Binding PreviewSearchMatchSummaryVisible}"
+                 FontSize="16"
+                 Opacity="0.92"
+                 VerticalAlignment="Center"
+                 HorizontalAlignment="Right"
+                 Margin="12,0,4,0" />
+      <StackPanel Grid.Column="2"
+                  Orientation="Horizontal"
+                  Spacing="8">
+        <Button Name="PreviewSearchPreviousButton"
+                Content="▲"
+                Width="32"
+                Click="OnSearchPrev" />
+        <Button Name="PreviewSearchNextButton"
+                Content="▼"
+                Width="32"
+                Click="OnSearchNext" />
+        <Button Name="PreviewSearchCloseButton"
+                Content="✕"
+                Width="32"
+                Click="OnSearchClose" />
+      </StackPanel>
+    </Grid>
+  </Border>
+</UserControl>

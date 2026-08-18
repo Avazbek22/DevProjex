@@ -58,6 +58,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _searchQuery = string.Empty;
     private int _searchCurrentMatchIndex;
     private int _searchTotalMatches;
+	private bool _previewSearchVisible;
+	private string _previewSearchQuery = string.Empty;
+	private int _previewSearchCurrentMatchIndex;
+	private int _previewSearchTotalMatches;
+	private bool _previewSearchMatchesCapped;
+	private bool _isPreviewSearchInProgress;
     private int _filterMatchCount;
     private string _nameFilter = string.Empty;
 
@@ -410,6 +416,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged();
             RaisePropertyChanged(nameof(IsSearchAvailable));
             RaisePropertyChanged(nameof(IsSearchFilterAvailable));
+			RaisePropertyChanged(nameof(IsPreviewSearchAvailable));
             RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
             RaisePropertyChanged(nameof(CanApplySettings));
             RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
@@ -491,6 +498,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsSearchAvailable => _isProjectLoaded && IsTreePaneVisible;
 
     public bool IsSearchFilterAvailable => _isProjectLoaded && IsTreePaneVisible && !_isProjectCopyExportInProgress;
+
+	public bool IsPreviewSearchAvailable =>
+		_isProjectLoaded &&
+		IsPreviewPaneVisible &&
+		_selectedPreviewContentMode != PreviewContentMode.Tree;
 
     public bool AreFilterSettingsEnabled => _isProjectLoaded && !_isProjectCopyExportInProgress;
 
@@ -636,6 +648,51 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _searchTotalMatches > 0;
 
     public string SearchMatchSummaryText => $"({_searchCurrentMatchIndex} / {_searchTotalMatches})";
+
+	public bool PreviewSearchVisible
+	{
+		get => _previewSearchVisible;
+		set
+		{
+			if (_previewSearchVisible == value) return;
+			_previewSearchVisible = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(PreviewSearchMatchSummaryVisible));
+		}
+	}
+
+	public string PreviewSearchQuery
+	{
+		get => _previewSearchQuery;
+		set
+		{
+			if (_previewSearchQuery == value) return;
+			_previewSearchQuery = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(PreviewSearchMatchSummaryVisible));
+		}
+	}
+
+	public int PreviewSearchCurrentMatchIndex => _previewSearchCurrentMatchIndex;
+
+	public int PreviewSearchTotalMatches => _previewSearchTotalMatches;
+
+	public bool PreviewSearchMatchesCapped => _previewSearchMatchesCapped;
+
+	public bool IsPreviewSearchInProgress => _isPreviewSearchInProgress;
+
+	public bool PreviewSearchMatchSummaryVisible =>
+		_previewSearchVisible && !string.IsNullOrWhiteSpace(_previewSearchQuery);
+
+	public string PreviewSearchMatchSummaryText
+	{
+		get
+		{
+			var current = _previewSearchCurrentMatchIndex.ToString("N0", CultureInfo.CurrentCulture);
+			var total = _previewSearchTotalMatches.ToString("N0", CultureInfo.CurrentCulture);
+			return $"({current} / {total}{(_previewSearchMatchesCapped ? "+" : string.Empty)})";
+		}
+	}
 
     public string NameFilter
     {
@@ -811,6 +868,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             RaisePropertyChanged(nameof(IsPreviewTreeSelected));
             RaisePropertyChanged(nameof(IsPreviewContentSelected));
             RaisePropertyChanged(nameof(IsPreviewTreeAndContentSelected));
+			RaisePropertyChanged(nameof(IsPreviewSearchAvailable));
             RaisePropertyChanged(nameof(PreviewCopyCurrentModeTooltip));
         }
     }
@@ -1020,6 +1078,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(IsPreviewOnlyMode));
         RaisePropertyChanged(nameof(IsSearchAvailable));
         RaisePropertyChanged(nameof(IsSearchFilterAvailable));
+		RaisePropertyChanged(nameof(IsPreviewSearchAvailable));
         RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
     }
 
@@ -1407,6 +1466,41 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(SearchMatchSummaryText));
         RaisePropertyChanged(nameof(SearchMatchSummaryVisible));
     }
+
+	public void UpdatePreviewSearchMatchSummary(
+		int currentIndex,
+		int totalMatches,
+		bool matchesCapped)
+	{
+		var normalizedTotal = Math.Max(0, totalMatches);
+		var normalizedCurrent = normalizedTotal == 0
+			? 0
+			: Math.Clamp(currentIndex, 1, normalizedTotal);
+		if (_previewSearchCurrentMatchIndex == normalizedCurrent &&
+		    _previewSearchTotalMatches == normalizedTotal &&
+		    _previewSearchMatchesCapped == matchesCapped)
+		{
+			return;
+		}
+
+		_previewSearchCurrentMatchIndex = normalizedCurrent;
+		_previewSearchTotalMatches = normalizedTotal;
+		_previewSearchMatchesCapped = matchesCapped;
+		RaisePropertyChanged(nameof(PreviewSearchCurrentMatchIndex));
+		RaisePropertyChanged(nameof(PreviewSearchTotalMatches));
+		RaisePropertyChanged(nameof(PreviewSearchMatchesCapped));
+		RaisePropertyChanged(nameof(PreviewSearchMatchSummaryText));
+		RaisePropertyChanged(nameof(PreviewSearchMatchSummaryVisible));
+	}
+
+	public void SetPreviewSearchInProgress(bool isInProgress)
+	{
+		if (_isPreviewSearchInProgress == isInProgress)
+			return;
+
+		_isPreviewSearchInProgress = isInProgress;
+		RaisePropertyChanged(nameof(IsPreviewSearchInProgress));
+	}
 
     public void SetSearchInProgress(bool isInProgress)
     {

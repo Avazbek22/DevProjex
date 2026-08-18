@@ -10,6 +10,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 		"FilterBarView.axaml",
 		"GitCloneWindow.axaml",
 		"HelpPopoverView.axaml",
+		"PreviewSearchBarView.axaml",
 		"SearchBarView.axaml",
 		"SettingsPanelView.axaml",
 		"ThemePopoverView.axaml",

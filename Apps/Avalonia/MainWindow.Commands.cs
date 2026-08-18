@@ -368,6 +368,21 @@ public partial class MainWindow
     private void OnSearchKeyDown(object? sender, KeyEventArgs e) =>
         _searchFilterController.HandleSearchInputKey(e);
 
+	private void OnTogglePreviewSearch(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Toggle();
+
+	private void OnPreviewSearchClose(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Close();
+
+	private void OnPreviewSearchNext(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Navigate(1);
+
+	private void OnPreviewSearchPrev(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Navigate(-1);
+
+	private void OnPreviewSearchKeyDown(object? sender, KeyEventArgs e) =>
+		_previewSearchController.HandleInputKey(e);
+
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         CancelAllMemoryCleanup();
@@ -382,8 +397,14 @@ public partial class MainWindow
             return;
         }
 
+		if (_previewSearchController.TryHandleToggleHotkey(e))
+			return;
+
         if (_searchFilterController.TryHandleToggleHotkey(e))
             return;
+
+		if (_previewSearchController.TryHandleEscape(e))
+			return;
 
         // Esc closes the help popover
         if (e.Key == Key.Escape && _viewModel.HelpPopoverOpen)

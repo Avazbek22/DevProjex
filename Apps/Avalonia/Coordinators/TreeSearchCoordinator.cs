@@ -2037,19 +2037,19 @@ public sealed class TreeSearchCoordinator(
 
     private void ApplySearchHighlightResourceOverrides(global::Avalonia.Application app, ThemeVariant theme)
     {
-        if (app.Resources.TryGetResource("TreeSearchHighlightBrush", theme, out var bg) &&
+        if (app.TryFindResource("TreeSearchHighlightBrush", theme, out var bg) &&
             bg is IBrush bgBrush)
             _cachedHighlightBackground = bgBrush;
 
-        if (app.Resources.TryGetResource("TreeSearchHighlightTextBrush", theme, out var fg) &&
+        if (app.TryFindResource("TreeSearchHighlightTextBrush", theme, out var fg) &&
             fg is IBrush fgBrush)
             _cachedHighlightForeground = fgBrush;
 
-        if (app.Resources.TryGetResource("TreeSearchCurrentBrush", theme, out var current) &&
+        if (app.TryFindResource("TreeSearchCurrentBrush", theme, out var current) &&
             current is IBrush currentBrush)
             _cachedCurrentBackground = currentBrush;
 
-        if (app.Resources.TryGetResource("AppTextBrush", theme, out var textFg) && textFg is IBrush textBrush)
+        if (app.TryFindResource("AppTextBrush", theme, out var textFg) && textFg is IBrush textBrush)
             _cachedNormalForeground = textBrush;
     }
 }

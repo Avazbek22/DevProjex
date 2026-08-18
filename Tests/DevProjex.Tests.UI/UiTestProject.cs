@@ -65,6 +65,24 @@ internal sealed class UiTestProject : IDisposable
 		});
 	}
 
+	public static UiTestProject CreateWithPreviewSearchWorkspace()
+	{
+		return Create(static rootPath =>
+		{
+			var lines = Enumerable.Range(1, 140)
+				.Select(index => index switch
+				{
+					60 => "first PreviewSearchNeedle occurrence",
+					95 => "second previewsearchneedle occurrence",
+					112 => "const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";",
+					136 => "third PreviewSearchNeedle occurrence",
+					_ => $"ordinary preview line {index:000}"
+				});
+			WriteFile(rootPath, Path.Combine("src", "PreviewSearch.cs"), string.Join('\n', lines));
+			WriteFile(rootPath, "README.md", "# Preview search fixture\n");
+		});
+	}
+
     public static UiTestProject CreateWithScopedExtensionlessEntries()
     {
         return Create(static rootPath =>

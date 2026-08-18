@@ -168,6 +168,7 @@ public partial class MainWindow
             // Dispose coordinators
             _memoryCleanup.Dispose();
             _previewWorkspaceController.Dispose();
+			_previewSearchController.Dispose();
             _searchFilterController.Dispose();
             _workspacePresentation.Dispose();
             _selectionCoordinator.Dispose();

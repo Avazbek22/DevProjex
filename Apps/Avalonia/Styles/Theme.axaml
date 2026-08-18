@@ -17,7 +17,7 @@
     <Color x:Key="AppMutedTextColor">#5E5E5E</Color>
     <Color x:Key="TreeSelectionColor">#DCEEFF</Color>
     <Color x:Key="PreviewSelectionColor">#2D8CFF</Color>
-    <Color x:Key="TreeSearchHighlightColor">#F7C76B</Color>
+    <Color x:Key="TreeSearchHighlightColor">#FFEB3B</Color>
     <Color x:Key="TreeSearchCurrentColor">#F9A825</Color>
     <Color x:Key="MenuHoverColor">#E6E6E6</Color>
     <Color x:Key="MenuPressedColor">#D9D9D9</Color>
@@ -96,8 +96,8 @@
     <Color x:Key="AppMutedTextColor">#9AA3B2</Color>
     <Color x:Key="TreeSelectionColor">#254861</Color>
     <Color x:Key="PreviewSelectionColor">#2D8CFF</Color>
-    <Color x:Key="TreeSearchHighlightColor">#E6A23A</Color>
-    <Color x:Key="TreeSearchCurrentColor">#F39C12</Color>
+    <Color x:Key="TreeSearchHighlightColor">#FFEB3B</Color>
+    <Color x:Key="TreeSearchCurrentColor">#F9A825</Color>
     <Color x:Key="MenuHoverColor">#3A3D44</Color>
     <Color x:Key="MenuPressedColor">#4A4D54</Color>
     <Color x:Key="ToastSurfaceColor">#1B1D22</Color>

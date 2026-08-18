@@ -695,6 +695,7 @@ public partial class MainWindow
 
     private readonly MainWindowViewModel _viewModel;
     private readonly SearchFilterInteractionController _searchFilterController;
+	private readonly PreviewSearchInteractionController _previewSearchController;
     private readonly WorkspacePresentationController _workspacePresentation;
     private readonly PreviewSurfaceController _previewSurfaceController;
     private readonly PreviewWorkspaceController _previewWorkspaceController;
@@ -764,6 +765,7 @@ public partial class MainWindow
     private ItemsControl? _toastHost;
     private SearchBarView? _searchBar;
     private FilterBarView? _filterBar;
+	private PreviewSearchBarView? _previewSearchBar;
     private ScrollViewer? _previewTextScrollViewer;
     private VirtualizedPreviewTextControl? _previewTextControl;
     private VirtualizedLineNumbersControl? _previewLineNumbersControl;
@@ -1013,6 +1015,7 @@ public partial class MainWindow
         }
         _searchBar = this.FindControl<SearchBarView>("SearchBar");
         _filterBar = this.FindControl<FilterBarView>("FilterBar");
+		_previewSearchBar = this.FindControl<PreviewSearchBarView>("PreviewSearchBar");
         _previewBarContainer = this.FindControl<Border>("PreviewBarContainer");
         _previewBar = this.FindControl<Border>("PreviewBar");
         _previewLineNumbersBackground = this.FindControl<Border>("PreviewLineNumbersBackground");
@@ -1101,6 +1104,14 @@ public partial class MainWindow
             ex => ShowErrorAsync(ex.Message),
             ScheduleBackgroundMemoryCleanup,
             CancelAllMemoryCleanup);
+		_previewSearchController = new PreviewSearchInteractionController(
+			_viewModel,
+			_previewSearchBar ??
+			throw new InvalidOperationException("Preview search bar control was not found."),
+			this.FindControl<Border>("PreviewSearchBarContainer") ??
+			throw new InvalidOperationException("Preview search bar container was not found."),
+			_previewTextControl ??
+			throw new InvalidOperationException("Preview text control was not found."));
         _previewSurfaceController = new PreviewSurfaceController(
             this,
             _viewModel,
@@ -1186,6 +1197,7 @@ public partial class MainWindow
                   !_workspacePresentation.IsPreviewPaneAnimating &&
                   !_workspacePresentation.IsTreePaneAnimating &&
                   !_searchFilterController.IsAnimating &&
+				  !_previewSearchController.IsAnimating &&
                   !_previewWorkspaceController.IsModeSwitchInProgress,
             SettingsPanelAnimationDuration,
             () => new MemoryCleanupRetentionSnapshot(
@@ -1262,6 +1274,10 @@ public partial class MainWindow
             {
                 _searchFilterController.OnSearchQueryChanged();
             }
+			else if (args.PropertyName == nameof(MainWindowViewModel.PreviewSearchQuery))
+			{
+				_previewSearchController.OnQueryChanged();
+			}
             else if (args.PropertyName == nameof(MainWindowViewModel.NameFilter))
             {
                 _searchFilterController.OnNameFilterChanged();
@@ -1286,7 +1302,10 @@ public partial class MainWindow
                 _viewModel.ThemePopoverOpen = false;
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.IsProjectLoaded))
+			{
                 UpdateDropZoneAnimationState();
+				_previewSearchController.OnAvailabilityChanged();
+			}
             else if (args.PropertyName is nameof(MainWindowViewModel.StatusBusy)
                      or nameof(MainWindowViewModel.StatusOperationVisible)
                      or nameof(MainWindowViewModel.StatusProgressIsIndeterminate)
@@ -1301,6 +1320,7 @@ public partial class MainWindow
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.SelectedPreviewContentMode))
             {
+				_previewSearchController.OnAvailabilityChanged();
                 if (!_previewWorkspaceController.IsModeSwitchInProgress)
                     UpdatePreviewSegmentThumbPosition(animate: false);
                 if (_metrics.HasStatusMetricsSnapshot && _viewModel.StatusMetricsVisible)
@@ -1311,6 +1331,7 @@ public partial class MainWindow
             }
 			else if (args.PropertyName == nameof(MainWindowViewModel.IsAnyPreviewVisible))
 			{
+				_previewSearchController.OnAvailabilityChanged();
 				if (_viewModel.IsAnyPreviewVisible && IsAnyContentRedactionEnabled)
 					CancelSecretRedactionDiscovery();
 				else

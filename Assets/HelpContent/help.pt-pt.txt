@@ -187,6 +187,8 @@ Aberto com o botão do ícone do olho na barra superior ou com Ctrl+B.
 
 Os botões laterais do rato seguem a navegação do navegador: Avançar abre o modo de visualização e Voltar fecha-o. Repetir a direção já ativa não tem efeito.
 
+Ctrl+Shift+F abre ou fecha a pesquisa no texto visível da visualização.
+
 Mostra o resultado final numa área de trabalho separada junto à árvore. Este modo não copia para a área de transferência e não exporta sozinho para um ficheiro — é um modo de visualização.
 
 Por predefinição, o espaço de trabalho é aberto como:
