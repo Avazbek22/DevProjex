@@ -313,6 +313,7 @@
   "Git.Error.NetworkError": "Netzwerkfehler:\n{0}",
   "Git.Error.NoInternetConnection": "Repository konnte nicht geklont werden. Bitte überprüfen Sie Ihre Internetverbindung.",
   "Git.Error.BranchSwitchFailed": "Branch konnte nicht gewechselt werden:\n{0}",
+  "Git.Error.WorktreeBranchUnavailable": "Der Branchwechsel ist für die zwischengespeicherte Kopie nicht verfügbar: {0}",
   "Git.Error.UpdateFailed": "Aktualisierungen konnten nicht abgerufen werden:\n{0}",
 
   "Dialog.OK": "OK",

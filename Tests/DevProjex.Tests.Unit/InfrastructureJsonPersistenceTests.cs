@@ -345,6 +345,28 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_DurableWriteDoesNotReportSuccessWithoutBackup()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "secret-marks.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		File.WriteAllText(fileSet.PrimaryPath, "old");
+		var operations = new JsonStoreWriteOperations(
+			static (_, _, _) => throw new PlatformNotSupportedException("replace unavailable"),
+			static (_, _, _) => throw new IOException("backup unavailable"));
+
+		var result = JsonStorePersistence.TryWriteAtomicDurable(
+			fileSet,
+			new TestDocument("committed", 7),
+			JsonOptions,
+			operations);
+
+		Assert.False(result);
+		Assert.Contains("\"name\":\"committed\"", File.ReadAllText(fileSet.PrimaryPath));
+		Assert.False(File.Exists(fileSet.BackupPath));
+	}
+
+	[Fact]
 	public void CrossProcessFileLock_AcquireFailsFastWhenSidecarLockIsAlreadyHeld()
 	{
 		using var temp = new TemporaryDirectory();

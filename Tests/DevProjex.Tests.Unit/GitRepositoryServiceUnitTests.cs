@@ -13,7 +13,7 @@ public class GitRepositoryServiceUnitTests
     {
         var startInfo = GitRepositoryService.CreateGitCommandStartInfo(
             workingDirectory: null,
-            arguments: "--version");
+            arguments: ["--version"]);
 
         Assert.False(startInfo.UseShellExecute);
         Assert.True(startInfo.RedirectStandardInput);
@@ -29,7 +29,65 @@ public class GitRepositoryServiceUnitTests
         Assert.Equal("never", startInfo.Environment["SSH_ASKPASS_REQUIRE"]);
         Assert.Equal("Never", startInfo.Environment["GCM_INTERACTIVE"]);
         Assert.Equal("false", startInfo.Environment["GCM_GUI_PROMPT"]);
+        Assert.Equal(["--version"], startInfo.ArgumentList);
     }
+
+	[Fact]
+	public async Task WorktreeSupportProbe_TransientFailureIsRetriedAndSuccessIsCached()
+	{
+		var calls = 0;
+		var manager = new GitWorktreeManager(_ => Task.FromResult(
+			Interlocked.Increment(ref calls) == 1
+				? WorktreeSupportState.TransientFailure
+				: WorktreeSupportState.Supported));
+
+		Assert.False(await manager.IsSupportedAsync("repo", TestContext.Current.CancellationToken));
+		Assert.True(await manager.IsSupportedAsync("repo", TestContext.Current.CancellationToken));
+		Assert.True(await manager.IsSupportedAsync("repo", TestContext.Current.CancellationToken));
+		Assert.Equal(2, calls);
+	}
+
+	[Fact]
+	public async Task WorktreeSupportProbe_FaultedProbeIsRetriedOnNextRequest()
+	{
+		var calls = 0;
+		var manager = new GitWorktreeManager(_ =>
+		{
+			calls++;
+			return calls == 1
+				? Task.FromException<WorktreeSupportState>(new IOException("transient probe failure"))
+				: Task.FromResult(WorktreeSupportState.Supported);
+		});
+
+		await Assert.ThrowsAsync<IOException>(() => manager.IsSupportedAsync("repo", CancellationToken.None));
+		Assert.True(await manager.IsSupportedAsync("repo", CancellationToken.None));
+		Assert.True(await manager.IsSupportedAsync("repo", CancellationToken.None));
+		Assert.Equal(2, calls);
+	}
+
+	[Theory]
+	[InlineData("feature/space+plus")]
+	[InlineData("release/v1.2@beta")]
+	[InlineData("тема/исправление")]
+	public void BranchNameValidator_AcceptsValidUnusualNames(string branchName)
+	{
+		Assert.True(GitBranchNameValidator.IsValid(branchName));
+		Assert.Equal(branchName, GitBranchNameValidator.ValidateAndNormalize(branchName));
+	}
+
+	[Theory]
+	[InlineData("-feature")]
+	[InlineData("feature..next")]
+	[InlineData("feature lock")]
+	[InlineData("feature/@{next")]
+	[InlineData("feature/.hidden")]
+	[InlineData("feature.lock")]
+	[InlineData("feature\\name")]
+	public void BranchNameValidator_RejectsInvalidNamesBeforeCommandConstruction(string branchName)
+	{
+		Assert.False(GitBranchNameValidator.IsValid(branchName));
+		Assert.Throws<ArgumentException>(() => GitBranchNameValidator.ValidateAndNormalize(branchName));
+	}
 
     #region Repository Name Extraction Tests
 

@@ -13,7 +13,6 @@ internal static class GitTrackedPathIndexCache
 	private const long EstimatedEmptyIndexBytes = 64;
 	private const int GitFileMaximumLength = 64 * 1024;
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
-	private static readonly string GitExecutable = OperatingSystem.IsWindows() ? "git.exe" : "git";
 	private static readonly object CacheSync = new();
 	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache =
 		new(PathComparer.Default);
@@ -258,32 +257,17 @@ internal static class GitTrackedPathIndexCache
 
 	internal static ProcessStartInfo CreateStartInfo(string repositoryRootPath)
 	{
-		var startInfo = new ProcessStartInfo
-		{
-			FileName = GitExecutable,
-			WorkingDirectory = repositoryRootPath,
-			UseShellExecute = false,
-			CreateNoWindow = true,
-			RedirectStandardInput = true,
-			RedirectStandardOutput = true,
-			RedirectStandardError = true,
-			StandardOutputEncoding = new UTF8Encoding(
-				encoderShouldEmitUTF8Identifier: false,
-				throwOnInvalidBytes: false),
-			StandardErrorEncoding = Encoding.UTF8
-		};
-		GitProcessEnvironmentSanitizer.RemoveRepositoryOverrides(startInfo);
-		startInfo.ArgumentList.Add("-C");
-		startInfo.ArgumentList.Add(repositoryRootPath);
-		startInfo.ArgumentList.Add("-c");
-		startInfo.ArgumentList.Add("core.quotepath=false");
-		startInfo.ArgumentList.Add("ls-files");
-		startInfo.ArgumentList.Add("--cached");
-		startInfo.ArgumentList.Add("--full-name");
-		startInfo.ArgumentList.Add("-z");
-		startInfo.ArgumentList.Add("--");
+		var startInfo = GitProcessStartInfoFactory.Create(
+			repositoryRootPath,
+			[
+				"-C", repositoryRootPath,
+				"-c", "core.quotepath=false",
+				"ls-files", "--cached", "--full-name", "-z", "--"
+			]);
+		startInfo.StandardOutputEncoding = new UTF8Encoding(
+			encoderShouldEmitUTF8Identifier: false,
+			throwOnInvalidBytes: false);
 		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
 		return startInfo;
 	}
 

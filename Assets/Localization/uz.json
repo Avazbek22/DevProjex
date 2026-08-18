@@ -313,6 +313,7 @@
   "Git.Error.NetworkError": "Tarmoq xatosi:\n{0}",
   "Git.Error.NoInternetConnection": "Repozitoriyani klonlab bo'lmadi. Iltimos, internet ulanishini tekshiring.",
   "Git.Error.BranchSwitchFailed": "Tarmoqni almashtirib bo'lmadi:\n{0}",
+  "Git.Error.WorktreeBranchUnavailable": "Keshlangan nusxa uchun tarmoqni almashtirish mavjud emas: {0}",
   "Git.Error.UpdateFailed": "Yangilanishlarni olib bo'lmadi:\n{0}",
 
   "Dialog.OK": "OK",

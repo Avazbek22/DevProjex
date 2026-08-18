@@ -82,6 +82,18 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public void TryGetZipUrl_StripsQueryAndFragmentBeforeBuildingArchiveUrl()
+    {
+        var result = _service.TryGetZipUrl(
+            "https://github.com/owner/repo.git?tab=readme#files",
+            out var zipUrl,
+            out _);
+
+        Assert.True(result);
+        Assert.Equal("https://github.com/owner/repo/archive/refs/heads/main.zip", zipUrl);
+    }
+
+    [Fact]
     public void TryGetZipUrl_ReturnsFalse_ForInvalidUrl()
     {
         // Invalid URLs should return false
@@ -148,6 +160,108 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // Verify content was extracted
         var files = Directory.GetFiles(targetDir, "*", SearchOption.AllDirectories);
         Assert.NotEmpty(files);
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_UsesDefaultBranchFromGitHubMetadata()
+    {
+        var archive = CreateArchive(("repo-develop/file.txt", "develop"u8.ToArray()));
+        var handler = new DefaultBranchArchiveHandler("develop", archive);
+        using var service = new ZipDownloadService(handler, ZipResourceLimits.Default with
+        {
+            FreeSpaceReserveBytes = 0
+        });
+        var targetDir = Path.Combine(_tempDir!, "develop-default");
+
+        var result = await service.DownloadAndExtractAsync(
+            "https://github.com/owner/repo",
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("develop", result.DefaultBranch);
+        Assert.Contains("/refs/heads/develop.zip", handler.ArchiveRequestUri, StringComparison.Ordinal);
+        Assert.Equal("develop", await File.ReadAllTextAsync(
+            Path.Combine(targetDir, "file.txt"),
+            TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("case")]
+    [InlineData("duplicate")]
+    [InlineData("file-directory")]
+    [InlineData("unicode")]
+    public async Task DownloadAndExtractAsync_RejectsCanonicalPathCollisions(string collisionKind)
+    {
+        var entries = collisionKind switch
+        {
+            "case" => new[]
+            {
+                ("repo-main/Foo.cs", "first"u8.ToArray()),
+                ("repo-main/foo.cs", "second"u8.ToArray())
+            },
+            "duplicate" => new[]
+            {
+                ("repo-main/file.txt", "first"u8.ToArray()),
+                ("repo-main/file.txt", "second"u8.ToArray())
+            },
+            "file-directory" => new[]
+            {
+                ("repo-main/path", "file"u8.ToArray()),
+                ("repo-main/path/child.txt", "child"u8.ToArray())
+            },
+            "unicode" => new[]
+            {
+                ("repo-main/caf\u00E9.txt", "first"u8.ToArray()),
+                ("repo-main/cafe\u0301.txt", "second"u8.ToArray())
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(collisionKind))
+        };
+        var archive = CreateArchive(entries);
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+        var targetDir = Path.Combine(_tempDir!, $"collision-{collisionKind}");
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("same file-system path", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(targetDir));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_FailureDuringStagedExtractionLeavesOccupiedTargetUntouched()
+    {
+        var archive = CreateArchive(
+            ("repo-main/first.txt", "first"u8.ToArray()),
+            ("repo-main/second.txt", "second"u8.ToArray()));
+        var openedEntries = 0;
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 },
+            entry => Interlocked.Increment(ref openedEntries) == 2
+                ? throw new IOException("Simulated extraction failure.")
+                : entry.Open());
+        var targetDir = Path.Combine(_tempDir!, "occupied-target");
+        Directory.CreateDirectory(targetDir);
+        var originalPath = Path.Combine(targetDir, "original.txt");
+        await File.WriteAllTextAsync(originalPath, "original", TestContext.Current.CancellationToken);
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal("original", await File.ReadAllTextAsync(originalPath, TestContext.Current.CancellationToken));
+        Assert.Single(Directory.EnumerateFileSystemEntries(targetDir));
+        Assert.DoesNotContain(
+            Directory.EnumerateDirectories(_tempDir!),
+            path => Path.GetFileName(path).Contains(".occupied-target.extract-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -393,7 +507,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         Assert.False(result.Success);
         Assert.Contains("compression ratio", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Directory.Exists(targetDir));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
     }
 
     [Fact]
@@ -418,7 +532,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         Assert.False(result.Success);
         Assert.Contains("entry count", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Directory.Exists(targetDir));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
     }
 
     [Fact]
@@ -444,7 +558,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         Assert.False(result.Success);
         Assert.Contains("single entry size", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Directory.Exists(targetDir));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
     }
 
     [Fact]
@@ -478,7 +592,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         Assert.False(result.Success);
         Assert.Contains("total extracted size", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Directory.Exists(targetDir));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
     }
 
     [Fact]
@@ -500,7 +614,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         Assert.False(result.Success);
         Assert.Contains("path depth", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Directory.Exists(targetDir));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
     }
 
     [Fact]
@@ -524,7 +638,7 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 
         Assert.False(result.Success);
         Assert.Contains("downloaded archive size", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Directory.Exists(targetDir));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
     }
 
     [Fact]
@@ -621,6 +735,32 @@ public class ZipDownloadServiceTests : IAsyncLifetime
                 content.Headers.ContentLength = declaredContentLength.Value;
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        }
+    }
+
+    private sealed class DefaultBranchArchiveHandler(string defaultBranch, byte[] archive) : HttpMessageHandler
+    {
+        public string? ArchiveRequestUri { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var uri = request.RequestUri?.AbsoluteUri ?? string.Empty;
+            if (uri.StartsWith("https://api.github.com/repos/", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($"{{\"default_branch\":\"{defaultBranch}\"}}")
+                });
+            }
+
+            ArchiveRequestUri = uri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(archive)
+            });
         }
     }
 

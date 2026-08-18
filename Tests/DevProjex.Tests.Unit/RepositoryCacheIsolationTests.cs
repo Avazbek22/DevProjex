@@ -99,8 +99,44 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			TestContext.Current.CancellationToken);
 		Assert.NotNull(afterCleanup);
 		Assert.Equal(basePath, afterCleanup.RepositoryPath, PathComparer.Default);
+		await WaitUntilAsync(() => worktrees.RemovedCount == 1);
 		Assert.Equal(1, worktrees.RemovedCount);
 		Assert.Equal(1, worktrees.PrunedCount);
+	}
+
+	[Fact]
+	public async Task GitSessionReturnsBeforeUnusedWorktreeCleanupCompletes()
+	{
+		var worktrees = new FakeWorktreeManager(supported: true, blockRemoval: true);
+		var service = CreateService(worktrees);
+		_ = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
+		var first = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken);
+		var second = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken);
+		Assert.NotNull(first);
+		Assert.NotNull(second);
+		first.Dispose();
+		second.Dispose();
+
+		using var reopened = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken).WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		Assert.NotNull(reopened);
+		await worktrees.RemovalStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, worktrees.RemovedCount);
+
+		worktrees.ReleaseRemoval();
+		await WaitUntilAsync(() => worktrees.RemovedCount == 1);
 	}
 
 	[Fact]
@@ -405,13 +441,35 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 		return published;
 	}
 
-	private sealed class FakeWorktreeManager(bool supported) : IGitWorktreeManager
+	private static async Task WaitUntilAsync(Func<bool> condition)
 	{
+		var timeout = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+		while (!condition() && DateTime.UtcNow < timeout)
+			await Task.Delay(20, TestContext.Current.CancellationToken);
+		Assert.True(condition(), "The asynchronous repository cleanup did not complete in time.");
+	}
+
+	private sealed class FakeWorktreeManager : IGitWorktreeManager
+	{
+		private readonly bool _supported;
+		private readonly bool _blockRemoval;
+		private readonly TaskCompletionSource _releaseRemoval = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public FakeWorktreeManager(bool supported, bool blockRemoval = false)
+		{
+			_supported = supported;
+			_blockRemoval = blockRemoval;
+			if (!blockRemoval)
+				_releaseRemoval.TrySetResult();
+		}
+
 		public int CreatedCount { get; private set; }
 		public int RemovedCount { get; private set; }
 		public int PrunedCount { get; private set; }
+		public TaskCompletionSource RemovalStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public void ReleaseRemoval() => _releaseRemoval.TrySetResult();
 		public Task<bool> IsSupportedAsync(string basePath, CancellationToken cancellationToken) =>
-			Task.FromResult(supported);
+			Task.FromResult(_supported);
 		public Task<bool> PreparePrimaryAsync(
 			string basePath,
 			string? branch,
@@ -430,15 +488,18 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			CreatedCount++;
 			return Task.FromResult(true);
 		}
-		public Task RemoveAsync(
+		public async Task RemoveAsync(
 			string basePath,
 			string worktreePath,
 			CancellationToken cancellationToken)
 		{
+			RemovalStarted.TrySetResult();
+			if (!_blockRemoval)
+				_releaseRemoval.TrySetResult();
+			await _releaseRemoval.Task.WaitAsync(cancellationToken);
 			if (Directory.Exists(worktreePath))
 				Directory.Delete(worktreePath, recursive: true);
 			RemovedCount++;
-			return Task.CompletedTask;
 		}
 		public Task PruneAsync(string basePath, CancellationToken cancellationToken)
 		{

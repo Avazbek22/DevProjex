@@ -1,3 +1,4 @@
+using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Secrets;
 
@@ -256,6 +257,138 @@ public sealed class PrivateDataRedactionCompositionTests
 			path,
 			content,
 			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData).Result.Text);
+	}
+
+	[Fact]
+	public void PersistentSecretMark_InsideWiderSecretFinding_PreservesFindingFlanksAndSharedIdentity()
+	{
+		const string value = "left-detector-flank-PERSISTENT-MARK-right-detector-flank";
+		const string markedValue = "PERSISTENT-MARK";
+		const string content = "value=" + value;
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", content);
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new NeedleDetector(
+				"catalog:smart-secrets-v4",
+				value,
+				"secret-rule",
+				RedactionFindingCategory.Secrets),
+			new NeedleDetector(
+				"private-data-v1",
+				"not-present",
+				"private-rule",
+				RedactionFindingCategory.PrivateData));
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(markedValue, out var mark, out _));
+		session.ReplacePersistentMarks(
+			workspace.Path,
+			new PersistentSecretMarksSnapshot(
+				1,
+				[
+					new MarkedSecretProfileEntry(
+						mark.Hash,
+						null,
+						mark.Length)
+				]));
+
+		var scan = Redact(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.Secrets);
+
+		var persistentSpan = Assert.Single(
+			scan.Result.Spans,
+			static span => span.RuleId == "manual-secret");
+		var detectorSpans = scan.Result.Spans
+			.Where(static span => span.RuleId == "secret-rule")
+			.ToArray();
+		Assert.Equal(2, detectorSpans.Length);
+		Assert.Single(detectorSpans.Select(static span => span.OccurrenceId).Distinct(StringComparer.Ordinal));
+		Assert.True(persistentSpan.Source.HasFlag(SecretFindingSource.PersistentMark));
+		Assert.NotNull(persistentSpan.PersistentMarkId);
+		Assert.DoesNotContain("left-detector-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(markedValue, scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("right-detector-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.Equal(2, scan.Snapshot.SecretRedactedCount);
+	}
+
+	[Fact]
+	public void ThreeNestedSameCategoryMarks_AllSurviveAndCoverTheOuterRange()
+	{
+		const string content = "0123456789abcdefghijklmnopqrst";
+		DetectedSecret[] findings =
+		[
+			new("outer", 0, 30, content, -100, SecretFindingSource.SessionMark, SessionMarkId: "outer"),
+			new("middle", 5, 20, content.Substring(5, 20), -200, SecretFindingSource.SessionMark, SessionMarkId: "middle"),
+			new("inner", 10, 10, content.Substring(10, 10), -300, SecretFindingSource.SessionMark, SessionMarkId: "inner")
+		];
+
+		var resolved = SecretRedactionScope.ResolveSegmentedFindings(findings);
+
+		Assert.Equal(3, resolved.Candidates.Count);
+		Assert.Equal(5, resolved.Segments.Count);
+		Assert.All(GetCoverage(content.Length, resolved.Segments), Assert.True);
+		Assert.Equal(
+			[1, 2, 3, 2, 1],
+			resolved.Segments.Select(static segment => segment.CandidateIndexes.Count).ToArray());
+	}
+
+	[Fact]
+	public void SameCategoryOverlap_WithCompressionMap_PreservesCoordinatesAndCoverage()
+	{
+		const string prefix = "// removed by compression\n";
+		const string value = "left-detector-flank-MANUAL-MARK-right-detector-flank";
+		const string markedValue = "MANUAL-MARK";
+		const string relativePath = "data.cs";
+		var source = prefix + "value=" + value;
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile(relativePath, source);
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new NeedleDetector(
+				"catalog:smart-secrets-v4",
+				value,
+				"secret-rule",
+				RedactionFindingCategory.Secrets),
+			new NeedleDetector(
+				"private-data-v1",
+				"not-present",
+				"private-rule",
+				RedactionFindingCategory.PrivateData));
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(markedValue, out var mark, out _));
+		Assert.True(session.AddSessionMarkedSecret(
+			relativePath,
+			source.IndexOf(markedValue, StringComparison.Ordinal),
+			mark,
+			ManualRedactionClass.Secret));
+		var compression = CodeCompressionPlan.Create(
+			relativePath,
+			"csharp",
+			[new CodeCompressionEdit(0, prefix.Length, string.Empty)],
+			source.Length,
+			"composition-transform-v1").Apply(source);
+		var scope = session.BeginOutput(
+			workspace.Path,
+			[path],
+			"composition-transform-v1",
+			SecretRedactionFeatures.Secrets);
+
+		var result = scope.Redact(
+			path,
+			compression.Text,
+			compression.Map,
+			TestContext.Current.CancellationToken);
+		var snapshot = scope.Complete();
+
+		var detectorSpans = result.Spans.Where(static span => span.RuleId == "secret-rule").ToArray();
+		Assert.Equal(2, detectorSpans.Length);
+		Assert.Single(detectorSpans.Select(static span => span.OccurrenceId).Distinct(StringComparer.Ordinal));
+		Assert.Single(result.Spans, static span => span.RuleId == "manual-secret");
+		Assert.DoesNotContain("left-detector-flank", result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(markedValue, result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("right-detector-flank", result.Text, StringComparison.Ordinal);
+		Assert.All(result.Spans, span => Assert.InRange(span.Start + span.Length, 1, result.Text.Length));
+		Assert.Equal(2, snapshot.SecretRedactedCount);
 	}
 
 	[Fact]

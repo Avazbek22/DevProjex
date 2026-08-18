@@ -179,6 +179,10 @@ public sealed class FileContentAnalyzer :
 		{
 			return Failure(FileContentClassification.AccessDenied, lease);
 		}
+		catch (SecurityException)
+		{
+			return Failure(FileContentClassification.AccessDenied, lease);
+		}
 		catch (FileNotFoundException)
 		{
 			return Failure(FileContentClassification.Missing, lease);
@@ -196,10 +200,6 @@ public sealed class FileContentAnalyzer :
 			return Failure(FileContentClassification.UnsupportedEncoding, lease);
 		}
 		catch (IOException)
-		{
-			return Failure(FileContentClassification.Unreadable, lease);
-		}
-		catch
 		{
 			return Failure(FileContentClassification.Unreadable, lease);
 		}
@@ -491,6 +491,12 @@ public sealed class FileContentAnalyzer :
 				new FileContentMetricsResult(FileContentClassification.AccessDenied),
 				null);
 		}
+		catch (SecurityException)
+		{
+			return new IdentifiedFileContentMetricsResult(
+				new FileContentMetricsResult(FileContentClassification.AccessDenied),
+				null);
+		}
 		catch (FileNotFoundException)
 		{
 			return new IdentifiedFileContentMetricsResult(
@@ -510,12 +516,6 @@ public sealed class FileContentAnalyzer :
 				null);
 		}
 		catch (IOException)
-		{
-			return new IdentifiedFileContentMetricsResult(
-				new FileContentMetricsResult(FileContentClassification.Unreadable),
-				null);
-		}
-		catch
 		{
 			return new IdentifiedFileContentMetricsResult(
 				new FileContentMetricsResult(FileContentClassification.Unreadable),
@@ -684,6 +684,10 @@ public sealed class FileContentAnalyzer :
 		{
 			return IdentifiedContentReadFact.Unidentified(FileContentClassification.AccessDenied);
 		}
+		catch (SecurityException)
+		{
+			return IdentifiedContentReadFact.Unidentified(FileContentClassification.AccessDenied);
+		}
 		catch (FileNotFoundException)
 		{
 			return IdentifiedContentReadFact.Unidentified(FileContentClassification.Missing);
@@ -701,10 +705,6 @@ public sealed class FileContentAnalyzer :
 			return IdentifiedContentReadFact.Unidentified(FileContentClassification.UnsupportedEncoding);
 		}
 		catch (IOException)
-		{
-			return IdentifiedContentReadFact.Unidentified(FileContentClassification.Unreadable);
-		}
-		catch
 		{
 			return IdentifiedContentReadFact.Unidentified(FileContentClassification.Unreadable);
 		}

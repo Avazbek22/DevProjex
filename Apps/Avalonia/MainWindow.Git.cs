@@ -283,6 +283,17 @@ public partial class MainWindow
                 await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
             }
         }
+        catch (RepositoryBranchUnavailableException ex)
+        {
+            if (stagingPath is not null)
+                await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
+
+            _gitCloneWindow?.Close();
+            _gitCloneWindow = null;
+            _taskbarProgress.MarkGitCloneError();
+            await ShowErrorAsync(FormatRepositoryBranchUnavailableMessage(ex));
+            _toastService.Show(_localization["Toast.Git.CloneError"]);
+        }
         catch (Exception ex)
         {
             if (stagingPath is not null)
@@ -439,6 +450,10 @@ public partial class MainWindow
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
 		}
+		catch (RepositoryBranchUnavailableException ex)
+		{
+			await ShowErrorAsync(FormatRepositoryBranchUnavailableMessage(ex));
+		}
 		catch (Exception ex)
 		{
 			await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
@@ -452,6 +467,11 @@ public partial class MainWindow
 			Volatile.Write(ref _gitCloneActionInProgress, 0);
 		}
 	}
+
+	private string FormatRepositoryBranchUnavailableMessage(RepositoryBranchUnavailableException exception) =>
+		exception.Reason == RepositoryBranchUnavailableReason.WorktreeUnsupported
+			? _localization.Format("Git.Error.WorktreeBranchUnavailable", exception.Branch)
+			: _localization.Format("Git.Error.BranchSwitchFailed", exception.Branch);
 
 	private void BeginGitCloneProgressPhase(string status)
 	{

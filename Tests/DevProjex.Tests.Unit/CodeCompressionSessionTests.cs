@@ -318,6 +318,30 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public async Task Prewarm_FileGrowthCannotRetainFactsBeyondTheFinalBudget()
+	{
+		const int grownCharacters = 9 * 1024 * 1024;
+		const long maximumRetainedBytes = 64L * 1024 * 1024;
+		using var temp = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, 4)
+			.Select(index => temp.CreateFile($"growing-{index}.cs", "x"))
+			.ToArray();
+		var analyzer = new GrowingPrewarmFileContentAnalyzer(grownCharacters);
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+
+		var result = await new CodeCompressionPrewarmer(analyzer).WarmAsync(
+			new CodeCompressionContext(temp.Path, session),
+			paths,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(paths.Length, result.WarmedFiles);
+		Assert.NotNull(result.ReadFacts);
+		Assert.True(result.ReadFacts.Count < paths.Length);
+		Assert.InRange(result.ReadFacts.RetainedBytes, 1, maximumRetainedBytes);
+	}
+
+	[Fact]
 	public async Task Prewarm_EmptyUnsupportedFilePreservesNoBenefitOutcomeWithoutMaterializingContent()
 	{
 		using var temp = new TemporaryDirectory();
@@ -1333,6 +1357,64 @@ public sealed class CodeCompressionSessionTests
 				decodeScratchGate,
 				cancellationToken);
 		}
+	}
+
+	private sealed class GrowingPrewarmFileContentAnalyzer(int grownCharacters) :
+		IFileContentAnalyzer,
+		IPrewarmFileContentAnalyzer
+	{
+		private readonly ConcurrentDictionary<string, int> _classifications = new(PathComparer.Default);
+		private readonly FileContentAnalyzer _inner = new();
+
+		public FileContentClassification? ClassifyWithoutReading(string path)
+		{
+			if (_classifications.AddOrUpdate(path, 1, static (_, count) => count + 1) == 2)
+				File.WriteAllText(path, new string('x', grownCharacters));
+			return null;
+		}
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			_inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			_inner.ReadFactAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<IdentifiedFileContentMetricsResult> GetClassifiedMetricsWithIdentityAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			((IPrewarmFileContentAnalyzer)_inner).GetClassifiedMetricsWithIdentityAsync(path, cancellationToken);
+
+		public ValueTask<BudgetedContentReadResult> ReadFactWithBudgetAsync(
+			string path,
+			long maximumReadBytes,
+			WeightedByteBudget byteBudget,
+			SemaphoreSlim decodeScratchGate,
+			CancellationToken cancellationToken = default) =>
+			((IPrewarmFileContentAnalyzer)_inner).ReadFactWithBudgetAsync(
+				path,
+				maximumReadBytes,
+				byteBudget,
+				decodeScratchGate,
+				cancellationToken);
 	}
 
 	private sealed class SynchronousMetricsConcurrencyAnalyzer(int requiredConcurrency) :

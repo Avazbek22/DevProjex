@@ -310,6 +310,7 @@
     "Git.Error.NetworkError":  "Error de red:\n{0}",
     "Git.Error.NoInternetConnection":  "No se pudo clonar el repositorio. Por favor verifique su conexión a Internet.",
     "Git.Error.BranchSwitchFailed":  "No se pudo cambiar de rama:\n{0}",
+    "Git.Error.WorktreeBranchUnavailable":  "El cambio de rama no está disponible para la copia en caché: {0}",
     "Git.Error.UpdateFailed":  "No se pudieron obtener actualizaciones:\n{0}",
     "Dialog.OK":  "OK",
     "Dialog.Cancel":  "Cancelar",
