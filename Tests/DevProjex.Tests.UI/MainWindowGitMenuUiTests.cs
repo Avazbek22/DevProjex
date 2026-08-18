@@ -102,7 +102,7 @@ public sealed class MainWindowGitMenuUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
-	public async Task GitBranchMenu_OpenScrollablePopup_UsesVisibleVerticalScrollBar()
+	public async Task GitBranchMenu_OpenScrollablePopup_UsesExternalScrollIndicator()
 	{
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
 
@@ -123,7 +123,7 @@ public sealed class MainWindowGitMenuUiTests(UiWorkspaceFixture workspace)
 				border => border.Classes.Contains("menu-scroll-indicator-thumb"));
 
 			Assert.False(scrollViewer.AllowAutoHide);
-			Assert.Equal(ScrollBarVisibility.Visible, scrollViewer.VerticalScrollBarVisibility);
+			Assert.Equal(ScrollBarVisibility.Hidden, scrollViewer.VerticalScrollBarVisibility);
 			Assert.True(externalScrollIndicator.IsVisible);
 			Assert.True(externalScrollIndicator.Bounds.Width >= 12);
 			Assert.True(externalScrollIndicator.Opacity > 0.9);

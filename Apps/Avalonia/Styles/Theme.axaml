@@ -1077,26 +1077,13 @@
     </Style>
 
     <Style Selector="MenuItem.menu-scrollable /template/ Popup ScrollViewer">
-        <!-- Keep real MenuItem containers for correct hover/selection while the popup scrolls. -->
+        <!-- Keep real MenuItem containers for correct hover/selection while the popup scrolls.
+             The template's own ScrollBar never receives pointer input inside a menu popup,
+             so it stays hidden; the external indicator is the one interactive scrollbar. -->
         <Setter Property="MaxHeight" Value="520" />
         <Setter Property="AllowAutoHide" Value="False" />
         <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
-        <Setter Property="VerticalScrollBarVisibility" Value="Visible" />
-    </Style>
-
-    <Style Selector="MenuItem.menu-scrollable /template/ Popup ScrollBar:vertical">
-        <Setter Property="AllowAutoHide" Value="False" />
-        <Setter Property="MinWidth" Value="12" />
-    </Style>
-
-    <Style Selector="MenuItem.menu-scrollable /template/ Popup ScrollBar:vertical /template/ Thumb">
-        <Setter Property="Background" Value="{DynamicResource AppMutedTextBrush}" />
-        <Setter Property="MinHeight" Value="32" />
-        <Setter Property="RenderTransform" Value="none" />
-    </Style>
-
-    <Style Selector="MenuItem.menu-scrollable /template/ Popup ScrollBar:vertical /template/ Thumb:pointerover">
-        <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+        <Setter Property="VerticalScrollBarVisibility" Value="Hidden" />
     </Style>
 
     <Style Selector="Grid.menu-external-scrollbar">
@@ -1169,6 +1156,25 @@
 
     <Style Selector="MenuItem MenuItem:pressed /template/ Border#PART_LayoutRoot">
         <Setter Property="Background" Value="{DynamicResource MenuChildPressedBrush}" />
+    </Style>
+
+    <!-- An item that owns an open submenu keeps one steady highlight. Pointer-over and
+         presses propagate up the menu chain, so without these overrides interacting with
+         submenu content (e.g. dragging its scrollbar) flashes the parent items. -->
+    <Style Selector="MenuItem:open /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+    </Style>
+
+    <Style Selector="MenuItem:open:pressed /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+    </Style>
+
+    <Style Selector="MenuItem MenuItem:open /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource MenuChildHoverBrush}" />
+    </Style>
+
+    <Style Selector="MenuItem MenuItem:open:pressed /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource MenuChildHoverBrush}" />
     </Style>
 
     <!-- ============================================== -->

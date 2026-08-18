@@ -1,3 +1,6 @@
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
+
 namespace DevProjex.Avalonia.Coordinators;
 
 internal static class MenuScrollBehavior
@@ -6,6 +9,9 @@ internal static class MenuScrollBehavior
     public const string ScrollableClass = "menu-scrollable";
     public const string ExternalScrollBarClass = "menu-external-scrollbar";
     public const string ArrowButtonClass = "menu-scroll-arrow-button";
+    public const string IndicatorThumbClass = "menu-scroll-indicator-thumb";
+    public const double IndicatorThumbWidth = 5;
+    public const double IndicatorThumbHotWidth = 7;
 
     private const double PopupMaxHeight = 530;
     private const double ScrollViewerMaxHeight = 520;
@@ -13,12 +19,15 @@ internal static class MenuScrollBehavior
     private const double IndicatorWidth = 12;
     private const double ArrowButtonHeight = 14;
     private const double IndicatorTrackWidth = 3;
-    private const double IndicatorThumbWidth = 5;
     private const double IndicatorThumbMinHeight = 32;
     private const double IndicatorVerticalInset = 4;
+    private const double TrackRestOpacity = 0.65;
+    private const double TrackHotOpacity = 0.9;
+    private const double ThumbRestOpacity = 0.95;
     private const string ScrollWrapperClass = "menu-scroll-wrapper";
     private const string IndicatorTrackClass = "menu-scroll-indicator-track";
-    private const string IndicatorThumbClass = "menu-scroll-indicator-thumb";
+    private static readonly TimeSpan HotTransitionDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(120));
 
     public static void SetScrollable(MenuItem menuItem, int itemCount)
     {
@@ -78,7 +87,10 @@ internal static class MenuScrollBehavior
         scrollViewer.MaxHeight = ScrollViewerMaxHeight;
         scrollViewer.AllowAutoHide = false;
         scrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Visible;
+        // The external indicator is the one interactive scrollbar. The template's own
+        // ScrollBar never receives pointer input inside a menu popup, so leaving it
+        // visible produces a convincing dead scrollbar right next to the live one.
+        scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
 
         DisableHoverScrollButtons(popupRoot);
         var rowStep = FitWholeMenuRows(popupRoot, popupBorder, scrollViewer);
@@ -204,7 +216,8 @@ internal static class MenuScrollBehavior
 
         var trackHost = new Grid
         {
-            ClipToBounds = true
+            ClipToBounds = true,
+            Background = Brushes.Transparent
         };
         Grid.SetRow(trackHost, 1);
 
@@ -216,7 +229,7 @@ internal static class MenuScrollBehavior
             Background = trackBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Stretch,
-            Opacity = 0.65
+            Opacity = TrackRestOpacity
         };
         track.Classes.Add(IndicatorTrackClass);
 
@@ -228,9 +241,34 @@ internal static class MenuScrollBehavior
             Background = thumbBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Top,
-            Opacity = 0.95
+            Opacity = ThumbRestOpacity
         };
         thumb.Classes.Add(IndicatorThumbClass);
+
+        track.Transitions =
+        [
+            new DoubleTransition
+            {
+                Property = Visual.OpacityProperty,
+                Duration = HotTransitionDuration,
+                Easing = new CubicEaseOut()
+            }
+        ];
+        thumb.Transitions =
+        [
+            new DoubleTransition
+            {
+                Property = Visual.OpacityProperty,
+                Duration = HotTransitionDuration,
+                Easing = new CubicEaseOut()
+            },
+            new DoubleTransition
+            {
+                Property = Layoutable.WidthProperty,
+                Duration = HotTransitionDuration,
+                Easing = new CubicEaseOut()
+            }
+        ];
 
         trackHost.Children.Add(track);
         trackHost.Children.Add(thumb);
@@ -245,6 +283,7 @@ internal static class MenuScrollBehavior
             scrollViewer,
             indicator,
             trackHost,
+            track,
             thumb,
             upButton,
             downButton,
@@ -354,18 +393,24 @@ internal static class MenuScrollBehavior
         private readonly ScrollViewer _scrollViewer;
         private readonly Control _indicator;
         private readonly Control _track;
+        private readonly Border _trackBar;
         private readonly Border _thumb;
         private readonly RepeatButton _upButton;
         private readonly RepeatButton _downButton;
         private readonly TranslateTransform _thumbTransform = new();
         private IPointer? _capturedPointer;
+        private TopLevel? _popupRoot;
         private double _rowStep;
+        private double _dragGrabOffset;
         private bool _isSnappingOffset;
+        private bool _isPointerInside;
+        private bool _isHot;
 
         public ScrollIndicatorBinding(
             ScrollViewer scrollViewer,
             Control indicator,
             Control track,
+            Border trackBar,
             Border thumb,
             RepeatButton upButton,
             RepeatButton downButton,
@@ -374,6 +419,7 @@ internal static class MenuScrollBehavior
             _scrollViewer = scrollViewer;
             _indicator = indicator;
             _track = track;
+            _trackBar = trackBar;
             _thumb = thumb;
             _upButton = upButton;
             _downButton = downButton;
@@ -383,11 +429,22 @@ internal static class MenuScrollBehavior
             _scrollViewer.PropertyChanged += OnScrollViewerPropertyChanged;
             _indicator.PropertyChanged += OnIndicatorPropertyChanged;
             _track.PropertyChanged += OnIndicatorPropertyChanged;
-            _track.PointerPressed += OnTrackPointerPressed;
-            _track.PointerMoved += OnTrackPointerMoved;
-            _track.PointerReleased += OnTrackPointerReleased;
+            // Tunneling beats the menu's own pointer handling: whatever the popup or an
+            // inner element would do with the press, the scrollbar sees it first. The
+            // handler ignores presses outside the track area, so the arrows keep working.
+            _indicator.AddHandler(
+                InputElement.PointerPressedEvent,
+                OnTrackPointerPressed,
+                RoutingStrategies.Tunnel);
+            _indicator.PointerMoved += OnTrackPointerMoved;
+            _indicator.PointerReleased += OnTrackPointerReleased;
+            _indicator.PointerEntered += OnIndicatorPointerEntered;
+            _indicator.PointerExited += OnIndicatorPointerExited;
+            _indicator.AttachedToVisualTree += OnIndicatorAttachedToVisualTree;
+            _indicator.DetachedFromVisualTree += OnIndicatorDetachedFromVisualTree;
             _upButton.Click += OnUpButtonClick;
             _downButton.Click += OnDownButtonClick;
+            AttachPopupRootHandler();
 
             SyncFromViewer();
             _scrollViewer.Dispatcher.Post(SyncFromViewer, DispatcherPriority.Loaded);
@@ -434,7 +491,9 @@ internal static class MenuScrollBehavior
 
         private void ScrollToPointer(PointerEventArgs e)
         {
-            var maxOffset = ResolveMaximumOffset();
+            // Dragging tracks the pointer continuously against the raw range; row snapping
+            // is for wheel and arrow steps and would make the drag feel notched.
+            var maxOffset = Math.Max(0, _scrollViewer.Extent.Height - _scrollViewer.Viewport.Height);
             var trackHeight = ResolveTrackHeight();
             if (maxOffset <= 0.5 || trackHeight <= 1)
                 return;
@@ -444,9 +503,21 @@ internal static class MenuScrollBehavior
                 IndicatorThumbMinHeight,
                 trackHeight);
             var availableTravel = Math.Max(1, trackHeight - thumbHeight);
-            var pointerY = e.GetPosition(_track).Y - IndicatorVerticalInset - thumbHeight / 2;
+            var pointerY = e.GetPosition(_track).Y - IndicatorVerticalInset - _dragGrabOffset;
             var offsetRatio = Math.Clamp(pointerY / availableTravel, 0, 1);
-            SetVerticalOffset(maxOffset * offsetRatio);
+            var requestedOffset = Math.Clamp(maxOffset * offsetRatio, 0, maxOffset);
+            if (Math.Abs(_scrollViewer.Offset.Y - requestedOffset) <= 0.5)
+                return;
+
+            _isSnappingOffset = true;
+            try
+            {
+                _scrollViewer.Offset = new Vector(_scrollViewer.Offset.X, requestedOffset);
+            }
+            finally
+            {
+                _isSnappingOffset = false;
+            }
         }
 
         private double ResolveMaximumOffset()
@@ -482,7 +553,8 @@ internal static class MenuScrollBehavior
 
         private void SnapOffsetToRows()
         {
-            if (!_isSnappingOffset)
+            // A drag in progress owns the offset; rows settle once on release.
+            if (!_isSnappingOffset && _capturedPointer is null)
                 SetVerticalOffset(_scrollViewer.Offset.Y);
         }
 
@@ -508,20 +580,62 @@ internal static class MenuScrollBehavior
 
         private void OnTrackPointerPressed(object? sender, PointerPressedEventArgs e)
         {
+            // The press is intercepted at several route stages; the first stage wins.
+            if (ReferenceEquals(_capturedPointer, e.Pointer))
+            {
+                e.Handled = true;
+                return;
+            }
+
             if (!e.GetCurrentPoint(_indicator).Properties.IsLeftButtonPressed)
                 return;
 
-            _capturedPointer = e.Pointer;
-            e.Pointer.Capture(_track);
+            // Presses over the arrow buttons stay theirs; only the track area scrolls.
+            if (!IsWithinTrackArea(e))
+                return;
+
+            BeginDrag(e);
             ScrollToPointer(e);
             e.Handled = true;
         }
 
         private void OnTrackPointerMoved(object? sender, PointerEventArgs e)
         {
-            if (_capturedPointer is null || !ReferenceEquals(_capturedPointer, e.Pointer))
+            var isButtonPressed = e.GetCurrentPoint(_indicator).Properties.IsLeftButtonPressed;
+            if (_capturedPointer is not null && ReferenceEquals(_capturedPointer, e.Pointer))
+            {
+                if (!isButtonPressed)
+                {
+                    // The release happened where this handler could not observe it.
+                    EndDrag(e);
+                    return;
+                }
+
+                // The menu interaction handler releases pointer capture whenever the held
+                // pointer leaves the owning MenuItem's bounds - which is exactly where this
+                // scrollbar lives. Take the capture back so the drag survives.
+                if (!ReferenceEquals(e.Pointer.Captured, _indicator))
+                    e.Pointer.Capture(_indicator);
+
+                ScrollToPointer(e);
+                e.Handled = true;
+                return;
+            }
+
+            if (!isButtonPressed || !IsWithinTrackArea(e))
                 return;
 
+            // The initial press can be consumed by the menu's own pointer handling before it
+            // reaches this scrollbar. The first held-button move over the track adopts the
+            // drag instead, so scrolling works regardless of who saw the press.
+            if (e.Pointer.Captured is { } captured &&
+                !ReferenceEquals(captured, _indicator) &&
+                (captured is not Visual capturedVisual || !_indicator.IsVisualAncestorOf(capturedVisual)))
+            {
+                return;
+            }
+
+            BeginDrag(e);
             ScrollToPointer(e);
             e.Handled = true;
         }
@@ -531,9 +645,120 @@ internal static class MenuScrollBehavior
             if (_capturedPointer is null || !ReferenceEquals(_capturedPointer, e.Pointer))
                 return;
 
-            _capturedPointer.Capture(null);
-            _capturedPointer = null;
+            EndDrag(e);
             e.Handled = true;
+        }
+
+        private bool IsWithinTrackArea(PointerEventArgs e) =>
+            new Rect(_track.Bounds.Size).Inflate(1).Contains(e.GetPosition(_track));
+
+        private void OnIndicatorAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e) =>
+            AttachPopupRootHandler();
+
+        private void OnIndicatorDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e) =>
+            DetachPopupRootHandler();
+
+        private void AttachPopupRootHandler()
+        {
+            if (_popupRoot is not null)
+                return;
+
+            // The popup window's root is the earliest interception point for presses inside
+            // the popup. Registering there guards the plain click (press without movement)
+            // against menu machinery consuming the press before it reaches the indicator.
+            _popupRoot = TopLevel.GetTopLevel(_indicator);
+            if (_popupRoot is null)
+                return;
+
+            _popupRoot.AddHandler(
+                InputElement.PointerPressedEvent,
+                OnTrackPointerPressed,
+                RoutingStrategies.Tunnel);
+            // The bubble stage with handledEventsToo is the safety net: every pointer event
+            // inside the popup window passes through its root regardless of who captured or
+            // handled it, so the scrollbar keeps working even when menu machinery consumes
+            // the events earlier on the route.
+            _popupRoot.AddHandler(
+                InputElement.PointerPressedEvent,
+                OnTrackPointerPressed,
+                RoutingStrategies.Bubble,
+                handledEventsToo: true);
+            _popupRoot.AddHandler(
+                InputElement.PointerMovedEvent,
+                OnTrackPointerMoved,
+                RoutingStrategies.Bubble,
+                handledEventsToo: true);
+            _popupRoot.AddHandler(
+                InputElement.PointerReleasedEvent,
+                OnTrackPointerReleased,
+                RoutingStrategies.Bubble,
+                handledEventsToo: true);
+        }
+
+        private void DetachPopupRootHandler()
+        {
+            if (_popupRoot is null)
+                return;
+
+            _popupRoot.RemoveHandler(InputElement.PointerPressedEvent, OnTrackPointerPressed);
+            _popupRoot.RemoveHandler(InputElement.PointerMovedEvent, OnTrackPointerMoved);
+            _popupRoot.RemoveHandler(InputElement.PointerReleasedEvent, OnTrackPointerReleased);
+            _popupRoot = null;
+        }
+
+        private void BeginDrag(PointerEventArgs e)
+        {
+            // Grabbing the thumb drags it from the grab point without jumping; pressing
+            // the free track jumps to that spot and continues by the thumb's middle.
+            var positionY = e.GetPosition(_track).Y;
+            var thumbTop = _thumbTransform.Y;
+            var thumbHeight = double.IsFinite(_thumb.Height) && _thumb.Height > 0
+                ? _thumb.Height
+                : IndicatorThumbMinHeight;
+            _dragGrabOffset = positionY >= thumbTop && positionY <= thumbTop + thumbHeight
+                ? positionY - thumbTop
+                : thumbHeight / 2;
+            _capturedPointer = e.Pointer;
+            e.Pointer.Capture(_indicator);
+            UpdateHotState();
+        }
+
+        private void EndDrag(PointerEventArgs e)
+        {
+            if (ReferenceEquals(_capturedPointer?.Captured, _indicator))
+                _capturedPointer.Capture(null);
+
+            _capturedPointer = null;
+            SetVerticalOffset(_scrollViewer.Offset.Y);
+            SyncFromViewer();
+            _isPointerInside = new Rect(_indicator.Bounds.Size).Contains(e.GetPosition(_indicator));
+            UpdateHotState();
+        }
+
+        private void OnIndicatorPointerEntered(object? sender, PointerEventArgs e)
+        {
+            _isPointerInside = true;
+            UpdateHotState();
+        }
+
+        private void OnIndicatorPointerExited(object? sender, PointerEventArgs e)
+        {
+            _isPointerInside = false;
+            UpdateHotState();
+        }
+
+        private void UpdateHotState()
+        {
+            var hot = _isPointerInside || _capturedPointer is not null;
+            if (hot == _isHot)
+                return;
+
+            _isHot = hot;
+            var thumbWidth = hot ? IndicatorThumbHotWidth : IndicatorThumbWidth;
+            _thumb.Width = thumbWidth;
+            _thumb.CornerRadius = new CornerRadius(thumbWidth / 2);
+            _thumb.Opacity = hot ? 1 : ThumbRestOpacity;
+            _trackBar.Opacity = hot ? TrackHotOpacity : TrackRestOpacity;
         }
 
         private void OnUpButtonClick(object? sender, RoutedEventArgs e)
@@ -561,9 +786,14 @@ internal static class MenuScrollBehavior
             _scrollViewer.PropertyChanged -= OnScrollViewerPropertyChanged;
             _indicator.PropertyChanged -= OnIndicatorPropertyChanged;
             _track.PropertyChanged -= OnIndicatorPropertyChanged;
-            _track.PointerPressed -= OnTrackPointerPressed;
-            _track.PointerMoved -= OnTrackPointerMoved;
-            _track.PointerReleased -= OnTrackPointerReleased;
+            _indicator.RemoveHandler(InputElement.PointerPressedEvent, OnTrackPointerPressed);
+            _indicator.PointerMoved -= OnTrackPointerMoved;
+            _indicator.PointerReleased -= OnTrackPointerReleased;
+            _indicator.PointerEntered -= OnIndicatorPointerEntered;
+            _indicator.PointerExited -= OnIndicatorPointerExited;
+            _indicator.AttachedToVisualTree -= OnIndicatorAttachedToVisualTree;
+            _indicator.DetachedFromVisualTree -= OnIndicatorDetachedFromVisualTree;
+            DetachPopupRootHandler();
             _upButton.Click -= OnUpButtonClick;
             _downButton.Click -= OnDownButtonClick;
         }
