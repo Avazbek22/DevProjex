@@ -30,10 +30,12 @@
         <Button Name="SearchPreviousButton"
                 Content="▲"
                 Width="32"
+                ToolTip.Tip="{Binding SearchPreviousTooltip}"
                 Click="OnSearchPrev" />
         <Button Name="SearchNextButton"
                 Content="▼"
                 Width="32"
+                ToolTip.Tip="{Binding SearchNextTooltip}"
                 Click="OnSearchNext" />
         <Button Name="SearchCloseButton"
                 Content="✕"

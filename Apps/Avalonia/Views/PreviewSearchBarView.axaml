@@ -29,10 +29,12 @@
         <Button Name="PreviewSearchPreviousButton"
                 Content="▲"
                 Width="32"
+                ToolTip.Tip="{Binding SearchPreviousTooltip}"
                 Click="OnSearchPrev" />
         <Button Name="PreviewSearchNextButton"
                 Content="▼"
                 Width="32"
+                ToolTip.Tip="{Binding SearchNextTooltip}"
                 Click="OnSearchNext" />
         <Button Name="PreviewSearchCloseButton"
                 Content="✕"

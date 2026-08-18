@@ -111,6 +111,92 @@ public sealed class MainWindowPreviewSearchUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task F3AndShiftF3_NavigateGloballyWhenPreviewTextHasFocus()
+	{
+		using var project = UiTestProject.CreateWithPreviewSearchWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await OpenSearchAsync(window);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var searchBox = UiTestDriver.GetRequiredControl<PreviewSearchBarView>(
+				window,
+				"PreviewSearchBar").SearchBoxControl!;
+			var preview = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+				window,
+				"PreviewTextControl");
+
+			searchBox.Text = "previewsearchneedle";
+			await WaitForPreviewSearchCountAsync(window, expectedCount: 3);
+			Assert.True(preview.Focus());
+			Assert.True(preview.IsFocused);
+
+			await UiTestDriver.PressKeyAsync(window, Key.F3);
+			Assert.Equal(2, viewModel.PreviewSearchCurrentMatchIndex);
+			Assert.Equal("previewsearchneedle", preview.GetSelectedText());
+
+			await UiTestDriver.PressKeyAsync(window, Key.F3, RawInputModifiers.Shift);
+			Assert.Equal(1, viewModel.PreviewSearchCurrentMatchIndex);
+			Assert.Equal("PreviewSearchNeedle", preview.GetSelectedText());
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task F3_PrioritizesPreviewSearchWhenBothSearchPanelsAreOpen()
+	{
+		using var project = UiTestProject.CreateWithPreviewSearchWorkspace();
+		File.WriteAllText(
+			Path.Combine(project.RootPath, "PreviewNotes.txt"),
+			"ordinary preview notes");
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await UiTestDriver.OpenSearchAsync(window);
+			var treeSearchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+			await UiTestDriver.EnterTextAsync(
+				window,
+				Assert.IsType<TextBox>(treeSearchBar.SearchBoxControl),
+				"Preview");
+			await UiTestDriver.WaitForSearchAppliedAsync(window, "Preview");
+
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+			await OpenSearchAsync(window);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var previewSearchBox = UiTestDriver.GetRequiredControl<PreviewSearchBarView>(
+				window,
+				"PreviewSearchBar").SearchBoxControl!;
+			var preview = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
+				window,
+				"PreviewTextControl");
+			previewSearchBox.Text = "previewsearchneedle";
+			await WaitForPreviewSearchCountAsync(window, expectedCount: 3);
+			Assert.True(viewModel.SearchVisible);
+			Assert.True(viewModel.PreviewSearchVisible);
+			Assert.True(viewModel.SearchTotalMatches > 1);
+			Assert.True(preview.Focus());
+			var treeMatchIndex = viewModel.SearchCurrentMatchIndex;
+
+			await UiTestDriver.PressKeyAsync(window, Key.F3);
+
+			Assert.Equal(2, viewModel.PreviewSearchCurrentMatchIndex);
+			Assert.Equal(treeMatchIndex, viewModel.SearchCurrentMatchIndex);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task RedactionRefresh_RescansVisibleTextWithoutMovingViewportOrFindingHiddenOriginal()
 	{
 		using var project = UiTestProject.CreateWithPreviewSearchWorkspace();
@@ -204,7 +290,7 @@ public sealed class MainWindowPreviewSearchUiTests
 	}
 
 	[AvaloniaFact]
-	public async Task TreeOnlyMode_DisablesSearchButtonAndIgnoresToggleHotkey()
+	public async Task TreeOnlyMode_FadesSearchButtonWithoutMovingCloseButtonOrAcceptingInput()
 	{
 		using var project = UiTestProject.CreateWithPreviewSearchWorkspace();
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
@@ -218,12 +304,27 @@ public sealed class MainWindowPreviewSearchUiTests
 			await WaitForSearchPanelAsync(window, visible: false);
 			var viewModel = UiTestDriver.GetViewModel(window);
 			var searchButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewSearchButton");
+			var closeButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewCloseButton");
 			var container = UiTestDriver.GetRequiredControl<Border>(
 				window,
 				"PreviewSearchBarContainer");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => searchButton.Opacity <= 0.01,
+				"preview search button to fade out in tree-only mode");
+			var closeButtonTreeOnlyBounds = UiTestDriver.GetBoundsInWindow(closeButton, window);
 
 			Assert.False(viewModel.IsPreviewSearchAvailable);
-			Assert.False(searchButton.IsEnabled);
+			Assert.True(searchButton.IsEnabled);
+			Assert.False(searchButton.IsHitTestVisible);
+			Assert.False(ToolTip.GetIsOpen(searchButton));
+			var hiddenButtonCenter = UiTestDriver.GetControlCenter(searchButton, window);
+			window.MouseMove(hiddenButtonCenter, RawInputModifiers.None);
+			window.MouseDown(hiddenButtonCenter, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+			window.MouseUp(hiddenButtonCenter, MouseButton.Left, RawInputModifiers.None);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			Assert.False(viewModel.PreviewSearchVisible);
+
 			await UiTestDriver.PressKeyAsync(
 				window,
 				Key.F,
@@ -232,6 +333,19 @@ public sealed class MainWindowPreviewSearchUiTests
 
 			Assert.False(viewModel.PreviewSearchVisible);
 			Assert.False(container.IsVisible);
+
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => searchButton.Opacity >= 0.99 && searchButton.IsHitTestVisible,
+				"preview search button to fade in for content mode");
+			var closeButtonContentBounds = UiTestDriver.GetBoundsInWindow(closeButton, window);
+			Assert.InRange(
+				Math.Abs(closeButtonContentBounds.Center.X - closeButtonTreeOnlyBounds.Center.X),
+				0,
+				0.5);
+			await UiTestDriver.ClickAsync(window, searchButton);
+			await WaitForSearchPanelAsync(window, visible: true);
 		}
 		finally
 		{
@@ -251,6 +365,8 @@ public sealed class MainWindowPreviewSearchUiTests
 			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
 			var searchButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewSearchButton");
 			var searchIcon = UiTestDriver.GetRequiredControl<Viewbox>(window, "PreviewSearchIcon");
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.Equal(viewModel.PreviewSearchTooltip, ToolTip.GetTip(searchButton));
 			AssertSearchIconFitsButton(searchIcon, searchButton);
 
 			await UiTestDriver.ClickAsync(window, searchButton);
@@ -268,8 +384,22 @@ public sealed class MainWindowPreviewSearchUiTests
 			Assert.True(searchBounds.Right <= previewBounds.Right + 0.5);
 			var searchBox = UiTestDriver.GetRequiredControl<PreviewSearchBarView>(
 				window,
-				"PreviewSearchBar").SearchBoxControl!;
-			searchBox.Text = "PreviewSearchNeedle";
+				"PreviewSearchBar");
+			Assert.Equal(
+				viewModel.SearchPreviousTooltip,
+				ToolTip.GetTip(searchBox.FindControl<Button>("PreviewSearchPreviousButton")!));
+			Assert.Equal(
+				viewModel.SearchNextTooltip,
+				ToolTip.GetTip(searchBox.FindControl<Button>("PreviewSearchNextButton")!));
+			var treeSearchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+			Assert.Equal(
+				viewModel.SearchPreviousTooltip,
+				ToolTip.GetTip(treeSearchBar.FindControl<Button>("SearchPreviousButton")!));
+			Assert.Equal(
+				viewModel.SearchNextTooltip,
+				ToolTip.GetTip(treeSearchBar.FindControl<Button>("SearchNextButton")!));
+			var searchInput = searchBox.SearchBoxControl!;
+			searchInput.Text = "PreviewSearchNeedle";
 			await WaitForPreviewSearchCountAsync(window, expectedCount: 3);
 
 			var preview = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(

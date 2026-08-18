@@ -187,7 +187,7 @@ Opened with the eye icon button in the top bar or with Ctrl+B.
 
 Mouse side buttons follow browser-style navigation: Forward opens Preview mode, and Back closes it. Repeating the current direction has no effect.
 
-Ctrl+Shift+F opens or closes search in the visible Preview text.
+Ctrl+Shift+F opens or closes search in file contents in Preview. Enter or F3 goes to the next match; Shift+Enter or Shift+F3 goes to the previous match.
 
 Shows the final result in a separate workspace next to the tree. This mode does not copy to the clipboard and does not export to a file on its own — it is a viewing mode.
 

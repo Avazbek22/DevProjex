@@ -403,6 +403,9 @@ public partial class MainWindow
         if (_searchFilterController.TryHandleToggleHotkey(e))
             return;
 
+		if (_previewSearchController.TryHandleNavigationHotkey(e))
+			return;
+
 		if (_previewSearchController.TryHandleEscape(e))
 			return;
 

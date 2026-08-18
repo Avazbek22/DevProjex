@@ -13,12 +13,15 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250));
 	private static readonly TimeSpan SearchDebounceInterval =
 		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(200));
+	private static readonly TimeSpan SearchButtonFadeDuration =
+		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(150));
 	private static readonly TimeSpan HotkeyDebounceWindow =
 		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(220));
 
 	private readonly MainWindowViewModel _viewModel;
 	private readonly PreviewSearchBarView _searchBar;
 	private readonly Border _container;
+	private readonly Button _searchButton;
 	private readonly VirtualizedPreviewTextControl _previewTextControl;
 	private readonly CancellationTokenSource _lifetimeCts = new();
 	private readonly TranslateTransform _transform;
@@ -33,16 +36,19 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 		MainWindowViewModel viewModel,
 		PreviewSearchBarView searchBar,
 		Border container,
+		Button searchButton,
 		VirtualizedPreviewTextControl previewTextControl)
 	{
 		_viewModel = viewModel;
 		_searchBar = searchBar;
 		_container = container;
+		_searchButton = searchButton;
 		_previewTextControl = previewTextControl;
 		_transform = searchBar.RenderTransform as TranslateTransform ?? new TranslateTransform();
 		searchBar.RenderTransform = _transform;
 		_previewTextControl.SearchDocumentChanged += OnPreviewDocumentChanged;
 		EnsureTransitions();
+		UpdateSearchButtonAvailability();
 		ForceHidden();
 	}
 
@@ -58,7 +64,11 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 
 	public void OnAvailabilityChanged()
 	{
-		if (_disposed || _viewModel.IsPreviewSearchAvailable)
+		if (_disposed)
+			return;
+
+		UpdateSearchButtonAvailability();
+		if (_viewModel.IsPreviewSearchAvailable)
 			return;
 
 		Close(focusPreview: false);
@@ -115,6 +125,16 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 			return false;
 
 		Close();
+		e.Handled = true;
+		return true;
+	}
+
+	public bool TryHandleNavigationHotkey(KeyEventArgs e)
+	{
+		if (_disposed || e.Key != Key.F3 || !_viewModel.PreviewSearchVisible)
+			return false;
+
+		Navigate(e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1);
 		e.Handled = true;
 		return true;
 	}
@@ -405,6 +425,31 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 				Easing = new CubicEaseOut()
 			}
 		];
+
+		var buttonTransitions = new Transitions();
+		if (_searchButton.Transitions is { } currentTransitions)
+		{
+			foreach (var transition in currentTransitions)
+				buttonTransitions.Add(transition);
+		}
+
+		buttonTransitions.Add(
+			new DoubleTransition
+			{
+				Property = Visual.OpacityProperty,
+				Duration = SearchButtonFadeDuration,
+				Easing = new CubicEaseOut()
+			});
+		_searchButton.Transitions = buttonTransitions;
+	}
+
+	private void UpdateSearchButtonAvailability()
+	{
+		var available = _viewModel.IsPreviewSearchAvailable;
+		_searchButton.IsHitTestVisible = available;
+		_searchButton.Opacity = available ? 1 : 0;
+		if (!available)
+			ToolTip.SetIsOpen(_searchButton, false);
 	}
 
 	private void ForceHidden()

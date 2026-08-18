@@ -1110,6 +1110,8 @@ public partial class MainWindow
 			throw new InvalidOperationException("Preview search bar control was not found."),
 			this.FindControl<Border>("PreviewSearchBarContainer") ??
 			throw new InvalidOperationException("Preview search bar container was not found."),
+			this.FindControl<Button>("PreviewSearchButton") ??
+			throw new InvalidOperationException("Preview search button was not found."),
 			_previewTextControl ??
 			throw new InvalidOperationException("Preview text control was not found."));
         _previewSurfaceController = new PreviewSurfaceController(

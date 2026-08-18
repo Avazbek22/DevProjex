@@ -1717,6 +1717,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuSearch { get; private set; } = string.Empty;
     public string FilterByNamePlaceholder { get; private set; } = string.Empty;
     public string FilterTooltip { get; private set; } = string.Empty;
+    public string PreviewSearchTooltip { get; private set; } = string.Empty;
+    public string SearchNextTooltip { get; private set; } = string.Empty;
+    public string SearchPreviousTooltip { get; private set; } = string.Empty;
     public string CopyFormatTooltip { get; private set; } = string.Empty;
     public string PreviewTooltip { get; private set; } = string.Empty;
     public string PreviewHideTreeTooltip { get; private set; } = string.Empty;
@@ -1890,6 +1893,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuSearch = _localization["Menu.Search"];
         FilterByNamePlaceholder = _localization["Filter.ByName"];
         FilterTooltip = _localization["Filter.Tooltip"];
+        PreviewSearchTooltip = _localization["Preview.Search.Tooltip"];
+        SearchNextTooltip = _localization["Search.Next.Tooltip"];
+        SearchPreviousTooltip = _localization["Search.Previous.Tooltip"];
         CopyFormatTooltip = _localization["CopyFormat.Tooltip"];
         PreviewTooltip = _localization["Preview.Tooltip"];
         PreviewHideTreeTooltip = _localization["Preview.HideTree.Tooltip"];
@@ -2055,6 +2061,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuSearch));
         RaisePropertyChanged(nameof(FilterByNamePlaceholder));
         RaisePropertyChanged(nameof(FilterTooltip));
+        RaisePropertyChanged(nameof(PreviewSearchTooltip));
+        RaisePropertyChanged(nameof(SearchNextTooltip));
+        RaisePropertyChanged(nameof(SearchPreviousTooltip));
         RaisePropertyChanged(nameof(CopyFormatTooltip));
         RaisePropertyChanged(nameof(PreviewTooltip));
         RaisePropertyChanged(nameof(PreviewHideTreeTooltip));
