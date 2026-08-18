@@ -164,7 +164,8 @@ so repeated transitions reproduce the same placeholder indexes. Exact matches wi
 category retain the existing single-winner behavior; the cascade preserves the winning candidate
 from each category. For a partial cross-category overlap, the Hide Secrets interval wins and any
 private-data portions outside it remain separate redactions. Overlap resolution within one
-category is unchanged.
+category is unchanged: a conflict removes only the candidate from that category, while
+candidates from other categories retain their residual coverage.
 
 Each option has its own detected and redacted counters. They count the effective,
 non-overlapping candidate currently represented in the output, not every suppressed raw detector

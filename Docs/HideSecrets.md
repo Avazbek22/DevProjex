@@ -1,8 +1,10 @@
 # Smart Secrets and Hide Secrets
 
 Hide Secrets and [Hide private data](HidePrivateData.md) share one redaction pipeline and
-one set of Preview decisions. If their findings overlap, the secret finding wins; keeping
-that secret occurrence as-is does not revive the suppressed private-data finding.
+one set of Preview decisions. When their findings cover the same range, the secret finding
+is redacted first; keeping it as-is reveals the private-data placeholder rather than the
+original value, which appears only after every candidate in the cascade is kept. The full
+overlap contract is described in [HidePrivateData.md](HidePrivateData.md).
 
 **Smart Secrets** is DevProjex's local, deterministic credential-detection engine.
 **Hide Secrets** is the opt-in switch that applies its decisions to produced output.

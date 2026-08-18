@@ -2801,9 +2801,15 @@ public sealed class SecretRedactionScope
 				continue;
 			}
 
-			var category = candidate.Candidates[0].Category;
-			if (overlaps.Any(interval => interval.Match!.Candidates[0].Category == category))
+			var blockedCategories = overlaps
+				.Select(static interval => interval.Match!.Candidates[0].Category)
+				.ToHashSet();
+			var survivingCandidates = candidate.Candidates
+				.Where(match => !blockedCategories.Contains(match.Category))
+				.ToArray();
+			if (survivingCandidates.Length == 0)
 				continue;
+			var residualCandidate = candidate with { Candidates = survivingCandidates };
 
 			var residualStart = candidate.Start;
 			foreach (var overlap in overlaps)
@@ -2811,13 +2817,13 @@ public sealed class SecretRedactionScope
 				if (overlap.Start > residualStart)
 				{
 					var residualEnd = Math.Min(overlap.Start, candidateEnd);
-					AddResidual(accepted, candidate, residualStart, residualEnd);
+					AddResidual(accepted, residualCandidate, residualStart, residualEnd);
 				}
 				residualStart = Math.Max(residualStart, overlap.End);
 				if (residualStart >= candidateEnd)
 					break;
 			}
-			AddResidual(accepted, candidate, residualStart, candidateEnd);
+			AddResidual(accepted, residualCandidate, residualStart, candidateEnd);
 		}
 
 		return accepted.Select(static interval => interval.Match!).ToArray();

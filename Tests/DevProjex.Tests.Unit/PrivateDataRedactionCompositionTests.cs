@@ -178,6 +178,210 @@ public sealed class PrivateDataRedactionCompositionTests
 	}
 
 	[Fact]
+	public void ExactCrossCategoryGroup_InsideManualSecretMark_PreservesPrivateDataFlanks()
+	{
+		const string value = "left-private-flank-MANUAL-SECRET-right-private-flank";
+		const string manualValue = "MANUAL-SECRET";
+		const string content = "value=" + value;
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", content);
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new NeedleDetector(
+				"catalog:smart-secrets-v4",
+				value,
+				"secret-rule",
+				RedactionFindingCategory.Secrets),
+			new NeedleDetector(
+				"private-data-v1",
+				value,
+				"private-rule",
+				RedactionFindingCategory.PrivateData));
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(manualValue, out var mark, out _));
+		Assert.True(session.AddSessionMarkedSecret(
+			"data.txt",
+			content.IndexOf(manualValue, StringComparison.Ordinal),
+			mark,
+			ManualRedactionClass.Secret));
+
+		var scan = Redact(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+
+		Assert.Equal(3, scan.Result.Spans.Count);
+		Assert.Single(scan.Result.Spans, static span => span.RuleId == "manual-secret");
+		Assert.Equal(2, scan.Result.Spans.Count(static span => span.RuleId == "private-rule"));
+		Assert.Equal(
+			"value=DEVPROJEX_REDACTED[private-rule#1]" +
+			"DEVPROJEX_REDACTED[manual-secret#1]" +
+			"DEVPROJEX_REDACTED[private-rule#2]",
+			scan.Result.Text);
+		Assert.DoesNotContain("left-private-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(manualValue, scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("right-private-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.Equal((1, 2), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+	}
+
+	[Fact]
+	public void ExactCrossCategoryGroup_InsideManualPrivateDataMark_PreservesSecretFlanks()
+	{
+		const string value = "left-secret-flank-MANUAL-PRIVATE-right-secret-flank";
+		const string manualValue = "MANUAL-PRIVATE";
+		const string content = "value=" + value;
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", content);
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new NeedleDetector(
+				"catalog:smart-secrets-v4",
+				value,
+				"secret-rule",
+				RedactionFindingCategory.Secrets),
+			new NeedleDetector(
+				"private-data-v1",
+				value,
+				"private-rule",
+				RedactionFindingCategory.PrivateData));
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(manualValue, out var mark, out _));
+		Assert.True(session.AddSessionMarkedSecret(
+			"data.txt",
+			content.IndexOf(manualValue, StringComparison.Ordinal),
+			mark,
+			ManualRedactionClass.PrivateData));
+
+		var scan = Redact(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+
+		Assert.Equal(3, scan.Result.Spans.Count);
+		Assert.Single(scan.Result.Spans, static span => span.RuleId == "manual-private-data");
+		Assert.Equal(2, scan.Result.Spans.Count(static span => span.RuleId == "secret-rule"));
+		Assert.Equal(
+			"value=DEVPROJEX_REDACTED[secret-rule#1]" +
+			"DEVPROJEX_REDACTED[manual-private-data#1]" +
+			"DEVPROJEX_REDACTED[secret-rule#2]",
+			scan.Result.Text);
+		Assert.DoesNotContain("left-secret-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(manualValue, scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("right-secret-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.Equal((2, 1), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+
+		var secretOccurrenceIds = scan.Result.Spans
+			.Where(static span => span.RuleId == "secret-rule")
+			.Select(static span => span.OccurrenceId)
+			.ToArray();
+		Assert.Equal(2, session.SetKeepAsIs(secretOccurrenceIds, keep: true));
+		var keptFlanks = Redact(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+		Assert.Equal(
+			"value=left-secret-flank-" +
+			"DEVPROJEX_REDACTED[manual-private-data#1]" +
+			"-right-secret-flank",
+			keptFlanks.Result.Text);
+		Assert.DoesNotContain("DEVPROJEX_REDACTED[private-rule", keptFlanks.Result.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ExactCrossCategoryGroup_InsideNonGenericSecret_PreservesPrivateDataFlanks()
+	{
+		const string value = "left-private-flank-PRIORITY-SECRET-right-private-flank";
+		const string priorityValue = "PRIORITY-SECRET";
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", value);
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new FixedFindingsDetector(
+				"catalog:smart-secrets-v4",
+				[
+					CreateFinding(value, value, "generic-api-key", RedactionFindingCategory.Secrets),
+					CreateFinding(value, priorityValue, "priority-secret", RedactionFindingCategory.Secrets)
+				]),
+			new NeedleDetector(
+				"private-data-v1",
+				value,
+				"private-rule",
+				RedactionFindingCategory.PrivateData));
+
+		var scan = Redact(
+			session,
+			workspace.Path,
+			path,
+			value,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+
+		Assert.Equal(3, scan.Result.Spans.Count);
+		Assert.Single(scan.Result.Spans, static span => span.RuleId == "priority-secret");
+		Assert.Equal(2, scan.Result.Spans.Count(static span => span.RuleId == "private-rule"));
+		Assert.Equal(
+			"DEVPROJEX_REDACTED[private-rule#1]" +
+			"DEVPROJEX_REDACTED[priority-secret#1]" +
+			"DEVPROJEX_REDACTED[private-rule#2]",
+			scan.Result.Text);
+		Assert.DoesNotContain("left-private-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(priorityValue, scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("right-private-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("DEVPROJEX_REDACTED[generic-api-key", scan.Result.Text, StringComparison.Ordinal);
+		Assert.Equal((1, 2), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+	}
+
+	[Fact]
+	public void TriplePriorityOverlap_RedactsEveryPositionCoveredByASurvivingCategory()
+	{
+		const string value = "left-private-flank-priority-MANUAL-MARK-secret-right-private-flank";
+		const string priorityValue = "priority-MANUAL-MARK-secret";
+		const string manualValue = "MANUAL-MARK";
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("data.txt", value);
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new FixedFindingsDetector(
+				"catalog:smart-secrets-v4",
+				[
+					CreateFinding(value, value, "generic-api-key", RedactionFindingCategory.Secrets),
+					CreateFinding(value, priorityValue, "priority-secret", RedactionFindingCategory.Secrets)
+				]),
+			new NeedleDetector(
+				"private-data-v1",
+				value,
+				"private-rule",
+				RedactionFindingCategory.PrivateData));
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(manualValue, out var mark, out _));
+		Assert.True(session.AddSessionMarkedSecret(
+			"data.txt",
+			value.IndexOf(manualValue, StringComparison.Ordinal),
+			mark,
+			ManualRedactionClass.Secret));
+
+		var scan = Redact(
+			session,
+			workspace.Path,
+			path,
+			value,
+			SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+
+		Assert.Equal(3, scan.Result.Spans.Count);
+		Assert.Single(scan.Result.Spans, static span => span.RuleId == "manual-secret");
+		Assert.Equal(2, scan.Result.Spans.Count(static span => span.RuleId == "private-rule"));
+		Assert.Equal(
+			"DEVPROJEX_REDACTED[private-rule#1]" +
+			"DEVPROJEX_REDACTED[manual-secret#1]" +
+			"DEVPROJEX_REDACTED[private-rule#2]",
+			scan.Result.Text);
+		Assert.DoesNotContain("left-private-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain(priorityValue, scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("right-private-flank", scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("DEVPROJEX_REDACTED[priority-secret", scan.Result.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("DEVPROJEX_REDACTED[generic-api-key", scan.Result.Text, StringComparison.Ordinal);
+		Assert.Equal((1, 2), (scan.Snapshot.SecretRedactedCount, scan.Snapshot.PrivateDataRedactedCount));
+	}
+
+	[Fact]
 	public void CombinedDetectorScope_RejectsRuleIdSharedAcrossCategories()
 	{
 		const string content = "shared-value";
@@ -522,6 +726,32 @@ public sealed class PrivateDataRedactionCompositionTests
 		var scope = session.BeginOutput(projectRoot, [path], features: features);
 		var result = scope.Redact(path, content, TestContext.Current.CancellationToken);
 		return (result, scope.Complete());
+	}
+
+	private static DetectedSecret CreateFinding(
+		string content,
+		string value,
+		string ruleId,
+		RedactionFindingCategory category)
+	{
+		var start = content.IndexOf(value, StringComparison.Ordinal);
+		return new DetectedSecret(ruleId, start, value.Length, value, -100, Category: category);
+	}
+
+	private sealed class FixedFindingsDetector(
+		string rulesIdentity,
+		IReadOnlyList<DetectedSecret> findings) : ISecretDetector
+	{
+		public string RulesIdentity => rulesIdentity;
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return findings;
+		}
 	}
 
 	private sealed class NeedleDetector(
