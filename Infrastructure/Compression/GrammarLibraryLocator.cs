@@ -36,6 +36,9 @@ public interface IGrammarLibraryLocator
 public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDisposable
 {
 	private const string LeaseFileName = ".devprojex.lease";
+	private const int UnixLockShared = 1;
+	private const int UnixLockExclusive = 2;
+	private const int UnixLockNonBlocking = 4;
 	// Matches what the .NET single-file extractor applies to the native libraries it writes.
 	private const UnixFileMode UnixExecutableMode =
 		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
@@ -198,13 +201,19 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDis
 
 			Directory.CreateDirectory(directory);
 			var leasePath = Path.Combine(directory, LeaseFileName);
-			// Cleanup requests write access to the marker. Active locators grant shared reads only,
-			// which makes that request fail on every supported OS without relying on unlink semantics.
+			// Windows uses conflicting file access; Unix pairs this handle with a shared flock below.
+			// Neither path relies on an open file preventing unlink.
 			var lease = new FileStream(
 				leasePath,
 				FileMode.OpenOrCreate,
 				FileAccess.Read,
 				FileShare.Read);
+			var lockResult = TryAcquireUnixLock(lease, UnixLockShared);
+			if (lockResult == UnixLockResult.Denied)
+			{
+				lease.Dispose();
+				throw new IOException($"Grammar directory '{directory}' is being cleaned up.");
+			}
 			_leases.Add(directory, lease);
 		}
 	}
@@ -318,11 +327,18 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDis
 				.ToArray();
 			foreach (var leasePath in leasePaths)
 			{
-				leases.Add(new FileStream(
+				var lease = new FileStream(
 					leasePath,
 					FileMode.OpenOrCreate,
 					FileAccess.ReadWrite,
-					FileShare.Delete));
+					FileShare.Delete);
+				var lockResult = TryAcquireUnixLock(lease, UnixLockExclusive);
+				if (lockResult != UnixLockResult.Acquired)
+				{
+					lease.Dispose();
+					throw new IOException($"Grammar directory '{directory}' is still leased.");
+				}
+				leases.Add(lease);
 			}
 			return true;
 		}
@@ -334,6 +350,32 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDis
 			return false;
 		}
 	}
+
+	private static UnixLockResult TryAcquireUnixLock(FileStream stream, int mode)
+	{
+		if (OperatingSystem.IsWindows())
+			return UnixLockResult.Acquired;
+
+		try
+		{
+			var descriptor = stream.SafeFileHandle.DangerousGetHandle().ToInt32();
+			return Flock(descriptor, mode | UnixLockNonBlocking) == 0
+				? UnixLockResult.Acquired
+				: UnixLockResult.Denied;
+		}
+		catch (Exception exception) when (exception is
+			DllNotFoundException or
+			EntryPointNotFoundException or
+			PlatformNotSupportedException)
+		{
+			// An unknown Unix cannot safely prove exclusivity. Active use may continue, but cleanup
+			// must preserve the directory instead of risking removal under a loaded native library.
+			return UnixLockResult.Unavailable;
+		}
+	}
+
+	[DllImport("libc", EntryPoint = "flock", SetLastError = true)]
+	private static extern int Flock(int fileDescriptor, int operation);
 
 	public void Dispose()
 	{
@@ -352,6 +394,13 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDis
 		_assembly.GetManifestResourceStream($"{_resourcePrefix}{fileName}")
 			?? throw new InvalidOperationException(
 				$"Embedded grammar '{fileName}' is missing. The publish filter and the embed list disagree.");
+
+	private enum UnixLockResult
+	{
+		Acquired,
+		Denied,
+		Unavailable
+	}
 }
 
 /// <summary>
