@@ -11,6 +11,7 @@ internal static class GitTrackedPathIndexCache
 	private const long CacheByteLimit = 16L * 1024 * 1024;
 	private const long MaximumSingleEntryBytes = 64L * 1024 * 1024;
 	private const long EstimatedEmptyIndexBytes = 64;
+	private const int MaximumTrackedPathLength = 32768;
 	private const int GitFileMaximumLength = 64 * 1024;
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
 	private static readonly object CacheSync = new();
@@ -226,13 +227,14 @@ internal static class GitTrackedPathIndexCache
 
 		var trackedPathsTask = ReadNullDelimitedPathsAsync(
 			process.StandardOutput,
-			timeoutSource.Token);
+			timeoutSource.Token,
+			timeoutSource.Cancel);
 		var errorDrainTask = DrainAsync(process.StandardError, timeoutSource.Token);
 		await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
 		var trackedPaths = await trackedPathsTask.ConfigureAwait(false);
 		await errorDrainTask.ConfigureAwait(false);
 
-		if (process.ExitCode != 0)
+		if (process.ExitCode != 0 || trackedPaths is null)
 			return null;
 
 		return new LoadedGitTrackedPathIndex(
@@ -271,13 +273,24 @@ internal static class GitTrackedPathIndexCache
 		return startInfo;
 	}
 
-	private static async Task<List<string>> ReadNullDelimitedPathsAsync(
+	internal static async Task<List<string>?> ReadNullDelimitedPathsAsync(
 		StreamReader reader,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		Action abortProcess,
+		long maximumRetainedBytes = MaximumSingleEntryBytes,
+		int maximumPathLength = MaximumTrackedPathLength)
 	{
+		ArgumentNullException.ThrowIfNull(reader);
+		ArgumentNullException.ThrowIfNull(abortProcess);
+		if (maximumRetainedBytes < EstimatedEmptyIndexBytes)
+			throw new ArgumentOutOfRangeException(nameof(maximumRetainedBytes));
+		if (maximumPathLength <= 0)
+			throw new ArgumentOutOfRangeException(nameof(maximumPathLength));
+
 		var paths = new List<string>(capacity: 1024);
 		var buffer = ArrayPool<char>.Shared.Rent(4096);
 		StringBuilder? spanningPath = null;
+		var estimatedRetainedBytes = EstimatedEmptyIndexBytes;
 		try
 		{
 			while (true)
@@ -297,12 +310,16 @@ internal static class GitTrackedPathIndexCache
 					var segmentLength = index - segmentStart;
 					if (spanningPath is null)
 					{
+						if (segmentLength > 0 && !TryReservePath(segmentLength))
+							return AbortRead();
 						if (segmentLength > 0)
 							paths.Add(new string(buffer, segmentStart, segmentLength));
 					}
 					else
 					{
 						spanningPath.Append(buffer, segmentStart, segmentLength);
+						if (spanningPath.Length > 0 && !TryReservePath(spanningPath.Length))
+							return AbortRead();
 						if (spanningPath.Length > 0)
 							paths.Add(spanningPath.ToString());
 						spanningPath = null;
@@ -315,12 +332,33 @@ internal static class GitTrackedPathIndexCache
 				{
 					spanningPath ??= new StringBuilder();
 					spanningPath.Append(buffer, segmentStart, read - segmentStart);
+					if (spanningPath.Length > maximumPathLength)
+						return AbortRead();
 				}
 			}
 
+			if (spanningPath is { Length: > 0 } && !TryReservePath(spanningPath.Length))
+				return AbortRead();
 			if (spanningPath is { Length: > 0 })
 				paths.Add(spanningPath.ToString());
 			return paths;
+
+			bool TryReservePath(int pathLength)
+			{
+				if (pathLength > maximumPathLength)
+					return false;
+				var pathBytes = IntPtr.Size + 32L + ((long)pathLength * sizeof(char));
+				if (maximumRetainedBytes - estimatedRetainedBytes < pathBytes)
+					return false;
+				estimatedRetainedBytes += pathBytes;
+				return true;
+			}
+
+			List<string>? AbortRead()
+			{
+				abortProcess();
+				return null;
+			}
 		}
 		finally
 		{

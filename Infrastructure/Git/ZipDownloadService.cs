@@ -464,9 +464,9 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 		return owner.Length > 0 && repository.Length > 0;
 	}
 
-	private static string CreateZipUrl(string owner, string repository, string branch) =>
+	internal static string CreateZipUrl(string owner, string repository, string branch) =>
 		$"https://github.com/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repository)}/" +
-		$"archive/refs/heads/{Uri.EscapeDataString(branch)}.zip";
+		$"archive/refs/heads/{string.Join("/", branch.Split('/').Select(Uri.EscapeDataString))}.zip";
 
 	private static IReadOnlyList<ZipExtractionEntry> BuildExtractionPlan(
 		ZipArchive archive,

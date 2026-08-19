@@ -186,6 +186,43 @@ public class ZipDownloadServiceTests : IAsyncLifetime
             TestContext.Current.CancellationToken));
     }
 
+	[Fact]
+	public async Task DownloadAndExtractAsync_DefaultBranchWithSlash_PreservesBranchSegmentsInArchiveUrl()
+	{
+		var archive = CreateArchive(("repo-release-5.1/file.txt", "release"u8.ToArray()));
+		var handler = new DefaultBranchArchiveHandler("release/5.1", archive);
+		using var service = new ZipDownloadService(handler, ZipResourceLimits.Default with
+		{
+			FreeSpaceReserveBytes = 0
+		});
+		var targetDir = Path.Combine(_tempDir!, "release-default");
+
+		var result = await service.DownloadAndExtractAsync(
+			"https://github.com/owner/repo",
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(result.Success, result.ErrorMessage);
+		Assert.Equal("release/5.1", result.DefaultBranch);
+		Assert.Contains(
+			"/archive/refs/heads/release/5.1.zip",
+			handler.ArchiveRequestUri,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void CreateZipUrl_EncodesSpecialCharactersInsideEachBranchSegment()
+	{
+		var url = ZipDownloadService.CreateZipUrl(
+			"owner",
+			"repo",
+			"release candidate/#5");
+
+		Assert.Equal(
+			"https://github.com/owner/repo/archive/refs/heads/release%20candidate/%235.zip",
+			url);
+	}
+
     [Theory]
 	[InlineData("nul")]
 	[InlineData("CON.txt")]

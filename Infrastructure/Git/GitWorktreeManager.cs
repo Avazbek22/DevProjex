@@ -23,6 +23,7 @@ internal interface IGitWorktreeManager
 
 internal sealed class GitWorktreeManager : IGitWorktreeManager
 {
+	private static readonly TimeSpan SupportProbeTimeout = TimeSpan.FromSeconds(10);
 	private readonly object _supportSync = new();
 	private readonly Func<string, Task<WorktreeSupportState>> _probeSupport;
 	private Task<WorktreeSupportState>? _supportProbe;
@@ -30,12 +31,22 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 
 	public GitWorktreeManager()
 	{
-		_probeSupport = ProbeSupportAsync;
+		_probeSupport = basePath => ProbeSupportAsync(basePath, RunAsync, SupportProbeTimeout);
 	}
 
 	internal GitWorktreeManager(Func<string, Task<WorktreeSupportState>> probeSupport)
 	{
 		_probeSupport = probeSupport ?? throw new ArgumentNullException(nameof(probeSupport));
+	}
+
+	internal GitWorktreeManager(
+		Func<string, IReadOnlyList<string>, CancellationToken, Task<GitProcessResult>> runAsync,
+		TimeSpan supportProbeTimeout)
+	{
+		ArgumentNullException.ThrowIfNull(runAsync);
+		if (supportProbeTimeout <= TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(supportProbeTimeout));
+		_probeSupport = basePath => ProbeSupportAsync(basePath, runAsync, supportProbeTimeout);
 	}
 
 	public async Task<bool> IsSupportedAsync(string basePath, CancellationToken cancellationToken)
@@ -147,14 +158,18 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		await RunSuccessfulAsync(basePath, ["worktree", "prune"], cancellationToken).ConfigureAwait(false);
 	}
 
-	private static async Task<WorktreeSupportState> ProbeSupportAsync(string basePath)
+	private static async Task<WorktreeSupportState> ProbeSupportAsync(
+		string basePath,
+		Func<string, IReadOnlyList<string>, CancellationToken, Task<GitProcessResult>> runAsync,
+		TimeSpan timeout)
 	{
+		using var timeoutSource = new CancellationTokenSource(timeout);
 		try
 		{
-			var result = await RunAsync(
+			var result = await runAsync(
 					basePath,
 					["worktree", "list", "--porcelain"],
-					CancellationToken.None)
+					timeoutSource.Token)
 				.ConfigureAwait(false);
 			if (result.ExitCode == 0)
 				return WorktreeSupportState.Supported;
@@ -168,6 +183,10 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			return WorktreeSupportState.PermanentUnsupported;
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return WorktreeSupportState.TransientFailure;
+		}
+		catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested)
 		{
 			return WorktreeSupportState.TransientFailure;
 		}
@@ -322,7 +341,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		}
 	}
 
-	private sealed record GitProcessResult(int ExitCode, string Output, string Error);
+	internal sealed record GitProcessResult(int ExitCode, string Output, string Error);
 
 	private static void TryDeletePartialWorktree(string path)
 	{

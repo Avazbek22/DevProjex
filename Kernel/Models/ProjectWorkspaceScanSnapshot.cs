@@ -7,5 +7,4 @@ namespace DevProjex.Kernel.Models;
 /// </summary>
 public sealed record ProjectWorkspaceScanSnapshot(
 	IgnoreSectionScanData IgnoreSection,
-	ProjectTreeInventorySnapshot? TreeInventory,
-	ProjectWorkspaceScanBreakdown? Breakdown = null);
+	ProjectTreeInventorySnapshot? TreeInventory);

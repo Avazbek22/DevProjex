@@ -247,7 +247,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var includeDirectoryToggleProbeRoots = request.IncludeDirectoryToggleProbeRoots;
 		var includeControllerImpactProbeRoots = request.IncludeControllerImpactProbeRoots;
 		var captureTreeInventory = request.CaptureTreeInventory;
-		var captureRootScanBreakdown = request.CaptureRootScanBreakdown;
 		var gitIgnoreLoadSession = CreateGitIgnoreLoadSession(extensionDiscoveryRules, effectiveRules);
 
 		var scanPlan = BuildRootSelectionScanPlan(
@@ -304,33 +303,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var subtreeInventories = captureTreeInventory
 			? new List<ProjectTreeInventorySnapshot>()
 			: null;
-		var rootScanSnapshots = captureRootScanBreakdown
-			? new Dictionary<string, ProjectWorkspaceRootScanSnapshot>(scanPlan.SelectedRoots.Count, PathComparer.Default)
-			: null;
-		var projectGitIgnoreContext = captureRootScanBreakdown
-			? effectiveRules.CreateGitIgnoreScanContext(rootPath)
-			: IgnoreRules.GitIgnoreScanContext.Disabled(effectiveRules);
-		var projectGitIgnoreCandidateContext = captureRootScanBreakdown
-			? effectiveRules.CreateGitIgnoreCandidateScanContext(rootPath)
-			: IgnoreRules.GitIgnoreScanContext.Disabled(effectiveRules);
-		if (captureRootScanBreakdown && effectiveRules.IsGitIgnoreTraversalEnabled)
-		{
-			(projectGitIgnoreContext, projectGitIgnoreCandidateContext, _, _) =
-				EnterNearestGitTrackedPathIndex(
-					rootPath,
-					projectGitIgnoreContext,
-					projectGitIgnoreCandidateContext,
-					cancellationToken,
-					loadSession: gitIgnoreLoadSession);
-		}
-
 		if (!rootFilePolicyUnavailable && scanPlan.SelectedRoots.Count > 0)
 		{
 			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 			Parallel.ForEach(
 				scanPlan.SelectedRoots,
 				parallelOptions,
-				() => new ProjectWorkspaceScanLocalState(captureTreeInventory, captureRootScanBreakdown),
+				() => new ProjectWorkspaceScanLocalState(captureTreeInventory),
 				(folder, _, localState) =>
 				{
 					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
@@ -360,39 +339,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					{
 						localState.TreeInventories.Add(inventoryCapture.Inventory);
 					}
-					if (localState.RootSnapshots is not null)
-					{
-						var rootFacts = AnalyzeDirectory(
-							folder.FullPath,
-							folder.RelativePath,
-							folder.Name,
-							folder.IsHidden,
-							effectiveRules,
-							projectGitIgnoreContext,
-							projectGitIgnoreCandidateContext);
-						var directoryToggleProbeCounts = includeDirectoryToggleProbeRoots
-							? CountRootDirectoryToggleCandidate(
-								rootFacts,
-								effectiveRules)
-							: IgnoreOptionCounts.Empty;
-						var controllerImpactProbeCounts = includeControllerImpactProbeRoots
-							? CountRootDirectoryControllerImpactCandidate(
-								rootFacts,
-								effectiveRules,
-								effectiveExtensionPolicy,
-								parallelOptions.CancellationToken)
-							: IgnoreControllerImpactCounts.Empty;
-						localState.RootSnapshots.Add(new KeyValuePair<string, ProjectWorkspaceRootScanSnapshot>(
-							folder.Name,
-							new ProjectWorkspaceRootScanSnapshot(
-								snapshot.Value,
-								directoryToggleProbeCounts,
-								controllerImpactProbeCounts,
-								snapshot.RootAccessDenied,
-								snapshot.HadAccessDenied,
-								snapshot.HadScanFailure)));
-					}
-
 					if (snapshot.RootAccessDenied)
 						Interlocked.Exchange(ref rootAccessDenied, 1);
 					if (snapshot.HadAccessDenied)
@@ -423,17 +369,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						{
 							subtreeInventories.AddRange(localState.TreeInventories);
 						}
-						if (rootScanSnapshots is not null &&
-						    localState.RootSnapshots is not null)
-						{
-							foreach (var pair in localState.RootSnapshots)
-								rootScanSnapshots[pair.Key] = pair.Value;
-						}
 					}
 				});
 		}
 
-		var unselectedDirectoryToggleProbeCounts = IgnoreOptionCounts.Empty;
 		if (includeDirectoryToggleProbeRoots && scanPlan.DirectoryToggleCandidates.Count > 0)
 		{
 			// Keep initial project-load inventory focused on the currently selected roots.
@@ -447,7 +386,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				effectiveRules,
 				cancellationToken);
 			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
-			unselectedDirectoryToggleProbeCounts = rootCandidateCounts.Value;
 			if (rootCandidateCounts.RootAccessDenied)
 				Interlocked.Exchange(ref rootAccessDenied, 1);
 			if (rootCandidateCounts.HadAccessDenied)
@@ -456,7 +394,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				Interlocked.Exchange(ref hadScanFailure, 1);
 		}
 
-		var unselectedControllerImpactProbeCounts = IgnoreControllerImpactCounts.Empty;
 		if (scanPlan.ControllerImpactCandidates.Count > 0)
 		{
 			var rootControllerImpactCounts = CountRootDirectoryControllerImpactCandidates(
@@ -465,7 +402,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				effectiveExtensionPolicy,
 				cancellationToken);
 			controllerImpactCounts = controllerImpactCounts.Add(rootControllerImpactCounts.Value);
-			unselectedControllerImpactProbeCounts = rootControllerImpactCounts.Value;
 			if (rootControllerImpactCounts.RootAccessDenied)
 				Interlocked.Exchange(ref rootAccessDenied, 1);
 			if (rootControllerImpactCounts.HadAccessDenied)
@@ -495,23 +431,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					cancellationToken,
 					gitIgnoreLoadSession))
 			: null;
-		var breakdown = captureRootScanBreakdown
-			? new ProjectWorkspaceScanBreakdown(
-				rootFileSnapshot.Value,
-				rootScanSnapshots!,
-				unselectedDirectoryToggleProbeCounts,
-				unselectedControllerImpactProbeCounts,
-				includeDirectoryToggleProbeRoots,
-				includeControllerImpactProbeRoots,
-				scanPlan.RootAccessDenied,
-				scanPlan.HadAccessDenied,
-				rootFileSnapshot.RootAccessDenied,
-				rootFileSnapshot.HadAccessDenied,
-				scanPlan.HadScanFailure,
-				rootFileSnapshot.HadScanFailure)
-			: null;
 		return new ScanResult<ProjectWorkspaceScanSnapshot>(
-			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory, breakdown),
+			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory),
 			rootAccessDenied == 1,
 			hadAccessDenied == 1,
 			hadScanFailure == 1);

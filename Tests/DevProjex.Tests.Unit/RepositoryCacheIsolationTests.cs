@@ -140,6 +140,169 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	}
 
 	[Fact]
+	public async Task GitSessionReturnsBeforeRepositorySizeRefreshAndBackgroundRefreshUpdatesIndex()
+	{
+		using var refreshStarted = new ManualResetEventSlim();
+		using var allowRefresh = new ManualResetEventSlim();
+		var refreshCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var hooks = new RepoCacheTestHooks
+		{
+			BeforeRepositorySizeRefresh = _ =>
+			{
+				refreshStarted.Set();
+				Assert.True(allowRefresh.Wait(
+					TimeSpan.FromSeconds(3),
+					TestContext.Current.CancellationToken));
+			},
+			AfterRepositorySizeRefresh = _ => refreshCompleted.TrySetResult()
+		};
+		var worktrees = new FakeWorktreeManager(supported: true);
+		var service = CreateService(worktrees, hooks: hooks);
+		var basePath = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
+		var initialSize = service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes;
+		using var first = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken);
+
+		using var second = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken).WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(first);
+		Assert.NotNull(second);
+		Assert.True(refreshStarted.Wait(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken));
+		Assert.Equal(initialSize, service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes);
+
+		allowRefresh.Set();
+		await refreshCompleted.Task.WaitAsync(
+			TimeSpan.FromSeconds(3),
+			TestContext.Current.CancellationToken);
+		Assert.True(service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes > initialSize);
+		Assert.True(Directory.Exists(basePath));
+	}
+
+	[Fact]
+	public async Task WorktreeCleanup_MultipleOpensWhileFirstCleanupIsBlocked_SchedulesOneTaskPerBasePath()
+	{
+		using var cleanupStarted = new ManualResetEventSlim();
+		using var allowCleanup = new ManualResetEventSlim();
+		var cleanupCount = 0;
+		var hooks = new RepoCacheTestHooks
+		{
+			BeforeUnusedWorktreeCleanup = _ =>
+			{
+				Interlocked.Increment(ref cleanupCount);
+				cleanupStarted.Set();
+				Assert.True(allowCleanup.Wait(
+					TimeSpan.FromSeconds(3),
+					TestContext.Current.CancellationToken));
+			}
+		};
+		var service = CreateService(new FakeWorktreeManager(supported: true), hooks: hooks);
+		_ = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
+		var sessions = new List<IRepositoryCacheSession>();
+		try
+		{
+			sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+				await service.TryAcquireRepositorySessionAsync(
+					RepositoryUrl,
+					"main",
+					TestContext.Current.CancellationToken)));
+			Assert.True(cleanupStarted.Wait(
+				TimeSpan.FromSeconds(2),
+				TestContext.Current.CancellationToken));
+
+			for (var index = 0; index < 3; index++)
+			{
+				sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+					await service.TryAcquireRepositorySessionAsync(
+						RepositoryUrl,
+						"main",
+						TestContext.Current.CancellationToken)));
+			}
+
+			Assert.Equal(1, Volatile.Read(ref cleanupCount));
+			allowCleanup.Set();
+			await Task.Delay(100, TestContext.Current.CancellationToken);
+			Assert.Equal(1, Volatile.Read(ref cleanupCount));
+		}
+		finally
+		{
+			allowCleanup.Set();
+			foreach (var session in sessions)
+				session.Dispose();
+		}
+	}
+
+	[Fact]
+	public async Task GarbageCollection_MultipleOpensWhileFirstPassIsBlocked_CoalescesOnePendingRepeat()
+	{
+		using var collectionStarted = new ManualResetEventSlim();
+		using var allowCollection = new ManualResetEventSlim();
+		var secondPassCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var collectionCount = 0;
+		var hooks = new RepoCacheTestHooks
+		{
+			BeforeScheduledGarbageCollection = () =>
+			{
+				var pass = Interlocked.Increment(ref collectionCount);
+				if (pass != 1)
+					return;
+				collectionStarted.Set();
+				Assert.True(allowCollection.Wait(
+					TimeSpan.FromSeconds(3),
+					TestContext.Current.CancellationToken));
+			},
+			AfterScheduledGarbageCollection = () =>
+			{
+				if (Volatile.Read(ref collectionCount) == 2)
+					secondPassCompleted.TrySetResult();
+			}
+		};
+		var service = CreateService(new FakeWorktreeManager(supported: true), hooks: hooks);
+		_ = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Zip, "snapshot");
+		var sessions = new List<IRepositoryCacheSession>();
+		try
+		{
+			sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+				await service.TryAcquireRepositorySessionAsync(
+					RepositoryUrl,
+					cancellationToken: TestContext.Current.CancellationToken)));
+			Assert.True(collectionStarted.Wait(
+				TimeSpan.FromSeconds(2),
+				TestContext.Current.CancellationToken));
+
+			for (var index = 0; index < 5; index++)
+			{
+				sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+					await service.TryAcquireRepositorySessionAsync(
+						RepositoryUrl,
+						cancellationToken: TestContext.Current.CancellationToken)));
+			}
+
+			Assert.Equal(1, Volatile.Read(ref collectionCount));
+			allowCollection.Set();
+			await secondPassCompleted.Task.WaitAsync(
+				TimeSpan.FromSeconds(3),
+				TestContext.Current.CancellationToken);
+			await Task.Delay(100, TestContext.Current.CancellationToken);
+			Assert.Equal(2, Volatile.Read(ref collectionCount));
+		}
+		finally
+		{
+			allowCollection.Set();
+			foreach (var session in sessions)
+				session.Dispose();
+		}
+	}
+
+	[Fact]
 	public async Task GitFallbackWithoutWorktreeSupportSharesLegacyCheckoutAndPinsDeletion()
 	{
 		var service = CreateService(new FakeWorktreeManager(supported: false));

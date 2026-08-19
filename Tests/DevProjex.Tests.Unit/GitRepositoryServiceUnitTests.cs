@@ -65,6 +65,38 @@ public class GitRepositoryServiceUnitTests
 		Assert.Equal(2, calls);
 	}
 
+	[Fact]
+	public async Task WorktreeSupportProbe_TimeoutIsTransientAndNextRequestStartsNewProbe()
+	{
+		var probeCount = 0;
+		var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var manager = new GitWorktreeManager(
+			async (_, _, cancellationToken) =>
+			{
+				var attempt = Interlocked.Increment(ref probeCount);
+				if (attempt > 1)
+					return new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty);
+				try
+				{
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				}
+				catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+				{
+					cancellationObserved.TrySetResult();
+					throw;
+				}
+				return new GitWorktreeManager.GitProcessResult(-1, string.Empty, string.Empty);
+			},
+			TimeSpan.FromMilliseconds(50));
+
+		Assert.False(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		await cancellationObserved.Task.WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		Assert.True(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(2, probeCount);
+	}
+
 	[Theory]
 	[InlineData("feature/space+plus")]
 	[InlineData("release/v1.2@beta")]

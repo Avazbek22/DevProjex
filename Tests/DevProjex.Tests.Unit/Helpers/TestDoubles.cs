@@ -48,9 +48,6 @@ internal sealed class StubFileSystemScanner : IFileSystemScannerProjectWorkspace
 		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var rootFiles = GetRootFileExtensionsHandler(request.RootPath, request.ExtensionDiscoveryRules);
 		extensions.UnionWith(rootFiles.Value);
-		var rootSnapshots = request.CaptureRootScanBreakdown
-			? new Dictionary<string, ProjectWorkspaceRootScanSnapshot>(PathComparer.Default)
-			: null;
 		var rootAccessDenied = rootFiles.RootAccessDenied;
 		var hadAccessDenied = rootFiles.HadAccessDenied;
 
@@ -63,35 +60,11 @@ internal sealed class StubFileSystemScanner : IFileSystemScannerProjectWorkspace
 			extensions.UnionWith(result.Value);
 			rootAccessDenied |= result.RootAccessDenied;
 			hadAccessDenied |= result.HadAccessDenied;
-
-			if (rootSnapshots is not null)
-			{
-				var section = CreateIgnoreSection(result.Value);
-				rootSnapshots[rootFolder] = new ProjectWorkspaceRootScanSnapshot(
-					section,
-					IgnoreOptionCounts.Empty,
-					IgnoreControllerImpactCounts.Empty,
-					result.RootAccessDenied,
-					result.HadAccessDenied);
-			}
 		}
 
 		var ignoreSection = CreateIgnoreSection(extensions);
-		var breakdown = rootSnapshots is null
-			? null
-			: new ProjectWorkspaceScanBreakdown(
-				CreateIgnoreSection(rootFiles.Value),
-				rootSnapshots,
-				IgnoreOptionCounts.Empty,
-				IgnoreControllerImpactCounts.Empty,
-				request.IncludeDirectoryToggleProbeRoots,
-				request.IncludeControllerImpactProbeRoots,
-				RootEnumerationAccessDenied: false,
-				RootEnumerationHadAccessDenied: false,
-				rootFiles.RootAccessDenied,
-				rootFiles.HadAccessDenied);
 		return new ScanResult<ProjectWorkspaceScanSnapshot>(
-			new ProjectWorkspaceScanSnapshot(ignoreSection, TreeInventory: null, breakdown),
+			new ProjectWorkspaceScanSnapshot(ignoreSection, TreeInventory: null),
 			rootAccessDenied,
 			hadAccessDenied);
 	}

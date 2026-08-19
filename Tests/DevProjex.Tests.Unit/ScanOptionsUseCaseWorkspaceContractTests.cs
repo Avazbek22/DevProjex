@@ -31,7 +31,6 @@ public sealed class ScanOptionsUseCaseWorkspaceContractTests
 			includeDirectoryToggleProbeRoots: true,
 			cancellationToken: TestContext.Current.CancellationToken,
 			includeControllerImpactProbeRoots: true,
-			captureRootScanBreakdown: true,
 			captureTreeInventory: true);
 
 		Assert.Same(expected.Value, actual.Value);
@@ -43,7 +42,6 @@ public sealed class ScanOptionsUseCaseWorkspaceContractTests
 		Assert.Same(policy, request.EffectiveExtensionPolicy);
 		Assert.True(request.IncludeDirectoryToggleProbeRoots);
 		Assert.True(request.IncludeControllerImpactProbeRoots);
-		Assert.True(request.CaptureRootScanBreakdown);
 		Assert.True(request.CaptureTreeInventory);
 		Assert.Equal(TestContext.Current.CancellationToken, scanner.CancellationTokens.Single());
 	}

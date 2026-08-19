@@ -206,7 +206,6 @@ public sealed class SelectionRefreshEngine(
                 currentSelectedIgnoreOptions,
                 currentIgnoreStateCache,
                 previousRuntimeSnapshot,
-                reusableWorkspaceScan: null,
                 cancellationToken);
 
             rootAccessDenied |= snapshot.RootAccessDenied;
@@ -289,7 +288,6 @@ public sealed class SelectionRefreshEngine(
         IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
         IReadOnlyDictionary<IgnoreOptionId, bool> ignoreStateCache,
         IgnoreSectionSnapshotState previousRuntimeSnapshotState,
-        ProjectWorkspaceScanSnapshot? reusableWorkspaceScan,
         CancellationToken cancellationToken)
     {
         var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots);
@@ -306,7 +304,6 @@ public sealed class SelectionRefreshEngine(
             extensionScanRules,
             ignoreRules,
             effectiveExtensionPolicy,
-            reusableWorkspaceScan,
             cancellationToken);
         var scanData = scan.Value.IgnoreSection;
         var rootAccessDenied = scan.RootAccessDenied;
@@ -363,7 +360,6 @@ public sealed class SelectionRefreshEngine(
                 extensionScanRules,
                 ignoreRules,
                 ExtensionOptionProjection.BuildResolvedPolicy(extensionOptions),
-                reusableWorkspaceScan: null,
                 cancellationToken);
             scanData = scan.Value.IgnoreSection;
             rootAccessDenied |= scan.RootAccessDenied;
@@ -430,8 +426,7 @@ public sealed class SelectionRefreshEngine(
             HadAccessDenied: hadAccessDenied,
             HadScanFailure: hadScanFailure,
             TreeInventory: scan.Value.TreeInventory,
-            EffectiveRules: ignoreRules,
-            WorkspaceScan: scan.Value);
+            EffectiveRules: ignoreRules);
     }
 
 	private static IReadOnlyList<SelectionOption> ApplyExplicitExtensionSelection(
@@ -456,23 +451,10 @@ public sealed class SelectionRefreshEngine(
         IgnoreRules extensionScanRules,
         IgnoreRules ignoreRules,
         IExtensionInclusionPolicy? effectiveExtensionPolicy,
-        ProjectWorkspaceScanSnapshot? reusableWorkspaceScan,
         CancellationToken cancellationToken)
     {
         const bool includeDirectoryToggleProbeRoots = true;
         const bool includeControllerImpactProbeRoots = true;
-        if (reusableWorkspaceScan is not null &&
-            ProjectWorkspaceScanProjection.TryProjectSelectedRoots(
-                reusableWorkspaceScan,
-                selectedRoots,
-                includeDirectoryToggleProbeRoots,
-                includeControllerImpactProbeRoots,
-                retainedRemovedRootEmptyFolderImpactRoots: null,
-                out var projectedScan))
-        {
-            return projectedScan;
-        }
-
         return scanOptions.GetProjectWorkspaceSnapshotForRootFolders(
                 context.Path,
                 selectedRoots,
@@ -482,7 +464,6 @@ public sealed class SelectionRefreshEngine(
                 includeDirectoryToggleProbeRoots,
                 cancellationToken,
                 includeControllerImpactProbeRoots,
-                captureRootScanBreakdown: true,
                 captureTreeInventory: context.CaptureTreeInventory);
     }
 
@@ -1099,8 +1080,7 @@ public sealed class SelectionRefreshEngine(
         bool HadAccessDenied,
         bool HadScanFailure,
         ProjectTreeInventorySnapshot? TreeInventory,
-        IgnoreRules EffectiveRules,
-        ProjectWorkspaceScanSnapshot WorkspaceScan);
+        IgnoreRules EffectiveRules);
 
     private sealed record IgnoreOptionResolutionResult(
         IReadOnlyList<ResolvedIgnoreOptionState> VisibleOptions,

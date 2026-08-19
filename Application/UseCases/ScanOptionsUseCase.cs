@@ -157,7 +157,6 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 			includeDirectoryToggleProbeRoots,
 			includeControllerImpactProbeRoots,
 			captureTreeInventory: false,
-			captureRootScanBreakdown: false,
 			cancellationToken);
 		return new ScanResult<IgnoreSectionScanData>(
 			scan.Value.IgnoreSection,
@@ -175,7 +174,6 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 		bool includeDirectoryToggleProbeRoots = false,
 		CancellationToken cancellationToken = default,
 		bool includeControllerImpactProbeRoots = false,
-		bool captureRootScanBreakdown = false,
 		bool captureTreeInventory = true)
 	{
 		return ScanWorkspace(
@@ -187,7 +185,6 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 			includeDirectoryToggleProbeRoots,
 			includeControllerImpactProbeRoots,
 			captureTreeInventory,
-			captureRootScanBreakdown,
 			cancellationToken);
 	}
 
@@ -212,7 +209,6 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 			includeDirectoryToggleProbeRoots,
 			includeControllerImpactProbeRoots: false,
 			captureTreeInventory: false,
-			captureRootScanBreakdown: false,
 			cancellationToken);
 		return new ScanResult<IgnoreOptionCounts>(
 			scan.Value.IgnoreSection.EffectiveIgnoreOptionCounts,
@@ -232,7 +228,6 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 		bool includeDirectoryToggleProbeRoots = false,
 		bool includeControllerImpactProbeRoots = false,
 		bool captureTreeInventory = false,
-		bool captureRootScanBreakdown = false,
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -245,8 +240,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 				effectiveExtensionPolicy,
 				captureTreeInventory,
 				includeDirectoryToggleProbeRoots,
-				includeControllerImpactProbeRoots,
-				captureRootScanBreakdown),
+				includeControllerImpactProbeRoots),
 			cancellationToken);
 	}
 
