@@ -311,6 +311,7 @@ public sealed class TreeSitterCodeCompressor :
 			pool.Dispose();
 		_languagePools.Clear();
 		_workerBudget.Dispose();
+		(_locator as IDisposable)?.Dispose();
 	}
 
 	private static void ValidateTransformKinds(CodeTransformKinds kinds)

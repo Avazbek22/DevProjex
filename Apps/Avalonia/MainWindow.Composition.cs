@@ -2,7 +2,6 @@ using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
 using DevProjex.Application.DesktopControl;
-using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Terminal.DesktopControl;
 using ThemeSettingsStore =
@@ -953,7 +952,8 @@ public partial class MainWindow
             TryElevateAndRestart,
             () => _currentPath,
             _statusOperations,
-            ApplyProgrammaticContentTransformationSelectionChange);
+            ApplyProgrammaticContentTransformationSelectionChange,
+			scanIncomplete: () => _toastService.Show(_localization["Scan.Error.Incomplete"]));
         // User changes in this section remain drafts until Apply. The callback is reserved for
         // programmatic activation, such as enabling Hide Secrets for a manual mark.
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);

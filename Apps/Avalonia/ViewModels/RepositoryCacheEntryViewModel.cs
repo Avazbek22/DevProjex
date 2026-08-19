@@ -1,4 +1,3 @@
-using System.Globalization;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.ViewModels;

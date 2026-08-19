@@ -2,7 +2,6 @@ using System.Buffers;
 using System.IO.Compression;
 using System.Net;
 using System.Security;
-using System.Text.RegularExpressions;
 
 namespace DevProjex.Infrastructure.Git;
 
@@ -10,7 +9,7 @@ namespace DevProjex.Infrastructure.Git;
 /// Downloads and extracts GitHub repositories as ZIP archives.
 /// Fallback for when Git CLI is not available.
 /// </summary>
-public sealed partial class ZipDownloadService : IZipDownloadService, IDisposable
+public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 {
     private const int StreamBufferSize = 81920;
     private const int ExtractionProgressReportInterval = 50;
@@ -64,7 +63,7 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
     {
         var repoName = ExtractRepositoryName(repositoryUrl);
 
-        if (!TryGetZipUrl(repositoryUrl, out var zipUrl, out var branch))
+        if (!TryGetGitHubRepository(repositoryUrl, out var owner, out var repository))
         {
             return new GitCloneResult(
                 Success: false,
@@ -76,31 +75,34 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
                 ErrorMessage: "Could not determine ZIP download URL");
         }
 
+        var metadataBranch = await TryGetDefaultBranchAsync(owner, repository, cancellationToken)
+            .ConfigureAwait(false);
+        var branch = metadataBranch ?? "main";
+        var zipUrl = CreateZipUrl(owner, repository, branch);
         var tempZipPath = Path.Combine(Path.GetTempPath(), $"devprojex_{Guid.NewGuid():N}.zip");
-        var cleanupTargetDirectory = false;
-        var completed = false;
+        var extractionStagingPath = CreateExtractionStagingPath(targetDirectory);
 
         try
         {
-            cleanupTargetDirectory = IsMissingOrEmptyDirectory(targetDirectory);
-
-            // Download ZIP - try main branch first, then master if 404
+            // Metadata failures retain the legacy main/master compatibility path.
             HttpResponseMessage? response = null;
             try
             {
                 response = await _httpClient.GetAsync(zipUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
                 // If 404 and we tried "main", try "master"
-                if (response.StatusCode == HttpStatusCode.NotFound && branch == "main")
+                if (metadataBranch is null &&
+                    response.StatusCode == HttpStatusCode.NotFound &&
+                    branch == "main")
                 {
                     response.Dispose();
 
                     // Try with master branch
-                    if (TryGetZipUrlWithBranch(repositoryUrl, "master", out var masterZipUrl))
-                    {
-                        branch = "master";
-                        response = await _httpClient.GetAsync(masterZipUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                    }
+                    branch = "master";
+                    response = await _httpClient.GetAsync(
+                        CreateZipUrl(owner, repository, branch),
+                        HttpCompletionOption.ResponseHeadersRead,
+                        cancellationToken);
                 }
 
                 response.EnsureSuccessStatusCode();
@@ -163,12 +165,12 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
             await ExtractArchiveAsync(
                     tempZipPath,
-                    targetDirectory,
+                    extractionStagingPath,
                     progress,
                     cancellationToken)
                 .ConfigureAwait(false);
+            PromoteExtractedDirectory(extractionStagingPath, targetDirectory);
 
-            completed = true;
             return new GitCloneResult(
                 Success: true,
                 LocalPath: targetDirectory,
@@ -207,8 +209,7 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
         finally
         {
             TryDeleteFile(tempZipPath);
-            if (!completed && cleanupTargetDirectory)
-                TryDeleteDirectory(targetDirectory);
+            TryDeleteDirectory(extractionStagingPath);
         }
     }
 
@@ -230,51 +231,41 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
         var declaredTotal = ValidateArchiveMetadata(archive, archiveSize);
         EnsureAvailableFreeSpace(targetDirectory, declaredTotal);
+        var extractionPlan = BuildExtractionPlan(archive, targetDirectory);
         Directory.CreateDirectory(targetDirectory);
 
         var extractionBudget = new ZipExtractionBudget(archiveSize, _limits);
         var buffer = ArrayPool<byte>.Shared.Rent(StreamBufferSize);
         try
         {
-            string? rootFolder = null;
-            var totalEntries = archive.Entries.Count;
+            var totalEntries = extractionPlan.Count;
             var processedEntries = 0;
             var lastExtractionPercent = -1;
 
             ReportPercent(progress, 0, ref lastExtractionPercent);
 
-            foreach (var entry in archive.Entries)
+            foreach (var plannedEntry in extractionPlan)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                var entryPath = entry.FullName;
-                if (string.IsNullOrEmpty(rootFolder))
-                    rootFolder = TryGetTopLevelFolder(entryPath);
-
-                if (!string.IsNullOrEmpty(rootFolder) && StartsWithFolderPrefix(entryPath, rootFolder))
-                    entryPath = entryPath[(rootFolder.Length + 1)..];
-
-                if (!string.IsNullOrEmpty(entryPath))
+                var entry = plannedEntry.Entry;
+                var destinationPath = plannedEntry.DestinationPath;
+                if (plannedEntry.IsDirectory)
                 {
-                    var destinationPath = ResolveSafeDestinationPath(targetDirectory, entryPath);
-                    if (IsDirectoryEntry(entry))
-                    {
-                        Directory.CreateDirectory(destinationPath);
-                    }
-                    else
-                    {
-                        var directory = Path.GetDirectoryName(destinationPath);
-                        if (!string.IsNullOrEmpty(directory))
-                            Directory.CreateDirectory(directory);
+                    Directory.CreateDirectory(destinationPath);
+                }
+                else
+                {
+                    var directory = Path.GetDirectoryName(destinationPath);
+                    if (!string.IsNullOrEmpty(directory))
+                        Directory.CreateDirectory(directory);
 
-                        await ExtractEntryAsync(
-                                entry,
-                                destinationPath,
-                                extractionBudget,
-                                buffer,
-                                cancellationToken)
-                            .ConfigureAwait(false);
-                    }
+                    await ExtractEntryAsync(
+                            entry,
+                            destinationPath,
+                            extractionBudget,
+                            buffer,
+                            cancellationToken)
+                        .ConfigureAwait(false);
                 }
 
                 processedEntries++;
@@ -367,27 +358,17 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
     /// <summary>
     /// Tries to get ZIP download URL for a specific branch.
     /// </summary>
-    private bool TryGetZipUrlWithBranch(string repositoryUrl, string branchName, out string zipUrl)
+    private static bool TryGetZipUrlWithBranch(string repositoryUrl, string branchName, out string zipUrl)
     {
         zipUrl = string.Empty;
 
         if (string.IsNullOrWhiteSpace(repositoryUrl))
             return false;
 
-        // Normalize URL
-        var url = repositoryUrl.Trim();
-        if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-            url = url[..^4];
-
-        // Try to match GitHub URL patterns
-        var match = GitHubUrlPattern().Match(url);
-        if (!match.Success)
+        if (!TryGetGitHubRepository(repositoryUrl, out var owner, out var repository))
             return false;
 
-        var owner = match.Groups["owner"].Value;
-        var repo = match.Groups["repo"].Value;
-
-        zipUrl = $"https://github.com/{owner}/{repo}/archive/refs/heads/{branchName}.zip";
+		zipUrl = CreateZipUrl(owner, repository, branchName);
         return true;
     }
 
@@ -402,9 +383,8 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
 
     private static string ExtractRepositoryName(string url)
     {
-        var match = GitHubUrlPattern().Match(url);
-        if (match.Success)
-            return match.Groups["repo"].Value;
+		if (TryGetGitHubRepository(url, out _, out var repository))
+			return repository;
 
         // Fallback
         try
@@ -425,8 +405,185 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
         return "repository";
     }
 
-    [GeneratedRegex(@"^https?://(?:www\.)?github\.com/(?<owner>[^/]+)/(?<repo>[^/]+)/?", RegexOptions.IgnoreCase)]
-    private static partial Regex GitHubUrlPattern();
+	private async Task<string?> TryGetDefaultBranchAsync(
+		string owner,
+		string repository,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			var metadataUrl = $"https://api.github.com/repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repository)}";
+			using var response = await _httpClient.GetAsync(
+				metadataUrl,
+				HttpCompletionOption.ResponseHeadersRead,
+				cancellationToken).ConfigureAwait(false);
+			if (!response.IsSuccessStatusCode)
+				return null;
+
+			await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+			using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+			if (!document.RootElement.TryGetProperty("default_branch", out var branchElement))
+				return null;
+			var branch = branchElement.GetString();
+			return string.IsNullOrWhiteSpace(branch) ? null : branch;
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
+		}
+		catch (Exception exception) when (exception is HttpRequestException or JsonException or IOException)
+		{
+			return null;
+		}
+	}
+
+	private static bool TryGetGitHubRepository(
+		string repositoryUrl,
+		out string owner,
+		out string repository)
+	{
+		owner = string.Empty;
+		repository = string.Empty;
+		var normalized = RepositoryUrlUtility.Normalize(repositoryUrl);
+		if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
+		    uri.Scheme is not ("http" or "https") ||
+		    !uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) &&
+		    !uri.Host.Equals("www.github.com", StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+
+		var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+		if (segments.Length != 2)
+			return false;
+		owner = Uri.UnescapeDataString(segments[0]);
+		repository = Uri.UnescapeDataString(segments[1]);
+		if (repository.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+			repository = repository[..^4];
+		return owner.Length > 0 && repository.Length > 0;
+	}
+
+	internal static string CreateZipUrl(string owner, string repository, string branch) =>
+		$"https://github.com/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repository)}/" +
+		$"archive/refs/heads/{string.Join("/", branch.Split('/').Select(Uri.EscapeDataString))}.zip";
+
+	private static IReadOnlyList<ZipExtractionEntry> BuildExtractionPlan(
+		ZipArchive archive,
+		string targetDirectory)
+	{
+		var planned = new List<ZipExtractionEntry>(archive.Entries.Count);
+		var explicitEntries = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+		var explicitFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var requiredDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var rootFolder = archive.Entries.Count == 0
+			? null
+			: TryGetTopLevelFolder(archive.Entries[0].FullName);
+
+		foreach (var entry in archive.Entries)
+		{
+			var entryPath = entry.FullName;
+			if (!string.IsNullOrEmpty(rootFolder) && StartsWithFolderPrefix(entryPath, rootFolder))
+				entryPath = entryPath[(rootFolder.Length + 1)..];
+			if (string.IsNullOrEmpty(entryPath))
+				continue;
+
+			var isDirectory = IsDirectoryEntry(entry);
+			var canonicalPath = CreateCanonicalArchivePath(entryPath);
+			if (!explicitEntries.TryAdd(canonicalPath, isDirectory))
+				throw CreateArchiveCollisionException(entry.FullName);
+
+			var separator = canonicalPath.IndexOf('/');
+			while (separator >= 0)
+			{
+				var ancestor = canonicalPath[..separator];
+				if (explicitFiles.Contains(ancestor))
+					throw CreateArchiveCollisionException(entry.FullName);
+				requiredDirectories.Add(ancestor);
+				separator = canonicalPath.IndexOf('/', separator + 1);
+			}
+
+			if (!isDirectory)
+			{
+				if (requiredDirectories.Contains(canonicalPath))
+					throw CreateArchiveCollisionException(entry.FullName);
+				explicitFiles.Add(canonicalPath);
+			}
+
+			planned.Add(new ZipExtractionEntry(
+				entry,
+				ResolveSafeDestinationPath(targetDirectory, entryPath),
+				isDirectory));
+		}
+
+		return planned;
+	}
+
+	private static string CreateCanonicalArchivePath(string entryPath)
+	{
+		var segments = entryPath
+			.Replace('\\', '/')
+			.Split('/', StringSplitOptions.RemoveEmptyEntries);
+		if (segments.Length == 0)
+			throw new InvalidDataException($"ZIP entry has an invalid path: {entryPath}");
+
+		for (var index = 0; index < segments.Length; index++)
+		{
+			var normalized = segments[index].Normalize(NormalizationForm.FormC).TrimEnd(' ', '.');
+			if (normalized.Length == 0 || normalized is "." or "..")
+				throw new InvalidDataException($"ZIP entry has an invalid path: {entryPath}");
+			if (OperatingSystem.IsWindows() && IsWindowsReservedDeviceName(normalized.AsSpan()))
+				throw new InvalidDataException($"ZIP entry uses a reserved Windows device name: {entryPath}");
+			segments[index] = normalized;
+		}
+		return string.Join('/', segments);
+	}
+
+	internal static bool IsWindowsReservedDeviceName(ReadOnlySpan<char> component)
+	{
+		var dotIndex = component.IndexOf('.');
+		var baseName = dotIndex >= 0 ? component[..dotIndex] : component;
+		while (!baseName.IsEmpty && baseName[^1] == ' ')
+			baseName = baseName[..^1];
+
+		if (baseName.Equals("CON", StringComparison.OrdinalIgnoreCase) ||
+		    baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase) ||
+		    baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase) ||
+		    baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
+
+		return baseName.Length == 4 &&
+		       (baseName[..3].Equals("COM", StringComparison.OrdinalIgnoreCase) ||
+		        baseName[..3].Equals("LPT", StringComparison.OrdinalIgnoreCase)) &&
+		       baseName[3] is >= '1' and <= '9';
+	}
+
+	private static InvalidDataException CreateArchiveCollisionException(string entryName) =>
+		new($"ZIP entries resolve to the same file-system path: {entryName}");
+
+	private static string CreateExtractionStagingPath(string targetDirectory)
+	{
+		var target = Path.GetFullPath(targetDirectory);
+		var parent = Path.GetDirectoryName(target)
+			?? throw new InvalidDataException("The ZIP extraction target has no parent directory.");
+		return Path.Combine(parent, $".{Path.GetFileName(target)}.extract-{Guid.NewGuid():N}");
+	}
+
+	private static void PromoteExtractedDirectory(string stagingDirectory, string targetDirectory)
+	{
+		if (File.Exists(targetDirectory))
+			throw new IOException("The ZIP extraction target is occupied by a file.");
+		if (Directory.Exists(targetDirectory))
+		{
+			if (Directory.EnumerateFileSystemEntries(targetDirectory).Any())
+				throw new IOException("The ZIP extraction target directory is not empty.");
+			Directory.Delete(targetDirectory);
+		}
+
+		Directory.Move(stagingDirectory, targetDirectory);
+	}
 
     private static string? TryGetTopLevelFolder(string entryPath)
     {
@@ -493,7 +650,7 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
     private static FileStream OpenAsyncFileForWrite(string path)
         => new(
             path,
-            FileMode.Create,
+            FileMode.CreateNew,
             FileAccess.Write,
             FileShare.None,
             StreamBufferSize,
@@ -571,9 +728,6 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
         return segments;
     }
 
-    private static bool IsMissingOrEmptyDirectory(string path) =>
-        !Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any();
-
     private static void TryDeleteFile(string path)
     {
         try
@@ -600,6 +754,11 @@ public sealed partial class ZipDownloadService : IZipDownloadService, IDisposabl
         }
     }
 }
+
+internal sealed record ZipExtractionEntry(
+	ZipArchiveEntry Entry,
+	string DestinationPath,
+	bool IsDirectory);
 
 internal sealed record ZipResourceLimits
 {

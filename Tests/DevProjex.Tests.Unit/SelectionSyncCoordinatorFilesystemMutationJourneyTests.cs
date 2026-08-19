@@ -1,5 +1,6 @@
 using DevProjex.Application.Presentation;
 using DevProjex.Application.Models;
+using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Tests.Unit;
@@ -7,6 +8,99 @@ namespace DevProjex.Tests.Unit;
 [Collection("AvaloniaUI")]
 public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
 {
+	[AvaloniaFact]
+	public async Task Refresh_WhenEnumerationFails_PreservesPublishedSelectionAndStateCaches()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateFile("src/App.cs", "class App {}\n");
+		workspace.CreateFile("docs/readme.md", "# Readme\n");
+		var failEnumeration = false;
+		var notifications = 0;
+		var scanner = new FileSystemScanner((point, _) =>
+		{
+			if (failEnumeration && point == FileSystemScanEnumerationPoint.RootDirectories)
+				throw new IOException("Simulated refresh failure.");
+		});
+		var viewModel = CreateViewModel();
+		var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			ignoreRulesService,
+			() => workspace.Path,
+			scanner,
+			() => notifications++);
+
+		await coordinator.RefreshProjectSelectionAsync(workspace.Path, TestContext.Current.CancellationToken);
+		coordinator.HookOptionListeners(viewModel.Extensions);
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+		SetChecked(viewModel.Extensions, ".md", false);
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+		var extensionsBefore = viewModel.Extensions.Select(static item => (item.Name, item.IsChecked)).ToArray();
+		var ignoreBefore = viewModel.IgnoreOptions.Select(static item => (item.Id, item.IsChecked)).ToArray();
+		var rootsBefore = coordinator.GetProjectScanRoots().ToArray();
+		var extensionStatesBefore = coordinator.SnapshotExtensionOptionStatesForPersistence();
+
+		failEnumeration = true;
+		coordinator.InvalidateFileSystemCaches();
+		await coordinator.RefreshProjectSelectionAsync(workspace.Path, TestContext.Current.CancellationToken);
+
+		Assert.Equal(extensionsBefore, viewModel.Extensions.Select(static item => (item.Name, item.IsChecked)));
+		Assert.Equal(ignoreBefore, viewModel.IgnoreOptions.Select(static item => (item.Id, item.IsChecked)));
+		Assert.Equal(rootsBefore, coordinator.GetProjectScanRoots(), PathComparer.Default);
+		Assert.Equal(extensionStatesBefore, coordinator.SnapshotExtensionOptionStatesForPersistence());
+		Assert.Equal(1, notifications);
+
+		var store = new RecordingProfileStore();
+		using var secretSession = new SecretRedactionSession(new EmptySecretDetector());
+		var persistence = new ProjectProfilePersistenceCoordinator(
+			viewModel,
+			coordinator,
+			store,
+			secretSession);
+		await persistence.PersistIfNeededAsync(workspace.Path, TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, store.SaveAttempts);
+		Assert.NotNull(store.LastProfile);
+		Assert.Contains(".cs", store.LastProfile.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.True(store.LastProfile.ExtensionStates?[".cs"]);
+		Assert.False(store.LastProfile.ExtensionStates?[".md"]);
+	}
+
+	[AvaloniaFact]
+	public async Task InitialProfileScan_WhenEnumerationFails_RemainsIncompleteAndIsNotPersisted()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateFile("app.cs", "class App {}\n");
+		var scanner = new FileSystemScanner((point, _) =>
+		{
+			if (point == FileSystemScanEnumerationPoint.RootFiles)
+				throw new IOException("Simulated initial scan failure.");
+		});
+		var viewModel = CreateViewModel();
+		var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			ignoreRulesService,
+			() => workspace.Path,
+			scanner);
+		coordinator.ApplyProjectProfileSelections(
+			workspace.Path,
+			new ProjectSelectionProfile([], [".cs"], []));
+
+		await coordinator.RefreshProjectSelectionAsync(workspace.Path, TestContext.Current.CancellationToken);
+
+		Assert.False(coordinator.IsSelectionStateCompleteForPersistence);
+		var store = new RecordingProfileStore();
+		using var secretSession = new SecretRedactionSession(new EmptySecretDetector());
+		var persistence = new ProjectProfilePersistenceCoordinator(
+			viewModel,
+			coordinator,
+			store,
+			secretSession);
+		await persistence.PersistIfNeededAsync(workspace.Path, TestContext.Current.CancellationToken);
+		Assert.Equal(0, store.SaveAttempts);
+	}
+
     [AvaloniaFact]
     public async Task RepeatedF5MutationJourney_LongLivedIslandMatchesColdSnapshotAndFinalTreeAtEveryStep()
     {
@@ -15,7 +109,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         var currentPath = workspace.Path;
         var viewModel = CreateViewModel();
         var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
-        using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
+		using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
 
         await coordinator.RefreshProjectSelectionAsync(
             currentPath,
@@ -147,7 +241,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         var currentPath = workspace.Path;
         var viewModel = CreateViewModel();
         var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
-        using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
+		using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
         var profile = new ProjectSelectionProfile(
             SelectedRootFolders: [],
             SelectedExtensions: [".cs", ".deep"],
@@ -208,7 +302,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         var currentPath = workspace.Path;
         var viewModel = CreateViewModel();
         var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
-        using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
+		using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
         var profile = new ProjectSelectionProfile(
             SelectedRootFolders: [],
             SelectedExtensions: [],
@@ -456,11 +550,13 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
     private static SelectionSyncCoordinator CreateCoordinator(
         MainWindowViewModel viewModel,
         IgnoreRulesService ignoreRulesService,
-        Func<string?> currentPathProvider)
+        Func<string?> currentPathProvider,
+		FileSystemScanner? scanner = null,
+		Action? scanIncomplete = null)
     {
         return new SelectionSyncCoordinator(
             viewModel,
-            new ScanOptionsUseCase(new FileSystemScanner()),
+            new ScanOptionsUseCase(scanner ?? new FileSystemScanner()),
             new FilterOptionSelectionService(),
             ProjectLoadWorkflowRuntime.CreateIgnoreOptionsService(),
             (path, selectedIgnoreOptions, selectedRoots) =>
@@ -470,7 +566,8 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
                 ShowAdvancedCounts = true
             },
             _ => false,
-            currentPathProvider);
+            currentPathProvider,
+			scanIncomplete: scanIncomplete);
     }
 
     private static MainWindowViewModel CreateViewModel()
@@ -532,4 +629,45 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         var option = Assert.Single(options, candidate => candidate.Id == id);
         Assert.Equal(expectedChecked, option.IsChecked);
     }
+
+	private sealed class RecordingProfileStore : IProjectProfileStore
+	{
+		public int SaveAttempts { get; private set; }
+		public ProjectSelectionProfile? LastProfile { get; private set; }
+
+		public bool EnsureStorageExists() => true;
+		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+		{
+			profile = new ProjectSelectionProfile([], [], []);
+			return false;
+		}
+
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		{
+			SaveAttempts++;
+			LastProfile = profile;
+			return true;
+		}
+
+		public bool TrySaveProfile(
+			string localProjectPath,
+			ProjectSelectionProfile profile,
+			DateTimeOffset updatedUtc) =>
+			TrySaveProfile(localProjectPath, profile);
+
+		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
+			_ = TrySaveProfile(localProjectPath, profile);
+
+		public void ClearAllProfiles()
+		{
+		}
+	}
+
+	private sealed class EmptySecretDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+	}
 }

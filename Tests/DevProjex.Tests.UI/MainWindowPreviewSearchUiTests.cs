@@ -1,10 +1,7 @@
-using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using DevProjex.Avalonia.Controls;
-using DevProjex.Avalonia.Views;
 using DevProjex.Application.Services;
-using DevProjex.Kernel.Models;
 using System.Reflection;
 
 namespace DevProjex.Tests.UI;

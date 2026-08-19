@@ -16,7 +16,6 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		IgnoreCase: true,
 		NormalizeUnicode: true,
 		IsAuthoritative: false);
-	private static readonly string GitExecutable = OperatingSystem.IsWindows() ? "git.exe" : "git";
 	private readonly object _cacheSync = new();
 	private readonly Dictionary<string, GitPathComparisonSemantics> _repositoryCache =
 		new(PathComparer.Default);
@@ -204,23 +203,13 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		string repositoryRoot,
 		IReadOnlyList<string> arguments)
 	{
-		var startInfo = new ProcessStartInfo
-		{
-			FileName = GitExecutable,
-			WorkingDirectory = repositoryRoot,
-			UseShellExecute = false,
-			CreateNoWindow = true,
-			RedirectStandardInput = true,
-			RedirectStandardOutput = true,
-			RedirectStandardError = true
-		};
-		GitProcessEnvironmentSanitizer.RemoveRepositoryOverrides(startInfo);
-		startInfo.ArgumentList.Add("-C");
-		startInfo.ArgumentList.Add(repositoryRoot);
-		foreach (var argument in arguments)
-			startInfo.ArgumentList.Add(argument);
+		var allArguments = new string[arguments.Count + 2];
+		allArguments[0] = "-C";
+		allArguments[1] = repositoryRoot;
+		for (var index = 0; index < arguments.Count; index++)
+			allArguments[index + 2] = arguments[index];
+		var startInfo = GitProcessStartInfoFactory.Create(repositoryRoot, allArguments);
 		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
 		return startInfo;
 	}
 

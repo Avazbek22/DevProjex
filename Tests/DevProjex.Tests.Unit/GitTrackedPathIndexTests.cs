@@ -4,6 +4,60 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class GitTrackedPathIndexTests
 {
+	[Fact]
+	public async Task NullDelimitedReader_WhenRetainedBudgetIsExceeded_AbortsBeforeMaterializingRemainder()
+	{
+		var payload = Encoding.UTF8.GetBytes("first.cs\0second-long-path.cs\0third.cs\0");
+		await using var stream = new MemoryStream(payload);
+		using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: false);
+		var abortCount = 0;
+
+		var paths = await GitTrackedPathIndexCache.ReadNullDelimitedPathsAsync(
+			reader,
+			TestContext.Current.CancellationToken,
+			() => abortCount++,
+			maximumRetainedBytes: 64 + IntPtr.Size + 32 + ("first.cs".Length * sizeof(char)),
+			maximumPathLength: 32768);
+
+		Assert.Null(paths);
+		Assert.Equal(1, abortCount);
+	}
+
+	[Fact]
+	public async Task NullDelimitedReader_WhenWithinBudget_ReturnsEveryPathWithoutAborting()
+	{
+		var payload = Encoding.UTF8.GetBytes("src/app.cs\0docs/readme.md\0");
+		await using var stream = new MemoryStream(payload);
+		using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: false);
+		var abortCount = 0;
+
+		var paths = await GitTrackedPathIndexCache.ReadNullDelimitedPathsAsync(
+			reader,
+			TestContext.Current.CancellationToken,
+			() => abortCount++);
+
+		Assert.Equal(["src/app.cs", "docs/readme.md"], paths);
+		Assert.Equal(0, abortCount);
+	}
+
+	[Fact]
+	public async Task NullDelimitedReader_WhenSinglePathExceedsLimit_AbortsWithoutReturningPartialIndex()
+	{
+		var payload = Encoding.UTF8.GetBytes("path-that-is-too-long\0");
+		await using var stream = new MemoryStream(payload);
+		using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: false);
+		var processKilled = false;
+
+		var paths = await GitTrackedPathIndexCache.ReadNullDelimitedPathsAsync(
+			reader,
+			TestContext.Current.CancellationToken,
+			() => processKilled = true,
+			maximumPathLength: 8);
+
+		Assert.Null(paths);
+		Assert.True(processKilled);
+	}
+
 	[Theory]
 	[InlineData("src/App.cs", true, false, true)]
 	[InlineData("src", false, true, true)]

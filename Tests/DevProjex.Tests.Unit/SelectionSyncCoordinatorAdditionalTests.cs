@@ -2,7 +2,6 @@ using DevProjex.Application.Models;
 using DevProjex.Application.Context;
 using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Collections;
-using System.Collections.Specialized;
 
 namespace DevProjex.Tests.Unit;
 

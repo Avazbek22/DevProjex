@@ -33,8 +33,12 @@ public interface IGrammarLibraryLocator
 /// signature, which is what Smart App Control and S mode check, so packaged builds ship grammars as
 /// ordinary package content instead - see <see cref="ContentGrammarLibraryLocator"/>.
 /// </summary>
-public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
+public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDisposable
 {
+	private const string LeaseFileName = ".devprojex.lease";
+	private const int UnixLockShared = 1;
+	private const int UnixLockExclusive = 2;
+	private const int UnixLockNonBlocking = 4;
 	// Matches what the .NET single-file extractor applies to the native libraries it writes.
 	private const UnixFileMode UnixExecutableMode =
 		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
@@ -52,8 +56,9 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 
 	private readonly Assembly _assembly;
 	private readonly string _resourcePrefix;
-	private readonly HashSet<string> _inUse = new(PathComparer);
+	private readonly Dictionary<string, FileStream> _leases = new(PathComparer);
 	private readonly object _inUseSync = new();
+	private bool _disposed;
 
 	public EmbeddedGrammarLibraryLocator(Assembly assembly, string resourcePrefix, string rootDirectory)
 	{
@@ -105,7 +110,10 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 			// Nothing is ever patched in place either - macOS library validation requires the bytes to
 			// stay bit-identical to the signed original.
 			if (HasExpectedHash(target, expected))
+			{
+				MarkInUse(Path.TrimEndingDirectorySeparator(RootDirectory));
 				return target;
+			}
 
 			MarkInUse(Path.TrimEndingDirectorySeparator(RootDirectory));
 			return Materialize(source, RootDirectory, fileName, expected);
@@ -186,13 +194,34 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 	private void MarkInUse(string directory)
 	{
 		lock (_inUseSync)
-			_inUse.Add(directory);
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (_leases.ContainsKey(directory))
+				return;
+
+			Directory.CreateDirectory(directory);
+			var leasePath = Path.Combine(directory, LeaseFileName);
+			// Windows uses conflicting file access; Unix pairs this handle with a shared flock below.
+			// Neither path relies on an open file preventing unlink.
+			var lease = new FileStream(
+				leasePath,
+				FileMode.OpenOrCreate,
+				FileAccess.Read,
+				FileShare.Read);
+			var lockResult = TryAcquireUnixLock(lease, UnixLockShared);
+			if (lockResult == UnixLockResult.Denied)
+			{
+				lease.Dispose();
+				throw new IOException($"Grammar directory '{directory}' is being cleaned up.");
+			}
+			_leases.Add(directory, lease);
+		}
 	}
 
 	private bool IsInUse(string directory)
 	{
 		lock (_inUseSync)
-			return _inUse.Contains(directory);
+			return _leases.ContainsKey(directory);
 	}
 
 	private static string Materialize(
@@ -260,9 +289,12 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 
 	private static void TryRemove(string directory, List<string> removed)
 	{
+		List<FileStream>? cleanupLeases = null;
 		try
 		{
 			if (Directory.GetLastWriteTimeUtc(directory) > DateTime.UtcNow - AbandonedAfter)
+				return;
+			if (!TryAcquireCleanupLeases(directory, out cleanupLeases))
 				return;
 			Directory.Delete(directory, recursive: true);
 			removed.Add(directory);
@@ -272,12 +304,103 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator
 			// A grammar still mapped by another process cannot be deleted on Windows. Leaving it
 			// costs disk; deleting it out from under a running instance would cost correctness.
 		}
+		finally
+		{
+			if (cleanupLeases is not null)
+			{
+				foreach (var lease in cleanupLeases)
+					lease.Dispose();
+			}
+		}
+	}
+
+	private static bool TryAcquireCleanupLeases(string directory, out List<FileStream> leases)
+	{
+		leases = [];
+		try
+		{
+			var leasePaths = Directory
+				.EnumerateFiles(directory, LeaseFileName, SearchOption.AllDirectories)
+				.Append(Path.Combine(directory, LeaseFileName))
+				.Distinct(PathComparer)
+				.OrderBy(static path => path, PathComparer)
+				.ToArray();
+			foreach (var leasePath in leasePaths)
+			{
+				var lease = new FileStream(
+					leasePath,
+					FileMode.OpenOrCreate,
+					FileAccess.ReadWrite,
+					FileShare.Delete);
+				var lockResult = TryAcquireUnixLock(lease, UnixLockExclusive);
+				if (lockResult != UnixLockResult.Acquired)
+				{
+					lease.Dispose();
+					throw new IOException($"Grammar directory '{directory}' is still leased.");
+				}
+				leases.Add(lease);
+			}
+			return true;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			foreach (var lease in leases)
+				lease.Dispose();
+			leases.Clear();
+			return false;
+		}
+	}
+
+	private static UnixLockResult TryAcquireUnixLock(FileStream stream, int mode)
+	{
+		if (OperatingSystem.IsWindows())
+			return UnixLockResult.Acquired;
+
+		try
+		{
+			var descriptor = stream.SafeFileHandle.DangerousGetHandle().ToInt32();
+			return Flock(descriptor, mode | UnixLockNonBlocking) == 0
+				? UnixLockResult.Acquired
+				: UnixLockResult.Denied;
+		}
+		catch (Exception exception) when (exception is
+			DllNotFoundException or
+			EntryPointNotFoundException or
+			PlatformNotSupportedException)
+		{
+			// An unknown Unix cannot safely prove exclusivity. Active use may continue, but cleanup
+			// must preserve the directory instead of risking removal under a loaded native library.
+			return UnixLockResult.Unavailable;
+		}
+	}
+
+	[DllImport("libc", EntryPoint = "flock", SetLastError = true)]
+	private static extern int Flock(int fileDescriptor, int operation);
+
+	public void Dispose()
+	{
+		lock (_inUseSync)
+		{
+			if (_disposed)
+				return;
+			_disposed = true;
+			foreach (var lease in _leases.Values)
+				lease.Dispose();
+			_leases.Clear();
+		}
 	}
 
 	private Stream OpenEmbedded(string fileName) =>
 		_assembly.GetManifestResourceStream($"{_resourcePrefix}{fileName}")
 			?? throw new InvalidOperationException(
 				$"Embedded grammar '{fileName}' is missing. The publish filter and the embed list disagree.");
+
+	private enum UnixLockResult
+	{
+		Acquired,
+		Denied,
+		Unavailable
+	}
 }
 
 /// <summary>

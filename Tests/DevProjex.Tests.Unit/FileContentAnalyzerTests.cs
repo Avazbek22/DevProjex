@@ -1,3 +1,5 @@
+using DevProjex.Application.Compression;
+
 namespace DevProjex.Tests.Unit;
 
 /// <summary>
@@ -23,6 +25,43 @@ public sealed class FileContentAnalyzerTests
 
 		Assert.Equal(FileContentClassification.Unreadable, classification);
 		Assert.NotEqual(FileContentClassification.Binary, classification);
+	}
+
+	[Theory]
+	[InlineData(ProbeOperation.CompleteTextBuffer)]
+	[InlineData(ProbeOperation.StreamingMetrics)]
+	[InlineData(ProbeOperation.CompleteSnapshot)]
+	[InlineData(ProbeOperation.ReadFact)]
+	public async Task UnexpectedReadFailurePropagates(ProbeOperation operation)
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("unexpected.txt", "ordinary text");
+		var analyzer = new FileContentAnalyzer(
+			static (_, _, _, _) => throw new InvalidOperationException("unexpected failure"));
+
+		var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+			() => ClassifyAsync(analyzer, path, operation));
+
+		Assert.Equal("unexpected failure", exception.Message);
+	}
+
+	[Fact]
+	public async Task PrewarmRead_UnexpectedFailurePropagates()
+	{
+		var analyzer = new FileContentAnalyzer(
+			static (_, _, _, _) => throw new InvalidOperationException("unexpected prewarm failure"));
+		using var byteBudget = new WeightedByteBudget(1024);
+		using var decodeGate = new SemaphoreSlim(1, 1);
+
+		var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+			await ((IPrewarmFileContentAnalyzer)analyzer).ReadFactWithBudgetAsync(
+				"ignored.txt",
+				maximumReadBytes: 512,
+				byteBudget,
+				decodeGate,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("unexpected prewarm failure", exception.Message);
 	}
 
 	private static async Task<FileContentClassification> ClassifyAsync(

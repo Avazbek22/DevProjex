@@ -45,6 +45,13 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
         if (host.TryHandleTreeRootAccessDenied(treeInput, treeBuild.Tree))
             return;
 
+		if (treeBuild.Tree.HadScanFailure)
+		{
+			if (!selectionSnapshot.HadScanFailure)
+				host.ReportIncompleteTreeScan();
+			treeBuild = treeBuild with { Inventory = null };
+		}
+
         TreeNodeViewModel treeRoot;
         using (PerformanceMetrics.Measure("ProjectLoadSnapshotPipeline.BuildTreeViewModel"))
         {

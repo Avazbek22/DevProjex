@@ -1,5 +1,4 @@
 using DevProjex.Application.Selection;
-using DevProjex.Application.Secrets;
 
 namespace DevProjex.Application.Services;
 

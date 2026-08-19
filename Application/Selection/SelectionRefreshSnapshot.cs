@@ -16,6 +16,7 @@ public sealed record SelectionRefreshSnapshot(
     IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreOptionStateCache,
     bool RootAccessDenied,
     bool HadAccessDenied,
+    bool HadScanFailure = false,
     ProjectTreeInventorySnapshot? TreeInventory = null,
     IReadOnlyList<SelectionOption>? VisibleExtensionOptions = null,
     GitWorkspaceEvidence GitEvidence = default,

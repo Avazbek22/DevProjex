@@ -69,6 +69,8 @@ public sealed class SelectionOptionStateCache
         }
     }
 
+    public void MarkIncomplete() => HasFullState = false;
+
     public HashSet<string> SnapshotSelectedNames() =>
         new(SelectedNames, _comparer);
 

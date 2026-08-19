@@ -1,5 +1,3 @@
-using DevProjex.Kernel.Models;
-
 namespace DevProjex.Application.Context;
 
 public static class ProjectSelectionMarkedSecretsResolver

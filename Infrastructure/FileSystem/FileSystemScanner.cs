@@ -7,6 +7,23 @@ namespace DevProjex.Infrastructure.FileSystem;
 
 public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemScannerAdvanced, IFileSystemScannerEffectiveEmptyFolderCounter, IFileSystemScannerEffectiveIgnoreCountsProvider, IFileSystemScannerIgnoreSectionSnapshotProvider, IFileSystemScannerExtensionPolicySnapshotProvider, IFileSystemScannerRootSelectionSnapshotProvider, IFileSystemScannerProjectWorkspaceSnapshotProvider, IFileSystemScannerProjectWorkspaceScanner
 {
+	private readonly Action<FileSystemScanEnumerationPoint, string>? _beforeEnumeration;
+
+	public FileSystemScanner()
+	{
+	}
+
+	internal FileSystemScanner(Action<FileSystemScanEnumerationPoint, string> beforeEnumeration)
+	{
+		_beforeEnumeration = beforeEnumeration ?? throw new ArgumentNullException(nameof(beforeEnumeration));
+	}
+
+	private void BeforeEnumeration(FileSystemScanEnumerationPoint point, string path) =>
+		_beforeEnumeration?.Invoke(point, path);
+
+	internal static bool IsExpectedFileSystemScanFailure(Exception exception) =>
+		exception is IOException or UnauthorizedAccessException or SecurityException;
+
 	public bool CanReadRoot(string rootPath)
 	{
 		try
@@ -38,7 +55,11 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			collectIgnoreOptionCounts: false,
 			includeRootDirectoryInCounts: false,
 			cancellationToken);
-		return new ScanResult<HashSet<string>>(scan.Value.Extensions, scan.RootAccessDenied, scan.HadAccessDenied);
+		return new ScanResult<HashSet<string>>(
+			scan.Value.Extensions,
+			scan.RootAccessDenied,
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	public ScanResult<ExtensionsScanData> GetExtensionsWithIgnoreOptionCounts(
@@ -57,7 +78,11 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	public ScanResult<HashSet<string>> GetRootFileExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
 	{
 		var scan = ScanRootFilesCore(rootPath, rules, collectIgnoreOptionCounts: false, cancellationToken);
-		return new ScanResult<HashSet<string>>(scan.Value.Extensions, scan.RootAccessDenied, scan.HadAccessDenied);
+		return new ScanResult<HashSet<string>>(
+			scan.Value.Extensions,
+			scan.RootAccessDenied,
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	public ScanResult<ExtensionsScanData> GetRootFileExtensionsWithIgnoreOptionCounts(
@@ -180,7 +205,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		return new ScanResult<IgnoreSectionScanData>(
 			scan.Value.IgnoreSection,
 			scan.RootAccessDenied,
-			scan.HadAccessDenied);
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	public ScanResult<ProjectWorkspaceScanSnapshot> GetProjectWorkspaceSnapshotForRootSelection(
@@ -221,7 +247,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var includeDirectoryToggleProbeRoots = request.IncludeDirectoryToggleProbeRoots;
 		var includeControllerImpactProbeRoots = request.IncludeControllerImpactProbeRoots;
 		var captureTreeInventory = request.CaptureTreeInventory;
-		var captureRootScanBreakdown = request.CaptureRootScanBreakdown;
 		var gitIgnoreLoadSession = CreateGitIgnoreLoadSession(extensionDiscoveryRules, effectiveRules);
 
 		var scanPlan = BuildRootSelectionScanPlan(
@@ -241,6 +266,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var gitEvidence = GitWorkspaceEvidence.Empty;
 		var rootAccessDenied = scanPlan.RootAccessDenied ? 1 : 0;
 		var hadAccessDenied = scanPlan.HadAccessDenied ? 1 : 0;
+		var hadScanFailure = scanPlan.HadScanFailure ? 1 : 0;
 		var mergeLock = new object();
 		var rootFileInventoryEntries = captureTreeInventory
 			? new List<ProjectTreeInventoryEntry>()
@@ -268,38 +294,22 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			Interlocked.Exchange(ref rootAccessDenied, 1);
 		if (rootFileSnapshot.HadAccessDenied)
 			Interlocked.Exchange(ref hadAccessDenied, 1);
+		if (rootFileSnapshot.HadScanFailure)
+			Interlocked.Exchange(ref hadScanFailure, 1);
 		var rootFilePolicyUnavailable = rootFileSnapshot.HadAccessDenied;
+		if (rootFilePolicyUnavailable)
+			Interlocked.Exchange(ref hadScanFailure, 1);
 
 		var subtreeInventories = captureTreeInventory
 			? new List<ProjectTreeInventorySnapshot>()
 			: null;
-		var rootScanSnapshots = captureRootScanBreakdown
-			? new Dictionary<string, ProjectWorkspaceRootScanSnapshot>(scanPlan.SelectedRoots.Count, PathComparer.Default)
-			: null;
-		var projectGitIgnoreContext = captureRootScanBreakdown
-			? effectiveRules.CreateGitIgnoreScanContext(rootPath)
-			: IgnoreRules.GitIgnoreScanContext.Disabled(effectiveRules);
-		var projectGitIgnoreCandidateContext = captureRootScanBreakdown
-			? effectiveRules.CreateGitIgnoreCandidateScanContext(rootPath)
-			: IgnoreRules.GitIgnoreScanContext.Disabled(effectiveRules);
-		if (captureRootScanBreakdown && effectiveRules.IsGitIgnoreTraversalEnabled)
-		{
-			(projectGitIgnoreContext, projectGitIgnoreCandidateContext, _, _) =
-				EnterNearestGitTrackedPathIndex(
-					rootPath,
-					projectGitIgnoreContext,
-					projectGitIgnoreCandidateContext,
-					cancellationToken,
-					loadSession: gitIgnoreLoadSession);
-		}
-
 		if (!rootFilePolicyUnavailable && scanPlan.SelectedRoots.Count > 0)
 		{
 			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
 			Parallel.ForEach(
 				scanPlan.SelectedRoots,
 				parallelOptions,
-				() => new ProjectWorkspaceScanLocalState(captureTreeInventory, captureRootScanBreakdown),
+				() => new ProjectWorkspaceScanLocalState(captureTreeInventory),
 				(folder, _, localState) =>
 				{
 					parallelOptions.CancellationToken.ThrowIfCancellationRequested();
@@ -329,42 +339,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					{
 						localState.TreeInventories.Add(inventoryCapture.Inventory);
 					}
-					if (localState.RootSnapshots is not null)
-					{
-						var rootFacts = AnalyzeDirectory(
-							folder.FullPath,
-							folder.RelativePath,
-							folder.Name,
-							folder.IsHidden,
-							effectiveRules,
-							projectGitIgnoreContext,
-							projectGitIgnoreCandidateContext);
-						var directoryToggleProbeCounts = includeDirectoryToggleProbeRoots
-							? CountRootDirectoryToggleCandidate(
-								rootFacts,
-								effectiveRules)
-							: IgnoreOptionCounts.Empty;
-						var controllerImpactProbeCounts = includeControllerImpactProbeRoots
-							? CountRootDirectoryControllerImpactCandidate(
-								rootFacts,
-								effectiveRules,
-								effectiveExtensionPolicy,
-								parallelOptions.CancellationToken)
-							: IgnoreControllerImpactCounts.Empty;
-						localState.RootSnapshots.Add(new KeyValuePair<string, ProjectWorkspaceRootScanSnapshot>(
-							folder.Name,
-							new ProjectWorkspaceRootScanSnapshot(
-								snapshot.Value,
-								directoryToggleProbeCounts,
-								controllerImpactProbeCounts,
-								snapshot.RootAccessDenied,
-								snapshot.HadAccessDenied)));
-					}
-
 					if (snapshot.RootAccessDenied)
 						Interlocked.Exchange(ref rootAccessDenied, 1);
 					if (snapshot.HadAccessDenied)
 						Interlocked.Exchange(ref hadAccessDenied, 1);
+					if (snapshot.HadScanFailure)
+						Interlocked.Exchange(ref hadScanFailure, 1);
 
 					return localState;
 				},
@@ -389,17 +369,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						{
 							subtreeInventories.AddRange(localState.TreeInventories);
 						}
-						if (rootScanSnapshots is not null &&
-						    localState.RootSnapshots is not null)
-						{
-							foreach (var pair in localState.RootSnapshots)
-								rootScanSnapshots[pair.Key] = pair.Value;
-						}
 					}
 				});
 		}
 
-		var unselectedDirectoryToggleProbeCounts = IgnoreOptionCounts.Empty;
 		if (includeDirectoryToggleProbeRoots && scanPlan.DirectoryToggleCandidates.Count > 0)
 		{
 			// Keep initial project-load inventory focused on the currently selected roots.
@@ -413,14 +386,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				effectiveRules,
 				cancellationToken);
 			effectiveCounts = effectiveCounts.Add(rootCandidateCounts.Value);
-			unselectedDirectoryToggleProbeCounts = rootCandidateCounts.Value;
 			if (rootCandidateCounts.RootAccessDenied)
 				Interlocked.Exchange(ref rootAccessDenied, 1);
 			if (rootCandidateCounts.HadAccessDenied)
 				Interlocked.Exchange(ref hadAccessDenied, 1);
+			if (rootCandidateCounts.HadScanFailure)
+				Interlocked.Exchange(ref hadScanFailure, 1);
 		}
 
-		var unselectedControllerImpactProbeCounts = IgnoreControllerImpactCounts.Empty;
 		if (scanPlan.ControllerImpactCandidates.Count > 0)
 		{
 			var rootControllerImpactCounts = CountRootDirectoryControllerImpactCandidates(
@@ -429,11 +402,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				effectiveExtensionPolicy,
 				cancellationToken);
 			controllerImpactCounts = controllerImpactCounts.Add(rootControllerImpactCounts.Value);
-			unselectedControllerImpactProbeCounts = rootControllerImpactCounts.Value;
 			if (rootControllerImpactCounts.RootAccessDenied)
 				Interlocked.Exchange(ref rootAccessDenied, 1);
 			if (rootControllerImpactCounts.HadAccessDenied)
 				Interlocked.Exchange(ref hadAccessDenied, 1);
+			if (rootControllerImpactCounts.HadScanFailure)
+				Interlocked.Exchange(ref hadScanFailure, 1);
 		}
 
 		var ignoreSection = new IgnoreSectionScanData(
@@ -450,6 +424,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				subtreeInventories!,
 				rootAccessDenied == 1,
 				hadAccessDenied == 1,
+				hadScanFailure == 1,
 				rootFileGitIgnoreMatchers!,
 				TryLoadRootTrackedPathIndex(
 					rootPath,
@@ -457,23 +432,11 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					cancellationToken,
 					gitIgnoreLoadSession))
 			: null;
-		var breakdown = captureRootScanBreakdown
-			? new ProjectWorkspaceScanBreakdown(
-				rootFileSnapshot.Value,
-				rootScanSnapshots!,
-				unselectedDirectoryToggleProbeCounts,
-				unselectedControllerImpactProbeCounts,
-				includeDirectoryToggleProbeRoots,
-				includeControllerImpactProbeRoots,
-				scanPlan.RootAccessDenied,
-				scanPlan.HadAccessDenied,
-				rootFileSnapshot.RootAccessDenied,
-				rootFileSnapshot.HadAccessDenied)
-			: null;
 		return new ScanResult<ProjectWorkspaceScanSnapshot>(
-			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory, breakdown),
+			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory),
 			rootAccessDenied == 1,
-			hadAccessDenied == 1);
+			hadAccessDenied == 1,
+			hadScanFailure == 1);
 	}
 
 	private static void ValidateProjectWorkspaceScanRuleContract(
@@ -539,6 +502,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		try
 		{
+			BeforeEnumeration(FileSystemScanEnumerationPoint.RootDirectories, rootPath);
 			if (useGitIgnore)
 			{
 				(gitIgnoreContext, _, _, var ancestorLoadStatus) = EnterNearestGitTrackedPathIndex(
@@ -581,31 +545,17 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		{
 			return new ScanResult<List<string>>(names, true, true);
 		}
-		catch
+		catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 		{
-			return new ScanResult<List<string>>(names, false, false);
+			return new ScanResult<List<string>>(
+				names,
+				RootAccessDenied: false,
+				HadAccessDenied: false,
+				HadScanFailure: true);
 		}
 
 		names.Sort(StringComparer.OrdinalIgnoreCase);
 		return new ScanResult<List<string>>(names, false, false);
-	}
-
-	/// <summary>
-	/// Optimized version that avoids DirectoryInfo allocation when possible.
-	/// Only creates DirectoryInfo when checking Hidden attribute.
-	/// </summary>
-	private static bool ShouldSkipDirectoryByName(
-		string name,
-		string fullPath,
-		IgnoreRules rules,
-		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
-	{
-		return ShouldSkipDirectoryByName(
-			name,
-			fullPath,
-			HasHiddenAttribute(fullPath),
-			rules,
-			gitIgnoreEvaluation);
 	}
 
 	/// <summary>
@@ -622,27 +572,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		return IgnoreDecisionEngine
 			.EvaluateDirectory(fullPath, name, isHidden, rules, gitIgnoreEvaluation)
 			.IsIgnored;
-	}
-
-	/// <summary>
-	/// Optimized version that avoids FileInfo allocation when possible.
-	/// Only checks attributes when necessary.
-	/// </summary>
-	private static bool ShouldSkipFileByName(
-		string name,
-		string fullPath,
-		IgnoreRules rules,
-		bool shouldApplySmartIgnore,
-		in IgnoreRules.GitIgnoreEvaluation gitIgnoreEvaluation)
-	{
-		return ShouldSkipFileByName(
-			name,
-			fullPath,
-			HasHiddenAttribute(fullPath),
-			GetFileLength(fullPath),
-			rules,
-			shouldApplySmartIgnore,
-			gitIgnoreEvaluation);
 	}
 
 	/// <summary>
@@ -674,24 +603,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		string fullPath,
 		string relativePath,
 		string name,
-		IgnoreRules rules,
-		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
-		IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
-	{
-		return AnalyzeDirectory(
-			fullPath,
-			relativePath,
-			name,
-			HasHiddenAttribute(fullPath),
-			rules,
-			gitIgnoreContext,
-			gitIgnoreCandidateContext);
-	}
-
-	private static DirectoryScanFacts AnalyzeDirectory(
-		string fullPath,
-		string relativePath,
-		string name,
 		bool isHidden,
 		IgnoreRules rules,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
@@ -717,29 +628,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				: rules.IsSmartIgnoredDirectoryCandidate(fullPath, name),
 			GitIgnoreEvaluation: gitIgnoreEvaluation,
 			GitIgnoreCandidateEvaluation: gitIgnoreCandidateEvaluation);
-	}
-
-	private static FileScanFacts AnalyzeFile(
-		string fullPath,
-		string relativePath,
-		string name,
-		bool shouldApplySmartIgnoreForFiles,
-		bool shouldApplySmartIgnoreCandidateForFiles,
-		IgnoreRules rules,
-		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
-		IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
-	{
-		return AnalyzeFile(
-			fullPath,
-			relativePath,
-			name,
-			HasHiddenAttribute(fullPath),
-			GetFileLength(fullPath),
-			shouldApplySmartIgnoreForFiles,
-			shouldApplySmartIgnoreCandidateForFiles,
-			rules,
-			gitIgnoreContext,
-			gitIgnoreCandidateContext);
 	}
 
 	private static FileScanFacts AnalyzeFile(
@@ -816,7 +704,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules rules,
 		IExtensionInclusionPolicy? extensionPolicy,
 		CancellationToken cancellationToken,
-		bool requireVisibleContentWhenEmptyFoldersIgnored = true)
+		bool requireVisibleContentWhenEmptyFoldersIgnored = true,
+		Action? scanFailure = null)
 	{
 		// Controller ownership is evaluated before general dot/hidden/empty rules.
 		// Otherwise overlapping candidates oscillate between controllers and lower-priority
@@ -840,16 +729,19 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		// Keep those concepts separate: controller impact answers "would this controller
 		// remove a visible choice or visible content?", not "does this folder have a raw
 		// suspicious name?".
-		if (requireVisibleContentWhenEmptyFoldersIgnored &&
-		    rules.IgnoreEmptyFolders &&
-		    !HasVisibleContentForControllerImpactCandidate(
-			    facts.FullPath,
-			    facts.RelativePath,
-			    rules,
-			    extensionPolicy,
-			    cancellationToken))
+		if (requireVisibleContentWhenEmptyFoldersIgnored && rules.IgnoreEmptyFolders)
 		{
-			return IgnoreControllerImpactCounts.Empty;
+			var hasVisibleContent = HasVisibleContentForControllerImpactCandidate(
+				facts.FullPath,
+				facts.RelativePath,
+				rules,
+				extensionPolicy,
+				cancellationToken,
+				out var hadScanFailure);
+			if (hadScanFailure)
+				scanFailure?.Invoke();
+			if (!hasVisibleContent)
+				return IgnoreControllerImpactCounts.Empty;
 		}
 
 		return new IgnoreControllerImpactCounts(
@@ -862,8 +754,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		string rootRelativePath,
 		IgnoreRules rules,
 		IExtensionInclusionPolicy? extensionPolicy,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		out bool hadScanFailure)
 	{
+		hadScanFailure = false;
 		var pending = new Stack<(string Path, string RelativePath)>();
 		pending.Push((rootPath, rootRelativePath));
 
@@ -906,9 +800,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				// An unreadable directory is still visible to the user as an access-denied node.
 				return true;
 			}
-			catch
+			catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 			{
-				// Best-effort impact probing must not destabilize project loading.
+				hadScanFailure = true;
+				return true;
 			}
 		}
 
@@ -1163,7 +1058,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		// Selected root folders must obey the same directory-level rules as the tree itself.
 		// Otherwise a stale root selection (for example a dot-folder discovered before the
 		// dynamic DotFolders toggle appeared) would still leak its subtree into counts.
-		if (ShouldSkipDirectoryByName(rootName, rootPath, HasHiddenAttribute(rootPath), rules, rootGitIgnore))
+		if (!TryReadHiddenAttribute(rootPath, out var rootIsHidden, out var rootAttributeAccessDenied))
+		{
+			return new ScanResult<ExtensionsScanData>(
+				new ExtensionsScanData(uniqueExtensions, IgnoreOptionCounts.Empty),
+				RootAccessDenied: rootAttributeAccessDenied,
+				HadAccessDenied: rootAttributeAccessDenied,
+				HadScanFailure: !rootAttributeAccessDenied);
+		}
+
+		if (ShouldSkipDirectoryByName(rootName, rootPath, rootIsHidden, rules, rootGitIgnore))
 		{
 			return new ScanResult<ExtensionsScanData>(
 				new ExtensionsScanData(uniqueExtensions, IgnoreOptionCounts.Empty),
@@ -1175,6 +1079,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var directories = new List<DirectoryScanNode>(capacity: 256);
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
+		var hadScanFailure = 0;
 		var directoryCounts = default(MutableIgnoreOptionCounts);
 		var gitIgnoreImpactCount = 0;
 
@@ -1212,12 +1117,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			if (collectIgnoreOptionCounts && isRootDirectory && includeRootDirectoryInCounts)
 			{
 				AccumulateDirectoryIgnoreOptionCounts(
-					new FileSystemDirectoryEntry(Path.GetFileName(dir), dir, relativePath, HasHiddenAttribute(dir)),
+					new FileSystemDirectoryEntry(Path.GetFileName(dir), dir, relativePath, rootIsHidden),
 					ref directoryCounts);
 			}
 
 			try
 			{
+				BeforeEnumeration(FileSystemScanEnumerationPoint.DirectoryDiscovery, dir);
 				var directoryBatch = FileSystemEntryEnumerator.ReadDirectoriesAndGitIgnore(
 					dir,
 					relativePath,
@@ -1299,7 +1205,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				if (isRootDirectory) Interlocked.Exchange(ref rootAccessDenied, 1);
 				continue;
 			}
-			catch
+			catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 			{
 				directories.Add(new DirectoryScanNode(
 					dir,
@@ -1308,6 +1214,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					isAccessDenied: false,
 					directoryGitIgnoreContext,
 					directoryGitIgnoreCandidateContext));
+				Interlocked.Exchange(ref hadScanFailure, 1);
 				continue;
 			}
 		}
@@ -1344,6 +1251,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					var hasVisibleFiles = false;
 					try
 					{
+						BeforeEnumeration(FileSystemScanEnumerationPoint.DirectoryFiles, dir);
 						foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(dir, relativePath))
 						{
 							parallelOptions.CancellationToken.ThrowIfCancellationRequested();
@@ -1385,8 +1293,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						isAccessDeniedByDirectory[index] = true;
 						return localState;
 					}
-					catch
+					catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 					{
+						Interlocked.Exchange(ref hadScanFailure, 1);
 						return localState;
 					}
 
@@ -1453,7 +1362,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					counts,
 					new IgnoreControllerImpactCounts(GitIgnore: gitIgnoreImpactCount)),
 				rootAccessDenied == 1,
-				hadAccessDenied == 1);
+				hadAccessDenied == 1,
+				hadScanFailure == 1);
 		}
 		finally
 		{
@@ -1527,6 +1437,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 		try
 		{
+			BeforeEnumeration(FileSystemScanEnumerationPoint.RootFiles, rootPath);
 			foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(rootPath))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -1561,12 +1472,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				RootAccessDenied: true,
 				HadAccessDenied: true);
 		}
-		catch
+		catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 		{
 			return new ScanResult<ExtensionsScanData>(
 				new ExtensionsScanData(exts, IgnoreOptionCounts.Empty),
 				RootAccessDenied: false,
-				HadAccessDenied: false);
+				HadAccessDenied: false,
+				HadScanFailure: true);
 		}
 
 		return new ScanResult<ExtensionsScanData>(
@@ -1591,7 +1503,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		return new ScanResult<IgnoreOptionCounts>(
 			scan.Value.EffectiveIgnoreOptionCounts,
 			scan.RootAccessDenied,
-			scan.HadAccessDenied);
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	private ScanResult<IgnoreOptionCounts> ScanEffectiveIgnoreOptionCountsCore(
@@ -1611,7 +1524,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		return new ScanResult<IgnoreOptionCounts>(
 			scan.Value.EffectiveIgnoreOptionCounts,
 			scan.RootAccessDenied,
-			scan.HadAccessDenied);
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	private ScanResult<IgnoreSectionScanData> ScanRootFileIgnoreSectionSnapshotCore(
@@ -1658,7 +1572,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				HadAccessDenied: true);
 		}
 
-		var gitEvidence = ReadGitWorkspaceEvidenceAtRoot(rootPath);
+		var (gitEvidence, gitEvidenceScanFailed) = ReadGitWorkspaceEvidenceAtRoot(rootPath);
 
 		// The combined ignore-section path intentionally reuses one file-fact record.
 		// This keeps the snapshot cheap enough for live refreshes, so the caller must
@@ -1723,6 +1637,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		try
 		{
+			BeforeEnumeration(FileSystemScanEnumerationPoint.RootFiles, rootPath);
 			foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(rootPath))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -1794,7 +1709,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				RootAccessDenied: true,
 				HadAccessDenied: true);
 		}
-		catch
+		catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 		{
 			return new ScanResult<IgnoreSectionScanData>(
 				new IgnoreSectionScanData(
@@ -1805,7 +1720,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					effectiveExtensions,
 					GitEvidence: gitEvidence),
 				RootAccessDenied: false,
-				HadAccessDenied: false);
+				HadAccessDenied: false,
+				HadScanFailure: true);
 		}
 
 		return new ScanResult<IgnoreSectionScanData>(
@@ -1817,22 +1733,27 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				effectiveExtensions,
 				GitEvidence: gitEvidence),
 			RootAccessDenied: false,
-			HadAccessDenied: rootGitIgnoreReadFailed);
+			HadAccessDenied: rootGitIgnoreReadFailed,
+			HadScanFailure: gitEvidenceScanFailed);
 	}
 
-	private static GitWorkspaceEvidence ReadGitWorkspaceEvidenceAtRoot(string rootPath)
+	private static (GitWorkspaceEvidence Evidence, bool HadScanFailure) ReadGitWorkspaceEvidenceAtRoot(
+		string rootPath)
 	{
 		try
 		{
 			var attributes = File.GetAttributes(Path.Combine(rootPath, ".git"));
 			return attributes.HasFlag(FileAttributes.ReparsePoint)
-				? GitWorkspaceEvidence.Empty
-				: new GitWorkspaceEvidence(HasRepositoryBoundary: true);
+				? (GitWorkspaceEvidence.Empty, false)
+				: (new GitWorkspaceEvidence(HasRepositoryBoundary: true), false);
 		}
-		catch
+		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
 		{
-			// Structural evidence is best-effort; normal access diagnostics remain authoritative.
-			return GitWorkspaceEvidence.Empty;
+			return (GitWorkspaceEvidence.Empty, false);
+		}
+		catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
+		{
+			return (GitWorkspaceEvidence.Empty, true);
 		}
 	}
 
@@ -1870,7 +1791,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					IgnoreControllerImpactCounts.Empty,
 					GitEvidence: discovery.Value.GitEvidence),
 				discovery.RootAccessDenied,
-				discovery.HadAccessDenied);
+				discovery.HadAccessDenied,
+				discovery.HadScanFailure);
 		}
 
 		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1889,6 +1811,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (treeInventoryDirectoryIncluded is not null)
 			Array.Clear(treeInventoryDirectoryIncluded, 0, directories.Count);
 		var hadAccessDenied = discovery.HadAccessDenied ? 1 : 0;
+		var hadScanFailure = discovery.HadScanFailure ? 1 : 0;
 		var mergeLock = new object();
 		try
 		{
@@ -1940,6 +1863,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 				try
 				{
+					BeforeEnumeration(FileSystemScanEnumerationPoint.DirectoryFiles, node.Path);
 					foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(node.Path, node.RelativePath))
 					{
 						token.ThrowIfCancellationRequested();
@@ -2054,8 +1978,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					visibilityStates[index] = visibilityState;
 					return default;
 				}
-				catch
+				catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 				{
+					Interlocked.Exchange(ref hadScanFailure, 1);
 					return default;
 				}
 
@@ -2152,6 +2077,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					treeInventoryDirectoryIncluded!,
 					discovery.RootAccessDenied,
 					hadAccessDenied == 1,
+					hadScanFailure == 1,
 					discovery.Value.DiscoveredGitIgnoreMatchers,
 					discovery.Value.DiscoveredGitTrackedPathIndexes);
 			}
@@ -2168,7 +2094,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						!rootVisibility.BaseFinalVisible && rootVisibility.EmptyFoldersFinalVisible,
 					GitEvidence: discovery.Value.GitEvidence),
 				discovery.RootAccessDenied,
-				hadAccessDenied == 1);
+				hadAccessDenied == 1,
+				hadScanFailure == 1);
 		}
 		finally
 		{
@@ -2185,6 +2112,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool[] treeInventoryDirectoryIncluded,
 		bool rootAccessDenied,
 		bool hadAccessDenied,
+		bool hadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> discoveredGitIgnoreMatchers,
 		IReadOnlyList<GitTrackedPathIndex> discoveredGitTrackedPathIndexes)
 	{
@@ -2201,7 +2129,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			rootAccessDenied,
 			hadAccessDenied,
 			discoveredGitIgnoreMatchers,
-			discoveredGitTrackedPathIndexes);
+			discoveredGitTrackedPathIndexes,
+			hadScanFailure);
 
 		int AddDirectoryShell(int sourceIndex, int parentIndex)
 		{
@@ -2304,6 +2233,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		List<ProjectTreeInventorySnapshot> subtreeInventories,
 		bool rootAccessDenied,
 		bool hadAccessDenied,
+		bool hadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> rootFileGitIgnoreMatchers,
 		GitTrackedPathIndex? rootTrackedPathIndex)
 	{
@@ -2320,7 +2250,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				relativePath: string.Empty,
 				parentIndex: -1,
 				isDirectory: true,
-				HasHiddenAttribute(rootPath),
+				isHidden: false,
 				length: 0)
 		};
 
@@ -2393,7 +2323,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			rootAccessDenied,
 			hadAccessDenied,
 			discoveredGitIgnoreMatchers,
-			discoveredGitTrackedPathIndexes);
+			discoveredGitTrackedPathIndexes,
+			hadScanFailure);
 	}
 
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeDiscoveredGitIgnoreMatchers(
@@ -2624,19 +2555,34 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			}
 		}
 
+		if (!TryReadHiddenAttribute(rootPath, out var rootIsHidden, out var rootAttributeAccessDenied))
+		{
+			return new ScanResult<EffectiveIgnoreScanDiscovery>(
+				new EffectiveIgnoreScanDiscovery(
+					[],
+					discoveredGitIgnoreMatchers,
+					[],
+					GitWorkspaceEvidence.Empty),
+				RootAccessDenied: rootAttributeAccessDenied,
+				HadAccessDenied: rootAttributeAccessDenied,
+				HadScanFailure: !rootAttributeAccessDenied);
+		}
+
 		var rootFacts = AnalyzeDirectory(
 			rootPath,
 			string.Empty,
 			rootName,
-			HasHiddenAttribute(rootPath),
+			rootIsHidden,
 			effectiveRules,
 			effectiveGitIgnoreContext,
 			effectiveGitIgnoreCandidateContext);
+		var controllerImpactScanFailure = 0;
 		var rootDirectControllerImpactCounts = CountDirectDirectoryControllerImpact(
 			rootFacts,
 			effectiveRules,
 			effectiveExtensionPolicy,
-			cancellationToken);
+			cancellationToken,
+			scanFailure: () => Interlocked.Exchange(ref controllerImpactScanFailure, 1));
 		var rootExtensionDiscoveryRuleState = EvaluateDirectoryRuleState(
 			rootFacts,
 			extensionDiscoveryRules.IgnoreHiddenFolders,
@@ -2663,6 +2609,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			discoveredGitTrackedPathIndexes.Add(inheritedTrackedPathIndex);
 		var rootAccessDenied = 0;
 		var hadAccessDenied = 0;
+		var hadScanFailure = controllerImpactScanFailure;
 		var pending =
 			new Stack<(
 				DirectoryScanFacts Facts,
@@ -2716,6 +2663,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			{
 				try
 				{
+					BeforeEnumeration(FileSystemScanEnumerationPoint.DirectoryDiscovery, facts.FullPath);
 					directoryBatch = FileSystemEntryEnumerator.ReadDirectoriesAndGitIgnore(
 						facts.FullPath,
 						facts.RelativePath,
@@ -2780,7 +2728,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						Interlocked.Exchange(ref rootAccessDenied, 1);
 					continue;
 				}
-				catch
+				catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 				{
 					directories.Add(new EffectiveIgnoreScanNode(
 						facts.FullPath,
@@ -2797,6 +2745,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						dotFoldersRuleState,
 						gitIgnoreContext,
 						gitIgnoreCandidateContext));
+					Interlocked.Exchange(ref hadScanFailure, 1);
 					continue;
 				}
 			}
@@ -2836,7 +2785,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						childFacts,
 						effectiveRules,
 						effectiveExtensionPolicy,
-						cancellationToken);
+						cancellationToken,
+						scanFailure: () => Interlocked.Exchange(ref hadScanFailure, 1));
 					var childExtensionDiscoveryRuleState = EvaluateDirectoryRuleState(
 						childFacts,
 						extensionDiscoveryRules.IgnoreHiddenFolders,
@@ -2886,7 +2836,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				discoveredGitTrackedPathIndexes,
 				gitEvidence),
 			rootAccessDenied == 1,
-			hadAccessDenied == 1);
+			hadAccessDenied == 1,
+			hadScanFailure == 1);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -3269,10 +3220,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		CancellationToken cancellationToken)
 	{
 		var scan = ScanEffectiveIgnoreOptionCountsCore(rootPath, allowedExtensions, rules, cancellationToken);
-		return new ScanResult<int>(scan.Value.EmptyFolders, scan.RootAccessDenied, scan.HadAccessDenied);
+		return new ScanResult<int>(
+			scan.Value.EmptyFolders,
+			scan.RootAccessDenied,
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
-	private static RootSelectionScanPlan BuildRootSelectionScanPlan(
+	private RootSelectionScanPlan BuildRootSelectionScanPlan(
 		string rootPath,
 		IReadOnlyCollection<string> selectedRootFolders,
 		IgnoreRules effectiveRules,
@@ -3291,7 +3246,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				directoryToggleCandidates,
 				controllerImpactCandidates,
 				RootAccessDenied: false,
-				HadAccessDenied: false);
+				HadAccessDenied: false,
+				HadScanFailure: false);
 		}
 		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
 		{
@@ -3300,7 +3256,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				directoryToggleCandidates,
 				controllerImpactCandidates,
 				RootAccessDenied: true,
-				HadAccessDenied: true);
+				HadAccessDenied: true,
+				HadScanFailure: false);
 		}
 
 		var selectedNames = new HashSet<string>(PathComparer.Default);
@@ -3331,12 +3288,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					directoryToggleCandidates,
 					controllerImpactCandidates,
 					RootAccessDenied: false,
-					HadAccessDenied: true);
+					HadAccessDenied: true,
+					HadScanFailure: false);
 			}
 		}
 
 		try
 		{
+			BeforeEnumeration(FileSystemScanEnumerationPoint.RootDirectories, rootPath);
 			foreach (var directory in FileSystemEntryEnumerator.EnumerateDirectories(rootPath))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -3381,17 +3340,25 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 		catch (UnauthorizedAccessException)
 		{
-			AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
+			var fallback = AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
 			return new RootSelectionScanPlan(
 				selectedRoots,
 				directoryToggleCandidates,
 				controllerImpactCandidates,
 				RootAccessDenied: true,
-				HadAccessDenied: true);
+				HadAccessDenied: true,
+				HadScanFailure: fallback.HadScanFailure);
 		}
-		catch
+		catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 		{
-			AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
+			var fallback = AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
+			return new RootSelectionScanPlan(
+				selectedRoots,
+				directoryToggleCandidates,
+				controllerImpactCandidates,
+				RootAccessDenied: false,
+				HadAccessDenied: fallback.HadAccessDenied,
+				HadScanFailure: true);
 		}
 
 		return new RootSelectionScanPlan(
@@ -3399,31 +3366,35 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			directoryToggleCandidates,
 			controllerImpactCandidates,
 			RootAccessDenied: false,
-			HadAccessDenied: false);
+			HadAccessDenied: false,
+			HadScanFailure: false);
 	}
 
-	private static void AddSelectedRootsByName(
+	private (bool HadAccessDenied, bool HadScanFailure) AddSelectedRootsByName(
 		string rootPath,
 		IReadOnlyCollection<string> selectedNames,
 		List<FileSystemDirectoryEntry> selectedRoots)
 	{
 		if (selectedNames.Count == 0)
-			return;
+			return (false, false);
 
 		string normalizedRootPath;
 		try
 		{
 			normalizedRootPath = PathUtility.Normalize(rootPath);
 		}
-		catch
+		catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 		{
-			return;
+			return (exception is UnauthorizedAccessException, exception is not UnauthorizedAccessException);
 		}
 
+		var hadAccessDenied = false;
+		var hadScanFailure = false;
 		foreach (var selectedName in selectedNames)
 		{
 			try
 			{
+				BeforeEnumeration(FileSystemScanEnumerationPoint.SelectedRootFallback, selectedName);
 				var fullPath = PathUtility.Normalize(Path.Combine(rootPath, selectedName));
 				if (PathComparer.Default.Equals(fullPath, normalizedRootPath) ||
 				    !PathUtility.IsPathInside(fullPath, normalizedRootPath) ||
@@ -3433,17 +3404,30 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					continue;
 				}
 
+				if (!TryReadHiddenAttribute(fullPath, out var isHidden, out var attributeAccessDenied))
+				{
+					hadAccessDenied |= attributeAccessDenied;
+					hadScanFailure |= !attributeAccessDenied;
+					continue;
+				}
+
 				selectedRoots.Add(new FileSystemDirectoryEntry(
 					selectedName,
 					fullPath,
 					selectedName,
-					HasHiddenAttribute(fullPath)));
+					isHidden));
 			}
-			catch
+			catch (UnauthorizedAccessException)
 			{
-				// Invalid stale root-folder selections are ignored by design.
+				hadAccessDenied = true;
+			}
+			catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
+			{
+				hadScanFailure = true;
 			}
 		}
+
+		return (hadAccessDenied, hadScanFailure);
 	}
 
 	private static bool IsSafeRelativeRootFolderName(string? selectedRootFolder)
@@ -3835,41 +3819,33 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			counts.HiddenFiles++;
 	}
 
-	private static bool HasHiddenAttribute(string fullPath)
+	private static bool TryReadHiddenAttribute(
+		string fullPath,
+		out bool isHidden,
+		out bool accessDenied)
 	{
 		try
 		{
-			return File.GetAttributes(fullPath).HasFlag(FileAttributes.Hidden);
+			isHidden = File.GetAttributes(fullPath).HasFlag(FileAttributes.Hidden);
+			accessDenied = false;
+			return true;
 		}
-		catch
+		catch (UnauthorizedAccessException)
 		{
+			isHidden = false;
+			accessDenied = true;
+			return false;
+		}
+		catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
+		{
+			isHidden = false;
+			accessDenied = false;
 			return false;
 		}
 	}
 
-	private static bool IsReparsePointDirectory(string path)
-	{
-		try
-		{
-			return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
-		}
-		catch
-		{
-			return true;
-		}
-	}
-
-	private static long GetFileLength(string fullPath)
-	{
-		try
-		{
-			return new FileInfo(fullPath).Length;
-		}
-		catch
-		{
-			return 0;
-		}
-	}
+	private static bool IsReparsePointDirectory(string path) =>
+		File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static bool IsExtensionlessFileName(string name) =>

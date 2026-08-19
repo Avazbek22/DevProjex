@@ -38,8 +38,7 @@ public sealed class CachedRepositoryRefreshIntegrationTests : IDisposable
 
 		using (var featureSession = await cache.TryAcquireRepositorySessionAsync(
 			       remote.RepositoryUrl,
-			       remote.FeatureBranchName,
-			       TestContext.Current.CancellationToken))
+			       cancellationToken: TestContext.Current.CancellationToken))
 		{
 			Assert.NotNull(featureSession);
 			Assert.True(await git.SwitchBranchAsync(

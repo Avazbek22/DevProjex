@@ -5,6 +5,45 @@ namespace DevProjex.Tests.Unit;
 public sealed class SelectionRefreshEngineTests
 {
 	[Fact]
+	public void ComputeFullRefreshSnapshot_Defaults_PerformsOneWorkspaceScan()
+	{
+		var scanner = CreateCountingWorkspaceScanner(out var scanCount);
+		var engine = CreateEngine(scanner);
+
+		_ = engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None);
+
+		Assert.Equal(1, scanCount());
+	}
+
+	[Fact]
+	public void ComputeLiveRefreshSnapshot_NewFileOptionState_PerformsOneWorkspaceScan()
+	{
+		var scanner = CreateCountingWorkspaceScanner(out var scanCount);
+		var engine = CreateEngine(scanner);
+		var context = CreateDefaultsContext() with
+		{
+			CurrentRootOptions = [new SelectionOption("src", true)],
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId> { IgnoreOptionId.HiddenFiles },
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.HiddenFiles] = true
+			},
+			IgnoreOptionStateCacheIsComplete = true,
+			CurrentSnapshotState = new IgnoreSectionSnapshotState(
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: new IgnoreOptionCounts(HiddenFiles: 1),
+				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+				HasExtensionlessEntries: false,
+				ExtensionlessEntriesCount: 0)
+		};
+
+		_ = engine.ComputeLiveRefreshSnapshot(context, CancellationToken.None);
+
+		Assert.Equal(1, scanCount());
+	}
+
+	[Fact]
 	public void ComputeFullRefreshSnapshot_DefaultDirectoryTogglesUseSinglePassRootProjection()
 	{
 		var scanner = new DotFolderNoiseScanner();
@@ -361,6 +400,34 @@ public sealed class SelectionRefreshEngineTests
 			new IgnoreOptionsService(localization),
 			BuildIgnoreRules,
 			GetIgnoreAvailability);
+	}
+
+	private static StubFileSystemScanner CreateCountingWorkspaceScanner(out Func<int> getScanCount)
+	{
+		var scanCount = 0;
+		var scanner = new StubFileSystemScanner
+		{
+			GetRootFolderNamesHandler = (_, _) => new ScanResult<List<string>>(["src"], false, false),
+			ScanProjectWorkspaceHandler = (request, cancellationToken) =>
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				scanCount++;
+				var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" };
+				return new ScanResult<ProjectWorkspaceScanSnapshot>(
+					new ProjectWorkspaceScanSnapshot(
+						new IgnoreSectionScanData(
+							extensions,
+							IgnoreOptionCounts.Empty,
+							new IgnoreOptionCounts(HiddenFiles: 1),
+							IgnoreControllerImpactCounts.Empty,
+							new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase)),
+						TreeInventory: null),
+					RootAccessDenied: false,
+					HadAccessDenied: false);
+			}
+		};
+		getScanCount = () => scanCount;
+		return scanner;
 	}
 
 	private static SelectionRefreshContext CreateDefaultsContext() =>

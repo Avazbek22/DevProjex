@@ -1,4 +1,6 @@
 using System.Buffers;
+using System.Collections.Concurrent;
+using System.ComponentModel;
 using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.Git;
@@ -15,6 +17,8 @@ public sealed class RepoCacheService : IRepoCacheService
 	private const string CacheIndexFileName = "cache-index.json";
 	private const int CacheIndexSchemaVersion = 2;
 	private static readonly TimeSpan IndexLockTimeout = TimeSpan.FromSeconds(5);
+	private static readonly TimeSpan WorktreeCleanupTimeout = TimeSpan.FromSeconds(5);
+	private static readonly TimeSpan RepositorySizeRefreshTimeout = TimeSpan.FromSeconds(30);
 	private static readonly JsonSerializerOptions IndexSerializerOptions = new(JsonSerializerDefaults.Web)
 	{
 		WriteIndented = true,
@@ -34,6 +38,9 @@ public sealed class RepoCacheService : IRepoCacheService
 	private readonly IGitWorktreeManager _worktreeManager;
 	private readonly RepoCacheTestHooks? _testHooks;
 	private readonly object _garbageCollectionSync = new();
+	private readonly ConcurrentDictionary<string, byte> _worktreeCleanupInFlight = new(PathComparer.Default);
+	private readonly ConcurrentDictionary<string, byte> _repositorySizeRefreshInFlight = new(PathComparer.Default);
+	private int _scheduledGarbageCollectionState;
 
 	public string CacheRootPath { get; }
 	public IReadOnlyList<string> CacheSearchRootPaths { get; }
@@ -316,7 +323,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			branch,
 			cancellationToken).ConfigureAwait(false);
 		if (session is not null)
-			_ = Task.Run(CollectGarbage, CancellationToken.None);
+			ScheduleGarbageCollection();
 		return session;
 	}
 
@@ -358,7 +365,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			entry.Branch,
 			cancellationToken).ConfigureAwait(false);
 		if (session is not null)
-			_ = Task.Run(CollectGarbage, CancellationToken.None);
+			ScheduleGarbageCollection();
 		return session;
 	}
 
@@ -538,6 +545,56 @@ public sealed class RepoCacheService : IRepoCacheService
 			CollectGarbageCore();
 	}
 
+	private void ScheduleGarbageCollection()
+	{
+		while (true)
+		{
+			var state = Volatile.Read(ref _scheduledGarbageCollectionState);
+			if (state == 2)
+				return;
+			if (state == 1)
+			{
+				if (Interlocked.CompareExchange(ref _scheduledGarbageCollectionState, 2, 1) == 1)
+					return;
+				continue;
+			}
+			if (Interlocked.CompareExchange(ref _scheduledGarbageCollectionState, 1, 0) == 0)
+			{
+				_ = Task.Run(RunScheduledGarbageCollection, CancellationToken.None);
+				return;
+			}
+		}
+	}
+
+	private void RunScheduledGarbageCollection()
+	{
+		try
+		{
+			while (true)
+			{
+				_testHooks?.BeforeScheduledGarbageCollection?.Invoke();
+				CollectGarbage();
+				_testHooks?.AfterScheduledGarbageCollection?.Invoke();
+
+				var state = Interlocked.CompareExchange(ref _scheduledGarbageCollectionState, 0, 1);
+				if (state == 1)
+					return;
+				if (state == 2 &&
+				    Interlocked.CompareExchange(ref _scheduledGarbageCollectionState, 1, 2) == 2)
+				{
+					continue;
+				}
+			}
+		}
+		catch (Exception exception)
+		{
+			var state = Interlocked.Exchange(ref _scheduledGarbageCollectionState, 0);
+			Trace.TraceWarning("Repository cache garbage collection failed: {0}", exception.Message);
+			if (state == 2)
+				ScheduleGarbageCollection();
+		}
+	}
+
 	private void CollectGarbageCore()
 	{
 		CleanupTrash();
@@ -588,8 +645,17 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	public void RefreshIndexedRepositorySize(string localPath)
 	{
+		RefreshIndexedRepositorySize(localPath, CancellationToken.None);
+	}
+
+	private void RefreshIndexedRepositorySize(string localPath, CancellationToken cancellationToken)
+	{
 		if (string.IsNullOrWhiteSpace(localPath))
 			return;
+		cancellationToken.ThrowIfCancellationRequested();
+		var size = CalculateDirectorySize(
+			RepositoryCacheLayout.GetContainer(localPath),
+			cancellationToken);
 
 		var fileSet = GetIndexFileSet();
 		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
@@ -605,7 +671,6 @@ public sealed class RepoCacheService : IRepoCacheService
 			if (entry is null)
 				return;
 
-			var size = CalculateDirectorySize(RepositoryCacheLayout.GetContainer(entry.LocalPath));
 			WriteIndex(
 				fileSet,
 				document.Entries
@@ -694,6 +759,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		RepositoryCacheIndexEntry? entry;
 		RepositoryFileLease? sessionLease = null;
 		string? selectedPath = null;
+		string? effectiveBranch = null;
 		var needsWorktreeCreation = false;
 		using (heldLock)
 		{
@@ -757,22 +823,11 @@ public sealed class RepoCacheService : IRepoCacheService
 				return null;
 			}
 
-			entry = verified with
-			{
-				Branch = string.IsNullOrWhiteSpace(requestedBranch) ? verified.Branch : requestedBranch.Trim(),
-				LastUsedUtc = _timeProvider.GetUtcNow(),
-				ContentKind = kind
-			};
-			WriteIndex(
-				fileSet,
-				document.Entries
-					.Where(candidate => !string.Equals(
-						candidate.Identity,
-						identity,
-						StringComparison.OrdinalIgnoreCase))
-					.Append(entry)
-					.OrderByDescending(static candidate => candidate.LastOpenedUtc)
-					.ToList());
+			entry = verified;
+			effectiveBranch = kind == RepositoryCacheContentKind.Git &&
+			                  !string.IsNullOrWhiteSpace(requestedBranch)
+				? GitBranchNameValidator.ValidateAndNormalize(requestedBranch.Trim())
+				: verified.Branch;
 		}
 
 		try
@@ -782,21 +837,72 @@ public sealed class RepoCacheService : IRepoCacheService
 				await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(
 					RepositoryCacheLayout.GetBaseOperationLockPath(CacheRootPath, entry.LocalPath),
 					cancellationToken).ConfigureAwait(false);
-				var prepared = needsWorktreeCreation
-					? await _worktreeManager.CreateDetachedAsync(
+				bool prepared;
+				try
+				{
+					prepared = await PrepareWorktreeAsync(
 						entry.LocalPath,
 						selectedPath,
-						entry.Branch,
-						cancellationToken).ConfigureAwait(false)
-					: await _worktreeManager.PreparePrimaryAsync(
-						selectedPath,
-						entry.Branch,
+						effectiveBranch,
+						needsWorktreeCreation,
 						cancellationToken).ConfigureAwait(false);
+				}
+				catch (RepositoryBranchUnavailableException exception) when (
+					exception.Reason == RepositoryBranchUnavailableReason.NotFound &&
+					!string.IsNullOrWhiteSpace(effectiveBranch))
+				{
+					var originalException = exception;
+					try
+					{
+						if (!await TryRestoreRemoteBranchAsync(
+								entry.LocalPath,
+								effectiveBranch,
+								cancellationToken)
+							.ConfigureAwait(false))
+						{
+							throw originalException;
+						}
+
+						prepared = await PrepareWorktreeAsync(
+							entry.LocalPath,
+							selectedPath,
+							effectiveBranch,
+							needsWorktreeCreation,
+							cancellationToken).ConfigureAwait(false);
+					}
+					catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+					{
+						throw;
+					}
+					catch
+					{
+						throw originalException;
+					}
+				}
 				if (!prepared)
 				{
 					sessionLease.Dispose();
 					return null;
 				}
+			}
+			else if (kind == RepositoryCacheContentKind.Git)
+			{
+				effectiveBranch = await ResolveFallbackBranchAsync(
+					selectedPath,
+					requestedBranch,
+					cancellationToken).ConfigureAwait(false);
+			}
+
+			entry = CommitSessionMetadata(
+				fileSet,
+				identity,
+				entry.LocalPath,
+				effectiveBranch,
+				kind);
+			if (entry is null)
+			{
+				sessionLease.Dispose();
+				return null;
 			}
 
 			var session = new RepositoryCacheSession(
@@ -807,9 +913,9 @@ public sealed class RepoCacheService : IRepoCacheService
 				sessionLease);
 			sessionLease = null;
 			if (kind == RepositoryCacheContentKind.Git && worktreesSupported)
-				await CleanupUnusedWorktreesAsync(entry.LocalPath, selectedPath).ConfigureAwait(false);
+				ScheduleUnusedWorktreeCleanup(entry.LocalPath, selectedPath);
 			if (needsWorktreeCreation || entry.ApproximateSizeBytes <= 0)
-				RefreshIndexedRepositorySize(entry.LocalPath);
+				ScheduleRepositorySizeRefresh(entry.LocalPath);
 			return session;
 		}
 		catch
@@ -819,15 +925,221 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 	}
 
-	private async Task CleanupUnusedWorktreesAsync(string basePath, string retainedPath)
+	private RepositoryCacheIndexEntry? CommitSessionMetadata(
+		JsonStoreFileSet fileSet,
+		string identity,
+		string expectedLocalPath,
+		string? branch,
+		RepositoryCacheContentKind kind)
+	{
+		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+			return null;
+
+		using (heldLock)
+		{
+			var document = LoadIndex(fileSet);
+			var current = FindByIdentity(document, identity);
+			if (current is null ||
+			    !PathComparer.Default.Equals(current.LocalPath, expectedLocalPath) ||
+			    !Directory.Exists(current.LocalPath))
+			{
+				return null;
+			}
+
+			var updated = current with
+			{
+				Branch = branch,
+				LastUsedUtc = _timeProvider.GetUtcNow(),
+				ContentKind = kind
+			};
+			WriteIndex(
+				fileSet,
+				document.Entries
+					.Where(candidate => !string.Equals(
+						candidate.Identity,
+						identity,
+						StringComparison.OrdinalIgnoreCase))
+					.Append(updated)
+					.OrderByDescending(static candidate => candidate.LastOpenedUtc)
+					.ToList());
+			return updated;
+		}
+	}
+
+	private async Task<bool> PrepareWorktreeAsync(
+		string basePath,
+		string selectedPath,
+		string? branch,
+		bool needsWorktreeCreation,
+		CancellationToken cancellationToken) =>
+		needsWorktreeCreation
+			? await _worktreeManager.CreateDetachedAsync(
+				basePath,
+				selectedPath,
+				branch,
+				cancellationToken).ConfigureAwait(false)
+			: await _worktreeManager.PreparePrimaryAsync(
+				selectedPath,
+				branch,
+				cancellationToken).ConfigureAwait(false);
+
+	private static async Task<bool> TryRestoreRemoteBranchAsync(
+		string repositoryPath,
+		string branch,
+		CancellationToken cancellationToken)
+	{
+		var normalizedBranch = GitBranchNameValidator.ValidateAndNormalize(branch);
+		if (await RunGitForOutputAsync(
+			    repositoryPath,
+			    ["remote", "set-branches", "--add", "origin", normalizedBranch],
+			    cancellationToken).ConfigureAwait(false) is null)
+		{
+			return false;
+		}
+
+		return await RunGitForOutputAsync(
+			       repositoryPath,
+			       ["fetch", "origin", normalizedBranch, "--depth", "1"],
+			       cancellationToken).ConfigureAwait(false) is not null;
+	}
+
+	private static async Task<string?> ResolveFallbackBranchAsync(
+		string repositoryPath,
+		string? requestedBranch,
+		CancellationToken cancellationToken)
+	{
+		var actualBranch = await ReadCurrentBranchAsync(repositoryPath, cancellationToken).ConfigureAwait(false);
+		if (!string.IsNullOrWhiteSpace(requestedBranch) &&
+		    !string.Equals(actualBranch, requestedBranch, StringComparison.Ordinal))
+		{
+			throw new RepositoryBranchUnavailableException(
+				requestedBranch,
+				RepositoryBranchUnavailableReason.WorktreeUnsupported);
+		}
+
+		return actualBranch;
+	}
+
+	private static async Task<string?> ReadCurrentBranchAsync(
+		string repositoryPath,
+		CancellationToken cancellationToken)
+	{
+		var current = await RunGitForOutputAsync(
+			repositoryPath,
+			["rev-parse", "--abbrev-ref", "HEAD"],
+			cancellationToken).ConfigureAwait(false);
+		if (!string.IsNullOrWhiteSpace(current) && !string.Equals(current.Trim(), "HEAD", StringComparison.Ordinal))
+			return current.Trim();
+
+		var configured = await RunGitForOutputAsync(
+			repositoryPath,
+			["config", "--worktree", "--get", "devprojex.branch"],
+			cancellationToken).ConfigureAwait(false);
+		return string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
+	}
+
+	private static async Task<string?> RunGitForOutputAsync(
+		string workingDirectory,
+		IReadOnlyList<string> arguments,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		using var process = new Process
+		{
+			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, arguments)
+		};
+		process.Start();
+		process.StandardInput.Close();
+		var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
+		var error = process.StandardError.ReadToEndAsync(cancellationToken);
+		try
+		{
+			await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+			await Task.WhenAll(output, error).ConfigureAwait(false);
+			return process.ExitCode == 0 ? await output.ConfigureAwait(false) : null;
+		}
+		catch (OperationCanceledException)
+		{
+			try
+			{
+				if (!process.HasExited)
+					process.Kill(entireProcessTree: true);
+			}
+			catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+			{
+			}
+			throw;
+		}
+	}
+
+	private void ScheduleUnusedWorktreeCleanup(string basePath, string retainedPath)
+	{
+		if (!_worktreeCleanupInFlight.TryAdd(basePath, 0))
+			return;
+		_ = Task.Run(async () =>
+		{
+			using var timeout = new CancellationTokenSource(WorktreeCleanupTimeout);
+			try
+			{
+				_testHooks?.BeforeUnusedWorktreeCleanup?.Invoke(basePath);
+				await CleanupUnusedWorktreesAsync(basePath, retainedPath, timeout.Token).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+			{
+				Trace.TraceWarning("Repository worktree cleanup timed out for '{0}'.", basePath);
+			}
+			catch (Exception exception)
+			{
+				Trace.TraceWarning("Repository worktree cleanup failed for '{0}': {1}", basePath, exception.Message);
+			}
+			finally
+			{
+				_worktreeCleanupInFlight.TryRemove(basePath, out _);
+			}
+		}, CancellationToken.None);
+	}
+
+	private void ScheduleRepositorySizeRefresh(string basePath)
+	{
+		if (!_repositorySizeRefreshInFlight.TryAdd(basePath, 0))
+			return;
+		_ = Task.Run(() =>
+		{
+			using var timeout = new CancellationTokenSource(RepositorySizeRefreshTimeout);
+			try
+			{
+				_testHooks?.BeforeRepositorySizeRefresh?.Invoke(basePath);
+				RefreshIndexedRepositorySize(basePath, timeout.Token);
+			}
+			catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+			{
+				Trace.TraceWarning("Repository size refresh timed out for '{0}'.", basePath);
+			}
+			catch (Exception exception)
+			{
+				Trace.TraceWarning("Repository size refresh failed for '{0}': {1}", basePath, exception.Message);
+			}
+			finally
+			{
+				_repositorySizeRefreshInFlight.TryRemove(basePath, out _);
+				_testHooks?.AfterRepositorySizeRefresh?.Invoke(basePath);
+			}
+		}, CancellationToken.None);
+	}
+
+	private async Task CleanupUnusedWorktreesAsync(
+		string basePath,
+		string retainedPath,
+		CancellationToken cancellationToken)
 	{
 		var removedAny = false;
 		await using (await RepositoryFileLease.AcquireExclusiveAsync(
 			RepositoryCacheLayout.GetBaseOperationLockPath(CacheRootPath, basePath),
-			CancellationToken.None).ConfigureAwait(false))
+			cancellationToken).ConfigureAwait(false))
 		{
 			foreach (var candidate in RepositoryCacheLayout.EnumerateCopies(basePath))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (PathComparer.Default.Equals(candidate, basePath) ||
 				    PathComparer.Default.Equals(candidate, retainedPath))
 				{
@@ -845,12 +1157,20 @@ public sealed class RepoCacheService : IRepoCacheService
 				{
 					try
 					{
-						await _worktreeManager.RemoveAsync(basePath, candidate, CancellationToken.None)
+						await _worktreeManager.RemoveAsync(basePath, candidate, cancellationToken)
 							.ConfigureAwait(false);
 						removedAny = true;
 					}
-					catch
+					catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 					{
+						throw;
+					}
+					catch (Exception exception)
+					{
+						Trace.TraceWarning(
+							"Repository worktree cleanup failed for '{0}': {1}",
+							candidate,
+							exception.Message);
 					}
 				}
 			}
@@ -859,10 +1179,18 @@ public sealed class RepoCacheService : IRepoCacheService
 			{
 				try
 				{
-					await _worktreeManager.PruneAsync(basePath, CancellationToken.None).ConfigureAwait(false);
+					await _worktreeManager.PruneAsync(basePath, cancellationToken).ConfigureAwait(false);
 				}
-				catch
+				catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 				{
+					throw;
+				}
+				catch (Exception exception)
+				{
+					Trace.TraceWarning(
+						"Repository worktree prune failed for '{0}': {1}",
+						basePath,
+						exception.Message);
 				}
 			}
 		}
@@ -1413,13 +1741,16 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 	}
 
-	private static long CalculateDirectorySize(string path)
+	private static long CalculateDirectorySize(
+		string path,
+		CancellationToken cancellationToken = default)
 	{
 		long total = 0;
 		try
 		{
 			foreach (var file in Directory.EnumerateFiles(path, "*", RecursiveCacheEnumeration))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				try
 				{
 					total = checked(total + new FileInfo(file).Length);
@@ -1650,4 +1981,9 @@ public sealed class RepoCacheService : IRepoCacheService
 internal sealed class RepoCacheTestHooks
 {
 	public Action<string>? AfterSessionLeaseAcquired { get; init; }
+	public Action? BeforeScheduledGarbageCollection { get; init; }
+	public Action? AfterScheduledGarbageCollection { get; init; }
+	public Action<string>? BeforeUnusedWorktreeCleanup { get; init; }
+	public Action<string>? BeforeRepositorySizeRefresh { get; init; }
+	public Action<string>? AfterRepositorySizeRefresh { get; init; }
 }

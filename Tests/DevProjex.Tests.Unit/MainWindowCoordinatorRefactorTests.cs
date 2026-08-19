@@ -1240,6 +1240,32 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.True(host.LastAppliedInput.PreserveExpandedPaths);
     }
 
+	[Fact]
+	public async Task RefreshTreePipeline_IncompleteInventoryKeepsPublishedTreeAndReportsOnce()
+	{
+		var viewModel = CreateViewModel();
+		var published = new TreeNodeViewModel(
+			RecordingRefreshTreeHost.CreateResult("published").Root,
+			parent: null,
+			icon: null);
+		viewModel.TreeNodes.Add(published);
+		var host = new RecordingRefreshTreeHost(viewModel)
+		{
+			BuildTreeHandler = _ => new BuildTreeSnapshotResult(
+				RecordingRefreshTreeHost.CreateResult("partial", hadScanFailure: true),
+				RecordingRefreshTreeHost.CreateInventorySnapshot(hadScanFailure: true))
+		};
+		using var pipeline = new RefreshTreePipeline(host);
+
+		var outcome = await pipeline.RefreshTreeAsync(
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(TreeRefreshOutcome.Skipped, outcome);
+		Assert.Equal(0, host.ApplyCount);
+		Assert.Equal(1, host.IncompleteScanReportCount);
+		Assert.Same(published, Assert.Single(viewModel.TreeNodes));
+	}
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -1296,6 +1322,28 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(0, host.BuildTreeCount);
         Assert.Equal(0, host.ApplyCount);
     }
+
+	[Fact]
+	public async Task ProjectLoadSnapshotPipeline_IncompleteTreePublishesPartialTreeWithoutReusableInventory()
+	{
+		var host = new RecordingProjectLoadSnapshotHost(CreateSelectionRefreshSnapshot())
+		{
+			BuildTreeResult = new BuildTreeSnapshotResult(
+				RecordingRefreshTreeHost.CreateResult("partial", hadScanFailure: true),
+				RecordingRefreshTreeHost.CreateInventorySnapshot(hadScanFailure: true))
+		};
+		var pipeline = new ProjectLoadSnapshotPipeline(host);
+
+		await pipeline.ReloadAsync(
+			@"C:\Project",
+			preserveTreeState: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, host.ApplyCount);
+		Assert.Equal(1, host.IncompleteScanReportCount);
+		Assert.Null(host.AppliedSnapshot?.TreeInventory);
+		Assert.True(host.AppliedSnapshot?.TreeResult.HadScanFailure);
+	}
 
     [Fact]
     public void ProjectLoadCancellationCoordinator_AppliesExpectedFallback()
@@ -1725,6 +1773,12 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public int ApplyCount { get; private set; }
 
+		public int IncompleteScanReportCount { get; private set; }
+
+		public BuildTreeSnapshotResult? BuildTreeResult { get; init; }
+
+		public ProjectLoadSnapshot? AppliedSnapshot { get; private set; }
+
         public bool HandleSelectionAccessDenied { get; init; }
 
         public Task<SelectionRefreshSnapshot?> BuildSelectionSnapshotAsync(
@@ -1796,7 +1850,7 @@ public sealed class MainWindowCoordinatorRefactorTests
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add(ProjectLoadSnapshotHostCall.BuildTree);
             BuildTreeCount++;
-            return new BuildTreeSnapshotResult(
+			return BuildTreeResult ?? new BuildTreeSnapshotResult(
                 RecordingRefreshTreeHost.CreateResult("root"),
                 CreateInventorySnapshot());
         }
@@ -1807,6 +1861,9 @@ public sealed class MainWindowCoordinatorRefactorTests
             _ = result;
             return false;
         }
+
+		public void ReportIncompleteTreeScan() =>
+			IncompleteScanReportCount++;
 
         public TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
         {
@@ -1825,8 +1882,10 @@ public sealed class MainWindowCoordinatorRefactorTests
             cancellationToken.ThrowIfCancellationRequested();
             Assert.Same(selectionSnapshot, snapshot.SelectionSnapshot);
             Assert.Same(CapturedTreeInput, snapshot.TreeInput);
-            Assert.NotNull(snapshot.TreeInventory);
+			if (!snapshot.TreeResult.HadScanFailure)
+				Assert.NotNull(snapshot.TreeInventory);
             Calls.Add(ProjectLoadSnapshotHostCall.ApplySnapshot);
+			AppliedSnapshot = snapshot;
             ApplyCount++;
         }
 
@@ -2038,6 +2097,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public int BeforeInteractiveFilterRefreshCount { get; private set; }
 
+		public int IncompleteScanReportCount { get; private set; }
+
         public bool LastUsedInMemoryFilter { get; private set; }
 
         public BuildTreeSnapshotResult? LastAppliedResult { get; private set; }
@@ -2087,6 +2148,9 @@ public sealed class MainWindowCoordinatorRefactorTests
             return result.RootAccessDenied;
         }
 
+		public void ReportIncompleteTreeScan() =>
+			IncompleteScanReportCount++;
+
         public TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
         {
             return BuildViewModelHandler?.Invoke(input, result) ??
@@ -2124,7 +2188,7 @@ public sealed class MainWindowCoordinatorRefactorTests
             viewModel.TreeNodes.Add(root);
         }
 
-        public static BuildTreeResult CreateResult(string name)
+        public static BuildTreeResult CreateResult(string name, bool hadScanFailure = false)
         {
             var root = new TreeNodeDescriptor(
                 name,
@@ -2134,10 +2198,14 @@ public sealed class MainWindowCoordinatorRefactorTests
                 IconKey: "folder",
                 Children: []);
 
-            return new BuildTreeResult(root, RootAccessDenied: false, HadAccessDenied: false);
+            return new BuildTreeResult(
+				root,
+				RootAccessDenied: false,
+				HadAccessDenied: false,
+				HadScanFailure: hadScanFailure);
         }
 
-        public static ProjectTreeInventorySnapshot CreateInventorySnapshot()
+        public static ProjectTreeInventorySnapshot CreateInventorySnapshot(bool hadScanFailure = false)
         {
             return new ProjectTreeInventorySnapshot(
                 [
@@ -2151,7 +2219,8 @@ public sealed class MainWindowCoordinatorRefactorTests
                         length: 0)
                 ],
                 rootAccessDenied: false,
-                hadAccessDenied: false);
+				hadAccessDenied: false,
+				hadScanFailure: hadScanFailure);
         }
     }
 

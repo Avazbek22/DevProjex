@@ -1,7 +1,5 @@
 using DevProjex.Application.Secrets;
-using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Secrets;
-using DevProjex.Infrastructure.SmartIgnore;
 
 namespace DevProjex.Tests.Unit;
 
@@ -512,6 +510,90 @@ public sealed class SmartSecretsDetectorTests
 		Assert.DoesNotContain(before, static finding => finding.RuleId == "environment-secret");
 		Assert.Contains(after, static finding => finding.RuleId == "environment-secret");
 		Assert.NotEqual(beforeIdentity, afterIdentity);
+	}
+
+	[Fact]
+	public void StructuredPrescan_RecognizesOnlyRequiredUniversalSyntax()
+	{
+		Assert.Equal(
+			StructuredSecretFeatureMask.None,
+			StructuredSecretDetector.ComputeFeatureMaskForAnalysis("plain source text"));
+		Assert.Equal(
+			StructuredSecretFeatureMask.CredentialUri,
+			StructuredSecretDetector.ComputeFeatureMaskForAnalysis("endpoint:////"));
+		Assert.Equal(
+			StructuredSecretFeatureMask.ConnectionString,
+			StructuredSecretDetector.ComputeFeatureMaskForAnalysis("key=value"));
+		Assert.Equal(
+			StructuredSecretFeatureMask.All,
+			StructuredSecretDetector.ComputeFeatureMaskForAnalysis("https://host/path?key=value"));
+	}
+
+	[Fact]
+	public void StructuredPrescan_AllStructuredRuleShapesMatchUnfilteredDetection()
+	{
+		(string Path, string Content)[] fixtures =
+		[
+			("settings.txt", "postgres://admin:live-password@db.local/app"),
+			("db.txt", "Server=db;User Id=sa;Password=Admin123!;Database=app"),
+			(".env", "DB_PASSWORD=Admin123!"),
+			("Dockerfile", "ENV DB_PASSWORD Admin123!"),
+			("request.http", "Authorization: Bearer live-token\nCookie: session=live-cookie"),
+			(".pgpass", "db.local:5432:app:admin:Admin123!"),
+			(".netrc", "machine api.internal login build password Admin123!"),
+			("appsettings.json", "{ \"Jwt\": { \"Secret\": \"signing phrase\" } }"),
+			("Web.config", "<add key=\"Password\" value=\"Admin123!\" />"),
+			("settings.py", "SECRET_KEY = \"short signing phrase\"")
+		];
+		var stack = SmartSecretStack.DotNet |
+		            SmartSecretStack.Node |
+		            SmartSecretStack.Python |
+		            SmartSecretStack.Jvm |
+		            SmartSecretStack.Terraform |
+		            SmartSecretStack.Container;
+
+		foreach (var (path, content) in fixtures)
+		{
+			var withPrescan = StructuredSecretDetector.Detect(
+				path,
+				content,
+				stack,
+				TestContext.Current.CancellationToken);
+			var withoutPrescan = StructuredSecretDetector.DetectWithoutPrescanForAnalysis(
+				path,
+				content,
+				stack);
+
+			Assert.Equal(withoutPrescan, withPrescan);
+		}
+	}
+
+	[Fact]
+	public void StructuredPrescan_SeededNegativeCorpusMatchesUnfilteredDetection()
+	{
+		const string alphabet =
+			"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :=/_-.;{}[]()'\"\r\n";
+		string[] paths = ["notes.txt", "source.cs", "settings.json", ".env", "request.http"];
+		var random = new Random(0x5EC8E7);
+		var buffer = new char[2048];
+
+		for (var fixtureIndex = 0; fixtureIndex < 512; fixtureIndex++)
+		{
+			var length = random.Next(buffer.Length + 1);
+			for (var index = 0; index < length; index++)
+				buffer[index] = alphabet[random.Next(alphabet.Length)];
+			var content = new string(buffer, 0, length);
+			var path = paths[fixtureIndex % paths.Length];
+
+			var withPrescan = StructuredSecretDetector.Detect(
+				path,
+				content,
+				SmartSecretStack.None,
+				TestContext.Current.CancellationToken);
+			var withoutPrescan = StructuredSecretDetector.DetectWithoutPrescanForAnalysis(path, content);
+
+			Assert.Equal(withoutPrescan, withPrescan);
+		}
 	}
 
 	[Fact(Timeout = 5_000)]

@@ -38,6 +38,7 @@
   "Toast.Git.NoUpdates": "Жаңартулар жоқ",
   "Toast.Git.BranchSwitched": "Бұтақ ауыстырылды: {0}",
   "Toast.Refresh.Success": "Жаңартылды",
+  "Scan.Error.Incomplete": "Жоба толығымен оқылмады. Соңғы дұрыс деректер көрсетіліп тұр. Қайта жаңартыңыз.",
   "Toast.Settings.Reset": "Баптаулар қалпына келтірілді",
   "Toast.Data.Reset": "Жоба деректері қалпына келтірілді",
   "Toast.Operation.LoadCanceled": "Жобаны жүктеу тоқтатылды",
@@ -313,6 +314,7 @@
   "Git.Error.NetworkError": "Желі қатесі:\n{0}",
   "Git.Error.NoInternetConnection": "Репозиторийді клондау мүмкін болмады. Интернет қосылысын тексеріңіз.",
   "Git.Error.BranchSwitchFailed": "Тармақты ауыстыру мүмкін болмады:\n{0}",
+  "Git.Error.WorktreeBranchUnavailable": "Кэштегі көшірме үшін тармақты ауыстыру қолжетімсіз: {0}",
   "Git.Error.UpdateFailed": "Жаңартуларды алу мүмкін болмады:\n{0}",
 
   "Dialog.OK": "OK",
@@ -470,6 +472,7 @@
   "Terminal.Error.ProfileUnresolved": "Таңдалған профильді анықтау мүмкін болмады.",
   "Terminal.Error.ProfileInvalid": "Тасымалданатын профиль жарамсыз немесе оқылмайды.",
   "Terminal.Error.ProfileWriteFailed": "Профильді сақтау мүмкін болмады.",
+  "Terminal.Error.ProfileSelectionTooLarge": "Профиль таңдауы 100 000 элемент сақтау шегінен асты және сақталмады.",
   "Terminal.Error.ProfileDestinationExists": "Профильдің межелі нысаны бұрыннан бар.",
   "Terminal.Error.ForceNotSupported": "Бұл шығыс түрі үшін --force қолданылмайды.",
   "Terminal.Error.ZipExtensionRequired": "ZIP шығысының кеңейтімі .zip болуы керек.",

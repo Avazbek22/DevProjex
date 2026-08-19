@@ -1037,6 +1037,14 @@ public partial class MainWindow : Window
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
             return false;
         }
+        catch (RepositoryBranchUnavailableException exception)
+        {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "branch-unavailable");
+            await ShowErrorAsync(FormatRepositoryBranchUnavailableMessage(exception));
+            return false;
+        }
         catch
         {
             if (ownsCandidateSession)

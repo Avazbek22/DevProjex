@@ -79,7 +79,14 @@ public sealed class ProfileCommandHandler(
 				return CommandLineExitCodes.PolicyFailure;
 			}
 			var legacy = ToLegacyProfile(plan);
-			if (!services.LocalProfileStore.TrySaveProfile(projectPath, legacy))
+			var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(projectPath, legacy);
+			if (saveResult.WasTruncated)
+			{
+				throw new PortableProjectProfileException(
+					"DPX-CLI-PROFILE-SELECTION-TOO-LARGE",
+					services.Localization["Terminal.Error.ProfileSelectionTooLarge"]);
+			}
+			if (!saveResult.Succeeded)
 			{
 				throw new PortableProjectProfileException(
 					"DPX-CLI-PROFILE-WRITE-FAILED",

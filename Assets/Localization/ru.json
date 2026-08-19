@@ -38,6 +38,7 @@
   "Toast.Git.NoUpdates": "Обновлений нет",
   "Toast.Git.BranchSwitched": "Ветка переключена на: {0}",
   "Toast.Refresh.Success": "Обновлено",
+  "Scan.Error.Incomplete": "Не удалось полностью прочитать проект. Показаны последние корректные данные. Повторите обновление.",
   "Toast.Settings.Reset": "Настройки сброшены",
   "Toast.Data.Reset": "Данные проектов сброшены",
   "Toast.Operation.LoadCanceled": "Загрузка проекта отменена",
@@ -313,6 +314,7 @@
   "Git.Error.NetworkError": "Ошибка сети:\n{0}",
   "Git.Error.NoInternetConnection": "Не удалось клонировать репозиторий. Пожалуйста, проверьте подключение к интернету.",
   "Git.Error.BranchSwitchFailed": "Не удалось переключить ветку:\n{0}",
+  "Git.Error.WorktreeBranchUnavailable": "Переключение веток недоступно для кэшированной копии: {0}",
   "Git.Error.UpdateFailed": "Не удалось получить обновления:\n{0}",
 
   "Dialog.OK": "OK",
@@ -488,6 +490,7 @@
   "Terminal.Error.ProfileUnresolved": "Не удалось разрешить выбранный профиль.",
   "Terminal.Error.ProfileInvalid": "Переносимый профиль недопустим или недоступен для чтения.",
   "Terminal.Error.ProfileWriteFailed": "Не удалось сохранить профиль.",
+  "Terminal.Error.ProfileSelectionTooLarge": "Выбор профиля превышает лимит хранения в 100 000 элементов и не был сохранён.",
   "Terminal.Error.ProfileDestinationExists": "Файл профиля уже существует.",
   "Terminal.Error.ForceNotSupported": "--force не поддерживается для этого типа результата.",
   "Terminal.Error.ZipExtensionRequired": "ZIP-файл должен иметь расширение .zip.",

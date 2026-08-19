@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using Avalonia.Interactivity;
 using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;

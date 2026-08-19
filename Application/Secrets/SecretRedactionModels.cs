@@ -1,5 +1,3 @@
-using DevProjex.Application.Compression;
-
 namespace DevProjex.Application.Secrets;
 
 public enum SecretPreviewSpanState

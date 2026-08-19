@@ -465,7 +465,8 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			"https://github.com/example/offline.git",
 			"feature/offline",
 			128,
-			git: true);
+			git: true,
+			initializeGit: true);
 		var recentStore = new RecentProjectsStore(() => appDataPath);
 		recentStore.AddRepository(recentStore.Load(), recentRepositoryUrl);
 		var git = new FailingNetworkGitRepositoryService();
@@ -523,7 +524,8 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			"https://github.com/example/enter-cache.git",
 			"feature/enter",
 			64,
-			git: true);
+			git: true,
+			initializeGit: true);
 		var git = new FailingNetworkGitRepositoryService();
 		var window = await CreateWindowAsync(appDataPath, cache, git);
 
@@ -1212,15 +1214,51 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		string repositoryUrl,
 		string branch,
 		int payloadSize,
-		bool git)
+		bool git,
+		bool initializeGit = false)
 	{
 		var staging = cache.CreateRepositoryStagingDirectory(repositoryUrl);
-		if (git)
+		if (initializeGit)
+		{
+			InitializeGitRepository(staging, branch);
+		}
+		else if (git)
+		{
 			Directory.CreateDirectory(Path.Combine(staging, ".git"));
+		}
 		File.WriteAllText(Path.Combine(staging, "payload.txt"), new string('x', payloadSize));
+		if (initializeGit)
+		{
+			RunGit(staging, ["add", "payload.txt"]);
+			RunGit(staging, ["commit", "-m", "cache fixture"]);
+			if (!string.Equals(branch, "main", StringComparison.Ordinal))
+				RunGit(staging, ["branch", branch]);
+		}
 		var published = cache.PublishRepositoryDirectory(staging, repositoryUrl);
 		cache.RecordIndexedRepository(repositoryUrl, published, branch);
 		return published;
+	}
+
+	private static void InitializeGitRepository(string repositoryPath, string branch)
+	{
+		RunGit(repositoryPath, ["init", "--initial-branch=main"]);
+		RunGit(repositoryPath, ["config", "user.email", "tests@devprojex.local"]);
+		RunGit(repositoryPath, ["config", "user.name", "DevProjex Tests"]);
+		Assert.True(GitBranchNameValidator.IsValid(branch));
+	}
+
+	private static void RunGit(string repositoryPath, IReadOnlyList<string> arguments)
+	{
+		using var process = new Process
+		{
+			StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, arguments)
+		};
+		Assert.True(process.Start());
+		process.StandardInput.Close();
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		process.WaitForExit();
+		Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error}{output}");
 	}
 
 	private static async Task WaitForCatalogAsync(MainWindow window, int? expectedCount = null)

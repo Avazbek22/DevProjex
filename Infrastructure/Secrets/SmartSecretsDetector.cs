@@ -392,11 +392,32 @@ internal static class StructuredSecretDetector
 		budget.Checkpoint(cancellationToken);
 		if (content.IsEmpty)
 			return [];
+		var features = ComputeFeatureMask(content, budget, cancellationToken);
+		return DetectEnabledFeatures(
+			repositoryRelativePath,
+			content,
+			stack,
+			fileKind,
+			features,
+			budget,
+			cancellationToken);
+	}
 
+	private static IReadOnlyList<DetectedSecret> DetectEnabledFeatures(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SmartSecretStack stack,
+		StructuredSecretFileKind fileKind,
+		StructuredSecretFeatureMask features,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
+	{
 		var findings = new BudgetedSecretFindingCollection(budget, cancellationToken);
-		DetectCredentialUris(content, findings, budget, cancellationToken);
+		if ((features & StructuredSecretFeatureMask.CredentialUri) != 0)
+			DetectCredentialUris(content, findings, budget, cancellationToken);
 		budget.Checkpoint(cancellationToken);
-		DetectConnectionStrings(content, findings, budget, cancellationToken);
+		if ((features & StructuredSecretFeatureMask.ConnectionString) != 0)
+			DetectConnectionStrings(content, findings, budget, cancellationToken);
 		budget.Checkpoint(cancellationToken);
 
 		switch (fileKind)
@@ -423,6 +444,62 @@ internal static class StructuredSecretDetector
 
 		budget.Checkpoint(cancellationToken);
 		return findings;
+	}
+
+	internal static IReadOnlyList<DetectedSecret> DetectWithoutPrescanForAnalysis(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SmartSecretStack stack = SmartSecretStack.None)
+	{
+		if (content.IsEmpty)
+			return [];
+		return DetectEnabledFeatures(
+			repositoryRelativePath,
+			content,
+			stack,
+			ClassifyFile(repositoryRelativePath),
+			StructuredSecretFeatureMask.All,
+			new SecretFileInspectionBudget(),
+			CancellationToken.None);
+	}
+
+	internal static StructuredSecretFeatureMask ComputeFeatureMaskForAnalysis(
+		ReadOnlySpan<char> content) =>
+		ComputeFeatureMask(
+			content,
+			new SecretFileInspectionBudget(),
+			CancellationToken.None);
+
+	private static StructuredSecretFeatureMask ComputeFeatureMask(
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken)
+	{
+		var result = StructuredSecretFeatureMask.None;
+		var searchStart = 0;
+		while (searchStart < content.Length && result != StructuredSecretFeatureMask.All)
+		{
+			budget.Checkpoint(cancellationToken);
+			var relativeIndex = content[searchStart..].IndexOfAny(':', '=');
+			if (relativeIndex < 0)
+				break;
+
+			var index = searchStart + relativeIndex;
+			if (content[index] == '=')
+			{
+				result |= StructuredSecretFeatureMask.ConnectionString;
+			}
+			else if (index + 2 < content.Length &&
+			         content[index + 1] == '/' &&
+			         content[index + 2] == '/')
+			{
+				result |= StructuredSecretFeatureMask.CredentialUri;
+			}
+
+			searchStart = index + 1;
+		}
+
+		return result;
 	}
 
 	internal static bool UsesScopedVocabulary(StructuredSecretFileKind fileKind) =>
@@ -1646,4 +1723,13 @@ internal static class StructuredSecretDetector
 		PgPass,
 		Netrc
 	}
+}
+
+[Flags]
+internal enum StructuredSecretFeatureMask : byte
+{
+	None = 0,
+	CredentialUri = 1 << 0,
+	ConnectionString = 1 << 1,
+	All = CredentialUri | ConnectionString
 }

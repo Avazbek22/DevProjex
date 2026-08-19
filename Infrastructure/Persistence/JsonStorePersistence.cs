@@ -56,14 +56,23 @@ internal static class JsonStorePersistence
 			document,
 			serializerOptions,
 			flushToDisk: false,
-			maximumPayloadBytes: long.MaxValue);
+			maximumPayloadBytes: long.MaxValue,
+			requireBackup: false,
+			JsonStoreWriteOperations.Default);
 
 	public static bool TryWriteAtomic<TDocument>(
 		JsonStoreFileSet fileSet,
 		TDocument document,
 		JsonSerializerOptions serializerOptions,
 		long maximumPayloadBytes)
-		=> TryWriteAtomic(fileSet, document, serializerOptions, flushToDisk: false, maximumPayloadBytes);
+		=> TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: false,
+			maximumPayloadBytes,
+			requireBackup: false,
+			JsonStoreWriteOperations.Default);
 
 	public static bool TryWriteAtomicDurable<TDocument>(
 		JsonStoreFileSet fileSet,
@@ -74,22 +83,48 @@ internal static class JsonStorePersistence
 			document,
 			serializerOptions,
 			flushToDisk: true,
-			maximumPayloadBytes: long.MaxValue);
+			maximumPayloadBytes: long.MaxValue,
+			requireBackup: true,
+			JsonStoreWriteOperations.Default);
 
 	public static bool TryWriteAtomicDurable<TDocument>(
 		JsonStoreFileSet fileSet,
 		TDocument document,
 		JsonSerializerOptions serializerOptions,
 		long maximumPayloadBytes)
-		=> TryWriteAtomic(fileSet, document, serializerOptions, flushToDisk: true, maximumPayloadBytes);
+		=> TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: true,
+			maximumPayloadBytes,
+			requireBackup: true,
+			JsonStoreWriteOperations.Default);
+
+	internal static bool TryWriteAtomicDurable<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions,
+		JsonStoreWriteOperations writeOperations) =>
+		TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: true,
+			maximumPayloadBytes: long.MaxValue,
+			requireBackup: true,
+			writeOperations);
 
 	private static bool TryWriteAtomic<TDocument>(
 		JsonStoreFileSet fileSet,
 		TDocument document,
 		JsonSerializerOptions serializerOptions,
 		bool flushToDisk,
-		long maximumPayloadBytes)
+		long maximumPayloadBytes,
+		bool requireBackup,
+		JsonStoreWriteOperations writeOperations)
     {
+		ArgumentNullException.ThrowIfNull(writeOperations);
 		string? tempPath = null;
         try
         {
@@ -114,22 +149,25 @@ internal static class JsonStorePersistence
 				stream.Flush(flushToDisk);
 			}
 
-            try
+            if (File.Exists(fileSet.PrimaryPath))
             {
-                // Replace keeps the primary update atomic on supported platforms
-                // and gives us a rollback snapshot for free when the file already exists.
-                if (File.Exists(fileSet.PrimaryPath))
-                    File.Replace(tempPath, fileSet.PrimaryPath, fileSet.BackupPath);
-                else
-                    File.Move(tempPath, fileSet.PrimaryPath);
+				try
+				{
+					// Replace keeps the primary update atomic and creates the rollback snapshot.
+					writeOperations.Replace(tempPath, fileSet.PrimaryPath, fileSet.BackupPath);
+				}
+				catch (NotSupportedException)
+				{
+					File.Move(tempPath, fileSet.PrimaryPath, overwrite: true);
+				}
             }
-            catch
+			else
             {
-                File.Move(tempPath, fileSet.PrimaryPath, overwrite: true);
+				File.Move(tempPath, fileSet.PrimaryPath);
             }
 
-            TryMirrorPrimaryToBackup(fileSet);
-            return true;
+			var backupMirrored = TryMirrorPrimaryToBackup(fileSet, writeOperations);
+			return backupMirrored || !requireBackup;
         }
         catch
         {
@@ -151,18 +189,21 @@ internal static class JsonStorePersistence
 		}
     }
 
-    private static void TryMirrorPrimaryToBackup(JsonStoreFileSet fileSet)
+	private static bool TryMirrorPrimaryToBackup(
+		JsonStoreFileSet fileSet,
+		JsonStoreWriteOperations writeOperations)
     {
         try
         {
             // The backup must mirror the final committed primary snapshot.
             // This keeps recovery deterministic across multiple processes.
             if (File.Exists(fileSet.PrimaryPath))
-                File.Copy(fileSet.PrimaryPath, fileSet.BackupPath, overwrite: true);
+				writeOperations.Copy(fileSet.PrimaryPath, fileSet.BackupPath, overwrite: true);
+			return true;
         }
         catch
         {
-            // Best effort only. The primary file remains authoritative.
+			return false;
         }
     }
 
@@ -200,4 +241,19 @@ internal static class JsonStorePersistence
             return false;
         }
     }
+}
+
+internal sealed class JsonStoreWriteOperations(
+	Action<string, string, string> replace,
+	Action<string, string, bool> copy)
+{
+	internal static JsonStoreWriteOperations Default { get; } = new(
+		static (source, destination, backup) => File.Replace(source, destination, backup),
+		static (source, destination, overwrite) => File.Copy(source, destination, overwrite));
+
+	internal void Replace(string source, string destination, string backup) =>
+		replace(source, destination, backup);
+
+	internal void Copy(string source, string destination, bool overwrite) =>
+		copy(source, destination, overwrite);
 }

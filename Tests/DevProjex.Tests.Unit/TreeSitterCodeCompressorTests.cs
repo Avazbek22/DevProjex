@@ -284,7 +284,19 @@ public sealed class TreeSitterCodeCompressorTests
 		var plans = await Task.WhenAll(tasks);
 
 		Assert.All(plans, plan => Assert.Equal(CodeCompressionOutcome.Compressed, plan.Outcome));
-		Assert.Equal(bodyPacks.Length, Directory.GetFiles(locator.RootDirectory).Length);
+		var materializedFiles = Directory.GetFiles(locator.RootDirectory);
+		var materializedLibraryNames = materializedFiles
+			.Select(static path => Path.GetFileName(path)!)
+			.Where(static name => !string.Equals(name, ".devprojex.lease", StringComparison.Ordinal))
+			.ToHashSet(StringComparer.Ordinal);
+		var expectedLibraryNames = bodyPacks
+			.Select(static pack => pack.Library)
+			.Distinct(StringComparer.Ordinal)
+			.Select(GrammarPlatform.ResolveFileName)
+			.ToHashSet(StringComparer.Ordinal);
+		Assert.True(expectedLibraryNames.SetEquals(materializedLibraryNames));
+		Assert.Single(materializedFiles, static path =>
+			string.Equals(Path.GetFileName(path), ".devprojex.lease", StringComparison.Ordinal));
 	}
 
 	[Fact]

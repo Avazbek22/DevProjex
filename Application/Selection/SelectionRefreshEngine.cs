@@ -70,6 +70,7 @@ public sealed class SelectionRefreshEngine(
             IgnoreOptionStateCache: dynamicSection.IgnoreOptionStateCache,
             RootAccessDenied: scanRootSection.RootAccessDenied || dynamicSection.RootAccessDenied,
             HadAccessDenied: scanRootSection.HadAccessDenied || dynamicSection.HadAccessDenied,
+            HadScanFailure: scanRootSection.HadScanFailure || dynamicSection.HadScanFailure,
             TreeInventory: dynamicSection.TreeInventory,
             VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
             GitEvidence: dynamicSection.SnapshotState.GitEvidence,
@@ -106,6 +107,7 @@ public sealed class SelectionRefreshEngine(
             IgnoreOptionStateCache: dynamicSection.IgnoreOptionStateCache,
             RootAccessDenied: scanRootSection.RootAccessDenied || dynamicSection.RootAccessDenied,
             HadAccessDenied: scanRootSection.HadAccessDenied || dynamicSection.HadAccessDenied,
+            HadScanFailure: scanRootSection.HadScanFailure || dynamicSection.HadScanFailure,
             TreeInventory: dynamicSection.TreeInventory,
             VisibleExtensionOptions: dynamicSection.VisibleExtensionOptions,
             GitEvidence: dynamicSection.SnapshotState.GitEvidence,
@@ -155,7 +157,8 @@ public sealed class SelectionRefreshEngine(
             options,
             CollectCheckedSelectionNames(options, PathComparer.Default),
             scan.RootAccessDenied,
-            scan.HadAccessDenied);
+            scan.HadAccessDenied,
+            scan.HadScanFailure);
     }
 
     private static ScanRootSectionSnapshot? BuildKnownScanRootSection(SelectionRefreshContext context)
@@ -167,7 +170,8 @@ public sealed class SelectionRefreshEngine(
             context.CurrentRootOptions,
             CollectCheckedSelectionNames(context.CurrentRootOptions, PathComparer.Default),
             RootAccessDenied: false,
-            HadAccessDenied: false);
+            HadAccessDenied: false,
+            HadScanFailure: false);
     }
 
     private DynamicSectionSnapshot BuildDynamicSection(
@@ -186,6 +190,7 @@ public sealed class SelectionRefreshEngine(
         IReadOnlyList<SelectionOption>? currentRootOptions = null;
         var rootAccessDenied = false;
         var hadAccessDenied = false;
+        var hadScanFailure = false;
         var visitedStates = new List<DynamicConvergenceState>(MaximumDynamicSnapshotPasses);
 
         // Dynamic ignore availability can feed back into the selected ignore set, especially
@@ -201,11 +206,21 @@ public sealed class SelectionRefreshEngine(
                 currentSelectedIgnoreOptions,
                 currentIgnoreStateCache,
                 previousRuntimeSnapshot,
-                reusableWorkspaceScan: null,
                 cancellationToken);
 
             rootAccessDenied |= snapshot.RootAccessDenied;
             hadAccessDenied |= snapshot.HadAccessDenied;
+            hadScanFailure |= snapshot.HadScanFailure;
+			if (hadScanFailure)
+			{
+				return snapshot with
+				{
+					RootOptions = currentRootOptions,
+					RootAccessDenied = rootAccessDenied,
+					HadAccessDenied = hadAccessDenied,
+					HadScanFailure = true
+				};
+			}
             var refreshPlan = IgnoreSectionRefreshPlanBuilder.Build(
                 previousSnapshot,
                 snapshot.SnapshotState,
@@ -220,7 +235,8 @@ public sealed class SelectionRefreshEngine(
                 {
                     RootOptions = currentRootOptions,
                     RootAccessDenied = rootAccessDenied,
-                    HadAccessDenied = hadAccessDenied
+                    HadAccessDenied = hadAccessDenied,
+                    HadScanFailure = hadScanFailure
                 };
             }
 
@@ -234,6 +250,7 @@ public sealed class SelectionRefreshEngine(
                 currentRootOptions = rebuiltRootSection.RootOptions;
                 rootAccessDenied |= rebuiltRootSection.RootAccessDenied;
                 hadAccessDenied |= rebuiltRootSection.HadAccessDenied;
+                hadScanFailure |= rebuiltRootSection.HadScanFailure;
             }
 
             currentSelectedIgnoreOptions = snapshot.SelectedIgnoreOptions;
@@ -271,7 +288,6 @@ public sealed class SelectionRefreshEngine(
         IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
         IReadOnlyDictionary<IgnoreOptionId, bool> ignoreStateCache,
         IgnoreSectionSnapshotState previousRuntimeSnapshotState,
-        ProjectWorkspaceScanSnapshot? reusableWorkspaceScan,
         CancellationToken cancellationToken)
     {
         var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots);
@@ -288,9 +304,11 @@ public sealed class SelectionRefreshEngine(
             extensionScanRules,
             ignoreRules,
             effectiveExtensionPolicy,
-            reusableWorkspaceScan,
             cancellationToken);
         var scanData = scan.Value.IgnoreSection;
+        var rootAccessDenied = scan.RootAccessDenied;
+        var hadAccessDenied = scan.HadAccessDenied;
+        var hadScanFailure = scan.HadScanFailure;
 
         var snapshotState = CreateSnapshotState(scanData);
         snapshotState = PreserveActiveRuntimeSnapshotState(
@@ -342,9 +360,11 @@ public sealed class SelectionRefreshEngine(
                 extensionScanRules,
                 ignoreRules,
                 ExtensionOptionProjection.BuildResolvedPolicy(extensionOptions),
-                reusableWorkspaceScan: null,
                 cancellationToken);
             scanData = scan.Value.IgnoreSection;
+            rootAccessDenied |= scan.RootAccessDenied;
+            hadAccessDenied |= scan.HadAccessDenied;
+            hadScanFailure |= scan.HadScanFailure;
 
             snapshotState = CreateSnapshotState(scanData);
             snapshotState = PreserveActiveRuntimeSnapshotState(
@@ -402,11 +422,11 @@ public sealed class SelectionRefreshEngine(
             IgnoreOptionStateCache: ignoreState.IgnoreOptionStateCache,
             SelectedIgnoreOptions: ignoreState.SelectedIgnoreOptions,
             SnapshotState: snapshotState,
-            RootAccessDenied: scan.RootAccessDenied,
-            HadAccessDenied: scan.HadAccessDenied,
+            RootAccessDenied: rootAccessDenied,
+            HadAccessDenied: hadAccessDenied,
+            HadScanFailure: hadScanFailure,
             TreeInventory: scan.Value.TreeInventory,
-            EffectiveRules: ignoreRules,
-            WorkspaceScan: scan.Value);
+            EffectiveRules: ignoreRules);
     }
 
 	private static IReadOnlyList<SelectionOption> ApplyExplicitExtensionSelection(
@@ -431,23 +451,10 @@ public sealed class SelectionRefreshEngine(
         IgnoreRules extensionScanRules,
         IgnoreRules ignoreRules,
         IExtensionInclusionPolicy? effectiveExtensionPolicy,
-        ProjectWorkspaceScanSnapshot? reusableWorkspaceScan,
         CancellationToken cancellationToken)
     {
         const bool includeDirectoryToggleProbeRoots = true;
         const bool includeControllerImpactProbeRoots = true;
-        if (reusableWorkspaceScan is not null &&
-            ProjectWorkspaceScanProjection.TryProjectSelectedRoots(
-                reusableWorkspaceScan,
-                selectedRoots,
-                includeDirectoryToggleProbeRoots,
-                includeControllerImpactProbeRoots,
-                retainedRemovedRootEmptyFolderImpactRoots: null,
-                out var projectedScan))
-        {
-            return projectedScan;
-        }
-
         return scanOptions.GetProjectWorkspaceSnapshotForRootFolders(
                 context.Path,
                 selectedRoots,
@@ -457,7 +464,6 @@ public sealed class SelectionRefreshEngine(
                 includeDirectoryToggleProbeRoots,
                 cancellationToken,
                 includeControllerImpactProbeRoots,
-                captureRootScanBreakdown: true,
                 captureTreeInventory: context.CaptureTreeInventory);
     }
 
@@ -1055,7 +1061,8 @@ public sealed class SelectionRefreshEngine(
         IReadOnlyList<SelectionOption> RootOptions,
         IReadOnlySet<string> RootFolders,
         bool RootAccessDenied,
-        bool HadAccessDenied);
+        bool HadAccessDenied,
+        bool HadScanFailure);
 
     private sealed record DynamicSectionSnapshot(
         IReadOnlyList<SelectionOption>? RootOptions,
@@ -1071,9 +1078,9 @@ public sealed class SelectionRefreshEngine(
         IgnoreSectionSnapshotState SnapshotState,
         bool RootAccessDenied,
         bool HadAccessDenied,
+        bool HadScanFailure,
         ProjectTreeInventorySnapshot? TreeInventory,
-        IgnoreRules EffectiveRules,
-        ProjectWorkspaceScanSnapshot WorkspaceScan);
+        IgnoreRules EffectiveRules);
 
     private sealed record IgnoreOptionResolutionResult(
         IReadOnlyList<ResolvedIgnoreOptionState> VisibleOptions,

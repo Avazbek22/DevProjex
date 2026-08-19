@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using DevProjex.Application.Context;
 using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Secrets;

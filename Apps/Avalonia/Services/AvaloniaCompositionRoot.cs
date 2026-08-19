@@ -10,8 +10,6 @@ using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.TerminalCommands;
 using DevProjex.Infrastructure.Updates;
 using DevProjex.Infrastructure.Secrets;
-using DevProjex.Application.Secrets;
-
 using DevProjex.Infrastructure.Compression;
 
 namespace DevProjex.Avalonia.Services;

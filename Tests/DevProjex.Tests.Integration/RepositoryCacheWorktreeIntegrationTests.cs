@@ -95,7 +95,78 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			TestContext.Current.CancellationToken);
 		Assert.NotNull(afterCrashStyleRelease);
 		Assert.Equal(basePath, afterCrashStyleRelease.RepositoryPath, PathComparer.Default);
-		Assert.False(Directory.Exists(extraCopyPath));
+		await WaitUntilAsync(() => !Directory.Exists(extraCopyPath));
+	}
+
+	[Fact]
+	public async Task RequestedMissingBranch_FailsWithoutChangingIndexedMetadata()
+	{
+		await using var source = await GitTestRepository.CreateAsync(
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var cache = new TemporaryDirectory();
+		var service = new RepoCacheService(cache.Path);
+		var git = new GitRepositoryService();
+		await PublishGitAsync(service, git, source, TestContext.Current.CancellationToken);
+		var before = Assert.IsType<RepositoryCacheIndexEntry>(service.FindIndexedRepository(source.RepositoryUrl));
+
+		var exception = await Assert.ThrowsAsync<RepositoryBranchUnavailableException>(
+			() => service.TryAcquireRepositorySessionAsync(
+				source.RepositoryUrl,
+				"missing/branch",
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(RepositoryBranchUnavailableReason.NotFound, exception.Reason);
+		var after = Assert.IsType<RepositoryCacheIndexEntry>(service.FindIndexedRepository(source.RepositoryUrl));
+		Assert.Equal(before.Branch, after.Branch);
+		Assert.Equal(before.LastUsedUtc, after.LastUsedUtc);
+	}
+
+	[Fact]
+	public async Task IndexedBranchMissingLocally_IsFetchedAndRestoredFromOrigin()
+	{
+		await using var source = await GitTestRepository.CreateAsync(
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var cache = new TemporaryDirectory();
+		var service = new RepoCacheService(cache.Path);
+		var git = new GitRepositoryService();
+		var basePath = await PublishGitAsync(service, git, source, TestContext.Current.CancellationToken);
+		service.RecordIndexedRepository(source.RepositoryUrl, basePath, source.FeatureBranchName);
+		await RunGitAsync(basePath, ["update-ref", "-d", $"refs/remotes/origin/{source.FeatureBranchName}"]);
+		await RunGitAsync(basePath, ["update-ref", "-d", $"refs/heads/{source.FeatureBranchName}"]);
+
+		using var session = await service.TryAcquireRepositorySessionAsync(
+			source.RepositoryUrl,
+			source.FeatureBranchName,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(session);
+		Assert.Equal(source.FeatureBranchName, session.Branch);
+		Assert.True(File.Exists(Path.Combine(session.RepositoryPath, "feature", "feature.txt")));
+		Assert.Equal(
+			source.FeatureBranchName,
+			await git.GetCurrentBranchAsync(session.RepositoryPath, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task IndexedBranchRemovedFromRepository_FailsInsteadOfOpeningHead()
+	{
+		await using var source = await GitTestRepository.CreateAsync(
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var cache = new TemporaryDirectory();
+		var service = new RepoCacheService(cache.Path);
+		var git = new GitRepositoryService();
+		var basePath = await PublishGitAsync(service, git, source, TestContext.Current.CancellationToken);
+		service.RecordIndexedRepository(source.RepositoryUrl, basePath, source.FeatureBranchName);
+		await RunGitAsync(source.BareRepositoryPath, ["update-ref", "-d", $"refs/heads/{source.FeatureBranchName}"]);
+		await RunGitAsync(basePath, ["update-ref", "-d", $"refs/remotes/origin/{source.FeatureBranchName}"]);
+		await RunGitAsync(basePath, ["update-ref", "-d", $"refs/heads/{source.FeatureBranchName}"]);
+
+		var exception = await Assert.ThrowsAsync<RepositoryBranchUnavailableException>(
+			() => service.TryAcquireRepositorySessionAsync(
+				source.RepositoryUrl,
+				source.FeatureBranchName,
+				TestContext.Current.CancellationToken));
+		Assert.Equal(RepositoryBranchUnavailableReason.NotFound, exception.Reason);
 	}
 
 	[Fact]
@@ -307,6 +378,38 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 	}
 
 	[Fact]
+	public async Task UnsupportedWorktreeFallback_RejectsDifferentRequestedBranch()
+	{
+		await using var source = await GitTestRepository.CreateAsync(
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var cache = new TemporaryDirectory();
+		var publishingService = new RepoCacheService(cache.Path);
+		var git = new GitRepositoryService();
+		var basePath = await PublishGitAsync(
+			publishingService,
+			git,
+			source,
+			TestContext.Current.CancellationToken);
+		var service = new RepoCacheService(
+			cache.Path,
+			RepositoryCachePolicy.Default,
+			TimeProvider.System,
+			new UnsupportedWorktreeManager());
+
+		var exception = await Assert.ThrowsAsync<RepositoryBranchUnavailableException>(
+			() => service.TryAcquireRepositorySessionAsync(
+				source.RepositoryUrl,
+				source.FeatureBranchName,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(RepositoryBranchUnavailableReason.WorktreeUnsupported, exception.Reason);
+		Assert.Equal(source.DefaultBranchName, await git.GetCurrentBranchAsync(
+			basePath,
+			TestContext.Current.CancellationToken));
+		Assert.Equal(source.DefaultBranchName, service.FindIndexedRepository(source.RepositoryUrl)?.Branch);
+	}
+
+	[Fact]
 	public async Task ReleasedRepository_IsEvictedAndNextOpenClonesAgain()
 	{
 		await using var source = await GitTestRepository.CreateAsync(
@@ -418,6 +521,31 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 		process.Start();
 		await process.WaitForExitAsync(cancellationToken);
 		return process.ExitCode != 0;
+	}
+
+	private static async Task RunGitAsync(string workingDirectory, IReadOnlyList<string> arguments)
+	{
+		using var process = new Process
+		{
+			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, arguments)
+		};
+		process.Start();
+		process.StandardInput.Close();
+		var output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		await Task.WhenAll(output, error);
+		Assert.True(process.ExitCode == 0, await error);
+	}
+
+	private static async Task WaitUntilAsync(Func<bool> condition)
+	{
+		var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+		while (!condition())
+		{
+			Assert.True(DateTime.UtcNow < deadline, "The background worktree cleanup did not finish.");
+			await Task.Delay(25, TestContext.Current.CancellationToken);
+		}
 	}
 
 	private sealed class UnsupportedWorktreeManager : IGitWorktreeManager

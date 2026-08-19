@@ -1,6 +1,5 @@
 using DevProjex.Avalonia.Collections;
 using DevProjex.Avalonia.Coordinators;
-using DevProjex.Application.Secrets;
 using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 

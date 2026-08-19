@@ -64,6 +64,15 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
             if (host.TryHandleRootAccessDenied(input, result.Tree))
                 return TreeRefreshOutcome.Skipped;
 
+			if (result.Tree.HadScanFailure)
+			{
+				if (!host.IsTreeRefreshInputCurrent(input))
+					return TreeRefreshOutcome.StaleInput;
+
+				host.ReportIncompleteTreeScan();
+				return TreeRefreshOutcome.Skipped;
+			}
+
             TreeNodeViewModel root;
             using (PerformanceMetrics.Measure("BuildTreeViewModel"))
             {

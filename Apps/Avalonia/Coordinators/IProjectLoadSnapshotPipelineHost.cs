@@ -21,6 +21,8 @@ internal interface IProjectLoadSnapshotPipelineHost
 
     bool TryHandleTreeRootAccessDenied(TreeRefreshInput input, BuildTreeResult result);
 
+	void ReportIncompleteTreeScan();
+
     TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result);
 
     void ApplyProjectLoadSnapshot(ProjectLoadSnapshot snapshot, CancellationToken cancellationToken);

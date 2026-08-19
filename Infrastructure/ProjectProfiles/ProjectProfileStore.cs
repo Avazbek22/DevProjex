@@ -76,25 +76,40 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		_persistentMarks.ApplyDeltaAsync(localProjectPath, delta, cancellationToken);
 
 	public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
-		=> TrySaveProfile(localProjectPath, profile, DateTimeOffset.UtcNow);
+		=> _ = TrySaveProfileWithResult(localProjectPath, profile);
 
 	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
-		=> TrySaveProfile(localProjectPath, profile, DateTimeOffset.UtcNow);
+		=> TrySaveProfileWithResult(localProjectPath, profile).Succeeded;
 
 	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
+		=> TrySaveProfileWithResult(localProjectPath, profile, updatedUtc).Succeeded;
+
+	public ProjectProfileSaveResult TrySaveProfileWithResult(
+		string localProjectPath,
+		ProjectSelectionProfile profile) =>
+		TrySaveProfileWithResult(localProjectPath, profile, DateTimeOffset.UtcNow);
+
+	private ProjectProfileSaveResult TrySaveProfileWithResult(
+		string localProjectPath,
+		ProjectSelectionProfile profile,
+		DateTimeOffset updatedUtc)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
-			return false;
+			return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
+
+		var persistedProfile = ToPersistedProfile(profile, updatedUtc, out var wasTruncated);
+		if (wasTruncated)
+			return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: true);
 
 		lock (_sync)
 		{
 			var fileSet = GetFileSet();
 			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
-				return false;
+				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 
 			using var _ = heldLock;
 			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
-				return false;
+				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 			var db = LoadInternal(fileSet);
 			db.SchemaVersion = CurrentSchemaVersion;
 
@@ -104,12 +119,14 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				existing is not null &&
 				existing.UpdatedUtc > updatedUtc)
 			{
-				return true;
+				return new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
 			}
 
-			db.Profiles[normalizedPath] = ToPersistedProfile(profile, updatedUtc);
+			db.Profiles[normalizedPath] = persistedProfile;
 			PruneProfiles(db);
-			return TrySaveInternal(fileSet, db);
+			return new ProjectProfileSaveResult(
+				TrySaveInternal(fileSet, db),
+				WasTruncated: false);
 		}
 	}
 
@@ -427,25 +444,32 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		return profile;
 	}
 
-	private static PersistedProjectProfile ToPersistedProfile(ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
+	private static PersistedProjectProfile ToPersistedProfile(
+		ProjectSelectionProfile profile,
+		DateTimeOffset updatedUtc,
+		out bool wasTruncated)
 	{
 		var selectedRootFolders = profile.SelectedRootFolders
 			.Where(IsValidStoredString)
 			.Distinct(PathComparer.Default)
-			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
+			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)
 			.ToList();
 		var selectedExtensions = profile.SelectedExtensions
 			.Where(IsValidStoredString)
 			.Distinct(StringComparer.OrdinalIgnoreCase)
-			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
+			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)
 			.ToList();
 		var selectedIgnoreOptions = profile.SelectedIgnoreOptions
 			.Distinct()
 			.ToList();
-		var rootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default);
+		var rootFolderStates = NormalizeStringStateDictionary(
+			profile.RootFolderStates,
+			PathComparer.Default,
+			out var rootFolderStatesTruncated);
 		var extensionStates = NormalizeStringStateDictionary(
 			profile.ExtensionStates,
-			StringComparer.OrdinalIgnoreCase);
+			StringComparer.OrdinalIgnoreCase,
+			out var extensionStatesTruncated);
 		var ignoreOptionStates = profile.IgnoreOptionStates is null
 			? []
 			: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
@@ -453,6 +477,21 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		ReconcileSelectedStringValues(selectedExtensions, extensionStates, StringComparer.OrdinalIgnoreCase);
 		ReconcileSelectedIgnoreOptions(selectedIgnoreOptions, ignoreOptionStates);
 		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreOptionStates);
+		var selectedPaths = (profile.SelectedPaths ?? [])
+			.Where(IsValidStoredString)
+			.Select(static item => item.Trim().Replace('\\', '/'))
+			.Distinct(PathComparer.Default)
+			.OrderBy(static item => item, PathComparer.Default)
+			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)
+			.ToList();
+
+		wasTruncated = selectedRootFolders.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
+		               selectedExtensions.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
+		               selectedPaths.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
+		               rootFolderStatesTruncated ||
+		               extensionStatesTruncated ||
+		               rootFolderStates.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
+		               extensionStates.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection;
 
 		return new PersistedProjectProfile
 		{
@@ -462,13 +501,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			RootFolderStates = rootFolderStates,
 			ExtensionStates = extensionStates,
 			IgnoreOptionStates = ignoreOptionStates,
-			SelectedPaths = (profile.SelectedPaths ?? [])
-				.Where(IsValidStoredString)
-				.Select(static item => item.Trim().Replace('\\', '/'))
-				.Distinct(PathComparer.Default)
-				.OrderBy(static item => item, PathComparer.Default)
-				.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
-				.ToList(),
+			SelectedPaths = selectedPaths,
 			MarkedSecrets = null,
 			UpdatedUtc = updatedUtc
 		};
@@ -617,18 +650,34 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private static Dictionary<string, bool> NormalizeStringStateDictionary(
 		IEnumerable<KeyValuePair<string, bool>>? states,
-		StringComparer comparer)
+		StringComparer comparer) =>
+		NormalizeStringStateDictionary(states, comparer, out _);
+
+	private static Dictionary<string, bool> NormalizeStringStateDictionary(
+		IEnumerable<KeyValuePair<string, bool>>? states,
+		StringComparer comparer,
+		out bool wasTruncated)
 	{
+		wasTruncated = false;
 		var normalized = new Dictionary<string, bool>(comparer);
 		if (states is null)
 			return normalized;
 
 		foreach (var (name, isChecked) in states)
 		{
-			if (normalized.Count >= ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
-				break;
-			if (IsValidStoredString(name))
+			if (!IsValidStoredString(name))
+				continue;
+			if (normalized.ContainsKey(name))
+			{
 				normalized[name] = isChecked;
+				continue;
+			}
+			if (normalized.Count >= ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
+			{
+				wasTruncated = true;
+				break;
+			}
+			normalized[name] = isChecked;
 		}
 
 		return normalized;

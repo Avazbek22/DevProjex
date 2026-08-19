@@ -1,4 +1,3 @@
-using DevProjex.Application.Compression;
 using System.Security.Cryptography;
 
 namespace DevProjex.Application.Secrets;

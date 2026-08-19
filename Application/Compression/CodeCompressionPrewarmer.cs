@@ -111,6 +111,8 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		var retainedFacts = new ConcurrentDictionary<
 			string,
 			ContentReadFactSnapshot.RetainedContentReadFact>(PathComparer.Default);
+		var retainedFactsSync = new object();
+		long retainedFactBytes = 0;
 		var parserWorkers = Math.Max(1, Math.Min(context.Session.AnalysisWorkerCapacity, candidates.Count));
 		var channel = Channel.CreateBounded<WarmWorkItem>(new BoundedChannelOptions(parserWorkers * 2)
 		{
@@ -167,7 +169,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		var snapshot = scope.Complete();
 		Debug.Assert(snapshot.TotalFiles == Volatile.Read(ref warmed));
 		stopwatch.Stop();
-		var retainedBytes = retainedFacts.Values.Sum(static retained => retained.Fact.ApproximateRetainedBytes);
+		var retainedBytes = Volatile.Read(ref retainedFactBytes);
 		return new CodeCompressionWarmupResult(
 			candidates.Count,
 			Volatile.Read(ref warmed),
@@ -237,13 +239,13 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 
 						if (retainedPaths.Contains(path) && identifiedMetrics.Identity is { } metricsIdentity)
 						{
-							retainedFacts[path] = new ContentReadFactSnapshot.RetainedContentReadFact(
+							TryRetainFact(path, new ContentReadFactSnapshot.RetainedContentReadFact(
 								new ContentReadFact(
 									Content: null,
 									Classification: FileContentClassification.Text,
 									RawMetrics: metrics,
 									Fingerprint: null),
-								metricsIdentity);
+								metricsIdentity));
 						}
 						scope.RecordUnsupported(path, relativePath, metrics.CharCount);
 						Increment(WarmFileOutcome.Warmed, ref warmed, ref skipped, ref failed);
@@ -294,9 +296,9 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 
 					if (retainedPaths.Contains(path) && identity is { } contentIdentity)
 					{
-						retainedFacts[path] = new ContentReadFactSnapshot.RetainedContentReadFact(
+						TryRetainFact(path, new ContentReadFactSnapshot.RetainedContentReadFact(
 							fact,
-							contentIdentity);
+							contentIdentity));
 					}
 					if (scope.TryWarmCached(path, relativePath, fact.Content!, fingerprint))
 					{
@@ -396,6 +398,22 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 
 			channel.Writer.TryComplete();
 			pipelineCancellation.Cancel();
+		}
+
+		void TryRetainFact(
+			string path,
+			ContentReadFactSnapshot.RetainedContentReadFact retainedFact)
+		{
+			var actualBytes = retainedFact.Fact.ApproximateRetainedBytes;
+			lock (retainedFactsSync)
+			{
+				if (actualBytes > MaximumRetainedReadFactBytes - retainedFactBytes ||
+				    !retainedFacts.TryAdd(path, retainedFact))
+				{
+					return;
+				}
+				retainedFactBytes += actualBytes;
+			}
 		}
 
 		static async Task ObserveCompletionAsync(Task[] tasks)

@@ -86,6 +86,34 @@ public sealed class EmbeddedGrammarLibraryLocatorTests
 		Assert.Contains(staleRid, removed, PathComparer.Default);
 	}
 
+	[Fact]
+	public void PruneAbandonedDirectories_DirectoryLeasedByAnotherLocatorIsPreserved()
+	{
+		using var temporary = new TemporaryDirectory();
+		var grammars = Path.Combine(temporary.Path, "DevProjex", "grammars");
+		var currentVersion = Path.Combine(grammars, "tree-sitter-current");
+		var currentRid = Directory.CreateDirectory(
+			Path.Combine(currentVersion, GrammarPlatform.RuntimeIdentifier)).FullName;
+		var leasedRid = Directory.CreateDirectory(
+			Path.Combine(currentVersion, "leased-rid")).FullName;
+		using var leasedLocator = CreateLocator(leasedRid);
+		var library = leasedLocator.EnumerateLibraries()[0];
+		_ = leasedLocator.Resolve(library);
+		Directory.SetLastWriteTimeUtc(leasedRid, DateTime.UtcNow - TimeSpan.FromDays(2));
+		using var cleanupLocator = CreateLocator(currentRid);
+
+		var whileLeased = cleanupLocator.PruneAbandonedDirectories();
+
+		Assert.True(Directory.Exists(leasedRid));
+		Assert.DoesNotContain(leasedRid, whileLeased, PathComparer.Default);
+
+		leasedLocator.Dispose();
+		var afterRelease = cleanupLocator.PruneAbandonedDirectories();
+
+		Assert.False(Directory.Exists(leasedRid));
+		Assert.Contains(leasedRid, afterRelease, PathComparer.Default);
+	}
+
 	private static EmbeddedGrammarLibraryLocator CreateLocator(string root) =>
 		new(
 			typeof(TreeSitterCodeCompressor).Assembly,

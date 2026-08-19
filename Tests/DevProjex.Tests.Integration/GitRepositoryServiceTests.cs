@@ -296,6 +296,30 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetBranchesAsync_PreservesCaseDistinctRefs()
+    {
+        SkipIfNoGit();
+        await using var source = await GitTestRepository.CreateAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
+        var targetDir = Path.Combine(_tempDir!, "case-distinct-branches");
+        var cloneResult = await _service.CloneAsync(
+            source.RepositoryUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(cloneResult.Success, cloneResult.ErrorMessage);
+        var head = await source.GetBranchHeadAsync(source.DefaultBranchName, TestContext.Current.CancellationToken);
+        await File.AppendAllTextAsync(
+            Path.Combine(source.BareRepositoryPath, "packed-refs"),
+            $"{head} refs/heads/Feature\n{head} refs/heads/feature\n",
+            TestContext.Current.CancellationToken);
+
+        var branches = await _service.GetBranchesAsync(targetDir, TestContext.Current.CancellationToken);
+
+        Assert.Contains(branches, branch => branch.Name == "Feature");
+        Assert.Contains(branches, branch => branch.Name == "feature");
+    }
+
+    [Fact]
     public async Task GetCurrentBranchAsync_ReturnsCurrentBranch()
     {
         SkipIfNoGit();
@@ -526,6 +550,16 @@ public class GitRepositoryServiceTests : IAsyncLifetime
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             async () => await _service.GetBranchesAsync(_tempDir!, cts.Token));
+    }
+
+    [Fact]
+    public async Task GetCurrentBranchAsync_PropagatesCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _service.GetCurrentBranchAsync(_tempDir!, cancellation.Token));
     }
 
     #endregion

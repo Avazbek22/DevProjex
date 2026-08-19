@@ -1,6 +1,5 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
-using Avalonia.Media;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Context;

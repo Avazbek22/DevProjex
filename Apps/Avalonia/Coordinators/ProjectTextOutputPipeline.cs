@@ -1,5 +1,3 @@
-using DevProjex.Application.Secrets;
-
 namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed class ProjectTextOutputPipeline(

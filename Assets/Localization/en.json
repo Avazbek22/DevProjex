@@ -38,6 +38,7 @@
   "Toast.Git.NoUpdates": "No updates",
   "Toast.Git.BranchSwitched": "Switched to branch: {0}",
   "Toast.Refresh.Success": "Refreshed",
+  "Scan.Error.Incomplete": "The project could not be read completely. The last valid data is still shown. Refresh again.",
   "Toast.Settings.Reset": "Settings reset",
   "Toast.Data.Reset": "Project data reset",
   "Toast.Operation.LoadCanceled": "Project loading canceled",
@@ -313,6 +314,7 @@
   "Git.Error.NetworkError": "Network error:\n{0}",
   "Git.Error.NoInternetConnection": "Failed to clone repository. Please check your internet connection.",
   "Git.Error.BranchSwitchFailed": "Failed to switch branch:\n{0}",
+  "Git.Error.WorktreeBranchUnavailable": "Branch switching is unavailable for the cached copy: {0}",
   "Git.Error.UpdateFailed": "Failed to get updates:\n{0}",
 
   "Dialog.OK": "OK",
@@ -488,6 +490,7 @@
   "Terminal.Error.ProfileUnresolved": "The selected profile could not be resolved.",
   "Terminal.Error.ProfileInvalid": "The portable profile is invalid or cannot be read.",
   "Terminal.Error.ProfileWriteFailed": "The profile could not be saved.",
+  "Terminal.Error.ProfileSelectionTooLarge": "The profile selection exceeds the 100,000-item storage limit and was not saved.",
   "Terminal.Error.ProfileDestinationExists": "The profile destination already exists.",
   "Terminal.Error.ForceNotSupported": "--force is not supported for this output kind.",
   "Terminal.Error.ZipExtensionRequired": "ZIP output must use the .zip extension.",
