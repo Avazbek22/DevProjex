@@ -790,6 +790,17 @@ public sealed class VirtualizedPreviewTextControl : Control
         return ResolveLineNumberAtOffset(verticalOffset, TopPadding, lineHeight, ResolveLineCount());
     }
 
+    public double GetVerticalOffsetForLine(int lineNumber)
+    {
+        var lineCount = ResolveLineCount();
+        var lineHeight = ResolveLineHeight();
+        if (lineCount <= 0 || lineHeight <= 0)
+            return 0;
+
+        var normalizedLineNumber = Math.Clamp(lineNumber, 1, lineCount);
+        return TopPadding + ((normalizedLineNumber - 1) * lineHeight);
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var lineHeight = ResolveLineHeight();

@@ -588,6 +588,11 @@ public partial class MainWindow : Window
         RoutedEventArgs e)
         => await _previewSurfaceController.CopyVisibleFilePathAsync();
 
+    private void OnPreviewStickyHeaderNavigate(
+        object? sender,
+        RoutedEventArgs e)
+        => _previewSurfaceController.ScrollCurrentStickySectionToStart();
+
     private bool TryGetCurrentPreviewStickySection(
         out PreviewDocumentSection currentSection)
         => _previewSurfaceController.TryGetCurrentStickySection(

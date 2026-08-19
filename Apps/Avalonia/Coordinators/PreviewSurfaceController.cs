@@ -713,6 +713,37 @@ internal sealed class PreviewSurfaceController : IDisposable
     public void RefreshStickyPath()
         => UpdateStickyPath();
 
+    public void ScrollCurrentStickySectionToStart()
+    {
+        if (!TryGetCurrentStickySection(out var currentSection))
+            return;
+
+        var scrollViewer = _controls.TextScrollViewer;
+        var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+        var targetOffset = new Vector(
+            scrollViewer.Offset.X,
+            Math.Clamp(
+                _controls.TextControl.GetVerticalOffsetForLine(currentSection.HeaderLine),
+                0,
+                maximumY));
+
+        try
+        {
+            _scrollSyncActive = true;
+            scrollViewer.Offset = targetOffset;
+            _controls.LineNumbersControl.VerticalOffset = targetOffset.Y;
+            _controls.TextControl.HorizontalOffset = targetOffset.X;
+            _controls.TextControl.VerticalOffset = targetOffset.Y;
+        }
+        finally
+        {
+            _scrollSyncActive = false;
+        }
+
+        _controls.TextControl.Focus();
+        UpdateStickyPath();
+    }
+
     public void HandleScrollViewerPointerPressed(
         PointerPressedEventArgs e)
     {

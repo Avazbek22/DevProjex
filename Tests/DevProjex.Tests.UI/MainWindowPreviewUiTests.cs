@@ -846,6 +846,51 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task StickyPath_ClickScrollsToTheStartOfTheVisibleFile()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            await UiTestDriver.ScrollPreviewUntilStickyHeaderVisibleAsync(window);
+
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var scrollViewer = UiTestDriver.GetRequiredPreviewScrollViewer(window);
+            var textControl = UiTestDriver.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(window, "PreviewTextControl");
+            var stickyHeaderText = UiTestDriver.GetRequiredControl<TextBlock>(window, "PreviewStickyHeaderText");
+            var navigateButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewStickyHeaderNavigateButton");
+            var section = Assert.Single(
+                viewModel.PreviewDocument!.Sections,
+                candidate => string.Equals(candidate.DisplayPath, stickyHeaderText.Text, StringComparison.Ordinal));
+            var lineInsideSection = Math.Min(section.EndLine, section.ContentStartLine + 4);
+            var offsetInsideSection = textControl.GetVerticalOffsetForLine(lineInsideSection);
+            scrollViewer.Offset = new Vector(scrollViewer.Offset.X, offsetInsideSection);
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => textControl.GetLineNumberAtVerticalOffset(textControl.VerticalOffset) == lineInsideSection,
+                "preview to scroll inside the file section before clicking its sticky path");
+            Assert.True(lineInsideSection > section.HeaderLine);
+            var horizontalOffset = scrollViewer.Offset.X;
+
+            await UiTestDriver.ClickAsync(window, navigateButton);
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => textControl.GetLineNumberAtVerticalOffset(scrollViewer.Offset.Y) == section.HeaderLine,
+                "sticky path click to scroll to the file header");
+            Assert.Equal(horizontalOffset, scrollViewer.Offset.X);
+            Assert.True(textControl.IsFocused);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task StickyPathCopyButton_IsVisibleInsideLineNumberCap_AndUsesCompactSize()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
