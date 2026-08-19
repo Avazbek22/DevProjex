@@ -686,6 +686,9 @@
                 <BrushTransition Property="BorderBrush"
                                  Duration="0:0:0.15"
                                  Easing="CubicEaseOut" />
+                <ThicknessTransition Property="Margin"
+                                     Duration="0:0:0.12"
+                                     Easing="CubicEaseOut" />
             </Transitions>
         </Setter>
     </Style>

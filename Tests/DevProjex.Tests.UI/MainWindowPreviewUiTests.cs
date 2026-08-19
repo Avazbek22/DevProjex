@@ -1,5 +1,7 @@
 using Avalonia.Animation;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.VisualTree;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Services;
 using System.ComponentModel;
@@ -909,9 +911,12 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             var stickyHeaderText = UiTestDriver.GetRequiredControl<TextBlock>(window, "PreviewStickyHeaderText");
             var lineNumbersBackground = UiTestDriver.GetRequiredControl<Border>(window, "PreviewLineNumbersBackground");
             var previewIsland = UiTestDriver.GetRequiredControl<Border>(window, "PreviewIsland");
+            var scrollViewer = UiTestDriver.GetRequiredPreviewScrollViewer(window);
+            var verticalScrollBar = Assert.Single(
+                scrollViewer.GetVisualDescendants().OfType<ScrollBar>(),
+                scrollBar => scrollBar.Orientation == Orientation.Vertical);
 
             var capBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderCap, window);
-            var headerBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderContainer, window);
             var buttonBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderCopyButton, window);
             var textBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderText, window);
             var lineNumbersBounds = UiTestDriver.GetBoundsInWindow(lineNumbersBackground, window);
@@ -922,9 +927,65 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.Same(previewIsland.Background, stickyHeaderCap.Background);
             Assert.Same(previewIsland.Background, stickyHeaderContainer.Background);
             Assert.Null(stickyHeaderNavigateButton.Transitions);
-            var hoverTransition = Assert.IsType<BrushTransition>(Assert.Single(stickyHeaderContainer.Transitions!));
+            var transitions = stickyHeaderContainer.Transitions!;
+            var hoverTransition = Assert.Single(transitions.OfType<BrushTransition>());
             Assert.Equal(Border.BorderBrushProperty, hoverTransition.Property);
             Assert.Equal(TimeSpan.FromMilliseconds(150), hoverTransition.Duration);
+            var insetTransition = Assert.Single(transitions.OfType<ThicknessTransition>());
+            Assert.Equal(Layoutable.MarginProperty, insetTransition.Property);
+            Assert.Equal(TimeSpan.FromMilliseconds(120), insetTransition.Duration);
+            Assert.True(verticalScrollBar.IsVisible);
+
+            verticalScrollBar.HideDelay = TimeSpan.Zero;
+            verticalScrollBar.ShowDelay = TimeSpan.Zero;
+            window.MouseMove(UiTestDriver.GetControlCenter(previewIsland, window), RawInputModifiers.None);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !verticalScrollBar.IsExpanded && stickyHeaderContainer.Margin.Right < 0.1,
+                "collapsed preview scrollbar to leave the full sticky-path width available");
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+            window.MouseMove(UiTestDriver.GetControlCenter(verticalScrollBar, window), RawInputModifiers.None);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => verticalScrollBar.IsExpanded && stickyHeaderContainer.Margin.Right > 0.1,
+                "expanded preview scrollbar to reserve only its active width");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var scrollBarOrigin = verticalScrollBar.TranslatePoint(default, scrollViewer);
+                    if (scrollBarOrigin is null)
+                        return false;
+
+                    var expectedInset = scrollViewer.Bounds.Width - scrollBarOrigin.Value.X;
+                    return Math.Abs(stickyHeaderContainer.Margin.Right - expectedInset) < 0.1;
+                },
+                "sticky path inset animation to settle at the expanded scrollbar edge");
+
+            var contractedHeaderBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderContainer, window);
+            var verticalScrollBarBounds = UiTestDriver.GetBoundsInWindow(verticalScrollBar, window);
+            var scrollViewerBounds = UiTestDriver.GetBoundsInWindow(scrollViewer, window);
+            var expectedScrollBarInset = scrollViewerBounds.Right - verticalScrollBarBounds.Left;
+            Assert.InRange(
+                Math.Abs(stickyHeaderContainer.Margin.Right - expectedScrollBarInset),
+                0,
+                1.5);
+            Assert.InRange(Math.Abs(contractedHeaderBounds.Right - verticalScrollBarBounds.Left), 0, 1.5);
+
+            window.MouseMove(UiTestDriver.GetControlCenter(previewIsland, window), RawInputModifiers.None);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !verticalScrollBar.IsExpanded && stickyHeaderContainer.Margin.Right < 0.1,
+                "collapsed preview scrollbar to return the full sticky-path width");
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+            var fullWidthHeaderBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderContainer, window);
+            var fullWidthScrollViewerBounds = UiTestDriver.GetBoundsInWindow(scrollViewer, window);
+            Assert.InRange(
+                Math.Abs(fullWidthHeaderBounds.Right - fullWidthScrollViewerBounds.Right),
+                0,
+                1.5);
             Assert.InRange(Math.Abs(capBounds.Width - lineNumbersBounds.Width), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Center.X - capBounds.Center.X), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Width - 24), 0, 1.5);
@@ -935,7 +996,7 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.NotNull(stickyHeaderCopyButton.BorderBrush);
             Assert.True(buttonBounds.Left >= capBounds.Left - 1);
             Assert.True(buttonBounds.Right <= capBounds.Right + 1);
-            Assert.True(buttonBounds.Right <= headerBounds.Left + 2);
+            Assert.True(buttonBounds.Right <= contractedHeaderBounds.Left + 2);
             Assert.True(capBounds.Right <= textBounds.Left + 2);
             Assert.Equal(PlacementMode.Right, ToolTip.GetPlacement(stickyHeaderCopyButton));
         }
