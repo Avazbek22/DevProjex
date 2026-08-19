@@ -21,7 +21,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	private void BeforeEnumeration(FileSystemScanEnumerationPoint point, string path) =>
 		_beforeEnumeration?.Invoke(point, path);
 
-	private static bool IsExpectedFileSystemScanFailure(Exception exception) =>
+	internal static bool IsExpectedFileSystemScanFailure(Exception exception) =>
 		exception is IOException or UnauthorizedAccessException or SecurityException;
 
 	public bool CanReadRoot(string rootPath)
@@ -424,6 +424,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				subtreeInventories!,
 				rootAccessDenied == 1,
 				hadAccessDenied == 1,
+				hadScanFailure == 1,
 				rootFileGitIgnoreMatchers!,
 				TryLoadRootTrackedPathIndex(
 					rootPath,
@@ -2076,6 +2077,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					treeInventoryDirectoryIncluded!,
 					discovery.RootAccessDenied,
 					hadAccessDenied == 1,
+					hadScanFailure == 1,
 					discovery.Value.DiscoveredGitIgnoreMatchers,
 					discovery.Value.DiscoveredGitTrackedPathIndexes);
 			}
@@ -2110,6 +2112,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool[] treeInventoryDirectoryIncluded,
 		bool rootAccessDenied,
 		bool hadAccessDenied,
+		bool hadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> discoveredGitIgnoreMatchers,
 		IReadOnlyList<GitTrackedPathIndex> discoveredGitTrackedPathIndexes)
 	{
@@ -2126,7 +2129,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			rootAccessDenied,
 			hadAccessDenied,
 			discoveredGitIgnoreMatchers,
-			discoveredGitTrackedPathIndexes);
+			discoveredGitTrackedPathIndexes,
+			hadScanFailure);
 
 		int AddDirectoryShell(int sourceIndex, int parentIndex)
 		{
@@ -2229,6 +2233,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		List<ProjectTreeInventorySnapshot> subtreeInventories,
 		bool rootAccessDenied,
 		bool hadAccessDenied,
+		bool hadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> rootFileGitIgnoreMatchers,
 		GitTrackedPathIndex? rootTrackedPathIndex)
 	{
@@ -2318,7 +2323,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			rootAccessDenied,
 			hadAccessDenied,
 			discoveredGitIgnoreMatchers,
-			discoveredGitTrackedPathIndexes);
+			discoveredGitTrackedPathIndexes,
+			hadScanFailure);
 	}
 
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeDiscoveredGitIgnoreMatchers(

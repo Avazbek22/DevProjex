@@ -93,7 +93,7 @@ public sealed class ProjectAnalysisService(
 				RootFolders: allowedRootFolders,
 				RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
 				HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied,
-				HadScanFailure: rootFolders.HadScanFailure);
+				HadScanFailure: rootFolders.HadScanFailure || treeInventory.HadScanFailure);
 		}
 		else
 		{
@@ -141,7 +141,7 @@ public sealed class ProjectAnalysisService(
 						RootFolders: rootFolders.Value,
 						RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
 						HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied,
-						HadScanFailure: rootFolders.HadScanFailure);
+						HadScanFailure: rootFolders.HadScanFailure || treeInventory.HadScanFailure);
 				}
 				else
 				{

@@ -11,11 +11,13 @@ public sealed class ProjectTreeInventorySnapshot(
 	bool rootAccessDenied,
 	bool hadAccessDenied,
 	IReadOnlyList<ScopedGitIgnoreMatcher>? discoveredGitIgnoreMatchers = null,
-	IReadOnlyList<GitTrackedPathIndex>? discoveredGitTrackedPathIndexes = null)
+	IReadOnlyList<GitTrackedPathIndex>? discoveredGitTrackedPathIndexes = null,
+	bool hadScanFailure = false)
 {
 	public IReadOnlyList<ProjectTreeInventoryEntry> Entries => entries;
 	public bool RootAccessDenied { get; } = rootAccessDenied;
 	public bool HadAccessDenied { get; } = hadAccessDenied;
+	public bool HadScanFailure { get; } = hadScanFailure;
 
 	// Inventory projections do not touch the filesystem again, so they must carry every
 	// reachable per-directory rule that affected discovery and can affect later selections.

@@ -73,6 +73,9 @@ public partial class MainWindow : IRefreshTreePipelineHost
         PathComparer.Default.Equals(_currentPath, input.CurrentPath) &&
         TryElevateAndRestart(input.CurrentPath);
 
+	void IRefreshTreePipelineHost.ReportIncompleteTreeScan() =>
+		_toastService.Show(_localization["Scan.Error.Incomplete"]);
+
     TreeNodeViewModel IRefreshTreePipelineHost.BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
     {
         var root = BuildTreeViewModel(result.Root, null);

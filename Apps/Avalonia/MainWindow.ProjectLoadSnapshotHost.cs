@@ -86,6 +86,9 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         PathComparer.Default.Equals(_currentPath, input.CurrentPath) &&
         TryElevateAndRestart(input.CurrentPath);
 
+	void IProjectLoadSnapshotPipelineHost.ReportIncompleteTreeScan() =>
+		_toastService.Show(_localization["Scan.Error.Incomplete"]);
+
     TreeNodeViewModel IProjectLoadSnapshotPipelineHost.BuildTreeViewModel(
         TreeRefreshInput input,
         BuildTreeResult result)

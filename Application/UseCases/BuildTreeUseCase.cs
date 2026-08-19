@@ -31,7 +31,8 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 			presentation.Root,
 			result.RootAccessDenied,
 			result.HadAccessDenied,
-			presentation.OrderedFilePaths);
+			presentation.OrderedFilePaths,
+			result.HadScanFailure);
 	}
 
 	public BuildTreeSnapshotResult ExecuteWithInventory(
@@ -58,7 +59,8 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 				presentation.Root,
 				result.RootAccessDenied,
 				result.HadAccessDenied,
-				presentation.OrderedFilePaths),
+				presentation.OrderedFilePaths,
+				result.HadScanFailure),
 			inventory);
 	}
 
@@ -82,7 +84,8 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 				presentation.Root,
 				result.RootAccessDenied,
 				result.HadAccessDenied,
-				presentation.OrderedFilePaths),
+				presentation.OrderedFilePaths,
+				result.HadScanFailure),
 			inventory);
 	}
 }

@@ -18,7 +18,8 @@ internal static class ProjectTreeInventoryScanner
 		string rootPath,
 		ProjectTreeGitIgnoreContexts initialGitIgnoreContexts,
 		Func<FileSystemTreeEntry, bool, ProjectTreeGitIgnoreContexts, bool> shouldTraverseDirectory,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		Action<FileSystemScanEnumerationPoint, string>? beforeEnumeration = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		var gitIgnoreLoadSession = new GitIgnoreMatcherLoadSession();
@@ -51,9 +52,11 @@ internal static class ProjectTreeInventoryScanner
 
 		var rootAccessDenied = false;
 		var hadAccessDenied = false;
+		var hadScanFailure = false;
 		List<FileSystemTreeEntry> rootChildren;
 		try
 		{
+			beforeEnumeration?.Invoke(FileSystemScanEnumerationPoint.RootDirectories, rootPath);
 			rootChildren = ReadDirectoryEntries(rootPath, relativePath: string.Empty, cancellationToken);
 		}
 		catch (OperationCanceledException)
@@ -65,9 +68,13 @@ internal static class ProjectTreeInventoryScanner
 			MarkAccessDenied(entries, 0);
 			return new ProjectTreeInventorySnapshot(entries, rootAccessDenied: true, hadAccessDenied: true);
 		}
-		catch
+		catch (Exception exception) when (FileSystemScanner.IsExpectedFileSystemScanFailure(exception))
 		{
-			return new ProjectTreeInventorySnapshot(entries, rootAccessDenied: false, hadAccessDenied: false);
+			return new ProjectTreeInventorySnapshot(
+				entries,
+				rootAccessDenied: false,
+				hadAccessDenied: false,
+				hadScanFailure: true);
 		}
 
 		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
@@ -161,7 +168,8 @@ internal static class ProjectTreeInventoryScanner
 					rootGitIgnoreContexts,
 					shouldTraverseDirectory,
 					gitIgnoreLoadSession,
-					cancellationToken);
+					cancellationToken,
+					beforeEnumeration);
 			}
 		}
 		else
@@ -176,7 +184,8 @@ internal static class ProjectTreeInventoryScanner
 					rootGitIgnoreContexts,
 					shouldTraverseDirectory,
 					gitIgnoreLoadSession,
-					parallelOptions.CancellationToken);
+					parallelOptions.CancellationToken,
+					beforeEnumeration);
 			});
 		}
 
@@ -184,6 +193,8 @@ internal static class ProjectTreeInventoryScanner
 		{
 			if (result.HadAccessDenied)
 				hadAccessDenied = true;
+			if (result.HadScanFailure)
+				hadScanFailure = true;
 
 			MergeSubtree(entries, result);
 			discoveredGitIgnoreMatchers.AddRange(result.DiscoveredGitIgnoreMatchers);
@@ -197,7 +208,8 @@ internal static class ProjectTreeInventoryScanner
 			rootAccessDenied,
 			hadAccessDenied,
 			uniqueMatchers,
-			uniqueTrackedPathIndexes);
+			uniqueTrackedPathIndexes,
+			hadScanFailure);
 	}
 
 	private static List<int> AddProjectRootChildren(
@@ -245,13 +257,15 @@ internal static class ProjectTreeInventoryScanner
 		ProjectTreeGitIgnoreContexts inheritedGitIgnoreContexts,
 		Func<FileSystemTreeEntry, bool, ProjectTreeGitIgnoreContexts, bool> shouldTraverseDirectory,
 		GitIgnoreMatcherLoadSession gitIgnoreLoadSession,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		Action<FileSystemScanEnumerationPoint, string>? beforeEnumeration)
 	{
 		var entries = new List<ProjectTreeInventoryEntry>(capacity: 128)
 		{
 			rootEntry
 		};
 		var hadAccessDenied = false;
+		var hadScanFailure = false;
 		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
 		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
 		var pendingDirectories = new Stack<(int Index, ProjectTreeGitIgnoreContexts GitIgnoreContexts)>();
@@ -266,6 +280,7 @@ internal static class ProjectTreeInventoryScanner
 			List<FileSystemTreeEntry> childEntries;
 			try
 			{
+				beforeEnumeration?.Invoke(FileSystemScanEnumerationPoint.DirectoryDiscovery, parent.FullPath);
 				childEntries = ReadDirectoryEntries(parent.FullPath, parent.RelativePath, cancellationToken);
 			}
 			catch (OperationCanceledException)
@@ -278,8 +293,9 @@ internal static class ProjectTreeInventoryScanner
 				hadAccessDenied = true;
 				continue;
 			}
-			catch
+			catch (Exception exception) when (FileSystemScanner.IsExpectedFileSystemScanFailure(exception))
 			{
+				hadScanFailure = true;
 				continue;
 			}
 
@@ -341,6 +357,7 @@ internal static class ProjectTreeInventoryScanner
 			rootGlobalIndex,
 			entries,
 			hadAccessDenied,
+			hadScanFailure,
 			discoveredGitIgnoreMatchers,
 			discoveredGitTrackedPathIndexes);
 	}
@@ -501,6 +518,7 @@ internal static class ProjectTreeInventoryScanner
 		int RootGlobalIndex,
 		List<ProjectTreeInventoryEntry> Entries,
 		bool HadAccessDenied,
+		bool HadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers,
 		IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes);
 

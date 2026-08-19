@@ -3,7 +3,8 @@ namespace DevProjex.Kernel.Models;
 public sealed record TreeBuildResult(
 	FileSystemNode Root,
 	bool RootAccessDenied,
-	bool HadAccessDenied);
+	bool HadAccessDenied,
+	bool HadScanFailure = false);
 
 public sealed class FileSystemNode(
 	string name,

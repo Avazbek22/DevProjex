@@ -139,7 +139,11 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 			hasNameFilter,
 			cancellationToken);
 
-		return new TreeBuildResult(root, inventory.RootAccessDenied, inventory.HadAccessDenied);
+		return new TreeBuildResult(
+			root,
+			inventory.RootAccessDenied,
+			inventory.HadAccessDenied,
+			inventory.HadScanFailure);
 	}
 
 	private static bool ShouldTraverseDirectoryInInventory(

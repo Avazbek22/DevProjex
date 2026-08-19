@@ -16,6 +16,8 @@ internal interface IRefreshTreePipelineHost
 
     bool TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result);
 
+	void ReportIncompleteTreeScan();
+
     TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result);
 
     bool IsTreeRefreshInputCurrent(TreeRefreshInput input);

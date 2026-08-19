@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Security;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia.Coordinators;
@@ -769,7 +770,7 @@ internal sealed class MetricsPipeline(
                 return;
             }
 
-            await ScanFileMetricsAsync(
+            var hadReadFailures = await ScanFileMetricsAsync(
                 filePaths,
                 stagedResults,
 				readFacts,
@@ -787,10 +788,19 @@ internal sealed class MetricsPipeline(
                 cacheGeneration);
 
             _isBackgroundMetricsActive = false;
-            _hasCompleteMetricsBaseline = true;
+            _hasCompleteMetricsBaseline = !hadReadFailures;
             if (statusOperations.IsActive(statusOperationId))
                 viewModel.StatusProgressValue = 100;
-            Recalculate();
+            if (hadReadFailures)
+            {
+                await PublishAvailableMetricsWithoutRecoveryAsync(
+                    currentTree,
+                    linkedCts.Token);
+            }
+            else
+            {
+                Recalculate();
+            }
             viewModel.StatusMetricsVisible = true;
             statusOperations.Complete(statusOperationId);
         }
@@ -835,6 +845,29 @@ internal sealed class MetricsPipeline(
             }
             statusOperations.Complete(statusOperationId);
         }
+        catch (Exception exception)
+        {
+            if (!IsCurrentMetricsRun(metricsCts, cacheGeneration))
+            {
+                statusOperations.Complete(statusOperationId);
+                return;
+            }
+
+            _isBackgroundMetricsActive = false;
+            _hasCompleteMetricsBaseline = false;
+            MergeStagedMetricsIntoCache(
+                stagedFilePaths,
+                stagedResults,
+                cacheGeneration);
+            Trace.TraceError(
+                "File metrics baseline failed: {0}",
+                exception);
+            await PublishAvailableMetricsWithoutRecoveryAsync(
+                currentTree,
+                CancellationToken.None);
+            viewModel.StatusMetricsVisible = true;
+            statusOperations.Complete(statusOperationId);
+        }
         finally
         {
 			if (readFacts is not null)
@@ -851,6 +884,7 @@ internal sealed class MetricsPipeline(
         if (filePaths.Count == 0 || results.Count == 0)
             return;
 
+        var mergedAny = false;
         lock (_metricsLock)
         {
             if (expectedCacheGeneration !=
@@ -879,11 +913,26 @@ internal sealed class MetricsPipeline(
 
                 if (result.TransformIdentity.Length > 0)
                     entry.SetTransformed(result.TransformIdentity, result.Effective);
+                mergedAny = true;
             }
         }
-    }
 
-    private async Task ScanFileMetricsAsync(
+		if (mergedAny)
+			InvalidateContentMetricsCache();
+	}
+
+	private void InvalidateContentMetricsCache()
+	{
+		lock (_computationCacheLock)
+		{
+			_hasContentMetricsCache = false;
+			_contentMetricsCacheValue = new ContentMetricsPair(
+				ExportOutputMetrics.Empty,
+				ExportOutputMetrics.Empty);
+		}
+	}
+
+	private async Task<bool> ScanFileMetricsAsync(
         IReadOnlyList<string> filePaths,
         FileMetricsScanResult[] stagedResults,
 		ContentReadFactSnapshot? readFacts,
@@ -892,10 +941,11 @@ internal sealed class MetricsPipeline(
         int maxDegreeOfParallelism)
     {
         if (filePaths.Count == 0)
-            return;
+            return false;
 
         var processedCount = 0;
         var lastProgressPercent = 0;
+        var hadReadFailures = 0;
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = maxDegreeOfParallelism,
@@ -973,13 +1023,9 @@ internal sealed class MetricsPipeline(
             {
                 throw;
             }
-            catch
+            catch (Exception exception) when (IsExpectedMetricsReadFailure(exception))
             {
-                stagedResults[index] = new FileMetricsScanResult(
-                    Raw: new FileMetricsVariant(default, HasMetrics: false),
-                    Effective: new FileMetricsVariant(default, HasMetrics: false),
-                    TransformIdentity: transformIdentity,
-                    WasInspected: true);
+                Interlocked.Exchange(ref hadReadFailures, 1);
             }
             finally
             {
@@ -997,6 +1043,43 @@ internal sealed class MetricsPipeline(
                 }
             }
         });
+
+        return Volatile.Read(ref hadReadFailures) != 0;
+    }
+
+    private static bool IsExpectedMetricsReadFailure(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or SecurityException;
+
+    private async Task PublishAvailableMetricsWithoutRecoveryAsync(
+        BuildTreeResult currentTree,
+        CancellationToken cancellationToken)
+    {
+        var currentPath = currentPathProvider();
+        if (string.IsNullOrWhiteSpace(currentPath))
+            return;
+
+        var selectedPaths = selectedPathsProvider();
+        var recalcVersion = Interlocked.Increment(ref _metricsRecalcVersion);
+        try
+        {
+            await PublishMetricsAsync(
+                cancellationToken,
+                recalcVersion,
+                selectedPaths.Count > 0,
+                selectedPaths,
+                treeFormatProvider(),
+                currentTree,
+                currentPath);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError(
+                "Publishing incomplete file metrics failed: {0}",
+                exception);
+        }
     }
 
     private static Task WaitForInitialVisualReadyAsync(
@@ -1081,7 +1164,13 @@ internal sealed class MetricsPipeline(
                         currentTree,
                         currentPath);
 
-                    await EnsureSelectedFileMetricsAsync(missingPaths, token);
+                    var hadReadFailures = await EnsureSelectedFileMetricsAsync(missingPaths, token);
+                    if (!hasAnyChecked &&
+                        !hadReadFailures &&
+                        CollectMissingMetricsFilePaths(targetFilePaths).Count == 0)
+                    {
+                        _hasCompleteMetricsBaseline = true;
+                    }
                 }
             }
 
@@ -1098,6 +1187,13 @@ internal sealed class MetricsPipeline(
         catch (OperationCanceledException)
         {
             // Expected when a newer selection supersedes the current one.
+        }
+        catch (Exception exception)
+        {
+            _hasCompleteMetricsBaseline = false;
+            Trace.TraceError(
+                "File metrics recovery failed: {0}",
+                exception);
         }
         finally
         {
@@ -1256,12 +1352,12 @@ internal sealed class MetricsPipeline(
         return missingPaths;
     }
 
-    private async Task EnsureSelectedFileMetricsAsync(
+    private async Task<bool> EnsureSelectedFileMetricsAsync(
         IReadOnlyList<string> missingPaths,
         CancellationToken cancellationToken)
     {
         if (missingPaths.Count == 0)
-            return;
+            return false;
 
         var metricsCts = ReplaceCancellationSource(ref _metricsCalculationCts);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, metricsCts.Token);
@@ -1282,7 +1378,7 @@ internal sealed class MetricsPipeline(
             if (statusOperations.IsActive(statusOperationId))
                 viewModel.StatusProgressValue = 0;
 
-            await ScanFileMetricsAsync(
+            var hadReadFailures = await ScanFileMetricsAsync(
                 missingPaths,
                 stagedResults,
 				null,
@@ -1300,6 +1396,7 @@ internal sealed class MetricsPipeline(
 
             if (statusOperations.IsActive(statusOperationId))
                 viewModel.StatusProgressValue = 100;
+            return hadReadFailures;
         }
         catch (OperationCanceledException)
         {
