@@ -1,3 +1,4 @@
+using Avalonia.Animation;
 using Avalonia.Layout;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Services;
@@ -903,6 +904,7 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
             var stickyHeaderCap = UiTestDriver.GetRequiredControl<Border>(window, "PreviewStickyHeaderCap");
             var stickyHeaderContainer = UiTestDriver.GetRequiredControl<Border>(window, "PreviewStickyHeaderContainer");
+            var stickyHeaderNavigateButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewStickyHeaderNavigateButton");
             var stickyHeaderCopyButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewStickyHeaderCopyButton");
             var stickyHeaderText = UiTestDriver.GetRequiredControl<TextBlock>(window, "PreviewStickyHeaderText");
             var lineNumbersBackground = UiTestDriver.GetRequiredControl<Border>(window, "PreviewLineNumbersBackground");
@@ -919,6 +921,10 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.Equal(1, stickyHeaderContainer.Opacity);
             Assert.Same(previewIsland.Background, stickyHeaderCap.Background);
             Assert.Same(previewIsland.Background, stickyHeaderContainer.Background);
+            Assert.Null(stickyHeaderNavigateButton.Transitions);
+            var hoverTransition = Assert.IsType<BrushTransition>(Assert.Single(stickyHeaderContainer.Transitions!));
+            Assert.Equal(Border.BorderBrushProperty, hoverTransition.Property);
+            Assert.Equal(TimeSpan.FromMilliseconds(150), hoverTransition.Duration);
             Assert.InRange(Math.Abs(capBounds.Width - lineNumbersBounds.Width), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Center.X - capBounds.Center.X), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Width - 24), 0, 1.5);
