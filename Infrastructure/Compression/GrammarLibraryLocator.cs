@@ -198,11 +198,13 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDis
 
 			Directory.CreateDirectory(directory);
 			var leasePath = Path.Combine(directory, LeaseFileName);
+			// Cleanup requests write access to the marker. Active locators grant shared reads only,
+			// which makes that request fail on every supported OS without relying on unlink semantics.
 			var lease = new FileStream(
 				leasePath,
 				FileMode.OpenOrCreate,
-				FileAccess.ReadWrite,
-				FileShare.ReadWrite | FileShare.Delete);
+				FileAccess.Read,
+				FileShare.Read);
 			_leases.Add(directory, lease);
 		}
 	}
