@@ -1,6 +1,4 @@
-using System.Globalization;
 using DevProjex.Avalonia.Services;
-using DevProjex.Application.Secrets;
 
 namespace DevProjex.Avalonia.Controls;
 

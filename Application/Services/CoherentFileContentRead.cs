@@ -1,5 +1,4 @@
 using System.Security;
-using DevProjex.Application.Compression;
 
 namespace DevProjex.Application.Services;
 

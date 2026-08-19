@@ -28,7 +28,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 			Extensions: extensions,
 			RootFolders: roots.Value,
 			RootAccessDenied: roots.RootAccessDenied || workspace.RootAccessDenied,
-			HadAccessDenied: roots.HadAccessDenied || workspace.HadAccessDenied);
+			HadAccessDenied: roots.HadAccessDenied || workspace.HadAccessDenied,
+			HadScanFailure: roots.HadScanFailure || workspace.HadScanFailure);
 	}
 
 	public ScanResult<List<string>> GetRootFolders(
@@ -41,7 +42,11 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 		var scan = scanner.GetRootFolderNames(rootPath, ignoreRules, cancellationToken);
 		var rootFolders = new List<string>(scan.Value);
 		rootFolders.Sort(PathComparer.Default);
-		return new ScanResult<List<string>>(rootFolders, scan.RootAccessDenied, scan.HadAccessDenied);
+		return new ScanResult<List<string>>(
+			rootFolders,
+			scan.RootAccessDenied,
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	public ScanResult<HashSet<string>> GetExtensionsForRootFolders(
@@ -58,7 +63,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 		return new ScanResult<HashSet<string>>(
 			new HashSet<string>(scan.Value.Extensions, StringComparer.OrdinalIgnoreCase),
 			scan.RootAccessDenied,
-			scan.HadAccessDenied);
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	public ScanResult<ExtensionsScanData> GetExtensionsAndIgnoreCountsForRootFolders(
@@ -82,7 +88,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 				ignoreSection.RawIgnoreOptionCounts,
 				ignoreSection.ControllerImpactCounts),
 			scan.RootAccessDenied,
-			scan.HadAccessDenied);
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	public ScanResult<int> GetEffectiveEmptyFolderCountForRootFolders(
@@ -103,7 +110,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 		return new ScanResult<int>(
 			scan.Value.IgnoreSection.EffectiveIgnoreOptionCounts.EmptyFolders,
 			scan.RootAccessDenied,
-			scan.HadAccessDenied);
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshotForRootFolders(
@@ -154,7 +162,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 		return new ScanResult<IgnoreSectionScanData>(
 			scan.Value.IgnoreSection,
 			scan.RootAccessDenied,
-			scan.HadAccessDenied);
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	public ScanResult<ProjectWorkspaceScanSnapshot> GetProjectWorkspaceSnapshotForRootFolders(
@@ -208,7 +217,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 		return new ScanResult<IgnoreOptionCounts>(
 			scan.Value.IgnoreSection.EffectiveIgnoreOptionCounts,
 			scan.RootAccessDenied,
-			scan.HadAccessDenied);
+			scan.HadAccessDenied,
+			scan.HadScanFailure);
 	}
 
 	public bool CanReadRoot(string rootPath) => scanner.CanReadRoot(rootPath);

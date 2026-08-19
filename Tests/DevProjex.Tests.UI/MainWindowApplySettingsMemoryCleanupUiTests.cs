@@ -1,9 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
-using Avalonia.Threading;
 using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Coordinators;
-using DevProjex.Avalonia.Services;
 using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.UI;

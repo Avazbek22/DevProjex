@@ -1,5 +1,4 @@
 using DevProjex.Application.Context;
-using System.Text.Json;
 
 namespace DevProjex.Tests.Unit;
 

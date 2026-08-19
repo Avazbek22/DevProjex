@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace DevProjex.Avalonia.Services;
 
 internal readonly record struct MemoryCleanupRetentionSnapshot(

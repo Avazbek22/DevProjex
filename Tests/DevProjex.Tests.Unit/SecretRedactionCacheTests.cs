@@ -1,6 +1,5 @@
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Compression;
-using System.Text;
 
 namespace DevProjex.Tests.Unit;
 

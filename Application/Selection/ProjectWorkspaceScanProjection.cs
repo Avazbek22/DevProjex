@@ -41,6 +41,7 @@ public static class ProjectWorkspaceScanProjection
 		var gitEvidence = rootFiles.GitEvidence;
 		var rootAccessDenied = breakdown.RootEnumerationAccessDenied || breakdown.RootFilesAccessDenied;
 		var hadAccessDenied = breakdown.RootEnumerationHadAccessDenied || breakdown.RootFilesHadAccessDenied;
+		var hadScanFailure = breakdown.RootEnumerationHadScanFailure || breakdown.RootFilesHadScanFailure;
 
 		foreach (var (rootName, rootSnapshot) in breakdown.SelectedRoots)
 		{
@@ -52,12 +53,13 @@ public static class ProjectWorkspaceScanProjection
 				gitEvidence = gitEvidence.Add(rootSnapshot.IgnoreSection.GitEvidence);
 				rootAccessDenied |= rootSnapshot.RootAccessDenied;
 				hadAccessDenied |= rootSnapshot.HadAccessDenied;
+				hadScanFailure |= rootSnapshot.HadScanFailure;
 				continue;
 			}
 
 			// A denied selected subtree cannot be safely converted into a cheap root probe:
 			// keep the normal filesystem fallback so access flags remain exact.
-			if (rootSnapshot.RootAccessDenied || rootSnapshot.HadAccessDenied)
+			if (rootSnapshot.RootAccessDenied || rootSnapshot.HadAccessDenied || rootSnapshot.HadScanFailure)
 				return false;
 
 			if (includeDirectoryToggleProbeRoots)
@@ -91,7 +93,8 @@ public static class ProjectWorkspaceScanProjection
 		projected = new ScanResult<ProjectWorkspaceScanSnapshot>(
 			new ProjectWorkspaceScanSnapshot(ignoreSection, source.TreeInventory, breakdown),
 			rootAccessDenied,
-			hadAccessDenied);
+			hadAccessDenied,
+			hadScanFailure);
 		return true;
 	}
 }

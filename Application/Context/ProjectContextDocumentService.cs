@@ -4,9 +4,7 @@ using System.Text.Json;
 using System.Text.Unicode;
 using System.Runtime.InteropServices;
 using System.Xml;
-using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
-using DevProjex.Application.Services;
 
 namespace DevProjex.Application.Context;
 

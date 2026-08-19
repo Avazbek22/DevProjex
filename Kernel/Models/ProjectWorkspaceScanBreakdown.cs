@@ -8,7 +8,8 @@ public sealed record ProjectWorkspaceRootScanSnapshot(
 	IgnoreOptionCounts DirectoryToggleProbeCounts,
 	IgnoreControllerImpactCounts ControllerImpactProbeCounts,
 	bool RootAccessDenied,
-	bool HadAccessDenied);
+	bool HadAccessDenied,
+	bool HadScanFailure = false);
 
 /// <summary>
 /// Decomposed workspace totals used to remove projected roots without filesystem IO.
@@ -23,4 +24,6 @@ public sealed record ProjectWorkspaceScanBreakdown(
 	bool RootEnumerationAccessDenied,
 	bool RootEnumerationHadAccessDenied,
 	bool RootFilesAccessDenied,
-	bool RootFilesHadAccessDenied);
+	bool RootFilesHadAccessDenied,
+	bool RootEnumerationHadScanFailure = false,
+	bool RootFilesHadScanFailure = false);

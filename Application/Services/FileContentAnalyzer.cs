@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Cryptography;
 using DevProjex.Application.Diagnostics;
-using DevProjex.Application.Compression;
 
 namespace DevProjex.Application.Services;
 

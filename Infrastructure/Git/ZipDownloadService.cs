@@ -2,7 +2,6 @@ using System.Buffers;
 using System.IO.Compression;
 using System.Net;
 using System.Security;
-using System.Text;
 
 namespace DevProjex.Infrastructure.Git;
 
@@ -533,9 +532,32 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 			var normalized = segments[index].Normalize(NormalizationForm.FormC).TrimEnd(' ', '.');
 			if (normalized.Length == 0 || normalized is "." or "..")
 				throw new InvalidDataException($"ZIP entry has an invalid path: {entryPath}");
+			if (OperatingSystem.IsWindows() && IsWindowsReservedDeviceName(normalized.AsSpan()))
+				throw new InvalidDataException($"ZIP entry uses a reserved Windows device name: {entryPath}");
 			segments[index] = normalized;
 		}
 		return string.Join('/', segments);
+	}
+
+	internal static bool IsWindowsReservedDeviceName(ReadOnlySpan<char> component)
+	{
+		var dotIndex = component.IndexOf('.');
+		var baseName = dotIndex >= 0 ? component[..dotIndex] : component;
+		while (!baseName.IsEmpty && baseName[^1] == ' ')
+			baseName = baseName[..^1];
+
+		if (baseName.Equals("CON", StringComparison.OrdinalIgnoreCase) ||
+		    baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase) ||
+		    baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase) ||
+		    baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
+
+		return baseName.Length == 4 &&
+		       (baseName[..3].Equals("COM", StringComparison.OrdinalIgnoreCase) ||
+		        baseName[..3].Equals("LPT", StringComparison.OrdinalIgnoreCase)) &&
+		       baseName[3] is >= '1' and <= '9';
 	}
 
 	private static InvalidDataException CreateArchiveCollisionException(string entryName) =>

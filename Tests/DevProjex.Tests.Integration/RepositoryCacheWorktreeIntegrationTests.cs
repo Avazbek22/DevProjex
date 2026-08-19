@@ -122,6 +122,32 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 	}
 
 	[Fact]
+	public async Task IndexedBranchMissingLocally_IsFetchedAndRestoredFromOrigin()
+	{
+		await using var source = await GitTestRepository.CreateAsync(
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var cache = new TemporaryDirectory();
+		var service = new RepoCacheService(cache.Path);
+		var git = new GitRepositoryService();
+		var basePath = await PublishGitAsync(service, git, source, TestContext.Current.CancellationToken);
+		service.RecordIndexedRepository(source.RepositoryUrl, basePath, source.FeatureBranchName);
+		await RunGitAsync(basePath, ["update-ref", "-d", $"refs/remotes/origin/{source.FeatureBranchName}"]);
+		await RunGitAsync(basePath, ["update-ref", "-d", $"refs/heads/{source.FeatureBranchName}"]);
+
+		using var session = await service.TryAcquireRepositorySessionAsync(
+			source.RepositoryUrl,
+			source.FeatureBranchName,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(session);
+		Assert.Equal(source.FeatureBranchName, session.Branch);
+		Assert.True(File.Exists(Path.Combine(session.RepositoryPath, "feature", "feature.txt")));
+		Assert.Equal(
+			source.FeatureBranchName,
+			await git.GetCurrentBranchAsync(session.RepositoryPath, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public async Task IndexedBranchRemovedFromRepository_FailsInsteadOfOpeningHead()
 	{
 		await using var source = await GitTestRepository.CreateAsync(

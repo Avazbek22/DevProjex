@@ -6,6 +6,10 @@ public interface IProjectProfileStore
 	bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile);
 	bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile);
 	bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc);
+	ProjectProfileSaveResult TrySaveProfileWithResult(
+		string localProjectPath,
+		ProjectSelectionProfile profile) =>
+		new(TrySaveProfile(localProjectPath, profile), WasTruncated: false);
 	ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout)
 	{
 		return TryLoadProfile(localProjectPath, out var profile)

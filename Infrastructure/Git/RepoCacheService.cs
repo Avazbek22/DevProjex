@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.ComponentModel;
-using System.Diagnostics;
 using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.Git;
@@ -775,16 +774,48 @@ public sealed class RepoCacheService : IRepoCacheService
 				await using var baseLock = await RepositoryFileLease.AcquireExclusiveAsync(
 					RepositoryCacheLayout.GetBaseOperationLockPath(CacheRootPath, entry.LocalPath),
 					cancellationToken).ConfigureAwait(false);
-				var prepared = needsWorktreeCreation
-					? await _worktreeManager.CreateDetachedAsync(
+				bool prepared;
+				try
+				{
+					prepared = await PrepareWorktreeAsync(
 						entry.LocalPath,
 						selectedPath,
 						effectiveBranch,
-						cancellationToken).ConfigureAwait(false)
-					: await _worktreeManager.PreparePrimaryAsync(
-						selectedPath,
-						effectiveBranch,
+						needsWorktreeCreation,
 						cancellationToken).ConfigureAwait(false);
+				}
+				catch (RepositoryBranchUnavailableException exception) when (
+					exception.Reason == RepositoryBranchUnavailableReason.NotFound &&
+					!string.IsNullOrWhiteSpace(effectiveBranch))
+				{
+					var originalException = exception;
+					try
+					{
+						if (!await TryRestoreRemoteBranchAsync(
+								entry.LocalPath,
+								effectiveBranch,
+								cancellationToken)
+							.ConfigureAwait(false))
+						{
+							throw originalException;
+						}
+
+						prepared = await PrepareWorktreeAsync(
+							entry.LocalPath,
+							selectedPath,
+							effectiveBranch,
+							needsWorktreeCreation,
+							cancellationToken).ConfigureAwait(false);
+					}
+					catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+					{
+						throw;
+					}
+					catch
+					{
+						throw originalException;
+					}
+				}
 				if (!prepared)
 				{
 					sessionLease.Dispose();
@@ -870,6 +901,43 @@ public sealed class RepoCacheService : IRepoCacheService
 					.ToList());
 			return updated;
 		}
+	}
+
+	private async Task<bool> PrepareWorktreeAsync(
+		string basePath,
+		string selectedPath,
+		string? branch,
+		bool needsWorktreeCreation,
+		CancellationToken cancellationToken) =>
+		needsWorktreeCreation
+			? await _worktreeManager.CreateDetachedAsync(
+				basePath,
+				selectedPath,
+				branch,
+				cancellationToken).ConfigureAwait(false)
+			: await _worktreeManager.PreparePrimaryAsync(
+				selectedPath,
+				branch,
+				cancellationToken).ConfigureAwait(false);
+
+	private static async Task<bool> TryRestoreRemoteBranchAsync(
+		string repositoryPath,
+		string branch,
+		CancellationToken cancellationToken)
+	{
+		var normalizedBranch = GitBranchNameValidator.ValidateAndNormalize(branch);
+		if (await RunGitForOutputAsync(
+			    repositoryPath,
+			    ["remote", "set-branches", "--add", "origin", normalizedBranch],
+			    cancellationToken).ConfigureAwait(false) is null)
+		{
+			return false;
+		}
+
+		return await RunGitForOutputAsync(
+			       repositoryPath,
+			       ["fetch", "origin", normalizedBranch, "--depth", "1"],
+			       cancellationToken).ConfigureAwait(false) is not null;
 	}
 
 	private static async Task<string?> ResolveFallbackBranchAsync(

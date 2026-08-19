@@ -1,5 +1,4 @@
 using DevProjex.Application.Secrets;
-using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Tests.Unit;
 

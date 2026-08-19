@@ -1,6 +1,5 @@
 using DevProjex.Application.Models;
 using DevProjex.Application.Context;
-using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Collections;
 using DevProjex.Avalonia.Services;
 
@@ -17,7 +16,8 @@ public sealed partial class SelectionSyncCoordinator(
     Func<string?> currentPathProvider,
     StatusOperationCoordinator? statusOperations = null,
     Action<IgnoreOptionId?>? contentTransformationChanged = null,
-    Action? selectionContentChanged = null)
+    Action? selectionContentChanged = null,
+    Action? scanIncomplete = null)
     : IDisposable
 {
     // Store collection references for proper cleanup
@@ -43,6 +43,7 @@ public sealed partial class SelectionSyncCoordinator(
     private IgnoreOptionCounts _ignoreOptionCounts;
     private IgnoreControllerImpactCounts _ignoreControllerImpactCounts;
     private GitWorkspaceEvidence _gitWorkspaceEvidence;
+	private bool _selectionPersistenceBlockedByIncompleteScan;
 
     private bool _suppressExtensionAllCheck;
     private bool _suppressExtensionItemCheck;
@@ -823,6 +824,13 @@ public sealed partial class SelectionSyncCoordinator(
                 if (IsStalePathRequest(currentPath))
                     return;
 
+				if (snapshot.HadScanFailure)
+				{
+					MarkSelectionRefreshClean();
+					scanIncomplete?.Invoke();
+					return;
+				}
+
                 ApplyLiveSelectionRefreshSnapshot(snapshot);
             });
         }
@@ -864,7 +872,19 @@ public sealed partial class SelectionSyncCoordinator(
         if (ShouldSkipRefreshForPreparedPath(currentPath))
             return false;
 
-        ApplySelectionRefreshSnapshot(snapshot);
+		if (snapshot.HadScanFailure)
+		{
+			ApplySelectionRefreshSnapshotWithCompleteness(
+				snapshot,
+				retainPreviousSnapshot: false,
+				cacheIsComplete: false);
+		}
+		else
+		{
+			ApplySelectionRefreshSnapshot(snapshot);
+		}
+		if (snapshot.HadScanFailure)
+			scanIncomplete?.Invoke();
 
         // Project-load snapshots apply selection and tree together. Prepared profile/default
         // state must still be consumed only after the matching selection snapshot wins.
@@ -952,9 +972,28 @@ public sealed partial class SelectionSyncCoordinator(
                 if (ShouldSkipRefreshForPreparedPath(currentPath))
                     return;
 
-                ApplySelectionRefreshSnapshot(
-                    snapshot,
-                    retainPreviousSnapshot: expectedRequestVersion.HasValue);
+				if (snapshot.HadScanFailure && HasStableSelectionSnapshotForPath(currentPath))
+				{
+					MarkSelectionRefreshClean();
+					scanIncomplete?.Invoke();
+					return;
+				}
+
+				if (snapshot.HadScanFailure)
+				{
+					ApplySelectionRefreshSnapshotWithCompleteness(
+						snapshot,
+						retainPreviousSnapshot: expectedRequestVersion.HasValue,
+						cacheIsComplete: false);
+				}
+				else
+				{
+					ApplySelectionRefreshSnapshot(
+						snapshot,
+						retainPreviousSnapshot: expectedRequestVersion.HasValue);
+				}
+				if (snapshot.HadScanFailure)
+					scanIncomplete?.Invoke();
 
                 // Consume prepared selection only after the matching snapshot is applied.
                 // Keeping this with the UI mutation prevents stale background refreshes from
@@ -1114,6 +1153,7 @@ public sealed partial class SelectionSyncCoordinator(
         _ignoreOptionCounts = IgnoreOptionCounts.Empty;
         _ignoreControllerImpactCounts = IgnoreControllerImpactCounts.Empty;
         _gitWorkspaceEvidence = GitWorkspaceEvidence.Empty;
+		_selectionPersistenceBlockedByIncompleteScan = false;
         _stableSelectionSnapshot = null;
         _reversibleSelectionSnapshot = null;
 
@@ -1169,6 +1209,9 @@ public sealed partial class SelectionSyncCoordinator(
 
     public IReadOnlyDictionary<string, bool>? SnapshotExtensionOptionStatesForPersistence() =>
         SnapshotExtensionOptionStateCacheOrNull(_session.Extensions.IsInitialized);
+
+	internal bool IsSelectionStateCompleteForPersistence =>
+		!_selectionPersistenceBlockedByIncompleteScan;
 
     public IReadOnlyDictionary<IgnoreOptionId, bool>? SnapshotIgnoreOptionStatesForPersistence()
     {
@@ -1836,18 +1879,31 @@ public sealed partial class SelectionSyncCoordinator(
         ApplySelectionRefreshSnapshotCore(
             snapshot,
             retainPreviousSnapshot,
-            scanRootsAreAuthoritative: true);
+            scanRootsAreAuthoritative: true,
+			cacheIsComplete: true);
+
+	private void ApplySelectionRefreshSnapshotWithCompleteness(
+		SelectionRefreshSnapshot snapshot,
+		bool retainPreviousSnapshot,
+		bool cacheIsComplete) =>
+		ApplySelectionRefreshSnapshotCore(
+			snapshot,
+			retainPreviousSnapshot,
+			scanRootsAreAuthoritative: true,
+			cacheIsComplete);
 
     private void ApplyLiveSelectionRefreshSnapshot(SelectionRefreshSnapshot snapshot) =>
         ApplySelectionRefreshSnapshotCore(
             snapshot,
             retainPreviousSnapshot: true,
-            scanRootsAreAuthoritative: false);
+            scanRootsAreAuthoritative: false,
+			cacheIsComplete: true);
 
     private void ApplySelectionRefreshSnapshotCore(
         SelectionRefreshSnapshot snapshot,
         bool retainPreviousSnapshot,
-        bool scanRootsAreAuthoritative)
+        bool scanRootsAreAuthoritative,
+		bool cacheIsComplete)
     {
         if (_stableSelectionSnapshot is not null)
             snapshot = RetainCurrentContentTransformationStates(snapshot);
@@ -1871,6 +1927,12 @@ public sealed partial class SelectionSyncCoordinator(
                 snapshot.HasIgnoreOptionCounts);
 
             ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+			if (!cacheIsComplete)
+			{
+				_session.Extensions.MarkIncomplete();
+				_session.IgnoreOptionStateCacheIsComplete = false;
+			}
+			_selectionPersistenceBlockedByIncompleteScan = !cacheIsComplete;
         }
         finally
         {
@@ -2174,6 +2236,7 @@ public sealed partial class SelectionSyncCoordinator(
         _session.IgnoreOptions.IsInitialized = snapshot.IgnoreOptionsInitialized;
         _session.IgnoreOptions.AllPreference = snapshot.IgnoreAllPreference;
         _session.IgnoreOptionStateCacheIsComplete = snapshot.IgnoreOptionStateCacheIsComplete;
+		_selectionPersistenceBlockedByIncompleteScan = false;
         MarkSelectionRefreshClean();
 
         _ignoreRulesBuildCache.Invalidate();
@@ -2198,6 +2261,10 @@ public sealed partial class SelectionSyncCoordinator(
             ExtensionOptionStateCache = extensionStates
         };
     }
+
+	private bool HasStableSelectionSnapshotForPath(string path) =>
+		_stableSelectionSnapshot is { } snapshot &&
+		PathComparer.Default.Equals(snapshot.Path, path);
 
     private SelectionRefreshSnapshot RetainCurrentContentTransformationStates(
         SelectionRefreshSnapshot snapshot)

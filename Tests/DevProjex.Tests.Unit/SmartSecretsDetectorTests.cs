@@ -1,7 +1,5 @@
 using DevProjex.Application.Secrets;
-using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Secrets;
-using DevProjex.Infrastructure.SmartIgnore;
 
 namespace DevProjex.Tests.Unit;
 

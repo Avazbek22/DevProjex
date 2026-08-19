@@ -4,7 +4,6 @@ using DevProjex.Application.Context;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Compression;
-using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Integration;
 

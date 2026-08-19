@@ -1,14 +1,11 @@
 using System.IO.Compression;
-using System.Xml.Linq;
 using System.Globalization;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Compression;
-using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.Secrets;
-using DevProjex.Infrastructure.SmartIgnore;
 
 namespace DevProjex.Tests.Integration;
 

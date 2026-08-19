@@ -1,6 +1,4 @@
-using System.Diagnostics;
 using DevProjex.Application.Compression;
-using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Compression;
 
 namespace DevProjex.Tests.Integration;

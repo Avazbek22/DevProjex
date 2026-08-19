@@ -187,6 +187,57 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     }
 
     [Theory]
+	[InlineData("nul")]
+	[InlineData("CON.txt")]
+	[InlineData("com1.tar.gz")]
+	[InlineData("src/AUX/x.cs")]
+	public async Task DownloadAndExtractAsync_RejectsWindowsReservedDeviceNames(string entryPath)
+	{
+		var archive = CreateArchive(($"repo-main/{entryPath}", "payload"u8.ToArray()));
+		using var service = new ZipDownloadService(
+			new ArchiveBytesHandler(archive),
+			ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+		var targetDir = Path.Combine(_tempDir!, $"reserved-{Guid.NewGuid():N}");
+
+		var result = await service.DownloadAndExtractAsync(
+			TestRepoUrl,
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.False(result.Success);
+			Assert.Contains("reserved Windows device name", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+			Assert.False(Directory.Exists(targetDir));
+		}
+		else
+		{
+			Assert.True(result.Success, result.ErrorMessage);
+		}
+	}
+
+	[Theory]
+	[InlineData("COM10")]
+	[InlineData("console.log")]
+	[InlineData("nullable.cs")]
+	public async Task DownloadAndExtractAsync_AllowsNonReservedSimilarNames(string entryPath)
+	{
+		var archive = CreateArchive(($"repo-main/{entryPath}", "payload"u8.ToArray()));
+		using var service = new ZipDownloadService(
+			new ArchiveBytesHandler(archive),
+			ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+		var targetDir = Path.Combine(_tempDir!, $"allowed-{Guid.NewGuid():N}");
+
+		var result = await service.DownloadAndExtractAsync(
+			TestRepoUrl,
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(result.Success, result.ErrorMessage);
+		Assert.True(File.Exists(Path.Combine(targetDir, entryPath.Replace('/', Path.DirectorySeparatorChar))));
+	}
+
+    [Theory]
     [InlineData("case")]
     [InlineData("duplicate")]
     [InlineData("file-directory")]

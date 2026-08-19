@@ -2,6 +2,19 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ZipDownloadServiceInternalHelpersTests
 {
+	[Theory]
+	[InlineData("nul", true)]
+	[InlineData("CON.txt", true)]
+	[InlineData("com1.tar.gz", true)]
+	[InlineData("AUX", true)]
+	[InlineData("COM10", false)]
+	[InlineData("console.log", false)]
+	[InlineData("nullable.cs", false)]
+	public void IsWindowsReservedDeviceName_ClassifiesBaseComponent(string component, bool expected)
+	{
+		Assert.Equal(expected, ZipDownloadService.IsWindowsReservedDeviceName(component));
+	}
+
     [Theory]
     [InlineData("repo-main/", "repo-main")]
     [InlineData("repo-main/src/file.txt", "repo-main")]

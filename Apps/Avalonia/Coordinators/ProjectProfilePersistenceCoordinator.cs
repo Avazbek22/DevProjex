@@ -27,8 +27,8 @@ public sealed class ProjectProfilePersistenceCoordinator(
 	public async Task PersistIfNeededAsync(
 		string? currentPath,
 		CancellationToken cancellationToken = default)
-    {
-		if (!CanPersist(currentPath))
+	{
+		if (!CanPersist(currentPath) || !selectionCoordinator.IsSelectionStateCompleteForPersistence)
             return;
 
         var profile = CaptureCurrentProfile();

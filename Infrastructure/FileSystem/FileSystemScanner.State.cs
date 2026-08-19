@@ -1,5 +1,14 @@
 namespace DevProjex.Infrastructure.FileSystem;
 
+internal enum FileSystemScanEnumerationPoint
+{
+    RootDirectories,
+    DirectoryDiscovery,
+    DirectoryFiles,
+    RootFiles,
+    SelectedRootFallback
+}
+
 public sealed partial class FileSystemScanner
 {
     private sealed class LocalExtensionScanState
@@ -53,7 +62,8 @@ public sealed partial class FileSystemScanner
         List<DirectoryScanFacts> DirectoryToggleCandidates,
         List<DirectoryScanFacts> ControllerImpactCandidates,
         bool RootAccessDenied,
-        bool HadAccessDenied);
+        bool HadAccessDenied,
+        bool HadScanFailure);
 
     private sealed class RootDirectoryToggleCandidateAccumulator
     {

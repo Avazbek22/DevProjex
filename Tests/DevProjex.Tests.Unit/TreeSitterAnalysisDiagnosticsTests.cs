@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using DevProjex.Application.Compression;
 using DevProjex.Infrastructure.Compression;
 

@@ -2,8 +2,6 @@ using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
-using DevProjex.Application.Services;
-using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Tests.Unit;
 

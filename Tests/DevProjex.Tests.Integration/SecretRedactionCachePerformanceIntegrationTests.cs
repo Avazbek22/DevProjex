@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Integration;

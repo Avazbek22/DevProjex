@@ -1,8 +1,6 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using System.Xml.Linq;
 using TreeSitter;
 

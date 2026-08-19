@@ -3,6 +3,49 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfileStoreTests
 {
 	[Fact]
+	public void TrySaveProfileWithResult_WhenSelectionExceedsLimit_RejectsWithoutPersistingTruncatedProfile()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		var paths = Enumerable.Range(
+			0,
+			ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)
+			.Select(static index => $"src/file-{index:D6}.cs")
+			.ToArray();
+
+		var result = store.TrySaveProfileWithResult(
+			projectPath,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: paths));
+
+		Assert.False(result.Succeeded);
+		Assert.True(result.WasTruncated);
+		Assert.False(store.TryLoadProfile(projectPath, out _));
+	}
+
+	[Fact]
+	public void TrySaveProfileWithResult_WhenSelectionIsExactlyAtLimit_SavesCompleteProfile()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		var paths = Enumerable.Range(
+			0,
+			ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
+			.Select(static index => $"src/file-{index:D6}.cs")
+			.ToArray();
+
+		var result = store.TrySaveProfileWithResult(
+			projectPath,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: paths));
+
+		Assert.True(result.Succeeded);
+		Assert.False(result.WasTruncated);
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Equal(paths.Length, loaded.SelectedPaths?.Count);
+	}
+
+	[Fact]
 	public async Task FutureSchemaSelectionStore_IsNeverDowngradedOrMutated()
 	{
 		using var temporary = new TemporaryDirectory();

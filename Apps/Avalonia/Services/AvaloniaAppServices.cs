@@ -1,7 +1,6 @@
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Application.Updates;
-using DevProjex.Application.Secrets;
 
 namespace DevProjex.Avalonia.Services;
 

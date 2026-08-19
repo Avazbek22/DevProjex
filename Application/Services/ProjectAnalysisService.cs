@@ -92,7 +92,8 @@ public sealed class ProjectAnalysisService(
 				Extensions: availableExtensions,
 				RootFolders: allowedRootFolders,
 				RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
-				HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied);
+				HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied,
+				HadScanFailure: rootFolders.HadScanFailure);
 		}
 		else
 		{
@@ -139,7 +140,8 @@ public sealed class ProjectAnalysisService(
 							.ToArray(),
 						RootFolders: rootFolders.Value,
 						RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
-						HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied);
+						HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied,
+						HadScanFailure: rootFolders.HadScanFailure);
 				}
 				else
 				{
@@ -154,7 +156,8 @@ public sealed class ProjectAnalysisService(
 							.ToArray(),
 						RootFolders: rootFolders.Value,
 						RootAccessDenied: rootFolders.RootAccessDenied || extensions.RootAccessDenied,
-						HadAccessDenied: rootFolders.HadAccessDenied || extensions.HadAccessDenied);
+						HadAccessDenied: rootFolders.HadAccessDenied || extensions.HadAccessDenied,
+						HadScanFailure: rootFolders.HadScanFailure || extensions.HadScanFailure);
 				}
 			}
 		}
