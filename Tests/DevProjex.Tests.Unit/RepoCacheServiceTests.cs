@@ -445,6 +445,33 @@ public class RepoCacheServiceTests : IDisposable
     }
 
     [Fact]
+    public void LegacyLocalRepositoryIdentityIsNormalizedWhenIndexIsRead()
+    {
+        var sourcePath = Path.Combine(_testCacheRoot, "source", "legacy.git");
+        var repositoryUrl = new Uri(sourcePath).AbsoluteUri;
+        var cachePath = _service.CreateRepositoryDirectory(repositoryUrl);
+        var legacyIdentity = RepositoryUrlUtility.Normalize(repositoryUrl)[..^4];
+        WriteCacheIndex(
+            _testCacheRoot,
+            [
+                new RepositoryCacheIndexEntry(
+                    legacyIdentity,
+                    repositoryUrl,
+                    cachePath,
+                    "main",
+                    null,
+                    DateTimeOffset.UtcNow,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip)
+            ]);
+
+        var entry = Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(repositoryUrl));
+
+        Assert.Equal(RepositoryUrlUtility.GetComparisonKey(repositoryUrl), entry.Identity);
+        Assert.Equal(cachePath, entry.LocalPath, PathComparer.Default);
+    }
+
+    [Fact]
     public async Task ListIndexedRepositories_LegacyCatalogEntryCanBeOpenedByPathOffline()
     {
         var currentBase = Path.Combine(_testCacheRoot, "open-current");

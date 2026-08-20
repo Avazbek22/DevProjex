@@ -2014,11 +2014,13 @@ public sealed class RepoCacheService : IRepoCacheService
 			                IsInCache(entry.LocalPath))
 			.Select(entry => entry with
 			{
+				Identity = RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl),
 				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
 				              entry.LastUsedUtc > maximumAcceptedTimestamp
 					? DateTimeOffset.UnixEpoch
 					: entry.LastUsedUtc
 			})
+			.Where(static entry => entry.Identity.Length > 0)
 			.GroupBy(static entry => entry.Identity, StringComparer.OrdinalIgnoreCase)
 			.Select(static group => group.OrderByDescending(entry => entry.LastOpenedUtc).First())
 			.OrderByDescending(static entry => entry.LastOpenedUtc)
