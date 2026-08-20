@@ -13,6 +13,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 {
     private const int StreamBufferSize = 81920;
     private const int ExtractionProgressReportInterval = 50;
+	private const long MaximumRepositoryMetadataBytes = 64 * 1024;
 
     private readonly HttpClient _httpClient;
     private readonly ZipResourceLimits _limits;
@@ -419,6 +420,11 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 				cancellationToken).ConfigureAwait(false);
 			if (!response.IsSuccessStatusCode)
 				return null;
+			if (response.Content.Headers.ContentLength is > MaximumRepositoryMetadataBytes)
+				return null;
+			await response.Content
+				.LoadIntoBufferAsync(MaximumRepositoryMetadataBytes, cancellationToken)
+				.ConfigureAwait(false);
 
 			await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 			using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)

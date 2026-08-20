@@ -211,6 +211,29 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 	}
 
 	[Fact]
+	public async Task DownloadAndExtractAsync_OversizedRepositoryMetadataUsesLegacyBranchFallback()
+	{
+		var archive = CreateArchive(("repo-main/file.txt", "main"u8.ToArray()));
+		var metadata = Encoding.UTF8.GetBytes(
+			$"{{\"default_branch\":\"develop\",\"padding\":\"{new string('x', 70 * 1024)}\"}}");
+		var handler = new DefaultBranchArchiveHandler("develop", archive, metadata);
+		using var service = new ZipDownloadService(handler, ZipResourceLimits.Default with
+		{
+			FreeSpaceReserveBytes = 0
+		});
+		var targetDir = Path.Combine(_tempDir!, "oversized-metadata");
+
+		var result = await service.DownloadAndExtractAsync(
+			"https://github.com/owner/repo",
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(result.Success, result.ErrorMessage);
+		Assert.Equal("main", result.DefaultBranch);
+		Assert.Contains("/refs/heads/main.zip", handler.ArchiveRequestUri, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void CreateZipUrl_EncodesSpecialCharactersInsideEachBranchSegment()
 	{
 		var url = ZipDownloadService.CreateZipUrl(
@@ -898,7 +921,10 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         }
     }
 
-    private sealed class DefaultBranchArchiveHandler(string defaultBranch, byte[] archive) : HttpMessageHandler
+    private sealed class DefaultBranchArchiveHandler(
+	    string defaultBranch,
+	    byte[] archive,
+	    byte[]? metadata = null) : HttpMessageHandler
     {
         public string? ArchiveRequestUri { get; private set; }
 
@@ -912,7 +938,9 @@ public class ZipDownloadServiceTests : IAsyncLifetime
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent($"{{\"default_branch\":\"{defaultBranch}\"}}")
+	                Content = metadata is null
+	                    ? new StringContent($"{{\"default_branch\":\"{defaultBranch}\"}}")
+	                    : new UnknownLengthContent(metadata)
                 });
             }
 
