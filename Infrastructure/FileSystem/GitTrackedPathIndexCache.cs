@@ -12,7 +12,7 @@ internal static class GitTrackedPathIndexCache
 	private const long MaximumSingleEntryBytes = 64L * 1024 * 1024;
 	private const long EstimatedEmptyIndexBytes = 64;
 	private const int MaximumTrackedPathLength = 32768;
-	private const int GitFileMaximumLength = 64 * 1024;
+	internal const int GitFileMaximumLength = 64 * 1024;
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
 	private static readonly object CacheSync = new();
 	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache =
@@ -536,19 +536,7 @@ internal static class GitTrackedPathIndexCache
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: 1024,
 			FileOptions.SequentialScan);
-		using var reader = new StreamReader(
-			stream,
-			Encoding.UTF8,
-			detectEncodingFromByteOrderMarks: true,
-			bufferSize: 1024,
-			leaveOpen: false);
-		var firstLine = reader.ReadLine();
-		const string prefix = "gitdir:";
-		if (firstLine is null || !firstLine.StartsWith(prefix, StringComparison.Ordinal))
-			return false;
-
-		var target = firstLine[prefix.Length..].Trim();
-		if (target.Length == 0)
+		if (!TryReadGitDirectoryPointer(stream, out var target))
 			return false;
 
 		var resolvedPath = Path.IsPathRooted(target)
@@ -556,6 +544,29 @@ internal static class GitTrackedPathIndexCache
 			: Path.Combine(repositoryRootPath, target);
 		gitDirectoryPath = PathUtility.Normalize(resolvedPath);
 		return Directory.Exists(gitDirectoryPath);
+	}
+
+	internal static bool TryReadGitDirectoryPointer(Stream stream, out string target)
+	{
+		target = string.Empty;
+		if (!GitLocalConfigSemanticsReader.TryReadBoundedText(
+				stream,
+				GitFileMaximumLength,
+				out var content))
+		{
+			return false;
+		}
+
+		var lineEnd = content.AsSpan().IndexOfAny('\r', '\n');
+		var firstLine = lineEnd >= 0 ? content[..lineEnd] : content;
+		const string prefix = "gitdir:";
+		if (!firstLine.StartsWith(prefix, StringComparison.Ordinal))
+			return false;
+
+		target = firstLine[prefix.Length..].Trim();
+		if (target.Length == 0)
+			return false;
+		return true;
 	}
 
 	private static bool TryMetadataEntryExists(string gitMetadataPath)

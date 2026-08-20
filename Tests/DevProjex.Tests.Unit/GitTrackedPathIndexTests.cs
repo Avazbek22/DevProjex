@@ -5,6 +5,20 @@ namespace DevProjex.Tests.Unit;
 public sealed class GitTrackedPathIndexTests
 {
 	[Fact]
+	public void GitDirectoryPointer_RejectsActualContentBeyondMaximumAfterLengthProbe()
+	{
+		var bytes = new byte[GitTrackedPathIndexCache.GitFileMaximumLength + 1];
+		Encoding.UTF8.GetBytes("gitdir: metadata", bytes);
+		using var stream = new StaleLengthMemoryStream(bytes, reportedLength: 16);
+
+		var result = GitTrackedPathIndexCache.TryReadGitDirectoryPointer(stream, out var target);
+
+		Assert.False(result);
+		Assert.Empty(target);
+		Assert.Equal(GitTrackedPathIndexCache.GitFileMaximumLength + 1, stream.Position);
+	}
+
+	[Fact]
 	public async Task NullDelimitedReader_WhenRetainedBudgetIsExceeded_AbortsBeforeMaterializingRemainder()
 	{
 		var payload = Encoding.UTF8.GetBytes("first.cs\0second-long-path.cs\0third.cs\0");
@@ -563,5 +577,11 @@ public sealed class GitTrackedPathIndexTests
 			"tracked.tmp");
 
 		Assert.False(evaluation.IsIgnored);
+	}
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
 	}
 }
