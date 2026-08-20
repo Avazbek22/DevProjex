@@ -665,6 +665,39 @@ public class RepoCacheServiceTests : IDisposable
         Assert.Equal("main", indexed.Branch);
     }
 
+	[Fact]
+	public void OversizedCacheIndex_IsNotReadOrReplacedByMetadataUpdates()
+	{
+		const string repositoryUrl = "https://github.com/example/oversized-index.git";
+		Directory.CreateDirectory(_testCacheRoot);
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		using (var stream = new FileStream(indexPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+			stream.SetLength(RepoCacheService.MaximumCacheIndexBytes + 1);
+		var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+
+		Assert.Null(_service.FindIndexedRepository(repositoryUrl));
+		_service.RecordIndexedRepository(repositoryUrl, repositoryPath, "main", "1234567");
+
+		Assert.Equal(RepoCacheService.MaximumCacheIndexBytes + 1, new FileInfo(indexPath).Length);
+		Assert.Null(_service.FindIndexedRepository(repositoryUrl));
+	}
+
+	[Fact]
+	public void FutureCacheIndex_IsNotDowngradedByMetadataUpdates()
+	{
+		const string repositoryUrl = "https://github.com/example/future-index.git";
+		Directory.CreateDirectory(_testCacheRoot);
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		File.WriteAllText(indexPath, """{"schemaVersion":3,"entries":[],"future":"preserve"}""");
+		var original = File.ReadAllBytes(indexPath);
+		var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+
+		_service.RecordIndexedRepository(repositoryUrl, repositoryPath, "main", "1234567");
+
+		Assert.Equal(original, File.ReadAllBytes(indexPath));
+		Assert.Null(_service.FindIndexedRepository(repositoryUrl));
+	}
+
     [Fact]
     public void FindIndexedRepository_IgnoresEntriesWithMissingRequiredStrings()
     {

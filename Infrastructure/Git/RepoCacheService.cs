@@ -16,6 +16,7 @@ public sealed class RepoCacheService : IRepoCacheService
 	private const string CacheFolderName = "RepoCache";
 	private const string CacheIndexFileName = "cache-index.json";
 	private const int CacheIndexSchemaVersion = 2;
+	internal const long MaximumCacheIndexBytes = 64L * 1024 * 1024;
 	private const byte RepositorySizeRefreshRunning = 1;
 	private const byte RepositorySizeRefreshPending = 2;
 	private static readonly TimeSpan IndexLockTimeout = TimeSpan.FromSeconds(5);
@@ -256,7 +257,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 			using (heldLock)
 			{
-				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+				if (HasUnsupportedIndexDocument(fileSet))
 					continue;
 
 				var document = LoadIndex(fileSet);
@@ -434,7 +435,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		string? pathToTrash = null;
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -493,7 +494,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		var trashPaths = new List<string>();
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -613,7 +614,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		var trashPaths = new List<string>();
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -670,7 +671,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -724,7 +725,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -1335,7 +1336,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -1992,7 +1993,8 @@ public sealed class RepoCacheService : IRepoCacheService
 			    static () => RepositoryCacheIndexDocument.Empty,
 			    NormalizeIndex,
 			    out document,
-			    out _))
+			    out _,
+			    MaximumCacheIndexBytes))
 		{
 			document = RepositoryCacheIndexDocument.Empty;
 			return false;
@@ -2034,7 +2036,14 @@ public sealed class RepoCacheService : IRepoCacheService
 		JsonStorePersistence.TryWriteAtomic(
 			fileSet,
 			new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries),
-			IndexSerializerOptions);
+			IndexSerializerOptions,
+			MaximumCacheIndexBytes);
+
+	private static bool HasUnsupportedIndexDocument(JsonStoreFileSet fileSet) =>
+		JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			CacheIndexSchemaVersion,
+			maximumDocumentBytes: MaximumCacheIndexBytes);
 
 	private sealed class WorktreeCleanupState(string initialRetainedPath)
 	{
