@@ -281,6 +281,12 @@ public sealed class RecentProjectsStore
 		out RecentProjectsLoadStatus status,
 		bool persistLegacyMigration = false)
 	{
+		if (HasFutureSchema(fileSet))
+		{
+			status = RecentProjectsLoadStatus.Success;
+			return CreateDefaultDb();
+		}
+
 		if (!File.Exists(fileSet.PrimaryPath) &&
 		    !File.Exists(fileSet.BackupPath) &&
 		    TryLoadLegacy(fileSet, out var legacyDb))
@@ -339,6 +345,9 @@ public sealed class RecentProjectsStore
 
 	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
 	{
+		if (HasFutureSchema(fileSet))
+			return true;
+
 		if (!File.Exists(fileSet.PrimaryPath) &&
 		    !File.Exists(fileSet.BackupPath) &&
 		    TryLoadLegacy(fileSet, out var legacyDb))
@@ -697,9 +706,18 @@ public sealed class RecentProjectsStore
 
 	private bool TrySave(JsonStoreFileSet fileSet, RecentProjectsDb db)
 	{
+		if (HasFutureSchema(fileSet))
+			return false;
+
 		var sanitized = SanitizeState(fileSet, db);
 		return JsonStorePersistence.TryWriteAtomic(fileSet, sanitized, SerializerOptions);
 	}
+
+	private static bool HasFutureSchema(JsonStoreFileSet fileSet) =>
+		JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			CurrentSchemaVersion,
+			maximumDocumentBytes: JsonStorePersistence.SmallDocumentMaximumBytes);
 
 	private static bool TryLoadFromPath(string path, out RecentProjectsDb db, out bool requiresRewrite)
 	{

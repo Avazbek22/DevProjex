@@ -393,6 +393,37 @@ public sealed class RecentProjectsStoreTests
 		Assert.Equal(JsonStorePersistence.SmallDocumentMaximumBytes + 1, new FileInfo(filePath).Length);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void FutureSchemaInPrimaryOrBackup_IsPreservedAndBlocksPersistence(bool useBackup)
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var primaryPath = store.GetPath();
+		var futurePath = useBackup ? primaryPath + ".bak" : primaryPath;
+		const string futureJson = """
+		{
+		  "schemaVersion": 999,
+		  "recentFolders": [],
+		  "recentRepositories": [],
+		  "futureHistory": { "keep": true }
+		}
+		""";
+		Directory.CreateDirectory(Path.GetDirectoryName(primaryPath)!);
+		File.WriteAllText(futurePath, futureJson);
+
+		var loaded = store.Load();
+		var updated = store.AddRepository(loaded, "https://github.com/example/new-repository");
+
+		Assert.Empty(loaded.RecentRepositories);
+		Assert.Single(updated.RecentRepositories);
+		Assert.False(store.TryPersist(updated));
+		Assert.True(store.EnsureStorageExists());
+		Assert.Equal(futureJson, File.ReadAllText(futurePath));
+		Assert.Equal(!useBackup, File.Exists(primaryPath));
+	}
+
 	[Fact]
 	public void Load_RemovesApplicationStateDirectory_FromLegacyData()
 	{
