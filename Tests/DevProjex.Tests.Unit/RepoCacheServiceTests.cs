@@ -369,6 +369,37 @@ public class RepoCacheServiceTests : IDisposable
     }
 
     [Fact]
+    public void LocalRepositoryCacheIdentityUsesPlatformPathCaseSemantics()
+    {
+        var sourceRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "SourceIdentity");
+        var upperUrl = new Uri(Path.Combine(sourceRoot, "Repo.git")).AbsoluteUri;
+        var lowerUrl = new Uri(Path.Combine(sourceRoot, "repo.git")).AbsoluteUri;
+        var upperCachePath = PublishZip(_service, upperUrl);
+        var lowerCachePath = PublishZip(_service, lowerUrl);
+        _service.RecordIndexedRepository(upperUrl, upperCachePath, "upper");
+        _service.RecordIndexedRepository(lowerUrl, lowerCachePath, "lower");
+
+        var entries = _service.ListIndexedRepositories();
+
+        if (OperatingSystem.IsWindows())
+        {
+            var entry = Assert.Single(entries);
+            Assert.Equal(lowerCachePath, entry.LocalPath, PathComparer.Default);
+            return;
+        }
+
+        Assert.Equal(2, entries.Count);
+        Assert.Equal(
+            upperCachePath,
+            Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(upperUrl)).LocalPath,
+            PathComparer.Default);
+        Assert.Equal(
+            lowerCachePath,
+            Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(lowerUrl)).LocalPath,
+            PathComparer.Default);
+    }
+
+    [Fact]
     public async Task ListIndexedRepositories_LegacyCatalogEntryCanBeOpenedByPathOffline()
     {
         var currentBase = Path.Combine(_testCacheRoot, "open-current");
