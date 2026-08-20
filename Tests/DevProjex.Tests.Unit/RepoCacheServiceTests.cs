@@ -472,6 +472,49 @@ public class RepoCacheServiceTests : IDisposable
     }
 
     [Fact]
+    public void CollectGarbage_OverlongFileUrlEntryDoesNotDiscardValidIndexEntries()
+    {
+        const string validUrl = "https://github.com/example/valid.git";
+        var validPath = _service.CreateRepositoryDirectory(validUrl);
+        var invalidPath = _service.CreateRepositoryDirectory("invalid");
+        File.WriteAllText(Path.Combine(validPath, "payload.txt"), "valid");
+        File.WriteAllText(Path.Combine(invalidPath, "payload.txt"), "invalid");
+        var invalidUrl = $"file:///C:/{new string('a', 40_000)}";
+        WriteCacheIndex(
+            _testCacheRoot,
+            [
+                new RepositoryCacheIndexEntry(
+                    "invalid",
+                    invalidUrl,
+                    invalidPath,
+                    null,
+                    null,
+                    DateTimeOffset.UtcNow,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip),
+                new RepositoryCacheIndexEntry(
+                    RepositoryUrlUtility.GetComparisonKey(validUrl),
+                    validUrl,
+                    validPath,
+                    "main",
+                    null,
+                    DateTimeOffset.UtcNow,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip)
+            ]);
+
+        _service.CollectGarbage();
+
+        var validEntry = Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(validUrl));
+        Assert.Equal(validPath, validEntry.LocalPath, PathComparer.Default);
+        Assert.DoesNotContain(
+            _service.ListIndexedRepositories(),
+            entry => string.Equals(entry.RepositoryUrl, invalidUrl, StringComparison.Ordinal));
+        Assert.True(Directory.Exists(validPath));
+        Assert.True(File.Exists(Path.Combine(validPath, "payload.txt")));
+    }
+
+    [Fact]
     public async Task ListIndexedRepositories_LegacyCatalogEntryCanBeOpenedByPathOffline()
     {
         var currentBase = Path.Combine(_testCacheRoot, "open-current");

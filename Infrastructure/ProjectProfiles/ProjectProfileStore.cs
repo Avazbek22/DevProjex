@@ -529,7 +529,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private static DateTimeOffset NormalizeProfileTimestamp(DateTimeOffset timestamp) =>
 		timestamp <= DateTimeOffset.UnixEpoch || timestamp > MaximumSafeProfileTimestamp
-			? DateTimeOffset.UtcNow
+			? DateTimeOffset.UnixEpoch.AddTicks(1)
 			: timestamp;
 
 	private static ProjectSelectionProfile ToProfile(

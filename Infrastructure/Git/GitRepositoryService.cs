@@ -399,6 +399,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
         try
         {
             branchName = GitBranchNameValidator.ValidateAndNormalize(branchName);
+            // Git resolves the otherwise valid branch name "@" as HEAD for a bare checkout target.
+            if (branchName == "@")
+                return false;
             if (RepositoryCacheLayout.IsManaged(repositoryPath))
             {
                 return await SwitchManagedWorktreeBranchAsync(

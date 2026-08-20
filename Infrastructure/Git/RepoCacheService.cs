@@ -2039,20 +2039,38 @@ public sealed class RepoCacheService : IRepoCacheService
 			                !string.IsNullOrWhiteSpace(entry.RepositoryUrl) &&
 			                !string.IsNullOrWhiteSpace(entry.LocalPath) &&
 			                IsInCache(entry.LocalPath))
-			.Select(entry => entry with
-			{
-				Identity = RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl),
-				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
-				              entry.LastUsedUtc > maximumAcceptedTimestamp
-					? DateTimeOffset.UnixEpoch
-					: entry.LastUsedUtc
-			})
-			.Where(static entry => entry.Identity.Length > 0)
+			.Select(entry => NormalizeIndexEntryOrNull(entry, maximumAcceptedTimestamp))
+			.Where(static entry => entry is not null)
+			.Select(static entry => entry!)
 			.GroupBy(static entry => entry.Identity, StringComparer.OrdinalIgnoreCase)
 			.Select(static group => group.OrderByDescending(entry => entry.LastOpenedUtc).First())
 			.OrderByDescending(static entry => entry.LastOpenedUtc)
 			.ToList();
 		return new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries);
+	}
+
+	private static RepositoryCacheIndexEntry? NormalizeIndexEntryOrNull(
+		RepositoryCacheIndexEntry entry,
+		DateTimeOffset maximumAcceptedTimestamp)
+	{
+		try
+		{
+			var identity = RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl);
+			if (identity.Length == 0)
+				return null;
+			return entry with
+			{
+				Identity = identity,
+				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
+				              entry.LastUsedUtc > maximumAcceptedTimestamp
+					? DateTimeOffset.UnixEpoch
+					: entry.LastUsedUtc
+			};
+		}
+		catch
+		{
+			return null;
+		}
 	}
 
 	private static bool WriteIndex(

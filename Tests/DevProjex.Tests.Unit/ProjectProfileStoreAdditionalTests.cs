@@ -575,11 +575,24 @@ public sealed class ProjectProfileStoreAdditionalTests
 			var profile = document["profiles"]![PathUtility.Normalize(projectPath)]!;
 			profile["updatedUtc"] = DateTimeOffset.MaxValue;
 			File.WriteAllText(storagePath, document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+			var applyRevision = DateTimeOffset.UtcNow;
 
 			Assert.True(store.TrySaveProfile(
 				projectPath,
 				replacement,
-				DateTimeOffset.UtcNow.AddMinutes(1)));
+				applyRevision));
+			using (var persistedDocument = JsonDocument.Parse(File.ReadAllBytes(storagePath)))
+			{
+				var persistedProfile = persistedDocument.RootElement
+					.GetProperty("profiles")
+					.GetProperty(PathUtility.Normalize(projectPath));
+				Assert.Equal(applyRevision, persistedProfile.GetProperty("updatedUtc").GetDateTimeOffset());
+				Assert.Equal(
+					["docs"],
+					persistedProfile.GetProperty("selectedRootFolders")
+						.EnumerateArray()
+						.Select(static value => value.GetString()));
+			}
 			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
 			Assert.Contains("docs", loaded.SelectedRootFolders);
 			Assert.DoesNotContain("src", loaded.SelectedRootFolders);
