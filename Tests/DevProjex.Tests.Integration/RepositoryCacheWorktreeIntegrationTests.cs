@@ -2,6 +2,8 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class RepositoryCacheWorktreeIntegrationTests
 {
+	private static readonly TimeSpan BackgroundCleanupTimeout = TimeSpan.FromSeconds(15);
+
 	[Fact]
 	public async Task TwoWindows_SwitchingOneDetachedWorktreeDoesNotChangeTheOther()
 	{
@@ -415,7 +417,21 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 		await using var source = await GitTestRepository.CreateAsync(
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
-		RepoCacheService service = new(cache.Path);
+		using var cleanupCompleted = new ManualResetEventSlim();
+		var cleanupCount = 0;
+		RepoCacheService service = new(
+			cache.Path,
+			RepositoryCachePolicy.Default,
+			TimeProvider.System,
+			new GitWorktreeManager(),
+			new RepoCacheTestHooks
+			{
+				AfterUnusedWorktreeCleanup = _ =>
+				{
+					if (Interlocked.Increment(ref cleanupCount) >= 2)
+						cleanupCompleted.Set();
+				}
+			});
 		var git = new GitRepositoryService();
 		var cloneCount = 0;
 
@@ -448,6 +464,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			Assert.Equal(firstPath, reused.RepositoryPath, PathComparer.Default);
 		}
 
+		Assert.True(cleanupCompleted.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 		service = new RepoCacheService(
 			cache.Path,
 			new RepositoryCachePolicy(1, TimeSpan.FromDays(60)),
@@ -540,10 +557,12 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 
 	private static async Task WaitUntilAsync(Func<bool> condition)
 	{
-		var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+		var stopwatch = Stopwatch.StartNew();
 		while (!condition())
 		{
-			Assert.True(DateTime.UtcNow < deadline, "The background worktree cleanup did not finish.");
+			Assert.True(
+				stopwatch.Elapsed < BackgroundCleanupTimeout,
+				"The background worktree cleanup did not finish.");
 			await Task.Delay(25, TestContext.Current.CancellationToken);
 		}
 	}

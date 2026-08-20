@@ -50,6 +50,20 @@ public sealed class SecretRedactionTempDirectoryTests
 	}
 
 	[Fact]
+	public void Initialize_WhenLeaseCreationFails_RemovesThePartialDirectory()
+	{
+		using var root = new TemporaryDirectory();
+		var partialPath = root.CreateFolder("partial");
+		File.WriteAllText(
+			Path.Combine(partialPath, SecretRedactionTempDirectory.LeaseFileName),
+			"occupied");
+
+		Assert.Throws<IOException>(() => SecretRedactionTempDirectory.Initialize(partialPath));
+
+		Assert.False(Directory.Exists(partialPath));
+	}
+
+	[Fact]
 	public void Scavenger_RemovesOnlyStaleUnleasedOwnedDirectory()
 	{
 		using var root = new TemporaryDirectory();
@@ -99,6 +113,23 @@ public sealed class SecretRedactionTempDirectoryTests
 		Assert.Equal(0, SecretRedactionTempDirectory.Scavenge(root.Path, now));
 		Assert.True(Directory.Exists(foreignFormat.FullName));
 		Assert.True(Directory.Exists(foreignOwner.FullName));
+	}
+
+	[Fact]
+	public void OwnerMarkerRead_RejectsContentThatGrewAfterLengthProbe()
+	{
+		using var root = new TemporaryDirectory();
+		using var owned = SecretRedactionTempDirectory.Create(root.Path);
+		var ownerBytes = File.ReadAllBytes(
+			Path.Combine(owned.Path, SecretRedactionTempDirectory.OwnerFileName));
+		using var stream = new StaleLengthMemoryStream(
+			[.. ownerBytes, (byte)'x'],
+			reportedLength: ownerBytes.Length);
+
+		var valid = SecretRedactionTempDirectory.HasExpectedOwnerMarker(stream);
+
+		Assert.False(valid);
+		Assert.Equal(ownerBytes.Length + 1, stream.Position);
 	}
 
 	[Fact]
@@ -169,4 +200,10 @@ public sealed class SecretRedactionTempDirectoryTests
 		File.SetLastWriteTimeUtc(
 			Path.Combine(directory, SecretRedactionTempDirectory.OwnerFileName),
 			now - SecretRedactionTempDirectory.MinimumScavengeAge - TimeSpan.FromHours(1));
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
+	}
 }

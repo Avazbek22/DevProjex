@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace DevProjex.Kernel.Models;
 
 public static class RepositoryUrlUtility
@@ -62,6 +65,18 @@ public static class RepositoryUrlUtility
 				uri.Host,
 				uri.IsDefaultPort ? -1 : uri.Port,
 				uri.AbsolutePath);
+		}
+		if (uri?.IsFile == true)
+			return BuildFileSystemKey(uri.LocalPath);
+
+		try
+		{
+			if (Path.IsPathFullyQualified(normalized))
+				return BuildFileSystemKey(normalized);
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		{
+			return string.Empty;
 		}
 
 		return TrimGitSuffix(normalized);
@@ -143,6 +158,12 @@ public static class RepositoryUrlUtility
 		var normalizedPath = TrimGitSuffix(NormalizePath(path));
 		var portSuffix = port > 0 ? $":{port}" : string.Empty;
 		return $"{normalizedHost}{portSuffix}/{normalizedPath.TrimStart('/')}";
+	}
+
+	private static string BuildFileSystemKey(string path)
+	{
+		var normalizedPath = PathUtility.NormalizeForCacheKey(TrimGitSuffix(path));
+		return $"file/{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath)))}";
 	}
 
 	private static string GetLastPathSegment(string value)

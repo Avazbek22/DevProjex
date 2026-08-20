@@ -45,6 +45,25 @@ public sealed class PersistentSecretMarkStoreTests
 	}
 
 	[Fact]
+	public async Task OversizedStore_IsRejectedAsInvalidWithoutMutation()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var directory = temporary.CreateFolder("DevProjex");
+		var primaryPath = Path.Combine(directory, "project-secret-marks.json");
+		using (var stream = new FileStream(primaryPath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(ProjectProfileStorageLimits.MaximumJsonBytes + 1);
+		var store = new PersistentSecretMarkStore(() => temporary.Path);
+
+		var load = await store.LoadAsync(project, TestContext.Current.CancellationToken);
+		var add = await store.AddAsync(project, Mark(FirstHash, 12), TestContext.Current.CancellationToken);
+
+		Assert.Equal(PersistentSecretMarkStoreStatus.InvalidStorage, load.Status);
+		Assert.Equal(PersistentSecretMarkStoreStatus.InvalidStorage, add.Status);
+		Assert.Equal(ProjectProfileStorageLimits.MaximumJsonBytes + 1, new FileInfo(primaryPath).Length);
+	}
+
+	[Fact]
 	public async Task IndependentStores_AddDistinctMarks_PreserveBothDeltas()
 	{
 		using var temporary = new TemporaryDirectory();

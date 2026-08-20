@@ -103,6 +103,29 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 	}
 
 	[Fact]
+	public void InvalidateCaches_FromFileSystemRootEvictsDescendantGitIgnoreMatcher()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "*.cache\n");
+		temp.CreateFile("artifact.cache", "ignored");
+		var service = CreateServiceWithSmartIgnore([]);
+		var before = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+		Assert.True(before.IsGitIgnored(
+			Path.Combine(temp.Path, "artifact.cache"),
+			isDirectory: false,
+			"artifact.cache"));
+
+		service.InvalidateCaches(Path.GetPathRoot(temp.Path)!);
+		var after = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+
+		Assert.NotSame(before.GitIgnoreMatcher, after.GitIgnoreMatcher);
+		Assert.True(after.IsGitIgnored(
+			Path.Combine(temp.Path, "artifact.cache"),
+			isDirectory: false,
+			"artifact.cache"));
+	}
+
+	[Fact]
 	public void Build_GitIgnoreRewriteWithSameLengthAndTimestamp_InvalidatesMatcher()
 	{
 		using var temp = new TemporaryDirectory();

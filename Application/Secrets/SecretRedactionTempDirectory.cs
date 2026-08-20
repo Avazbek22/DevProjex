@@ -11,7 +11,7 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 	internal const string LeaseFileName = ".lease";
 	internal const string OwnerFileName = ".owner";
 	// The marker is one SHA-256 hex digest. A small allowance rejects attacker-controlled temp
-	// files before ReadAllText can allocate from an arbitrary length.
+	// files before their contents are materialized.
 	private const long MaximumOwnerMarkerBytes = 128;
 	// Cleanup runs in the background. A deletion cap bounds destructive work while rejected live,
 	// young, or foreign entries do not prevent reachable stale output from being reclaimed.
@@ -23,6 +23,7 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 	internal static readonly TimeSpan MinimumScavengeAge = TimeSpan.FromHours(24);
 
 	private static readonly string OwnerIdentity = CreateOwnerIdentity();
+	private static readonly byte[] OwnerIdentityBytes = Encoding.UTF8.GetBytes(OwnerIdentity);
 	private FileStream? _lease;
 	private int _disposed;
 
@@ -65,7 +66,7 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 		throw new IOException("A unique secret-redaction temporary directory could not be created.");
 	}
 
-	private static SecretRedactionTempDirectory Initialize(string directory)
+	internal static SecretRedactionTempDirectory Initialize(string directory)
 	{
 		FileStream? lease = null;
 		try
@@ -89,11 +90,8 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 		}
 		catch
 		{
-			if (lease is not null)
-			{
-				lease.Dispose();
-				TryDelete(directory);
-			}
+			lease?.Dispose();
+			TryDelete(directory);
 			throw;
 		}
 	}
@@ -156,8 +154,7 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 			    IsReparsePoint(directory) ||
 			    IsReparsePoint(ownerPath) ||
 			    !File.Exists(ownerPath) ||
-			    new FileInfo(ownerPath).Length > MaximumOwnerMarkerBytes ||
-			    !File.ReadAllText(ownerPath, Encoding.UTF8).Equals(OwnerIdentity, StringComparison.Ordinal) ||
+			    !HasExpectedOwnerMarker(ownerPath) ||
 			    !IsOwnedByCurrentUser(directory))
 			{
 				return false;
@@ -171,6 +168,32 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 		{
 			return false;
 		}
+	}
+
+	private static bool HasExpectedOwnerMarker(string path)
+	{
+		using var stream = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read | FileShare.Delete,
+			bufferSize: 128,
+			FileOptions.SequentialScan);
+		return HasExpectedOwnerMarker(stream);
+	}
+
+	internal static bool HasExpectedOwnerMarker(Stream stream)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
+		if (stream.Length != OwnerIdentityBytes.Length || stream.Length > MaximumOwnerMarkerBytes)
+			return false;
+
+		Span<byte> marker = stackalloc byte[OwnerIdentityBytes.Length];
+		stream.ReadExactly(marker);
+		Span<byte> overflowProbe = stackalloc byte[1];
+		return stream.Read(overflowProbe) == 0 &&
+		       stream.Length == OwnerIdentityBytes.Length &&
+		       marker.SequenceEqual(OwnerIdentityBytes);
 	}
 
 	internal static bool HasExpectedDirectoryName(string directory)

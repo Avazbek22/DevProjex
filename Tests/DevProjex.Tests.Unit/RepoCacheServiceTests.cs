@@ -332,6 +332,186 @@ public class RepoCacheServiceTests : IDisposable
     }
 
     [Fact]
+    public void FindIndexedRepository_FutureTimestampCannotOverrideValidDuplicate()
+    {
+        const string repositoryUrl = "https://github.com/example/timestamp.git";
+        var corruptPath = _service.CreateRepositoryDirectory(repositoryUrl);
+        var validPath = _service.CreateRepositoryDirectory(repositoryUrl);
+        var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+        var validTimestamp = DateTimeOffset.UtcNow.AddMinutes(-1);
+        WriteCacheIndex(
+            _testCacheRoot,
+            [
+                new RepositoryCacheIndexEntry(
+                    identity,
+                    repositoryUrl,
+                    corruptPath,
+                    "corrupt",
+                    null,
+                    DateTimeOffset.MaxValue,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip),
+                new RepositoryCacheIndexEntry(
+                    identity,
+                    repositoryUrl,
+                    validPath,
+                    "valid",
+                    null,
+                    validTimestamp,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip)
+            ]);
+
+        var entry = Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(repositoryUrl));
+
+        Assert.Equal(validPath, entry.LocalPath, PathComparer.Default);
+        Assert.Equal(validTimestamp, entry.LastOpenedUtc);
+    }
+
+    [Fact]
+    public void CollectGarbage_SaturatedIndexedSizeStillEvictsEveryOversizedEntry()
+    {
+        const string firstUrl = "https://github.com/example/oversized-first.git";
+        const string secondUrl = "https://github.com/example/oversized-second.git";
+        var firstPath = _service.CreateRepositoryDirectory(firstUrl);
+        var secondPath = _service.CreateRepositoryDirectory(secondUrl);
+        var lastUsedUtc = DateTimeOffset.UtcNow;
+        WriteCacheIndex(
+            _testCacheRoot,
+            [
+                new RepositoryCacheIndexEntry(
+                    RepositoryUrlUtility.GetComparisonKey(firstUrl),
+                    firstUrl,
+                    firstPath,
+                    null,
+                    null,
+                    lastUsedUtc,
+                    RepositoryCacheEntryState.Ready,
+                    long.MaxValue,
+                    RepositoryCacheContentKind.Zip),
+                new RepositoryCacheIndexEntry(
+                    RepositoryUrlUtility.GetComparisonKey(secondUrl),
+                    secondUrl,
+                    secondPath,
+                    null,
+                    null,
+                    lastUsedUtc,
+                    RepositoryCacheEntryState.Ready,
+                    long.MaxValue,
+                    RepositoryCacheContentKind.Zip)
+            ]);
+        var service = new RepoCacheService(
+            _testCacheRoot,
+            new RepositoryCachePolicy(1, TimeSpan.FromDays(60)),
+            TimeProvider.System,
+            new GitWorktreeManager());
+
+        service.CollectGarbage();
+
+        Assert.Empty(service.ListIndexedRepositories());
+        Assert.False(Directory.Exists(firstPath));
+        Assert.False(Directory.Exists(secondPath));
+    }
+
+    [Fact]
+    public void LocalRepositoryCacheIdentityUsesPlatformPathCaseSemantics()
+    {
+        var sourceRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "SourceIdentity");
+        var upperUrl = new Uri(Path.Combine(sourceRoot, "Repo.git")).AbsoluteUri;
+        var lowerUrl = new Uri(Path.Combine(sourceRoot, "repo.git")).AbsoluteUri;
+        var upperCachePath = PublishZip(_service, upperUrl);
+        var lowerCachePath = PublishZip(_service, lowerUrl);
+        _service.RecordIndexedRepository(upperUrl, upperCachePath, "upper");
+        _service.RecordIndexedRepository(lowerUrl, lowerCachePath, "lower");
+
+        var entries = _service.ListIndexedRepositories();
+
+        if (OperatingSystem.IsWindows())
+        {
+            var entry = Assert.Single(entries);
+            Assert.Equal(lowerCachePath, entry.LocalPath, PathComparer.Default);
+            return;
+        }
+
+        Assert.Equal(2, entries.Count);
+        Assert.Equal(
+            upperCachePath,
+            Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(upperUrl)).LocalPath,
+            PathComparer.Default);
+        Assert.Equal(
+            lowerCachePath,
+            Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(lowerUrl)).LocalPath,
+            PathComparer.Default);
+    }
+
+    [Fact]
+    public void LegacyLocalRepositoryIdentityIsNormalizedWhenIndexIsRead()
+    {
+        var sourcePath = Path.Combine(_testCacheRoot, "source", "legacy.git");
+        var repositoryUrl = new Uri(sourcePath).AbsoluteUri;
+        var cachePath = _service.CreateRepositoryDirectory(repositoryUrl);
+        var legacyIdentity = RepositoryUrlUtility.Normalize(repositoryUrl)[..^4];
+        WriteCacheIndex(
+            _testCacheRoot,
+            [
+                new RepositoryCacheIndexEntry(
+                    legacyIdentity,
+                    repositoryUrl,
+                    cachePath,
+                    "main",
+                    null,
+                    DateTimeOffset.UtcNow,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip)
+            ]);
+
+        var entry = Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(repositoryUrl));
+
+        Assert.Equal(RepositoryUrlUtility.GetComparisonKey(repositoryUrl), entry.Identity);
+        Assert.Equal(cachePath, entry.LocalPath, PathComparer.Default);
+    }
+
+    [Fact]
+    public void CollectGarbage_OverlongFileUrlEntryDoesNotDiscardValidIndexEntries()
+    {
+        const string validUrl = "https://github.com/example/valid.git";
+        var validPath = _service.CreateRepositoryDirectory(validUrl);
+        var invalidPath = _service.CreateRepositoryDirectory("invalid");
+        File.WriteAllText(Path.Combine(validPath, "payload.txt"), "valid");
+        File.WriteAllText(Path.Combine(invalidPath, "payload.txt"), "invalid");
+        var invalidUrl = $"file:///C:/{new string('a', 40_000)}";
+        WriteCacheIndex(
+            _testCacheRoot,
+            [
+                new RepositoryCacheIndexEntry(
+                    "invalid",
+                    invalidUrl,
+                    invalidPath,
+                    null,
+                    null,
+                    DateTimeOffset.UtcNow,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip),
+                new RepositoryCacheIndexEntry(
+                    RepositoryUrlUtility.GetComparisonKey(validUrl),
+                    validUrl,
+                    validPath,
+                    "main",
+                    null,
+                    DateTimeOffset.UtcNow,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip)
+            ]);
+
+        _service.CollectGarbage();
+
+        var validEntry = Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(validUrl));
+        Assert.Equal(validPath, validEntry.LocalPath, PathComparer.Default);
+        Assert.True(Directory.Exists(validPath));
+        Assert.True(File.Exists(Path.Combine(validPath, "payload.txt")));
+    }
+
+    [Fact]
     public async Task ListIndexedRepositories_LegacyCatalogEntryCanBeOpenedByPathOffline()
     {
         var currentBase = Path.Combine(_testCacheRoot, "open-current");
@@ -524,6 +704,80 @@ public class RepoCacheServiceTests : IDisposable
         Assert.Equal(cachePath, indexed.LocalPath, PathComparer.Default);
         Assert.Equal("main", indexed.Branch);
     }
+
+	[Fact]
+	public void OversizedCacheIndex_IsNotReadOrReplacedByMetadataUpdates()
+	{
+		const string repositoryUrl = "https://github.com/example/oversized-index.git";
+		Directory.CreateDirectory(_testCacheRoot);
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		using (var stream = new FileStream(indexPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+			stream.SetLength(RepoCacheService.MaximumCacheIndexBytes + 1);
+		var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+
+		Assert.Null(_service.FindIndexedRepository(repositoryUrl));
+		_service.RecordIndexedRepository(repositoryUrl, repositoryPath, "main", "1234567");
+
+		Assert.Equal(RepoCacheService.MaximumCacheIndexBytes + 1, new FileInfo(indexPath).Length);
+		Assert.Null(_service.FindIndexedRepository(repositoryUrl));
+	}
+
+	[Fact]
+	public void FutureCacheIndex_IsNotDowngradedByMetadataUpdates()
+	{
+		const string repositoryUrl = "https://github.com/example/future-index.git";
+		Directory.CreateDirectory(_testCacheRoot);
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		File.WriteAllText(indexPath, """{"schemaVersion":3,"entries":[],"future":"preserve"}""");
+		var original = File.ReadAllBytes(indexPath);
+		var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+
+		_service.RecordIndexedRepository(repositoryUrl, repositoryPath, "main", "1234567");
+
+		Assert.Equal(original, File.ReadAllBytes(indexPath));
+		Assert.Null(_service.FindIndexedRepository(repositoryUrl));
+	}
+
+	[Fact]
+	public async Task FutureCacheIndexWithCurrentBackup_IsNotDowngradedBySessionMetadata()
+	{
+		const string repositoryUrl = "https://github.com/example/future-session-index.git";
+		var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+		_service.RecordIndexedRepository(repositoryUrl, repositoryPath, "main", "1234567");
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		Assert.True(File.Exists($"{indexPath}.bak"));
+		File.WriteAllText(indexPath, """{"schemaVersion":3,"entries":[],"future":"preserve"}""");
+		var original = File.ReadAllBytes(indexPath);
+
+		using var session = await _service.TryAcquireRepositorySessionAsync(
+			repositoryUrl,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Null(session);
+		Assert.Equal(original, File.ReadAllBytes(indexPath));
+	}
+
+	[Fact]
+	public async Task FutureCacheIndexWithLegacyGitBackup_DoesNotMoveRepositoryDuringMigration()
+	{
+		const string repositoryUrl = "https://github.com/example/future-legacy-index.git";
+		var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+		Directory.CreateDirectory(Path.Combine(repositoryPath, ".git"));
+		_service.RecordIndexedRepository(repositoryUrl, repositoryPath, "main", "1234567");
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		Assert.True(File.Exists($"{indexPath}.bak"));
+		File.WriteAllText(indexPath, """{"schemaVersion":3,"entries":[],"future":"preserve"}""");
+		var original = File.ReadAllBytes(indexPath);
+
+		using var session = await _service.TryAcquireRepositorySessionAsync(
+			repositoryUrl,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Null(session);
+		Assert.True(Directory.Exists(repositoryPath));
+		Assert.True(Directory.Exists(Path.Combine(repositoryPath, ".git")));
+		Assert.Equal(original, File.ReadAllBytes(indexPath));
+	}
 
     [Fact]
     public void FindIndexedRepository_IgnoresEntriesWithMissingRequiredStrings()

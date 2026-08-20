@@ -30,7 +30,7 @@ public sealed record ContentSelectionSnapshot(
 		}
 
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-		Append(hash, Path.GetFullPath(projectRoot));
+		Append(hash, PathUtility.Normalize(projectRoot));
 		foreach (var path in paths.OrderBy(static path => path, PathComparer.Default))
 			Append(hash, path);
 		return new ContentSelectionSnapshot(

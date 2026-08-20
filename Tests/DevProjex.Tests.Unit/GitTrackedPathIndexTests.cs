@@ -5,6 +5,20 @@ namespace DevProjex.Tests.Unit;
 public sealed class GitTrackedPathIndexTests
 {
 	[Fact]
+	public void GitDirectoryPointer_RejectsActualContentBeyondMaximumAfterLengthProbe()
+	{
+		var bytes = new byte[GitTrackedPathIndexCache.GitFileMaximumLength + 1];
+		Encoding.UTF8.GetBytes("gitdir: metadata", bytes);
+		using var stream = new StaleLengthMemoryStream(bytes, reportedLength: 16);
+
+		var result = GitTrackedPathIndexCache.TryReadGitDirectoryPointer(stream, out var target);
+
+		Assert.False(result);
+		Assert.Empty(target);
+		Assert.Equal(GitTrackedPathIndexCache.GitFileMaximumLength + 1, stream.Position);
+	}
+
+	[Fact]
 	public async Task NullDelimitedReader_WhenRetainedBudgetIsExceeded_AbortsBeforeMaterializingRemainder()
 	{
 		var payload = Encoding.UTF8.GetBytes("first.cs\0second-long-path.cs\0third.cs\0");
@@ -56,6 +70,20 @@ public sealed class GitTrackedPathIndexTests
 
 		Assert.Null(paths);
 		Assert.True(processKilled);
+	}
+
+	[Theory]
+	[InlineData(64, true)]
+	[InlineData(16 * 1024 * 1024, true)]
+	[InlineData(16 * 1024 * 1024 + 1, false)]
+	[InlineData(64 * 1024 * 1024, false)]
+	public void CacheRetentionPolicy_EnforcesTheGlobalRetainedByteBudget(
+		long estimatedRetainedBytes,
+		bool expected)
+	{
+		Assert.Equal(
+			expected,
+			GitTrackedPathIndexCache.CanRetainCacheEntry(estimatedRetainedBytes));
 	}
 
 	[Theory]
@@ -112,6 +140,35 @@ public sealed class GitTrackedPathIndexTests
 		Assert.True(startInfo.RedirectStandardOutput);
 		Assert.True(startInfo.RedirectStandardError);
 		Assert.Equal("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
+	}
+
+	[Theory]
+	[InlineData(2, true)]
+	[InlineData(5, false)]
+	[InlineData(8, false)]
+	[InlineData(11, false)]
+	public void GitStartFailureCaching_DistinguishesMissingExecutableFromTransientFailures(
+		int nativeErrorCode,
+		bool expectedPermanent)
+	{
+		var exception = new System.ComponentModel.Win32Exception(nativeErrorCode);
+
+		Assert.Equal(
+			expectedPermanent,
+			GitTrackedPathIndexCache.IsPermanentGitStartFailure(exception));
+	}
+
+	[Theory]
+	[InlineData(3)]
+	[InlineData(193)]
+	[InlineData(216)]
+	public void WindowsSpecificGitStartFailures_ArePermanentOnlyOnWindows(int nativeErrorCode)
+	{
+		var exception = new System.ComponentModel.Win32Exception(nativeErrorCode);
+
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			GitTrackedPathIndexCache.IsPermanentGitStartFailure(exception));
 	}
 
 	[Fact]
@@ -520,5 +577,11 @@ public sealed class GitTrackedPathIndexTests
 			"tracked.tmp");
 
 		Assert.False(evaluation.IsIgnored);
+	}
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
 	}
 }

@@ -242,7 +242,8 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             CreateDefaultDb,
             NormalizeAfterRead,
             out database,
-            out requiresRewrite);
+            out requiresRewrite,
+            JsonStorePersistence.SmallDocumentMaximumBytes);
 
     private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
     {
@@ -273,7 +274,10 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
     };
 
     private static bool HasFutureSchema(JsonStoreFileSet fileSet) =>
-        JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion);
+        JsonStorePersistence.ContainsFutureDocument(
+            fileSet,
+            CurrentSchemaVersion,
+            maximumDocumentBytes: JsonStorePersistence.SmallDocumentMaximumBytes);
 
     private static bool TrySaveInternal(JsonStoreFileSet fileSet, UserSettingsDb database)
         => JsonStorePersistence.TryWriteAtomic(fileSet, database, SerializerOptions);

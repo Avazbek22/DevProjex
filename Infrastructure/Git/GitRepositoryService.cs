@@ -154,7 +154,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// Parses git clone error messages and returns user-friendly error text.
     /// Git errors can be cryptic - this method translates them to understandable messages.
     /// </summary>
-    private static string ParseGitCloneError(string gitError)
+    internal static string ParseGitCloneError(string gitError)
     {
         if (string.IsNullOrWhiteSpace(gitError))
             return "Clone failed";
@@ -198,7 +198,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// - https://github.com/user/repo.git -> repo
     /// - https://github.com/user/repo -> repo
     /// </summary>
-    private static string ExtractRepositoryName(string url)
+    internal static string ExtractRepositoryName(string url)
     {
         try
         {
@@ -399,6 +399,9 @@ public sealed class GitRepositoryService : IGitRepositoryService
         try
         {
             branchName = GitBranchNameValidator.ValidateAndNormalize(branchName);
+            // Git resolves the otherwise valid branch name "@" as HEAD for a bare checkout target.
+            if (branchName == "@")
+                return false;
             if (RepositoryCacheLayout.IsManaged(repositoryPath))
             {
                 return await SwitchManagedWorktreeBranchAsync(
@@ -808,12 +811,13 @@ public sealed class GitRepositoryService : IGitRepositoryService
             if (e.Data is not null)
             {
                 var line = e.Data;
-                if (TryExtractProgressPercent(line, out var percent))
+                var classification = ClassifyGitStderrLine(line);
+                if (classification.Percent is { } percent)
                 {
                     if (progress is not null)
                     {
                         var previousPercent = Interlocked.Exchange(ref lastReportedPercent, percent);
-                        if (IsSafeGitProgressLine(line))
+                        if (classification.IsSafeProgressLine)
                         {
                             // Preserve the phase detail for richer consumers without also
                             // emitting a second standalone percentage for the same Git line.
@@ -825,14 +829,19 @@ public sealed class GitRepositoryService : IGitRepositoryService
                         }
                     }
 
-                    // Progress lines can be very noisy during clone/fetch and are not
-                    // needed in the final error payload.
-                    return;
+                    if (!classification.RetainForError)
+                    {
+                        // Progress lines can be very noisy during clone/fetch and are not
+                        // needed in the final error payload.
+                        return;
+                    }
                 }
 
                 errorBuffer.Add(line);
 
-                if (progress is not null && IsSafeGitProgressLine(line))
+                if (progress is not null &&
+                    classification.Percent is null &&
+                    classification.IsSafeProgressLine)
                     progress.Report(line);
             }
         };
@@ -936,7 +945,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         }
     }
 
-    private static bool TryExtractProgressPercent(string line, out int percent)
+    internal static bool TryExtractProgressPercent(string line, out int percent)
     {
         percent = -1;
         if (string.IsNullOrWhiteSpace(line))
@@ -956,7 +965,11 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     start--;
 
                 var length = end - start;
-                if (length > 0 &&
+                var hasInvalidNumericPrefix = start >= 0 &&
+                                              (char.IsLetterOrDigit(line[start]) ||
+                                               line[start] is '+' or '-' or '.' or '_');
+                if (!hasInvalidNumericPrefix &&
+                    length > 0 &&
                     int.TryParse(line.AsSpan(start + 1, length), out var value) &&
                     value is >= 0 and <= 100)
                 {
@@ -971,7 +984,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         return false;
     }
 
-    private static bool IsSafeGitProgressLine(string line)
+    internal static bool IsSafeGitProgressLine(string line)
     {
         var trimmed = line.AsSpan().TrimStart();
         return trimmed.StartsWith("remote: Enumerating objects:", StringComparison.OrdinalIgnoreCase) ||
@@ -982,6 +995,21 @@ public sealed class GitRepositoryService : IGitRepositoryService
                trimmed.StartsWith("Checking out files:", StringComparison.OrdinalIgnoreCase) ||
                trimmed.StartsWith("Updating files:", StringComparison.OrdinalIgnoreCase);
     }
+
+    internal static GitStderrLineClassification ClassifyGitStderrLine(string line)
+    {
+        var hasPercent = TryExtractProgressPercent(line, out var percent);
+        var isSafeProgressLine = IsSafeGitProgressLine(line);
+        return new GitStderrLineClassification(
+            hasPercent ? percent : null,
+            isSafeProgressLine,
+            RetainForError: !hasPercent || !isSafeProgressLine);
+    }
+
+    internal readonly record struct GitStderrLineClassification(
+        int? Percent,
+        bool IsSafeProgressLine,
+        bool RetainForError);
 
     private sealed class BoundedLineBuffer(int maxChars)
     {

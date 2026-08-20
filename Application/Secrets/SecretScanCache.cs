@@ -105,7 +105,7 @@ internal sealed class SecretScanCache
 
 	public void SynchronizeProject(string projectRoot)
 	{
-		var canonicalRoot = Path.GetFullPath(projectRoot);
+		var canonicalRoot = PathUtility.Normalize(projectRoot);
 		lock (_sync)
 		{
 			if (_projectRoot is null || !PathComparer.Default.Equals(_projectRoot, canonicalRoot))
@@ -243,7 +243,7 @@ internal sealed class SecretScanCache
 		string rulesIdentity,
 		string transformIdentity,
 		int markedSecretsRevision) =>
-		new(Path.GetFullPath(path), rulesIdentity, transformIdentity, markedSecretsRevision);
+		new(PathUtility.Normalize(path), rulesIdentity, transformIdentity, markedSecretsRevision);
 
 	private static SecretScanCacheKey CreateKey(SecretScanCacheEntry entry) =>
 		new(

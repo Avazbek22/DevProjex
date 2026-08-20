@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
@@ -44,6 +45,17 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         File.WriteAllText(firstDisappearingPath, "first\n");
         File.WriteAllText(secondDisappearingPath, "second\n");
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+        var observedToastMessages = new ConcurrentQueue<string>();
+        var toastItems = UiTestDriver.GetToastService(window).Items;
+        System.Collections.Specialized.NotifyCollectionChangedEventHandler toastChanged = (_, args) =>
+        {
+            if (args.NewItems is null)
+                return;
+
+            foreach (var toast in args.NewItems.OfType<ToastMessageViewModel>())
+                observedToastMessages.Enqueue(toast.Message);
+        };
+        toastItems.CollectionChanged += toastChanged;
         try
         {
             await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
@@ -58,11 +70,8 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             await UiTestDriver.ClickApplySettingsAsync(window);
             await UiTestDriver.WaitForConditionAsync(
                 window,
-                () => UiTestDriver.GetToastService(window).Items.Any(
-                    toast => string.Equals(
-                        toast.Message,
-                        "Checked items hidden by the current settings: 2",
-                        StringComparison.Ordinal)),
+                () => observedToastMessages.Contains(
+                    "Checked items hidden by the current settings: 2"),
                 "exact structural selection-loss toast");
 
             var selectedPaths = UiTestDriver.GetCheckedTreePaths(window);
@@ -71,11 +80,8 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             Assert.DoesNotContain(firstDisappearingPath, selectedPaths);
             Assert.DoesNotContain(secondDisappearingPath, selectedPaths);
             Assert.Contains(
-                UiTestDriver.GetToastService(window).Items,
-                toast => string.Equals(
-                    toast.Message,
-                    "Checked items hidden by the current settings: 2",
-                    StringComparison.Ordinal));
+                "Checked items hidden by the current settings: 2",
+                observedToastMessages);
 
             await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".tree-state");
             await UiTestDriver.ClickApplySettingsAsync(window);
@@ -86,6 +92,7 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         }
         finally
         {
+            toastItems.CollectionChanged -= toastChanged;
             await UiTestDriver.CloseWindowAsync(window);
         }
     }

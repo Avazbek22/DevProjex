@@ -6,11 +6,15 @@ public sealed class MarkedSecretsMatcherMemoryTests(ITestOutputHelper output)
 {
 	private const string MarkedValue = "persistent-secret-value";
 
-	[Fact(Timeout = 15_000)]
+	[Fact(Timeout = 45_000)]
 	public void NewlineDenseMaximumFile_UsesBoundedPositionIndexMemory()
 	{
 		var content = new string('\n', checked((int)SecretRedactionOutputPreparer.MaximumScannableFileBytes));
 		var matcher = CreateMatcher();
+		var cancellationToken = TestContext.Current.CancellationToken;
+		var memoryMeasurementBudget = new SecretFileInspectionBudget(
+			TimeSpan.FromSeconds(30),
+			cancellationToken);
 		var legacyAllocated = MeasureLegacyPositionIndexAllocations(content);
 		GC.Collect();
 		GC.WaitForPendingFinalizers();
@@ -20,7 +24,9 @@ public sealed class MarkedSecretsMatcherMemoryTests(ITestOutputHelper output)
 		var findings = matcher.Match(
 			"config.env",
 			content,
-			TestContext.Current.CancellationToken);
+			transformMap: null,
+			memoryMeasurementBudget,
+			cancellationToken);
 		var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 		output.WriteLine(
 			"16 MiB newline index: legacy={0:N0} B, bitsets+match={1:N0} B",

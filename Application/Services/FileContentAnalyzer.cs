@@ -55,7 +55,7 @@ public sealed class FileContentAnalyzer :
 		".bin", ".dat", ".db", ".sqlite", ".mdb"
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 	private static readonly Encoding StrictUtf8 = new UTF8Encoding(
-		encoderShouldEmitUTF8Identifier: false,
+		encoderShouldEmitUTF8Identifier: true,
 		throwOnInvalidBytes: true);
 	private static readonly Encoding StrictUtf16Le = new UnicodeEncoding(
 		bigEndian: false,
@@ -382,8 +382,7 @@ public sealed class FileContentAnalyzer :
 		{
 			if (buffer is not null)
 			{
-				CryptographicOperations.ZeroMemory(
-					MemoryMarshal.AsBytes(buffer.AsSpan(0, written)));
+				ClearSensitiveCharacterBuffer(buffer);
 				ArrayPool<char>.Shared.Return(buffer);
 			}
 		}
@@ -994,14 +993,16 @@ public sealed class FileContentAnalyzer :
 		return true;
 	}
 
+	internal static void ClearSensitiveCharacterBuffer(char[] buffer)
+	{
+		ArgumentNullException.ThrowIfNull(buffer);
+		CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(buffer.AsSpan()));
+	}
+
 	private static Encoding ResolveBomFallbackEncoding(Encoding bomEncoding)
 	{
-		// The BOM-less strict UTF-8 instance has no preamble, so StreamReader auto-detection switches
-		// it to the framework replacement-fallback UTF-8 encoding. UTF-16/32 preambles match their
-		// supplied strict encodings and keep exception fallback. Preserve that established split.
-		if (ReferenceEquals(bomEncoding, StrictUtf8))
-			return Encoding.UTF8;
-		if (ReferenceEquals(bomEncoding, StrictUtf16Le) ||
+		if (ReferenceEquals(bomEncoding, StrictUtf8) ||
+		    ReferenceEquals(bomEncoding, StrictUtf16Le) ||
 		    ReferenceEquals(bomEncoding, StrictUtf16Be) ||
 		    ReferenceEquals(bomEncoding, StrictUtf32Le) ||
 		    ReferenceEquals(bomEncoding, StrictUtf32Be))
@@ -1247,6 +1248,7 @@ public sealed class FileContentAnalyzer :
 			}
 			finally
 			{
+				CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(buffer.AsSpan()));
 				ArrayPool<char>.Shared.Return(buffer);
 			}
 		}
@@ -1332,8 +1334,7 @@ public sealed class FileContentAnalyzer :
 			var current = Interlocked.Exchange(ref _buffer, null);
 			if (current is not null)
 			{
-				CryptographicOperations.ZeroMemory(
-					MemoryMarshal.AsBytes(current.AsSpan(0, length)));
+				ClearSensitiveCharacterBuffer(current);
 				ArrayPool<char>.Shared.Return(current);
 			}
 			return ValueTask.CompletedTask;
@@ -1456,6 +1457,7 @@ public sealed class FileContentAnalyzer :
 			}
 			finally
 			{
+				CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(buffer.AsSpan()));
 				ArrayPool<char>.Shared.Return(buffer);
 			}
 		}

@@ -35,7 +35,7 @@ public sealed class GitleaksSecretDetectorAcceptanceBenchmarkTests
 		}
 
 		var report = new AcceptanceReport(
-			SchemaVersion: 1,
+			SchemaVersion: 2,
 			CreatedAtUtc: DateTimeOffset.UtcNow,
 			OperatingSystem: RuntimeInformation.OSDescription,
 			Framework: RuntimeInformation.FrameworkDescription,
@@ -64,6 +64,7 @@ public sealed class GitleaksSecretDetectorAcceptanceBenchmarkTests
 	{
 		var timings = new double[cases.Count];
 		var fingerprint = new HashCode();
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
 		var total = Stopwatch.StartNew();
 		for (var index = 0; index < cases.Count; index++)
 		{
@@ -85,7 +86,11 @@ public sealed class GitleaksSecretDetectorAcceptanceBenchmarkTests
 			}
 		}
 		total.Stop();
-		return new AcceptancePass(total.Elapsed.TotalMilliseconds, timings, fingerprint.ToHashCode());
+		return new AcceptancePass(
+			total.Elapsed.TotalMilliseconds,
+			GC.GetAllocatedBytesForCurrentThread() - allocatedBefore,
+			timings,
+			fingerprint.ToHashCode());
 	}
 
 	private static Percentiles Aggregate(IEnumerable<double> samples)
@@ -149,7 +154,11 @@ public sealed class GitleaksSecretDetectorAcceptanceBenchmarkTests
 		bool ShouldMatch);
 
 	private sealed record CorpusCase(string RuleId, string Path, string Content, bool ShouldMatch);
-	private sealed record AcceptancePass(double TotalMilliseconds, double[] FileMilliseconds, int Fingerprint);
+	private sealed record AcceptancePass(
+		double TotalMilliseconds,
+		long AllocatedBytes,
+		double[] FileMilliseconds,
+		int Fingerprint);
 	private sealed record AcceptanceRun(int Run, AcceptancePass Cold, AcceptancePass Warm);
 	private sealed record Percentiles(
 		double MedianMilliseconds,

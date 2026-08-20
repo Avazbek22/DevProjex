@@ -1,15 +1,37 @@
+using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
+
 namespace DevProjex.Infrastructure.Persistence;
 
 internal static class JsonStorePersistence
 {
+    internal const long SmallDocumentMaximumBytes = 8 * 1024 * 1024;
+    private static readonly Encoding StrictUtf16LittleEndian = new UnicodeEncoding(
+        bigEndian: false,
+        byteOrderMark: true,
+        throwOnInvalidBytes: true);
+    private static readonly Encoding StrictUtf16BigEndian = new UnicodeEncoding(
+        bigEndian: true,
+        byteOrderMark: true,
+        throwOnInvalidBytes: true);
+    private static readonly Encoding StrictUtf32LittleEndian = new UTF32Encoding(
+        bigEndian: false,
+        byteOrderMark: true,
+        throwOnInvalidCharacters: true);
+    private static readonly Encoding StrictUtf32BigEndian = new UTF32Encoding(
+        bigEndian: true,
+        byteOrderMark: true,
+        throwOnInvalidCharacters: true);
+
     // A future backup is authoritative even when the primary is missing, corrupt or older.
     // Treating the complete file set as read-only prevents recovery from downgrading both copies.
     public static bool ContainsFutureDocument(
         JsonStoreFileSet fileSet,
         int currentSchemaVersion,
-        int? currentDefaultsRevision = null) =>
-        IsFutureDocument(fileSet.PrimaryPath, currentSchemaVersion, currentDefaultsRevision) ||
-        IsFutureDocument(fileSet.BackupPath, currentSchemaVersion, currentDefaultsRevision);
+        int? currentDefaultsRevision = null,
+        long maximumDocumentBytes = long.MaxValue) =>
+        IsFutureDocument(fileSet.PrimaryPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes) ||
+        IsFutureDocument(fileSet.BackupPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes);
 
     public static bool TryReadNormalized<TDocument>(
         string path,
@@ -17,7 +39,8 @@ internal static class JsonStorePersistence
         Func<TDocument> createDefault,
         Func<TDocument, TDocument> normalize,
         out TDocument document,
-        out bool requiresRewrite)
+        out bool requiresRewrite,
+        long maximumDocumentBytes = long.MaxValue)
     {
         document = createDefault();
         requiresRewrite = false;
@@ -27,7 +50,16 @@ internal static class JsonStorePersistence
 
         try
         {
-            var json = File.ReadAllText(path);
+            string json;
+            if (maximumDocumentBytes == long.MaxValue)
+            {
+                json = File.ReadAllText(path);
+            }
+            else if (maximumDocumentBytes > int.MaxValue ||
+                     !TryReadAllTextWithinSizeLimit(path, (int)maximumDocumentBytes, out json))
+            {
+                return false;
+            }
             var deserialized = JsonSerializer.Deserialize<TDocument>(json, serializerOptions);
             if (deserialized is null)
                 return false;
@@ -207,39 +239,209 @@ internal static class JsonStorePersistence
         }
     }
 
+    internal static bool IsDocumentWithinSizeLimit(string path, long maximumDocumentBytes)
+    {
+        if (maximumDocumentBytes < 0)
+            return false;
+
+        try
+        {
+            return new FileInfo(path).Length <= maximumDocumentBytes;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static bool TryReadAllTextWithinSizeLimit(
+        string path,
+        int maximumDocumentBytes,
+        out string text)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 16 * 1024,
+            FileOptions.SequentialScan);
+        return TryReadAllTextWithinSizeLimit(stream, maximumDocumentBytes, out text);
+    }
+
+    internal static bool TryReadAllTextWithinSizeLimit(
+        Stream stream,
+        int maximumDocumentBytes,
+        out string text)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumDocumentBytes);
+        text = string.Empty;
+        if (!TryBufferWithinSizeLimit(stream, maximumDocumentBytes, out var content))
+            return false;
+
+        using (content)
+        using (var reader = new StreamReader(
+                   content,
+                   Encoding.UTF8,
+                   detectEncodingFromByteOrderMarks: true,
+                   bufferSize: 1024,
+                   leaveOpen: true))
+        {
+            text = reader.ReadToEnd();
+        }
+        return true;
+    }
+
+    internal static bool TryParseDocumentWithinSizeLimit(
+        Stream stream,
+        int maximumDocumentBytes,
+        JsonDocumentOptions options,
+        [NotNullWhen(true)] out JsonDocument? document)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumDocumentBytes);
+        document = null;
+        if (!TryBufferWithinSizeLimit(stream, maximumDocumentBytes, out var content))
+            return false;
+
+        using (content)
+            document = JsonDocument.Parse(content, options);
+        return true;
+    }
+
+    private static bool TryBufferWithinSizeLimit(
+        Stream stream,
+        int maximumDocumentBytes,
+        [NotNullWhen(true)] out MemoryStream? content)
+    {
+        content = null;
+        if (stream.Length > maximumDocumentBytes)
+            return false;
+
+        var initialCapacity = (int)Math.Min(stream.Length, Math.Min(maximumDocumentBytes, 16 * 1024));
+        var buffered = new MemoryStream(initialCapacity);
+        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            var totalBytes = 0;
+            while (true)
+            {
+                var remaining = maximumDocumentBytes - totalBytes;
+                var readSize = remaining >= buffer.Length ? buffer.Length : remaining + 1;
+                var read = stream.Read(buffer, 0, readSize);
+                if (read == 0)
+                    break;
+                if (read > remaining)
+                    return false;
+                buffered.Write(buffer, 0, read);
+                totalBytes += read;
+            }
+
+            buffered.Position = 0;
+            content = buffered;
+            return true;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+            if (content is null)
+                buffered.Dispose();
+        }
+    }
+
     private static bool IsFutureDocument(
         string path,
         int currentSchemaVersion,
-        int? currentDefaultsRevision)
+        int? currentDefaultsRevision,
+        long maximumDocumentBytes)
     {
         if (!File.Exists(path))
             return false;
 
         try
         {
-            using var stream = new FileStream(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
-            using var document = JsonDocument.Parse(stream);
-            var root = document.RootElement;
-            var schemaVersion = root.TryGetProperty("schemaVersion", out var schemaElement) &&
-                                schemaElement.TryGetInt32(out var schema)
-                ? schema
-                : 0;
-            if (schemaVersion > currentSchemaVersion)
-                return true;
+            JsonDocument document;
+            if (maximumDocumentBytes == long.MaxValue)
+            {
+                using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                document = ParseDocument(stream);
+            }
+            else
+            {
+                // An unbounded document cannot be classified safely and must not be downgraded.
+                if (maximumDocumentBytes > int.MaxValue ||
+                    !TryReadAllTextWithinSizeLimit(path, (int)maximumDocumentBytes, out var json))
+                {
+                    return true;
+                }
+                document = JsonDocument.Parse(json);
+            }
+            using (document)
+            {
+                var root = document.RootElement;
+                if (IsVersionNewer(root, "schemaVersion", currentSchemaVersion))
+                    return true;
 
-            return currentDefaultsRevision is { } currentRevision &&
-                   root.TryGetProperty("defaultsRevision", out var revisionElement) &&
-                   revisionElement.TryGetInt32(out var revision) &&
-                   revision > currentRevision;
+                return currentDefaultsRevision is { } currentRevision &&
+                       IsVersionNewer(root, "defaultsRevision", currentRevision);
+            }
         }
         catch
         {
             return false;
         }
+    }
+
+    private static bool IsVersionNewer(JsonElement root, string propertyName, int currentVersion)
+    {
+        if (!root.TryGetProperty(propertyName, out var element))
+            return false;
+        if (element.TryGetInt64(out var signedVersion))
+            return signedVersion > currentVersion;
+        return element.TryGetUInt64(out var unsignedVersion) &&
+               unsignedVersion > (ulong)Math.Max(0, currentVersion);
+    }
+
+    private static JsonDocument ParseDocument(FileStream stream)
+    {
+        var encoding = DetectUnicodeEncoding(stream);
+        if (encoding is null)
+            return JsonDocument.Parse(stream);
+
+        using var reader = new StreamReader(
+            stream,
+            encoding,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: 1024,
+            leaveOpen: true);
+        return JsonDocument.Parse(reader.ReadToEnd());
+    }
+
+    private static Encoding? DetectUnicodeEncoding(FileStream stream)
+    {
+        Span<byte> prefix = stackalloc byte[4];
+        var bytesRead = stream.Read(prefix);
+        stream.Position = 0;
+        if (bytesRead >= 4)
+        {
+            if (prefix[0] == 0xFF && prefix[1] == 0xFE && prefix[2] == 0x00 && prefix[3] == 0x00)
+                return StrictUtf32LittleEndian;
+            if (prefix[0] == 0x00 && prefix[1] == 0x00 && prefix[2] == 0xFE && prefix[3] == 0xFF)
+                return StrictUtf32BigEndian;
+        }
+        if (bytesRead >= 2)
+        {
+            if (prefix[0] == 0xFF && prefix[1] == 0xFE)
+                return StrictUtf16LittleEndian;
+            if (prefix[0] == 0xFE && prefix[1] == 0xFF)
+                return StrictUtf16BigEndian;
+        }
+        return null;
     }
 }
 

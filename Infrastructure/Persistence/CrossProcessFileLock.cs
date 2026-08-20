@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace DevProjex.Infrastructure.Persistence;
 
 internal static class CrossProcessFileLock
@@ -32,7 +34,7 @@ internal static class CrossProcessFileLock
 
         Directory.CreateDirectory(fileSet.DirectoryPath);
 
-        var startedUtc = DateTime.UtcNow;
+		var startedTimestamp = Stopwatch.GetTimestamp();
         while (true)
         {
             try
@@ -48,7 +50,7 @@ internal static class CrossProcessFileLock
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                if (DateTime.UtcNow - startedUtc >= timeout)
+				if (Stopwatch.GetElapsedTime(startedTimestamp) >= timeout)
                     throw;
 
                 Thread.Sleep(RetryDelay);

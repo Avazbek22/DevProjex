@@ -9,6 +9,17 @@ public sealed class FileContentAnalyzerTests
 {
 	private readonly IFileContentAnalyzer _analyzer = new FileContentAnalyzer();
 
+	[Fact]
+	public void SensitiveCharacterBufferCleanup_ClearsUsedContentAndUnusedCapacity()
+	{
+		var buffer = Enumerable.Repeat('x', 64).ToArray();
+		buffer.AsSpan(0, 8).Fill('s');
+
+		FileContentAnalyzer.ClearSensitiveCharacterBuffer(buffer);
+
+		Assert.All(buffer, static character => Assert.Equal('\0', character));
+	}
+
 	[Theory]
 	[InlineData(ProbeOperation.CompleteTextBuffer)]
 	[InlineData(ProbeOperation.StreamingMetrics)]
@@ -799,7 +810,7 @@ public sealed class FileContentAnalyzerTests
 	}
 
 	[Fact]
-	public async Task StreamingMetrics_MalformedBomPayloadsMatchMaterializedReplacementFallback()
+	public async Task MalformedBomPayloadsAreUnsupportedAcrossReadSurfaces()
 	{
 		using var temp = new TemporaryDirectory();
 		var malformedPayloads = new Dictionary<string, byte[]>(StringComparer.Ordinal)
@@ -825,41 +836,20 @@ public sealed class FileContentAnalyzerTests
 			await using var snapshot = await _analyzer.OpenCompleteSnapshotAsync(
 				path,
 				TestContext.Current.CancellationToken);
+			await using var buffer = await _analyzer.OpenCompleteTextBufferAsync(
+				path,
+				long.MaxValue,
+				TestContext.Current.CancellationToken);
 
-			Assert.True(
-				streaming.Classification == materialized.Classification,
-				$"Streaming/materialized classification mismatch for {caseId}: " +
-				$"{streaming.Classification}/{materialized.Classification}.");
-			Assert.True(
-				snapshot.Result.Classification == materialized.Classification,
-				$"Snapshot/materialized classification mismatch for {caseId}: " +
-				$"{snapshot.Result.Classification}/{materialized.Classification}.");
-			if (materialized.Classification == FileContentClassification.Text)
-			{
-				Assert.NotNull(materialized.Content);
-				var expected = FileContentAnalyzer.ComputeMetrics(materialized.Content, payload.Length);
-				Assert.Equal(expected, streaming.Metrics);
-				Assert.Equal(expected, materialized.RawMetrics);
-				Assert.Equal(expected, snapshot.Result.Metrics);
-
-				var copied = new StringBuilder();
-				await snapshot.CopyTextToAsync(
-					materialized.Content.Length,
-					(chunk, _) =>
-					{
-						copied.Append(chunk.Span);
-						return ValueTask.CompletedTask;
-					},
-					TestContext.Current.CancellationToken);
-				Assert.Equal(materialized.Content, copied.ToString());
-			}
-			else
-			{
-				Assert.Null(streaming.Metrics);
-				Assert.Null(materialized.Content);
-				Assert.Null(materialized.RawMetrics);
-				Assert.Null(snapshot.Result.Metrics);
-			}
+			Assert.Equal(FileContentClassification.UnsupportedEncoding, streaming.Classification);
+			Assert.Equal(FileContentClassification.UnsupportedEncoding, materialized.Classification);
+			Assert.Equal(FileContentClassification.UnsupportedEncoding, snapshot.Result.Classification);
+			Assert.Equal(FileContentClassification.UnsupportedEncoding, buffer.Classification);
+			Assert.Null(streaming.Metrics);
+			Assert.Null(materialized.Content);
+			Assert.Null(materialized.RawMetrics);
+			Assert.Null(snapshot.Result.Metrics);
+			Assert.True(buffer.Content.IsEmpty, caseId);
 		}
 	}
 

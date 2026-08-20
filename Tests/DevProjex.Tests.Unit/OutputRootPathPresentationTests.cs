@@ -1,3 +1,4 @@
+using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Unit;
@@ -46,6 +47,37 @@ public sealed class OutputRootPathPresentationTests
 	}
 
 	[Fact]
+	public void CaptureRedactionDecision_PreservesKeepAcrossEquivalentProjectRootAliases()
+	{
+		using var project = new TemporaryDirectory();
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new EmptyDetector(),
+			new EmptyDetector());
+		var initialContext = new ContentTransformationContext(
+			null,
+			new SecretRedactionContext(
+				project.Path,
+				session,
+				SecretRedactionFeatures.PrivateData));
+		var initial = Assert.IsType<OutputPathRedactionDecision>(
+			OutputRootPathPresentation.CaptureRedactionDecision(initialContext));
+		Assert.True(session.ToggleKeepAsIs(initial.OccurrenceId));
+		var aliasedContext = initialContext with
+		{
+			Redaction = initialContext.Redaction! with
+			{
+				ProjectRoot = project.Path + Path.DirectorySeparatorChar
+			}
+		};
+
+		var aliased = Assert.IsType<OutputPathRedactionDecision>(
+			OutputRootPathPresentation.CaptureRedactionDecision(aliasedContext));
+
+		Assert.Equal(initial.OccurrenceId, aliased.OccurrenceId);
+		Assert.True(aliased.Keep);
+	}
+
+	[Fact]
 	public void RelativeContentHeaderMapper_IsStablePerRootAndProducesPortablePaths()
 	{
 		using var project = new TemporaryDirectory();
@@ -56,5 +88,13 @@ public sealed class OutputRootPathPresentationTests
 
 		Assert.Same(first, second);
 		Assert.Equal("src/Program.cs", first(file));
+	}
+
+	private sealed class EmptyDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
 	}
 }

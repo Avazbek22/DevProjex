@@ -161,6 +161,16 @@ public sealed class GitleaksSecretDetectorTests
 		Assert.DoesNotContain(findings, match => match.RuleId == "generic-api-key");
 	}
 
+	[Theory]
+	[InlineData("", 0d)]
+	[InlineData("aaaa", 0d)]
+	[InlineData("abcd", 2d)]
+	[InlineData("\u0430\u0431\u0430\u0431", 1d)]
+	public void ShannonEntropy_PreservesAsciiAndUnicodeResults(string value, double expected)
+	{
+		Assert.Equal(expected, GitleaksSecretDetector.CalculateShannonEntropy(value), precision: 12);
+	}
+
 	[Fact]
 	public void Detect_UserSecretsIdFastAllowlist_PreservesARealGenericFindingInTheSameFile()
 	{

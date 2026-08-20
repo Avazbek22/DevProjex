@@ -218,6 +218,31 @@ public sealed class SecretRedactionCacheTests
 	}
 
 	[Fact]
+	public void EquivalentProjectRootAliasesReuseDetectionCacheAndSnapshotIdentity()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("src/config.env", $"token={Secret}\n");
+		var content = File.ReadAllText(path);
+		var metadata = SecretFileMetadata.Capture(path);
+		var detector = new CountingDetector();
+		using var session = new SecretRedactionSession(detector);
+		var firstScope = session.BeginOutput(workspace.Path, [path]);
+		firstScope.Analyze(path, content, metadata, TestContext.Current.CancellationToken);
+		var first = firstScope.Complete();
+
+		var aliasScope = session.BeginOutput(
+			workspace.Path + Path.DirectorySeparatorChar,
+			[path]);
+		var reused = aliasScope.TryAnalyzeCached(path);
+		var alias = aliasScope.Complete();
+
+		Assert.True(reused);
+		Assert.Equal(first.SelectionKey, alias.SelectionKey);
+		Assert.Equal(1, detector.CallCount);
+		Assert.Equal(1, session.GetCacheDiagnostics().DetectionRuns);
+	}
+
+	[Fact]
 	public async Task DiscoveryCacheMode_ReusesValidatedContentWithoutWeakeningStrictRevalidation()
 	{
 		using var workspace = new TemporaryDirectory();
