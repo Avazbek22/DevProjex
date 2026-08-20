@@ -9,7 +9,8 @@ namespace DevProjex.Application.Services;
 
 public sealed class ProjectScopeDiscoveryService(
 	SmartIgnoreService smartIgnore,
-	ProjectRootFactsProvider? rootFactsProvider = null)
+	ProjectRootFactsProvider? rootFactsProvider = null,
+	Func<DateTime>? utcNowProvider = null)
 {
 	private const int ScopeCacheLimit = 128;
 	private static readonly TimeSpan ScopeCacheTtl = TimeSpan.FromSeconds(5);
@@ -149,6 +150,7 @@ public sealed class ProjectScopeDiscoveryService(
 	private readonly LinkedList<ScopeCacheEntry> _scopeCacheLru = new();
 	private readonly Dictionary<string, long> _latestDiscoverySequences = new(PathStringComparer);
 	private readonly ProjectRootFactsProvider _rootFactsProvider = rootFactsProvider ?? smartIgnore.RootFactsProvider;
+	private readonly Func<DateTime> _utcNowProvider = utcNowProvider ?? (() => DateTime.UtcNow);
 	private long _scopeCacheGeneration;
 	private long _nextDiscoverySequence;
 
@@ -171,18 +173,21 @@ public sealed class ProjectScopeDiscoveryService(
 		}
 
 		var cacheKey = BuildScopeCacheKey(normalizedRoot, selectedRootFolders);
-		var now = DateTime.UtcNow;
+		var now = _utcNowProvider();
 
 		long cacheGeneration;
 		long discoverySequence;
 		lock (_scopeCacheSync)
 		{
-			if (_scopeCache.TryGetValue(cacheKey, out var cachedNode) &&
-				now - cachedNode.Value.CachedAtUtc <= ScopeCacheTtl)
+			if (_scopeCache.TryGetValue(cacheKey, out var cachedNode))
 			{
-				_scopeCacheLru.Remove(cachedNode);
-				_scopeCacheLru.AddFirst(cachedNode);
-				return cachedNode.Value.Context;
+				var age = now - cachedNode.Value.CachedAtUtc;
+				if (age >= TimeSpan.Zero && age <= ScopeCacheTtl)
+				{
+					_scopeCacheLru.Remove(cachedNode);
+					_scopeCacheLru.AddFirst(cachedNode);
+					return cachedNode.Value.Context;
+				}
 			}
 
 			RemoveScopeCacheEntry(cacheKey);
@@ -226,7 +231,7 @@ public sealed class ProjectScopeDiscoveryService(
 
 			_latestDiscoverySequences.Remove(cacheKey);
 			RemoveScopeCacheEntry(cacheKey);
-			var entry = new ScopeCacheEntry(cacheKey, DateTime.UtcNow, context, discoveryStamp);
+			var entry = new ScopeCacheEntry(cacheKey, _utcNowProvider(), context, discoveryStamp);
 			_scopeCache[cacheKey] = _scopeCacheLru.AddFirst(entry);
 
 			while (_scopeCache.Count > ScopeCacheLimit &&
@@ -314,7 +319,7 @@ public sealed class ProjectScopeDiscoveryService(
 			allCurrent = false;
 			break;
 		}
-		var now = DateTime.UtcNow;
+		var now = _utcNowProvider();
 		lock (_scopeCacheSync)
 		{
 			if (!allCurrent)

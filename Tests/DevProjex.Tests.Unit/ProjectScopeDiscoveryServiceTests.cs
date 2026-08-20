@@ -20,6 +20,28 @@ public sealed class ProjectScopeDiscoveryServiceTests
 	}
 
 	[Fact]
+	public void Discover_WhenClockMovesBackward_DoesNotReuseStaleScopeTopology()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("package.json", "{}");
+		var now = new DateTime(2026, 8, 20, 12, 0, 0, DateTimeKind.Utc);
+		var discovery = new ProjectScopeDiscoveryService(
+			new SmartIgnoreService([]),
+			utcNowProvider: () => now);
+		var initial = discovery.Discover(temp.Path, selectedRootFolders: null);
+		Assert.Single(initial.Scopes);
+
+		temp.CreateFile("nested/pyproject.toml", "[project]\nname = \"nested\"\n");
+		now = now.AddMinutes(-10);
+		var afterClockRollback = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.NotSame(initial, afterClockRollback);
+		Assert.Contains(
+			afterClockRollback.Scopes,
+			scope => ScopeEndsWith(scope, "nested"));
+	}
+
+	[Fact]
 	public async Task Discover_InvalidatedWhileFactsAreBuilding_DoesNotPublishStaleTopology()
 	{
 		using var buildStarted = new ManualResetEventSlim();
