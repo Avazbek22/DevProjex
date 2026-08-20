@@ -377,6 +377,24 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void CrossProcessFileLock_BoundedWaitTimesOutAndDoesNotPoisonTheSidecar()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		var timeout = TimeSpan.FromMilliseconds(75);
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		using (CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero))
+		{
+			Assert.ThrowsAny<IOException>(() => CrossProcessFileLock.Acquire(fileSet, timeout));
+		}
+		stopwatch.Stop();
+
+		Assert.True(stopwatch.Elapsed >= timeout, $"Lock wait ended after {stopwatch.Elapsed}.");
+		using var reacquired = CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero);
+		Assert.NotNull(reacquired);
+	}
+
+	[Fact]
 	public void CrossProcessFileLock_DisposeReleasesSidecarLockForNextWriter()
 	{
 		using var temp = new TemporaryDirectory();
