@@ -717,6 +717,28 @@ public class RepoCacheServiceTests : IDisposable
 		Assert.Equal(original, File.ReadAllBytes(indexPath));
 	}
 
+	[Fact]
+	public async Task FutureCacheIndexWithLegacyGitBackup_DoesNotMoveRepositoryDuringMigration()
+	{
+		const string repositoryUrl = "https://github.com/example/future-legacy-index.git";
+		var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+		Directory.CreateDirectory(Path.Combine(repositoryPath, ".git"));
+		_service.RecordIndexedRepository(repositoryUrl, repositoryPath, "main", "1234567");
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		Assert.True(File.Exists($"{indexPath}.bak"));
+		File.WriteAllText(indexPath, """{"schemaVersion":3,"entries":[],"future":"preserve"}""");
+		var original = File.ReadAllBytes(indexPath);
+
+		using var session = await _service.TryAcquireRepositorySessionAsync(
+			repositoryUrl,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Null(session);
+		Assert.True(Directory.Exists(repositoryPath));
+		Assert.True(Directory.Exists(Path.Combine(repositoryPath, ".git")));
+		Assert.Equal(original, File.ReadAllBytes(indexPath));
+	}
+
     [Fact]
     public void FindIndexedRepository_IgnoresEntriesWithMissingRequiredStrings()
     {
