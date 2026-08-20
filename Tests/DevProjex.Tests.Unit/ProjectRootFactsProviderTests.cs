@@ -91,6 +91,44 @@ public sealed class ProjectRootFactsProviderTests
 	}
 
 	[Fact]
+	public void Get_TrailingSeparatorAliasSharesCacheEntry()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: null,
+			factsBuilder: path => CreateFacts(path, $"build-{++buildCount}.marker"));
+
+		var first = provider.Get(rootPath);
+		var alias = provider.Get(rootPath + Path.DirectorySeparatorChar);
+
+		Assert.Same(first, alias);
+		Assert.Equal(1, buildCount);
+	}
+
+	[Fact]
+	public void Get_WhenClockMovesBackward_DoesNotExtendCacheLifetime()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var now = new DateTime(2026, 8, 20, 12, 0, 0, DateTimeKind.Utc);
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: () => now,
+			factsBuilder: path => CreateFacts(path, $"build-{++buildCount}.marker"));
+
+		var first = provider.Get(rootPath);
+		now = now.AddMinutes(-10);
+		var afterClockRollback = provider.Get(rootPath);
+
+		Assert.NotSame(first, afterClockRollback);
+		Assert.Equal(2, buildCount);
+	}
+
+	[Fact]
 	public void TryGetFileSignature_SameLengthAndTimestampButDifferentContent_ChangesFingerprint()
 	{
 		using var temp = new TemporaryDirectory();
@@ -170,6 +208,26 @@ public sealed class ProjectRootFactsProviderTests
 		var unrelatedAfterInvalidation = provider.Get(unrelated.Path);
 		Assert.Same(unrelatedBeforeInvalidation, unrelatedAfterInvalidation);
 		Assert.False(unrelatedAfterInvalidation.HasMarkerFile("pyproject.toml"));
+	}
+
+	[Fact]
+	public void Invalidate_FromFileSystemRoot_RemovesDescendantSnapshot()
+	{
+		var fileSystemRoot = Path.GetPathRoot(Path.GetTempPath())!;
+		var descendant = Path.Combine(fileSystemRoot, "DevProjex", "Tests", Guid.NewGuid().ToString("N"));
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: null,
+			factsBuilder: path => CreateFacts(path, $"build-{++buildCount}.marker"));
+
+		var initial = provider.Get(descendant);
+		provider.Invalidate(fileSystemRoot, includeDescendants: true);
+		var refreshed = provider.Get(descendant);
+
+		Assert.NotSame(initial, refreshed);
+		Assert.Equal(2, buildCount);
 	}
 
 	[Fact]

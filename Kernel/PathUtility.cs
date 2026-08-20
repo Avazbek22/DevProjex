@@ -41,10 +41,15 @@ public static class PathUtility
 
 		if (normalizedPath.Length <= normalizedRootPath.Length)
 			return false;
+		if (IsDirectorySeparator(normalizedRootPath[^1]))
+			return true;
 
 		var next = normalizedPath[normalizedRootPath.Length];
-		return next == Path.DirectorySeparatorChar || next == Path.AltDirectorySeparatorChar;
+		return IsDirectorySeparator(next);
 	}
+
+	private static bool IsDirectorySeparator(char value) =>
+		value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
 
 	private static string TrimTrailingSeparators(string path)
 	{

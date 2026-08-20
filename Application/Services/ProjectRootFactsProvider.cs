@@ -53,28 +53,24 @@ public sealed class ProjectRootFactsProvider
 		if (string.IsNullOrWhiteSpace(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
 
-		string normalizedRootPath;
-		try
-		{
-			normalizedRootPath = Path.GetFullPath(rootPath);
-		}
-		catch
-		{
+		if (!TryNormalizePath(rootPath, out var normalizedRootPath))
 			return ProjectRootFacts.Missing(rootPath);
-		}
 
 		var now = _utcNowProvider();
 		if (!forceRefresh && _cacheLimit > 0)
 		{
 			lock (_cacheSync)
 			{
-				if (_cache.TryGetValue(normalizedRootPath, out var cachedNode) &&
-				    now - cachedNode.Value.CachedAtUtc <= _cacheTtl)
+				if (_cache.TryGetValue(normalizedRootPath, out var cachedNode))
 				{
-					_cacheLru.Remove(cachedNode);
-					_cacheLru.AddFirst(cachedNode);
-					IgnorePipelineDiagnostics.RecordRootFactsCacheHit();
-					return cachedNode.Value.Facts;
+					var age = now - cachedNode.Value.CachedAtUtc;
+					if (age >= TimeSpan.Zero && age <= _cacheTtl)
+					{
+						_cacheLru.Remove(cachedNode);
+						_cacheLru.AddFirst(cachedNode);
+						IgnorePipelineDiagnostics.RecordRootFactsCacheHit();
+						return cachedNode.Value.Facts;
+					}
 				}
 			}
 		}
@@ -337,7 +333,7 @@ public sealed class ProjectRootFactsProvider
 	{
 		try
 		{
-			normalizedPath = Path.GetFullPath(path);
+			normalizedPath = PathUtility.Normalize(path);
 			return true;
 		}
 		catch
@@ -348,22 +344,7 @@ public sealed class ProjectRootFactsProvider
 	}
 
 	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
-	{
-		if (PathComparer.Default.Equals(candidatePath, rootPath))
-			return true;
-		if (!candidatePath.StartsWith(rootPath, PathComparison))
-			return false;
-
-		return candidatePath.Length > rootPath.Length &&
-		       IsDirectorySeparator(candidatePath[rootPath.Length]);
-	}
-
-	private static bool IsDirectorySeparator(char value) =>
-		value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
-
-	private static StringComparison PathComparison => OperatingSystem.IsWindows()
-		? StringComparison.OrdinalIgnoreCase
-		: StringComparison.Ordinal;
+		=> PathUtility.IsPathInside(candidatePath, rootPath);
 
 	private readonly record struct ProjectRootEntry(
 		string Name,

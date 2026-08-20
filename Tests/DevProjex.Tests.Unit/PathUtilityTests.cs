@@ -42,6 +42,15 @@ public sealed class PathUtilityTests
 	}
 
 	[Fact]
+	public void IsPathInside_FileSystemRootContainsDescendant()
+	{
+		var rootPath = Path.GetPathRoot(Path.GetTempPath())!;
+		var descendant = Path.Combine(rootPath, "DevProjex", "workspace");
+
+		Assert.True(PathUtility.IsPathInside(descendant, rootPath));
+	}
+
+	[Fact]
 	public void IsPathInside_ReturnsFalse_ForPrefixTrapSibling()
 	{
 		using var temp = new TemporaryDirectory();
