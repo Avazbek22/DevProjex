@@ -128,6 +128,35 @@ public sealed class GitTrackedPathIndexTests
 		Assert.Equal("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
 	}
 
+	[Theory]
+	[InlineData(2, true)]
+	[InlineData(5, false)]
+	[InlineData(8, false)]
+	[InlineData(11, false)]
+	public void GitStartFailureCaching_DistinguishesMissingExecutableFromTransientFailures(
+		int nativeErrorCode,
+		bool expectedPermanent)
+	{
+		var exception = new System.ComponentModel.Win32Exception(nativeErrorCode);
+
+		Assert.Equal(
+			expectedPermanent,
+			GitTrackedPathIndexCache.IsPermanentGitStartFailure(exception));
+	}
+
+	[Theory]
+	[InlineData(3)]
+	[InlineData(193)]
+	[InlineData(216)]
+	public void WindowsSpecificGitStartFailures_ArePermanentOnlyOnWindows(int nativeErrorCode)
+	{
+		var exception = new System.ComponentModel.Win32Exception(nativeErrorCode);
+
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			GitTrackedPathIndexCache.IsPermanentGitStartFailure(exception));
+	}
+
 	[Fact]
 	public void ExactAndDescendantLookups_NormalizeSeparatorsDeduplicateAndStayInsideRepository()
 	{

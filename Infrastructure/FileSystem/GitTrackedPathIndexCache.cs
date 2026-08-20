@@ -203,9 +203,10 @@ internal static class GitTrackedPathIndexCache
 			process.StandardInput.Close();
 			Volatile.Write(ref _gitAvailability, 1);
 		}
-		catch (Win32Exception)
+		catch (Win32Exception exception)
 		{
-			Volatile.Write(ref _gitAvailability, -1);
+			if (IsPermanentGitStartFailure(exception))
+				Volatile.Write(ref _gitAvailability, -1);
 			return null;
 		}
 
@@ -271,6 +272,15 @@ internal static class GitTrackedPathIndexCache
 			throwOnInvalidBytes: false);
 		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
 		return startInfo;
+	}
+
+	internal static bool IsPermanentGitStartFailure(Win32Exception exception)
+	{
+		ArgumentNullException.ThrowIfNull(exception);
+		if (exception.NativeErrorCode == 2)
+			return true;
+
+		return OperatingSystem.IsWindows() && exception.NativeErrorCode is 3 or 193 or 216;
 	}
 
 	internal static async Task<List<string>?> ReadNullDelimitedPathsAsync(
