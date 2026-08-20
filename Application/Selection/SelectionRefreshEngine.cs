@@ -829,7 +829,10 @@ public sealed class SelectionRefreshEngine(
                 stateCache,
                 stateCacheIsComplete);
         }
-        catch
+        catch (Exception exception) when (exception is
+               IOException or
+               UnauthorizedAccessException or
+               System.Security.SecurityException)
         {
             return IgnoreOptionsAvailabilityResolver.CreateUnmeasured(
                 includeGitIgnore: false,
