@@ -412,14 +412,15 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
-	public async Task Prewarm_SchedulesSynchronousUnsupportedMetricReadsConcurrently()
+	public async Task Prewarm_SynchronousUnsupportedMetricReadsRespectAvailableParallelism()
 	{
 		var paths = Enumerable.Range(0, 4)
 			.Select(index => $"C:/project/site-{index}.css")
 			.ToArray();
 		using var compressor = CodeCompressionTestHarness.CreateCompressor();
 		using var session = new CodeCompressionSession(compressor);
-		using var analyzer = new SynchronousMetricsConcurrencyAnalyzer(requiredConcurrency: 2);
+		var expectedConcurrency = Math.Min(2, Math.Max(1, Environment.ProcessorCount));
+		using var analyzer = new SynchronousMetricsConcurrencyAnalyzer(expectedConcurrency);
 
 		var result = await Task.Run(() =>
 				new CodeCompressionPrewarmer(analyzer).WarmAsync(
@@ -431,7 +432,7 @@ public sealed class CodeCompressionSessionTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(paths.Length, result.WarmedFiles);
-		Assert.True(analyzer.PeakConcurrentReads >= 2);
+		Assert.True(analyzer.PeakConcurrentReads >= expectedConcurrency);
 	}
 
 	[Fact]
