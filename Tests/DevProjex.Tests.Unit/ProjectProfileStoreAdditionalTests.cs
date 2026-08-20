@@ -553,6 +553,45 @@ public sealed class ProjectProfileStoreAdditionalTests
 		}
 	}
 
+	[Fact]
+	public void TrySaveProfile_ExtremePersistedTimestamp_DoesNotBlockLaterRevision()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+			var original = new ProjectSelectionProfile(
+				SelectedRootFolders: ["src"],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.DotFiles]);
+			var replacement = new ProjectSelectionProfile(
+				SelectedRootFolders: ["docs"],
+				SelectedExtensions: [".md"],
+				SelectedIgnoreOptions: [IgnoreOptionId.UseGitIgnore]);
+			Assert.True(store.TrySaveProfile(projectPath, original));
+			var storagePath = store.GetPath();
+			var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(storagePath))!;
+			var profile = document["profiles"]![PathUtility.Normalize(projectPath)]!;
+			profile["updatedUtc"] = DateTimeOffset.MaxValue;
+			File.WriteAllText(storagePath, document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+			Assert.True(store.TrySaveProfile(
+				projectPath,
+				replacement,
+				DateTimeOffset.UtcNow.AddMinutes(1)));
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.Contains("docs", loaded.SelectedRootFolders);
+			Assert.DoesNotContain("src", loaded.SelectedRootFolders);
+			Assert.Contains(".md", loaded.SelectedExtensions);
+			Assert.DoesNotContain(".cs", loaded.SelectedExtensions);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
 	[Theory]
 	[InlineData("RepoTrailingSlash")]
 	[InlineData("RepoTrailingAltSlash")]

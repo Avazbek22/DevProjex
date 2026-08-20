@@ -12,6 +12,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	private const int CurrentSchemaVersion = 3;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
+	private static readonly DateTimeOffset MaximumSafeProfileTimestamp = DateTimeOffset.MaxValue.AddDays(-1);
 
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -438,8 +439,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			profile.IgnoreOptionStates);
 		NormalizeGitFilteringState(profile.SelectedIgnoreOptions, profile.IgnoreOptionStates);
 
-		if (profile.UpdatedUtc <= DateTimeOffset.UnixEpoch)
-			profile.UpdatedUtc = DateTimeOffset.UtcNow;
+		profile.UpdatedUtc = NormalizeProfileTimestamp(profile.UpdatedUtc);
 
 		return profile;
 	}
@@ -503,9 +503,14 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			IgnoreOptionStates = ignoreOptionStates,
 			SelectedPaths = selectedPaths,
 			MarkedSecrets = null,
-			UpdatedUtc = updatedUtc
+			UpdatedUtc = NormalizeProfileTimestamp(updatedUtc)
 		};
 	}
+
+	private static DateTimeOffset NormalizeProfileTimestamp(DateTimeOffset timestamp) =>
+		timestamp <= DateTimeOffset.UnixEpoch || timestamp > MaximumSafeProfileTimestamp
+			? DateTimeOffset.UtcNow
+			: timestamp;
 
 	private static ProjectSelectionProfile ToProfile(
 		PersistedProjectProfile profile,
