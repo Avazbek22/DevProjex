@@ -974,7 +974,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 
 			Assert.Equal(1, git.PullCount);
 			Assert.Equal(0, git.CloneCount);
-			Assert.Equal(0, git.BranchDiscoveryCount);
+			Assert.Equal(1, git.BranchDiscoveryCount);
 			Assert.Equal(ProjectSourceType.GitClone, viewModel.ProjectSourceType);
 			Assert.Equal("main", viewModel.CurrentBranch);
 			Assert.DoesNotContain(
