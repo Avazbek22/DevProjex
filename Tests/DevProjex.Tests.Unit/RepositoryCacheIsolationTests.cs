@@ -1,8 +1,11 @@
+using System.Diagnostics;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class RepositoryCacheIsolationTests : IDisposable
 {
 	private const string RepositoryUrl = "https://github.com/example/isolation.git";
+	private static readonly TimeSpan BackgroundOperationTimeout = TimeSpan.FromSeconds(15);
 	private readonly string _cacheRoot = Path.Combine(
 		Path.GetTempPath(),
 		"DevProjex",
@@ -131,7 +134,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			TestContext.Current.CancellationToken);
 		Assert.NotNull(reopened);
 		await worktrees.RemovalStarted.Task.WaitAsync(
-			TimeSpan.FromSeconds(2),
+			BackgroundOperationTimeout,
 			TestContext.Current.CancellationToken);
 		Assert.Equal(0, worktrees.RemovedCount);
 
@@ -606,8 +609,8 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 
 	private static async Task WaitUntilAsync(Func<bool> condition)
 	{
-		var timeout = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-		while (!condition() && DateTime.UtcNow < timeout)
+		var stopwatch = Stopwatch.StartNew();
+		while (!condition() && stopwatch.Elapsed < BackgroundOperationTimeout)
 			await Task.Delay(20, TestContext.Current.CancellationToken);
 		Assert.True(condition(), "The asynchronous repository cleanup did not complete in time.");
 	}

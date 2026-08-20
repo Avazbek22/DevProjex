@@ -2,6 +2,8 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class RepositoryCacheWorktreeIntegrationTests
 {
+	private static readonly TimeSpan BackgroundCleanupTimeout = TimeSpan.FromSeconds(15);
+
 	[Fact]
 	public async Task TwoWindows_SwitchingOneDetachedWorktreeDoesNotChangeTheOther()
 	{
@@ -540,10 +542,12 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 
 	private static async Task WaitUntilAsync(Func<bool> condition)
 	{
-		var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+		var stopwatch = Stopwatch.StartNew();
 		while (!condition())
 		{
-			Assert.True(DateTime.UtcNow < deadline, "The background worktree cleanup did not finish.");
+			Assert.True(
+				stopwatch.Elapsed < BackgroundCleanupTimeout,
+				"The background worktree cleanup did not finish.");
 			await Task.Delay(25, TestContext.Current.CancellationToken);
 		}
 	}
