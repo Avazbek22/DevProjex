@@ -352,6 +352,26 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DownloadAndExtractAsync_RejectsTraversalWhenItIsTheFirstArchiveEntry()
+    {
+        var archive = CreateArchive(("../outside.txt", "payload"u8.ToArray()));
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+        var targetDir = Path.Combine(_tempDir!, "first-entry-traversal");
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("invalid path", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(targetDir));
+        Assert.False(File.Exists(Path.Combine(_tempDir!, "outside.txt")));
+    }
+
+    [Fact]
     public async Task DownloadAndExtractAsync_FailureDuringStagedExtractionLeavesOccupiedTargetUntouched()
     {
         var archive = CreateArchive(

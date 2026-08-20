@@ -596,7 +596,11 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
             return null;
 
         var slashIndex = entryPath.IndexOf('/');
-        return slashIndex > 0 ? entryPath[..slashIndex] : null;
+        if (slashIndex <= 0)
+            return null;
+
+        var folderName = entryPath[..slashIndex];
+        return folderName is "." or ".." ? null : folderName;
     }
 
     private static bool StartsWithFolderPrefix(string value, string folderName)
