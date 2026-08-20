@@ -98,7 +98,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 			return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 
-		var persistedProfile = ToPersistedProfile(profile, updatedUtc, out var wasTruncated);
+		var normalizedUpdatedUtc = NormalizeProfileTimestamp(updatedUtc);
+		var persistedProfile = ToPersistedProfile(profile, normalizedUpdatedUtc, out var wasTruncated);
 		if (wasTruncated)
 			return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: true);
 
@@ -118,7 +119,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			// The caller-provided timestamp reflects when the profile became user-approved.
 			if (db.Profiles.TryGetValue(normalizedPath, out var existing) &&
 				existing is not null &&
-				existing.UpdatedUtc > updatedUtc)
+				existing.UpdatedUtc > normalizedUpdatedUtc)
 			{
 				return new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
 			}

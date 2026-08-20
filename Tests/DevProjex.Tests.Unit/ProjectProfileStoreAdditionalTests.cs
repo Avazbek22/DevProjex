@@ -592,6 +592,38 @@ public sealed class ProjectProfileStoreAdditionalTests
 		}
 	}
 
+	[Fact]
+	public void TrySaveProfile_ExtremeCallerTimestamp_CannotBypassNormalizedRevisionOrdering()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+			var currentProfile = new ProjectSelectionProfile(
+				SelectedRootFolders: ["current"],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.DotFiles]);
+			var staleProfile = new ProjectSelectionProfile(
+				SelectedRootFolders: ["stale"],
+				SelectedExtensions: [".txt"],
+				SelectedIgnoreOptions: [IgnoreOptionId.EmptyFiles]);
+			var currentRevision = DateTimeOffset.UtcNow.AddHours(1);
+
+			Assert.True(store.TrySaveProfile(projectPath, currentProfile, currentRevision));
+			Assert.True(store.TrySaveProfile(projectPath, staleProfile, DateTimeOffset.MaxValue));
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.Contains("current", loaded.SelectedRootFolders);
+			Assert.DoesNotContain("stale", loaded.SelectedRootFolders);
+			Assert.Contains(".cs", loaded.SelectedExtensions);
+			Assert.DoesNotContain(".txt", loaded.SelectedExtensions);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
 	[Theory]
 	[InlineData("RepoTrailingSlash")]
 	[InlineData("RepoTrailingAltSlash")]
