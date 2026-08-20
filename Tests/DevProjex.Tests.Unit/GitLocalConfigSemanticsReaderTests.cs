@@ -191,22 +191,26 @@ public sealed class GitLocalConfigSemanticsReaderTests
 	[Fact]
 	public void BoundedTextRead_ExactLimitSucceedsAndOverflowStopsAfterProbeCharacter()
 	{
-		using var exactReader = new CountingTextReader("0123456789");
-		using var oversizedReader = new CountingTextReader(new string('x', 10_000));
+		using var exactReader = new StaleLengthMemoryStream(
+			Encoding.UTF8.GetBytes("0123456789"),
+			reportedLength: 10);
+		using var oversizedReader = new StaleLengthMemoryStream(
+			Encoding.UTF8.GetBytes(new string('\u00E9', 10_000)),
+			reportedLength: 10);
 
 		var exact = GitLocalConfigSemanticsReader.TryReadBoundedText(
 			exactReader,
-			maximumCharacters: 10,
+			maximumBytes: 10,
 			out var text);
 		var oversized = GitLocalConfigSemanticsReader.TryReadBoundedText(
 			oversizedReader,
-			maximumCharacters: 10,
+			maximumBytes: 10,
 			out _);
 
 		Assert.True(exact);
 		Assert.Equal("0123456789", text);
 		Assert.False(oversized);
-		Assert.Equal(11, oversizedReader.CharactersRead);
+		Assert.Equal(11, oversizedReader.Position);
 	}
 
 	private static string CreateStandardMetadata(TemporaryDirectory temp, string relativeGitPath)
@@ -218,21 +222,9 @@ public sealed class GitLocalConfigSemanticsReaderTests
 		return gitMetadataPath;
 	}
 
-	private sealed class CountingTextReader(string content) : TextReader
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
 	{
-		private int _position;
-
-		public int CharactersRead { get; private set; }
-
-		public override int Read(char[] buffer, int index, int count)
-		{
-			var length = Math.Min(count, content.Length - _position);
-			if (length <= 0)
-				return 0;
-			content.CopyTo(_position, buffer, index, length);
-			_position += length;
-			CharactersRead += length;
-			return length;
-		}
+		public override long Length => reportedLength;
 	}
 }

@@ -287,10 +287,12 @@ internal static class JsonStorePersistence
             var totalBytes = 0;
             while (true)
             {
-                var read = stream.Read(buffer, 0, buffer.Length);
+                var remaining = maximumDocumentBytes - totalBytes;
+                var readSize = remaining >= buffer.Length ? buffer.Length : remaining + 1;
+                var read = stream.Read(buffer, 0, readSize);
                 if (read == 0)
                     break;
-                if (read > maximumDocumentBytes - totalBytes)
+                if (read > remaining)
                     return false;
                 content.Write(buffer, 0, read);
                 totalBytes += read;

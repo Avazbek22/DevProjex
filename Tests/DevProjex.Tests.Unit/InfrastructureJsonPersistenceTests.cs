@@ -349,6 +349,7 @@ public sealed class InfrastructureJsonPersistenceTests
 
 		Assert.False(result);
 		Assert.Empty(text);
+		Assert.Equal(11, stream.Position);
 	}
 
 	[Fact]

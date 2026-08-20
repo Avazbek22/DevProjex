@@ -236,13 +236,7 @@ internal static class GitLocalConfigSemanticsReader
 				FileOptions.SequentialScan);
 			if (stream.Length > maximumLengthBytes)
 				return false;
-			using var reader = new StreamReader(
-				stream,
-				Encoding.UTF8,
-				detectEncodingFromByteOrderMarks: true,
-				bufferSize: 4096,
-				leaveOpen: false);
-			if (!TryReadBoundedText(reader, maximumLengthBytes, out var observedText))
+			if (!TryReadBoundedText(stream, maximumLengthBytes, out var observedText))
 				return false;
 
 			fileInfo.Refresh();
@@ -260,39 +254,49 @@ internal static class GitLocalConfigSemanticsReader
 	}
 
 	internal static bool TryReadBoundedText(
-		TextReader reader,
-		int maximumCharacters,
+		Stream stream,
+		int maximumBytes,
 		out string text)
 	{
-		ArgumentNullException.ThrowIfNull(reader);
-		ArgumentOutOfRangeException.ThrowIfNegative(maximumCharacters);
+		ArgumentNullException.ThrowIfNull(stream);
+		ArgumentOutOfRangeException.ThrowIfNegative(maximumBytes);
 		text = string.Empty;
-		var bufferSize = maximumCharacters >= 4095 ? 4096 : maximumCharacters + 1;
-		var buffer = ArrayPool<char>.Shared.Rent(bufferSize);
-		var builder = new StringBuilder(Math.Min(maximumCharacters, 4096));
+		if (stream.Length > maximumBytes)
+			return false;
+
+		var initialCapacity = (int)Math.Min(stream.Length, Math.Min(maximumBytes, 4096));
+		using var content = new MemoryStream(initialCapacity);
+		var buffer = ArrayPool<byte>.Shared.Rent(4096);
 		try
 		{
 			var total = 0;
 			while (true)
 			{
-				var remaining = maximumCharacters - total;
+				var remaining = maximumBytes - total;
 				var readSize = remaining >= buffer.Length ? buffer.Length : remaining + 1;
-				var read = reader.Read(buffer, 0, readSize);
+				var read = stream.Read(buffer, 0, readSize);
 				if (read == 0)
-				{
-					text = builder.ToString();
-					return true;
-				}
+					break;
 				if (read > remaining)
 					return false;
-				builder.Append(buffer, 0, read);
+				content.Write(buffer, 0, read);
 				total += read;
 			}
 		}
 		finally
 		{
-			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
+			ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
 		}
+
+		content.Position = 0;
+		using var reader = new StreamReader(
+			content,
+			Encoding.UTF8,
+			detectEncodingFromByteOrderMarks: true,
+			bufferSize: 1024,
+			leaveOpen: true);
+		text = reader.ReadToEnd();
+		return true;
 	}
 
 	private static bool TryParse(
