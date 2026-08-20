@@ -55,7 +55,7 @@ public sealed class FileContentAnalyzer :
 		".bin", ".dat", ".db", ".sqlite", ".mdb"
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 	private static readonly Encoding StrictUtf8 = new UTF8Encoding(
-		encoderShouldEmitUTF8Identifier: false,
+		encoderShouldEmitUTF8Identifier: true,
 		throwOnInvalidBytes: true);
 	private static readonly Encoding StrictUtf16Le = new UnicodeEncoding(
 		bigEndian: false,
@@ -996,12 +996,8 @@ public sealed class FileContentAnalyzer :
 
 	private static Encoding ResolveBomFallbackEncoding(Encoding bomEncoding)
 	{
-		// The BOM-less strict UTF-8 instance has no preamble, so StreamReader auto-detection switches
-		// it to the framework replacement-fallback UTF-8 encoding. UTF-16/32 preambles match their
-		// supplied strict encodings and keep exception fallback. Preserve that established split.
-		if (ReferenceEquals(bomEncoding, StrictUtf8))
-			return Encoding.UTF8;
-		if (ReferenceEquals(bomEncoding, StrictUtf16Le) ||
+		if (ReferenceEquals(bomEncoding, StrictUtf8) ||
+		    ReferenceEquals(bomEncoding, StrictUtf16Le) ||
 		    ReferenceEquals(bomEncoding, StrictUtf16Be) ||
 		    ReferenceEquals(bomEncoding, StrictUtf32Le) ||
 		    ReferenceEquals(bomEncoding, StrictUtf32Be))

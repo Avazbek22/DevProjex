@@ -957,6 +957,10 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		var legacyPath = Path.Combine(sourceRoot, "legacy-windows-1250.txt");
 		var legacyPrefix = Encoding.ASCII.GetBytes(legacySentinel + "-");
 		File.WriteAllBytes(legacyPath, [.. legacyPrefix, 0xE9, .. Encoding.ASCII.GetBytes("-END")]);
+		var malformedBomPath = Path.Combine(sourceRoot, "malformed-utf8-bom.txt");
+		File.WriteAllBytes(
+			malformedBomPath,
+			[0xEF, 0xBB, 0xBF, .. Encoding.ASCII.GetBytes(legacySentinel + "-"), 0xC3, 0x28]);
 		var binaryPath = Path.Combine(sourceRoot, "payload.bin");
 		var binaryBytes = new byte[] { 0x00, 0x01, 0xFF, 0x42 };
 		File.WriteAllBytes(binaryPath, binaryBytes);
@@ -979,10 +983,13 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			redaction,
 			plan.IncludedFiles,
 			TestContext.Current.CancellationToken);
-		var unscannable = Assert.Single(analysis.UnscannableFiles);
-		Assert.Equal(legacyPath, unscannable.Path);
-		Assert.Equal(FileContentClassification.UnsupportedEncoding, unscannable.Classification);
-		Assert.Equal(1, analysis.SkippedFileCount);
+		Assert.Equal(2, analysis.UnscannableFiles.Count);
+		Assert.All(
+			analysis.UnscannableFiles,
+			file => Assert.Equal(FileContentClassification.UnsupportedEncoding, file.Classification));
+		Assert.Contains(analysis.UnscannableFiles, file => PathComparer.Default.Equals(file.Path, legacyPath));
+		Assert.Contains(analysis.UnscannableFiles, file => PathComparer.Default.Equals(file.Path, malformedBomPath));
+		Assert.Equal(2, analysis.SkippedFileCount);
 		Assert.Equal(0, analysis.FailedFileCount);
 
 		var contextService = new ProjectContextDocumentService(
@@ -998,8 +1005,10 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			TestContext.Current.CancellationToken,
 			plain: true);
 		var contextText = Encoding.UTF8.GetString(contextDestination.ToArray());
-		Assert.Equal(FileContentClassification.UnsupportedEncoding,
-			Assert.Single(contextReport.UnscannableFiles).Classification);
+		Assert.Equal(2, contextReport.UnscannableFiles.Count);
+		Assert.All(
+			contextReport.UnscannableFiles,
+			file => Assert.Equal(FileContentClassification.UnsupportedEncoding, file.Classification));
 		Assert.Contains("DEVPROJEX_REDACTED[", contextText, StringComparison.Ordinal);
 		Assert.DoesNotContain(legacySentinel, contextText, StringComparison.Ordinal);
 
@@ -1011,9 +1020,12 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			ProjectCopyExportFormat.Folder,
 			hideSecrets,
 			hidePrivateData);
-		Assert.Equal(FileContentClassification.UnsupportedEncoding,
-			Assert.Single(folder.UnscannableFiles!).Classification);
+		Assert.Equal(2, folder.UnscannableFiles!.Count);
+		Assert.All(
+			folder.UnscannableFiles,
+			file => Assert.Equal(FileContentClassification.UnsupportedEncoding, file.Classification));
 		Assert.False(File.Exists(Path.Combine(folder.DestinationPath, Path.GetFileName(legacyPath))));
+		Assert.False(File.Exists(Path.Combine(folder.DestinationPath, Path.GetFileName(malformedBomPath))));
 		Assert.Equal(binaryBytes, File.ReadAllBytes(Path.Combine(folder.DestinationPath, "payload.bin")));
 		Assert.Contains(
 			"DEVPROJEX_REDACTED[",
@@ -1028,10 +1040,13 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 			ProjectCopyExportFormat.Zip,
 			hideSecrets,
 			hidePrivateData);
-		Assert.Equal(FileContentClassification.UnsupportedEncoding,
-			Assert.Single(zip.UnscannableFiles!).Classification);
+		Assert.Equal(2, zip.UnscannableFiles!.Count);
+		Assert.All(
+			zip.UnscannableFiles,
+			file => Assert.Equal(FileContentClassification.UnsupportedEncoding, file.Classification));
 		using var archive = ZipFile.OpenRead(zip.DestinationPath);
 		Assert.Null(archive.GetEntry(Path.GetFileName(legacyPath)));
+		Assert.Null(archive.GetEntry(Path.GetFileName(malformedBomPath)));
 		Assert.Equal(binaryBytes, ReadZipBytes(archive, "payload.bin"));
 		Assert.Contains(
 			"DEVPROJEX_REDACTED[",
