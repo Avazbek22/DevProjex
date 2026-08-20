@@ -167,6 +167,20 @@ public sealed class ProjectRootFactsProviderTests
 	}
 
 	[Fact]
+	public void ContentFingerprint_RejectsFileThatGrewAfterMetadataProbe()
+	{
+		using var stream = new StaleLengthMemoryStream(
+			Encoding.UTF8.GetBytes("root-length-overflow"),
+			reportedLength: 4);
+
+		var exception = Assert.Throws<IOException>(() =>
+			ProjectRootFactsProvider.ComputeContentFingerprint(stream, expectedLength: 4));
+
+		Assert.Contains("changed", exception.Message, StringComparison.OrdinalIgnoreCase);
+		Assert.Equal(5, stream.Position);
+	}
+
+	[Fact]
 	public void HasMatchingFileMetadata_ReportsContentRewriteOnlyWhenMetadataChanges()
 	{
 		using var temp = new TemporaryDirectory();
@@ -449,6 +463,12 @@ public sealed class ProjectRootFactsProviderTests
 			files: [new ProjectRootFileFact(markerName, Path.GetExtension(markerName))],
 			directories: [],
 			gitIgnoreSignature: null);
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
+	}
 
 	[Fact]
 	public void HasGitIgnoreFile_RejectsReparseFileAndAcceptsRegularFile()

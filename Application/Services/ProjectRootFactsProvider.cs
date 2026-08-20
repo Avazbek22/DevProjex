@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Enumeration;
 using System.Security.Cryptography;
 using DevProjex.Application.Diagnostics;
@@ -270,12 +271,22 @@ public sealed class ProjectRootFactsProvider
 				return null;
 			if (linkInfo.Length > GitIgnoreFileReader.MaximumFileSizeBytes)
 				return null;
+			var expectedLastWriteTicks = linkInfo.LastWriteTimeUtc.Ticks;
+			var expectedLength = linkInfo.Length;
+			var fingerprint = ComputeContentFingerprint(linkInfo.FullName, expectedLength);
+			linkInfo.Refresh();
+			if (!linkInfo.Exists ||
+			    linkInfo.LastWriteTimeUtc.Ticks != expectedLastWriteTicks ||
+			    linkInfo.Length != expectedLength)
+			{
+				return null;
+			}
 
 			return new ProjectRootFileSignature(
-				linkInfo.LastWriteTimeUtc.Ticks,
-				linkInfo.Length,
+				expectedLastWriteTicks,
+				expectedLength,
 				LinkTarget: string.Empty,
-				ComputeContentFingerprint(linkInfo.FullName));
+				fingerprint);
 		}
 		catch (Exception exception) when (exception is
 		       IOException or
@@ -317,7 +328,7 @@ public sealed class ProjectRootFactsProvider
 		}
 	}
 
-	private static string ComputeContentFingerprint(string filePath)
+	private static string ComputeContentFingerprint(string filePath, long expectedLength)
 	{
 		using var stream = new FileStream(
 			filePath,
@@ -326,7 +337,39 @@ public sealed class ProjectRootFactsProvider
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: 4096,
 			FileOptions.SequentialScan);
-		return Convert.ToHexString(SHA256.HashData(stream));
+		return ComputeContentFingerprint(stream, expectedLength);
+	}
+
+	internal static string ComputeContentFingerprint(Stream stream, long expectedLength)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
+		ArgumentOutOfRangeException.ThrowIfNegative(expectedLength);
+		if (stream.Length != expectedLength)
+			throw new IOException("The project root file changed before it could be hashed.");
+
+		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+		try
+		{
+			var remaining = expectedLength;
+			while (remaining > 0)
+			{
+				var readSize = (int)Math.Min(buffer.Length, remaining);
+				var read = stream.Read(buffer, 0, readSize);
+				if (read == 0)
+					throw new IOException("The project root file changed while it was being hashed.");
+				hash.AppendData(buffer, 0, read);
+				remaining -= read;
+			}
+
+			if (stream.Read(buffer, 0, 1) != 0 || stream.Length != expectedLength)
+				throw new IOException("The project root file changed while it was being hashed.");
+			return Convert.ToHexString(hash.GetHashAndReset());
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+		}
 	}
 
 	private static bool TryNormalizePath(string path, out string normalizedPath)
