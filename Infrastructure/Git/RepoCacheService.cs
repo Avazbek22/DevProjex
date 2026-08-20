@@ -1094,6 +1094,9 @@ public sealed class RepoCacheService : IRepoCacheService
 			catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
 			{
 			}
+			await GitProcessOutputReader
+				.ObserveCompletionAsync(output, error)
+				.ConfigureAwait(false);
 			throw;
 		}
 	}

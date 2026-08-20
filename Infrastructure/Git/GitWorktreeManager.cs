@@ -379,6 +379,9 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			catch
 			{
 			}
+			await GitProcessOutputReader
+				.ObserveCompletionAsync(outputTask, errorTask)
+				.ConfigureAwait(false);
 
 			throw;
 		}

@@ -79,6 +79,26 @@ public class GitRepositoryServiceUnitTests
 	}
 
 	[Fact]
+	public async Task WorktreeProcessOutput_CancellationObservationWaitsForPipeCleanup()
+	{
+		var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var reader = Task.Run(
+			async () =>
+			{
+				await release.Task;
+				throw new IOException("Pipe closed during process cancellation.");
+			},
+			TestContext.Current.CancellationToken);
+
+		var observation = GitProcessOutputReader.ObserveCompletionAsync(reader);
+		Assert.False(observation.IsCompleted);
+
+		release.SetResult();
+		await observation;
+		Assert.True(reader.IsFaulted);
+	}
+
+	[Fact]
 	public async Task WorktreeSupportProbe_FaultedProbeIsRetriedOnNextRequest()
 	{
 		var calls = 0;

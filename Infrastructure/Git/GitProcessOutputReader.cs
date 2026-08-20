@@ -45,6 +45,18 @@ internal static class GitProcessOutputReader
 			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
 		}
 	}
+
+	internal static async Task ObserveCompletionAsync(params Task[] readers)
+	{
+		try
+		{
+			await Task.WhenAll(readers).ConfigureAwait(false);
+		}
+		catch
+		{
+			// The process cancellation remains the primary failure after both pipes release resources.
+		}
+	}
 }
 
 internal readonly record struct GitProcessOutput(string Text, bool ExceededLimit);
