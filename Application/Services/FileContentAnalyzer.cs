@@ -1247,6 +1247,7 @@ public sealed class FileContentAnalyzer :
 			}
 			finally
 			{
+				CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(buffer.AsSpan()));
 				ArrayPool<char>.Shared.Return(buffer);
 			}
 		}
@@ -1456,6 +1457,7 @@ public sealed class FileContentAnalyzer :
 			}
 			finally
 			{
+				CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(buffer.AsSpan()));
 				ArrayPool<char>.Shared.Return(buffer);
 			}
 		}
