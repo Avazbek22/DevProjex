@@ -130,7 +130,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			RepositoryUrl,
 			"main",
 			TestContext.Current.CancellationToken).WaitAsync(
-			TimeSpan.FromSeconds(2),
+			BackgroundOperationTimeout,
 			TestContext.Current.CancellationToken);
 		Assert.NotNull(reopened);
 		await worktrees.RemovalStarted.Task.WaitAsync(
