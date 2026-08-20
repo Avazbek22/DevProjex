@@ -274,6 +274,34 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 		Assert.True(File.Exists(Path.Combine(targetDir, entryPath.Replace('/', Path.DirectorySeparatorChar))));
 	}
 
+	[Fact]
+	public async Task DownloadAndExtractAsync_RejectsNtfsAlternateDataStreamPathOnWindows()
+	{
+		const string entryPath = "readme.txt:hidden";
+		var archive = CreateArchive(($"repo-main/{entryPath}", "payload"u8.ToArray()));
+		using var service = new ZipDownloadService(
+			new ArchiveBytesHandler(archive),
+			ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+		var targetDir = Path.Combine(_tempDir!, $"alternate-stream-{Guid.NewGuid():N}");
+
+		var result = await service.DownloadAndExtractAsync(
+			TestRepoUrl,
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.False(result.Success);
+			Assert.Contains("alternate data stream", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+			Assert.False(Directory.Exists(targetDir));
+		}
+		else
+		{
+			Assert.True(result.Success, result.ErrorMessage);
+			Assert.True(File.Exists(Path.Combine(targetDir, entryPath)));
+		}
+	}
+
     [Theory]
     [InlineData("case")]
     [InlineData("duplicate")]

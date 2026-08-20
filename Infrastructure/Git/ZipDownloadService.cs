@@ -532,6 +532,8 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 			var normalized = segments[index].Normalize(NormalizationForm.FormC).TrimEnd(' ', '.');
 			if (normalized.Length == 0 || normalized is "." or "..")
 				throw new InvalidDataException($"ZIP entry has an invalid path: {entryPath}");
+			if (OperatingSystem.IsWindows() && normalized.Contains(':', StringComparison.Ordinal))
+				throw new InvalidDataException($"ZIP entry uses an NTFS alternate data stream path: {entryPath}");
 			if (OperatingSystem.IsWindows() && IsWindowsReservedDeviceName(normalized.AsSpan()))
 				throw new InvalidDataException($"ZIP entry uses a reserved Windows device name: {entryPath}");
 			segments[index] = normalized;
