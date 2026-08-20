@@ -945,6 +945,9 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
+			if (HasUnsupportedIndexDocument(fileSet))
+				return null;
+
 			var document = LoadIndex(fileSet);
 			var current = FindByIdentity(document, identity);
 			if (current is null ||
@@ -960,7 +963,7 @@ public sealed class RepoCacheService : IRepoCacheService
 				LastUsedUtc = _timeProvider.GetUtcNow(),
 				ContentKind = kind
 			};
-			WriteIndex(
+			if (!WriteIndex(
 				fileSet,
 				document.Entries
 					.Where(candidate => !string.Equals(
@@ -969,7 +972,10 @@ public sealed class RepoCacheService : IRepoCacheService
 						StringComparison.OrdinalIgnoreCase))
 					.Append(updated)
 					.OrderByDescending(static candidate => candidate.LastOpenedUtc)
-					.ToList());
+					.ToList()))
+			{
+				return null;
+			}
 			return updated;
 		}
 	}
@@ -1381,6 +1387,9 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
+			if (HasUnsupportedIndexDocument(fileSet))
+				return null;
+
 			var document = LoadIndex(fileSet);
 			var entry = FindByIdentity(document, identity);
 			if (entry is null ||
