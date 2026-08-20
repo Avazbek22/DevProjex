@@ -29,7 +29,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 	private readonly Action<byte[]>? _sensitiveBufferClearedObserver;
 	private byte[]? _key;
 	private Task<PersistentSecretIdentityAvailability>? _initializationTask;
-	private DateTimeOffset _retryNotBeforeUtc;
+	private long _transientFailureTimestamp;
 	private PersistentSecretIdentityProviderState _state;
 	private int _initializationAttemptCount;
 
@@ -91,7 +91,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			if (_state == PersistentSecretIdentityProviderState.PermanentFault)
 				return ValueTask.FromResult(PersistentSecretIdentityAvailability.PermanentlyUnavailable);
 			if (_state == PersistentSecretIdentityProviderState.TransientFault &&
-			    _timeProvider.GetUtcNow() < _retryNotBeforeUtc)
+			    _timeProvider.GetElapsedTime(_transientFailureTimestamp) < _transientRetryCooldown)
 			{
 				return ValueTask.FromResult(PersistentSecretIdentityAvailability.TemporarilyUnavailable);
 			}
@@ -212,7 +212,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 					return PersistentSecretIdentityAvailability.Ready;
 				case KeyInitializationStatus.TransientFault:
 					_state = PersistentSecretIdentityProviderState.TransientFault;
-					_retryNotBeforeUtc = _timeProvider.GetUtcNow() + _transientRetryCooldown;
+					_transientFailureTimestamp = _timeProvider.GetTimestamp();
 					return PersistentSecretIdentityAvailability.TemporarilyUnavailable;
 				default:
 					_state = PersistentSecretIdentityProviderState.PermanentFault;
