@@ -37,7 +37,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			if (HasOversizedDocument(fileSet) ||
+			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return false;
 			return EnsureStorageExistsCore(fileSet);
 		}
@@ -110,7 +111,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 
 			using var _ = heldLock;
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			if (HasOversizedDocument(fileSet) ||
+			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 			var db = LoadInternal(fileSet);
 			db.SchemaVersion = CurrentSchemaVersion;
@@ -143,7 +145,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				if (CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
 				{
 					using var _ = heldLock;
-					if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+					if (!HasOversizedDocument(fileSet) &&
+					    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 						return;
 					if (File.Exists(fileSet.PrimaryPath))
 						File.Delete(fileSet.PrimaryPath);
@@ -184,6 +187,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			}
 
 			using var _ = heldLock;
+			if (HasOversizedDocument(fileSet))
+			{
+				return new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.InvalidStorage,
+					null);
+			}
 			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 			{
 				return new ProjectProfileLookupResult(
@@ -226,7 +235,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			if (HasOversizedDocument(fileSet) ||
+			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return false;
 			var db = LoadInternal(fileSet);
 			selectionDeleted = !db.Profiles.Remove(normalizedPath) || TrySaveInternal(fileSet, db);
@@ -287,6 +297,15 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private JsonStoreFileSet GetFileSet()
 		=> JsonStoreFileSet.Create(_appDataPathProvider, FolderName, FileName);
+
+	private static bool HasOversizedDocument(JsonStoreFileSet fileSet) =>
+		IsOversizedDocument(fileSet.PrimaryPath) || IsOversizedDocument(fileSet.BackupPath);
+
+	private static bool IsOversizedDocument(string path) =>
+		File.Exists(path) &&
+		!JsonStorePersistence.IsDocumentWithinSizeLimit(
+			path,
+			ProjectProfileStorageLimits.MaximumJsonBytes);
 
 	private ProjectProfileDb LoadInternal(JsonStoreFileSet fileSet)
 	{
