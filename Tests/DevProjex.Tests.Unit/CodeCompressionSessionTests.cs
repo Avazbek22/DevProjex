@@ -220,6 +220,29 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public async Task Prewarm_SecurityFailureIsIsolatedToTheUnreadableFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var readable = temp.CreateFile("src/readable.cs", "same-content");
+		var denied = temp.CreateFile("src/denied.cs", "denied-content");
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+
+		var result = await new CodeCompressionPrewarmer(new SelectiveSecurityFailureAnalyzer(denied))
+			.WarmAsync(
+				new CodeCompressionContext(temp.Path, session),
+				[readable, denied],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, result.CandidateFiles);
+		Assert.Equal(1, result.WarmedFiles);
+		Assert.Equal(1, result.FailedFiles);
+		Assert.Equal(0, result.SkippedFiles);
+		Assert.Equal(1, session.Snapshot.TotalFiles);
+		Assert.Equal(1, compressor.AnalysisCount);
+	}
+
+	[Fact]
 	public async Task Prewarm_BodiesModeStreamsCommentOnlyMetricsWithoutMaterializingContent()
 	{
 		const string source = "/* remove */\n.card { color: red; }\n";
@@ -1807,5 +1830,45 @@ public sealed class CodeCompressionSessionTests
 			long maxSizeForFullRead,
 			CancellationToken cancellationToken = default) =>
 			ValueTask.FromResult<TextFileContent?>(Content);
+	}
+
+	private sealed class SelectiveSecurityFailureAnalyzer(string deniedPath) : IFileContentAnalyzer
+	{
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(true);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			if (PathComparer.Default.Equals(path, deniedPath))
+				throw new System.Security.SecurityException("Access policy denied the file.");
+
+			const string content = "same-content";
+			return ValueTask.FromResult(new ContentReadFact(
+				content,
+				FileContentClassification.Text,
+				new TextFileMetrics(content.Length, 1, content.Length, false, false),
+				ContentFingerprint.Compute(content)));
+		}
 	}
 }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using System.Security;
 using System.Threading.Channels;
 
 namespace DevProjex.Application.Compression;
@@ -322,7 +323,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 					throw;
 				}
 				catch (Exception exception) when (
-					exception is IOException or UnauthorizedAccessException or NotSupportedException)
+					exception is IOException or UnauthorizedAccessException or NotSupportedException or SecurityException)
 				{
 					Increment(WarmFileOutcome.Failed, ref warmed, ref skipped, ref failed);
 					ReportProgress(progress, ref processed, candidates.Count);
@@ -372,7 +373,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 						throw;
 					}
 					catch (Exception exception) when (
-						exception is IOException or UnauthorizedAccessException or NotSupportedException)
+						exception is IOException or UnauthorizedAccessException or NotSupportedException or SecurityException)
 					{
 						Increment(WarmFileOutcome.Failed, ref warmed, ref skipped, ref failed);
 					}
@@ -479,7 +480,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 			return true;
 		}
 		catch (Exception exception) when (
-			exception is IOException or UnauthorizedAccessException or NotSupportedException)
+			exception is IOException or UnauthorizedAccessException or NotSupportedException or SecurityException)
 		{
 			length = 0;
 			return false;
