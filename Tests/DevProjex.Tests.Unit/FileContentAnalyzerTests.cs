@@ -9,6 +9,17 @@ public sealed class FileContentAnalyzerTests
 {
 	private readonly IFileContentAnalyzer _analyzer = new FileContentAnalyzer();
 
+	[Fact]
+	public void SensitiveCharacterBufferCleanup_ClearsUsedContentAndUnusedCapacity()
+	{
+		var buffer = Enumerable.Repeat('x', 64).ToArray();
+		buffer.AsSpan(0, 8).Fill('s');
+
+		FileContentAnalyzer.ClearSensitiveCharacterBuffer(buffer);
+
+		Assert.All(buffer, static character => Assert.Equal('\0', character));
+	}
+
 	[Theory]
 	[InlineData(ProbeOperation.CompleteTextBuffer)]
 	[InlineData(ProbeOperation.StreamingMetrics)]

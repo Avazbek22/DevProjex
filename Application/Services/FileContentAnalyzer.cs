@@ -382,8 +382,7 @@ public sealed class FileContentAnalyzer :
 		{
 			if (buffer is not null)
 			{
-				CryptographicOperations.ZeroMemory(
-					MemoryMarshal.AsBytes(buffer.AsSpan(0, written)));
+				ClearSensitiveCharacterBuffer(buffer);
 				ArrayPool<char>.Shared.Return(buffer);
 			}
 		}
@@ -994,6 +993,12 @@ public sealed class FileContentAnalyzer :
 		return true;
 	}
 
+	internal static void ClearSensitiveCharacterBuffer(char[] buffer)
+	{
+		ArgumentNullException.ThrowIfNull(buffer);
+		CryptographicOperations.ZeroMemory(MemoryMarshal.AsBytes(buffer.AsSpan()));
+	}
+
 	private static Encoding ResolveBomFallbackEncoding(Encoding bomEncoding)
 	{
 		if (ReferenceEquals(bomEncoding, StrictUtf8) ||
@@ -1329,8 +1334,7 @@ public sealed class FileContentAnalyzer :
 			var current = Interlocked.Exchange(ref _buffer, null);
 			if (current is not null)
 			{
-				CryptographicOperations.ZeroMemory(
-					MemoryMarshal.AsBytes(current.AsSpan(0, length)));
+				ClearSensitiveCharacterBuffer(current);
 				ArrayPool<char>.Shared.Return(current);
 			}
 			return ValueTask.CompletedTask;
