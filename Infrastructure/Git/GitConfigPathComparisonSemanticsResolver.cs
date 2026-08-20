@@ -9,6 +9,7 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 	private const int CacheLimit = 128;
 	private const int CommandTimeoutMilliseconds = 5000;
 	private const int KillWaitMilliseconds = 1000;
+	private static readonly TimeSpan UnavailableRetryDelay = TimeSpan.FromSeconds(5);
 	// Values on an unavailable result are intentionally non-contractual. Consumers must
 	// reject non-authoritative semantics instead of guessing across escaped patterns,
 	// character classes, negations, or tracked membership.
@@ -16,11 +17,34 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		IgnoreCase: true,
 		NormalizeUnicode: true,
 		IsAuthoritative: false);
+	private readonly Func<string, string, GitPathComparisonSemantics> _repositorySemanticsResolver;
+	private readonly Func<DateTime> _utcNowProvider;
+	private readonly TimeSpan _unavailableRetryDelay;
 	private readonly object _cacheSync = new();
-	private readonly Dictionary<string, GitPathComparisonSemantics> _repositoryCache =
+	private readonly Dictionary<string, RepositorySemanticsCacheEntry> _repositoryCache =
 		new(PathComparer.Default);
 
 	public static GitConfigPathComparisonSemanticsResolver Instance { get; } = new();
+
+	public GitConfigPathComparisonSemanticsResolver()
+		: this(ResolveRepositorySemantics, static () => DateTime.UtcNow, UnavailableRetryDelay)
+	{
+	}
+
+	internal GitConfigPathComparisonSemanticsResolver(
+		Func<string, string, GitPathComparisonSemantics> repositorySemanticsResolver,
+		Func<DateTime> utcNowProvider,
+		TimeSpan unavailableRetryDelay)
+	{
+		ArgumentNullException.ThrowIfNull(repositorySemanticsResolver);
+		ArgumentNullException.ThrowIfNull(utcNowProvider);
+		if (unavailableRetryDelay < TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(unavailableRetryDelay));
+
+		_repositorySemanticsResolver = repositorySemanticsResolver;
+		_utcNowProvider = utcNowProvider;
+		_unavailableRetryDelay = unavailableRetryDelay;
+	}
 
 	public GitPathComparisonSemantics Resolve(string scopeRootPath)
 	{
@@ -32,18 +56,28 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 			return ResolveFileSystemFallback(scopeRootPath, gitMetadataPath: null);
 		}
 
+		var now = _utcNowProvider();
 		lock (_cacheSync)
 		{
 			if (_repositoryCache.TryGetValue(repositoryRoot, out var cached))
-				return cached;
+			{
+				var elapsed = now - cached.CapturedUtc;
+				if (cached.Semantics.IsAuthoritative ||
+				    elapsed >= TimeSpan.Zero && elapsed < _unavailableRetryDelay)
+			{
+					return cached.Semantics;
+				}
+			}
 		}
 
-		var resolved = ResolveRepositorySemantics(repositoryRoot, gitMetadataPath);
+		var resolved = _repositorySemanticsResolver(repositoryRoot, gitMetadataPath);
 		lock (_cacheSync)
 		{
 			if (_repositoryCache.Count >= CacheLimit)
 				_repositoryCache.Clear();
-			_repositoryCache[repositoryRoot] = resolved;
+			_repositoryCache[repositoryRoot] = new RepositorySemanticsCacheEntry(
+				resolved,
+				_utcNowProvider());
 		}
 
 		return resolved;
@@ -354,5 +388,9 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 			// Timeout cleanup is best-effort; no process output reaches a user surface.
 		}
 	}
+
+	private readonly record struct RepositorySemanticsCacheEntry(
+		GitPathComparisonSemantics Semantics,
+		DateTime CapturedUtc);
 
 }
