@@ -339,21 +339,8 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 	}
 
 	private static bool PathsOverlap(string leftPath, string rightPath) =>
-		IsSameOrDescendantPath(leftPath, rightPath) ||
-		IsSameOrDescendantPath(rightPath, leftPath);
-
-	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
-	{
-		if (PathComparer.Default.Equals(candidatePath, rootPath))
-			return true;
-		if (!candidatePath.StartsWith(rootPath, PathComparer.Comparison) ||
-		    candidatePath.Length <= rootPath.Length)
-		{
-			return false;
-		}
-
-		return candidatePath[rootPath.Length] is '\\' or '/';
-	}
+		PathUtility.IsPathInside(leftPath, rightPath) ||
+		PathUtility.IsPathInside(rightPath, leftPath);
 
 	private static void TryKill(Process process)
 	{

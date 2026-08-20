@@ -163,7 +163,7 @@ public sealed class ProjectScopeDiscoveryService(
 		string normalizedRoot;
 		try
 		{
-			normalizedRoot = Path.GetFullPath(rootPath);
+			normalizedRoot = PathUtility.Normalize(rootPath);
 		}
 		catch
 		{
@@ -244,7 +244,7 @@ public sealed class ProjectScopeDiscoveryService(
 		string normalizedRoot;
 		try
 		{
-			normalizedRoot = Path.GetFullPath(rootPath);
+			normalizedRoot = PathUtility.Normalize(rootPath);
 		}
 		catch
 		{
@@ -280,7 +280,7 @@ public sealed class ProjectScopeDiscoveryService(
 		string normalizedRoot;
 		try
 		{
-			normalizedRoot = Path.GetFullPath(rootPath);
+			normalizedRoot = PathUtility.Normalize(rootPath);
 		}
 		catch
 		{

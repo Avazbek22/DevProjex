@@ -3,6 +3,23 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectScopeDiscoveryServiceTests
 {
 	[Fact]
+	public void Invalidate_TrailingSeparatorAliasRefreshesCanonicalScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("source.txt", "plain");
+		var discovery = CreateDiscovery();
+		var initial = discovery.Discover(temp.Path, selectedRootFolders: null);
+		Assert.False(initial.HasAnyGitIgnore);
+
+		temp.CreateFile(".gitignore", "*.cache\n");
+		discovery.Invalidate(temp.Path + Path.DirectorySeparatorChar);
+		var refreshed = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.True(refreshed.HasAnyGitIgnore);
+		Assert.NotSame(initial, refreshed);
+	}
+
+	[Fact]
 	public async Task Discover_InvalidatedWhileFactsAreBuilding_DoesNotPublishStaleTopology()
 	{
 		using var buildStarted = new ManualResetEventSlim();
