@@ -1218,7 +1218,9 @@ public sealed partial class SelectionSyncCoordinator(
     public IReadOnlyCollection<IgnoreOptionId> GetSelectedIgnoreOptionIds()
     {
         EnsureIgnoreSelectionCache();
-        UpdateIgnoreSelectionCache();
+        // The prepared profile/default snapshot owns selection until its matching section is published.
+        if (_session.PreparedPath is null)
+            UpdateIgnoreSelectionCache();
         return SnapshotRuntimeSelectedIgnoreOptions();
     }
 

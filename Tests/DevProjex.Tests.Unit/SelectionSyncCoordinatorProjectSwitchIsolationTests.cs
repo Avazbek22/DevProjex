@@ -2,6 +2,18 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 {
+	private static readonly IgnoreOptionId[] CompletePublishedSectionIds =
+	[
+		IgnoreOptionId.SmartIgnore,
+		IgnoreOptionId.HideSecrets,
+		IgnoreOptionId.HidePrivateData,
+		IgnoreOptionId.CompressCode,
+		IgnoreOptionId.StripComments,
+		IgnoreOptionId.StripBlankLines,
+		IgnoreOptionId.UseGitIgnore,
+		IgnoreOptionId.TrackedGitFilesOnly
+	];
+
 	[Theory]
 	[MemberData(nameof(IgnoreProjectSwitchCases))]
 	public void ProjectSwitch_IgnoreSelections_RestorePerProjectWithoutCrossBleed(
@@ -62,6 +74,78 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 		AssertMutuallyExclusiveGitFilteringModes(restoredProjectAState);
 	}
 
+	[Fact]
+	public void ProjectSwitch_TargetProjectProfileReplacesTheCompletePreviousSectionState()
+	{
+		const string projectA = @"C:\Workspace\ProjectA";
+		const string projectB = @"C:\Workspace\ProjectB";
+		var currentPath = projectA;
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => currentPath,
+			availabilityProvider: static (_, _) => CreateCompleteAvailability());
+		var projectAState = CreateCompleteIgnoreState(
+			IgnoreOptionId.SmartIgnore,
+			IgnoreOptionId.UseGitIgnore,
+			IgnoreOptionId.HideSecrets,
+			IgnoreOptionId.StripComments);
+		var projectBState = CreateCompleteIgnoreState(
+			IgnoreOptionId.TrackedGitFilesOnly,
+			IgnoreOptionId.HidePrivateData,
+			IgnoreOptionId.CompressCode,
+			IgnoreOptionId.StripBlankLines);
+
+		coordinator.ApplyProjectProfileSelections(projectA, CreateProfile(projectAState));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], projectA);
+		AssertIgnoreState(SnapshotIgnoreState(viewModel.IgnoreOptions), projectAState);
+
+		currentPath = projectB;
+		coordinator.ApplyProjectProfileSelections(projectB, CreateProfile(projectBState));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], projectB);
+
+		AssertIgnoreState(SnapshotIgnoreState(viewModel.IgnoreOptions), projectBState);
+		AssertMutuallyExclusiveGitFilteringModes(SnapshotIgnoreState(viewModel.IgnoreOptions));
+	}
+
+	[Fact]
+	public void ProjectSwitch_PreparedProfileReadDoesNotImportPreviousProjectCheckboxes()
+	{
+		const string projectA = @"C:\Workspace\ProjectA";
+		const string projectB = @"C:\Workspace\ProjectB";
+		var currentPath = projectA;
+		var viewModel = CreateViewModel();
+		var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => currentPath,
+			availabilityProvider: static (_, _) => CreateCompleteAvailability());
+		var projectAState = CreateCompleteIgnoreState(
+			IgnoreOptionId.UseGitIgnore,
+			IgnoreOptionId.SmartIgnore,
+			IgnoreOptionId.HideSecrets);
+		var projectBState = CreateCompleteIgnoreState(
+			IgnoreOptionId.TrackedGitFilesOnly,
+			IgnoreOptionId.HidePrivateData);
+
+		coordinator.ApplyProjectProfileSelections(projectA, CreateProfile(projectAState));
+		coordinator.PopulateIgnoreOptionsForRootSelection([], projectA);
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.UseGitIgnore).IsChecked);
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked);
+
+		currentPath = projectB;
+		coordinator.ApplyProjectProfileSelections(projectB, CreateProfile(projectBState));
+		var selectedBeforePublication = coordinator.GetSelectedIgnoreOptionIds();
+
+		Assert.Equal(
+			projectBState.Where(static pair => pair.Value).Select(static pair => pair.Key).Order(),
+			selectedBeforePublication.Order());
+
+		coordinator.PopulateIgnoreOptionsForRootSelection([], projectB);
+		AssertIgnoreState(SnapshotIgnoreState(viewModel.IgnoreOptions), projectBState);
+	}
+
 	[Theory]
 	[MemberData(nameof(ExtensionProjectSwitchCases))]
 	public void ProjectSwitch_ExtensionSelections_AreRestoredPerProject(
@@ -118,6 +202,10 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 			new[] { IgnoreOptionId.SmartIgnore, IgnoreOptionId.DotFiles },
 			new[] { IgnoreOptionId.ExtensionlessFiles, IgnoreOptionId.HiddenFiles },
 			new[] { IgnoreOptionId.UseGitIgnore, IgnoreOptionId.SmartIgnore, IgnoreOptionId.HiddenFolders },
+			new[] { IgnoreOptionId.HideSecrets },
+			new[] { IgnoreOptionId.HidePrivateData },
+			new[] { IgnoreOptionId.CompressCode },
+			new[] { IgnoreOptionId.StripComments, IgnoreOptionId.StripBlankLines },
 			Array.Empty<IgnoreOptionId>()
 		};
 
@@ -242,6 +330,10 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.HidePrivateData"] = "Hide private data",
+				["Settings.Ignore.CompressCode"] = "Compress code",
+				["Settings.Ignore.StripComments"] = "Strip comments",
+				["Settings.Ignore.StripBlankLines"] = "Strip blank lines",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
@@ -254,6 +346,34 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 
 		return new StubLocalizationCatalog(data);
 	}
+
+	private static ProjectSelectionProfile CreateProfile(
+		IReadOnlyDictionary<IgnoreOptionId, bool> state)
+	{
+		return new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: state
+				.Where(static pair => pair.Value)
+				.Select(static pair => pair.Key)
+				.ToArray(),
+			IgnoreOptionStates: state);
+	}
+
+	private static IReadOnlyDictionary<IgnoreOptionId, bool> CreateCompleteIgnoreState(
+		params IgnoreOptionId[] selectedOptions)
+	{
+		var selected = selectedOptions.ToHashSet();
+		return CompletePublishedSectionIds.ToDictionary(
+			static optionId => optionId,
+			optionId => selected.Contains(optionId));
+	}
+
+	private static IgnoreOptionsAvailability CreateCompleteAvailability() =>
+		new(
+			IncludeGitIgnore: true,
+			IncludeSmartIgnore: true,
+			IncludeTrackedGitFilesOnly: true);
 
 	private static IReadOnlyDictionary<IgnoreOptionId, bool> SnapshotIgnoreState(IEnumerable<IgnoreOptionViewModel> options)
 	{

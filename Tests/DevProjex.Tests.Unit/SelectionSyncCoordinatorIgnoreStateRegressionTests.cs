@@ -88,6 +88,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 
 		GetIgnoreOption(viewModel, IgnoreOptionId.DotFiles).IsChecked = false;
 		GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked = false;
+		coordinator.UpdateIgnoreSelectionCache();
 
 		selected = coordinator.GetSelectedIgnoreOptionIds();
 		Assert.Empty(selected);
