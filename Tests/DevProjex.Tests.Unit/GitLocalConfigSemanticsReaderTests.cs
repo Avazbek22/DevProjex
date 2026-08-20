@@ -188,6 +188,27 @@ public sealed class GitLocalConfigSemanticsReaderTests
 			out _));
 	}
 
+	[Fact]
+	public void BoundedTextRead_ExactLimitSucceedsAndOverflowStopsAfterProbeCharacter()
+	{
+		using var exactReader = new CountingTextReader("0123456789");
+		using var oversizedReader = new CountingTextReader(new string('x', 10_000));
+
+		var exact = GitLocalConfigSemanticsReader.TryReadBoundedText(
+			exactReader,
+			maximumCharacters: 10,
+			out var text);
+		var oversized = GitLocalConfigSemanticsReader.TryReadBoundedText(
+			oversizedReader,
+			maximumCharacters: 10,
+			out _);
+
+		Assert.True(exact);
+		Assert.Equal("0123456789", text);
+		Assert.False(oversized);
+		Assert.Equal(11, oversizedReader.CharactersRead);
+	}
+
 	private static string CreateStandardMetadata(TemporaryDirectory temp, string relativeGitPath)
 	{
 		var gitMetadataPath = temp.CreateFolder(relativeGitPath);
@@ -195,5 +216,23 @@ public sealed class GitLocalConfigSemanticsReaderTests
 		temp.CreateFolder(Path.Combine(relativeGitPath, "objects"));
 		temp.CreateFolder(Path.Combine(relativeGitPath, "refs"));
 		return gitMetadataPath;
+	}
+
+	private sealed class CountingTextReader(string content) : TextReader
+	{
+		private int _position;
+
+		public int CharactersRead { get; private set; }
+
+		public override int Read(char[] buffer, int index, int count)
+		{
+			var length = Math.Min(count, content.Length - _position);
+			if (length <= 0)
+				return 0;
+			content.CopyTo(_position, buffer, index, length);
+			_position += length;
+			CharactersRead += length;
+			return length;
+		}
 	}
 }

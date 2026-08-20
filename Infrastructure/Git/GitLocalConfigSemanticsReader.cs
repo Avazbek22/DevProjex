@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 
 namespace DevProjex.Infrastructure.Git;
@@ -233,13 +234,16 @@ internal static class GitLocalConfigSemanticsReader
 				FileShare.Read | FileShare.Delete,
 				bufferSize: 4096,
 				FileOptions.SequentialScan);
+			if (stream.Length > maximumLengthBytes)
+				return false;
 			using var reader = new StreamReader(
 				stream,
 				Encoding.UTF8,
 				detectEncodingFromByteOrderMarks: true,
 				bufferSize: 4096,
 				leaveOpen: false);
-			var observedText = reader.ReadToEnd();
+			if (!TryReadBoundedText(reader, maximumLengthBytes, out var observedText))
+				return false;
 
 			fileInfo.Refresh();
 			if (fileInfo.Exists &&
@@ -253,6 +257,42 @@ internal static class GitLocalConfigSemanticsReader
 		}
 
 		return false;
+	}
+
+	internal static bool TryReadBoundedText(
+		TextReader reader,
+		int maximumCharacters,
+		out string text)
+	{
+		ArgumentNullException.ThrowIfNull(reader);
+		ArgumentOutOfRangeException.ThrowIfNegative(maximumCharacters);
+		text = string.Empty;
+		var bufferSize = maximumCharacters >= 4095 ? 4096 : maximumCharacters + 1;
+		var buffer = ArrayPool<char>.Shared.Rent(bufferSize);
+		var builder = new StringBuilder(Math.Min(maximumCharacters, 4096));
+		try
+		{
+			var total = 0;
+			while (true)
+			{
+				var remaining = maximumCharacters - total;
+				var readSize = remaining >= buffer.Length ? buffer.Length : remaining + 1;
+				var read = reader.Read(buffer, 0, readSize);
+				if (read == 0)
+				{
+					text = builder.ToString();
+					return true;
+				}
+				if (read > remaining)
+					return false;
+				builder.Append(buffer, 0, read);
+				total += read;
+			}
+		}
+		finally
+		{
+			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
+		}
 	}
 
 	private static bool TryParse(
