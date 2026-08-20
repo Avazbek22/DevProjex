@@ -16,6 +16,8 @@ public sealed class RepoCacheService : IRepoCacheService
 	private const string CacheFolderName = "RepoCache";
 	private const string CacheIndexFileName = "cache-index.json";
 	private const int CacheIndexSchemaVersion = 2;
+	private const byte RepositorySizeRefreshRunning = 1;
+	private const byte RepositorySizeRefreshPending = 2;
 	private static readonly TimeSpan IndexLockTimeout = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan WorktreeCleanupTimeout = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan RepositorySizeRefreshTimeout = TimeSpan.FromSeconds(30);
@@ -656,6 +658,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		var size = CalculateDirectorySize(
 			RepositoryCacheLayout.GetContainer(localPath),
 			cancellationToken);
+		_testHooks?.AfterRepositorySizeCalculated?.Invoke(localPath);
 
 		var fileSet = GetIndexFileSet();
 		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
@@ -1101,30 +1104,62 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private void ScheduleRepositorySizeRefresh(string basePath)
 	{
-		if (!_repositorySizeRefreshInFlight.TryAdd(basePath, 0))
-			return;
-		_ = Task.Run(() =>
+		while (true)
 		{
-			using var timeout = new CancellationTokenSource(RepositorySizeRefreshTimeout);
-			try
+			if (_repositorySizeRefreshInFlight.TryAdd(basePath, RepositorySizeRefreshRunning))
 			{
-				_testHooks?.BeforeRepositorySizeRefresh?.Invoke(basePath);
-				RefreshIndexedRepositorySize(basePath, timeout.Token);
+				_ = Task.Run(() => RunScheduledRepositorySizeRefresh(basePath), CancellationToken.None);
+				return;
 			}
-			catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+
+			if (_repositorySizeRefreshInFlight.TryUpdate(
+				    basePath,
+				    RepositorySizeRefreshPending,
+				    RepositorySizeRefreshRunning) ||
+			    _repositorySizeRefreshInFlight.TryGetValue(basePath, out var state) &&
+			    state == RepositorySizeRefreshPending)
 			{
-				Trace.TraceWarning("Repository size refresh timed out for '{0}'.", basePath);
+				return;
 			}
-			catch (Exception exception)
+		}
+	}
+
+	private void RunScheduledRepositorySizeRefresh(string basePath)
+	{
+		while (true)
+		{
+			using (var timeout = new CancellationTokenSource(RepositorySizeRefreshTimeout))
 			{
-				Trace.TraceWarning("Repository size refresh failed for '{0}': {1}", basePath, exception.Message);
+				try
+				{
+					_testHooks?.BeforeRepositorySizeRefresh?.Invoke(basePath);
+					RefreshIndexedRepositorySize(basePath, timeout.Token);
+				}
+				catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+				{
+					Trace.TraceWarning("Repository size refresh timed out for '{0}'.", basePath);
+				}
+				catch (Exception exception)
+				{
+					Trace.TraceWarning("Repository size refresh failed for '{0}': {1}", basePath, exception.Message);
+				}
 			}
-			finally
+
+			while (true)
 			{
-				_repositorySizeRefreshInFlight.TryRemove(basePath, out _);
-				_testHooks?.AfterRepositorySizeRefresh?.Invoke(basePath);
+				if (_repositorySizeRefreshInFlight.TryUpdate(
+					    basePath,
+					    RepositorySizeRefreshRunning,
+					    RepositorySizeRefreshPending))
+					break;
+				if (_repositorySizeRefreshInFlight.TryRemove(
+					    new KeyValuePair<string, byte>(basePath, RepositorySizeRefreshRunning)))
+				{
+					_testHooks?.AfterRepositorySizeRefresh?.Invoke(basePath);
+					return;
+				}
 			}
-		}, CancellationToken.None);
+		}
 	}
 
 	private async Task CleanupUnusedWorktreesAsync(
@@ -1985,5 +2020,6 @@ internal sealed class RepoCacheTestHooks
 	public Action? AfterScheduledGarbageCollection { get; init; }
 	public Action<string>? BeforeUnusedWorktreeCleanup { get; init; }
 	public Action<string>? BeforeRepositorySizeRefresh { get; init; }
+	public Action<string>? AfterRepositorySizeCalculated { get; init; }
 	public Action<string>? AfterRepositorySizeRefresh { get; init; }
 }

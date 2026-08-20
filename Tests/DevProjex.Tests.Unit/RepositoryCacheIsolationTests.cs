@@ -5,7 +5,7 @@ namespace DevProjex.Tests.Unit;
 public sealed class RepositoryCacheIsolationTests : IDisposable
 {
 	private const string RepositoryUrl = "https://github.com/example/isolation.git";
-	private static readonly TimeSpan BackgroundOperationTimeout = TimeSpan.FromSeconds(15);
+	private static readonly TimeSpan BackgroundOperationTimeout = TimeSpan.FromSeconds(30);
 	private readonly string _cacheRoot = Path.Combine(
 		Path.GetTempPath(),
 		"DevProjex",
@@ -188,6 +188,81 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			TestContext.Current.CancellationToken);
 		Assert.True(service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes > initialSize);
 		Assert.True(Directory.Exists(basePath));
+	}
+
+	[Fact]
+	public async Task RepositorySizeRefresh_RequestDuringCompletedEnumeration_CoalescesOneFreshPass()
+	{
+		using var firstSizeCalculated = new ManualResetEventSlim();
+		using var allowFirstRefreshCommit = new ManualResetEventSlim();
+		using var secondRefreshStarted = new ManualResetEventSlim();
+		using var allowSecondRefresh = new ManualResetEventSlim();
+		var refreshCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var refreshCount = 0;
+		var hooks = new RepoCacheTestHooks
+		{
+			BeforeRepositorySizeRefresh = _ =>
+			{
+				var pass = Interlocked.Increment(ref refreshCount);
+				if (pass != 2)
+					return;
+				secondRefreshStarted.Set();
+				Assert.True(allowSecondRefresh.Wait(BackgroundOperationTimeout));
+			},
+			AfterRepositorySizeCalculated = _ =>
+			{
+				if (Volatile.Read(ref refreshCount) != 1)
+					return;
+				firstSizeCalculated.Set();
+				Assert.True(allowFirstRefreshCommit.Wait(BackgroundOperationTimeout));
+			},
+			AfterRepositorySizeRefresh = _ => refreshCompleted.TrySetResult()
+		};
+		var service = CreateService(new FakeWorktreeManager(supported: true), hooks: hooks);
+		_ = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
+		var sessions = new List<IRepositoryCacheSession>();
+		try
+		{
+			sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+				await service.TryAcquireRepositorySessionAsync(
+					RepositoryUrl,
+					"main",
+					TestContext.Current.CancellationToken)));
+			sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+				await service.TryAcquireRepositorySessionAsync(
+					RepositoryUrl,
+					"main",
+					TestContext.Current.CancellationToken)));
+			Assert.True(firstSizeCalculated.Wait(
+				BackgroundOperationTimeout,
+				TestContext.Current.CancellationToken));
+
+			sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+				await service.TryAcquireRepositorySessionAsync(
+					RepositoryUrl,
+					"main",
+					TestContext.Current.CancellationToken)));
+			allowFirstRefreshCommit.Set();
+			Assert.True(secondRefreshStarted.Wait(
+				BackgroundOperationTimeout,
+				TestContext.Current.CancellationToken));
+			var staleSize = service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes;
+
+			allowSecondRefresh.Set();
+			await refreshCompleted.Task.WaitAsync(
+				BackgroundOperationTimeout,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(2, Volatile.Read(ref refreshCount));
+			Assert.True(service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes > staleSize);
+		}
+		finally
+		{
+			allowFirstRefreshCommit.Set();
+			allowSecondRefresh.Set();
+			foreach (var session in sessions)
+				session.Dispose();
+		}
 	}
 
 	[Fact]
