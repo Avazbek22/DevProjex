@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Tests.Unit;
 
@@ -372,6 +373,24 @@ public sealed class RecentProjectsStoreTests
 		Assert.Empty(loaded.RecentFolders);
 		Assert.Empty(loaded.RecentRepositories);
 		Assert.Equal(invalidJson, File.ReadAllText(filePath));
+	}
+
+	[Fact]
+	public void Load_OversizedPrimary_ReturnsDefaultWithoutMaterializingOrDestroyingFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var filePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+		using (var stream = new FileStream(filePath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(JsonStorePersistence.SmallDocumentMaximumBytes + 1);
+
+		var loaded = store.Load();
+
+		Assert.Equal(3, loaded.SchemaVersion);
+		Assert.Empty(loaded.RecentFolders);
+		Assert.Empty(loaded.RecentRepositories);
+		Assert.Equal(JsonStorePersistence.SmallDocumentMaximumBytes + 1, new FileInfo(filePath).Length);
 	}
 
 	[Fact]

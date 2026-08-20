@@ -258,6 +258,13 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
         try
         {
+            if (!JsonStorePersistence.IsDocumentWithinSizeLimit(
+                    path,
+                    JsonStorePersistence.SmallDocumentMaximumBytes))
+            {
+                return ThemeDocumentReadStatus.MissingOrInvalid;
+            }
+
             var json = File.ReadAllText(path);
             var deserialized = JsonSerializer.Deserialize<ThemeSettingsDocument>(json, SerializerOptions);
             if (deserialized is null)
@@ -432,7 +439,8 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         JsonStorePersistence.ContainsFutureDocument(
             fileSet,
             CurrentSchemaVersion,
-            CurrentDefaultsRevision);
+            CurrentDefaultsRevision,
+            JsonStorePersistence.SmallDocumentMaximumBytes);
 
     private static bool TryParseKeyStatic(string? key, out ThemeVariant theme, out ThemeEffectMode effect)
     {

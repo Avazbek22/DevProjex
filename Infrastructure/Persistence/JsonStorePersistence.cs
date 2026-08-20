@@ -2,14 +2,17 @@ namespace DevProjex.Infrastructure.Persistence;
 
 internal static class JsonStorePersistence
 {
+    internal const long SmallDocumentMaximumBytes = 8 * 1024 * 1024;
+
     // A future backup is authoritative even when the primary is missing, corrupt or older.
     // Treating the complete file set as read-only prevents recovery from downgrading both copies.
     public static bool ContainsFutureDocument(
         JsonStoreFileSet fileSet,
         int currentSchemaVersion,
-        int? currentDefaultsRevision = null) =>
-        IsFutureDocument(fileSet.PrimaryPath, currentSchemaVersion, currentDefaultsRevision) ||
-        IsFutureDocument(fileSet.BackupPath, currentSchemaVersion, currentDefaultsRevision);
+        int? currentDefaultsRevision = null,
+        long maximumDocumentBytes = long.MaxValue) =>
+        IsFutureDocument(fileSet.PrimaryPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes) ||
+        IsFutureDocument(fileSet.BackupPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes);
 
     public static bool TryReadNormalized<TDocument>(
         string path,
@@ -17,7 +20,8 @@ internal static class JsonStorePersistence
         Func<TDocument> createDefault,
         Func<TDocument, TDocument> normalize,
         out TDocument document,
-        out bool requiresRewrite)
+        out bool requiresRewrite,
+        long maximumDocumentBytes = long.MaxValue)
     {
         document = createDefault();
         requiresRewrite = false;
@@ -27,6 +31,9 @@ internal static class JsonStorePersistence
 
         try
         {
+            if (!IsDocumentWithinSizeLimit(path, maximumDocumentBytes))
+                return false;
+
             var json = File.ReadAllText(path);
             var deserialized = JsonSerializer.Deserialize<TDocument>(json, serializerOptions);
             if (deserialized is null)
@@ -207,16 +214,36 @@ internal static class JsonStorePersistence
         }
     }
 
+    internal static bool IsDocumentWithinSizeLimit(string path, long maximumDocumentBytes)
+    {
+        if (maximumDocumentBytes < 0)
+            return false;
+
+        try
+        {
+            return new FileInfo(path).Length <= maximumDocumentBytes;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool IsFutureDocument(
         string path,
         int currentSchemaVersion,
-        int? currentDefaultsRevision)
+        int? currentDefaultsRevision,
+        long maximumDocumentBytes)
     {
         if (!File.Exists(path))
             return false;
 
         try
         {
+            // An unbounded document cannot be classified safely and must not be downgraded.
+            if (!IsDocumentWithinSizeLimit(path, maximumDocumentBytes))
+                return true;
+
             using var stream = new FileStream(
                 path,
                 FileMode.Open,

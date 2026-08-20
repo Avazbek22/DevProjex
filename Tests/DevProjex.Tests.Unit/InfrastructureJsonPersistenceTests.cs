@@ -313,6 +313,48 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_TryReadNormalized_RejectsDocumentBeyondExplicitLimit()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		using (var stream = new FileStream(fileSet.PrimaryPath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(257);
+
+		var result = JsonStorePersistence.TryReadNormalized(
+			fileSet.PrimaryPath,
+			JsonOptions,
+			static () => new TestDocument("default", 0),
+			static document => document,
+			out var document,
+			out var requiresRewrite,
+			maximumDocumentBytes: 256);
+
+		Assert.False(result);
+		Assert.False(requiresRewrite);
+		Assert.Equal(new TestDocument("default", 0), document);
+		Assert.Equal(257, new FileInfo(fileSet.PrimaryPath).Length);
+	}
+
+	[Fact]
+	public void JsonStorePersistence_ContainsFutureDocument_ProtectsDocumentBeyondExplicitLimit()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		using (var stream = new FileStream(fileSet.PrimaryPath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(257);
+
+		var protectedDocument = JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			currentSchemaVersion: 1,
+			maximumDocumentBytes: 256);
+
+		Assert.True(protectedDocument);
+		Assert.Equal(257, new FileInfo(fileSet.PrimaryPath).Length);
+	}
+
+	[Fact]
 	public void JsonStorePersistence_TryWriteAtomic_CommitsPrimaryMirrorsBackupAndLeavesNoTempFiles()
 	{
 		using var temp = new TemporaryDirectory();
