@@ -40,7 +40,8 @@ public sealed class RepoCacheService : IRepoCacheService
 	private readonly IGitWorktreeManager _worktreeManager;
 	private readonly RepoCacheTestHooks? _testHooks;
 	private readonly object _garbageCollectionSync = new();
-	private readonly ConcurrentDictionary<string, byte> _worktreeCleanupInFlight = new(PathComparer.Default);
+	private readonly ConcurrentDictionary<string, WorktreeCleanupState> _worktreeCleanupInFlight =
+		new(PathComparer.Default);
 	private readonly ConcurrentDictionary<string, byte> _repositorySizeRefreshInFlight = new(PathComparer.Default);
 	private int _scheduledGarbageCollectionState;
 
@@ -1077,29 +1078,55 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private void ScheduleUnusedWorktreeCleanup(string basePath, string retainedPath)
 	{
-		if (!_worktreeCleanupInFlight.TryAdd(basePath, 0))
-			return;
-		_ = Task.Run(async () =>
+		while (true)
 		{
-			using var timeout = new CancellationTokenSource(WorktreeCleanupTimeout);
-			try
+			if (_worktreeCleanupInFlight.TryGetValue(basePath, out var active))
 			{
-				_testHooks?.BeforeUnusedWorktreeCleanup?.Invoke(basePath);
-				await CleanupUnusedWorktreesAsync(basePath, retainedPath, timeout.Token).ConfigureAwait(false);
+				if (active.TryQueue(retainedPath))
+					return;
+				Thread.Yield();
+				continue;
 			}
-			catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+
+			var state = new WorktreeCleanupState(retainedPath);
+			if (!_worktreeCleanupInFlight.TryAdd(basePath, state))
+				continue;
+			_ = Task.Run(() => RunScheduledWorktreeCleanupAsync(basePath, state), CancellationToken.None);
+			return;
+		}
+	}
+
+	private async Task RunScheduledWorktreeCleanupAsync(string basePath, WorktreeCleanupState state)
+	{
+		var retainedPath = state.InitialRetainedPath;
+		try
+		{
+			while (true)
 			{
-				Trace.TraceWarning("Repository worktree cleanup timed out for '{0}'.", basePath);
+				using var timeout = new CancellationTokenSource(WorktreeCleanupTimeout);
+				try
+				{
+					_testHooks?.BeforeUnusedWorktreeCleanup?.Invoke(basePath);
+					await CleanupUnusedWorktreesAsync(basePath, retainedPath, timeout.Token).ConfigureAwait(false);
+				}
+				catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+				{
+					Trace.TraceWarning("Repository worktree cleanup timed out for '{0}'.", basePath);
+				}
+				catch (Exception exception)
+				{
+					Trace.TraceWarning("Repository worktree cleanup failed for '{0}': {1}", basePath, exception.Message);
+				}
+
+				if (!state.TryTakePending(out retainedPath))
+					return;
 			}
-			catch (Exception exception)
-			{
-				Trace.TraceWarning("Repository worktree cleanup failed for '{0}': {1}", basePath, exception.Message);
-			}
-			finally
-			{
-				_worktreeCleanupInFlight.TryRemove(basePath, out _);
-			}
-		}, CancellationToken.None);
+		}
+		finally
+		{
+			_worktreeCleanupInFlight.TryRemove(
+				new KeyValuePair<string, WorktreeCleanupState>(basePath, state));
+		}
 	}
 
 	private void ScheduleRepositorySizeRefresh(string basePath)
@@ -1992,6 +2019,44 @@ public sealed class RepoCacheService : IRepoCacheService
 			fileSet,
 			new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries),
 			IndexSerializerOptions);
+
+	private sealed class WorktreeCleanupState(string initialRetainedPath)
+	{
+		private readonly object _sync = new();
+		private string _pendingRetainedPath = initialRetainedPath;
+		private bool _hasPending;
+		private bool _isCompleting;
+
+		public string InitialRetainedPath { get; } = initialRetainedPath;
+
+		public bool TryQueue(string retainedPath)
+		{
+			lock (_sync)
+			{
+				if (_isCompleting)
+					return false;
+				_pendingRetainedPath = retainedPath;
+				_hasPending = true;
+				return true;
+			}
+		}
+
+		public bool TryTakePending(out string retainedPath)
+		{
+			lock (_sync)
+			{
+				if (_hasPending)
+				{
+					_hasPending = false;
+					retainedPath = _pendingRetainedPath;
+					return true;
+				}
+				_isCompleting = true;
+				retainedPath = string.Empty;
+				return false;
+			}
+		}
+	}
 
 	private sealed record RepositoryCacheIndexDocument(
 		int SchemaVersion,

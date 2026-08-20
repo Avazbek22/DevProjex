@@ -266,7 +266,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	}
 
 	[Fact]
-	public async Task WorktreeCleanup_MultipleOpensWhileFirstCleanupIsBlocked_SchedulesOneTaskPerBasePath()
+	public async Task WorktreeCleanup_MultipleOpensWhileFirstCleanupIsBlocked_CoalescesOnePendingRepeat()
 	{
 		using var cleanupStarted = new ManualResetEventSlim();
 		using var allowCleanup = new ManualResetEventSlim();
@@ -293,7 +293,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 					"main",
 					TestContext.Current.CancellationToken)));
 			Assert.True(cleanupStarted.Wait(
-				TimeSpan.FromSeconds(2),
+				BackgroundOperationTimeout,
 				TestContext.Current.CancellationToken));
 
 			for (var index = 0; index < 3; index++)
@@ -307,8 +307,8 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 
 			Assert.Equal(1, Volatile.Read(ref cleanupCount));
 			allowCleanup.Set();
-			await Task.Delay(100, TestContext.Current.CancellationToken);
-			Assert.Equal(1, Volatile.Read(ref cleanupCount));
+			await WaitUntilAsync(() => Volatile.Read(ref cleanupCount) == 2);
+			Assert.Equal(2, Volatile.Read(ref cleanupCount));
 		}
 		finally
 		{
