@@ -21,6 +21,7 @@ public sealed class RepoCacheService : IRepoCacheService
 	private static readonly TimeSpan IndexLockTimeout = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan WorktreeCleanupTimeout = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan RepositorySizeRefreshTimeout = TimeSpan.FromSeconds(30);
+	private static readonly TimeSpan MaximumPersistedClockSkew = TimeSpan.FromDays(1);
 	private static readonly JsonSerializerOptions IndexSerializerOptions = new(JsonSerializerDefaults.Web)
 	{
 		WriteIndented = true,
@@ -1999,12 +2000,23 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private RepositoryCacheIndexDocument NormalizeIndex(RepositoryCacheIndexDocument document)
 	{
+		var utcNow = _timeProvider.GetUtcNow();
+		var maximumAcceptedTimestamp = utcNow <= DateTimeOffset.MaxValue - MaximumPersistedClockSkew
+			? utcNow + MaximumPersistedClockSkew
+			: DateTimeOffset.MaxValue;
 		var entries = (document.Entries ?? [])
 			.Where(entry => entry is not null &&
 			                !string.IsNullOrWhiteSpace(entry.Identity) &&
 			                !string.IsNullOrWhiteSpace(entry.RepositoryUrl) &&
 			                !string.IsNullOrWhiteSpace(entry.LocalPath) &&
 			                IsInCache(entry.LocalPath))
+			.Select(entry => entry with
+			{
+				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
+				              entry.LastUsedUtc > maximumAcceptedTimestamp
+					? DateTimeOffset.UnixEpoch
+					: entry.LastUsedUtc
+			})
 			.GroupBy(static entry => entry.Identity, StringComparer.OrdinalIgnoreCase)
 			.Select(static group => group.OrderByDescending(entry => entry.LastOpenedUtc).First())
 			.OrderByDescending(static entry => entry.LastOpenedUtc)

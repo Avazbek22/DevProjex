@@ -332,6 +332,43 @@ public class RepoCacheServiceTests : IDisposable
     }
 
     [Fact]
+    public void FindIndexedRepository_FutureTimestampCannotOverrideValidDuplicate()
+    {
+        const string repositoryUrl = "https://github.com/example/timestamp.git";
+        var corruptPath = _service.CreateRepositoryDirectory(repositoryUrl);
+        var validPath = _service.CreateRepositoryDirectory(repositoryUrl);
+        var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+        var validTimestamp = DateTimeOffset.UtcNow.AddMinutes(-1);
+        WriteCacheIndex(
+            _testCacheRoot,
+            [
+                new RepositoryCacheIndexEntry(
+                    identity,
+                    repositoryUrl,
+                    corruptPath,
+                    "corrupt",
+                    null,
+                    DateTimeOffset.MaxValue,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip),
+                new RepositoryCacheIndexEntry(
+                    identity,
+                    repositoryUrl,
+                    validPath,
+                    "valid",
+                    null,
+                    validTimestamp,
+                    RepositoryCacheEntryState.Ready,
+                    ContentKind: RepositoryCacheContentKind.Zip)
+            ]);
+
+        var entry = Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(repositoryUrl));
+
+        Assert.Equal(validPath, entry.LocalPath, PathComparer.Default);
+        Assert.Equal(validTimestamp, entry.LastOpenedUtc);
+    }
+
+    [Fact]
     public async Task ListIndexedRepositories_LegacyCatalogEntryCanBeOpenedByPathOffline()
     {
         var currentBase = Path.Combine(_testCacheRoot, "open-current");
