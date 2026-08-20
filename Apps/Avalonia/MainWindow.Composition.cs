@@ -1120,6 +1120,9 @@ public partial class MainWindow
             this,
             _viewModel,
             new PreviewSurfaceControls(
+				_previewIsland ??
+				throw new InvalidOperationException(
+					"Preview island was not found."),
                 _previewTextScrollViewer ??
                 throw new InvalidOperationException(
                     "Preview scroll viewer was not found."),
