@@ -599,6 +599,43 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void ExtremePersistedTimestamps_DoNotBreakRemovalOrReopening()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var folderPath = temp.CreateFolder("Workspace");
+		const string repositoryUrl = "https://github.com/example/repository";
+		var state = new RecentProjectsDb
+		{
+			RecentFolders =
+			[
+				new RecentFolderEntry
+				{
+					Path = folderPath,
+					OpenedUtc = DateTimeOffset.MaxValue
+				}
+			],
+			RecentRepositories =
+			[
+				new RecentRepositoryEntry
+				{
+					Url = repositoryUrl,
+					OpenedUtc = DateTimeOffset.MaxValue
+				}
+			]
+		};
+
+		state = store.RemoveFolder(state, folderPath);
+		state = store.RemoveRepository(state, repositoryUrl);
+		state = store.AddFolder(state, folderPath);
+		state = store.AddRepository(state, repositoryUrl);
+		var reloaded = store.Load();
+
+		Assert.Equal(PathUtility.Normalize(folderPath), Assert.Single(reloaded.RecentFolders).Path);
+		Assert.Equal(repositoryUrl, Assert.Single(reloaded.RecentRepositories).Url);
+	}
+
+	[Fact]
 	public void TryPersist_ExcessRemovalHistory_IsBoundedToNewestSixtyFourEntries()
 	{
 		using var temp = new TemporaryDirectory();

@@ -11,6 +11,7 @@ public sealed class RecentProjectsStore
 	private const int MaxRecentRepositoryRemovals = 32;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "recent-projects.json";
+	private static readonly DateTimeOffset MaximumSafeHistoryTimestamp = DateTimeOffset.MaxValue.AddDays(-1);
 	private static readonly string LegacyRepoCacheRootPath = Path.Combine(
 		Path.GetTempPath(),
 		FolderName,
@@ -443,7 +444,7 @@ public sealed class RecentProjectsStore
 			.Select(static entry => new RecentFolderEntry
 			{
 				Path = PathUtility.Normalize(entry.Path),
-				OpenedUtc = entry.OpenedUtc <= DateTimeOffset.UnixEpoch ? DateTimeOffset.UtcNow : entry.OpenedUtc
+				OpenedUtc = NormalizeHistoryTimestamp(entry.OpenedUtc)
 			})
 			.Where(static entry => !IsRepoCachePath(entry.Path))
 			.Where(entry => !removalTimes.TryGetValue(entry.Path, out var removedUtc) || entry.OpenedUtc > removedUtc)
@@ -472,9 +473,7 @@ public sealed class RecentProjectsStore
 			.Select(static entry => new RecentFolderRemovalEntry
 			{
 				Path = PathUtility.Normalize(entry.Path),
-				RemovedUtc = entry.RemovedUtc <= DateTimeOffset.UnixEpoch
-					? DateTimeOffset.UtcNow
-					: entry.RemovedUtc
+				RemovedUtc = NormalizeHistoryTimestamp(entry.RemovedUtc)
 			})
 			.OrderByDescending(static entry => entry.RemovedUtc)
 			.ToList();
@@ -502,7 +501,7 @@ public sealed class RecentProjectsStore
 			.Select(static entry => new RecentRepositoryEntry
 			{
 				Url = RepositoryUrlUtility.Normalize(entry.Url),
-				OpenedUtc = entry.OpenedUtc <= DateTimeOffset.UnixEpoch ? DateTimeOffset.UtcNow : entry.OpenedUtc
+				OpenedUtc = NormalizeHistoryTimestamp(entry.OpenedUtc)
 			})
 			.Where(entry =>
 			{
@@ -534,9 +533,7 @@ public sealed class RecentProjectsStore
 			.Select(static entry => new RecentRepositoryRemovalEntry
 			{
 				Url = RepositoryUrlUtility.Normalize(entry.Url),
-				RemovedUtc = entry.RemovedUtc <= DateTimeOffset.UnixEpoch
-					? DateTimeOffset.UtcNow
-					: entry.RemovedUtc
+				RemovedUtc = NormalizeHistoryTimestamp(entry.RemovedUtc)
 			})
 			.OrderByDescending(static entry => entry.RemovedUtc)
 			.ToList();
@@ -554,6 +551,11 @@ public sealed class RecentProjectsStore
 
 		return unique;
 	}
+
+	private static DateTimeOffset NormalizeHistoryTimestamp(DateTimeOffset timestamp) =>
+		timestamp <= DateTimeOffset.UnixEpoch || timestamp > MaximumSafeHistoryTimestamp
+			? DateTimeOffset.UtcNow
+			: timestamp;
 
 	private static void MoveToFront<TEntry>(
 		List<TEntry> entries,
