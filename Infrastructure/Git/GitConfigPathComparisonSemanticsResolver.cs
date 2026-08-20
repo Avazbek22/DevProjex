@@ -23,6 +23,10 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 	private readonly object _cacheSync = new();
 	private readonly Dictionary<string, RepositorySemanticsCacheEntry> _repositoryCache =
 		new(PathComparer.Default);
+	private readonly Dictionary<string, long> _latestResolutionSequences =
+		new(PathComparer.Default);
+	private long _cacheGeneration;
+	private long _nextResolutionSequence;
 
 	public static GitConfigPathComparisonSemanticsResolver Instance { get; } = new();
 
@@ -57,6 +61,8 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		}
 
 		var now = _utcNowProvider();
+		long cacheGeneration;
+		long resolutionSequence;
 		lock (_cacheSync)
 		{
 			if (_repositoryCache.TryGetValue(repositoryRoot, out var cached))
@@ -68,13 +74,30 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 					return cached.Semantics;
 				}
 			}
+
+			if (!_latestResolutionSequences.ContainsKey(repositoryRoot) &&
+			    _latestResolutionSequences.Count >= CacheLimit)
+			{
+				_cacheGeneration++;
+				_repositoryCache.Clear();
+				_latestResolutionSequences.Clear();
+			}
+
+			cacheGeneration = _cacheGeneration;
+			resolutionSequence = ++_nextResolutionSequence;
+			_latestResolutionSequences[repositoryRoot] = resolutionSequence;
 		}
 
 		var resolved = _repositorySemanticsResolver(repositoryRoot, gitMetadataPath);
 		lock (_cacheSync)
 		{
-			if (_repositoryCache.Count >= CacheLimit)
-				_repositoryCache.Clear();
+			if (cacheGeneration != _cacheGeneration ||
+			    !_latestResolutionSequences.TryGetValue(repositoryRoot, out var latestResolutionSequence) ||
+			    latestResolutionSequence != resolutionSequence)
+			{
+				return resolved;
+			}
+
 			_repositoryCache[repositoryRoot] = new RepositorySemanticsCacheEntry(
 				resolved,
 				_utcNowProvider());
@@ -90,10 +113,17 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 
 		lock (_cacheSync)
 		{
+			_cacheGeneration++;
 			foreach (var repositoryRoot in _repositoryCache.Keys.ToArray())
 			{
 				if (PathsOverlap(repositoryRoot, normalizedRootPath))
 					_repositoryCache.Remove(repositoryRoot);
+			}
+
+			foreach (var repositoryRoot in _latestResolutionSequences.Keys.ToArray())
+			{
+				if (PathsOverlap(repositoryRoot, normalizedRootPath))
+					_latestResolutionSequences.Remove(repositoryRoot);
 			}
 		}
 	}
