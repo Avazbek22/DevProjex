@@ -945,14 +945,18 @@
                           Name="PreviewStickyHeaderContainer"
                           Classes="preview-sticky-header"
                           IsVisible="False">
-                    <TextBlock Name="PreviewStickyHeaderText"
-                               Classes="preview-sticky-header-text"
-                               FontFamily="{Binding SelectedFontFamily}"
-                               FontSize="{Binding PreviewFontSize}"
-                               Margin="10,4,10,4"
-                               MinWidth="0"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" />
+                    <Button Name="PreviewStickyHeaderNavigateButton"
+                            Classes="preview-sticky-header-navigate"
+                            Click="OnPreviewStickyHeaderNavigate">
+                      <TextBlock Name="PreviewStickyHeaderText"
+                                 Classes="preview-sticky-header-text"
+                                 FontFamily="{Binding SelectedFontFamily}"
+                                 FontSize="{Binding PreviewFontSize}"
+                                 Margin="10,4,10,4"
+                                 MinWidth="0"
+                                 VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </Button>
                   </Border>
                 </Grid>
               </Grid>

@@ -48,6 +48,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 	private readonly object _manualMarkOperationsSync = new();
 	private readonly HashSet<Task> _manualMarkOperations = [];
 	private readonly SemaphoreSlim _manualMarkMutationGate = new(1, 1);
+    private readonly Thickness _stickyHeaderBaseMargin;
 
     private CancellationTokenSource? _selectionMetricsCts;
     private DispatcherTimer? _selectionMetricsDebounceTimer;
@@ -56,6 +57,8 @@ internal sealed class PreviewSurfaceController : IDisposable
         ExportOutputMetrics.Empty;
     private bool _hasSelectionMetricsSnapshot;
     private bool _scrollSyncActive;
+    private ScrollBar? _verticalScrollBar;
+    private double _stickyHeaderScrollBarInset = -1;
 	private Vector? _pendingRedactionViewportOffset;
 	private PersistentSecretMarkId? _pendingMarkedSecretId;
     private bool _disposed;
@@ -106,6 +109,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_ensureManualRedactionClassEnabled = ensureManualRedactionClassEnabled;
 		_applyPersistentMarkDelta = applyPersistentMarkDelta;
 		_persistProjectProfile = persistProjectProfile;
+        _stickyHeaderBaseMargin = controls.StickyHeaderContainer.Margin;
 
         controls.TextControl.VerticalOffset =
             Math.Max(0, controls.TextScrollViewer.Offset.Y);
@@ -122,6 +126,26 @@ internal sealed class PreviewSurfaceController : IDisposable
 		controls.TextControl.ManualSecretMarkRequested += OnManualSecretMarkRequested;
 		controls.TextControl.ManualSecretUnmarkRequested += OnManualSecretUnmarkRequested;
 		controls.TextControl.ManualSecretMarkRejected += OnManualSecretMarkRejected;
+        controls.TextScrollViewer.LayoutUpdated += OnTextScrollViewerLayoutUpdated;
+    }
+
+    private void OnVerticalScrollBarPropertyChanged(
+        object? sender,
+        AvaloniaPropertyChangedEventArgs e)
+    {
+        if (!_disposed &&
+            (e.Property == ScrollBar.IsExpandedProperty ||
+             e.Property == Visual.IsVisibleProperty ||
+             e.Property == Layoutable.BoundsProperty))
+        {
+            UpdateStickyHeaderScrollBarInset();
+        }
+    }
+
+    private void OnTextScrollViewerLayoutUpdated(object? sender, EventArgs e)
+    {
+        if (!_disposed)
+            UpdateStickyHeaderScrollBarInset();
     }
 
 	private async void OnManualSecretMarkRejected(
@@ -713,6 +737,37 @@ internal sealed class PreviewSurfaceController : IDisposable
     public void RefreshStickyPath()
         => UpdateStickyPath();
 
+    public void ScrollCurrentStickySectionToStart()
+    {
+        if (!TryGetCurrentStickySection(out var currentSection))
+            return;
+
+        var scrollViewer = _controls.TextScrollViewer;
+        var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+        var targetOffset = new Vector(
+            scrollViewer.Offset.X,
+            Math.Clamp(
+                _controls.TextControl.GetVerticalOffsetForLine(currentSection.HeaderLine),
+                0,
+                maximumY));
+
+        try
+        {
+            _scrollSyncActive = true;
+            scrollViewer.Offset = targetOffset;
+            _controls.LineNumbersControl.VerticalOffset = targetOffset.Y;
+            _controls.TextControl.HorizontalOffset = targetOffset.X;
+            _controls.TextControl.VerticalOffset = targetOffset.Y;
+        }
+        finally
+        {
+            _scrollSyncActive = false;
+        }
+
+        _controls.TextControl.Focus();
+        UpdateStickyPath();
+    }
+
     public void HandleScrollViewerPointerPressed(
         PointerPressedEventArgs e)
     {
@@ -1234,6 +1289,9 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_controls.TextControl.ManualSecretMarkRequested -= OnManualSecretMarkRequested;
 		_controls.TextControl.ManualSecretUnmarkRequested -= OnManualSecretUnmarkRequested;
 		_controls.TextControl.ManualSecretMarkRejected -= OnManualSecretMarkRejected;
+        _controls.TextScrollViewer.LayoutUpdated -= OnTextScrollViewerLayoutUpdated;
+        if (_verticalScrollBar is not null)
+            _verticalScrollBar.PropertyChanged -= OnVerticalScrollBarPropertyChanged;
 
         if (_selectionMetricsDebounceTimer is not null)
         {
@@ -1366,6 +1424,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     private void UpdateStickyPath()
     {
+        UpdateStickyHeaderScrollBarInset();
         if (!TryGetCurrentStickySection(out var currentSection))
         {
             HideStickyPath();
@@ -1384,6 +1443,49 @@ internal sealed class PreviewSurfaceController : IDisposable
         _controls.TextControl.StickyHeaderText = string.Empty;
         _controls.LineNumbersControl.StickyHeaderReserved = false;
         _controls.LineNumbersControl.StickyHeaderVisible = false;
+    }
+
+    private void UpdateStickyHeaderScrollBarInset()
+    {
+        if (_verticalScrollBar is null)
+        {
+            _verticalScrollBar = _controls.TextScrollViewer
+                .GetVisualDescendants()
+                .OfType<ScrollBar>()
+                .FirstOrDefault(static scrollBar => scrollBar.Orientation == Orientation.Vertical);
+            if (_verticalScrollBar is not null)
+            {
+                _verticalScrollBar.PropertyChanged += OnVerticalScrollBarPropertyChanged;
+                _controls.TextScrollViewer.LayoutUpdated -= OnTextScrollViewerLayoutUpdated;
+            }
+        }
+
+        var inset = 0.0;
+        if (_verticalScrollBar is
+            {
+                IsVisible: true,
+                IsExpanded: true,
+                Bounds.Width: > 0
+            } scrollBar)
+        {
+            var origin = scrollBar.TranslatePoint(default, _controls.TextScrollViewer);
+            inset = origin is { } scrollBarOrigin
+                ? Math.Clamp(
+                    _controls.TextScrollViewer.Bounds.Width - scrollBarOrigin.X,
+                    0,
+                    _controls.TextScrollViewer.Bounds.Width)
+                : scrollBar.Bounds.Width;
+        }
+
+        if (Math.Abs(_stickyHeaderScrollBarInset - inset) < 0.1)
+            return;
+
+        _stickyHeaderScrollBarInset = inset;
+        _controls.StickyHeaderContainer.Margin = new Thickness(
+            _stickyHeaderBaseMargin.Left,
+            _stickyHeaderBaseMargin.Top,
+            _stickyHeaderBaseMargin.Right + inset,
+            _stickyHeaderBaseMargin.Bottom);
     }
 
     private void HideStickyPath()
