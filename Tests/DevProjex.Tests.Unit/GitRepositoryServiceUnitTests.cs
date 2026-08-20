@@ -66,6 +66,27 @@ public class GitRepositoryServiceUnitTests
 	}
 
 	[Fact]
+	public async Task WorktreeSupportProbe_TransientResultAfterWaiterCancellationIsRetried()
+	{
+		var calls = 0;
+		var firstProbe = new TaskCompletionSource<WorktreeSupportState>(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var manager = new GitWorktreeManager(_ => Interlocked.Increment(ref calls) == 1
+			? firstProbe.Task
+			: Task.FromResult(WorktreeSupportState.Supported));
+		using var cancellation = new CancellationTokenSource();
+
+		var canceledWaiter = manager.IsSupportedAsync("repository", cancellation.Token);
+		cancellation.Cancel();
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledWaiter);
+		firstProbe.SetResult(WorktreeSupportState.TransientFailure);
+		await firstProbe.Task;
+
+		Assert.True(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(2, calls);
+	}
+
+	[Fact]
 	public async Task WorktreeSupportProbe_TimeoutIsTransientAndNextRequestStartsNewProbe()
 	{
 		var probeCount = 0;

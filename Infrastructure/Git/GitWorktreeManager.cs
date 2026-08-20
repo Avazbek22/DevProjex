@@ -54,6 +54,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		Task<WorktreeSupportState> probe;
 		lock (_supportSync)
 		{
+			PublishCompletedProbeLocked();
 			if (_cachedSupportState != WorktreeSupportState.Unknown)
 				return _cachedSupportState == WorktreeSupportState.Supported;
 			_supportProbe ??= _probeSupport(basePath);
@@ -85,6 +86,23 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		}
 
 		return state == WorktreeSupportState.Supported;
+	}
+
+	private void PublishCompletedProbeLocked()
+	{
+		if (_supportProbe is not { IsCompleted: true } completed)
+			return;
+
+		_supportProbe = null;
+		if (completed.IsCompletedSuccessfully)
+		{
+			var state = completed.GetAwaiter().GetResult();
+			if (state is WorktreeSupportState.Supported or WorktreeSupportState.PermanentUnsupported)
+				_cachedSupportState = state;
+			return;
+		}
+
+		_ = completed.Exception;
 	}
 
 	public async Task<bool> PreparePrimaryAsync(
