@@ -47,6 +47,38 @@ public class GitRepositoryServiceUnitTests
 	}
 
 	[Fact]
+	public async Task WorktreeProcessOutput_AtLimitIsPreserved()
+	{
+		const int limit = 257;
+		var expected = new string('x', limit);
+		using var reader = new StringReader(expected);
+
+		var result = await GitWorktreeManager.ReadBoundedOutputAsync(
+			reader,
+			limit,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(result.ExceededLimit);
+		Assert.Equal(expected, result.Text);
+	}
+
+	[Fact]
+	public async Task WorktreeProcessOutput_OverLimitIsDrainedAndRejected()
+	{
+		const int limit = 257;
+		using var reader = new StringReader(new string('x', limit + 4096));
+
+		var result = await GitWorktreeManager.ReadBoundedOutputAsync(
+			reader,
+			limit,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.ExceededLimit);
+		Assert.Empty(result.Text);
+		Assert.Equal(-1, reader.Peek());
+	}
+
+	[Fact]
 	public async Task WorktreeSupportProbe_FaultedProbeIsRetriedOnNextRequest()
 	{
 		var calls = 0;
