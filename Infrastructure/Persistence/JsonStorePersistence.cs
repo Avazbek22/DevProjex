@@ -3,6 +3,22 @@ namespace DevProjex.Infrastructure.Persistence;
 internal static class JsonStorePersistence
 {
     internal const long SmallDocumentMaximumBytes = 8 * 1024 * 1024;
+    private static readonly Encoding StrictUtf16LittleEndian = new UnicodeEncoding(
+        bigEndian: false,
+        byteOrderMark: true,
+        throwOnInvalidBytes: true);
+    private static readonly Encoding StrictUtf16BigEndian = new UnicodeEncoding(
+        bigEndian: true,
+        byteOrderMark: true,
+        throwOnInvalidBytes: true);
+    private static readonly Encoding StrictUtf32LittleEndian = new UTF32Encoding(
+        bigEndian: false,
+        byteOrderMark: true,
+        throwOnInvalidCharacters: true);
+    private static readonly Encoding StrictUtf32BigEndian = new UTF32Encoding(
+        bigEndian: true,
+        byteOrderMark: true,
+        throwOnInvalidCharacters: true);
 
     // A future backup is authoritative even when the primary is missing, corrupt or older.
     // Treating the complete file set as read-only prevents recovery from downgrading both copies.
@@ -249,7 +265,7 @@ internal static class JsonStorePersistence
                 FileMode.Open,
                 FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
-            using var document = JsonDocument.Parse(stream);
+            using var document = ParseDocument(stream);
             var root = document.RootElement;
             var schemaVersion = root.TryGetProperty("schemaVersion", out var schemaElement) &&
                                 schemaElement.TryGetInt32(out var schema)
@@ -267,6 +283,43 @@ internal static class JsonStorePersistence
         {
             return false;
         }
+    }
+
+    private static JsonDocument ParseDocument(FileStream stream)
+    {
+        var encoding = DetectUnicodeEncoding(stream);
+        if (encoding is null)
+            return JsonDocument.Parse(stream);
+
+        using var reader = new StreamReader(
+            stream,
+            encoding,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: 1024,
+            leaveOpen: true);
+        return JsonDocument.Parse(reader.ReadToEnd());
+    }
+
+    private static Encoding? DetectUnicodeEncoding(FileStream stream)
+    {
+        Span<byte> prefix = stackalloc byte[4];
+        var bytesRead = stream.Read(prefix);
+        stream.Position = 0;
+        if (bytesRead >= 4)
+        {
+            if (prefix[0] == 0xFF && prefix[1] == 0xFE && prefix[2] == 0x00 && prefix[3] == 0x00)
+                return StrictUtf32LittleEndian;
+            if (prefix[0] == 0x00 && prefix[1] == 0x00 && prefix[2] == 0xFE && prefix[3] == 0xFF)
+                return StrictUtf32BigEndian;
+        }
+        if (bytesRead >= 2)
+        {
+            if (prefix[0] == 0xFF && prefix[1] == 0xFE)
+                return StrictUtf16LittleEndian;
+            if (prefix[0] == 0xFE && prefix[1] == 0xFF)
+                return StrictUtf16BigEndian;
+        }
+        return null;
     }
 }
 

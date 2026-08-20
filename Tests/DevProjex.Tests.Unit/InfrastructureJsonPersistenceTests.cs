@@ -354,6 +354,37 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Equal(257, new FileInfo(fileSet.PrimaryPath).Length);
 	}
 
+	[Theory]
+	[InlineData("utf16-le")]
+	[InlineData("utf16-be")]
+	[InlineData("utf32-le")]
+	[InlineData("utf32-be")]
+	public void JsonStorePersistence_ContainsFutureDocument_DetectsUnicodeSchema(string encodingName)
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		Encoding encoding = encodingName switch
+		{
+			"utf16-le" => new UnicodeEncoding(false, true, true),
+			"utf16-be" => new UnicodeEncoding(true, true, true),
+			"utf32-le" => new UTF32Encoding(false, true, true),
+			"utf32-be" => new UTF32Encoding(true, true, true),
+			_ => throw new ArgumentOutOfRangeException(nameof(encodingName))
+		};
+		File.WriteAllText(
+			fileSet.PrimaryPath,
+			"""{ "schemaVersion": 2, "name": "future" }""",
+			encoding);
+
+		var protectedDocument = JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			currentSchemaVersion: 1,
+			maximumDocumentBytes: 256);
+
+		Assert.True(protectedDocument);
+	}
+
 	[Fact]
 	public void JsonStorePersistence_TryWriteAtomic_CommitsPrimaryMirrorsBackupAndLeavesNoTempFiles()
 	{

@@ -284,6 +284,26 @@ public sealed class UserSettingsStoreTests
     }
 
     [Fact]
+    public void FutureSchemaWithUtf16Bom_IsNeverOverwrittenByOlderApplication()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        var path = store.GetPath();
+        const string futureJson = """
+        { "schemaVersion": 999, "futureProperty": "keep-me" }
+        """;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, futureJson, new UnicodeEncoding(false, true, true));
+        var originalBytes = File.ReadAllBytes(path);
+
+        var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+        loaded.ViewSettings = loaded.ViewSettings with { IsCompactMode = true };
+
+        Assert.False(store.TrySave(loaded));
+        Assert.Equal(originalBytes, File.ReadAllBytes(path));
+    }
+
+    [Fact]
     public void OversizedDocument_IsPreservedAndRejectsWrites()
     {
         using var temp = new TemporaryDirectory();
