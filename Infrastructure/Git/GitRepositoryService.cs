@@ -154,7 +154,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// Parses git clone error messages and returns user-friendly error text.
     /// Git errors can be cryptic - this method translates them to understandable messages.
     /// </summary>
-    private static string ParseGitCloneError(string gitError)
+    internal static string ParseGitCloneError(string gitError)
     {
         if (string.IsNullOrWhiteSpace(gitError))
             return "Clone failed";
@@ -198,7 +198,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// - https://github.com/user/repo.git -> repo
     /// - https://github.com/user/repo -> repo
     /// </summary>
-    private static string ExtractRepositoryName(string url)
+    internal static string ExtractRepositoryName(string url)
     {
         try
         {
@@ -936,7 +936,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         }
     }
 
-    private static bool TryExtractProgressPercent(string line, out int percent)
+    internal static bool TryExtractProgressPercent(string line, out int percent)
     {
         percent = -1;
         if (string.IsNullOrWhiteSpace(line))
@@ -956,7 +956,11 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     start--;
 
                 var length = end - start;
-                if (length > 0 &&
+                var hasInvalidNumericPrefix = start >= 0 &&
+                                              (char.IsLetterOrDigit(line[start]) ||
+                                               line[start] is '+' or '-' or '.' or '_');
+                if (!hasInvalidNumericPrefix &&
+                    length > 0 &&
                     int.TryParse(line.AsSpan(start + 1, length), out var value) &&
                     value is >= 0 and <= 100)
                 {
@@ -971,7 +975,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         return false;
     }
 
-    private static bool IsSafeGitProgressLine(string line)
+    internal static bool IsSafeGitProgressLine(string line)
     {
         var trimmed = line.AsSpan().TrimStart();
         return trimmed.StartsWith("remote: Enumerating objects:", StringComparison.OrdinalIgnoreCase) ||

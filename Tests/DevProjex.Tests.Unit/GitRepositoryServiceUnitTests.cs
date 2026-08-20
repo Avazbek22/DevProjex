@@ -1,8 +1,7 @@
 namespace DevProjex.Tests.Unit;
 
 /// <summary>
-/// Unit tests for GitRepositoryService helper methods.
-/// Tests URL extraction, error parsing, and validation logic without requiring Git.
+/// Unit tests for GitRepositoryService process and parsing contracts without requiring Git.
 /// </summary>
 public class GitRepositoryServiceUnitTests
 {
@@ -181,64 +180,38 @@ public class GitRepositoryServiceUnitTests
 		Assert.Throws<ArgumentException>(() => GitBranchNameValidator.ValidateAndNormalize(branchName));
 	}
 
-    #region Repository Name Extraction Tests
+	[Theory]
+	[InlineData("https://github.com/user/repo", "repo")]
+	[InlineData("https://github.com/user/my-repo.git", "my-repo")]
+	[InlineData("git@github.com:user/repo.git", "repo")]
+	[InlineData("https://github.com/org/project-name?tab=readme", "project-name")]
+	public void ExtractRepositoryName_UsesTheCloneMetadataParser(string url, string expectedName)
+	{
+		Assert.Equal(expectedName, GitRepositoryService.ExtractRepositoryName(url));
+	}
 
-    [Theory]
-    [InlineData("https://github.com/user/repo", "repo")]
-    [InlineData("https://github.com/user/my-repo", "my-repo")]
-    [InlineData("https://github.com/user/repo.git", "repo")]
-    [InlineData("https://github.com/org/project-name", "project-name")]
-    public void RepositoryUrl_ExtractsName_FromUrl(string url, string expectedName)
-    {
-        // Test URL parsing logic (structural test)
-        var uri = new Uri(url);
-        var pathParts = uri.AbsolutePath.Trim('/').Split('/');
-        var repoNameWithGit = pathParts[^1];
-        var repoName = repoNameWithGit.EndsWith(".git") ? repoNameWithGit[..^4] : repoNameWithGit;
+	[Theory]
+	[InlineData("fatal: repository 'https://github.com/user/repo' not found", "Invalid repository URL or repository does not exist")]
+	[InlineData("fatal: unable to access: Could not resolve host", "Network error - check your internet connection")]
+	[InlineData("fatal: Authentication failed for private repository", "Authentication failed - repository may be private")]
+	[InlineData("Permission denied (publickey)", "Authentication failed - repository may be private")]
+	[InlineData("operation timed out", "Connection timeout - repository may be too large or network is slow")]
+	[InlineData("", "Clone failed")]
+	public void ParseGitCloneError_MapsKnownFailureClasses(string gitError, string expected)
+	{
+		Assert.Equal(expected, GitRepositoryService.ParseGitCloneError(gitError));
+	}
 
-        Assert.Equal(expectedName, repoName);
-    }
+	[Fact]
+	public void ParseGitCloneError_DoesNotEchoUnknownAuthenticatedStderr()
+	{
+		const string stderr = "fatal: transport rejected https://user:token@example.test/repo";
 
-    #endregion
+		var result = GitRepositoryService.ParseGitCloneError(stderr);
 
-    #region Error Message Detection Tests
-
-    [Theory]
-    [InlineData("Repository not found")]
-    [InlineData("fatal: repository 'https://github.com/user/repo' not found")]
-    [InlineData("ERROR: Repository not found")]
-    public void GitErrors_NotFound_ContainKeywords(string gitError)
-    {
-        // Structural test - verify error messages contain expected keywords
-        Assert.Contains("not found", gitError, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Theory]
-    [InlineData("Authentication failed")]
-    [InlineData("fatal: Authentication failed for 'https://github.com/private/repo'")]
-    [InlineData("Permission denied")]
-    public void GitErrors_Authentication_ContainKeywords(string gitError)
-    {
-        // Structural test
-        Assert.True(
-            gitError.Contains("authentication", StringComparison.OrdinalIgnoreCase) ||
-            gitError.Contains("permission", StringComparison.OrdinalIgnoreCase)
-        );
-    }
-
-    [Theory]
-    [InlineData("Could not resolve host")]
-    [InlineData("Network is unreachable")]
-    public void GitErrors_Network_ContainKeywords(string gitError)
-    {
-        // Structural test
-        Assert.True(
-            gitError.Contains("network", StringComparison.OrdinalIgnoreCase) ||
-            gitError.Contains("resolve", StringComparison.OrdinalIgnoreCase)
-        );
-    }
-
-    #endregion
+		Assert.Equal("Clone failed", result);
+		Assert.DoesNotContain("token", result, StringComparison.Ordinal);
+	}
 
     #region Default Branch Detection Tests
 
@@ -279,172 +252,35 @@ public class GitRepositoryServiceUnitTests
 
     #endregion
 
-    #region Shallow Clone Optimization Tests
+	[Theory]
+	[InlineData("Receiving objects: 50% (500/1000)", 50)]
+	[InlineData("remote: Counting objects: 100% (12/12)", 100)]
+	[InlineData("prefix 150% then 7%", 7)]
+	public void TryExtractProgressPercent_ReturnsTheFirstValidPercentage(string message, int expected)
+	{
+		Assert.True(GitRepositoryService.TryExtractProgressPercent(message, out var percent));
+		Assert.Equal(expected, percent);
+	}
 
-    [Fact]
-    public void CloneCommand_IncludesDepthOne()
-    {
-        // Verify shallow clone optimization is used
-        // The actual command should include --depth 1 for performance
-        var testUrl = "https://github.com/user/repo";
-        var testPath = "/tmp/test";
+	[Theory]
+	[InlineData("")]
+	[InlineData("Receiving objects without percentage")]
+	[InlineData("Receiving objects: 101%")]
+	[InlineData("Receiving objects: -1%")]
+	[InlineData("Receiving objects: 1.5%")]
+	[InlineData("Receiving objects: phase1%")]
+	public void TryExtractProgressPercent_RejectsMissingOrOutOfRangeValues(string message)
+	{
+		Assert.False(GitRepositoryService.TryExtractProgressPercent(message, out _));
+	}
 
-        // This is a structural test verifying the pattern is correct
-        Assert.StartsWith("https://", testUrl);
-        Assert.NotEmpty(testPath);
-    }
-
-    #endregion
-
-    #region Branch Name Validation Tests
-
-    [Theory]
-    [InlineData("main")]
-    [InlineData("master")]
-    [InlineData("develop")]
-    [InlineData("feature/new-feature")]
-    [InlineData("bugfix/fix-123")]
-    [InlineData("release/v1.0")]
-    public void BranchNames_ValidFormats_AreValid(string branchName)
-    {
-        // Valid branch names should not contain forbidden characters
-        Assert.DoesNotContain(" ", branchName);
-        Assert.DoesNotContain("\t", branchName);
-        Assert.DoesNotContain("\n", branchName);
-        Assert.NotEmpty(branchName);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData(" ")]
-    [InlineData("\t")]
-    [InlineData("\n")]
-    public void BranchNames_InvalidFormats_AreInvalid(string branchName)
-    {
-        // Invalid branch names
-        Assert.True(string.IsNullOrWhiteSpace(branchName));
-    }
-
-    #endregion
-
-    #region URL Format Tests
-
-    [Theory]
-    [InlineData("https://github.com/user/repo")]
-    [InlineData("https://github.com/user/repo.git")]
-    [InlineData("https://gitlab.com/org/project")]
-    [InlineData("https://bitbucket.org/team/app")]
-    public void GitUrls_CommonFormats_AreValid(string url)
-    {
-        Assert.True(Uri.TryCreate(url, UriKind.Absolute, out var uri));
-        Assert.True(uri.Scheme == "https" || uri.Scheme == "http");
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("not a url")]
-    [InlineData("ftp://github.com/user/repo")]
-    [InlineData("file:///C:/repos/local")]
-    public void GitUrls_InvalidFormats_AreInvalid(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            Assert.True(string.IsNullOrWhiteSpace(url));
-        }
-        else
-        {
-            var isValid = Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
-                          (uri.Scheme == "https" || uri.Scheme == "http");
-            Assert.False(isValid);
-        }
-    }
-
-    #endregion
-
-    #region Path Handling Tests
-
-    [Theory]
-    [InlineData(@"C:\temp\repo")]
-    [InlineData(@"C:\Users\Name\Documents\Projects\repo")]
-    [InlineData(@"D:\repos\my-project")]
-    public void RepositoryPaths_WindowsFormat_AreValid(string path)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.True(Path.IsPathRooted(path));
-            Assert.DoesNotContain("//", path.Replace("\\", "/"));
-        }
-    }
-
-    [Theory]
-    [InlineData("/tmp/repo")]
-    [InlineData("/home/user/repos/project")]
-    [InlineData("/var/git/my-repo")]
-    public void RepositoryPaths_UnixFormat_AreValid(string path)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            Assert.True(Path.IsPathRooted(path));
-            Assert.DoesNotContain("\\", path);
-        }
-    }
-
-    #endregion
-
-    #region Command Building Tests
-
-    [Fact]
-    public void GitCommands_QuotesPaths()
-    {
-        // Paths with spaces should be quoted
-        var pathWithSpaces = @"C:\My Documents\repo";
-        var quoted = $"\"{pathWithSpaces}\"";
-
-        Assert.StartsWith("\"", quoted);
-        Assert.EndsWith("\"", quoted);
-    }
-
-    [Fact]
-    public void GitCommands_HandlesSpecialCharacters()
-    {
-        // Special characters in paths should be handled
-        var specialPath = @"C:\repo's\my-project";
-
-        Assert.Contains("'", specialPath);
-        // Should be able to handle such paths
-        Assert.NotEmpty(specialPath);
-    }
-
-    #endregion
-
-    #region Progress Reporting Tests
-
-    [Fact]
-    public void ProgressMessages_ContainPercentages()
-    {
-        // Progress messages typically contain percentages
-        var exampleMessages = new[]
-        {
-            "Cloning: 25%",
-            "Downloading: 50%",
-            "Receiving objects: 75%",
-            "Resolving deltas: 100%"
-        };
-
-        Assert.All(exampleMessages, msg =>
-        {
-            Assert.Contains("%", msg);
-        });
-    }
-
-    [Theory]
-    [InlineData("Receiving objects: 50% (500/1000)")]
-    [InlineData("Resolving deltas: 100% (100/100)")]
-    public void ProgressMessages_ParseCorrectly(string message)
-    {
-        Assert.Contains("%", message);
-        Assert.Matches(@"\d+%", message);
-    }
-
-    #endregion
+	[Theory]
+	[InlineData("Receiving objects: 50% (5/10)", true)]
+	[InlineData(" remote: Enumerating objects: 12", true)]
+	[InlineData("remote: warning https://user:token@example.test 50%", false)]
+	[InlineData("fatal: Authentication failed 50%", false)]
+	public void IsSafeGitProgressLine_UsesAClosedPhaseAllowlist(string message, bool expected)
+	{
+		Assert.Equal(expected, GitRepositoryService.IsSafeGitProgressLine(message));
+	}
 }
