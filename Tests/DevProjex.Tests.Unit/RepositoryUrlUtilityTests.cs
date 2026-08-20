@@ -55,6 +55,32 @@ public sealed class RepositoryUrlUtilityTests
 		Assert.Equal(repositoryUrl.TrimEnd('/'), display);
 	}
 
+	[Fact]
+	public void LocalRepositoryIdentityUsesPlatformPathCaseSemantics()
+	{
+		var upperPath = Path.Combine(Path.GetTempPath(), "DevProjex", "CaseIdentity", "Repo.git");
+		var lowerPath = Path.Combine(Path.GetTempPath(), "DevProjex", "CaseIdentity", "repo.git");
+		var upperUri = new Uri(upperPath).AbsoluteUri;
+		var lowerUri = new Uri(lowerPath).AbsoluteUri;
+
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			RepositoryUrlUtility.AreEquivalent(upperUri, lowerUri));
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			RepositoryUrlUtility.AreEquivalent(upperPath, lowerPath));
+	}
+
+	[Fact]
+	public void LocalRepositoryIdentityStillIgnoresGitSuffix()
+	{
+		var repositoryPath = Path.Combine(Path.GetTempPath(), "DevProjex", "LocalIdentity", "repo");
+
+		Assert.True(RepositoryUrlUtility.AreEquivalent(
+			new Uri(repositoryPath).AbsoluteUri,
+			new Uri(repositoryPath + ".git").AbsoluteUri));
+	}
+
 	[Theory]
 	[InlineData("")]
 	[InlineData("-uploader")]

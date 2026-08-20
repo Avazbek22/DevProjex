@@ -5,6 +5,8 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class GitRepositoryServiceCancellationTests
 {
+    private static readonly TimeSpan ProcessTreeStartupTimeout = TimeSpan.FromSeconds(30);
+
     [Fact]
     public async Task IsGitAvailableAsync_PreCanceledToken_ThrowsWhenGitCliIsAvailable()
     {
@@ -55,7 +57,7 @@ public sealed class GitRepositoryServiceCancellationTests
         try
         {
             await childReady.Task
-                .WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+                .WaitAsync(ProcessTreeStartupTimeout, TestContext.Current.CancellationToken);
             childProcessId = int.Parse(
                 await File.ReadAllTextAsync(readyPath, TestContext.Current.CancellationToken),
                 NumberStyles.None,

@@ -122,6 +122,24 @@ public sealed class GitPathComparisonSemanticsIntegrationTests
 	}
 
 	[Fact]
+	public void InvalidatingFromFileSystemRootEvictsDescendantRepositorySemantics()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("root-invalidation-repository");
+		RunGit(repositoryRoot, "init", "--quiet");
+		RunGit(repositoryRoot, "config", "core.ignoreCase", "false");
+		var resolver = GitConfigPathComparisonSemanticsResolver.Instance;
+		resolver.Invalidate(repositoryRoot);
+		Assert.False(resolver.Resolve(repositoryRoot).IgnoreCase);
+
+		RunGit(repositoryRoot, "config", "core.ignoreCase", "true");
+		resolver.Invalidate(Path.GetPathRoot(repositoryRoot)!);
+
+		Assert.True(resolver.Resolve(repositoryRoot).IgnoreCase);
+	}
+
+	[Fact]
 	public void CoreIgnoreCaseMatchesNativeGitAsciiOnlyCaseFolding()
 	{
 		EnsureGitAvailable();

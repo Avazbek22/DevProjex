@@ -164,7 +164,7 @@ public sealed class SecretRedactionSession : IDisposable
 	{
 		if (_persistentMarkStore is null)
 			return;
-		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		long expectedGeneration;
 		lock (_sync)
 		{
@@ -231,7 +231,7 @@ public sealed class SecretRedactionSession : IDisposable
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(selection);
 		ValidateFeatures(features);
-		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 
 		HashSet<string> keptOccurrences;
 		long overrideRevision;
@@ -342,7 +342,7 @@ public sealed class SecretRedactionSession : IDisposable
 		ArgumentNullException.ThrowIfNull(snapshot);
 		ReplaceMarkedSecretsCore(
 			snapshot.Marks,
-			Path.GetFullPath(projectRoot),
+			PathUtility.Normalize(projectRoot),
 			snapshot.Revision,
 			snapshot.StateAppliedRevisions,
 			expectedGeneration: null);
@@ -461,7 +461,7 @@ public sealed class SecretRedactionSession : IDisposable
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(delta);
-		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		ValidatePendingDelta(delta);
 		bool changed;
 		lock (_sync)
@@ -504,7 +504,7 @@ public sealed class SecretRedactionSession : IDisposable
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(snapshot);
-		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		var replacement = NormalizePersistentMarks(snapshot.Marks);
 		bool changed;
 		lock (_sync)
@@ -544,7 +544,7 @@ public sealed class SecretRedactionSession : IDisposable
 	public bool RollbackPendingPersistentMarkDelta(string projectRoot, Guid operationId)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
-		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		bool changed;
 		lock (_sync)
 		{
@@ -749,7 +749,7 @@ public sealed class SecretRedactionSession : IDisposable
 		ValidatePendingDelta(delta);
 		if (delta.Kind != PersistentSecretMarkDeltaKind.Add)
 			throw new ArgumentException("Only an add delta can replace a session source anchor.", nameof(delta));
-		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		var anchor = new SessionMarkedSecret(
 			relativePath.Replace('\\', '/'),
 			sourceOffset,
@@ -1082,7 +1082,7 @@ public sealed class SecretRedactionSession : IDisposable
 	{
 		if (_persistentMarkStore is null)
 			return;
-		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		PersistentSecretMarkDelta[] migrations;
 		long expectedGeneration;
 		lock (_sync)
@@ -1129,7 +1129,7 @@ public sealed class SecretRedactionSession : IDisposable
 	internal void SchedulePendingPersistentMarkMigrationsAfterPreview(string projectRoot)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
-		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		CancellationTokenSource? obsoleteSchedule;
 		CancellationTokenSource schedule;
 		long expectedGeneration;
@@ -1499,7 +1499,7 @@ public sealed class SecretRedactionSession : IDisposable
 	public void AdvanceContentGeneration(string projectRoot)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
-		var normalizedProjectRoot = Path.GetFullPath(projectRoot);
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		CancellationTokenSource obsoleteGeneration;
 		lock (_sync)
 		{
@@ -2219,7 +2219,7 @@ public sealed class SecretRedactionScope
 	{
 		_session = session;
 		_transformIdentity = transformIdentity;
-		_projectRoot = Path.GetFullPath(projectRoot);
+		_projectRoot = PathUtility.Normalize(projectRoot);
 		_keptOccurrenceIds = keptOccurrenceIds;
 		_overrideRevision = overrideRevision;
 		_snapshotRevision = snapshotRevision;

@@ -12,6 +12,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	private const int CurrentSchemaVersion = 3;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
+	private static readonly DateTimeOffset MaximumSafeProfileTimestamp = DateTimeOffset.MaxValue.AddDays(-1);
 
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -36,7 +37,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			if (HasOversizedDocument(fileSet) ||
+			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return false;
 			return EnsureStorageExistsCore(fileSet);
 		}
@@ -97,7 +99,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 			return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 
-		var persistedProfile = ToPersistedProfile(profile, updatedUtc, out var wasTruncated);
+		var normalizedUpdatedUtc = NormalizeProfileTimestamp(updatedUtc);
+		var persistedProfile = ToPersistedProfile(profile, normalizedUpdatedUtc, out var wasTruncated);
 		if (wasTruncated)
 			return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: true);
 
@@ -108,7 +111,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 
 			using var _ = heldLock;
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			if (HasOversizedDocument(fileSet) ||
+			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 			var db = LoadInternal(fileSet);
 			db.SchemaVersion = CurrentSchemaVersion;
@@ -117,7 +121,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			// The caller-provided timestamp reflects when the profile became user-approved.
 			if (db.Profiles.TryGetValue(normalizedPath, out var existing) &&
 				existing is not null &&
-				existing.UpdatedUtc > updatedUtc)
+				existing.UpdatedUtc > normalizedUpdatedUtc)
 			{
 				return new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
 			}
@@ -141,7 +145,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				if (CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
 				{
 					using var _ = heldLock;
-					if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+					if (!HasOversizedDocument(fileSet) &&
+					    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 						return;
 					if (File.Exists(fileSet.PrimaryPath))
 						File.Delete(fileSet.PrimaryPath);
@@ -182,6 +187,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			}
 
 			using var _ = heldLock;
+			if (HasOversizedDocument(fileSet))
+			{
+				return new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.InvalidStorage,
+					null);
+			}
 			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 			{
 				return new ProjectProfileLookupResult(
@@ -224,7 +235,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 
 			using var _ = heldLock;
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			if (HasOversizedDocument(fileSet) ||
+			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return false;
 			var db = LoadInternal(fileSet);
 			selectionDeleted = !db.Profiles.Remove(normalizedPath) || TrySaveInternal(fileSet, db);
@@ -285,6 +297,15 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private JsonStoreFileSet GetFileSet()
 		=> JsonStoreFileSet.Create(_appDataPathProvider, FolderName, FileName);
+
+	private static bool HasOversizedDocument(JsonStoreFileSet fileSet) =>
+		IsOversizedDocument(fileSet.PrimaryPath) || IsOversizedDocument(fileSet.BackupPath);
+
+	private static bool IsOversizedDocument(string path) =>
+		File.Exists(path) &&
+		!JsonStorePersistence.IsDocumentWithinSizeLimit(
+			path,
+			ProjectProfileStorageLimits.MaximumJsonBytes);
 
 	private ProjectProfileDb LoadInternal(JsonStoreFileSet fileSet)
 	{
@@ -438,8 +459,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			profile.IgnoreOptionStates);
 		NormalizeGitFilteringState(profile.SelectedIgnoreOptions, profile.IgnoreOptionStates);
 
-		if (profile.UpdatedUtc <= DateTimeOffset.UnixEpoch)
-			profile.UpdatedUtc = DateTimeOffset.UtcNow;
+		profile.UpdatedUtc = NormalizeProfileTimestamp(profile.UpdatedUtc);
 
 		return profile;
 	}
@@ -503,9 +523,14 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			IgnoreOptionStates = ignoreOptionStates,
 			SelectedPaths = selectedPaths,
 			MarkedSecrets = null,
-			UpdatedUtc = updatedUtc
+			UpdatedUtc = NormalizeProfileTimestamp(updatedUtc)
 		};
 	}
+
+	private static DateTimeOffset NormalizeProfileTimestamp(DateTimeOffset timestamp) =>
+		timestamp <= DateTimeOffset.UnixEpoch || timestamp > MaximumSafeProfileTimestamp
+			? DateTimeOffset.UnixEpoch.AddTicks(1)
+			: timestamp;
 
 	private static ProjectSelectionProfile ToProfile(
 		PersistedProjectProfile profile,
@@ -759,14 +784,20 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				FileMode.Open,
 				FileAccess.Read,
 				FileShare.ReadWrite | FileShare.Delete);
-			if (stream.Length > ProjectProfileStorageLimits.MaximumJsonBytes)
-				return false;
-			using var document = JsonDocument.Parse(
+			if (!JsonStorePersistence.TryParseDocumentWithinSizeLimit(
 				stream,
-				new JsonDocumentOptions { MaxDepth = 64 });
-			if (!TryParseDatabase(document.RootElement, out db, out requiresRewrite))
+				(int)ProjectProfileStorageLimits.MaximumJsonBytes,
+				new JsonDocumentOptions { MaxDepth = 64 },
+				out var document))
+			{
 				return false;
-			return true;
+			}
+			using (document)
+			{
+				if (!TryParseDatabase(document.RootElement, out db, out requiresRewrite))
+					return false;
+				return true;
+			}
 		}
 		catch
 		{

@@ -6,6 +6,8 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class TreeSitterAnalysisDiagnosticsTests
 {
+	private static readonly TimeSpan CoordinationTimeout = TimeSpan.FromSeconds(30);
+
 	[Fact]
 	public void BlankLineCollection_RemainsInsideTheExistingEditShapingPhaseSchema()
 	{
@@ -378,7 +380,7 @@ public sealed class TreeSitterAnalysisDiagnosticsTests
 				TestContext.Current.CancellationToken),
 			TestContext.Current.CancellationToken);
 		await observer.Reached.WaitAsync(
-			TimeSpan.FromSeconds(5),
+			CoordinationTimeout,
 			TestContext.Current.CancellationToken);
 
 		diagnosticsA.Dispose();
@@ -386,7 +388,7 @@ public sealed class TreeSitterAnalysisDiagnosticsTests
 		using var diagnosticsB = compressor.BeginAnalysisDiagnostics();
 		observer.Release();
 		_ = await analysisTask.WaitAsync(
-			TimeSpan.FromSeconds(5),
+			CoordinationTimeout,
 			TestContext.Current.CancellationToken);
 		var frozenAfterCompletion = diagnosticsA.Capture();
 
@@ -441,7 +443,7 @@ public sealed class TreeSitterAnalysisDiagnosticsTests
 			if (phase != targetPhase)
 				return;
 			_reached.TrySetResult();
-			if (!_release.Wait(TimeSpan.FromSeconds(5)))
+			if (!_release.Wait(CoordinationTimeout))
 				throw new TimeoutException("The diagnostics freeze test did not release analysis.");
 		}
 

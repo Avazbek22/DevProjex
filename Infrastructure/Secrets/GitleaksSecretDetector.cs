@@ -821,11 +821,13 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static double CalculateShannonEntropy(ReadOnlySpan<char> value)
 	{
+		if (value.Length == 0)
+			return 0;
 		Span<int> frequencies = stackalloc int[128];
 		foreach (var character in value)
 		{
 			if (character >= frequencies.Length)
-				return CalculateShannonEntropy(value.ToString());
+				return CalculateNonAsciiShannonEntropy(value);
 			frequencies[character]++;
 		}
 
@@ -886,10 +888,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		return content[lineStart..lineEnd].ToString();
 	}
 
-	internal static double CalculateShannonEntropy(string value)
+	internal static double CalculateShannonEntropy(string value) =>
+		CalculateShannonEntropy(value.AsSpan());
+
+	private static double CalculateNonAsciiShannonEntropy(ReadOnlySpan<char> value)
 	{
-		if (value.Length == 0)
-			return 0;
 		var frequencies = new Dictionary<char, int>();
 		foreach (var character in value)
 			frequencies[character] = frequencies.GetValueOrDefault(character) + 1;

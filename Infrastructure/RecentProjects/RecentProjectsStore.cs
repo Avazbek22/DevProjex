@@ -11,6 +11,7 @@ public sealed class RecentProjectsStore
 	private const int MaxRecentRepositoryRemovals = 32;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "recent-projects.json";
+	private static readonly DateTimeOffset MaximumSafeHistoryTimestamp = DateTimeOffset.MaxValue.AddDays(-1);
 	private static readonly string LegacyRepoCacheRootPath = Path.Combine(
 		Path.GetTempPath(),
 		FolderName,
@@ -280,6 +281,12 @@ public sealed class RecentProjectsStore
 		out RecentProjectsLoadStatus status,
 		bool persistLegacyMigration = false)
 	{
+		if (HasFutureSchema(fileSet))
+		{
+			status = RecentProjectsLoadStatus.Success;
+			return CreateDefaultDb();
+		}
+
 		if (!File.Exists(fileSet.PrimaryPath) &&
 		    !File.Exists(fileSet.BackupPath) &&
 		    TryLoadLegacy(fileSet, out var legacyDb))
@@ -338,6 +345,9 @@ public sealed class RecentProjectsStore
 
 	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
 	{
+		if (HasFutureSchema(fileSet))
+			return true;
+
 		if (!File.Exists(fileSet.PrimaryPath) &&
 		    !File.Exists(fileSet.BackupPath) &&
 		    TryLoadLegacy(fileSet, out var legacyDb))
@@ -443,7 +453,7 @@ public sealed class RecentProjectsStore
 			.Select(static entry => new RecentFolderEntry
 			{
 				Path = PathUtility.Normalize(entry.Path),
-				OpenedUtc = entry.OpenedUtc <= DateTimeOffset.UnixEpoch ? DateTimeOffset.UtcNow : entry.OpenedUtc
+				OpenedUtc = NormalizeHistoryTimestamp(entry.OpenedUtc)
 			})
 			.Where(static entry => !IsRepoCachePath(entry.Path))
 			.Where(entry => !removalTimes.TryGetValue(entry.Path, out var removedUtc) || entry.OpenedUtc > removedUtc)
@@ -472,9 +482,7 @@ public sealed class RecentProjectsStore
 			.Select(static entry => new RecentFolderRemovalEntry
 			{
 				Path = PathUtility.Normalize(entry.Path),
-				RemovedUtc = entry.RemovedUtc <= DateTimeOffset.UnixEpoch
-					? DateTimeOffset.UtcNow
-					: entry.RemovedUtc
+				RemovedUtc = NormalizeHistoryTimestamp(entry.RemovedUtc)
 			})
 			.OrderByDescending(static entry => entry.RemovedUtc)
 			.ToList();
@@ -502,7 +510,7 @@ public sealed class RecentProjectsStore
 			.Select(static entry => new RecentRepositoryEntry
 			{
 				Url = RepositoryUrlUtility.Normalize(entry.Url),
-				OpenedUtc = entry.OpenedUtc <= DateTimeOffset.UnixEpoch ? DateTimeOffset.UtcNow : entry.OpenedUtc
+				OpenedUtc = NormalizeHistoryTimestamp(entry.OpenedUtc)
 			})
 			.Where(entry =>
 			{
@@ -534,9 +542,7 @@ public sealed class RecentProjectsStore
 			.Select(static entry => new RecentRepositoryRemovalEntry
 			{
 				Url = RepositoryUrlUtility.Normalize(entry.Url),
-				RemovedUtc = entry.RemovedUtc <= DateTimeOffset.UnixEpoch
-					? DateTimeOffset.UtcNow
-					: entry.RemovedUtc
+				RemovedUtc = NormalizeHistoryTimestamp(entry.RemovedUtc)
 			})
 			.OrderByDescending(static entry => entry.RemovedUtc)
 			.ToList();
@@ -554,6 +560,11 @@ public sealed class RecentProjectsStore
 
 		return unique;
 	}
+
+	private static DateTimeOffset NormalizeHistoryTimestamp(DateTimeOffset timestamp) =>
+		timestamp <= DateTimeOffset.UnixEpoch || timestamp > MaximumSafeHistoryTimestamp
+			? DateTimeOffset.UtcNow
+			: timestamp;
 
 	private static void MoveToFront<TEntry>(
 		List<TEntry> entries,
@@ -695,9 +706,18 @@ public sealed class RecentProjectsStore
 
 	private bool TrySave(JsonStoreFileSet fileSet, RecentProjectsDb db)
 	{
+		if (HasFutureSchema(fileSet))
+			return false;
+
 		var sanitized = SanitizeState(fileSet, db);
 		return JsonStorePersistence.TryWriteAtomic(fileSet, sanitized, SerializerOptions);
 	}
+
+	private static bool HasFutureSchema(JsonStoreFileSet fileSet) =>
+		JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			CurrentSchemaVersion,
+			maximumDocumentBytes: JsonStorePersistence.SmallDocumentMaximumBytes);
 
 	private static bool TryLoadFromPath(string path, out RecentProjectsDb db, out bool requiresRewrite)
 	{
@@ -709,7 +729,13 @@ public sealed class RecentProjectsStore
 
 		try
 		{
-			var json = File.ReadAllText(path);
+			if (!JsonStorePersistence.TryReadAllTextWithinSizeLimit(
+				    path,
+				    (int)JsonStorePersistence.SmallDocumentMaximumBytes,
+				    out var json))
+			{
+				return false;
+			}
 			var deserialized = JsonSerializer.Deserialize<RecentProjectsDb>(json, SerializerOptions);
 			if (deserialized is null)
 				return false;

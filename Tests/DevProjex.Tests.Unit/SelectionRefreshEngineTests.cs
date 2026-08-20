@@ -16,6 +16,45 @@ public sealed class SelectionRefreshEngineTests
 	}
 
 	[Fact]
+	public void ComputeFullRefreshSnapshot_AvailabilityIoFailureUsesMeasuredFallback()
+	{
+		var scanner = new DotFolderNoiseScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			static (_, _) => throw new IOException("transient availability failure"));
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(
+			CreateDefaultsContext(),
+			CancellationToken.None);
+
+		Assert.Contains(
+			snapshot.IgnoreOptions,
+			static option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
+	}
+
+	[Fact]
+	public void ComputeFullRefreshSnapshot_UnexpectedAvailabilityFailurePropagates()
+	{
+		var scanner = new DotFolderNoiseScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			static (_, _) => throw new InvalidOperationException("unexpected availability failure"));
+
+		var exception = Assert.Throws<InvalidOperationException>(() =>
+			engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None));
+
+		Assert.Equal("unexpected availability failure", exception.Message);
+	}
+
+	[Fact]
 	public void ComputeLiveRefreshSnapshot_NewFileOptionState_PerformsOneWorkspaceScan()
 	{
 		var scanner = CreateCountingWorkspaceScanner(out var scanCount);

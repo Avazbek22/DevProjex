@@ -6,8 +6,11 @@ public sealed class ZipDownloadServiceInternalHelpersTests
 	[InlineData("nul", true)]
 	[InlineData("CON.txt", true)]
 	[InlineData("com1.tar.gz", true)]
+	[InlineData("COM\u00B9.txt", true)]
+	[InlineData("lpt\u00B2", true)]
 	[InlineData("AUX", true)]
 	[InlineData("COM10", false)]
+	[InlineData("COM\u2074", false)]
 	[InlineData("console.log", false)]
 	[InlineData("nullable.cs", false)]
 	public void IsWindowsReservedDeviceName_ClassifiesBaseComponent(string component, bool expected)

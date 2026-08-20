@@ -11,7 +11,6 @@ internal static class GitBranchNameValidator
 	{
 		if (string.IsNullOrEmpty(branchName) ||
 		    branchName[0] == '-' ||
-		    branchName is "@" ||
 		    branchName[^1] is '/' or '.' ||
 		    branchName.Contains("..", StringComparison.Ordinal) ||
 		    branchName.Contains("@{", StringComparison.Ordinal) ||
@@ -25,7 +24,7 @@ internal static class GitBranchNameValidator
 		{
 			if (component.Length == 0 ||
 			    component[0] == '.' ||
-			    component.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))
+			    component.EndsWith(".lock", StringComparison.Ordinal))
 			{
 				return false;
 			}
@@ -33,7 +32,7 @@ internal static class GitBranchNameValidator
 
 		foreach (var character in branchName)
 		{
-			if (char.IsControl(character))
+			if (character < ' ' || character == '\u007F')
 				return false;
 		}
 

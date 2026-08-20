@@ -1,4 +1,5 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Kernel;
 
 namespace DevProjex.Application.Services;
 
@@ -44,7 +45,7 @@ public static class OutputRootPathPresentation
 		string normalizedProjectRoot;
 		try
 		{
-			normalizedProjectRoot = Path.GetFullPath(redaction.ProjectRoot);
+			normalizedProjectRoot = PathUtility.Normalize(redaction.ProjectRoot);
 		}
 		catch
 		{

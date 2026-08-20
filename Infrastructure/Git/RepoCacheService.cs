@@ -16,9 +16,13 @@ public sealed class RepoCacheService : IRepoCacheService
 	private const string CacheFolderName = "RepoCache";
 	private const string CacheIndexFileName = "cache-index.json";
 	private const int CacheIndexSchemaVersion = 2;
+	internal const long MaximumCacheIndexBytes = 64L * 1024 * 1024;
+	private const byte RepositorySizeRefreshRunning = 1;
+	private const byte RepositorySizeRefreshPending = 2;
 	private static readonly TimeSpan IndexLockTimeout = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan WorktreeCleanupTimeout = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan RepositorySizeRefreshTimeout = TimeSpan.FromSeconds(30);
+	private static readonly TimeSpan MaximumPersistedClockSkew = TimeSpan.FromDays(1);
 	private static readonly JsonSerializerOptions IndexSerializerOptions = new(JsonSerializerDefaults.Web)
 	{
 		WriteIndented = true,
@@ -38,7 +42,8 @@ public sealed class RepoCacheService : IRepoCacheService
 	private readonly IGitWorktreeManager _worktreeManager;
 	private readonly RepoCacheTestHooks? _testHooks;
 	private readonly object _garbageCollectionSync = new();
-	private readonly ConcurrentDictionary<string, byte> _worktreeCleanupInFlight = new(PathComparer.Default);
+	private readonly ConcurrentDictionary<string, WorktreeCleanupState> _worktreeCleanupInFlight =
+		new(PathComparer.Default);
 	private readonly ConcurrentDictionary<string, byte> _repositorySizeRefreshInFlight = new(PathComparer.Default);
 	private int _scheduledGarbageCollectionState;
 
@@ -252,7 +257,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 			using (heldLock)
 			{
-				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+				if (HasUnsupportedIndexDocument(fileSet))
 					continue;
 
 				var document = LoadIndex(fileSet);
@@ -430,7 +435,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		string? pathToTrash = null;
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -489,7 +494,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		var trashPaths = new List<string>();
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -609,7 +614,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		var trashPaths = new List<string>();
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -628,7 +633,9 @@ public sealed class RepoCacheService : IRepoCacheService
 				using (leases)
 				{
 					entries.Remove(entry);
-					totalSize -= Math.Max(0, entry.ApproximateSizeBytes);
+					totalSize = totalSize == long.MaxValue
+						? CalculateIndexedSize(entries)
+						: totalSize - Math.Max(0, entry.ApproximateSizeBytes);
 					trashPaths.Add(RepositoryCacheLayout.GetContainer(entry.LocalPath));
 				}
 			}
@@ -656,6 +663,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		var size = CalculateDirectorySize(
 			RepositoryCacheLayout.GetContainer(localPath),
 			cancellationToken);
+		_testHooks?.AfterRepositorySizeCalculated?.Invoke(localPath);
 
 		var fileSet = GetIndexFileSet();
 		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
@@ -663,7 +671,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -717,7 +725,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -937,6 +945,9 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
+			if (HasUnsupportedIndexDocument(fileSet))
+				return null;
+
 			var document = LoadIndex(fileSet);
 			var current = FindByIdentity(document, identity);
 			if (current is null ||
@@ -952,7 +963,7 @@ public sealed class RepoCacheService : IRepoCacheService
 				LastUsedUtc = _timeProvider.GetUtcNow(),
 				ContentKind = kind
 			};
-			WriteIndex(
+			if (!WriteIndex(
 				fileSet,
 				document.Entries
 					.Where(candidate => !string.Equals(
@@ -961,7 +972,10 @@ public sealed class RepoCacheService : IRepoCacheService
 						StringComparison.OrdinalIgnoreCase))
 					.Append(updated)
 					.OrderByDescending(static candidate => candidate.LastOpenedUtc)
-					.ToList());
+					.ToList()))
+			{
+				return null;
+			}
 			return updated;
 		}
 	}
@@ -1050,13 +1064,25 @@ public sealed class RepoCacheService : IRepoCacheService
 		};
 		process.Start();
 		process.StandardInput.Close();
-		var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
-		var error = process.StandardError.ReadToEndAsync(cancellationToken);
+		var output = GitProcessOutputReader.ReadAsync(
+			process.StandardOutput,
+			GitProcessOutputReader.MaximumOutputCharacters,
+			cancellationToken);
+		var error = GitProcessOutputReader.ReadAsync(
+			process.StandardError,
+			GitProcessOutputReader.MaximumOutputCharacters,
+			cancellationToken);
 		try
 		{
 			await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
 			await Task.WhenAll(output, error).ConfigureAwait(false);
-			return process.ExitCode == 0 ? await output.ConfigureAwait(false) : null;
+			var standardOutput = await output.ConfigureAwait(false);
+			var standardError = await error.ConfigureAwait(false);
+			return process.ExitCode == 0 &&
+			       !standardOutput.ExceededLimit &&
+			       !standardError.ExceededLimit
+				? standardOutput.Text
+				: null;
 		}
 		catch (OperationCanceledException)
 		{
@@ -1068,63 +1094,125 @@ public sealed class RepoCacheService : IRepoCacheService
 			catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
 			{
 			}
+			await GitProcessOutputReader
+				.ObserveCompletionAsync(output, error)
+				.ConfigureAwait(false);
 			throw;
 		}
 	}
 
 	private void ScheduleUnusedWorktreeCleanup(string basePath, string retainedPath)
 	{
-		if (!_worktreeCleanupInFlight.TryAdd(basePath, 0))
-			return;
-		_ = Task.Run(async () =>
+		while (true)
 		{
-			using var timeout = new CancellationTokenSource(WorktreeCleanupTimeout);
-			try
+			if (_worktreeCleanupInFlight.TryGetValue(basePath, out var active))
 			{
-				_testHooks?.BeforeUnusedWorktreeCleanup?.Invoke(basePath);
-				await CleanupUnusedWorktreesAsync(basePath, retainedPath, timeout.Token).ConfigureAwait(false);
+				if (active.TryQueue(retainedPath))
+					return;
+				Thread.Yield();
+				continue;
 			}
-			catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+
+			var state = new WorktreeCleanupState(retainedPath);
+			if (!_worktreeCleanupInFlight.TryAdd(basePath, state))
+				continue;
+			_ = Task.Run(() => RunScheduledWorktreeCleanupAsync(basePath, state), CancellationToken.None);
+			return;
+		}
+	}
+
+	private async Task RunScheduledWorktreeCleanupAsync(string basePath, WorktreeCleanupState state)
+	{
+		var retainedPath = state.InitialRetainedPath;
+		try
+		{
+			while (true)
 			{
-				Trace.TraceWarning("Repository worktree cleanup timed out for '{0}'.", basePath);
+				using var timeout = new CancellationTokenSource(WorktreeCleanupTimeout);
+				try
+				{
+					_testHooks?.BeforeUnusedWorktreeCleanup?.Invoke(basePath);
+					await CleanupUnusedWorktreesAsync(basePath, retainedPath, timeout.Token).ConfigureAwait(false);
+					_testHooks?.AfterUnusedWorktreeCleanup?.Invoke(basePath);
+				}
+				catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+				{
+					Trace.TraceWarning("Repository worktree cleanup timed out for '{0}'.", basePath);
+				}
+				catch (Exception exception)
+				{
+					Trace.TraceWarning("Repository worktree cleanup failed for '{0}': {1}", basePath, exception.Message);
+				}
+
+				if (!state.TryTakePending(out retainedPath))
+					return;
 			}
-			catch (Exception exception)
-			{
-				Trace.TraceWarning("Repository worktree cleanup failed for '{0}': {1}", basePath, exception.Message);
-			}
-			finally
-			{
-				_worktreeCleanupInFlight.TryRemove(basePath, out _);
-			}
-		}, CancellationToken.None);
+		}
+		finally
+		{
+			_worktreeCleanupInFlight.TryRemove(
+				new KeyValuePair<string, WorktreeCleanupState>(basePath, state));
+		}
 	}
 
 	private void ScheduleRepositorySizeRefresh(string basePath)
 	{
-		if (!_repositorySizeRefreshInFlight.TryAdd(basePath, 0))
-			return;
-		_ = Task.Run(() =>
+		while (true)
 		{
-			using var timeout = new CancellationTokenSource(RepositorySizeRefreshTimeout);
-			try
+			if (_repositorySizeRefreshInFlight.TryAdd(basePath, RepositorySizeRefreshRunning))
 			{
-				_testHooks?.BeforeRepositorySizeRefresh?.Invoke(basePath);
-				RefreshIndexedRepositorySize(basePath, timeout.Token);
+				_ = Task.Run(() => RunScheduledRepositorySizeRefresh(basePath), CancellationToken.None);
+				return;
 			}
-			catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+
+			if (_repositorySizeRefreshInFlight.TryUpdate(
+				    basePath,
+				    RepositorySizeRefreshPending,
+				    RepositorySizeRefreshRunning) ||
+			    _repositorySizeRefreshInFlight.TryGetValue(basePath, out var state) &&
+			    state == RepositorySizeRefreshPending)
 			{
-				Trace.TraceWarning("Repository size refresh timed out for '{0}'.", basePath);
+				return;
 			}
-			catch (Exception exception)
+		}
+	}
+
+	private void RunScheduledRepositorySizeRefresh(string basePath)
+	{
+		while (true)
+		{
+			using (var timeout = new CancellationTokenSource(RepositorySizeRefreshTimeout))
 			{
-				Trace.TraceWarning("Repository size refresh failed for '{0}': {1}", basePath, exception.Message);
+				try
+				{
+					_testHooks?.BeforeRepositorySizeRefresh?.Invoke(basePath);
+					RefreshIndexedRepositorySize(basePath, timeout.Token);
+				}
+				catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+				{
+					Trace.TraceWarning("Repository size refresh timed out for '{0}'.", basePath);
+				}
+				catch (Exception exception)
+				{
+					Trace.TraceWarning("Repository size refresh failed for '{0}': {1}", basePath, exception.Message);
+				}
 			}
-			finally
+
+			while (true)
 			{
-				_repositorySizeRefreshInFlight.TryRemove(basePath, out _);
-				_testHooks?.AfterRepositorySizeRefresh?.Invoke(basePath);
+				if (_repositorySizeRefreshInFlight.TryUpdate(
+					    basePath,
+					    RepositorySizeRefreshRunning,
+					    RepositorySizeRefreshPending))
+					break;
+				if (_repositorySizeRefreshInFlight.TryRemove(
+					    new KeyValuePair<string, byte>(basePath, RepositorySizeRefreshRunning)))
+				{
+					_testHooks?.AfterRepositorySizeRefresh?.Invoke(basePath);
+					return;
+				}
 			}
-		}, CancellationToken.None);
+		}
 	}
 
 	private async Task CleanupUnusedWorktreesAsync(
@@ -1270,7 +1358,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CacheIndexSchemaVersion))
+			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
 			var document = LoadIndex(fileSet);
@@ -1315,6 +1403,9 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		using (heldLock)
 		{
+			if (HasUnsupportedIndexDocument(fileSet))
+				return null;
+
 			var document = LoadIndex(fileSet);
 			var entry = FindByIdentity(document, identity);
 			if (entry is null ||
@@ -1927,7 +2018,8 @@ public sealed class RepoCacheService : IRepoCacheService
 			    static () => RepositoryCacheIndexDocument.Empty,
 			    NormalizeIndex,
 			    out document,
-			    out _))
+			    out _,
+			    MaximumCacheIndexBytes))
 		{
 			document = RepositoryCacheIndexDocument.Empty;
 			return false;
@@ -1937,17 +2029,48 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private RepositoryCacheIndexDocument NormalizeIndex(RepositoryCacheIndexDocument document)
 	{
+		var utcNow = _timeProvider.GetUtcNow();
+		var maximumAcceptedTimestamp = utcNow <= DateTimeOffset.MaxValue - MaximumPersistedClockSkew
+			? utcNow + MaximumPersistedClockSkew
+			: DateTimeOffset.MaxValue;
 		var entries = (document.Entries ?? [])
 			.Where(entry => entry is not null &&
 			                !string.IsNullOrWhiteSpace(entry.Identity) &&
 			                !string.IsNullOrWhiteSpace(entry.RepositoryUrl) &&
 			                !string.IsNullOrWhiteSpace(entry.LocalPath) &&
 			                IsInCache(entry.LocalPath))
+			.Select(entry => NormalizeIndexEntryOrNull(entry, maximumAcceptedTimestamp))
+			.Where(static entry => entry is not null)
+			.Select(static entry => entry!)
 			.GroupBy(static entry => entry.Identity, StringComparer.OrdinalIgnoreCase)
 			.Select(static group => group.OrderByDescending(entry => entry.LastOpenedUtc).First())
 			.OrderByDescending(static entry => entry.LastOpenedUtc)
 			.ToList();
 		return new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries);
+	}
+
+	private static RepositoryCacheIndexEntry? NormalizeIndexEntryOrNull(
+		RepositoryCacheIndexEntry entry,
+		DateTimeOffset maximumAcceptedTimestamp)
+	{
+		try
+		{
+			var identity = RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl);
+			if (identity.Length == 0)
+				return null;
+			return entry with
+			{
+				Identity = identity,
+				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
+				              entry.LastUsedUtc > maximumAcceptedTimestamp
+					? DateTimeOffset.UnixEpoch
+					: entry.LastUsedUtc
+			};
+		}
+		catch
+		{
+			return null;
+		}
 	}
 
 	private static bool WriteIndex(
@@ -1956,7 +2079,52 @@ public sealed class RepoCacheService : IRepoCacheService
 		JsonStorePersistence.TryWriteAtomic(
 			fileSet,
 			new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries),
-			IndexSerializerOptions);
+			IndexSerializerOptions,
+			MaximumCacheIndexBytes);
+
+	private static bool HasUnsupportedIndexDocument(JsonStoreFileSet fileSet) =>
+		JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			CacheIndexSchemaVersion,
+			maximumDocumentBytes: MaximumCacheIndexBytes);
+
+	private sealed class WorktreeCleanupState(string initialRetainedPath)
+	{
+		private readonly object _sync = new();
+		private string _pendingRetainedPath = initialRetainedPath;
+		private bool _hasPending;
+		private bool _isCompleting;
+
+		public string InitialRetainedPath { get; } = initialRetainedPath;
+
+		public bool TryQueue(string retainedPath)
+		{
+			lock (_sync)
+			{
+				if (_isCompleting)
+					return false;
+				_pendingRetainedPath = retainedPath;
+				_hasPending = true;
+				return true;
+			}
+		}
+
+		public bool TryTakePending(out string retainedPath)
+		{
+			lock (_sync)
+			{
+				if (_hasPending)
+				{
+					_hasPending = false;
+					retainedPath = _pendingRetainedPath;
+					return true;
+				}
+				_isCompleting = true;
+				retainedPath = string.Empty;
+				return false;
+			}
+		}
+	}
 
 	private sealed record RepositoryCacheIndexDocument(
 		int SchemaVersion,
@@ -1984,6 +2152,8 @@ internal sealed class RepoCacheTestHooks
 	public Action? BeforeScheduledGarbageCollection { get; init; }
 	public Action? AfterScheduledGarbageCollection { get; init; }
 	public Action<string>? BeforeUnusedWorktreeCleanup { get; init; }
+	public Action<string>? AfterUnusedWorktreeCleanup { get; init; }
 	public Action<string>? BeforeRepositorySizeRefresh { get; init; }
+	public Action<string>? AfterRepositorySizeCalculated { get; init; }
 	public Action<string>? AfterRepositorySizeRefresh { get; init; }
 }

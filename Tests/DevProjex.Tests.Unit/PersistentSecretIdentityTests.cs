@@ -386,6 +386,22 @@ public sealed class PersistentSecretIdentityTests
 	}
 
 	[Fact]
+	public void StableLengthProbe_RejectsKeyFileThatGrewAfterOpening()
+	{
+		using var stream = new StaleLengthMemoryStream(
+			[1, 2, 3, 4, 5],
+			reportedLength: 4);
+		stream.Position = 4;
+
+		var stable = PersistentSecretIdentityProvider.HasStableLengthAfterRead(
+			stream,
+			expectedLength: 4);
+
+		Assert.False(stable);
+		Assert.Equal(5, stream.Position);
+	}
+
+	[Fact]
 	public async Task Provider_DoesNotTouchStorageUntilAnIdentityIsRequired()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -493,6 +509,40 @@ public sealed class PersistentSecretIdentityTests
 			PersistentSecretIdentityAvailability.Ready,
 			await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
 		Assert.Equal(PersistentSecretIdentityProviderState.Ready, provider.State);
+		Assert.Equal(2, provider.InitializationAttemptCount);
+	}
+
+	[Fact]
+	public async Task TransientRetryCooldown_UsesMonotonicTimeAcrossUtcClockAdjustments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var appData = workspace.CreateFolder("app-data");
+		var pathAvailable = false;
+		var timeProvider = new IndependentTimeProvider(
+			new DateTimeOffset(2026, 8, 20, 3, 0, 0, TimeSpan.Zero));
+		using var provider = new PersistentSecretIdentityProvider(
+			() => pathAvailable
+				? appData
+				: throw new System.Security.SecurityException("Storage is temporarily unavailable."),
+			TimeSpan.FromMilliseconds(30),
+			TimeSpan.FromSeconds(1),
+			timeProvider);
+
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.TemporarilyUnavailable,
+			await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		pathAvailable = true;
+		timeProvider.MoveUtcForward(TimeSpan.FromDays(1));
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.TemporarilyUnavailable,
+			await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(1, provider.InitializationAttemptCount);
+		timeProvider.MoveUtcBackward(TimeSpan.FromDays(2));
+		timeProvider.AdvanceMonotonic(TimeSpan.FromSeconds(2));
+
+		Assert.Equal(
+			PersistentSecretIdentityAvailability.Ready,
+			await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
 		Assert.Equal(2, provider.InitializationAttemptCount);
 	}
 
@@ -608,6 +658,30 @@ public sealed class PersistentSecretIdentityTests
 				return;
 			}
 		}
+	}
+
+	private sealed class IndependentTimeProvider(DateTimeOffset utcNow) : TimeProvider
+	{
+		private DateTimeOffset _utcNow = utcNow;
+		private long _timestamp;
+
+		public override DateTimeOffset GetUtcNow() => _utcNow;
+
+		public override long GetTimestamp() => _timestamp;
+
+		public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+		public void MoveUtcForward(TimeSpan duration) => _utcNow += duration;
+
+		public void MoveUtcBackward(TimeSpan duration) => _utcNow -= duration;
+
+		public void AdvanceMonotonic(TimeSpan duration) => _timestamp += duration.Ticks;
+	}
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
 	}
 
 	[Fact]

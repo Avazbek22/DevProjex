@@ -9,6 +9,7 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 	private const int CacheLimit = 128;
 	private const int CommandTimeoutMilliseconds = 5000;
 	private const int KillWaitMilliseconds = 1000;
+	private static readonly TimeSpan UnavailableRetryDelay = TimeSpan.FromSeconds(5);
 	// Values on an unavailable result are intentionally non-contractual. Consumers must
 	// reject non-authoritative semantics instead of guessing across escaped patterns,
 	// character classes, negations, or tracked membership.
@@ -16,11 +17,38 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		IgnoreCase: true,
 		NormalizeUnicode: true,
 		IsAuthoritative: false);
+	private readonly Func<string, string, GitPathComparisonSemantics> _repositorySemanticsResolver;
+	private readonly Func<DateTime> _utcNowProvider;
+	private readonly TimeSpan _unavailableRetryDelay;
 	private readonly object _cacheSync = new();
-	private readonly Dictionary<string, GitPathComparisonSemantics> _repositoryCache =
+	private readonly Dictionary<string, RepositorySemanticsCacheEntry> _repositoryCache =
 		new(PathComparer.Default);
+	private readonly Dictionary<string, long> _latestResolutionSequences =
+		new(PathComparer.Default);
+	private long _cacheGeneration;
+	private long _nextResolutionSequence;
 
 	public static GitConfigPathComparisonSemanticsResolver Instance { get; } = new();
+
+	public GitConfigPathComparisonSemanticsResolver()
+		: this(ResolveRepositorySemantics, static () => DateTime.UtcNow, UnavailableRetryDelay)
+	{
+	}
+
+	internal GitConfigPathComparisonSemanticsResolver(
+		Func<string, string, GitPathComparisonSemantics> repositorySemanticsResolver,
+		Func<DateTime> utcNowProvider,
+		TimeSpan unavailableRetryDelay)
+	{
+		ArgumentNullException.ThrowIfNull(repositorySemanticsResolver);
+		ArgumentNullException.ThrowIfNull(utcNowProvider);
+		if (unavailableRetryDelay < TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(unavailableRetryDelay));
+
+		_repositorySemanticsResolver = repositorySemanticsResolver;
+		_utcNowProvider = utcNowProvider;
+		_unavailableRetryDelay = unavailableRetryDelay;
+	}
 
 	public GitPathComparisonSemantics Resolve(string scopeRootPath)
 	{
@@ -32,18 +60,47 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 			return ResolveFileSystemFallback(scopeRootPath, gitMetadataPath: null);
 		}
 
+		var now = _utcNowProvider();
+		long cacheGeneration;
+		long resolutionSequence;
 		lock (_cacheSync)
 		{
 			if (_repositoryCache.TryGetValue(repositoryRoot, out var cached))
-				return cached;
+			{
+				var elapsed = now - cached.CapturedUtc;
+				if (cached.Semantics.IsAuthoritative ||
+				    elapsed >= TimeSpan.Zero && elapsed < _unavailableRetryDelay)
+			{
+					return cached.Semantics;
+				}
+			}
+
+			if (!_latestResolutionSequences.ContainsKey(repositoryRoot) &&
+			    _latestResolutionSequences.Count >= CacheLimit)
+			{
+				_cacheGeneration++;
+				_repositoryCache.Clear();
+				_latestResolutionSequences.Clear();
+			}
+
+			cacheGeneration = _cacheGeneration;
+			resolutionSequence = ++_nextResolutionSequence;
+			_latestResolutionSequences[repositoryRoot] = resolutionSequence;
 		}
 
-		var resolved = ResolveRepositorySemantics(repositoryRoot, gitMetadataPath);
+		var resolved = _repositorySemanticsResolver(repositoryRoot, gitMetadataPath);
 		lock (_cacheSync)
 		{
-			if (_repositoryCache.Count >= CacheLimit)
-				_repositoryCache.Clear();
-			_repositoryCache[repositoryRoot] = resolved;
+			if (cacheGeneration != _cacheGeneration ||
+			    !_latestResolutionSequences.TryGetValue(repositoryRoot, out var latestResolutionSequence) ||
+			    latestResolutionSequence != resolutionSequence)
+			{
+				return resolved;
+			}
+
+			_repositoryCache[repositoryRoot] = new RepositorySemanticsCacheEntry(
+				resolved,
+				_utcNowProvider());
 		}
 
 		return resolved;
@@ -56,10 +113,17 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 
 		lock (_cacheSync)
 		{
+			_cacheGeneration++;
 			foreach (var repositoryRoot in _repositoryCache.Keys.ToArray())
 			{
 				if (PathsOverlap(repositoryRoot, normalizedRootPath))
 					_repositoryCache.Remove(repositoryRoot);
+			}
+
+			foreach (var repositoryRoot in _latestResolutionSequences.Keys.ToArray())
+			{
+				if (PathsOverlap(repositoryRoot, normalizedRootPath))
+					_latestResolutionSequences.Remove(repositoryRoot);
 			}
 		}
 	}
@@ -170,8 +234,14 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 				return false;
 
 			process.StandardInput.Close();
-			var outputTask = process.StandardOutput.ReadToEndAsync();
-			var errorTask = process.StandardError.ReadToEndAsync();
+			var outputTask = GitProcessOutputReader.ReadAsync(
+				process.StandardOutput,
+				GitProcessOutputReader.MaximumOutputCharacters,
+				CancellationToken.None);
+			var errorTask = GitProcessOutputReader.ReadAsync(
+				process.StandardError,
+				GitProcessOutputReader.MaximumOutputCharacters,
+				CancellationToken.None);
 			if (!process.WaitForExit(CommandTimeoutMilliseconds))
 			{
 				TryKill(process);
@@ -183,8 +253,11 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 				return false;
 			}
 
-			standardOutput = outputTask.GetAwaiter().GetResult();
-			_ = errorTask.GetAwaiter().GetResult();
+			var output = outputTask.GetAwaiter().GetResult();
+			var error = errorTask.GetAwaiter().GetResult();
+			if (output.ExceededLimit || error.ExceededLimit)
+				return false;
+			standardOutput = output.Text;
 			exitCode = process.ExitCode;
 			return true;
 		}
@@ -339,21 +412,8 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 	}
 
 	private static bool PathsOverlap(string leftPath, string rightPath) =>
-		IsSameOrDescendantPath(leftPath, rightPath) ||
-		IsSameOrDescendantPath(rightPath, leftPath);
-
-	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
-	{
-		if (PathComparer.Default.Equals(candidatePath, rootPath))
-			return true;
-		if (!candidatePath.StartsWith(rootPath, PathComparer.Comparison) ||
-		    candidatePath.Length <= rootPath.Length)
-		{
-			return false;
-		}
-
-		return candidatePath[rootPath.Length] is '\\' or '/';
-	}
+		PathUtility.IsPathInside(leftPath, rightPath) ||
+		PathUtility.IsPathInside(rightPath, leftPath);
 
 	private static void TryKill(Process process)
 	{
@@ -367,5 +427,9 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 			// Timeout cleanup is best-effort; no process output reaches a user surface.
 		}
 	}
+
+	private readonly record struct RepositorySemanticsCacheEntry(
+		GitPathComparisonSemantics Semantics,
+		DateTime CapturedUtc);
 
 }

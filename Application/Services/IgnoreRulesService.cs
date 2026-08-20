@@ -21,8 +21,6 @@ public sealed class IgnoreRulesService(
 		pathComparisonSemanticsResolver ?? PlatformGitPathComparisonSemanticsResolver.Instance;
 
 	private static readonly StringComparer PathStringComparer = PathComparer.Default;
-	private static readonly StringComparison PathStringComparison = PathComparer.Comparison;
-
 	public IgnoreRules Build(string rootPath, IReadOnlyCollection<IgnoreOptionId> selectedOptions) =>
 		Build(rootPath, selectedOptions, selectedRootFolders: null);
 
@@ -47,7 +45,7 @@ public sealed class IgnoreRulesService(
 		string normalizedRoot;
 		try
 		{
-			normalizedRoot = Path.GetFullPath(rootPath);
+			normalizedRoot = PathUtility.Normalize(rootPath);
 		}
 		catch
 		{
@@ -58,7 +56,7 @@ public sealed class IgnoreRulesService(
 		{
 			foreach (var cachePath in GitIgnoreCache.Keys.ToArray())
 			{
-				if (IsSameOrDescendantPath(cachePath, normalizedRoot))
+				if (PathUtility.IsPathInside(cachePath, normalizedRoot))
 					RemoveGitIgnoreCacheEntry(cachePath);
 			}
 		}
@@ -495,20 +493,6 @@ public sealed class IgnoreRulesService(
 		ProjectRootFileSignature Signature,
 		GitPathComparisonSemantics ComparisonSemantics,
 		GitIgnoreMatcher Matcher);
-
-	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
-	{
-		if (PathStringComparer.Equals(candidatePath, rootPath))
-			return true;
-		if (!candidatePath.StartsWith(rootPath, PathStringComparison))
-			return false;
-
-		return candidatePath.Length > rootPath.Length &&
-		       IsDirectorySeparator(candidatePath[rootPath.Length]);
-	}
-
-	private static bool IsDirectorySeparator(char value) =>
-		value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
 
 	private sealed record ScopedSmartIgnoreBuildResult(
 		IReadOnlySet<string> FolderNames,

@@ -24,6 +24,7 @@ internal interface IGitWorktreeManager
 internal sealed class GitWorktreeManager : IGitWorktreeManager
 {
 	private static readonly TimeSpan SupportProbeTimeout = TimeSpan.FromSeconds(10);
+	internal const int MaximumProcessOutputCharacters = GitProcessOutputReader.MaximumOutputCharacters;
 	private readonly object _supportSync = new();
 	private readonly Func<string, Task<WorktreeSupportState>> _probeSupport;
 	private Task<WorktreeSupportState>? _supportProbe;
@@ -54,6 +55,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		Task<WorktreeSupportState> probe;
 		lock (_supportSync)
 		{
+			PublishCompletedProbeLocked();
 			if (_cachedSupportState != WorktreeSupportState.Unknown)
 				return _cachedSupportState == WorktreeSupportState.Supported;
 			_supportProbe ??= _probeSupport(basePath);
@@ -85,6 +87,23 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		}
 
 		return state == WorktreeSupportState.Supported;
+	}
+
+	private void PublishCompletedProbeLocked()
+	{
+		if (_supportProbe is not { IsCompleted: true } completed)
+			return;
+
+		_supportProbe = null;
+		if (completed.IsCompletedSuccessfully)
+		{
+			var state = completed.GetAwaiter().GetResult();
+			if (state is WorktreeSupportState.Supported or WorktreeSupportState.PermanentUnsupported)
+				_cachedSupportState = state;
+			return;
+		}
+
+		_ = completed.Exception;
 	}
 
 	public async Task<bool> PreparePrimaryAsync(
@@ -178,7 +197,13 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 				? WorktreeSupportState.PermanentUnsupported
 				: WorktreeSupportState.TransientFailure;
 		}
-		catch (Exception exception) when (exception is Win32Exception or PlatformNotSupportedException)
+		catch (Win32Exception exception)
+		{
+			return IsPermanentGitStartFailure(exception)
+				? WorktreeSupportState.PermanentUnsupported
+				: WorktreeSupportState.TransientFailure;
+		}
+		catch (PlatformNotSupportedException)
 		{
 			return WorktreeSupportState.PermanentUnsupported;
 		}
@@ -190,6 +215,14 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		{
 			return WorktreeSupportState.TransientFailure;
 		}
+	}
+
+	private static bool IsPermanentGitStartFailure(Win32Exception exception)
+	{
+		if (exception.NativeErrorCode == 2)
+			return true;
+
+		return OperatingSystem.IsWindows() && exception.NativeErrorCode is 3 or 193 or 216;
 	}
 
 	private static async Task<string> ResolveRevisionAsync(
@@ -318,13 +351,23 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		if (!process.Start())
 			return new GitProcessResult(-1, string.Empty, string.Empty);
 
-		var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-		var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+		var outputTask = GitProcessOutputReader.ReadAsync(
+			process.StandardOutput,
+			MaximumProcessOutputCharacters,
+			cancellationToken);
+		var errorTask = GitProcessOutputReader.ReadAsync(
+			process.StandardError,
+			MaximumProcessOutputCharacters,
+			cancellationToken);
 		try
 		{
 			await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
 			await Task.WhenAll(outputTask, errorTask).ConfigureAwait(false);
-			return new GitProcessResult(process.ExitCode, await outputTask, await errorTask);
+			var output = await outputTask.ConfigureAwait(false);
+			var error = await errorTask.ConfigureAwait(false);
+			return output.ExceededLimit || error.ExceededLimit
+				? new GitProcessResult(-1, string.Empty, "Git process output exceeded the safety limit.")
+				: new GitProcessResult(process.ExitCode, output.Text, error.Text);
 		}
 		catch (OperationCanceledException)
 		{
@@ -336,6 +379,9 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			catch
 			{
 			}
+			await GitProcessOutputReader
+				.ObserveCompletionAsync(outputTask, errorTask)
+				.ConfigureAwait(false);
 
 			throw;
 		}

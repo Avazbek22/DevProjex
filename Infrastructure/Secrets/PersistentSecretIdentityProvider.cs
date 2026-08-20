@@ -29,7 +29,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 	private readonly Action<byte[]>? _sensitiveBufferClearedObserver;
 	private byte[]? _key;
 	private Task<PersistentSecretIdentityAvailability>? _initializationTask;
-	private DateTimeOffset _retryNotBeforeUtc;
+	private long _transientFailureTimestamp;
 	private PersistentSecretIdentityProviderState _state;
 	private int _initializationAttemptCount;
 
@@ -91,7 +91,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			if (_state == PersistentSecretIdentityProviderState.PermanentFault)
 				return ValueTask.FromResult(PersistentSecretIdentityAvailability.PermanentlyUnavailable);
 			if (_state == PersistentSecretIdentityProviderState.TransientFault &&
-			    _timeProvider.GetUtcNow() < _retryNotBeforeUtc)
+			    _timeProvider.GetElapsedTime(_transientFailureTimestamp) < _transientRetryCooldown)
 			{
 				return ValueTask.FromResult(PersistentSecretIdentityAvailability.TemporarilyUnavailable);
 			}
@@ -212,7 +212,7 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 					return PersistentSecretIdentityAvailability.Ready;
 				case KeyInitializationStatus.TransientFault:
 					_state = PersistentSecretIdentityProviderState.TransientFault;
-					_retryNotBeforeUtc = _timeProvider.GetUtcNow() + _transientRetryCooldown;
+					_transientFailureTimestamp = _timeProvider.GetTimestamp();
 					return PersistentSecretIdentityAvailability.TemporarilyUnavailable;
 				default:
 					_state = PersistentSecretIdentityProviderState.PermanentFault;
@@ -337,10 +337,13 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
 			if (stream.Length is <= 0 or > MaximumKeyFileBytes)
 				return KeyFileReadResult.Permanent();
-			byte[]? bytes = new byte[checked((int)stream.Length)];
-			stream.ReadExactly(bytes);
+			var expectedLength = stream.Length;
+			byte[]? bytes = new byte[checked((int)expectedLength)];
 			try
 			{
+				stream.ReadExactly(bytes);
+				if (!HasStableLengthAfterRead(stream, expectedLength))
+					return KeyFileReadResult.Transient();
 				if (bytes.AsSpan().StartsWith(EnvelopeMagic))
 				{
 					if (!TryParseEnvelope(bytes, out var payload))
@@ -485,9 +488,21 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 				stream.Write(envelope);
 				stream.Flush(flushToDisk: true);
 			}
-			var persisted = File.ReadAllBytes(tempPath);
+			byte[]? persisted = null;
 			try
 			{
+				using var validationStream = new FileStream(
+					tempPath,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.Read);
+				if (validationStream.Length is <= 0 or > MaximumKeyFileBytes)
+					return false;
+				var expectedLength = validationStream.Length;
+				persisted = new byte[checked((int)expectedLength)];
+				validationStream.ReadExactly(persisted);
+				if (!HasStableLengthAfterRead(validationStream, expectedLength))
+					return false;
 				if (!persisted.AsSpan().SequenceEqual(envelope) ||
 				    !TryParseEnvelope(persisted, out var validationPayload))
 				{
@@ -515,6 +530,13 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 				// The committed file is authoritative; an abandoned temp is ignored on the next load.
 			}
 		}
+	}
+
+	internal static bool HasStableLengthAfterRead(Stream stream, long expectedLength)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
+		Span<byte> overflowProbe = stackalloc byte[1];
+		return stream.Read(overflowProbe) == 0 && stream.Length == expectedLength;
 	}
 
 	private static bool HasOwnerOnlyPermissions(string path)

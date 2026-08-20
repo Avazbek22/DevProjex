@@ -13,6 +13,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 {
     private const int StreamBufferSize = 81920;
     private const int ExtractionProgressReportInterval = 50;
+	private const long MaximumRepositoryMetadataBytes = 64 * 1024;
 
     private readonly HttpClient _httpClient;
     private readonly ZipResourceLimits _limits;
@@ -419,6 +420,11 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 				cancellationToken).ConfigureAwait(false);
 			if (!response.IsSuccessStatusCode)
 				return null;
+			if (response.Content.Headers.ContentLength is > MaximumRepositoryMetadataBytes)
+				return null;
+			await response.Content
+				.LoadIntoBufferAsync(MaximumRepositoryMetadataBytes, cancellationToken)
+				.ConfigureAwait(false);
 
 			await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 			using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)
@@ -532,6 +538,8 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 			var normalized = segments[index].Normalize(NormalizationForm.FormC).TrimEnd(' ', '.');
 			if (normalized.Length == 0 || normalized is "." or "..")
 				throw new InvalidDataException($"ZIP entry has an invalid path: {entryPath}");
+			if (OperatingSystem.IsWindows() && normalized.Contains(':', StringComparison.Ordinal))
+				throw new InvalidDataException($"ZIP entry uses an NTFS alternate data stream path: {entryPath}");
 			if (OperatingSystem.IsWindows() && IsWindowsReservedDeviceName(normalized.AsSpan()))
 				throw new InvalidDataException($"ZIP entry uses a reserved Windows device name: {entryPath}");
 			segments[index] = normalized;
@@ -557,8 +565,11 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 		return baseName.Length == 4 &&
 		       (baseName[..3].Equals("COM", StringComparison.OrdinalIgnoreCase) ||
 		        baseName[..3].Equals("LPT", StringComparison.OrdinalIgnoreCase)) &&
-		       baseName[3] is >= '1' and <= '9';
+		       IsReservedWindowsDeviceNumber(baseName[3]);
 	}
+
+	private static bool IsReservedWindowsDeviceNumber(char value) =>
+		value is >= '1' and <= '9' or '\u00B9' or '\u00B2' or '\u00B3';
 
 	private static InvalidDataException CreateArchiveCollisionException(string entryName) =>
 		new($"ZIP entries resolve to the same file-system path: {entryName}");
@@ -591,7 +602,17 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
             return null;
 
         var slashIndex = entryPath.IndexOf('/');
-        return slashIndex > 0 ? entryPath[..slashIndex] : null;
+        if (slashIndex <= 0)
+            return null;
+
+        var folderName = entryPath[..slashIndex];
+        if (folderName is "." or ".." ||
+            OperatingSystem.IsWindows() && folderName.Contains(':', StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return folderName;
     }
 
     private static bool StartsWithFolderPrefix(string value, string folderName)

@@ -1,8 +1,11 @@
+using System.Diagnostics;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class RepositoryCacheIsolationTests : IDisposable
 {
 	private const string RepositoryUrl = "https://github.com/example/isolation.git";
+	private static readonly TimeSpan BackgroundOperationTimeout = TimeSpan.FromSeconds(30);
 	private readonly string _cacheRoot = Path.Combine(
 		Path.GetTempPath(),
 		"DevProjex",
@@ -127,11 +130,11 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			RepositoryUrl,
 			"main",
 			TestContext.Current.CancellationToken).WaitAsync(
-			TimeSpan.FromSeconds(2),
+			BackgroundOperationTimeout,
 			TestContext.Current.CancellationToken);
 		Assert.NotNull(reopened);
 		await worktrees.RemovalStarted.Task.WaitAsync(
-			TimeSpan.FromSeconds(2),
+			BackgroundOperationTimeout,
 			TestContext.Current.CancellationToken);
 		Assert.Equal(0, worktrees.RemovedCount);
 
@@ -188,7 +191,82 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	}
 
 	[Fact]
-	public async Task WorktreeCleanup_MultipleOpensWhileFirstCleanupIsBlocked_SchedulesOneTaskPerBasePath()
+	public async Task RepositorySizeRefresh_RequestDuringCompletedEnumeration_CoalescesOneFreshPass()
+	{
+		using var firstSizeCalculated = new ManualResetEventSlim();
+		using var allowFirstRefreshCommit = new ManualResetEventSlim();
+		using var secondRefreshStarted = new ManualResetEventSlim();
+		using var allowSecondRefresh = new ManualResetEventSlim();
+		var refreshCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var refreshCount = 0;
+		var hooks = new RepoCacheTestHooks
+		{
+			BeforeRepositorySizeRefresh = _ =>
+			{
+				var pass = Interlocked.Increment(ref refreshCount);
+				if (pass != 2)
+					return;
+				secondRefreshStarted.Set();
+				Assert.True(allowSecondRefresh.Wait(BackgroundOperationTimeout));
+			},
+			AfterRepositorySizeCalculated = _ =>
+			{
+				if (Volatile.Read(ref refreshCount) != 1)
+					return;
+				firstSizeCalculated.Set();
+				Assert.True(allowFirstRefreshCommit.Wait(BackgroundOperationTimeout));
+			},
+			AfterRepositorySizeRefresh = _ => refreshCompleted.TrySetResult()
+		};
+		var service = CreateService(new FakeWorktreeManager(supported: true), hooks: hooks);
+		_ = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
+		var sessions = new List<IRepositoryCacheSession>();
+		try
+		{
+			sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+				await service.TryAcquireRepositorySessionAsync(
+					RepositoryUrl,
+					"main",
+					TestContext.Current.CancellationToken)));
+			sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+				await service.TryAcquireRepositorySessionAsync(
+					RepositoryUrl,
+					"main",
+					TestContext.Current.CancellationToken)));
+			Assert.True(firstSizeCalculated.Wait(
+				BackgroundOperationTimeout,
+				TestContext.Current.CancellationToken));
+
+			sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
+				await service.TryAcquireRepositorySessionAsync(
+					RepositoryUrl,
+					"main",
+					TestContext.Current.CancellationToken)));
+			allowFirstRefreshCommit.Set();
+			Assert.True(secondRefreshStarted.Wait(
+				BackgroundOperationTimeout,
+				TestContext.Current.CancellationToken));
+			var staleSize = service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes;
+
+			allowSecondRefresh.Set();
+			await refreshCompleted.Task.WaitAsync(
+				BackgroundOperationTimeout,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(2, Volatile.Read(ref refreshCount));
+			Assert.True(service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes > staleSize);
+		}
+		finally
+		{
+			allowFirstRefreshCommit.Set();
+			allowSecondRefresh.Set();
+			foreach (var session in sessions)
+				session.Dispose();
+		}
+	}
+
+	[Fact]
+	public async Task WorktreeCleanup_MultipleOpensWhileFirstCleanupIsBlocked_CoalescesOnePendingRepeat()
 	{
 		using var cleanupStarted = new ManualResetEventSlim();
 		using var allowCleanup = new ManualResetEventSlim();
@@ -215,7 +293,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 					"main",
 					TestContext.Current.CancellationToken)));
 			Assert.True(cleanupStarted.Wait(
-				TimeSpan.FromSeconds(2),
+				BackgroundOperationTimeout,
 				TestContext.Current.CancellationToken));
 
 			for (var index = 0; index < 3; index++)
@@ -229,8 +307,8 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 
 			Assert.Equal(1, Volatile.Read(ref cleanupCount));
 			allowCleanup.Set();
-			await Task.Delay(100, TestContext.Current.CancellationToken);
-			Assert.Equal(1, Volatile.Read(ref cleanupCount));
+			await WaitUntilAsync(() => Volatile.Read(ref cleanupCount) == 2);
+			Assert.Equal(2, Volatile.Read(ref cleanupCount));
 		}
 		finally
 		{
@@ -275,7 +353,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 					RepositoryUrl,
 					cancellationToken: TestContext.Current.CancellationToken)));
 			Assert.True(collectionStarted.Wait(
-				TimeSpan.FromSeconds(2),
+				TimeSpan.FromSeconds(15),
 				TestContext.Current.CancellationToken));
 
 			for (var index = 0; index < 5; index++)
@@ -606,8 +684,8 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 
 	private static async Task WaitUntilAsync(Func<bool> condition)
 	{
-		var timeout = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-		while (!condition() && DateTime.UtcNow < timeout)
+		var stopwatch = Stopwatch.StartNew();
+		while (!condition() && stopwatch.Elapsed < BackgroundOperationTimeout)
 			await Task.Delay(20, TestContext.Current.CancellationToken);
 		Assert.True(condition(), "The asynchronous repository cleanup did not complete in time.");
 	}

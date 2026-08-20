@@ -176,7 +176,8 @@ internal sealed class PersistentSecretMarkStore(
 				if (!CrossProcessFileLock.TryAcquire(fileSet, _lockTimeout, out var heldLock))
 					return;
 				using var _ = heldLock;
-				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+				if (!HasOversizedDocument(fileSet) &&
+				    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 					return;
 				File.Delete(fileSet.PrimaryPath);
 				File.Delete(fileSet.BackupPath);
@@ -383,6 +384,8 @@ internal sealed class PersistentSecretMarkStore(
 
 	private StoreLoadResult LoadDatabase(JsonStoreFileSet fileSet)
 	{
+		if (HasOversizedDocument(fileSet))
+			return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.InvalidStorage);
 		if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 			return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.UnsupportedFutureSchema);
 		if (TryLoadFromPath(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite))
@@ -419,12 +422,18 @@ internal sealed class PersistentSecretMarkStore(
 				FileMode.Open,
 				FileAccess.Read,
 				FileShare.ReadWrite | FileShare.Delete);
-			if (stream.Length > ProjectProfileStorageLimits.MaximumJsonBytes)
-				return false;
-			using var document = JsonDocument.Parse(
+			if (!JsonStorePersistence.TryParseDocumentWithinSizeLimit(
 				stream,
-				new JsonDocumentOptions { MaxDepth = 64 });
-			return TryParseDatabase(document.RootElement, out database, out requiresRewrite);
+				(int)ProjectProfileStorageLimits.MaximumJsonBytes,
+				new JsonDocumentOptions { MaxDepth = 64 },
+				out var document))
+			{
+				return false;
+			}
+			using (document)
+			{
+				return TryParseDatabase(document.RootElement, out database, out requiresRewrite);
+			}
 		}
 		catch
 		{
@@ -796,6 +805,15 @@ internal sealed class PersistentSecretMarkStore(
 
 	private JsonStoreFileSet GetFileSet() =>
 		JsonStoreFileSet.Create(appDataPathProvider, FolderName, FileName);
+
+	private static bool HasOversizedDocument(JsonStoreFileSet fileSet) =>
+		IsOversizedDocument(fileSet.PrimaryPath) || IsOversizedDocument(fileSet.BackupPath);
+
+	private static bool IsOversizedDocument(string path) =>
+		File.Exists(path) &&
+		!JsonStorePersistence.IsDocumentWithinSizeLimit(
+			path,
+			ProjectProfileStorageLimits.MaximumJsonBytes);
 
 	private static bool TrySave(JsonStoreFileSet fileSet, PersistentSecretMarkDb database)
 	{
