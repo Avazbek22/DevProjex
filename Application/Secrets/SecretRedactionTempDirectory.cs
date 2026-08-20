@@ -65,7 +65,7 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 		throw new IOException("A unique secret-redaction temporary directory could not be created.");
 	}
 
-	private static SecretRedactionTempDirectory Initialize(string directory)
+	internal static SecretRedactionTempDirectory Initialize(string directory)
 	{
 		FileStream? lease = null;
 		try
@@ -89,11 +89,8 @@ internal sealed class SecretRedactionTempDirectory : IDisposable
 		}
 		catch
 		{
-			if (lease is not null)
-			{
-				lease.Dispose();
-				TryDelete(directory);
-			}
+			lease?.Dispose();
+			TryDelete(directory);
 			throw;
 		}
 	}

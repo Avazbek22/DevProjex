@@ -50,6 +50,20 @@ public sealed class SecretRedactionTempDirectoryTests
 	}
 
 	[Fact]
+	public void Initialize_WhenLeaseCreationFails_RemovesThePartialDirectory()
+	{
+		using var root = new TemporaryDirectory();
+		var partialPath = root.CreateFolder("partial");
+		File.WriteAllText(
+			Path.Combine(partialPath, SecretRedactionTempDirectory.LeaseFileName),
+			"occupied");
+
+		Assert.Throws<IOException>(() => SecretRedactionTempDirectory.Initialize(partialPath));
+
+		Assert.False(Directory.Exists(partialPath));
+	}
+
+	[Fact]
 	public void Scavenger_RemovesOnlyStaleUnleasedOwnedDirectory()
 	{
 		using var root = new TemporaryDirectory();
