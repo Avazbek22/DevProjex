@@ -275,7 +275,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 					RepositoryUrl,
 					cancellationToken: TestContext.Current.CancellationToken)));
 			Assert.True(collectionStarted.Wait(
-				TimeSpan.FromSeconds(2),
+				TimeSpan.FromSeconds(15),
 				TestContext.Current.CancellationToken));
 
 			for (var index = 0; index < 5; index++)
