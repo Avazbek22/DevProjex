@@ -808,12 +808,13 @@ public sealed class GitRepositoryService : IGitRepositoryService
             if (e.Data is not null)
             {
                 var line = e.Data;
-                if (TryExtractProgressPercent(line, out var percent))
+                var classification = ClassifyGitStderrLine(line);
+                if (classification.Percent is { } percent)
                 {
                     if (progress is not null)
                     {
                         var previousPercent = Interlocked.Exchange(ref lastReportedPercent, percent);
-                        if (IsSafeGitProgressLine(line))
+                        if (classification.IsSafeProgressLine)
                         {
                             // Preserve the phase detail for richer consumers without also
                             // emitting a second standalone percentage for the same Git line.
@@ -825,14 +826,19 @@ public sealed class GitRepositoryService : IGitRepositoryService
                         }
                     }
 
-                    // Progress lines can be very noisy during clone/fetch and are not
-                    // needed in the final error payload.
-                    return;
+                    if (!classification.RetainForError)
+                    {
+                        // Progress lines can be very noisy during clone/fetch and are not
+                        // needed in the final error payload.
+                        return;
+                    }
                 }
 
                 errorBuffer.Add(line);
 
-                if (progress is not null && IsSafeGitProgressLine(line))
+                if (progress is not null &&
+                    classification.Percent is null &&
+                    classification.IsSafeProgressLine)
                     progress.Report(line);
             }
         };
@@ -986,6 +992,21 @@ public sealed class GitRepositoryService : IGitRepositoryService
                trimmed.StartsWith("Checking out files:", StringComparison.OrdinalIgnoreCase) ||
                trimmed.StartsWith("Updating files:", StringComparison.OrdinalIgnoreCase);
     }
+
+    internal static GitStderrLineClassification ClassifyGitStderrLine(string line)
+    {
+        var hasPercent = TryExtractProgressPercent(line, out var percent);
+        var isSafeProgressLine = IsSafeGitProgressLine(line);
+        return new GitStderrLineClassification(
+            hasPercent ? percent : null,
+            isSafeProgressLine,
+            RetainForError: !hasPercent || !isSafeProgressLine);
+    }
+
+    internal readonly record struct GitStderrLineClassification(
+        int? Percent,
+        bool IsSafeProgressLine,
+        bool RetainForError);
 
     private sealed class BoundedLineBuffer(int maxChars)
     {

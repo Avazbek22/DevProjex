@@ -283,4 +283,22 @@ public class GitRepositoryServiceUnitTests
 	{
 		Assert.Equal(expected, GitRepositoryService.IsSafeGitProgressLine(message));
 	}
+
+	[Theory]
+	[InlineData("Receiving objects: 50% (5/10)", 50, true, false)]
+	[InlineData("fatal: Authentication failed 50%", 50, false, true)]
+	[InlineData("remote: warning https://user:token@example.test 50%", 50, false, true)]
+	[InlineData("fatal: repository not found", null, false, true)]
+	public void ClassifyGitStderrLine_RetainsErrorsThatContainPercentages(
+		string message,
+		int? expectedPercent,
+		bool expectedSafeProgressLine,
+		bool expectedRetainForError)
+	{
+		var classification = GitRepositoryService.ClassifyGitStderrLine(message);
+
+		Assert.Equal(expectedPercent, classification.Percent);
+		Assert.Equal(expectedSafeProgressLine, classification.IsSafeProgressLine);
+		Assert.Equal(expectedRetainForError, classification.RetainForError);
+	}
 }
