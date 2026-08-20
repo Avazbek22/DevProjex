@@ -386,6 +386,22 @@ public sealed class PersistentSecretIdentityTests
 	}
 
 	[Fact]
+	public void StableLengthProbe_RejectsKeyFileThatGrewAfterOpening()
+	{
+		using var stream = new StaleLengthMemoryStream(
+			[1, 2, 3, 4, 5],
+			reportedLength: 4);
+		stream.Position = 4;
+
+		var stable = PersistentSecretIdentityProvider.HasStableLengthAfterRead(
+			stream,
+			expectedLength: 4);
+
+		Assert.False(stable);
+		Assert.Equal(5, stream.Position);
+	}
+
+	[Fact]
 	public async Task Provider_DoesNotTouchStorageUntilAnIdentityIsRequired()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -660,6 +676,12 @@ public sealed class PersistentSecretIdentityTests
 		public void MoveUtcBackward(TimeSpan duration) => _utcNow -= duration;
 
 		public void AdvanceMonotonic(TimeSpan duration) => _timestamp += duration.Ticks;
+	}
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
 	}
 
 	[Fact]

@@ -337,10 +337,13 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 			using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
 			if (stream.Length is <= 0 or > MaximumKeyFileBytes)
 				return KeyFileReadResult.Permanent();
-			byte[]? bytes = new byte[checked((int)stream.Length)];
-			stream.ReadExactly(bytes);
+			var expectedLength = stream.Length;
+			byte[]? bytes = new byte[checked((int)expectedLength)];
 			try
 			{
+				stream.ReadExactly(bytes);
+				if (!HasStableLengthAfterRead(stream, expectedLength))
+					return KeyFileReadResult.Transient();
 				if (bytes.AsSpan().StartsWith(EnvelopeMagic))
 				{
 					if (!TryParseEnvelope(bytes, out var payload))
@@ -485,9 +488,21 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 				stream.Write(envelope);
 				stream.Flush(flushToDisk: true);
 			}
-			var persisted = File.ReadAllBytes(tempPath);
+			byte[]? persisted = null;
 			try
 			{
+				using var validationStream = new FileStream(
+					tempPath,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.Read);
+				if (validationStream.Length is <= 0 or > MaximumKeyFileBytes)
+					return false;
+				var expectedLength = validationStream.Length;
+				persisted = new byte[checked((int)expectedLength)];
+				validationStream.ReadExactly(persisted);
+				if (!HasStableLengthAfterRead(validationStream, expectedLength))
+					return false;
 				if (!persisted.AsSpan().SequenceEqual(envelope) ||
 				    !TryParseEnvelope(persisted, out var validationPayload))
 				{
@@ -515,6 +530,13 @@ public sealed class PersistentSecretIdentityProvider : IPersistentSecretIdentity
 				// The committed file is authoritative; an abandoned temp is ignored on the next load.
 			}
 		}
+	}
+
+	internal static bool HasStableLengthAfterRead(Stream stream, long expectedLength)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
+		Span<byte> overflowProbe = stackalloc byte[1];
+		return stream.Read(overflowProbe) == 0 && stream.Length == expectedLength;
 	}
 
 	private static bool HasOwnerOnlyPermissions(string path)
