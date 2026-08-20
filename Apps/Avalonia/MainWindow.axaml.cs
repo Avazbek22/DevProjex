@@ -1094,6 +1094,7 @@ public partial class MainWindow : Window
         var projectLoadFinalization = BeginProjectLoadFinalization();
         var previousSourceType = _viewModel.ProjectSourceType;
         var previousBranch = _viewModel.CurrentBranch;
+		var previousBranches = _viewModel.GitBranches.ToArray();
         var previousRepositoryUrl = _currentRepositoryUrl;
         var previousProjectDisplayName = _currentProjectDisplayName;
         var candidateBranch = ReferenceEquals(candidateSession, _currentRepositorySession)
@@ -1122,6 +1123,7 @@ public partial class MainWindow : Window
                     candidateSession?.Dispose();
                 _viewModel.ProjectSourceType = previousSourceType;
                 _viewModel.CurrentBranch = previousBranch;
+				RestoreGitBranches(previousBranches);
                 _currentRepositoryUrl = previousRepositoryUrl;
                 _currentProjectDisplayName = previousProjectDisplayName;
                 _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
@@ -1147,6 +1149,20 @@ public partial class MainWindow : Window
                     ? ProjectSourceType.GitClone
                     : ProjectSourceType.ZipDownload;
                 _viewModel.CurrentBranch = candidateBranch;
+				_viewModel.GitBranches.Clear();
+				if (candidateSession.ContentKind == RepositoryCacheContentKind.Git &&
+				    !string.IsNullOrWhiteSpace(candidateBranch))
+				{
+					_viewModel.GitBranches.Add(
+						new GitBranch(candidateBranch, IsActive: true, IsRemote: false));
+				}
+				UpdateBranchMenu();
+				if (candidateSession.ContentKind == RepositoryCacheContentKind.Git)
+				{
+					ObserveDetachedTask(
+						RefreshCachedRepositoryBranchesAfterLoadAsync(normalizedPath),
+						"RefreshCachedRepositoryBranchesAfterLoad");
+				}
                 UpdateTitle();
             }
             else
@@ -1167,6 +1183,7 @@ public partial class MainWindow : Window
             {
                 _viewModel.ProjectSourceType = previousSourceType;
                 _viewModel.CurrentBranch = previousBranch;
+				RestoreGitBranches(previousBranches);
                 _currentRepositoryUrl = previousRepositoryUrl;
                 _currentProjectDisplayName = previousProjectDisplayName;
             }
@@ -1321,13 +1338,13 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private async Task ReloadProjectAsync(
+    private async Task<bool> ReloadProjectAsync(
         CancellationToken cancellationToken = default,
         bool applyStoredProfile = false,
         bool reuseUnchangedDiscoveryCaches = false,
         bool preserveTreeState = true)
     {
-        if (string.IsNullOrEmpty(_currentPath)) return;
+		if (string.IsNullOrEmpty(_currentPath)) return false;
         cancellationToken.ThrowIfCancellationRequested();
 
         // A no-change F5 validates only directories previously inspected by scope discovery.
@@ -1352,6 +1369,7 @@ public partial class MainWindow : Window
         _projectLoadTiming = timing;
 #endif
 
+		PersistentSecretMarksSnapshot? persistentMarks = null;
 		if (applyStoredProfile)
 		{
 			var profileSnapshot = await LoadProjectProfileWithRetryAsync(
@@ -1374,15 +1392,14 @@ public partial class MainWindow : Window
 				    PersistentMarks: not null
 			    })
 			{
-				_secretRedactionSession.ReplacePersistentMarks(
-					_currentPath,
-					profileSnapshot.PersistentMarks);
+				persistentMarks = profileSnapshot.PersistentMarks;
 			}
 		}
 
-		await _projectLoadSnapshotPipeline.ReloadAsync(
+		return await _projectLoadSnapshotPipeline.ReloadAsync(
 			_currentPath,
 			preserveTreeState,
+			persistentMarks,
 			cancellationToken);
 	}
 
@@ -1406,24 +1423,21 @@ public partial class MainWindow : Window
     /// <summary>
     /// Clears state from previous project to release memory before loading a new one.
     /// </summary>
-    private void ClearPreviousProjectState(bool forceCompactingGc = false)
+    private void ClearPreviousProjectState(
+		bool forceCompactingGc = false,
+		bool preserveProjectSessions = false)
     {
         _memoryCleanup.CancelPreview();
-		_secretRedactionCount = null;
-		_secretRedactionMatchedCount = null;
-		_privateDataRedactionCount = null;
-		_privateDataRedactionMatchedCount = null;
-		_secretRedactionScanState = SecretScanState.Disabled;
-		ApplyRedactionStatus(SecretScanState.Disabled);
-		_secretRedactionSession.Reset();
-		_appliedHideSecretsEnabled = false;
-		_appliedHidePrivateDataEnabled = false;
-		_appliedCompressCodeEnabled = false;
-		_appliedStripCommentsEnabled = false;
-		_appliedStripBlankLinesEnabled = false;
+		CancelSecretRedactionDiscovery();
+		ApplyProjectRuntimeState(ProjectRuntimeStateSnapshot.Cleared);
 		PublishTransformationContext();
-		_codeCompressionSnapshot = null;
-		_codeCompressionSession.Reset();
+		if (!preserveProjectSessions)
+		{
+			_secretRedactionSession.Reset();
+			_codeCompressionSession.Reset();
+			_contentSessionProjectPath = null;
+		}
+		_selectionCoordinator.ClearAppliedSelectionState();
 
         // Background metrics become stale as soon as the visible tree is about to change.
         // Cancel them before tearing down the current project state to avoid wasted I/O.
@@ -1476,6 +1490,7 @@ public partial class MainWindow : Window
         _viewModel.IsPreviewLoading = false;
         InvalidatePreviewCache();
         _metrics.InvalidateComputedCaches();
+		_metrics.ResetStatusMetricsSnapshot();
 
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
@@ -1486,6 +1501,59 @@ public partial class MainWindow : Window
         _memoryCleanup.RunImmediate(
             compactLargeObjectHeap: forceCompactingGc);
     }
+
+	private void RestoreGitBranches(IReadOnlyList<GitBranch> branches)
+	{
+		_viewModel.GitBranches.Clear();
+		foreach (var branch in branches)
+			_viewModel.GitBranches.Add(branch);
+		UpdateBranchMenu();
+	}
+
+	private async Task RefreshCachedRepositoryBranchesAfterLoadAsync(string projectPath)
+	{
+		var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+		await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+			_postLoadVisualReadyTask,
+			MetricsCalculationPolicy.InitialVisualReadyTimeout,
+			cancellationToken);
+		if (PathComparer.Default.Equals(_currentPath, projectPath))
+			await RefreshGitBranchesAsync(projectPath, cancellationToken);
+	}
+
+	private ProjectRuntimeStateSnapshot CaptureProjectRuntimeState() => new(
+		_appliedHideSecretsEnabled,
+		_appliedHidePrivateDataEnabled,
+		_appliedCompressCodeEnabled,
+		_appliedStripCommentsEnabled,
+		_appliedStripBlankLinesEnabled,
+		_secretRedactionCount,
+		_secretRedactionMatchedCount,
+		_privateDataRedactionCount,
+		_privateDataRedactionMatchedCount,
+		_secretRedactionScanState,
+		_codeCompressionSnapshot);
+
+	private void ApplyProjectRuntimeState(ProjectRuntimeStateSnapshot state)
+	{
+		_appliedHideSecretsEnabled = state.HideSecretsApplied;
+		_appliedHidePrivateDataEnabled = state.HidePrivateDataApplied;
+		_appliedCompressCodeEnabled = state.CompressCodeApplied;
+		_appliedStripCommentsEnabled = state.StripCommentsApplied;
+		_appliedStripBlankLinesEnabled = state.StripBlankLinesApplied;
+		_secretRedactionCount = state.SecretRedactedCount;
+		_secretRedactionMatchedCount = state.SecretDetectedCount;
+		_privateDataRedactionCount = state.PrivateDataRedactedCount;
+		_privateDataRedactionMatchedCount = state.PrivateDataDetectedCount;
+		_secretRedactionScanState = state.SecretScanState;
+		_codeCompressionSnapshot = state.CompressionSnapshot;
+		_viewModel.SetAppliedContentTransformationState(
+			state.CompressCodeApplied,
+			state.StripCommentsApplied,
+			state.StripBlankLinesApplied);
+		ApplyRedactionStatus(state.SecretScanState);
+		RelabelIgnoreOptionsWithCurrentCounts();
+	}
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ResetInteractiveFilterCache() =>
@@ -1917,6 +1985,15 @@ public partial class MainWindow : Window
     {
         var hadLoadedProjectBefore = _viewModel.IsProjectLoaded && !string.IsNullOrWhiteSpace(_currentPath);
 		var selectionCheckpoint = _selectionCoordinator.CaptureProjectCheckpoint();
+		var treeSelection = hadLoadedProjectBefore
+			? ProjectTreeSelectionSnapshot.Capture(
+				_currentPath!,
+				_viewModel.TreeNodes,
+				_treeSelectionSnapshotCache)
+			: null;
+		var treeExpansion = hadLoadedProjectBefore
+			? ProjectTreeUiState.CaptureExpansion(_currentPath!, _viewModel.TreeNodes)
+			: null;
 
         return new ProjectLoadCancellationSnapshot(
             HadLoadedProjectBefore: hadLoadedProjectBefore,
@@ -1944,7 +2021,14 @@ public partial class MainWindow : Window
 				.Select(static option => new IgnoreOptionSnapshot(option.Id, option.Label, option.IsChecked))
 				.ToArray())
 		{
-			SelectionCheckpoint = selectionCheckpoint
+			SelectionCheckpoint = selectionCheckpoint,
+			RuntimeState = CaptureProjectRuntimeState(),
+			TreeSelection = treeSelection,
+			TreeExpansion = treeExpansion,
+			SearchQuery = _viewModel.SearchQuery,
+			NameFilter = _viewModel.NameFilter,
+			PreviewSearchVisible = _viewModel.PreviewSearchVisible,
+			PreviewSearchQuery = _viewModel.PreviewSearchQuery
 		};
     }
 
@@ -1975,6 +2059,9 @@ public partial class MainWindow : Window
         _viewModel.StatusMetricsVisible = snapshot.StatusMetricsVisible;
         _viewModel.StatusTreeStatsText = snapshot.StatusTreeStatsText;
         _viewModel.StatusContentStatsText = snapshot.StatusContentStatsText;
+		_viewModel.SearchQuery = snapshot.SearchQuery;
+		_viewModel.NameFilter = snapshot.NameFilter;
+		ApplyProjectRuntimeState(snapshot.RuntimeState);
 
         _viewModel.ProjectSourceType = snapshot.ProjectSourceType;
         _viewModel.CurrentBranch = snapshot.CurrentBranch;
@@ -1999,13 +2086,45 @@ public partial class MainWindow : Window
 
             var rootNode = BuildTreeViewModel(snapshot.Tree.Root, null);
             rootNode.DisplayName = displayName;
-            rootNode.IsExpanded = true;
             _viewModel.TreeNodes.Add(rootNode);
+			ProjectTreeUiState.RestoreExpansion(rootNode, snapshot.TreeExpansion);
+			if (snapshot.TreeSelection is not null)
+			{
+				ApplyTreeSelectionWithoutPublishing(() => snapshot.TreeSelection.Restore(rootNode));
+			}
         }
+		_previewSearchController.RestoreProjectState(
+			snapshot.PreviewSearchQuery,
+			snapshot.PreviewSearchVisible);
+		SyncSearchAndFilterVisualStateFromFlags();
+		_searchFilterController.ReapplyActiveTreeQueryPresentation();
+		_viewModel.IsProjectLoadInProgress = false;
+		PublishTransformationContext();
+		ScheduleRestoredPreviewRefresh(snapshot.Path);
 
         UpdateBranchMenu();
         UpdateTitle();
     }
+
+	private void ScheduleRestoredPreviewRefresh(string? restoredProjectPath)
+	{
+		Dispatcher.UIThread.Post(
+			() =>
+			{
+				if (string.IsNullOrWhiteSpace(restoredProjectPath) ||
+				    !PathComparer.Default.Equals(_currentPath, restoredProjectPath) ||
+				    !_viewModel.IsAnyPreviewVisible)
+				{
+					return;
+				}
+
+				var refresh = _previewPipeline.RefreshNowAsync(allowDuringModeSwitch: true);
+				ObserveDetachedTask(
+					refresh.Completion,
+					"RestoreProjectPreviewAfterCancellation");
+			},
+			DispatcherPriority.Background);
+	}
 
 	private void RestoreLegacySelectionSnapshot(ProjectLoadCancellationSnapshot snapshot)
 	{
@@ -2075,6 +2194,7 @@ public partial class MainWindow : Window
         _searchFilterController.ClearProjectState();
 
         _viewModel.IsProjectLoaded = false;
+		_viewModel.IsProjectLoadInProgress = false;
         _viewModel.SettingsVisible = false;
         _viewModel.SearchVisible = false;
         _viewModel.FilterVisible = false;

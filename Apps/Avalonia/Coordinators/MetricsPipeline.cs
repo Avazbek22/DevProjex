@@ -109,6 +109,7 @@ internal sealed class MetricsPipeline(
     private long _lastStatusTreeAndContentContentChars;
     private long _lastStatusTreeAndContentContentTokens;
     private bool _hasStatusMetricsSnapshot;
+	private string? _statusMetricsProjectPath;
     private bool _hasTreeMetricsCache;
     private TreeMetricsCacheKey _treeMetricsCacheKey;
     private ExportOutputMetrics _treeMetricsCacheValue = ExportOutputMetrics.Empty;
@@ -542,6 +543,7 @@ internal sealed class MetricsPipeline(
         _lastStatusTreeAndContentContentLines = combinedContentMetrics.Lines;
         _lastStatusTreeAndContentContentChars = combinedContentMetrics.Chars;
         _lastStatusTreeAndContentContentTokens = combinedContentMetrics.Tokens;
+		_statusMetricsProjectPath = currentPathProvider();
         _hasStatusMetricsSnapshot = true;
         RenderStatusBarMetrics();
     }
@@ -567,6 +569,20 @@ internal sealed class MetricsPipeline(
         PreviewSelectionRange selectionRange,
         out ExportOutputMetrics metrics)
     {
+		var currentProjectPath = currentPathProvider();
+		var projectMatches = string.IsNullOrWhiteSpace(_statusMetricsProjectPath)
+			? string.IsNullOrWhiteSpace(currentProjectPath)
+			: !string.IsNullOrWhiteSpace(currentProjectPath) &&
+			  PathComparer.Default.Equals(_statusMetricsProjectPath, currentProjectPath);
+		var currentDocument = viewModel.PreviewDocument;
+		if (!_hasStatusMetricsSnapshot ||
+		    !projectMatches ||
+		    currentDocument is not null && currentDocument.CharacterCount != document.CharacterCount)
+		{
+			metrics = ExportOutputMetrics.Empty;
+			return false;
+		}
+
         var contentMetrics = selectedMode == PreviewContentMode.TreeAndContent
             ? new ExportOutputMetrics(
                 _lastStatusTreeAndContentContentLines,
@@ -575,7 +591,7 @@ internal sealed class MetricsPipeline(
             : new ExportOutputMetrics(_lastStatusContentLines, _lastStatusContentChars, _lastStatusContentTokens);
 
         return PreviewSelectionMetricsPolicy.TryGetCachedMetrics(
-            _hasStatusMetricsSnapshot,
+			true,
             selectedMode,
             document,
             selectionRange,
@@ -1081,6 +1097,21 @@ internal sealed class MetricsPipeline(
                 exception);
         }
     }
+
+	public void ResetStatusMetricsSnapshot()
+	{
+		_hasStatusMetricsSnapshot = false;
+		_lastStatusTreeLines = 0;
+		_lastStatusTreeChars = 0;
+		_lastStatusTreeTokens = 0;
+		_lastStatusContentLines = 0;
+		_lastStatusContentChars = 0;
+		_lastStatusContentTokens = 0;
+		_lastStatusTreeAndContentContentLines = 0;
+		_lastStatusTreeAndContentContentChars = 0;
+		_lastStatusTreeAndContentContentTokens = 0;
+		_statusMetricsProjectPath = null;
+	}
 
     private static Task WaitForInitialVisualReadyAsync(
         Task initialVisualReadyTask,

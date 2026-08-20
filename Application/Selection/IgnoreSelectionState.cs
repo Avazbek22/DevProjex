@@ -76,6 +76,7 @@ public sealed class IgnoreSelectionState
 
 	public void ReplaceStateCache(IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
 	{
+		AllPreference = null;
 		_optionStateCache.Clear();
 		foreach (var (id, isChecked) in stateCache)
 			_optionStateCache[id] = isChecked;

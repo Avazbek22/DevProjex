@@ -64,8 +64,6 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
     void IProjectLoadSnapshotPipelineHost.BeforeProjectLoadTreeRefresh()
     {
 		CancelSecretRedactionDiscovery();
-		if (!string.IsNullOrWhiteSpace(_currentPath))
-			_secretRedactionSession.AdvanceContentGeneration(_currentPath);
         // Mirrors a full tree refresh without requiring an intermediate UI-applied
         // selection state. This keeps obsolete metrics IO out of the load hot path.
         _metrics.CancelBackgroundCalculation();
@@ -98,7 +96,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         return root;
     }
 
-    void IProjectLoadSnapshotPipelineHost.ApplyProjectLoadSnapshot(
+    bool IProjectLoadSnapshotPipelineHost.ApplyProjectLoadSnapshot(
         ProjectLoadSnapshot snapshot,
         CancellationToken cancellationToken)
     {
@@ -108,8 +106,10 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             snapshot.TreeInput.CurrentPath,
             snapshot.SelectionSnapshot))
         {
-            return;
+			return false;
         }
+
+		PrepareContentSessionsForPublishedProject(snapshot);
 
         // Project profiles are applied with option notifications suppressed. Publish the resolved
         // transformation state before post-load work starts, otherwise a persisted compression
@@ -124,7 +124,25 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             usedInMemoryFilter: false,
             postLoadCleanupReason: null,
             cancellationToken);
+		_viewModel.IsProjectLoadInProgress = false;
+		return true;
     }
+
+	private void PrepareContentSessionsForPublishedProject(ProjectLoadSnapshot snapshot)
+	{
+		var projectPath = snapshot.TreeInput.CurrentPath;
+		if (string.IsNullOrWhiteSpace(_contentSessionProjectPath) ||
+		    !PathComparer.Default.Equals(_contentSessionProjectPath, projectPath))
+		{
+			_secretRedactionSession.Reset();
+			_codeCompressionSession.Reset();
+			_contentSessionProjectPath = projectPath;
+		}
+
+		_secretRedactionSession.AdvanceContentGeneration(projectPath);
+		if (snapshot.PersistentMarks is not null)
+			_secretRedactionSession.ReplacePersistentMarks(projectPath, snapshot.PersistentMarks);
+	}
 
     private static HashSet<string> CollectCheckedSelectionNames(
         IReadOnlyList<SelectionOption>? options,

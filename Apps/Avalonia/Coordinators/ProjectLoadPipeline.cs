@@ -5,22 +5,43 @@ internal sealed class ProjectLoadPipeline(
     StatusOperationCoordinator statusOperations) : IDisposable
 {
     private CancellationTokenSource? _activeLoadCts;
+	private readonly SemaphoreSlim _loadGate = new(1, 1);
+	private long _latestRequestId;
 
     public async Task OpenFolderAsync(
         string path,
         bool fromDialog,
         bool recordRecentFolder)
     {
-        host.CaptureProjectLoadCancellationSnapshot();
-        await host.PrepareSearchAndFilterForProjectLoadAsync();
-        host.CancelBackgroundMemoryCleanup();
-        host.CancelPreviewRefresh();
+		var requestId = Interlocked.Increment(ref _latestRequestId);
+		CancelActiveLoad();
+		await _loadGate.WaitAsync();
+		try
+		{
+			if (requestId != Volatile.Read(ref _latestRequestId))
+				return;
 
+			await OpenFolderCoreAsync(path, fromDialog, recordRecentFolder);
+		}
+		finally
+		{
+			_loadGate.Release();
+		}
+	}
+
+	private async Task OpenFolderCoreAsync(
+		string path,
+		bool fromDialog,
+		bool recordRecentFolder)
+	{
+        host.CaptureProjectLoadCancellationSnapshot();
         var hadLoadedProjectBefore = host.ViewModel.IsProjectLoaded;
         var releaseCachedRepositoryOnSuccess =
             fromDialog && !string.IsNullOrWhiteSpace(host.CurrentCachedRepoPath);
-        var projectLoadCts = ReplaceCancellationSource(ref _activeLoadCts);
+		var projectLoadCts = new CancellationTokenSource();
+		Interlocked.Exchange(ref _activeLoadCts, projectLoadCts)?.Dispose();
         var cancellationToken = projectLoadCts.Token;
+		var published = false;
 
         host.ViewModel.StatusMetricsVisible = false;
         var statusOperationId = statusOperations.Begin(
@@ -31,42 +52,57 @@ internal sealed class ProjectLoadPipeline(
 
         try
         {
+			await host.PrepareSearchAndFilterForProjectLoadAsync();
+			host.CancelBackgroundMemoryCleanup();
+			host.CancelPreviewRefresh();
+
             if (hadLoadedProjectBefore)
             {
                 // Publish the loading shell first; compacting old project memory can block long
                 // enough that doing it before a visible transition feels like a frozen window.
                 await host.YieldProjectLoadStartupFrameAsync(cancellationToken);
-                host.ClearPreviousProjectState(forceCompactingGc: true);
+				host.ClearPreviousProjectState(
+					forceCompactingGc: true,
+					preserveProjectSessions: true);
             }
 
             host.SetProjectLoadIdentity(path, fromDialog);
             host.UpdateTitle();
             await host.YieldProjectLoadStartupFrameAsync(cancellationToken);
 
-            await host.ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
+			published = await host.ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
+			if (!published)
+			{
+				host.TryApplyActiveProjectLoadCancellationFallback();
+				statusOperations.Complete(statusOperationId);
+				return;
+			}
+
+			host.ClearProjectLoadCancellation();
+			host.ScheduleProjectLoadMemoryCleanup(hadLoadedProjectBefore);
             if (recordRecentFolder)
                 await host.RecordRecentFolderAsync(path, cancellationToken);
 
             if (releaseCachedRepositoryOnSuccess)
                 host.ReleaseCurrentRepositorySession();
 
-            host.ClearProjectLoadCancellation();
             statusOperations.Complete(statusOperationId);
-            host.ScheduleProjectLoadMemoryCleanup(hadLoadedProjectBefore);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            if (statusOperations.IsActive(statusOperationId) &&
-                host.TryApplyActiveProjectLoadCancellationFallback())
-            {
-                host.ShowLoadCanceledToast();
+			var restored = !published &&
+				host.TryApplyActiveProjectLoadCancellationFallback();
+			if (restored && statusOperations.IsActive(statusOperationId))
+			{
+				host.ShowLoadCanceledToast();
             }
 
             statusOperations.Complete(statusOperationId);
         }
         catch
         {
-            host.ClearProjectLoadCancellation();
+			if (!published)
+				host.TryApplyActiveProjectLoadCancellationFallback();
             statusOperations.Complete(statusOperationId);
             throw;
         }
@@ -84,15 +120,7 @@ internal sealed class ProjectLoadPipeline(
     public void Dispose()
     {
         CancelAndDispose(ref _activeLoadCts);
-    }
-
-    private static CancellationTokenSource ReplaceCancellationSource(ref CancellationTokenSource? target)
-    {
-        var cts = new CancellationTokenSource();
-        var previous = Interlocked.Exchange(ref target, cts);
-        previous?.Cancel();
-        previous?.Dispose();
-        return cts;
+		_loadGate.Dispose();
     }
 
     private static void DisposeIfCurrent(ref CancellationTokenSource? target, CancellationTokenSource candidate)

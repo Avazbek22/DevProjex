@@ -213,17 +213,28 @@ internal static class UiTestDriver
         bool fromDialog = true,
         bool recordRecentFolder = true)
     {
-        var method = typeof(MainWindow).GetMethod("TryOpenFolderAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(method);
-
-        var task = await window.Dispatcher.InvokeAsync<Task>(() =>
-        {
-            var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder, null]);
-            return Assert.IsAssignableFrom<Task>(result);
-        }, DispatcherPriority.Normal);
-        await task;
-        await WaitForSelectionRefreshIdleAsync(window);
+		var task = await BeginOpenFolderAsync(window, path, fromDialog, recordRecentFolder);
+		await task;
+		await WaitForSelectionRefreshIdleAsync(window);
     }
+
+	public static async Task<Task> BeginOpenFolderAsync(
+		MainWindow window,
+		string path,
+		bool fromDialog = true,
+		bool recordRecentFolder = true)
+	{
+		var method = typeof(MainWindow).GetMethod(
+			"TryOpenFolderAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+
+		return await window.Dispatcher.InvokeAsync<Task>(() =>
+		{
+			var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder, null]);
+			return Assert.IsAssignableFrom<Task>(result);
+		}, DispatcherPriority.Normal);
+	}
 
     public static async Task RefreshProjectAsync(MainWindow window)
     {

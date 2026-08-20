@@ -394,7 +394,7 @@ public sealed partial class SelectionSyncCoordinator(
 
     public void HandleExtensionsAllChanged(bool isChecked)
     {
-        if (_suppressExtensionAllCheck) return;
+        if (_suppressExtensionAllCheck || _session.PreparedPath is not null) return;
 
         _suppressExtensionAllCheck = true;
         viewModel.AllExtensionsChecked = isChecked;
@@ -412,7 +412,7 @@ public sealed partial class SelectionSyncCoordinator(
 
     public void HandleIgnoreAllChanged(bool isChecked, string? currentPath)
     {
-        if (_suppressIgnoreAllCheck) return;
+        if (_suppressIgnoreAllCheck || _session.PreparedPath is not null) return;
 
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = isChecked;
@@ -438,7 +438,7 @@ public sealed partial class SelectionSyncCoordinator(
 
 	public void HandleContentProcessingAllChanged(bool isChecked)
 	{
-		if (_suppressContentProcessingAllCheck)
+		if (_suppressContentProcessingAllCheck || _session.PreparedPath is not null)
 			return;
 
 		var changed = false;
@@ -730,6 +730,9 @@ public sealed partial class SelectionSyncCoordinator(
 		_session.AdvanceRevision();
     }
 
+	internal void ConsumePreparedSelectionForPath(string projectPath) =>
+		_session.ConsumePreparedSelectionForPath(projectPath);
+
     public void ResetProjectProfileSelections(string projectPath)
     {
 		DiscardSelectionSnapshotsForDifferentProject(projectPath);
@@ -738,8 +741,18 @@ public sealed partial class SelectionSyncCoordinator(
         _session.AdvanceRevision();
 
         // Restore defaults for projects without a saved profile.
-        viewModel.AllExtensionsChecked = true;
-        viewModel.AllIgnoreChecked = true;
+		_suppressExtensionAllCheck = true;
+		_suppressIgnoreAllCheck = true;
+		try
+		{
+			viewModel.AllExtensionsChecked = true;
+			viewModel.AllIgnoreChecked = true;
+		}
+		finally
+		{
+			_suppressExtensionAllCheck = false;
+			_suppressIgnoreAllCheck = false;
+		}
     }
 
 	private void DiscardSelectionSnapshotsForDifferentProject(string projectPath)
@@ -1481,7 +1494,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         if (viewModel.Extensions.Contains(option))
         {
-            if (_suppressExtensionItemCheck) return;
+            if (_suppressExtensionItemCheck || _session.PreparedPath is not null) return;
 
             SyncAllCheckbox(viewModel.Extensions, ref _suppressExtensionAllCheck,
                 value => viewModel.AllExtensionsChecked = value);
@@ -1496,7 +1509,7 @@ public sealed partial class SelectionSyncCoordinator(
 
     private void OnIgnoreCheckedChanged(object? sender, EventArgs e)
     {
-        if (_suppressIgnoreItemCheck) return;
+        if (_suppressIgnoreItemCheck || _session.PreparedPath is not null) return;
 
         var changedOption = sender as IgnoreOptionViewModel;
         _session.IgnoreOptions.IsInitialized = true;
@@ -2843,7 +2856,7 @@ public sealed partial class SelectionSyncCoordinator(
     private HashSet<IgnoreOptionId> SnapshotRuntimeSelectedIgnoreOptions()
     {
         var selected = _session.IgnoreOptions.SnapshotSelectedOptions();
-        if (selected.Count == 0)
+        if (selected.Count == 0 || _session.PreparedPath is not null)
             return selected;
 
         var visibleIds = new HashSet<IgnoreOptionId>();

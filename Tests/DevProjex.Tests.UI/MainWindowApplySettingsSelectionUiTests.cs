@@ -480,6 +480,75 @@ public sealed class MainWindowApplySettingsSelectionUiTests
     }
 
 	[AvaloniaFact]
+	public async Task GitPull_RestoresStoredAppliedRedactionInsteadOfCommittingDraft()
+	{
+		const string secret = "AKIA" + "Z7M3Q5X2P6N4R7T5";
+		using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
+		var git = new MutatingGitRepositoryService(project.RootPath);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { GitRepositoryService = git },
+			projectSourceType: ProjectSourceType.GitClone,
+			managedClonePath: project.RootPath,
+			repositoryUrl: "https://example.test/repository.git");
+
+		try
+		{
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			Assert.False(UiTestDriver.GetViewModel(window).HideSecretsOption!.IsChecked);
+			Assert.Equal((true, false), UiTestDriver.GetAppliedContentRedactionState(window));
+
+			await InvokePrivateTaskAsync(window, "GetGitUpdatesAsync");
+			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+
+			Assert.True(UiTestDriver.GetViewModel(window).HideSecretsOption!.IsChecked);
+			Assert.Equal((true, false), UiTestDriver.GetAppliedContentRedactionState(window));
+			Assert.DoesNotContain(
+				secret,
+				UiTestDriver.RedactFileWithCurrentSession(
+					window,
+					Path.Combine(project.RootPath, "src", "Secrets.cs")),
+				StringComparison.Ordinal);
+			Assert.False(UiTestDriver.GetViewModel(window).HasPendingFilterSettingsChanges);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task GitPull_WithoutHeadChangeDoesNotRebuildTree()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var git = new MutatingGitRepositoryService(project.RootPath)
+		{
+			AdvanceHeadOnPull = false
+		};
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { GitRepositoryService = git },
+			projectSourceType: ProjectSourceType.GitClone,
+			managedClonePath: project.RootPath,
+			repositoryUrl: "https://example.test/repository.git");
+
+		try
+		{
+			var publishedRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+
+			await InvokePrivateTaskAsync(window, "GetGitUpdatesAsync");
+
+			Assert.Same(publishedRoot, Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ProjectSwitch_LoadsContentTransformationStateFromTheTargetProfile()
 	{
 		using var firstProject = UiTestProject.CreateWithSecretRedactionWorkspace();
@@ -520,6 +589,117 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 		}
 		finally
 		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ProjectSwitchCancellation_RestoresAppliedRedactionTreeQueriesAndPersistentMarks()
+	{
+		const string firstMarkedValue = "first-cancellation-mark-value-42";
+		const string secondMarkedValue = "second-cancellation-mark-value-84";
+		using var firstProject = UiTestProject.CreateWithSecretRedactionWorkspace();
+		using var secondProject = UiTestProject.CreateDefault();
+		var sourcePath = Path.Combine(firstProject.RootPath, "src", "Secrets.cs");
+		await File.AppendAllTextAsync(
+			sourcePath,
+			$"const string first = \"{firstMarkedValue}\";\nconst string second = \"{secondMarkedValue}\";\n",
+			TestContext.Current.CancellationToken);
+		var blockingTreeBuilder = new BlockingTreeBuilder();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			firstProject,
+			configureServices: services => services with
+			{
+				BuildTreeUseCase = new BuildTreeUseCase(
+					blockingTreeBuilder,
+					new TreeNodePresentationService(
+						services.Localization,
+						new IconMapper()))
+			});
+
+		try
+		{
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.CompressCode);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.StripComments);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.StripBlankLines);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await UiTestDriver.RequestPersistentSecretMarkAsync(window, firstMarkedValue);
+			var profileStore = new DevProjex.Infrastructure.ProjectProfiles.ProjectProfileStore(
+				() => UiTestDriver.GetWindowAppDataPath(window));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => profileStore.LoadMarksAsync(firstProject.RootPath).AsTask().GetAwaiter().GetResult()
+					.Snapshot?.Marks.Count == 1,
+				"the first project mark to be persisted");
+
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			var source = FindRequiredDirectChild(root, "src");
+			source.IsChecked = true;
+			source.IsExpanded = true;
+			var viewModel = UiTestDriver.GetViewModel(window);
+			viewModel.SearchQuery = "Secrets";
+			viewModel.PreviewSearchQuery = "const";
+			viewModel.PreviewSearchVisible = true;
+
+			blockingTreeBuilder.Arm();
+			var opening = await UiTestDriver.BeginOpenFolderAsync(window, secondProject.RootPath);
+			await blockingTreeBuilder.BuildStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+			Assert.True(viewModel.IsProjectLoadInProgress);
+			Assert.False(viewModel.AreFilterSettingsEnabled);
+			Assert.False(UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets)
+				.IsEffectivelyEnabled);
+
+			await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
+			blockingTreeBuilder.Release();
+			await opening.WaitAsync(TimeSpan.FromSeconds(30));
+			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+
+			viewModel = UiTestDriver.GetViewModel(window);
+			var restoredRoot = Assert.Single(viewModel.TreeNodes);
+			Assert.True(PathComparer.Default.Equals(firstProject.RootPath, restoredRoot.FullPath));
+			var restoredSource = FindRequiredDirectChild(restoredRoot, "src");
+			Assert.True(restoredSource.IsChecked);
+			Assert.True(restoredSource.IsExpanded);
+			Assert.Equal((true, true), UiTestDriver.GetAppliedContentRedactionState(window));
+			Assert.Equal((true, true, true), UiTestDriver.GetAppliedContentTransformationState(window));
+			Assert.Equal("Secrets", viewModel.SearchQuery);
+			Assert.Equal(string.Empty, viewModel.NameFilter);
+			Assert.Equal("const", viewModel.PreviewSearchQuery);
+			Assert.DoesNotContain(
+				firstMarkedValue,
+				UiTestDriver.RedactFileWithCurrentSession(window, sourcePath),
+				StringComparison.Ordinal);
+
+			var previewText = UiTestDriver.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+				window,
+				"PreviewTextControl");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => previewText.Document is not null,
+				"the restored preview document to be published");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.PreviewSearchVisible,
+				"the preview search panel to reopen after its document becomes available");
+			Assert.Contains(
+				secondMarkedValue,
+				UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+				StringComparison.Ordinal);
+			await UiTestDriver.RequestPersistentSecretMarkAsync(window, secondMarkedValue);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => profileStore.LoadMarksAsync(firstProject.RootPath).AsTask().GetAwaiter().GetResult()
+					.Snapshot?.Marks.Count == 2,
+				"a mark created after cancellation to persist against the restored project");
+		}
+		finally
+		{
+			blockingTreeBuilder.Release();
 			await UiTestDriver.CloseWindowAsync(window);
 		}
 	}
@@ -836,6 +1016,8 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 
         public Action? SwitchMutation { get; init; }
 
+		public bool AdvanceHeadOnPull { get; init; } = true;
+
         public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
 
@@ -884,7 +1066,8 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         {
             Assert.True(PathComparer.Default.Equals(repositoryPath, requestedRepositoryPath));
             PullMutation?.Invoke();
-            _head = "after";
+			if (AdvanceHeadOnPull)
+				_head = "after";
             return Task.FromResult(true);
         }
 

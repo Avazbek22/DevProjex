@@ -694,11 +694,8 @@ public partial class MainWindow
                 return;
             }
 
-            // Refresh branches and tree
-            await RefreshGitBranchesAsync(_currentPath, cancellationToken);
-            await ReloadProjectAsync(cancellationToken);
-
             var afterHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
+			await RefreshGitBranchesAsync(_currentPath, cancellationToken);
             await RecordCachedRepositoryAsync(
                 _currentPath,
                 _currentRepositoryUrl,
@@ -715,6 +712,7 @@ public partial class MainWindow
             }
             else
             {
+				await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
                 _statusOperations.Complete(statusOperationId);
                 // Clean up memory from old tree after successful update.
@@ -779,7 +777,7 @@ public partial class MainWindow
 
             // Reload tree first so branch/title state is only updated after full success.
             // This keeps UI stable if reload fails or gets cancelled mid-flight.
-            await ReloadProjectAsync(cancellationToken);
+			await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
             await RefreshGitBranchesAsync(_currentPath, cancellationToken);
             _statusOperations.Complete(statusOperationId);
 

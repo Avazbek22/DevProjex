@@ -108,7 +108,15 @@ public sealed partial class SelectionSyncCoordinator
 			_suppressExtensionItemCheck = false;
 		}
 
-		viewModel.AllExtensionsChecked = true;
+		_suppressExtensionAllCheck = true;
+		try
+		{
+			viewModel.AllExtensionsChecked = true;
+		}
+		finally
+		{
+			_suppressExtensionAllCheck = false;
+		}
 		return true;
 	}
 
