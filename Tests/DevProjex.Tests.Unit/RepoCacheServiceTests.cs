@@ -369,6 +369,51 @@ public class RepoCacheServiceTests : IDisposable
     }
 
     [Fact]
+    public void CollectGarbage_SaturatedIndexedSizeStillEvictsEveryOversizedEntry()
+    {
+        const string firstUrl = "https://github.com/example/oversized-first.git";
+        const string secondUrl = "https://github.com/example/oversized-second.git";
+        var firstPath = _service.CreateRepositoryDirectory(firstUrl);
+        var secondPath = _service.CreateRepositoryDirectory(secondUrl);
+        var lastUsedUtc = DateTimeOffset.UtcNow;
+        WriteCacheIndex(
+            _testCacheRoot,
+            [
+                new RepositoryCacheIndexEntry(
+                    RepositoryUrlUtility.GetComparisonKey(firstUrl),
+                    firstUrl,
+                    firstPath,
+                    null,
+                    null,
+                    lastUsedUtc,
+                    RepositoryCacheEntryState.Ready,
+                    long.MaxValue,
+                    RepositoryCacheContentKind.Zip),
+                new RepositoryCacheIndexEntry(
+                    RepositoryUrlUtility.GetComparisonKey(secondUrl),
+                    secondUrl,
+                    secondPath,
+                    null,
+                    null,
+                    lastUsedUtc,
+                    RepositoryCacheEntryState.Ready,
+                    long.MaxValue,
+                    RepositoryCacheContentKind.Zip)
+            ]);
+        var service = new RepoCacheService(
+            _testCacheRoot,
+            new RepositoryCachePolicy(1, TimeSpan.FromDays(60)),
+            TimeProvider.System,
+            new GitWorktreeManager());
+
+        service.CollectGarbage();
+
+        Assert.Empty(service.ListIndexedRepositories());
+        Assert.False(Directory.Exists(firstPath));
+        Assert.False(Directory.Exists(secondPath));
+    }
+
+    [Fact]
     public void LocalRepositoryCacheIdentityUsesPlatformPathCaseSemantics()
     {
         var sourceRoot = Path.Combine(Path.GetTempPath(), "DevProjex", "SourceIdentity");

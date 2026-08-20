@@ -632,7 +632,9 @@ public sealed class RepoCacheService : IRepoCacheService
 				using (leases)
 				{
 					entries.Remove(entry);
-					totalSize -= Math.Max(0, entry.ApproximateSizeBytes);
+					totalSize = totalSize == long.MaxValue
+						? CalculateIndexedSize(entries)
+						: totalSize - Math.Max(0, entry.ApproximateSizeBytes);
 					trashPaths.Add(RepositoryCacheLayout.GetContainer(entry.LocalPath));
 				}
 			}
