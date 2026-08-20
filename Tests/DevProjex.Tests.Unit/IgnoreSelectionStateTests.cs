@@ -193,4 +193,53 @@ public sealed class IgnoreSelectionStateTests
 		Assert.True(state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
 		Assert.False(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
 	}
+
+	[Fact]
+	public void ReplaceStateCache_ClearsPreviousProjectAllPreference()
+	{
+		var state = new IgnoreSelectionState
+		{
+			AllPreference = false
+		};
+
+		state.ReplaceStateCache(new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.HiddenFiles] = true
+		});
+
+		Assert.Null(state.AllPreference);
+		Assert.True(state.OptionStateCache[IgnoreOptionId.HiddenFiles]);
+	}
+
+	[Fact]
+	public void RestoreProfileSelection_ClearsPreviousProjectAllPreference()
+	{
+		var state = new IgnoreSelectionState
+		{
+			AllPreference = false
+		};
+
+		state.RestoreProfileSelection([IgnoreOptionId.DotFolders]);
+
+		Assert.Null(state.AllPreference);
+		Assert.Equal([IgnoreOptionId.DotFolders], state.SelectedOptions);
+	}
+
+	[Fact]
+	public void ApplyProfileThenApplyProfile_NewDescriptorUsesSecondProjectsDefault()
+	{
+		var session = new ProjectSelectionSessionState();
+		session.IgnoreOptions.AllPreference = false;
+		var first = new ProjectSelectionProfile([], [], [], IgnoreOptionStates:
+			new Dictionary<IgnoreOptionId, bool> { [IgnoreOptionId.HiddenFiles] = false });
+		var second = new ProjectSelectionProfile([], [], [], IgnoreOptionStates:
+			new Dictionary<IgnoreOptionId, bool> { [IgnoreOptionId.HiddenFiles] = true });
+
+		session.ApplyProfile(@"C:\Workspace\A", first);
+		session.IgnoreOptions.AllPreference = false;
+		session.ApplyProfile(@"C:\Workspace\B", second);
+		Assert.Null(session.IgnoreOptions.AllPreference);
+		Assert.True(session.IgnoreOptions.OptionStateCache[IgnoreOptionId.HiddenFiles]);
+		Assert.False(session.IgnoreOptions.OptionStateCache.ContainsKey(IgnoreOptionId.DotFolders));
+	}
 }
