@@ -13,6 +13,7 @@ public sealed partial class SelectionSyncCoordinator
             IReadOnlyList<SelectionOption> extensionOptions,
             IReadOnlyList<IgnoreOptionSnapshot> ignoreOptions,
             IReadOnlyList<IgnoreOptionDescriptor> ignoreDescriptors,
+			string? ignoreOptionsProjectPath,
             bool allExtensionsChecked,
             bool allIgnoreChecked,
             bool hasExtensionlessExtensionEntries,
@@ -32,6 +33,7 @@ public sealed partial class SelectionSyncCoordinator
             ExtensionOptions = extensionOptions;
             IgnoreOptions = ignoreOptions;
             IgnoreDescriptors = ignoreDescriptors;
+			IgnoreOptionsProjectPath = ignoreOptionsProjectPath;
             AllExtensionsChecked = allExtensionsChecked;
             AllIgnoreChecked = allIgnoreChecked;
             HasExtensionlessExtensionEntries = hasExtensionlessExtensionEntries;
@@ -52,6 +54,7 @@ public sealed partial class SelectionSyncCoordinator
         internal IReadOnlyList<SelectionOption> ExtensionOptions { get; }
         internal IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions { get; }
         internal IReadOnlyList<IgnoreOptionDescriptor> IgnoreDescriptors { get; }
+		internal string? IgnoreOptionsProjectPath { get; }
         internal bool AllExtensionsChecked { get; }
         internal bool AllIgnoreChecked { get; }
         internal bool HasExtensionlessExtensionEntries { get; }
@@ -89,6 +92,7 @@ public sealed partial class SelectionSyncCoordinator
             extensions,
             ignoreOptions,
             _ignoreOptions.ToArray(),
+			_ignoreOptionsProjectPath,
             viewModel.AllExtensionsChecked,
             viewModel.AllIgnoreChecked,
             _hasExtensionlessExtensionEntries,
@@ -147,6 +151,7 @@ public sealed partial class SelectionSyncCoordinator
 
             _session.RestoreSnapshot(checkpoint.Session);
             _ignoreOptions = checkpoint.IgnoreDescriptors;
+			_ignoreOptionsProjectPath = checkpoint.IgnoreOptionsProjectPath;
             _hasExtensionlessExtensionEntries = checkpoint.HasExtensionlessExtensionEntries;
             _extensionlessExtensionEntriesCount = checkpoint.ExtensionlessExtensionEntriesCount;
             _hasIgnoreOptionCounts = checkpoint.HasIgnoreOptionCounts;

@@ -35,6 +35,7 @@ public sealed partial class SelectionSyncCoordinator(
     private bool _disposed;
 
     private IReadOnlyList<IgnoreOptionDescriptor> _ignoreOptions = [];
+	private string? _ignoreOptionsProjectPath;
     private readonly ProjectSelectionSessionState _session = new();
     private readonly List<string> _scanRoots = [];
     private bool _hasExtensionlessExtensionEntries;
@@ -606,7 +607,7 @@ public sealed partial class SelectionSyncCoordinator(
             if (!string.IsNullOrWhiteSpace(path) && IsStalePathRequest(path))
                 return;
 
-            ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
+			ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections, path);
         });
     }
 
@@ -622,7 +623,7 @@ public sealed partial class SelectionSyncCoordinator(
         var availability = ResolveIgnoreOptionsAvailability(path, rootFolders);
         var options = ignoreOptionsService.GetOptions(availability);
 
-        ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
+        ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections, path);
     }
 
     public void RefreshIgnoreOptionsForCurrentSelection(string? currentPath = null)
@@ -633,7 +634,7 @@ public sealed partial class SelectionSyncCoordinator(
         var hasPreviousSelections = _session.IgnoreOptions.IsInitialized;
         var availability = ResolveIgnoreOptionsAvailability(path, scanRoots);
         var options = ignoreOptionsService.GetOptions(availability);
-        ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
+        ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections, path);
     }
 
     public void RelabelIgnoreOptions(
@@ -883,7 +884,8 @@ public sealed partial class SelectionSyncCoordinator(
 					return;
 				}
 
-                ApplyLiveSelectionRefreshSnapshot(snapshot);
+				ApplyLiveSelectionRefreshSnapshot(snapshot);
+				_ignoreOptionsProjectPath = currentPath;
             });
         }
         finally
@@ -935,6 +937,7 @@ public sealed partial class SelectionSyncCoordinator(
 		{
 			ApplySelectionRefreshSnapshot(snapshot);
 		}
+		_ignoreOptionsProjectPath = currentPath;
 		if (snapshot.HadScanFailure)
 			scanIncomplete?.Invoke();
 
@@ -1044,6 +1047,7 @@ public sealed partial class SelectionSyncCoordinator(
 						snapshot,
 						retainPreviousSnapshot: expectedRequestVersion.HasValue);
 				}
+				_ignoreOptionsProjectPath = currentPath;
 				if (snapshot.HadScanFailure)
 					scanIncomplete?.Invoke();
 
@@ -1211,6 +1215,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         // Clear ignore options
         _ignoreOptions = [];
+		_ignoreOptionsProjectPath = null;
         _ignoreRulesBuildCache.Invalidate();
     }
 
@@ -1288,6 +1293,8 @@ public sealed partial class SelectionSyncCoordinator(
         var scanRoots = GetProjectScanRoots();
         var availability = ResolveIgnoreOptionsAvailability(path, scanRoots);
         _ignoreOptions = ignoreOptionsService.GetOptions(availability);
+		if (!string.IsNullOrWhiteSpace(path))
+			_ignoreOptionsProjectPath = path;
         _session.IgnoreOptions.EnsureDefaults(_ignoreOptions);
     }
 
@@ -1326,7 +1333,8 @@ public sealed partial class SelectionSyncCoordinator(
     private void ApplyIgnoreOptions(
         IReadOnlyList<IgnoreOptionDescriptor> options,
         IReadOnlySet<IgnoreOptionId> previousSelections,
-        bool hasPreviousSelections)
+        bool hasPreviousSelections,
+		string? projectPath = null)
     {
         var useDefaultCheckedFallback = ShouldUseIgnoreDefaultFallback(options, previousSelections);
         var controllerGroupEndIndex = FindLastControllerOptionIndex(
@@ -1365,6 +1373,8 @@ public sealed partial class SelectionSyncCoordinator(
         UpdateIgnoreSelectionCache(
             hasPreviousSelections ? previousSelections : null,
             markStateCacheComplete: false);
+		if (!string.IsNullOrWhiteSpace(projectPath))
+			_ignoreOptionsProjectPath = projectPath;
         SyncIgnoreAllCheckbox();
         SynchronizeStableIgnoreOptionLabels();
         RequestPendingApplyEvaluation();
@@ -2856,8 +2866,14 @@ public sealed partial class SelectionSyncCoordinator(
     private HashSet<IgnoreOptionId> SnapshotRuntimeSelectedIgnoreOptions()
     {
         var selected = _session.IgnoreOptions.SnapshotSelectedOptions();
-        if (selected.Count == 0 || _session.PreparedPath is not null)
+        if (selected.Count == 0)
             return selected;
+		if (_session.PreparedPath is not null &&
+		    (string.IsNullOrWhiteSpace(_ignoreOptionsProjectPath) ||
+		     !PathComparer.Default.Equals(_session.PreparedPath, _ignoreOptionsProjectPath)))
+		{
+			return selected;
+		}
 
         var visibleIds = new HashSet<IgnoreOptionId>();
         foreach (var option in _ignoreOptions)
