@@ -8,6 +8,33 @@ public sealed class SecretOccurrenceIdentityTests
 	private const string Secret = "canonical-secret-value";
 
 	[Fact]
+	public void KeepAsIs_SurvivesEquivalentProjectRootAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("config.txt", Secret);
+		using var session = new SecretRedactionSession(new ExactSecretDetector());
+		var initial = session.BeginOutput(workspace.Path, [path]).CreatePlan(
+			path,
+			Secret,
+			ContentTransformMap.Identity,
+			TestContext.Current.CancellationToken);
+		var initialSpan = Assert.Single(initial.Spans);
+		Assert.True(session.ToggleKeepAsIs(initialSpan.OccurrenceId));
+
+		var aliased = session.BeginOutput(
+			workspace.Path + Path.DirectorySeparatorChar,
+			[path]).CreatePlan(
+			path,
+			Secret,
+			ContentTransformMap.Identity,
+			TestContext.Current.CancellationToken);
+		var aliasedSpan = Assert.Single(aliased.Spans);
+
+		Assert.Equal(initialSpan.OccurrenceId, aliasedSpan.OccurrenceId);
+		Assert.Equal(SecretPreviewSpanState.KeptAsIs, aliasedSpan.State);
+	}
+
+	[Fact]
 	public void KeepAsIs_UsesCanonicalSourceCoordinateAcrossAllTransformationCombinations()
 	{
 		const string source = "body-prefix\ncomment-prefix\n\nTOKEN=" + Secret + "\n";
