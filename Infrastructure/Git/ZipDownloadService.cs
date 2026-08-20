@@ -559,8 +559,11 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 		return baseName.Length == 4 &&
 		       (baseName[..3].Equals("COM", StringComparison.OrdinalIgnoreCase) ||
 		        baseName[..3].Equals("LPT", StringComparison.OrdinalIgnoreCase)) &&
-		       baseName[3] is >= '1' and <= '9';
+		       IsReservedWindowsDeviceNumber(baseName[3]);
 	}
+
+	private static bool IsReservedWindowsDeviceNumber(char value) =>
+		value is >= '1' and <= '9' or '\u00B9' or '\u00B2' or '\u00B3';
 
 	private static InvalidDataException CreateArchiveCollisionException(string entryName) =>
 		new($"ZIP entries resolve to the same file-system path: {entryName}");

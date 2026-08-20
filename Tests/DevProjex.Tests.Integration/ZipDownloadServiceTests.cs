@@ -227,6 +227,8 @@ public class ZipDownloadServiceTests : IAsyncLifetime
 	[InlineData("nul")]
 	[InlineData("CON.txt")]
 	[InlineData("com1.tar.gz")]
+	[InlineData("COM\u00B9.txt")]
+	[InlineData("src/LPT\u00B2/file.cs")]
 	[InlineData("src/AUX/x.cs")]
 	public async Task DownloadAndExtractAsync_RejectsWindowsReservedDeviceNames(string entryPath)
 	{
