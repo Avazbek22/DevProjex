@@ -78,7 +78,7 @@ public sealed class PreviewMarkerBar : Control
 		if (_ticks.Length == 0 || Bounds.Width <= 0 || Bounds.Height <= 0)
 			return;
 
-		var width = Math.Max(1, Bounds.Width);
+		var width = Bounds.Width;
 		var maximumTop = Math.Max(0, Bounds.Height - TickHeight);
 		foreach (var tick in _ticks)
 		{
@@ -88,13 +88,20 @@ public sealed class PreviewMarkerBar : Control
 			if (brush is null)
 				continue;
 
+			var lane = PreviewMarkerLaneGeometry.Resolve(tick.Target.Category, width);
+			if (lane.Width <= 0)
+				continue;
+
 			var top = Math.Clamp(tick.Y - (TickHeight / 2), 0, maximumTop);
-			context.DrawRectangle(
-				brush,
-				null,
-				new RoundedRect(
-					new Rect(0, top, width, TickHeight),
-					TickHeight / 2));
+			using (context.PushOpacity(lane.Opacity))
+			{
+				context.DrawRectangle(
+					brush,
+					null,
+					new RoundedRect(
+						new Rect(lane.X, top, lane.Width, TickHeight),
+						TickHeight / 2));
+			}
 		}
 	}
 

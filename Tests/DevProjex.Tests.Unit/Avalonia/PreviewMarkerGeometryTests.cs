@@ -5,6 +5,55 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class PreviewMarkerGeometryTests
 {
 	[Fact]
+	public void ResolveLane_SplitsFullWidthIntoAdjacentCategoryHalves()
+	{
+		var redaction = PreviewMarkerLaneGeometry.Resolve(PreviewMarkerCategory.Redaction, 15);
+		var search = PreviewMarkerLaneGeometry.Resolve(PreviewMarkerCategory.Search, 15);
+
+		Assert.Equal(new PreviewMarkerLane(0, 7.5, 1), redaction);
+		Assert.Equal(new PreviewMarkerLane(7.5, 7.5, 0.55), search);
+		Assert.Equal(redaction.X + redaction.Width, search.X, precision: 6);
+		Assert.Equal(15, search.X + search.Width, precision: 6);
+	}
+
+	[Theory]
+	[InlineData(false, 0, 0, 0, 1)]
+	[InlineData(true, 0, 0, 0, 0.55)]
+	[InlineData(false, 0.5, 0, 0.25, 1)]
+	[InlineData(true, 0.5, 0.25, 0.25, 0.55)]
+	public void ResolveLane_PreservesZeroAndSubpixelWidths(
+		bool isSearch,
+		double totalWidth,
+		double expectedX,
+		double expectedWidth,
+		double expectedOpacity)
+	{
+		var category = isSearch
+			? PreviewMarkerCategory.Search
+			: PreviewMarkerCategory.Redaction;
+		var lane = PreviewMarkerLaneGeometry.Resolve(category, totalWidth);
+
+		Assert.Equal(expectedX, lane.X, precision: 6);
+		Assert.Equal(expectedWidth, lane.Width, precision: 6);
+		Assert.Equal(expectedOpacity, lane.Opacity, precision: 6);
+	}
+
+	[Theory]
+	[InlineData(-1)]
+	[InlineData(double.NaN)]
+	[InlineData(double.PositiveInfinity)]
+	public void ResolveLane_ClampsInvalidWidthsToEmpty(double totalWidth)
+	{
+		var redaction = PreviewMarkerLaneGeometry.Resolve(PreviewMarkerCategory.Redaction, totalWidth);
+		var search = PreviewMarkerLaneGeometry.Resolve(PreviewMarkerCategory.Search, totalWidth);
+
+		Assert.Equal(0, redaction.Width);
+		Assert.Equal(0, search.Width);
+		Assert.Equal(0, redaction.X);
+		Assert.Equal(0, search.X);
+	}
+
+	[Fact]
 	public void Build_MapsFirstAndLastLinesToStableStripeBoundaries()
 	{
 		PreviewMarkerSource[] markers =

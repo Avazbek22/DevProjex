@@ -971,7 +971,7 @@
                                            IsHitTestVisible="False"
                                            IsMarkerDisplayEnabled="{Binding IsPreviewSearchAvailable}"
                                            RedactionBrush="{DynamicResource AppAccentBrush}"
-                                           SearchBrush="{DynamicResource AppAccentBrush}" />
+                                           SearchBrush="{DynamicResource TreeSearchHighlightBrush}" />
               </Grid>
             </Grid>
             </Border>

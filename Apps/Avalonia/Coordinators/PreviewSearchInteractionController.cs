@@ -74,6 +74,21 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 		Close(focusPreview: false);
 	}
 
+	public void ClearProjectState()
+	{
+		if (_disposed)
+			return;
+
+		CancelPendingSearch();
+		_viewModel.PreviewSearchQuery = string.Empty;
+		_viewModel.SetPreviewSearchInProgress(false);
+		_previewTextControl.ClearSearchMatches();
+		_viewModel.UpdatePreviewSearchMatchSummary(0, 0, matchesCapped: false);
+
+		if (_viewModel.PreviewSearchVisible || _container.IsVisible)
+			Close(focusPreview: false);
+	}
+
 	public void Toggle()
 	{
 		if (_disposed || !_viewModel.IsPreviewSearchAvailable)

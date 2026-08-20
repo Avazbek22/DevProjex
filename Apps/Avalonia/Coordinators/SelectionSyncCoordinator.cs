@@ -724,19 +724,58 @@ public sealed partial class SelectionSyncCoordinator(
 
     public void ApplyProjectProfileSelections(string projectPath, ProjectSelectionProfile profile)
     {
+		DiscardSelectionSnapshotsForDifferentProject(projectPath);
         _session.ApplyProfile(projectPath, profile);
+		ApplyPreparedContentTransformationStates();
 		_session.AdvanceRevision();
     }
 
     public void ResetProjectProfileSelections(string projectPath)
     {
+		DiscardSelectionSnapshotsForDifferentProject(projectPath);
         _session.ResetToDefaultsForProject(projectPath);
+		ApplyPreparedContentTransformationStates();
         _session.AdvanceRevision();
 
         // Restore defaults for projects without a saved profile.
         viewModel.AllExtensionsChecked = true;
         viewModel.AllIgnoreChecked = true;
     }
+
+	private void DiscardSelectionSnapshotsForDifferentProject(string projectPath)
+	{
+		if (_stableSelectionSnapshot is not { } stableSnapshot ||
+		    PathComparer.Default.Equals(stableSnapshot.Path, projectPath))
+		{
+			return;
+		}
+
+		_stableSelectionSnapshot = null;
+		_reversibleSelectionSnapshot = null;
+	}
+
+	private void ApplyPreparedContentTransformationStates()
+	{
+		_suppressIgnoreItemCheck = true;
+		try
+		{
+			foreach (var option in viewModel.IgnoreOptions)
+			{
+				if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
+					continue;
+
+				var defaultChecked = _ignoreOptions.FirstOrDefault(
+					descriptor => descriptor.Id == option.Id)?.DefaultChecked == true;
+				option.IsChecked = _session.IgnoreOptions.TryGetCachedState(option.Id, out var isChecked)
+					? isChecked
+					: defaultChecked;
+			}
+		}
+		finally
+		{
+			_suppressIgnoreItemCheck = false;
+		}
+	}
 
     public async Task UpdateLiveOptionsForProjectScopeAsync(
         string? currentPath,

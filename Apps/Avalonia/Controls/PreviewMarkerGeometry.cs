@@ -18,6 +18,11 @@ internal readonly record struct PreviewMarkerTick(
 	double Y,
 	PreviewMarkerTarget Target);
 
+internal readonly record struct PreviewMarkerLane(
+	double X,
+	double Width,
+	double Opacity);
+
 internal readonly record struct PreviewMarkerScrollMetrics(
 	double ExtentHeight,
 	double ViewportHeight,
@@ -35,6 +40,25 @@ internal sealed record PreviewMarkerSnapshot(
 internal sealed class PreviewMarkersChangedEventArgs(PreviewMarkerSnapshot snapshot) : EventArgs
 {
 	public PreviewMarkerSnapshot Snapshot { get; } = snapshot;
+}
+
+internal static class PreviewMarkerLaneGeometry
+{
+	private const double SearchOpacity = 0.55;
+
+	public static PreviewMarkerLane Resolve(PreviewMarkerCategory category, double totalWidth)
+	{
+		var width = double.IsFinite(totalWidth) && totalWidth > 0
+			? totalWidth
+			: 0;
+		var leftWidth = width / 2;
+		return category switch
+		{
+			PreviewMarkerCategory.Redaction => new PreviewMarkerLane(0, leftWidth, 1),
+			PreviewMarkerCategory.Search => new PreviewMarkerLane(leftWidth, width - leftWidth, SearchOpacity),
+			_ => throw new ArgumentOutOfRangeException(nameof(category), category, null)
+		};
+	}
 }
 
 internal static class PreviewMarkerGeometry

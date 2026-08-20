@@ -479,6 +479,51 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         }
     }
 
+	[AvaloniaFact]
+	public async Task ProjectSwitch_LoadsContentTransformationStateFromTheTargetProfile()
+	{
+		using var firstProject = UiTestProject.CreateWithSecretRedactionWorkspace();
+		using var secondProject = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(firstProject);
+		try
+		{
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetAppliedContentRedactionState(window) == (true, true),
+				"both redaction transformations to become applied in the first project");
+			var profileStore = new DevProjex.Infrastructure.ProjectProfiles.ProjectProfileStore(
+				() => UiTestDriver.GetWindowAppDataPath(window));
+			Assert.Equal(
+				ProjectProfileLookupStatus.Missing,
+				profileStore.LookupProfile(secondProject.RootPath, TimeSpan.FromSeconds(1)).Status);
+
+			await UiTestDriver.OpenFolderAsync(window, secondProject.RootPath);
+			Assert.Equal(
+				ProjectProfileLookupStatus.Missing,
+				profileStore.LookupProfile(secondProject.RootPath, TimeSpan.FromSeconds(1)).Status);
+
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.HideSecrets,
+				visible: true,
+				isChecked: false);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.HidePrivateData,
+				visible: true,
+				isChecked: false);
+			Assert.Equal((false, false), UiTestDriver.GetAppliedContentRedactionState(window));
+			Assert.False(UiTestDriver.GetViewModel(window).HasPendingFilterSettingsChanges);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task StructuralApply_SelectionChangedDuringBuildUsesLatestUiState()
     {
