@@ -178,7 +178,13 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 				? WorktreeSupportState.PermanentUnsupported
 				: WorktreeSupportState.TransientFailure;
 		}
-		catch (Exception exception) when (exception is Win32Exception or PlatformNotSupportedException)
+		catch (Win32Exception exception)
+		{
+			return IsPermanentGitStartFailure(exception)
+				? WorktreeSupportState.PermanentUnsupported
+				: WorktreeSupportState.TransientFailure;
+		}
+		catch (PlatformNotSupportedException)
 		{
 			return WorktreeSupportState.PermanentUnsupported;
 		}
@@ -190,6 +196,14 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		{
 			return WorktreeSupportState.TransientFailure;
 		}
+	}
+
+	private static bool IsPermanentGitStartFailure(Win32Exception exception)
+	{
+		if (exception.NativeErrorCode == 2)
+			return true;
+
+		return OperatingSystem.IsWindows() && exception.NativeErrorCode is 3 or 193 or 216;
 	}
 
 	private static async Task<string> ResolveRevisionAsync(

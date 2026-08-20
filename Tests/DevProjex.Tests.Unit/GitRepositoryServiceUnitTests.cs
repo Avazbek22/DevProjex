@@ -97,6 +97,40 @@ public class GitRepositoryServiceUnitTests
 		Assert.Equal(2, probeCount);
 	}
 
+	[Fact]
+	public async Task WorktreeSupportProbe_TransientProcessStartFailureIsRetried()
+	{
+		var probeCount = 0;
+		var manager = new GitWorktreeManager(
+			(_, _, _) => Interlocked.Increment(ref probeCount) == 1
+				? Task.FromException<GitWorktreeManager.GitProcessResult>(
+					new System.ComponentModel.Win32Exception(5))
+				: Task.FromResult(new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty)),
+			TimeSpan.FromSeconds(1));
+
+		Assert.False(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.True(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(2, probeCount);
+	}
+
+	[Fact]
+	public async Task WorktreeSupportProbe_MissingGitExecutableIsCachedAsPermanent()
+	{
+		var probeCount = 0;
+		var manager = new GitWorktreeManager(
+			(_, _, _) =>
+			{
+				Interlocked.Increment(ref probeCount);
+				return Task.FromException<GitWorktreeManager.GitProcessResult>(
+					new System.ComponentModel.Win32Exception(2));
+			},
+			TimeSpan.FromSeconds(1));
+
+		Assert.False(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.False(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(1, probeCount);
+	}
+
 	[Theory]
 	[InlineData("feature/space+plus")]
 	[InlineData("release/v1.2@beta")]
