@@ -83,6 +83,18 @@ internal sealed class UiTestProject : IDisposable
 		});
 	}
 
+	public static UiTestProject CreateWithPreviewMarkerWorkspace()
+	{
+		return Create(static rootPath =>
+		{
+			var lines = Enumerable.Range(1, 220)
+				.Select(index => index is 30 or 110 or 190
+					? "const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";"
+					: $"ordinary preview marker line {index:000}");
+			WriteFile(rootPath, Path.Combine("src", "PreviewMarkers.cs"), string.Join('\n', lines));
+		});
+	}
+
     public static UiTestProject CreateWithScopedExtensionlessEntries()
     {
         return Create(static rootPath =>

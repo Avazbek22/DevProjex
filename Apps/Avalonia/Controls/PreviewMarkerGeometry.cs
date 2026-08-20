@@ -18,6 +18,13 @@ internal readonly record struct PreviewMarkerTick(
 	double Y,
 	PreviewMarkerTarget Target);
 
+internal readonly record struct PreviewMarkerScrollMetrics(
+	double ExtentHeight,
+	double ViewportHeight,
+	double ThumbHeight,
+	double FirstLineTop,
+	double LineHeight);
+
 internal sealed record PreviewMarkerSnapshot(
 	int TotalLineCount,
 	PreviewMarkerSource[] Markers)
@@ -37,7 +44,8 @@ internal static class PreviewMarkerGeometry
 	public static PreviewMarkerTick[] Build(
 		IReadOnlyList<PreviewMarkerSource> markers,
 		int totalLineCount,
-		double height)
+		double height,
+		PreviewMarkerScrollMetrics? scrollMetrics = null)
 	{
 		ArgumentNullException.ThrowIfNull(markers);
 		if (markers.Count == 0 ||
@@ -61,35 +69,34 @@ internal static class PreviewMarkerGeometry
 			(int)Math.Clamp(Math.Ceiling(height) * 2, 1, 8192));
 		var ticks = new List<PreviewMarkerTick>(initialCapacity);
 		var category = ordered[0].Category;
-		var firstLine = ordered[0].LineNumber;
-		var lastLine = firstLine;
-		var lastY = MapLineToY(firstLine, totalLineCount, height);
-		var ySum = lastY;
-		var mergedCount = 1;
+		var clusterStartIndex = 0;
+		var clusterStartY = MapLineToY(
+			ordered[0].LineNumber,
+			totalLineCount,
+			height,
+			scrollMetrics);
 
 		for (var index = 1; index < ordered.Length; index++)
 		{
 			var marker = ordered[index];
-			var y = MapLineToY(marker.LineNumber, totalLineCount, height);
-			if (marker.Category == category && y - lastY <= MergeDistance)
-			{
-				lastLine = marker.LineNumber;
-				lastY = y;
-				ySum += y;
-				mergedCount++;
+			var y = MapLineToY(marker.LineNumber, totalLineCount, height, scrollMetrics);
+			if (marker.Category == category && y - clusterStartY <= MergeDistance)
 				continue;
-			}
 
-			AddTick(ticks, category, firstLine, lastLine, ySum, mergedCount);
+			AddTick(ticks, ordered, clusterStartIndex, index, totalLineCount, height, scrollMetrics);
 			category = marker.Category;
-			firstLine = marker.LineNumber;
-			lastLine = firstLine;
-			lastY = y;
-			ySum = y;
-			mergedCount = 1;
+			clusterStartIndex = index;
+			clusterStartY = y;
 		}
 
-		AddTick(ticks, category, firstLine, lastLine, ySum, mergedCount);
+		AddTick(
+			ticks,
+			ordered,
+			clusterStartIndex,
+			ordered.Length,
+			totalLineCount,
+			height,
+			scrollMetrics);
 		ticks.Sort(static (left, right) =>
 		{
 			var yComparison = left.Y.CompareTo(right.Y);
@@ -100,13 +107,19 @@ internal static class PreviewMarkerGeometry
 		return ticks.ToArray();
 	}
 
-	public static PreviewMarkerTarget? FindNearestTarget(
+	public static PreviewMarkerTarget? FindTargetAt(
 		IReadOnlyList<PreviewMarkerTick> ticks,
-		double y)
+		double y,
+		double maximumDistance)
 	{
 		ArgumentNullException.ThrowIfNull(ticks);
-		if (ticks.Count == 0 || !double.IsFinite(y))
+		if (ticks.Count == 0 ||
+		    !double.IsFinite(y) ||
+		    !double.IsFinite(maximumDistance) ||
+		    maximumDistance < 0)
+		{
 			return null;
+		}
 
 		var nearest = ticks[0];
 		var nearestDistance = Math.Abs(y - nearest.Y);
@@ -121,29 +134,89 @@ internal static class PreviewMarkerGeometry
 			nearestDistance = distance;
 		}
 
-		return nearest.Target;
+		return nearestDistance <= maximumDistance
+			? nearest.Target
+			: null;
 	}
 
 	private static double MapLineToY(
 		int lineNumber,
 		int totalLineCount,
-		double height)
+		double height,
+		PreviewMarkerScrollMetrics? scrollMetrics)
 	{
-		var mapped = lineNumber / (double)totalLineCount * height;
-		return Math.Clamp(mapped, 0, Math.Max(0, height - 1));
+		var maximumY = Math.Max(0, height - 1);
+		if (scrollMetrics is
+		    {
+			    ExtentHeight: > 0,
+			    ViewportHeight: > 0,
+			    ThumbHeight: >= 0,
+			    LineHeight: > 0
+		    } metrics &&
+		    metrics.ExtentHeight > metrics.ViewportHeight)
+		{
+			var maximumOffset = metrics.ExtentHeight - metrics.ViewportHeight;
+			var lineCenter = metrics.FirstLineTop +
+			                 ((lineNumber - 0.5) * metrics.LineHeight);
+			var targetOffset = Math.Clamp(
+				lineCenter - (metrics.ViewportHeight / 2),
+				0,
+				maximumOffset);
+			var thumbHeight = Math.Clamp(metrics.ThumbHeight, 0, height);
+			var thumbTravel = Math.Max(0, height - thumbHeight);
+			var mapped = (thumbHeight / 2) +
+			             ((targetOffset / maximumOffset) * thumbTravel);
+			return Math.Clamp(mapped, 0, maximumY);
+		}
+
+		var fallbackMapped = ((lineNumber - 0.5) / totalLineCount) * height;
+		return Math.Clamp(fallbackMapped, 0, maximumY);
 	}
 
 	private static void AddTick(
 		List<PreviewMarkerTick> ticks,
-		PreviewMarkerCategory category,
-		int firstLine,
-		int lastLine,
-		double ySum,
-		int mergedCount)
+		IReadOnlyList<PreviewMarkerSource> markers,
+		int startIndex,
+		int endIndex,
+		int totalLineCount,
+		double height,
+		PreviewMarkerScrollMetrics? scrollMetrics)
 	{
-		var targetLine = firstLine + ((lastLine - firstLine) / 2);
+		var ySum = 0d;
+		for (var index = startIndex; index < endIndex; index++)
+			ySum += MapLineToY(
+				markers[index].LineNumber,
+				totalLineCount,
+				height,
+				scrollMetrics);
+
+		var averageY = ySum / (endIndex - startIndex);
+		var representative = markers[startIndex];
+		var representativeY = MapLineToY(
+			representative.LineNumber,
+			totalLineCount,
+			height,
+			scrollMetrics);
+		var nearestDistance = Math.Abs(representativeY - averageY);
+		for (var index = startIndex + 1; index < endIndex; index++)
+		{
+			var candidate = markers[index];
+			var candidateY = MapLineToY(
+				candidate.LineNumber,
+				totalLineCount,
+				height,
+				scrollMetrics);
+			var distance = Math.Abs(candidateY - averageY);
+			if (distance >= nearestDistance)
+				continue;
+
+			representative = candidate;
+			representativeY = candidateY;
+			nearestDistance = distance;
+		}
+
 		ticks.Add(new PreviewMarkerTick(
-			ySum / mergedCount,
-			new PreviewMarkerTarget(targetLine, category)));
+			representativeY,
+			new PreviewMarkerTarget(representative.LineNumber, representative.Category)));
 	}
 }

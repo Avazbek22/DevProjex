@@ -1,15 +1,11 @@
 namespace DevProjex.Avalonia.Controls;
 
-internal sealed class PreviewMarkerInvokedEventArgs(PreviewMarkerTarget target) : EventArgs
-{
-	public PreviewMarkerTarget Target { get; } = target;
-}
-
 public sealed class PreviewMarkerBar : Control
 {
-	private const double TickHorizontalInset = 2;
 	private const double TickHeight = 2;
+	private const double TickHitRadius = 4;
 	private PreviewMarkerSnapshot _snapshot = PreviewMarkerSnapshot.Empty;
+	private PreviewMarkerScrollMetrics? _scrollMetrics;
 	private PreviewMarkerTick[] _ticks = [];
 	private double _geometryHeight = double.NaN;
 
@@ -21,8 +17,6 @@ public sealed class PreviewMarkerBar : Control
 
 	public static readonly StyledProperty<IBrush?> SearchBrushProperty =
 		AvaloniaProperty.Register<PreviewMarkerBar, IBrush?>(nameof(SearchBrush));
-
-	internal event EventHandler<PreviewMarkerInvokedEventArgs>? MarkerInvoked;
 
 	static PreviewMarkerBar()
 	{
@@ -49,12 +43,23 @@ public sealed class PreviewMarkerBar : Control
 		set => SetValue(SearchBrushProperty, value);
 	}
 
+	internal IReadOnlyList<PreviewMarkerTick> MarkerTicks => _ticks;
+
 	internal void SetMarkers(PreviewMarkerSnapshot snapshot)
 	{
 		ArgumentNullException.ThrowIfNull(snapshot);
 		_snapshot = snapshot;
 		RebuildGeometry(Bounds.Height);
 		UpdateVisibility();
+	}
+
+	internal void SetScrollMetrics(PreviewMarkerScrollMetrics? metrics)
+	{
+		if (_scrollMetrics == metrics)
+			return;
+
+		_scrollMetrics = metrics;
+		RebuildGeometry(Bounds.Height);
 	}
 
 	protected override Size ArrangeOverride(Size finalSize)
@@ -73,7 +78,7 @@ public sealed class PreviewMarkerBar : Control
 		if (_ticks.Length == 0 || Bounds.Width <= 0 || Bounds.Height <= 0)
 			return;
 
-		var width = Math.Max(1, Bounds.Width - (TickHorizontalInset * 2));
+		var width = Math.Max(1, Bounds.Width);
 		var maximumTop = Math.Max(0, Bounds.Height - TickHeight);
 		foreach (var tick in _ticks)
 		{
@@ -88,23 +93,16 @@ public sealed class PreviewMarkerBar : Control
 				brush,
 				null,
 				new RoundedRect(
-					new Rect(TickHorizontalInset, top, width, TickHeight),
+					new Rect(0, top, width, TickHeight),
 					TickHeight / 2));
 		}
 	}
 
-	protected override void OnPointerPressed(PointerPressedEventArgs e)
+	internal PreviewMarkerTarget? FindTargetAt(Point point)
 	{
-		base.OnPointerPressed(e);
-		if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-			return;
-
-		var target = PreviewMarkerGeometry.FindNearestTarget(_ticks, e.GetPosition(this).Y);
-		if (target is null)
-			return;
-
-		MarkerInvoked?.Invoke(this, new PreviewMarkerInvokedEventArgs(target.Value));
-		e.Handled = true;
+		return new Rect(Bounds.Size).Contains(point)
+			? PreviewMarkerGeometry.FindTargetAt(_ticks, point.Y, TickHitRadius)
+			: null;
 	}
 
 	private void RebuildGeometry(double height)
@@ -113,7 +111,8 @@ public sealed class PreviewMarkerBar : Control
 		_ticks = PreviewMarkerGeometry.Build(
 			_snapshot.Markers,
 			_snapshot.TotalLineCount,
-			height);
+			height,
+			_scrollMetrics);
 		InvalidateVisual();
 	}
 

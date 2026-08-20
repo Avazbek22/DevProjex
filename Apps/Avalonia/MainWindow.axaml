@@ -963,14 +963,14 @@
 
                 <controls:PreviewMarkerBar Grid.Column="1"
                                            Name="PreviewMarkerBar"
-                                           Width="9"
-                                           MinWidth="9"
+                                           Width="15"
+                                           MinWidth="15"
                                            HorizontalAlignment="Right"
                                            VerticalAlignment="Stretch"
                                            ZIndex="20"
-                                           Cursor="Hand"
+                                           IsHitTestVisible="False"
                                            IsMarkerDisplayEnabled="{Binding IsPreviewSearchAvailable}"
-                                           RedactionBrush="{DynamicResource TreeSearchCurrentBrush}"
+                                           RedactionBrush="{DynamicResource AppAccentBrush}"
                                            SearchBrush="{DynamicResource AppAccentBrush}" />
               </Grid>
             </Grid>
