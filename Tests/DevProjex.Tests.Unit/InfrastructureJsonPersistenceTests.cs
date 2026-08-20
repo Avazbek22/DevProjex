@@ -353,6 +353,23 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_BoundedJsonParseRejectsContentThatGrewAfterLengthProbe()
+	{
+		var bytes = Encoding.UTF8.GetBytes("{\"value\":1}overflow");
+		using var stream = new StaleLengthMemoryStream(bytes, reportedLength: 11);
+
+		var result = JsonStorePersistence.TryParseDocumentWithinSizeLimit(
+			stream,
+			maximumDocumentBytes: 11,
+			default,
+			out var document);
+
+		Assert.False(result);
+		Assert.Null(document);
+		Assert.Equal(12, stream.Position);
+	}
+
+	[Fact]
 	public void JsonStorePersistence_ContainsFutureDocument_ProtectsDocumentBeyondExplicitLimit()
 	{
 		using var temp = new TemporaryDirectory();

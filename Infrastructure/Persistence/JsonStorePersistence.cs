@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 
 namespace DevProjex.Infrastructure.Persistence;
 
@@ -276,11 +277,50 @@ internal static class JsonStorePersistence
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentOutOfRangeException.ThrowIfNegative(maximumDocumentBytes);
         text = string.Empty;
+        if (!TryBufferWithinSizeLimit(stream, maximumDocumentBytes, out var content))
+            return false;
+
+        using (content)
+        using (var reader = new StreamReader(
+                   content,
+                   Encoding.UTF8,
+                   detectEncodingFromByteOrderMarks: true,
+                   bufferSize: 1024,
+                   leaveOpen: true))
+        {
+            text = reader.ReadToEnd();
+        }
+        return true;
+    }
+
+    internal static bool TryParseDocumentWithinSizeLimit(
+        Stream stream,
+        int maximumDocumentBytes,
+        JsonDocumentOptions options,
+        [NotNullWhen(true)] out JsonDocument? document)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumDocumentBytes);
+        document = null;
+        if (!TryBufferWithinSizeLimit(stream, maximumDocumentBytes, out var content))
+            return false;
+
+        using (content)
+            document = JsonDocument.Parse(content, options);
+        return true;
+    }
+
+    private static bool TryBufferWithinSizeLimit(
+        Stream stream,
+        int maximumDocumentBytes,
+        [NotNullWhen(true)] out MemoryStream? content)
+    {
+        content = null;
         if (stream.Length > maximumDocumentBytes)
             return false;
 
         var initialCapacity = (int)Math.Min(stream.Length, Math.Min(maximumDocumentBytes, 16 * 1024));
-        using var content = new MemoryStream(initialCapacity);
+        var buffered = new MemoryStream(initialCapacity);
         var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
         try
         {
@@ -294,24 +334,20 @@ internal static class JsonStorePersistence
                     break;
                 if (read > remaining)
                     return false;
-                content.Write(buffer, 0, read);
+                buffered.Write(buffer, 0, read);
                 totalBytes += read;
             }
+
+            buffered.Position = 0;
+            content = buffered;
+            return true;
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+            if (content is null)
+                buffered.Dispose();
         }
-
-        content.Position = 0;
-        using var reader = new StreamReader(
-            content,
-            Encoding.UTF8,
-            detectEncodingFromByteOrderMarks: true,
-            bufferSize: 1024,
-            leaveOpen: true);
-        text = reader.ReadToEnd();
-        return true;
     }
 
     private static bool IsFutureDocument(

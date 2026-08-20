@@ -422,12 +422,18 @@ internal sealed class PersistentSecretMarkStore(
 				FileMode.Open,
 				FileAccess.Read,
 				FileShare.ReadWrite | FileShare.Delete);
-			if (stream.Length > ProjectProfileStorageLimits.MaximumJsonBytes)
-				return false;
-			using var document = JsonDocument.Parse(
+			if (!JsonStorePersistence.TryParseDocumentWithinSizeLimit(
 				stream,
-				new JsonDocumentOptions { MaxDepth = 64 });
-			return TryParseDatabase(document.RootElement, out database, out requiresRewrite);
+				(int)ProjectProfileStorageLimits.MaximumJsonBytes,
+				new JsonDocumentOptions { MaxDepth = 64 },
+				out var document))
+			{
+				return false;
+			}
+			using (document)
+			{
+				return TryParseDatabase(document.RootElement, out database, out requiresRewrite);
+			}
 		}
 		catch
 		{

@@ -784,14 +784,20 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				FileMode.Open,
 				FileAccess.Read,
 				FileShare.ReadWrite | FileShare.Delete);
-			if (stream.Length > ProjectProfileStorageLimits.MaximumJsonBytes)
-				return false;
-			using var document = JsonDocument.Parse(
+			if (!JsonStorePersistence.TryParseDocumentWithinSizeLimit(
 				stream,
-				new JsonDocumentOptions { MaxDepth = 64 });
-			if (!TryParseDatabase(document.RootElement, out db, out requiresRewrite))
+				(int)ProjectProfileStorageLimits.MaximumJsonBytes,
+				new JsonDocumentOptions { MaxDepth = 64 },
+				out var document))
+			{
 				return false;
-			return true;
+			}
+			using (document)
+			{
+				if (!TryParseDatabase(document.RootElement, out db, out requiresRewrite))
+					return false;
+				return true;
+			}
 		}
 		catch
 		{
