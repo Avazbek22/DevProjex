@@ -142,7 +142,11 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 			Math.Min(MaximumIoParallelism, Math.Max(1, Environment.ProcessorCount)),
 			candidates.Count);
 		var producers = Enumerable.Range(0, producerCount)
-			.Select(_ => Task.Run(RunProducerAsync, CancellationToken.None))
+			.Select(_ => Task.Factory.StartNew(
+				RunProducerAsync,
+				CancellationToken.None,
+				TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+				TaskScheduler.Default).Unwrap())
 			.ToArray();
 		try
 		{
