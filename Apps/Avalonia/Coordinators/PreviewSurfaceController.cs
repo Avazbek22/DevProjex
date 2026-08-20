@@ -3,9 +3,11 @@ using DevProjex.Avalonia.Services;
 namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed record PreviewSurfaceControls(
+	Border Surface,
     ScrollViewer TextScrollViewer,
     VirtualizedPreviewTextControl TextControl,
     VirtualizedLineNumbersControl LineNumbersControl,
+    PreviewMarkerBar MarkerBar,
     Border StickyHeaderCap,
     Border StickyHeaderContainer,
     TextBlock StickyHeaderText);
@@ -58,6 +60,17 @@ internal sealed class PreviewSurfaceController : IDisposable
     private bool _hasSelectionMetricsSnapshot;
     private bool _scrollSyncActive;
     private ScrollBar? _verticalScrollBar;
+	private Cursor? _previewMarkerHandCursor;
+	private Cursor? _previewMarkerDragCursor;
+	private InputElement? _previewMarkerCursorTarget;
+	private IPointer? _previewMarkerDragPointer;
+	private double _previewMarkerDragStartY;
+	private double _previewMarkerDragStartOffsetY;
+	private bool _previewMarkerDragging;
+	private bool _previewMarkerViewerAllowAutoHide;
+	private bool _previewMarkerScrollBarAllowAutoHide;
+	private bool _previewMarkerScrollBarInteractionActive;
+	private bool _previewMarkerRailPointerOver;
     private double _stickyHeaderScrollBarInset = -1;
 	private Vector? _pendingRedactionViewportOffset;
 	private PersistentSecretMarkId? _pendingMarkedSecretId;
@@ -126,8 +139,238 @@ internal sealed class PreviewSurfaceController : IDisposable
 		controls.TextControl.ManualSecretMarkRequested += OnManualSecretMarkRequested;
 		controls.TextControl.ManualSecretUnmarkRequested += OnManualSecretUnmarkRequested;
 		controls.TextControl.ManualSecretMarkRejected += OnManualSecretMarkRejected;
+		controls.TextControl.PreviewMarkersChanged += OnPreviewMarkersChanged;
+		controls.MarkerBar.SetMarkers(controls.TextControl.MarkerSnapshot);
+		controls.Surface.AddHandler(
+			InputElement.PointerPressedEvent,
+			OnPreviewMarkerPointerPressed,
+			RoutingStrategies.Tunnel,
+			handledEventsToo: true);
+		controls.Surface.AddHandler(
+			InputElement.PointerMovedEvent,
+			OnPreviewMarkerPointerMoved,
+			RoutingStrategies.Tunnel,
+			handledEventsToo: true);
+		controls.Surface.AddHandler(
+			InputElement.PointerReleasedEvent,
+			OnPreviewMarkerPointerReleased,
+			RoutingStrategies.Tunnel,
+			handledEventsToo: true);
+		controls.Surface.PointerExited += OnPreviewMarkerPointerExited;
+		controls.TextScrollViewer.PointerCaptureLost += OnPreviewMarkerPointerCaptureLost;
         controls.TextScrollViewer.LayoutUpdated += OnTextScrollViewerLayoutUpdated;
     }
+
+	private void OnPreviewMarkersChanged(
+		object? sender,
+		PreviewMarkersChangedEventArgs e)
+	{
+		_controls.MarkerBar.SetMarkers(e.Snapshot);
+		UpdateStickyHeaderScrollBarInset();
+	}
+
+	private void OnPreviewMarkerPointerPressed(
+		object? sender,
+		PointerPressedEventArgs e)
+	{
+		if (!e.GetCurrentPoint(_controls.TextScrollViewer).Properties.IsLeftButtonPressed)
+			return;
+
+		var target = _controls.MarkerBar.FindTargetAt(e.GetPosition(_controls.MarkerBar));
+		if (target is null)
+			return;
+
+		_controls.TextControl.NavigateToMarker(target.Value);
+		_previewMarkerDragPointer = e.Pointer;
+		_previewMarkerDragStartY = e.GetPosition(_controls.MarkerBar).Y;
+		_previewMarkerDragStartOffsetY = _controls.TextScrollViewer.Offset.Y;
+		_previewMarkerDragging = false;
+		e.Pointer.Capture(_controls.TextScrollViewer);
+		BeginPreviewMarkerScrollBarInteraction();
+		SetPreviewMarkerCursor(_controls.TextScrollViewer, isDragging: true);
+		e.Handled = true;
+	}
+
+	private void OnPreviewMarkerPointerMoved(
+		object? sender,
+		PointerEventArgs e)
+	{
+		UpdatePreviewMarkerRailPointerState(IsPointerWithinPreviewScrollBar(e));
+		if (ReferenceEquals(_previewMarkerDragPointer, e.Pointer) &&
+		    e.GetCurrentPoint(_controls.TextScrollViewer).Properties.IsLeftButtonPressed)
+		{
+			var deltaY = e.GetPosition(_controls.MarkerBar).Y - _previewMarkerDragStartY;
+			_previewMarkerDragging |= Math.Abs(deltaY) >= 2;
+			if (_previewMarkerDragging)
+			{
+				KeepPreviewMarkerScrollBarActive();
+				SetPreviewMarkerCursor(_controls.TextScrollViewer, isDragging: true);
+				ScrollFromPreviewMarkerDrag(deltaY);
+			}
+
+			e.Handled = true;
+			return;
+		}
+
+		var markerTarget = _controls.MarkerBar.FindTargetAt(e.GetPosition(_controls.MarkerBar));
+		SetPreviewMarkerCursor(
+			markerTarget is not null || _previewMarkerRailPointerOver
+				? e.Source as InputElement
+				: null,
+			isDragging: markerTarget is null && _previewMarkerRailPointerOver);
+	}
+
+	private void OnPreviewMarkerPointerReleased(
+		object? sender,
+		PointerReleasedEventArgs e)
+	{
+		if (!ReferenceEquals(_previewMarkerDragPointer, e.Pointer))
+			return;
+
+		UpdatePreviewMarkerRailPointerState(IsPointerWithinPreviewScrollBar(e));
+		EndPreviewMarkerDrag(releaseCapture: true);
+		var markerTarget = _controls.MarkerBar.FindTargetAt(e.GetPosition(_controls.MarkerBar));
+		SetPreviewMarkerCursor(
+			markerTarget is not null || _previewMarkerRailPointerOver
+				? e.Source as InputElement
+				: null,
+			isDragging: markerTarget is null && _previewMarkerRailPointerOver);
+		e.Handled = true;
+	}
+
+	private void OnPreviewMarkerPointerCaptureLost(
+		object? sender,
+		PointerCaptureLostEventArgs e)
+	{
+		if (ReferenceEquals(_previewMarkerDragPointer, e.Pointer))
+		{
+			EndPreviewMarkerDrag(releaseCapture: false);
+			SetPreviewMarkerCursor(null);
+		}
+	}
+
+	private void ScrollFromPreviewMarkerDrag(double deltaY)
+	{
+		if (_verticalScrollBar?.GetVisualDescendants().OfType<Track>().FirstOrDefault() is not { } track ||
+		    track.GetVisualDescendants().OfType<Thumb>().FirstOrDefault() is not { } thumb)
+		{
+			return;
+		}
+
+		var maximumOffset = Math.Max(
+			0,
+			_controls.TextScrollViewer.Extent.Height - _controls.TextScrollViewer.Viewport.Height);
+		var thumbTravel = Math.Max(1, track.Bounds.Height - thumb.Bounds.Height);
+		var targetY = Math.Clamp(
+			_previewMarkerDragStartOffsetY + ((deltaY / thumbTravel) * maximumOffset),
+			0,
+			maximumOffset);
+		_controls.TextScrollViewer.Offset = new Vector(
+			_controls.TextScrollViewer.Offset.X,
+			targetY);
+	}
+
+	private void EndPreviewMarkerDrag(bool releaseCapture)
+	{
+		var pointer = _previewMarkerDragPointer;
+		_previewMarkerDragPointer = null;
+		_previewMarkerDragging = false;
+		if (releaseCapture && ReferenceEquals(pointer?.Captured, _controls.TextScrollViewer))
+			pointer.Capture(null);
+
+		if (!_previewMarkerRailPointerOver)
+			EndPreviewMarkerScrollBarInteraction();
+	}
+
+	private bool IsPointerWithinPreviewScrollBar(PointerEventArgs e)
+		=> _verticalScrollBar is { IsVisible: true, Bounds.Width: > 0 } scrollBar &&
+		   new Rect(scrollBar.Bounds.Size).Contains(e.GetPosition(scrollBar));
+
+	private void UpdatePreviewMarkerRailPointerState(bool pointerOver)
+	{
+		if (_previewMarkerRailPointerOver == pointerOver)
+			return;
+
+		_previewMarkerRailPointerOver = pointerOver;
+		if (pointerOver)
+		{
+			BeginPreviewMarkerScrollBarInteraction();
+		}
+		else if (_previewMarkerDragPointer is null)
+		{
+			EndPreviewMarkerScrollBarInteraction();
+		}
+
+		UpdateStickyHeaderScrollBarInset();
+	}
+
+	private void BeginPreviewMarkerScrollBarInteraction()
+	{
+		if (_previewMarkerScrollBarInteractionActive)
+		{
+			KeepPreviewMarkerScrollBarActive();
+			return;
+		}
+
+		_previewMarkerViewerAllowAutoHide = _controls.TextScrollViewer.AllowAutoHide;
+		_previewMarkerScrollBarAllowAutoHide = _verticalScrollBar?.AllowAutoHide ?? true;
+		_previewMarkerScrollBarInteractionActive = true;
+		_controls.TextScrollViewer.SetCurrentValue(ScrollViewer.AllowAutoHideProperty, false);
+		if (_verticalScrollBar is not null)
+			_verticalScrollBar.SetCurrentValue(ScrollBar.AllowAutoHideProperty, false);
+	}
+
+	private void KeepPreviewMarkerScrollBarActive()
+	{
+		_controls.TextScrollViewer.SetCurrentValue(ScrollViewer.AllowAutoHideProperty, false);
+		_verticalScrollBar?.SetCurrentValue(ScrollBar.AllowAutoHideProperty, false);
+	}
+
+	private void EndPreviewMarkerScrollBarInteraction()
+	{
+		if (!_previewMarkerScrollBarInteractionActive)
+			return;
+
+		_previewMarkerScrollBarInteractionActive = false;
+		_controls.TextScrollViewer.SetCurrentValue(
+			ScrollViewer.AllowAutoHideProperty,
+			_previewMarkerViewerAllowAutoHide);
+		if (_verticalScrollBar is null)
+			return;
+
+		_verticalScrollBar.SetCurrentValue(
+			ScrollBar.AllowAutoHideProperty,
+			_previewMarkerScrollBarAllowAutoHide);
+	}
+
+	private void OnPreviewMarkerPointerExited(
+		object? sender,
+		PointerEventArgs e)
+	{
+		UpdatePreviewMarkerRailPointerState(pointerOver: false);
+		SetPreviewMarkerCursor(null);
+	}
+
+	private void SetPreviewMarkerCursor(
+		InputElement? target,
+		bool isDragging = false)
+	{
+		var cursor = isDragging
+			? _previewMarkerDragCursor ??= new Cursor(StandardCursorType.Arrow)
+			: _previewMarkerHandCursor ??= new Cursor(StandardCursorType.Hand);
+		if (ReferenceEquals(_previewMarkerCursorTarget, target) &&
+		    ReferenceEquals(target?.Cursor, cursor))
+		{
+			return;
+		}
+
+		_previewMarkerCursorTarget?.ClearValue(InputElement.CursorProperty);
+		_previewMarkerCursorTarget = target;
+		if (target is null)
+			return;
+
+		target.Cursor = cursor;
+	}
 
     private void OnVerticalScrollBarPropertyChanged(
         object? sender,
@@ -1289,6 +1532,22 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_controls.TextControl.ManualSecretMarkRequested -= OnManualSecretMarkRequested;
 		_controls.TextControl.ManualSecretUnmarkRequested -= OnManualSecretUnmarkRequested;
 		_controls.TextControl.ManualSecretMarkRejected -= OnManualSecretMarkRejected;
+		_controls.TextControl.PreviewMarkersChanged -= OnPreviewMarkersChanged;
+		_controls.Surface.RemoveHandler(
+			InputElement.PointerPressedEvent,
+			OnPreviewMarkerPointerPressed);
+		_controls.Surface.RemoveHandler(
+			InputElement.PointerMovedEvent,
+			OnPreviewMarkerPointerMoved);
+		_controls.Surface.RemoveHandler(
+			InputElement.PointerReleasedEvent,
+			OnPreviewMarkerPointerReleased);
+		_controls.Surface.PointerExited -= OnPreviewMarkerPointerExited;
+		_controls.TextScrollViewer.PointerCaptureLost -= OnPreviewMarkerPointerCaptureLost;
+		EndPreviewMarkerDrag(releaseCapture: true);
+		_previewMarkerRailPointerOver = false;
+		EndPreviewMarkerScrollBarInteraction();
+		SetPreviewMarkerCursor(null);
         _controls.TextScrollViewer.LayoutUpdated -= OnTextScrollViewerLayoutUpdated;
         if (_verticalScrollBar is not null)
             _verticalScrollBar.PropertyChanged -= OnVerticalScrollBarPropertyChanged;
@@ -1456,17 +1715,20 @@ internal sealed class PreviewSurfaceController : IDisposable
             if (_verticalScrollBar is not null)
             {
                 _verticalScrollBar.PropertyChanged += OnVerticalScrollBarPropertyChanged;
-                _controls.TextScrollViewer.LayoutUpdated -= OnTextScrollViewerLayoutUpdated;
             }
         }
+
+		UpdatePreviewMarkerTrackMargin();
 
         var inset = 0.0;
         if (_verticalScrollBar is
             {
                 IsVisible: true,
-                IsExpanded: true,
                 Bounds.Width: > 0
-            } scrollBar)
+            } scrollBar &&
+		    (scrollBar.IsExpanded ||
+		     _previewMarkerRailPointerOver ||
+		     _previewMarkerDragPointer is not null))
         {
             var origin = scrollBar.TranslatePoint(default, _controls.TextScrollViewer);
             inset = origin is { } scrollBarOrigin
@@ -1487,6 +1749,49 @@ internal sealed class PreviewSurfaceController : IDisposable
             _stickyHeaderBaseMargin.Right + inset,
             _stickyHeaderBaseMargin.Bottom);
     }
+
+	private void UpdatePreviewMarkerTrackMargin()
+	{
+		var margin = default(Thickness);
+		if (_verticalScrollBar is { IsVisible: true } scrollBar &&
+		    scrollBar.GetVisualDescendants().OfType<Track>().FirstOrDefault() is { } track &&
+		    track.GetVisualDescendants().OfType<Thumb>().FirstOrDefault() is { } thumb &&
+		    track.TranslatePoint(default, _controls.TextScrollViewer) is { } origin)
+		{
+			var availableHeight = Math.Max(0, _controls.TextScrollViewer.Bounds.Height);
+			var top = Math.Clamp(origin.Y, 0, availableHeight);
+			var bottom = Math.Clamp(
+				availableHeight - top - track.Bounds.Height,
+				0,
+				availableHeight);
+			margin = new Thickness(0, top, 0, bottom);
+
+			var lineCount = _controls.TextControl.MarkerSnapshot.TotalLineCount;
+			var firstLineTop = _controls.TextControl.GetVerticalOffsetForLine(1);
+			var lineHeight = lineCount > 1
+				? _controls.TextControl.GetVerticalOffsetForLine(2) - firstLineTop
+				: Math.Max(1, _controls.TextScrollViewer.Extent.Height - firstLineTop);
+			_controls.MarkerBar.SetScrollMetrics(new PreviewMarkerScrollMetrics(
+				_controls.TextScrollViewer.Extent.Height,
+				_controls.TextScrollViewer.Viewport.Height,
+				thumb.Bounds.Height,
+				firstLineTop,
+				lineHeight));
+		}
+		else
+		{
+			_controls.MarkerBar.SetScrollMetrics(null);
+		}
+
+		var current = _controls.MarkerBar.Margin;
+		if (Math.Abs(current.Top - margin.Top) < 0.1 &&
+		    Math.Abs(current.Bottom - margin.Bottom) < 0.1)
+		{
+			return;
+		}
+
+		_controls.MarkerBar.Margin = margin;
+	}
 
     private void HideStickyPath()
     {

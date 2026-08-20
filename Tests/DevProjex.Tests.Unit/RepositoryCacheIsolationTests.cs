@@ -403,12 +403,20 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	[Fact]
 	public async Task PinnedRepository_IsNeverDeletedUntilLeaseIsReleased()
 	{
-		var service = CreateService(new FakeWorktreeManager(supported: true));
+		var cleanupCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var hooks = new RepoCacheTestHooks
+		{
+			AfterUnusedWorktreeCleanup = _ => cleanupCompleted.TrySetResult()
+		};
+		var service = CreateService(new FakeWorktreeManager(supported: true), hooks: hooks);
 		var basePath = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
 		var session = await service.TryAcquireRepositorySessionAsync(
 			RepositoryUrl,
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.NotNull(session);
+		await cleanupCompleted.Task.WaitAsync(
+			BackgroundOperationTimeout,
+			TestContext.Current.CancellationToken);
 
 		service.DeleteRepositoryDirectory(basePath);
 		Assert.True(Directory.Exists(basePath));

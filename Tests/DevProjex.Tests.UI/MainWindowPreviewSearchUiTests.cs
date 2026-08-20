@@ -110,6 +110,39 @@ public sealed class MainWindowPreviewSearchUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task ProjectSwitch_ClosesPreviewSearchAndClearsItsProjectScopedQuery()
+	{
+		using var firstProject = UiTestProject.CreateWithPreviewSearchWorkspace();
+		using var secondProject = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(firstProject);
+
+		try
+		{
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await OpenSearchAsync(window);
+			var searchBox = UiTestDriver.GetRequiredControl<PreviewSearchBarView>(
+				window,
+				"PreviewSearchBar").SearchBoxControl!;
+			searchBox.Text = "PreviewSearchNeedle";
+			await WaitForPreviewSearchCountAsync(window, expectedCount: 3);
+
+			await UiTestDriver.OpenFolderAsync(window, secondProject.RootPath);
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.False(viewModel.PreviewSearchVisible);
+			Assert.Equal(string.Empty, viewModel.PreviewSearchQuery);
+			Assert.Equal(0, viewModel.PreviewSearchTotalMatches);
+			Assert.Equal(string.Empty, searchBox.Text);
+			Assert.Equal("(0 / 0)", viewModel.PreviewSearchMatchSummaryText);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task F3AndShiftF3_NavigateGloballyWhenPreviewTextHasFocus()
 	{
 		using var project = UiTestProject.CreateWithPreviewSearchWorkspace();

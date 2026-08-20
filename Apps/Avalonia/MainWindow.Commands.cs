@@ -555,8 +555,11 @@ public partial class MainWindow
     private void SyncSearchAndFilterVisualStateFromFlags() =>
         _searchFilterController.SyncVisualState();
 
-    private Task PrepareSearchAndFilterForProjectLoadAsync() =>
-        _searchFilterController.PrepareForProjectLoadAsync();
+	private Task PrepareSearchAndFilterForProjectLoadAsync()
+	{
+		_previewSearchController.ClearProjectState();
+		return _searchFilterController.PrepareForProjectLoadAsync();
+	}
 
     private void OnExtensionsAllChanged(object? sender, RoutedEventArgs e)
     {

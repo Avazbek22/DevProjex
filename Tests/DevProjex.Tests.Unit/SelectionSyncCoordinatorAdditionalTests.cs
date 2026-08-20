@@ -1118,6 +1118,55 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.False(coordinator.TryAcceptContentRedactionOnlyChangeAsApplied(projectPath));
 	}
 
+	[Fact]
+	public void ProjectSwitch_DoesNotOverlayPreviousContentTransformationsOnTargetProfile()
+	{
+		const string projectA = @"C:\ProjectA";
+		const string projectB = @"C:\ProjectB";
+		var currentPath = projectA;
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => currentPath);
+		var projectASnapshot = CreateReversibleSelectionRefreshSnapshot();
+		ApplySelectionRefreshSnapshot(coordinator, projectASnapshot);
+
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HidePrivateData).IsChecked);
+
+		currentPath = projectB;
+		var projectBProfile = new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: [],
+			IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.HideSecrets] = false,
+				[IgnoreOptionId.HidePrivateData] = false
+			});
+		coordinator.ApplyProjectProfileSelections(projectB, projectBProfile);
+		var projectBSnapshot = projectASnapshot with
+		{
+			IgnoreOptions = projectASnapshot.IgnoreOptions
+				.Select(static option => option.Id is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData
+					? option with { IsChecked = false }
+					: option)
+				.ToArray(),
+			IgnoreOptionStateCache = projectASnapshot.IgnoreOptionStateCache.ToDictionary(
+				static pair => pair.Key,
+				static pair => pair.Key is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData
+					? false
+					: pair.Value)
+		};
+
+		ApplySelectionRefreshSnapshot(coordinator, projectBSnapshot);
+
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HideSecrets).IsChecked);
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HidePrivateData).IsChecked);
+	}
+
 	[AvaloniaFact]
 	public async Task ApplyHidePrivateDataOverride_IsImmediateAndDoesNotScanTheTree()
 	{
