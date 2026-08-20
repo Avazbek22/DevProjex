@@ -368,7 +368,7 @@ public sealed class ProjectCopyExportService(
 		}
 		finally
 		{
-			ArrayPool<byte>.Shared.Return(buffer);
+			ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
 			try
 			{
 				await DeleteStagingDirectoryAsync(stagingPath).ConfigureAwait(false);
@@ -517,7 +517,7 @@ public sealed class ProjectCopyExportService(
 		}
 		finally
 		{
-			ArrayPool<byte>.Shared.Return(buffer);
+			ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
 			try
 			{
 				await DeleteStagingFileAsync(stagingPath).ConfigureAwait(false);
