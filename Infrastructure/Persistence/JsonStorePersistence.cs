@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace DevProjex.Infrastructure.Persistence;
 
 internal static class JsonStorePersistence
@@ -47,10 +49,16 @@ internal static class JsonStorePersistence
 
         try
         {
-            if (!IsDocumentWithinSizeLimit(path, maximumDocumentBytes))
+            string json;
+            if (maximumDocumentBytes == long.MaxValue)
+            {
+                json = File.ReadAllText(path);
+            }
+            else if (maximumDocumentBytes > int.MaxValue ||
+                     !TryReadAllTextWithinSizeLimit(path, (int)maximumDocumentBytes, out json))
+            {
                 return false;
-
-            var json = File.ReadAllText(path);
+            }
             var deserialized = JsonSerializer.Deserialize<TDocument>(json, serializerOptions);
             if (deserialized is null)
                 return false;
@@ -245,6 +253,65 @@ internal static class JsonStorePersistence
         }
     }
 
+    internal static bool TryReadAllTextWithinSizeLimit(
+        string path,
+        int maximumDocumentBytes,
+        out string text)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 16 * 1024,
+            FileOptions.SequentialScan);
+        return TryReadAllTextWithinSizeLimit(stream, maximumDocumentBytes, out text);
+    }
+
+    internal static bool TryReadAllTextWithinSizeLimit(
+        Stream stream,
+        int maximumDocumentBytes,
+        out string text)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumDocumentBytes);
+        text = string.Empty;
+        if (stream.Length > maximumDocumentBytes)
+            return false;
+
+        var initialCapacity = (int)Math.Min(stream.Length, Math.Min(maximumDocumentBytes, 16 * 1024));
+        using var content = new MemoryStream(initialCapacity);
+        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            var totalBytes = 0;
+            while (true)
+            {
+                var read = stream.Read(buffer, 0, buffer.Length);
+                if (read == 0)
+                    break;
+                if (read > maximumDocumentBytes - totalBytes)
+                    return false;
+                content.Write(buffer, 0, read);
+                totalBytes += read;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+        }
+
+        content.Position = 0;
+        using var reader = new StreamReader(
+            content,
+            Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: 1024,
+            leaveOpen: true);
+        text = reader.ReadToEnd();
+        return true;
+    }
+
     private static bool IsFutureDocument(
         string path,
         int currentSchemaVersion,
@@ -256,22 +323,35 @@ internal static class JsonStorePersistence
 
         try
         {
-            // An unbounded document cannot be classified safely and must not be downgraded.
-            if (!IsDocumentWithinSizeLimit(path, maximumDocumentBytes))
-                return true;
+            JsonDocument document;
+            if (maximumDocumentBytes == long.MaxValue)
+            {
+                using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                document = ParseDocument(stream);
+            }
+            else
+            {
+                // An unbounded document cannot be classified safely and must not be downgraded.
+                if (maximumDocumentBytes > int.MaxValue ||
+                    !TryReadAllTextWithinSizeLimit(path, (int)maximumDocumentBytes, out var json))
+                {
+                    return true;
+                }
+                document = JsonDocument.Parse(json);
+            }
+            using (document)
+            {
+                var root = document.RootElement;
+                if (IsVersionNewer(root, "schemaVersion", currentSchemaVersion))
+                    return true;
 
-            using var stream = new FileStream(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
-            using var document = ParseDocument(stream);
-            var root = document.RootElement;
-            if (IsVersionNewer(root, "schemaVersion", currentSchemaVersion))
-                return true;
-
-            return currentDefaultsRevision is { } currentRevision &&
-                   IsVersionNewer(root, "defaultsRevision", currentRevision);
+                return currentDefaultsRevision is { } currentRevision &&
+                       IsVersionNewer(root, "defaultsRevision", currentRevision);
+            }
         }
         catch
         {

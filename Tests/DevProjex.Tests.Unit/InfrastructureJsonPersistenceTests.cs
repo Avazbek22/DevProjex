@@ -337,6 +337,21 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_BoundedReadRejectsContentThatGrewAfterLengthProbe()
+	{
+		var bytes = Encoding.UTF8.GetBytes("0123456789overflow");
+		using var stream = new StaleLengthMemoryStream(bytes, reportedLength: 10);
+
+		var result = JsonStorePersistence.TryReadAllTextWithinSizeLimit(
+			stream,
+			maximumDocumentBytes: 10,
+			out var text);
+
+		Assert.False(result);
+		Assert.Empty(text);
+	}
+
+	[Fact]
 	public void JsonStorePersistence_ContainsFutureDocument_ProtectsDocumentBeyondExplicitLimit()
 	{
 		using var temp = new TemporaryDirectory();
@@ -527,6 +542,12 @@ public sealed class InfrastructureJsonPersistenceTests
 	{
 		var primaryPath = Path.Combine(temp.Path, "appdata", fileName);
 		return new JsonStoreFileSet(primaryPath, $"{primaryPath}.bak", $"{primaryPath}.lock");
+	}
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
 	}
 
 	private sealed record TestDocument(string Name, int Count);

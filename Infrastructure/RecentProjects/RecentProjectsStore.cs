@@ -729,14 +729,13 @@ public sealed class RecentProjectsStore
 
 		try
 		{
-			if (!JsonStorePersistence.IsDocumentWithinSizeLimit(
+			if (!JsonStorePersistence.TryReadAllTextWithinSizeLimit(
 				    path,
-				    JsonStorePersistence.SmallDocumentMaximumBytes))
+				    (int)JsonStorePersistence.SmallDocumentMaximumBytes,
+				    out var json))
 			{
 				return false;
 			}
-
-			var json = File.ReadAllText(path);
 			var deserialized = JsonSerializer.Deserialize<RecentProjectsDb>(json, SerializerOptions);
 			if (deserialized is null)
 				return false;

@@ -258,14 +258,13 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
         try
         {
-            if (!JsonStorePersistence.IsDocumentWithinSizeLimit(
+            if (!JsonStorePersistence.TryReadAllTextWithinSizeLimit(
                     path,
-                    JsonStorePersistence.SmallDocumentMaximumBytes))
+                    (int)JsonStorePersistence.SmallDocumentMaximumBytes,
+                    out var json))
             {
                 return ThemeDocumentReadStatus.MissingOrInvalid;
             }
-
-            var json = File.ReadAllText(path);
             var deserialized = JsonSerializer.Deserialize<ThemeSettingsDocument>(json, SerializerOptions);
             if (deserialized is null)
                 return ThemeDocumentReadStatus.MissingOrInvalid;
