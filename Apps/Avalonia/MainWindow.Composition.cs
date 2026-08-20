@@ -807,6 +807,7 @@ public partial class MainWindow
     private Border? _previewBar;
     private Grid? _previewSegmentGrid;
     private Border? _previewSegmentThumb;
+    private PreviewMarkerBar? _previewMarkerBar;
     private Button? _previewTreeModeButton;
     private Button? _previewContentModeButton;
     private Button? _previewTreeAndContentModeButton;
@@ -1022,6 +1023,7 @@ public partial class MainWindow
         _previewStickyHeaderCap = this.FindControl<Border>("PreviewStickyHeaderCap");
         _previewStickyHeaderContainer = this.FindControl<Border>("PreviewStickyHeaderContainer");
         _previewStickyHeaderText = this.FindControl<TextBlock>("PreviewStickyHeaderText");
+        _previewMarkerBar = this.FindControl<PreviewMarkerBar>("PreviewMarkerBar");
         _previewSegmentGrid = this.FindControl<Grid>("PreviewSegmentGrid");
         _previewSegmentThumb = this.FindControl<Border>("PreviewSegmentThumb");
         _previewTreeModeButton = this.FindControl<Button>("PreviewTreeModeButton");
@@ -1127,6 +1129,9 @@ public partial class MainWindow
                 _previewLineNumbersControl ??
                 throw new InvalidOperationException(
                     "Preview line numbers control was not found."),
+                _previewMarkerBar ??
+                throw new InvalidOperationException(
+                    "Preview marker bar was not found."),
                 _previewStickyHeaderCap ??
                 throw new InvalidOperationException(
                     "Preview sticky header cap was not found."),

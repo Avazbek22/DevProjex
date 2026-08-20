@@ -905,6 +905,7 @@
                                                             HorizontalAlignment="Left"
                                                             VerticalAlignment="Top" />
                   </ScrollViewer>
+
                 </Grid>
 
                 <Grid Grid.ColumnSpan="2"
@@ -959,6 +960,18 @@
                     </Button>
                   </Border>
                 </Grid>
+
+                <controls:PreviewMarkerBar Grid.Column="1"
+                                           Name="PreviewMarkerBar"
+                                           Width="9"
+                                           MinWidth="9"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Stretch"
+                                           ZIndex="20"
+                                           Cursor="Hand"
+                                           IsMarkerDisplayEnabled="{Binding IsPreviewSearchAvailable}"
+                                           RedactionBrush="{DynamicResource TreeSearchCurrentBrush}"
+                                           SearchBrush="{DynamicResource AppAccentBrush}" />
               </Grid>
             </Grid>
             </Border>

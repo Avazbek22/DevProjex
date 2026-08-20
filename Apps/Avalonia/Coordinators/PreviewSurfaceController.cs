@@ -6,6 +6,7 @@ internal sealed record PreviewSurfaceControls(
     ScrollViewer TextScrollViewer,
     VirtualizedPreviewTextControl TextControl,
     VirtualizedLineNumbersControl LineNumbersControl,
+    PreviewMarkerBar MarkerBar,
     Border StickyHeaderCap,
     Border StickyHeaderContainer,
     TextBlock StickyHeaderText);
@@ -126,8 +127,21 @@ internal sealed class PreviewSurfaceController : IDisposable
 		controls.TextControl.ManualSecretMarkRequested += OnManualSecretMarkRequested;
 		controls.TextControl.ManualSecretUnmarkRequested += OnManualSecretUnmarkRequested;
 		controls.TextControl.ManualSecretMarkRejected += OnManualSecretMarkRejected;
+		controls.TextControl.PreviewMarkersChanged += OnPreviewMarkersChanged;
+		controls.MarkerBar.MarkerInvoked += OnPreviewMarkerInvoked;
+		controls.MarkerBar.SetMarkers(controls.TextControl.MarkerSnapshot);
         controls.TextScrollViewer.LayoutUpdated += OnTextScrollViewerLayoutUpdated;
     }
+
+	private void OnPreviewMarkersChanged(
+		object? sender,
+		PreviewMarkersChangedEventArgs e)
+		=> _controls.MarkerBar.SetMarkers(e.Snapshot);
+
+	private void OnPreviewMarkerInvoked(
+		object? sender,
+		PreviewMarkerInvokedEventArgs e)
+		=> _controls.TextControl.NavigateToMarker(e.Target);
 
     private void OnVerticalScrollBarPropertyChanged(
         object? sender,
@@ -1289,6 +1303,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_controls.TextControl.ManualSecretMarkRequested -= OnManualSecretMarkRequested;
 		_controls.TextControl.ManualSecretUnmarkRequested -= OnManualSecretUnmarkRequested;
 		_controls.TextControl.ManualSecretMarkRejected -= OnManualSecretMarkRejected;
+		_controls.TextControl.PreviewMarkersChanged -= OnPreviewMarkersChanged;
+		_controls.MarkerBar.MarkerInvoked -= OnPreviewMarkerInvoked;
         _controls.TextScrollViewer.LayoutUpdated -= OnTextScrollViewerLayoutUpdated;
         if (_verticalScrollBar is not null)
             _verticalScrollBar.PropertyChanged -= OnVerticalScrollBarPropertyChanged;

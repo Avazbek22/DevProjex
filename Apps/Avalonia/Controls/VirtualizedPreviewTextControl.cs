@@ -73,6 +73,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	public event EventHandler<PreviewManualSecretUnmarkRequestedEventArgs>? ManualSecretUnmarkRequested;
 	internal event EventHandler<PreviewManualSecretMarkRejectedEventArgs>? ManualSecretMarkRejected;
 	internal event EventHandler? SearchDocumentChanged;
+	internal event EventHandler<PreviewMarkersChangedEventArgs>? PreviewMarkersChanged;
 
     public static readonly StyledProperty<string> TextProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(Text), string.Empty);
@@ -718,6 +719,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	internal int SearchMatchCount => _searchMatches.Length;
 
 	internal int ActiveSearchMatchIndex => _activeSearchMatchIndex;
+	internal PreviewMarkerSnapshot MarkerSnapshot { get; private set; } = PreviewMarkerSnapshot.Empty;
 
 	internal int SetSearchMatches(
 		PreviewSearchMatch[] matches,
@@ -726,6 +728,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	{
 		ArgumentNullException.ThrowIfNull(matches);
 		_searchMatches = matches;
+		PublishPreviewMarkers();
 		if (matches.Length == 0)
 		{
 			_activeSearchMatchIndex = -1;
@@ -758,6 +761,24 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 	internal void NavigateRedaction(bool forward) => MoveToRedaction(forward);
 
+	internal void NavigateToMarker(PreviewMarkerTarget target)
+	{
+		if (target.Category == PreviewMarkerCategory.Redaction)
+		{
+			var index = FindNearestRedactedOccurrenceIndex(target.LineNumber);
+			if (index >= 0)
+				ActivateRedaction(_redactionOccurrences[index], centerInViewport: true);
+		}
+		else
+		{
+			var index = FindNearestSearchMatchIndex(target.LineNumber);
+			if (index >= 0)
+				ActivateSearchMatch(index, scrollIntoView: true, centerInViewport: true);
+		}
+
+		Focus();
+	}
+
 	internal void ClearSearchMatches()
 	{
 		var hadMatches = _searchMatches.Length > 0 || _activeSearchMatchIndex >= 0;
@@ -765,7 +786,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 		_activeSearchMatchIndex = -1;
 		ClearSearchSelection();
 		if (hadMatches)
+		{
+			PublishPreviewMarkers();
 			InvalidateVisual();
+		}
 	}
 
     public bool TryHandleViewportSelectionStart(IPointer pointer, Point viewportPoint, KeyModifiers keyModifiers)
@@ -1457,6 +1481,44 @@ public sealed class VirtualizedPreviewTextControl : Control
 		if (_activeRedactionTarget is { } active && FindRedaction(active) is null)
 			_activeRedactionTarget = null;
 		UpdateHoveredRedaction(null);
+		PublishPreviewMarkers();
+	}
+
+	private void PublishPreviewMarkers()
+	{
+		var document = Document;
+		if (document is null)
+		{
+			MarkerSnapshot = PreviewMarkerSnapshot.Empty;
+			PreviewMarkersChanged?.Invoke(this, new PreviewMarkersChangedEventArgs(MarkerSnapshot));
+			return;
+		}
+
+		List<PreviewMarkerSource>? markers = null;
+		foreach (var (lineNumber, redactions) in _redactionsByLine)
+		{
+			if (!redactions.Any(static span => span.State == SecretPreviewSpanState.Redacted))
+				continue;
+
+			markers ??= [];
+			markers.Add(new PreviewMarkerSource(lineNumber, PreviewMarkerCategory.Redaction));
+		}
+
+		var previousSearchLine = -1;
+		foreach (var match in _searchMatches)
+		{
+			if (match.LineNumber == previousSearchLine)
+				continue;
+
+			markers ??= [];
+			markers.Add(new PreviewMarkerSource(match.LineNumber, PreviewMarkerCategory.Search));
+			previousSearchLine = match.LineNumber;
+		}
+
+		MarkerSnapshot = new PreviewMarkerSnapshot(
+			Math.Max(1, document.LineCount),
+			markers?.ToArray() ?? []);
+		PreviewMarkersChanged?.Invoke(this, new PreviewMarkersChangedEventArgs(MarkerSnapshot));
 	}
 
 	private void RaiseRedactionToggleRequested(PreviewRedactionSpan redaction)
@@ -1557,15 +1619,46 @@ public sealed class VirtualizedPreviewTextControl : Control
 			return;
 
 		var nextIndex = ResolveRedactionNavigationIndex(forward);
-		var redaction = _redactionOccurrences[nextIndex];
+		ActivateRedaction(_redactionOccurrences[nextIndex], centerInViewport: false);
+	}
+
+	private void ActivateRedaction(
+		PreviewRedactionSpan redaction,
+		bool centerInViewport)
+	{
 		_activeRedactionTarget = CreateNavigationTarget(redaction);
 		_selectionOwnedBySearch = false;
 		_selectionAnchor = new SelectionPosition(redaction.LineNumber, redaction.StartColumn);
 		_selectionActive = _selectionAnchor;
 		UpdateHoveredRedaction(null);
-		ScrollRedactionIntoView(redaction);
+		ScrollRedactionIntoView(redaction, centerInViewport);
 		InvalidateVisual();
 		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private int FindNearestRedactedOccurrenceIndex(int targetLine)
+	{
+		var nearestIndex = -1;
+		var nearestDistance = int.MaxValue;
+		for (var index = 0; index < _redactionOccurrences.Length; index++)
+		{
+			var occurrence = _redactionOccurrences[index];
+			if (occurrence.State != SecretPreviewSpanState.Redacted)
+				continue;
+
+			var distance = Math.Abs(occurrence.LineNumber - targetLine);
+			if (distance < nearestDistance)
+			{
+				nearestIndex = index;
+				nearestDistance = distance;
+			}
+			else if (occurrence.LineNumber > targetLine && distance > nearestDistance)
+			{
+				break;
+			}
+		}
+
+		return nearestIndex;
 	}
 
 	private int ResolveRedactionNavigationIndex(bool forward)
@@ -1622,7 +1715,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private double ResolveRedactionLineBottom(PreviewRedactionSpan redaction, double lineHeight)
 		=> ResolveRedactionLineTop(redaction, lineHeight) + lineHeight;
 
-	private void ScrollRedactionIntoView(PreviewRedactionSpan redaction)
+	private void ScrollRedactionIntoView(
+		PreviewRedactionSpan redaction,
+		bool centerInViewport = false)
 	{
 		var scrollViewer = GetOwnerScrollViewer();
 		if (scrollViewer is null)
@@ -1632,9 +1727,12 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var lineTop = ResolveRedactionLineTop(redaction, lineHeight);
 		var lineBottom = ResolveRedactionLineBottom(redaction, lineHeight);
 		var offset = scrollViewer.Offset;
-		var targetY = offset.Y;
-		if (lineTop < offset.Y || lineBottom > offset.Y + scrollViewer.Viewport.Height)
-			targetY = lineTop - (scrollViewer.Viewport.Height * 0.35);
+		var targetY = ResolveTargetVerticalOffset(
+			lineTop,
+			lineBottom,
+			offset.Y,
+			scrollViewer.Viewport.Height,
+			centerInViewport);
 
 		var lineText = GetLineText(redaction.LineNumber);
 		var typeface = ResolveTypeface();
@@ -1670,7 +1768,27 @@ public sealed class VirtualizedPreviewTextControl : Control
 		return index < _searchMatches.Length ? index : 0;
 	}
 
-	private void ActivateSearchMatch(int index, bool scrollIntoView)
+	private int FindNearestSearchMatchIndex(int targetLine)
+	{
+		if (_searchMatches.Length == 0)
+			return -1;
+
+		var nextIndex = FindFirstSearchMatchOnOrAfterLine(targetLine);
+		if (nextIndex == 0)
+			return 0;
+		if (nextIndex == _searchMatches.Length)
+			return nextIndex - 1;
+
+		return targetLine - _searchMatches[nextIndex - 1].LineNumber <=
+		       _searchMatches[nextIndex].LineNumber - targetLine
+			? nextIndex - 1
+			: nextIndex;
+	}
+
+	private void ActivateSearchMatch(
+		int index,
+		bool scrollIntoView,
+		bool centerInViewport = false)
 	{
 		if (index < 0 || index >= _searchMatches.Length)
 			return;
@@ -1685,13 +1803,15 @@ public sealed class VirtualizedPreviewTextControl : Control
 		_activeRedactionTarget = null;
 		UpdateHoveredRedaction(null);
 		if (scrollIntoView)
-			ScrollSearchMatchIntoView(match);
+			ScrollSearchMatchIntoView(match, centerInViewport);
 
 		InvalidateVisual();
 		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
 	}
 
-	private void ScrollSearchMatchIntoView(PreviewSearchMatch match)
+	private void ScrollSearchMatchIntoView(
+		PreviewSearchMatch match,
+		bool centerInViewport = false)
 	{
 		var scrollViewer = GetOwnerScrollViewer();
 		if (scrollViewer is null)
@@ -1701,9 +1821,12 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var lineTop = ResolveContentTopPadding() + ((match.LineNumber - 1) * lineHeight);
 		var lineBottom = lineTop + lineHeight;
 		var offset = scrollViewer.Offset;
-		var targetY = offset.Y;
-		if (lineTop < offset.Y || lineBottom > offset.Y + scrollViewer.Viewport.Height)
-			targetY = lineTop - (scrollViewer.Viewport.Height * 0.35);
+		var targetY = ResolveTargetVerticalOffset(
+			lineTop,
+			lineBottom,
+			offset.Y,
+			scrollViewer.Viewport.Height,
+			centerInViewport);
 
 		var lineText = GetLineText(match.LineNumber);
 		var typeface = ResolveTypeface();
@@ -1723,6 +1846,21 @@ public sealed class VirtualizedPreviewTextControl : Control
 		scrollViewer.Offset = new Vector(
 			Math.Clamp(targetX, 0, maximumX),
 			Math.Clamp(targetY, 0, maximumY));
+	}
+
+	private static double ResolveTargetVerticalOffset(
+		double lineTop,
+		double lineBottom,
+		double viewportTop,
+		double viewportHeight,
+		bool centerInViewport)
+	{
+		if (centerInViewport)
+			return ((lineTop + lineBottom) / 2) - (viewportHeight / 2);
+
+		return lineTop < viewportTop || lineBottom > viewportTop + viewportHeight
+			? lineTop - (viewportHeight * 0.35)
+			: viewportTop;
 	}
 
 	private void ClearSearchSelection()
