@@ -157,6 +157,7 @@ public class GitRepositoryServiceUnitTests
 	[InlineData("release/v1.2@beta")]
 	[InlineData("feature.LOCK")]
 	[InlineData("feature/next\u0085checkpoint")]
+	[InlineData("@")]
 	[InlineData("тема/исправление")]
 	public void BranchNameValidator_AcceptsValidUnusualNames(string branchName)
 	{

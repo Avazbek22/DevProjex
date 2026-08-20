@@ -11,7 +11,6 @@ internal static class GitBranchNameValidator
 	{
 		if (string.IsNullOrEmpty(branchName) ||
 		    branchName[0] == '-' ||
-		    branchName is "@" ||
 		    branchName[^1] is '/' or '.' ||
 		    branchName.Contains("..", StringComparison.Ordinal) ||
 		    branchName.Contains("@{", StringComparison.Ordinal) ||
