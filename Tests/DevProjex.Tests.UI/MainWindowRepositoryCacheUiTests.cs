@@ -625,7 +625,9 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				Assert.IsType<Button>(cloneWindow.FindControl<Button>("StartCloneButton")));
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => !cloneWindow.IsVisible && git.BranchDiscoveryCount > 0,
+				() => !cloneWindow.IsVisible &&
+				      viewModel.GitBranches.Select(static branch => branch.Name)
+					      .SequenceEqual(["feature/cache", "release"]),
 				"the cached repository branch catalog to refresh after publication");
 
 			Assert.Equal(["feature/cache", "release"], viewModel.GitBranches.Select(static branch => branch.Name));
