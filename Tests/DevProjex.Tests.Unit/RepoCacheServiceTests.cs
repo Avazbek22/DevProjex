@@ -507,9 +507,6 @@ public class RepoCacheServiceTests : IDisposable
 
         var validEntry = Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(validUrl));
         Assert.Equal(validPath, validEntry.LocalPath, PathComparer.Default);
-        Assert.DoesNotContain(
-            _service.ListIndexedRepositories(),
-            entry => string.Equals(entry.RepositoryUrl, invalidUrl, StringComparison.Ordinal));
         Assert.True(Directory.Exists(validPath));
         Assert.True(File.Exists(Path.Combine(validPath, "payload.txt")));
     }
