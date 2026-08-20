@@ -370,7 +370,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         DocumentProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
         {
-			control.ClearSearchMatches();
+			control.ClearSearchMatches(publishMarkers: false);
             control.RebuildRedactionIndex();
             control.RebuildTextLayoutMetadata();
 			control.SearchDocumentChanged?.Invoke(control, EventArgs.Empty);
@@ -779,7 +779,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		Focus();
 	}
 
-	internal void ClearSearchMatches()
+	internal void ClearSearchMatches(bool publishMarkers = true)
 	{
 		var hadMatches = _searchMatches.Length > 0 || _activeSearchMatchIndex >= 0;
 		_searchMatches = [];
@@ -787,7 +787,8 @@ public sealed class VirtualizedPreviewTextControl : Control
 		ClearSearchSelection();
 		if (hadMatches)
 		{
-			PublishPreviewMarkers();
+			if (publishMarkers)
+				PublishPreviewMarkers();
 			InvalidateVisual();
 		}
 	}

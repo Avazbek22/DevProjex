@@ -150,4 +150,95 @@ public sealed class PreviewMarkerGeometryTests
 
 		Assert.Null(target);
 	}
+
+	[Fact]
+	public void Build_FiltersInvalidLinesAndRejectsInvalidGeometry()
+	{
+		PreviewMarkerSource[] markers =
+		[
+			new(-1, PreviewMarkerCategory.Redaction),
+			new(0, PreviewMarkerCategory.Search),
+			new(5, PreviewMarkerCategory.Redaction),
+			new(11, PreviewMarkerCategory.Search)
+		];
+
+		var tick = Assert.Single(PreviewMarkerGeometry.Build(markers, totalLineCount: 10, height: 40));
+
+		Assert.Equal(new PreviewMarkerTarget(5, PreviewMarkerCategory.Redaction), tick.Target);
+		Assert.Empty(PreviewMarkerGeometry.Build(markers, totalLineCount: 0, height: 40));
+		Assert.Empty(PreviewMarkerGeometry.Build(markers, totalLineCount: 10, height: 0));
+		Assert.Empty(PreviewMarkerGeometry.Build(markers, totalLineCount: 10, height: double.NaN));
+		Assert.Empty(PreviewMarkerGeometry.Build(markers, totalLineCount: 10, height: double.PositiveInfinity));
+	}
+
+	[Fact]
+	public void Build_WithScrollMetricsPinsBoundaryLinesToThumbCenters()
+	{
+		PreviewMarkerSource[] markers =
+		[
+			new(1, PreviewMarkerCategory.Redaction),
+			new(100, PreviewMarkerCategory.Redaction)
+		];
+		var metrics = new PreviewMarkerScrollMetrics(
+			ExtentHeight: 1_020,
+			ViewportHeight: 220,
+			ThumbHeight: 20,
+			FirstLineTop: 10,
+			LineHeight: 10);
+
+		var ticks = PreviewMarkerGeometry.Build(markers, totalLineCount: 100, height: 100, metrics);
+
+		Assert.Equal(2, ticks.Length);
+		Assert.Equal(10, ticks[0].Y, precision: 6);
+		Assert.Equal(90, ticks[1].Y, precision: 6);
+	}
+
+	[Fact]
+	public void Build_IsDeterministicForUnorderedDuplicateInput()
+	{
+		PreviewMarkerSource[] ordered =
+		[
+			new(5, PreviewMarkerCategory.Redaction),
+			new(5, PreviewMarkerCategory.Redaction),
+			new(40, PreviewMarkerCategory.Search),
+			new(80, PreviewMarkerCategory.Redaction)
+		];
+		PreviewMarkerSource[] shuffled = [ordered[3], ordered[1], ordered[2], ordered[0]];
+
+		var first = PreviewMarkerGeometry.Build(ordered, totalLineCount: 100, height: 120);
+		var second = PreviewMarkerGeometry.Build(shuffled, totalLineCount: 100, height: 120);
+
+		Assert.Equal(first, second);
+	}
+
+	[Fact]
+	public void Build_DenseDocumentKeepsRenderedTickCountBoundedByStripeHeightAndCategoryCount()
+	{
+		var markers = Enumerable.Range(1, 100_000)
+			.SelectMany(static line => new[]
+			{
+				new PreviewMarkerSource(line, PreviewMarkerCategory.Redaction),
+				new PreviewMarkerSource(line, PreviewMarkerCategory.Search)
+			})
+			.ToArray();
+
+		var ticks = PreviewMarkerGeometry.Build(markers, totalLineCount: 100_000, height: 240);
+
+		Assert.InRange(ticks.Length, 2, 480);
+		Assert.All(ticks, static tick => Assert.InRange(tick.Y, 0, 239));
+	}
+
+	[Theory]
+	[InlineData(double.NaN, 4)]
+	[InlineData(10, double.NaN)]
+	[InlineData(10, -1)]
+	public void FindTargetAt_RejectsInvalidLookupArguments(double y, double maximumDistance)
+	{
+		PreviewMarkerTick[] ticks =
+		[
+			new(10, new PreviewMarkerTarget(10, PreviewMarkerCategory.Redaction))
+		];
+
+		Assert.Null(PreviewMarkerGeometry.FindTargetAt(ticks, y, maximumDistance));
+	}
 }
