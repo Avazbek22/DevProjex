@@ -1118,6 +1118,7 @@ public sealed class RepoCacheService : IRepoCacheService
 				{
 					_testHooks?.BeforeUnusedWorktreeCleanup?.Invoke(basePath);
 					await CleanupUnusedWorktreesAsync(basePath, retainedPath, timeout.Token).ConfigureAwait(false);
+					_testHooks?.AfterUnusedWorktreeCleanup?.Invoke(basePath);
 				}
 				catch (OperationCanceledException) when (timeout.IsCancellationRequested)
 				{
@@ -2118,6 +2119,7 @@ internal sealed class RepoCacheTestHooks
 	public Action? BeforeScheduledGarbageCollection { get; init; }
 	public Action? AfterScheduledGarbageCollection { get; init; }
 	public Action<string>? BeforeUnusedWorktreeCleanup { get; init; }
+	public Action<string>? AfterUnusedWorktreeCleanup { get; init; }
 	public Action<string>? BeforeRepositorySizeRefresh { get; init; }
 	public Action<string>? AfterRepositorySizeCalculated { get; init; }
 	public Action<string>? AfterRepositorySizeRefresh { get; init; }

@@ -417,7 +417,21 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 		await using var source = await GitTestRepository.CreateAsync(
 			cancellationToken: TestContext.Current.CancellationToken);
 		using var cache = new TemporaryDirectory();
-		RepoCacheService service = new(cache.Path);
+		using var cleanupCompleted = new ManualResetEventSlim();
+		var cleanupCount = 0;
+		RepoCacheService service = new(
+			cache.Path,
+			RepositoryCachePolicy.Default,
+			TimeProvider.System,
+			new GitWorktreeManager(),
+			new RepoCacheTestHooks
+			{
+				AfterUnusedWorktreeCleanup = _ =>
+				{
+					if (Interlocked.Increment(ref cleanupCount) >= 2)
+						cleanupCompleted.Set();
+				}
+			});
 		var git = new GitRepositoryService();
 		var cloneCount = 0;
 
@@ -450,6 +464,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 			Assert.Equal(firstPath, reused.RepositoryPath, PathComparer.Default);
 		}
 
+		Assert.True(cleanupCompleted.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 		service = new RepoCacheService(
 			cache.Path,
 			new RepositoryCachePolicy(1, TimeSpan.FromDays(60)),
