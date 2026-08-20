@@ -155,6 +155,8 @@ public class GitRepositoryServiceUnitTests
 	[Theory]
 	[InlineData("feature/space+plus")]
 	[InlineData("release/v1.2@beta")]
+	[InlineData("feature.LOCK")]
+	[InlineData("feature/next\u0085checkpoint")]
 	[InlineData("тема/исправление")]
 	public void BranchNameValidator_AcceptsValidUnusualNames(string branchName)
 	{
@@ -170,6 +172,8 @@ public class GitRepositoryServiceUnitTests
 	[InlineData("feature/.hidden")]
 	[InlineData("feature.lock")]
 	[InlineData("feature\\name")]
+	[InlineData("feature/next\u001Fcheckpoint")]
+	[InlineData("feature/next\u007Fcheckpoint")]
 	public void BranchNameValidator_RejectsInvalidNamesBeforeCommandConstruction(string branchName)
 	{
 		Assert.False(GitBranchNameValidator.IsValid(branchName));
