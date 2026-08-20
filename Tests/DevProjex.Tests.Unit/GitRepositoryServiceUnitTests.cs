@@ -53,7 +53,7 @@ public class GitRepositoryServiceUnitTests
 		var expected = new string('x', limit);
 		using var reader = new StringReader(expected);
 
-		var result = await GitWorktreeManager.ReadBoundedOutputAsync(
+		var result = await GitProcessOutputReader.ReadAsync(
 			reader,
 			limit,
 			TestContext.Current.CancellationToken);
@@ -68,7 +68,7 @@ public class GitRepositoryServiceUnitTests
 		const int limit = 257;
 		using var reader = new StringReader(new string('x', limit + 4096));
 
-		var result = await GitWorktreeManager.ReadBoundedOutputAsync(
+		var result = await GitProcessOutputReader.ReadAsync(
 			reader,
 			limit,
 			TestContext.Current.CancellationToken);

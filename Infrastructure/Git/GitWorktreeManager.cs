@@ -1,6 +1,4 @@
-using System.Buffers;
 using System.ComponentModel;
-using System.Text;
 
 namespace DevProjex.Infrastructure.Git;
 
@@ -26,7 +24,7 @@ internal interface IGitWorktreeManager
 internal sealed class GitWorktreeManager : IGitWorktreeManager
 {
 	private static readonly TimeSpan SupportProbeTimeout = TimeSpan.FromSeconds(10);
-	internal const int MaximumProcessOutputCharacters = 1024 * 1024;
+	internal const int MaximumProcessOutputCharacters = GitProcessOutputReader.MaximumOutputCharacters;
 	private readonly object _supportSync = new();
 	private readonly Func<string, Task<WorktreeSupportState>> _probeSupport;
 	private Task<WorktreeSupportState>? _supportProbe;
@@ -353,11 +351,11 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		if (!process.Start())
 			return new GitProcessResult(-1, string.Empty, string.Empty);
 
-		var outputTask = ReadBoundedOutputAsync(
+		var outputTask = GitProcessOutputReader.ReadAsync(
 			process.StandardOutput,
 			MaximumProcessOutputCharacters,
 			cancellationToken);
-		var errorTask = ReadBoundedOutputAsync(
+		var errorTask = GitProcessOutputReader.ReadAsync(
 			process.StandardError,
 			MaximumProcessOutputCharacters,
 			cancellationToken);
@@ -386,47 +384,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		}
 	}
 
-	internal static async Task<BoundedProcessOutput> ReadBoundedOutputAsync(
-		TextReader reader,
-		int maximumCharacters,
-		CancellationToken cancellationToken)
-	{
-		ArgumentNullException.ThrowIfNull(reader);
-		if (maximumCharacters <= 0)
-			throw new ArgumentOutOfRangeException(nameof(maximumCharacters));
-
-		var buffer = ArrayPool<char>.Shared.Rent(Math.Min(4096, maximumCharacters));
-		var output = new StringBuilder(Math.Min(4096, maximumCharacters));
-		var exceededLimit = false;
-		try
-		{
-			while (true)
-			{
-				var read = await reader
-					.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)
-					.ConfigureAwait(false);
-				if (read == 0)
-					break;
-
-				var remaining = maximumCharacters - output.Length;
-				if (remaining > 0)
-					output.Append(buffer, 0, Math.Min(read, remaining));
-				if (read > remaining)
-					exceededLimit = true;
-			}
-
-			return exceededLimit
-				? new BoundedProcessOutput(string.Empty, ExceededLimit: true)
-				: new BoundedProcessOutput(output.ToString(), ExceededLimit: false);
-		}
-		finally
-		{
-			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
-		}
-	}
-
 	internal sealed record GitProcessResult(int ExitCode, string Output, string Error);
-	internal readonly record struct BoundedProcessOutput(string Text, bool ExceededLimit);
 
 	private static void TryDeletePartialWorktree(string path)
 	{

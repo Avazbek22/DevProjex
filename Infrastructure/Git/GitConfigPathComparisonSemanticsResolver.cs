@@ -234,8 +234,14 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 				return false;
 
 			process.StandardInput.Close();
-			var outputTask = process.StandardOutput.ReadToEndAsync();
-			var errorTask = process.StandardError.ReadToEndAsync();
+			var outputTask = GitProcessOutputReader.ReadAsync(
+				process.StandardOutput,
+				GitProcessOutputReader.MaximumOutputCharacters,
+				CancellationToken.None);
+			var errorTask = GitProcessOutputReader.ReadAsync(
+				process.StandardError,
+				GitProcessOutputReader.MaximumOutputCharacters,
+				CancellationToken.None);
 			if (!process.WaitForExit(CommandTimeoutMilliseconds))
 			{
 				TryKill(process);
@@ -247,8 +253,11 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 				return false;
 			}
 
-			standardOutput = outputTask.GetAwaiter().GetResult();
-			_ = errorTask.GetAwaiter().GetResult();
+			var output = outputTask.GetAwaiter().GetResult();
+			var error = errorTask.GetAwaiter().GetResult();
+			if (output.ExceededLimit || error.ExceededLimit)
+				return false;
+			standardOutput = output.Text;
 			exitCode = process.ExitCode;
 			return true;
 		}

@@ -1064,13 +1064,25 @@ public sealed class RepoCacheService : IRepoCacheService
 		};
 		process.Start();
 		process.StandardInput.Close();
-		var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
-		var error = process.StandardError.ReadToEndAsync(cancellationToken);
+		var output = GitProcessOutputReader.ReadAsync(
+			process.StandardOutput,
+			GitProcessOutputReader.MaximumOutputCharacters,
+			cancellationToken);
+		var error = GitProcessOutputReader.ReadAsync(
+			process.StandardError,
+			GitProcessOutputReader.MaximumOutputCharacters,
+			cancellationToken);
 		try
 		{
 			await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
 			await Task.WhenAll(output, error).ConfigureAwait(false);
-			return process.ExitCode == 0 ? await output.ConfigureAwait(false) : null;
+			var standardOutput = await output.ConfigureAwait(false);
+			var standardError = await error.ConfigureAwait(false);
+			return process.ExitCode == 0 &&
+			       !standardOutput.ExceededLimit &&
+			       !standardError.ExceededLimit
+				? standardOutput.Text
+				: null;
 		}
 		catch (OperationCanceledException)
 		{
