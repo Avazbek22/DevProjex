@@ -372,6 +372,28 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DownloadAndExtractAsync_OnWindowsRejectsDriveLikeFirstArchiveEntry()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var archive = CreateArchive(("C:/outside.txt", "payload"u8.ToArray()));
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+        var targetDir = Path.Combine(_tempDir!, "first-entry-drive");
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("alternate data stream", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(targetDir));
+    }
+
+    [Fact]
     public async Task DownloadAndExtractAsync_FailureDuringStagedExtractionLeavesOccupiedTargetUntouched()
     {
         var archive = CreateArchive(

@@ -600,7 +600,13 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
             return null;
 
         var folderName = entryPath[..slashIndex];
-        return folderName is "." or ".." ? null : folderName;
+        if (folderName is "." or ".." ||
+            OperatingSystem.IsWindows() && folderName.Contains(':', StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return folderName;
     }
 
     private static bool StartsWithFolderPrefix(string value, string folderName)
