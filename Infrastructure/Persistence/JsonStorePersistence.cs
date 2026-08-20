@@ -267,22 +267,26 @@ internal static class JsonStorePersistence
                 FileShare.ReadWrite | FileShare.Delete);
             using var document = ParseDocument(stream);
             var root = document.RootElement;
-            var schemaVersion = root.TryGetProperty("schemaVersion", out var schemaElement) &&
-                                schemaElement.TryGetInt32(out var schema)
-                ? schema
-                : 0;
-            if (schemaVersion > currentSchemaVersion)
+            if (IsVersionNewer(root, "schemaVersion", currentSchemaVersion))
                 return true;
 
             return currentDefaultsRevision is { } currentRevision &&
-                   root.TryGetProperty("defaultsRevision", out var revisionElement) &&
-                   revisionElement.TryGetInt32(out var revision) &&
-                   revision > currentRevision;
+                   IsVersionNewer(root, "defaultsRevision", currentRevision);
         }
         catch
         {
             return false;
         }
+    }
+
+    private static bool IsVersionNewer(JsonElement root, string propertyName, int currentVersion)
+    {
+        if (!root.TryGetProperty(propertyName, out var element))
+            return false;
+        if (element.TryGetInt64(out var signedVersion))
+            return signedVersion > currentVersion;
+        return element.TryGetUInt64(out var unsignedVersion) &&
+               unsignedVersion > (ulong)Math.Max(0, currentVersion);
     }
 
     private static JsonDocument ParseDocument(FileStream stream)

@@ -385,6 +385,29 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.True(protectedDocument);
 	}
 
+	[Theory]
+	[InlineData("schemaVersion", null)]
+	[InlineData("defaultsRevision", 1)]
+	public void JsonStorePersistence_ContainsFutureDocument_ProtectsVersionBeyondInt32(
+		string propertyName,
+		int? currentDefaultsRevision)
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		var json = propertyName == "schemaVersion"
+			? """{ "schemaVersion": 2147483648 }"""
+			: """{ "schemaVersion": 1, "defaultsRevision": 2147483648 }""";
+		File.WriteAllText(fileSet.PrimaryPath, json);
+
+		var protectedDocument = JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			currentSchemaVersion: 1,
+			currentDefaultsRevision);
+
+		Assert.True(protectedDocument);
+	}
+
 	[Fact]
 	public void JsonStorePersistence_TryWriteAtomic_CommitsPrimaryMirrorsBackupAndLeavesNoTempFiles()
 	{
