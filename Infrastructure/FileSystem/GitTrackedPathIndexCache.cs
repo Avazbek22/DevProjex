@@ -598,7 +598,7 @@ internal static class GitTrackedPathIndexCache
 
 	private static void Store(GitIndexSignature signature, LoadedGitTrackedPathIndex loaded)
 	{
-		if (loaded.EstimatedRetainedBytes > MaximumSingleEntryBytes)
+		if (!CanRetainCacheEntry(loaded.EstimatedRetainedBytes))
 			return;
 
 		lock (CacheSync)
@@ -619,6 +619,9 @@ internal static class GitTrackedPathIndexCache
 			}
 		}
 	}
+
+	internal static bool CanRetainCacheEntry(long estimatedRetainedBytes) =>
+		estimatedRetainedBytes is >= EstimatedEmptyIndexBytes and <= CacheByteLimit;
 
 	private static void Remove(string repositoryRootPath)
 	{

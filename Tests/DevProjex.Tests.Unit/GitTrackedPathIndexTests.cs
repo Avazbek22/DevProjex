@@ -59,6 +59,20 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Theory]
+	[InlineData(64, true)]
+	[InlineData(16 * 1024 * 1024, true)]
+	[InlineData(16 * 1024 * 1024 + 1, false)]
+	[InlineData(64 * 1024 * 1024, false)]
+	public void CacheRetentionPolicy_EnforcesTheGlobalRetainedByteBudget(
+		long estimatedRetainedBytes,
+		bool expected)
+	{
+		Assert.Equal(
+			expected,
+			GitTrackedPathIndexCache.CanRetainCacheEntry(estimatedRetainedBytes));
+	}
+
+	[Theory]
 	[InlineData("src/App.cs", true, false, true)]
 	[InlineData("src", false, true, true)]
 	[InlineData("src/Missing.cs", false, false, false)]
