@@ -394,7 +394,6 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 		public IReadOnlyDictionary<string, string> Get(AppLanguage language) =>
 			new Dictionary<string, string>
 			{
-				["Tree.AccessDeniedRoot"] = "Access denied",
 				["Tree.AccessDenied"] = "Access denied",
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",

@@ -2,7 +2,7 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class TreeNodePresentationServiceTests
 {
-	// Verifies access-denied nodes use localized display names and icons.
+	// Verifies access-denied nodes preserve their names and append one localized marker.
 	[Fact]
 	public void Build_UsesLocalizationForAccessDenied()
 	{
@@ -10,8 +10,7 @@ public sealed class TreeNodePresentationServiceTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
-				["Tree.AccessDeniedRoot"] = "RootDenied",
-				["Tree.AccessDenied"] = "ChildDenied"
+				["Tree.AccessDenied"] = "access denied"
 			}
 		});
 		var localization = new LocalizationService(catalog, AppLanguage.En);
@@ -25,13 +24,18 @@ public sealed class TreeNodePresentationServiceTests
 			isAccessDenied: true,
 			children: new List<FileSystemNode>
 			{
-				new FileSystemNode("child", "/root/child", true, true, new List<FileSystemNode>())
+				new FileSystemNode("child", "/root/child", true, true, new List<FileSystemNode>()),
+				new FileSystemNode("name.ext", "/root/name.ext", false, true, new List<FileSystemNode>())
 			});
 
 		var result = service.Build(root);
 
-		Assert.Equal("RootDenied", result.DisplayName);
-		Assert.Equal("ChildDenied", result.Children[0].DisplayName);
+		Assert.Equal("root [access denied]", result.DisplayName);
+		Assert.Equal("child [access denied]", result.Children[0].DisplayName);
+		Assert.Equal("name.ext [access denied]", result.Children[1].DisplayName);
+		Assert.DoesNotContain("⛔", result.DisplayName, StringComparison.Ordinal);
+		Assert.All(result.Children, static child =>
+			Assert.DoesNotContain("⛔", child.DisplayName, StringComparison.Ordinal));
 		Assert.Equal("icon", result.IconKey);
 	}
 
@@ -159,8 +163,7 @@ public sealed class TreeNodePresentationServiceTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
-				["Tree.AccessDeniedRoot"] = "RootDenied",
-				["Tree.AccessDenied"] = "ChildDenied"
+				["Tree.AccessDenied"] = "access denied"
 			}
 		});
 		var localization = new LocalizationService(catalog, AppLanguage.En);
@@ -180,7 +183,7 @@ public sealed class TreeNodePresentationServiceTests
 		var result = service.Build(root);
 
 		Assert.Equal("root", result.DisplayName);
-		Assert.Equal("ChildDenied", result.Children[0].DisplayName);
+		Assert.Equal("child [access denied]", result.Children[0].DisplayName);
 	}
 
 	// Verifies nested children preserve directory flags.

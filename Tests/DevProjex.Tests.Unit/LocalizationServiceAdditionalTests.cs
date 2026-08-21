@@ -11,8 +11,7 @@ public sealed class LocalizationServiceAdditionalTests
 				["Key.World"] = "World",
 				["Key.Format0"] = "Value: {0}",
 				["Key.Format2"] = "{0} + {1} = {2}",
-				["Tree.AccessDenied"] = "Access denied",
-				["Tree.AccessDeniedRoot"] = "Access denied root"
+				["Tree.AccessDenied"] = "access denied"
 			},
 			[AppLanguage.Ru] = new Dictionary<string, string>
 			{
@@ -20,8 +19,7 @@ public sealed class LocalizationServiceAdditionalTests
 				["Key.World"] = "Мир",
 				["Key.Format0"] = "Значение: {0}",
 				["Key.Format2"] = "{0} + {1} = {2}",
-				["Tree.AccessDenied"] = "Доступ запрещен",
-				["Tree.AccessDeniedRoot"] = "Доступ запрещен (корень)"
+				["Tree.AccessDenied"] = "доступ запрещен"
 			}
 		};
 
@@ -29,8 +27,7 @@ public sealed class LocalizationServiceAdditionalTests
 	// Verifies the indexer returns localized values for known keys in English.
 	[InlineData("Key.Hello", "Hello")]
 	[InlineData("Key.World", "World")]
-	[InlineData("Tree.AccessDenied", "Access denied")]
-	[InlineData("Tree.AccessDeniedRoot", "Access denied root")]
+	[InlineData("Tree.AccessDenied", "access denied")]
 	[InlineData("Key.Format0", "Value: {0}")]
 	[InlineData("Key.Format2", "{0} + {1} = {2}")]
 	public void Indexer_ReturnsEnglishValues(string key, string expected)
@@ -46,8 +43,7 @@ public sealed class LocalizationServiceAdditionalTests
 	// Verifies the indexer returns localized values for known keys in Russian.
 	[InlineData("Key.Hello", "Привет")]
 	[InlineData("Key.World", "Мир")]
-	[InlineData("Tree.AccessDenied", "Доступ запрещен")]
-	[InlineData("Tree.AccessDeniedRoot", "Доступ запрещен (корень)")]
+	[InlineData("Tree.AccessDenied", "доступ запрещен")]
 	[InlineData("Key.Format0", "Значение: {0}")]
 	[InlineData("Key.Format2", "{0} + {1} = {2}")]
 	public void Indexer_ReturnsRussianValues(string key, string expected)

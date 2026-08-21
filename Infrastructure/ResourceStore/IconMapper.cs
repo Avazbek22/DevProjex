@@ -12,7 +12,7 @@ public sealed class IconMapper : IIconMapper
 
 		if (node.IsDirectory)
 		{
-			if (node.IsAccessDenied || mapping.GrayFolderNames.Contains(node.Name))
+			if (mapping.GrayFolderNames.Contains(node.Name))
 				return "grayFolder";
 
 			return "folder";

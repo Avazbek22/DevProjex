@@ -22,7 +22,7 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 		List<string>? orderedFilePaths)
 	{
 		var displayName = node.IsAccessDenied
-			? (isRoot ? localization["Tree.AccessDeniedRoot"] : localization["Tree.AccessDenied"])
+			? $"{node.Name} [{localization["Tree.AccessDenied"]}]"
 			: node.Name;
 
 		var iconKey = iconMapper.GetIconKey(node);

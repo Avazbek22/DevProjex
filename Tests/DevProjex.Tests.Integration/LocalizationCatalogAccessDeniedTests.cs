@@ -32,6 +32,23 @@ public sealed class LocalizationCatalogAccessDeniedTests
 		AssertNotEnglish(language);
 	}
 
+	[Theory]
+	[MemberData(nameof(AllLanguageCases))]
+	public void TreeAccessDeniedMarker_IsSuffixTextWithoutDecoration(AppLanguage language)
+	{
+		var localized = new JsonLocalizationCatalog().Get(language);
+
+		Assert.True(localized.TryGetValue("Tree.AccessDenied", out var marker));
+		Assert.False(string.IsNullOrWhiteSpace(marker));
+		// German capitalizes nouns, so its marker legitimately starts uppercase.
+		if (language != AppLanguage.De)
+			Assert.False(char.IsUpper(marker![0]));
+		Assert.DoesNotContain("⛔", marker, StringComparison.Ordinal);
+		Assert.DoesNotContain("[", marker, StringComparison.Ordinal);
+		Assert.DoesNotContain("]", marker, StringComparison.Ordinal);
+		Assert.DoesNotContain("Tree.AccessDeniedRoot", localized.Keys);
+	}
+
 	public static IEnumerable<object[]> AllLanguageCases()
 	{
 		foreach (var language in SupportedLanguages)
