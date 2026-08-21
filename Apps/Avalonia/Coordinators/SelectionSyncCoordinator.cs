@@ -1266,6 +1266,8 @@ public sealed partial class SelectionSyncCoordinator(
         return SnapshotRuntimeSelectedIgnoreOptions();
     }
 
+	internal bool HasPreparedSelection => _session.PreparedPath is not null;
+
     public void ApplyIgnoreSelectionOverride(
         IReadOnlySet<IgnoreOptionId> selectedOptions)
     {

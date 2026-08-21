@@ -104,6 +104,7 @@ public static class AvaloniaCompositionRoot
         var toastService = new ToastService();
         var elevation = new ElevationService();
         var appInstanceLauncher = new AppInstanceLauncher();
+        var projectPathLauncher = new ProjectPathLauncher();
         // UI tests need an isolated app-data root so persisted settings/profiles from
         // previous runs cannot leak into the current window state and make workflow
         // scenarios nondeterministic on CI.
@@ -155,6 +156,7 @@ public static class AvaloniaCompositionRoot
             TaskbarProgressService: taskbarProgressService,
             SessionMetricsRecorder: sessionMetricsRecorder,
 			SecretRedactionSession: secretRedactionSession,
-			CodeCompressionSession: codeCompressionSession);
+			CodeCompressionSession: codeCompressionSession,
+			ProjectPathLauncher: projectPathLauncher);
     }
 }

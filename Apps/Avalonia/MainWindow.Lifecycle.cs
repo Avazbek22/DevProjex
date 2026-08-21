@@ -161,6 +161,7 @@ public partial class MainWindow
             Deactivated -= OnDeactivated;
 
             _previewSurfaceController.Dispose();
+			_treeContextMenu.Dispose();
             CancelAndDisposeWindowOperations();
 
             _searchFilterController.ClearProjectState();
