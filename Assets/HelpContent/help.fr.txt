@@ -11,11 +11,11 @@ Important : DevProjex ne modifie pas les fichiers du projet ouvert.
 Cases à cocher : cocher un nœud s’applique aux enfants ; l’état des parents se recalculent automatiquement.
 
 Raccourcis :
-* Ctrl+E — tout déplier
-* Ctrl+W — tout replier (la racine reste ouverte)
+* {mod}E — tout déplier
+* {collapseAll} — tout replier (la racine reste ouverte)
 
 ## 3) Fichier
-* Ouvrir le dossier… — ouvrir le dossier racine (Ctrl+O)
+* Ouvrir le dossier… — ouvrir le dossier racine ({mod}O)
 * Nouvelle fenêtre — ouvrir une nouvelle instance indépendante de DevProjex
 * Récents — liste des dossiers locaux ouverts récemment
 * Actualiser — relire un dossier local et reconstruire l’arborescence (F5)
@@ -141,7 +141,7 @@ Le sélecteur n’influence pas :
 Copie l’arborescence du projet.
 S’il y a des nœuds cochés, l’arborescence est construite à partir de la sélection ; si la sélection est vide ou invalide, l’arborescence complète est copiée.
 Le format du résultat est défini par le sélecteur de format d’arborescence.
-Raccourcis : Ctrl+Shift+C et Ctrl+Alt+C.
+Raccourcis : {mod}{shift}C et {mod}{alt}C.
 
 ### Copier le contenu
 Copie le contenu des fichiers :
@@ -149,14 +149,14 @@ Copie le contenu des fichiers :
 * les fichiers non textuels sont ignorés (y compris les binaires) ;
 * pour les fichiers texte vides, le chemin et la ligne `[No Content, 0 bytes]` sont ajoutés ;
 * pour les fichiers ne contenant que des espaces/retours à la ligne, le chemin et la ligne `[Whitespace, N bytes]` sont ajoutés.
-Raccourci : Ctrl+Alt+V.
+Raccourci : {mod}{alt}V.
 
 ### Copier l’arborescence + le contenu
 Combine arborescence et contenu :
 * arborescence depuis la sélection ; si la sélection est vide ou invalide, l’arborescence complète est utilisée ;
 * contenu selon les mêmes règles que « Copier le contenu » ;
 * le format du bloc arborescence est défini par le sélecteur de format d’arborescence.
-Raccourci : Ctrl+Shift+V.
+Raccourci : {mod}{shift}V.
 
 ### Représentations de l’arborescence
 Les formats représentent différemment la même arborescence de projet sélectionnée.
@@ -183,11 +183,11 @@ Arborescence + contenu :
 * export en `.txt`.
 
 ## 7) Mode aperçu
-S’ouvre avec le bouton icône œil dans la barre supérieure ou avec Ctrl+B.
+S’ouvre avec le bouton icône œil dans la barre supérieure ou avec {mod}B.
 
 Les boutons latéraux de la souris suivent la navigation du navigateur : Suivant ouvre le mode aperçu et Précédent le ferme. Répéter la direction déjà active n’a aucun effet.
 
-Ctrl+Shift+F ouvre ou ferme la recherche dans le contenu des fichiers de l’aperçu. Enter ou F3 passe au résultat suivant ; Shift+Enter ou Shift+F3 au précédent.
+{mod}{shift}F ouvre ou ferme la recherche dans le contenu des fichiers de l’aperçu. Enter ou F3 passe au résultat suivant ; {shift}Enter ou {shift}F3 au précédent.
 
 Affiche le résultat final dans un espace de travail séparé, à côté de l’arborescence. Ce mode ne copie rien dans le presse-papiers et n’exporte rien vers un fichier par lui-même : il sert uniquement à la consultation.
 
@@ -220,22 +220,22 @@ Boutons :
 * X dans le panneau de l’arborescence — masque l’arborescence et laisse uniquement le panneau d’aperçu ;
 * X dans la barre supérieure de l’aperçu — ferme complètement le mode aperçu ;
 * petit bouton de copie dans l’en-tête épinglé du fichier — copie le bloc du fichier actuellement visible tel qu’il est affiché dans l’aperçu ;
-* un nouveau clic sur l’icône œil ou Ctrl+B ferme aussi le mode aperçu.
+* un nouveau clic sur l’icône œil ou {mod}B ferme aussi le mode aperçu.
 
 La recherche et le filtre restent disponibles tant que le panneau de l’arborescence est visible dans l’aperçu.
 Si l’arborescence est masquée, la recherche et le filtre deviennent temporairement indisponibles jusqu’à la sortie du mode aperçu seul.
 
 ## 8) Affichage
 ### Zoom
-* Ctrl++ / Ctrl+= — agrandir
-* Ctrl+- — réduire
-* Ctrl+0 — réinitialiser
-* Ctrl + molette — zoom fluide dans le panneau sous le curseur
+* {mod}+ / {mod}= — agrandir
+* {mod}- — réduire
+* {mod}0 — réinitialiser
+* {mod}molette — zoom fluide dans le panneau sous le curseur
 
 Comportement :
 * en mode normal, c’est l’arborescence qui est zoomée ;
 * en aperçu avec l’arborescence visible, Agrandir, Réduire et Réinitialiser du menu s’appliquent à la fois à l’arborescence et à l’aperçu ;
-* avec Ctrl + molette, l’arborescence et l’aperçu zooment indépendamment selon la position du curseur ;
+* avec {mod}molette, l’arborescence et l’aperçu zooment indépendamment selon la position du curseur ;
 * en mode aperçu seul, seul le panneau d’aperçu est zoomé.
 
 Plage : 6–28, reset : 15.
@@ -254,9 +254,9 @@ La police choisie est appliquée après clic sur « Appliquer » dans le panneau
 
 ## 9) Recherche dans l'arbre
 Ouvre la recherche, met en évidence les correspondances et permet la navigation.
-* Ctrl+F — afficher/masquer
+* {mod}F — afficher/masquer
 * Enter — résultat suivant
-* Shift+Enter — précédent
+* {shift}Enter — précédent
 * Esc — fermer
 
 La recherche n’ouvre que les branches nécessaires ; en effaçant la requête, l’arbre se replie (sauf la racine).
@@ -270,7 +270,7 @@ Limitations :
 
 ## 10) Filtrer par nom
 Affiche uniquement les nœuds correspondant au filtre et leurs parents. Mise à jour avec délai (debounce).
-* Ctrl+Shift+N — afficher/masquer le filtre
+* {mod}{shift}N — afficher/masquer le filtre
 * Esc — fermer le filtre
 
 Limitations :
@@ -296,7 +296,7 @@ Remarque sur « Types de fichiers » :
 * cette liste affiche uniquement les fichiers avec extension ;
 * les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Exclusions ».
 
-Ctrl+P — afficher/masquer le panneau.
+{mod}P — afficher/masquer le panneau.
 
 ### 11.1 Profils de paramètres des projets locaux
 Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :

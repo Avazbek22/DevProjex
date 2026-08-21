@@ -542,6 +542,7 @@ internal static class UiTestDriver
         var physicalKey = key switch
         {
             Key.F => PhysicalKey.F,
+			Key.O => PhysicalKey.O,
             Key.B => PhysicalKey.B,
             Key.P => PhysicalKey.P,
             Key.N => PhysicalKey.N,

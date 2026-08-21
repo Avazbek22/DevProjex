@@ -11,11 +11,11 @@ Important: DevProjex does not modify files in the project you open.
 Checkboxes: selecting a node applies to its children; parent state is recalculated automatically.
 
 Hotkeys:
-* Ctrl+E — expand all
-* Ctrl+W — collapse all (root stays expanded)
+* {mod}E — expand all
+* {collapseAll} — collapse all (root stays expanded)
 
 ## 3) File
-* Open folder… — open root folder (Ctrl+O)
+* Open folder… — open root folder ({mod}O)
 * New window — open a new independent DevProjex instance
 * Recent — list of recently opened local folders
 * Refresh — rescan a local folder and rebuild the tree (F5)
@@ -141,7 +141,7 @@ The toggle does not affect:
 Copies the project tree.
 If there are checked nodes, the tree is built from selection; if the selection is empty or invalid, the full tree is copied.
 The result format is defined by the tree format toggle.
-Hotkeys: Ctrl+Shift+C and Ctrl+Alt+C.
+Hotkeys: {mod}{shift}C and {mod}{alt}C.
 
 ### Copy content
 Copies file contents:
@@ -149,14 +149,14 @@ Copies file contents:
 * non-text files are ignored (including binary);
 * for empty text files, the path and the line `[No Content, 0 bytes]` are output;
 * for files containing only whitespace/line breaks, the path and the line `[Whitespace, N bytes]` are output.
-Hotkey: Ctrl+Alt+V.
+Hotkey: {mod}{alt}V.
 
 ### Copy tree + content
 Combines tree and content:
 * tree is built from selection; if selection is empty/invalid, the full tree is used;
 * content follows the same rules as “Copy content”;
 * tree block format is defined by the tree format toggle.
-Hotkey: Ctrl+Shift+V.
+Hotkey: {mod}{shift}V.
 
 ### Tree representations
 Tree formats use different representations for the same selected project tree.
@@ -183,11 +183,11 @@ Tree + content:
 * exported as `.txt`.
 
 ## 7) Preview mode
-Opened with the eye icon button in the top bar or with Ctrl+B.
+Opened with the eye icon button in the top bar or with {mod}B.
 
 Mouse side buttons follow browser-style navigation: Forward opens Preview mode, and Back closes it. Repeating the current direction has no effect.
 
-Ctrl+Shift+F opens or closes search in file contents in Preview. Enter or F3 goes to the next match; Shift+Enter or Shift+F3 goes to the previous match.
+{mod}{shift}F opens or closes search in file contents in Preview. Enter or F3 goes to the next match; {shift}Enter or {shift}F3 goes to the previous match.
 
 Shows the final result in a separate workspace next to the tree. This mode does not copy to the clipboard and does not export to a file on its own — it is a viewing mode.
 
@@ -220,22 +220,22 @@ Buttons:
 * X in the tree pane — hides the tree and leaves only the preview pane;
 * X in the top preview pane — closes Preview mode completely;
 * small copy button in the pinned file header — copies the current visible file block exactly as it is shown in Preview;
-* pressing the eye icon again or Ctrl+B also closes Preview mode.
+* pressing the eye icon again or {mod}B also closes Preview mode.
 
 Search and Filter are available while the tree pane is visible in Preview.
 If the tree is hidden, Search and Filter are temporarily unavailable until you leave preview-only mode.
 
 ## 8) View
 ### Zoom
-* Ctrl++ / Ctrl+= — zoom in
-* Ctrl+- — zoom out
-* Ctrl+0 — reset
-* Ctrl + mouse wheel — smooth zoom in the pane under the cursor
+* {mod}+ / {mod}= — zoom in
+* {mod}- — zoom out
+* {mod}0 — reset
+* {mod}mouse wheel — smooth zoom in the pane under the cursor
 
 Behavior:
 * in normal mode, the tree is zoomed;
 * in Preview with the tree visible, Zoom In, Zoom Out, and Reset from the menu apply to both the tree and the preview;
-* with Ctrl + mouse wheel, tree and preview zoom independently depending on where the cursor is;
+* with {mod}mouse wheel, tree and preview zoom independently depending on where the cursor is;
 * in preview-only mode, only the preview pane is zoomed.
 
 Range: 6–28, reset is 15.
@@ -254,9 +254,9 @@ The selected font is applied after clicking “Apply settings” in the settings
 
 ## 9) Search (tree)
 Opens the search bar, highlights matches, and allows navigation.
-* Ctrl+F — show/hide
+* {mod}F — show/hide
 * Enter — next result
-* Shift+Enter — previous
+* {shift}Enter — previous
 * Esc — close
 
 Search auto-expands only the needed branches; clearing the query collapses the tree (except root).
@@ -270,7 +270,7 @@ Constraints:
 
 ## 10) Filter (by name)
 Shows only nodes matching the filter string and their parents. Updates are debounced.
-* Ctrl+Shift+N — show/hide filter
+* {mod}{shift}N — show/hide filter
 * Esc — close filter
 
 Constraints:
@@ -296,7 +296,7 @@ Note about "Extensions":
 * this list shows only files that have an extension;
 * files without an extension are not added to this list and are controlled by a separate option in "Exclusions".
 
-Ctrl+P — show/hide the panel.
+{mod}P — show/hide the panel.
 
 ### 11.1 Local project parameter profiles
 For local folders, DevProjex remembers the last applied project parameters:

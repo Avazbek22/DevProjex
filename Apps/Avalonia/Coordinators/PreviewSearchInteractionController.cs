@@ -23,6 +23,7 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 	private readonly Border _container;
 	private readonly Button _searchButton;
 	private readonly VirtualizedPreviewTextControl _previewTextControl;
+	private readonly DesktopShortcutModifiers _shortcutModifiers;
 	private readonly CancellationTokenSource _lifetimeCts = new();
 	private readonly TranslateTransform _transform;
 	private CancellationTokenSource? _searchCts;
@@ -38,13 +39,15 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 		PreviewSearchBarView searchBar,
 		Border container,
 		Button searchButton,
-		VirtualizedPreviewTextControl previewTextControl)
+		VirtualizedPreviewTextControl previewTextControl,
+		DesktopShortcutModifiers? shortcutModifiers = null)
 	{
 		_viewModel = viewModel;
 		_searchBar = searchBar;
 		_container = container;
 		_searchButton = searchButton;
 		_previewTextControl = previewTextControl;
+		_shortcutModifiers = shortcutModifiers ?? DesktopShortcutModifiers.Current;
 		_transform = searchBar.RenderTransform as TranslateTransform ?? new TranslateTransform();
 		searchBar.RenderTransform = _transform;
 		_previewTextControl.SearchDocumentChanged += OnPreviewDocumentChanged;
@@ -136,7 +139,7 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 	{
 		if (_disposed ||
 		    e.Key != Key.F ||
-		    e.KeyModifiers != (KeyModifiers.Control | KeyModifiers.Shift))
+		    !_shortcutModifiers.IsPrimaryWithShift(e.KeyModifiers))
 		{
 			return false;
 		}

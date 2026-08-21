@@ -387,9 +387,10 @@ public partial class MainWindow
     {
         CancelAllMemoryCleanup();
         var mods = e.KeyModifiers;
+        var shortcutModifiers = DesktopShortcutModifiers.Current;
 
-        // Ctrl+O (always available)
-        if (mods == KeyModifiers.Control && e.Key == Key.O)
+        // The open command is always available.
+        if (shortcutModifiers.IsPrimary(mods) && e.Key == Key.O)
         {
             if (_viewModel.CanChangeProjectTree)
                 OnOpenFolder(this, new RoutedEventArgs());
@@ -437,23 +438,30 @@ public partial class MainWindow
         }
 
         // Zoom hotkeys (in WinForms they work even without a loaded project)
-        if (mods == KeyModifiers.Control && (e.Key == Key.OemPlus || e.Key == Key.Add))
+        if (shortcutModifiers.IsPrimaryWithOptionalShift(mods) &&
+            (e.Key == Key.OemPlus || e.Key == Key.Add))
         {
             _treeViewport.ZoomIn();
             e.Handled = true;
             return;
         }
 
-        if (mods == KeyModifiers.Control && (e.Key == Key.OemMinus || e.Key == Key.Subtract))
+        if (shortcutModifiers.IsPrimary(mods) && (e.Key == Key.OemMinus || e.Key == Key.Subtract))
         {
             _treeViewport.ZoomOut();
             e.Handled = true;
             return;
         }
 
-        if (mods == KeyModifiers.Control && (e.Key == Key.D0 || e.Key == Key.NumPad0))
+        if (shortcutModifiers.IsPrimary(mods) && (e.Key == Key.D0 || e.Key == Key.NumPad0))
         {
             OnZoomReset(this, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
+        if (shortcutModifiers.IsUnboundMacOSCommandW(e.Key, mods))
+        {
             e.Handled = true;
             return;
         }
@@ -461,24 +469,21 @@ public partial class MainWindow
         if (!_viewModel.IsProjectLoaded)
             return;
 
-        // Ctrl+B Preview mode toggle
-        if (mods == KeyModifiers.Control && e.Key == Key.B)
+        if (shortcutModifiers.IsPrimary(mods) && e.Key == Key.B)
         {
             OnTogglePreview(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        // Ctrl+P Options panel toggle
-        if (mods == KeyModifiers.Control && e.Key == Key.P)
+        if (shortcutModifiers.IsPrimary(mods) && e.Key == Key.P)
         {
             OnToggleSettings(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        // Ctrl+E Expand All
-        if (mods == KeyModifiers.Control && e.Key == Key.E)
+        if (shortcutModifiers.IsPrimary(mods) && e.Key == Key.E)
         {
             if (_viewModel.IsTreePaneVisible)
                 _treeViewport.ExpandAll();
@@ -486,8 +491,7 @@ public partial class MainWindow
             return;
         }
 
-        // Ctrl+W Collapse All
-        if (mods == KeyModifiers.Control && e.Key == Key.W)
+        if (shortcutModifiers.IsCollapseAll(e.Key, mods))
         {
             if (_viewModel.IsTreePaneVisible)
                 _treeViewport.CollapseAll();
@@ -496,28 +500,28 @@ public partial class MainWindow
         }
 
         // Copy hotkeys (same as WinForms)
-        if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.C)
+        if (shortcutModifiers.IsPrimaryWithShift(mods) && e.Key == Key.C)
         {
             OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.C)
+        if (shortcutModifiers.IsPrimaryWithAlt(mods) && e.Key == Key.C)
         {
             OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.V)
+        if (shortcutModifiers.IsPrimaryWithAlt(mods) && e.Key == Key.V)
         {
             OnCopyContent(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.V)
+        if (shortcutModifiers.IsPrimaryWithShift(mods) && e.Key == Key.V)
         {
             OnCopyTreeAndContent(this, new RoutedEventArgs());
             e.Handled = true;

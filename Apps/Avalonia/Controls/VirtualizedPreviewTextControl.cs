@@ -1,4 +1,5 @@
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Avalonia.Controls;
 
@@ -146,7 +147,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 	public static readonly StyledProperty<string> RedactedSecretToolTipFormatProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
 			nameof(RedactedSecretToolTipFormat),
-			"Detected {0}.\nClick to keep the original value.\nAlt+Up / Alt+Down navigates findings.");
+			DesktopShortcutTextFormatter.Format(
+				"Detected {0}.\nClick to keep the original value.\n{alt}↑ / {alt}↓ navigates findings.",
+				DesktopPlatformResolver.Resolve()));
 
 	public static readonly StyledProperty<string> KeptSecretToolTipFormatProperty =
 		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
@@ -1297,10 +1300,10 @@ public sealed class VirtualizedPreviewTextControl : Control
         var properties = e.GetCurrentPoint(this).Properties;
 		var isContextGesture = properties.IsRightButtonPressed ||
 			properties.PointerUpdateKind == PointerUpdateKind.RightButtonPressed ||
-			(OperatingSystem.IsMacOS() &&
+			(DesktopShortcutModifiers.Current.Platform == DesktopPlatform.MacOS &&
 			 (properties.IsLeftButtonPressed ||
 			  properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed) &&
-			 e.KeyModifiers.HasFlag(KeyModifiers.Control));
+			 DesktopShortcutModifiers.Current.IsMacOSSecondaryClickModifier(e.KeyModifiers));
 		if (isContextGesture)
         {
             Focus();
@@ -1387,14 +1390,14 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (e.Handled)
             return;
 
-        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.A)
+		if (DesktopShortcutModifiers.Current.IsPrimary(e.KeyModifiers) && e.Key == Key.A)
         {
             SelectAll();
             e.Handled = true;
             return;
         }
 
-        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.C && HasSelection)
+		if (DesktopShortcutModifiers.Current.IsPrimary(e.KeyModifiers) && e.Key == Key.C && HasSelection)
         {
             _ = CopySelectionToClipboardAsync();
             e.Handled = true;

@@ -2,14 +2,19 @@ namespace DevProjex.Avalonia.Services;
 
 internal static class TreeZoomWheelHandler
 {
-    public static bool TryGetZoomStep(KeyModifiers modifiers, Vector delta, bool pointerOverTree, out double step)
+    public static bool TryGetZoomStep(
+        KeyModifiers modifiers,
+        Vector delta,
+        bool pointerOverTree,
+        out double step,
+        DesktopShortcutModifiers? shortcutModifiers = null)
     {
         step = 0;
 
         if (!pointerOverTree)
             return false;
 
-        if (!modifiers.HasFlag(KeyModifiers.Control) && !modifiers.HasFlag(KeyModifiers.Meta))
+        if (!(shortcutModifiers ?? DesktopShortcutModifiers.Current).IsPrimary(modifiers))
             return false;
 
         if (delta.Y > 0)

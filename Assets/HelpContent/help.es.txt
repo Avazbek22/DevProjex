@@ -11,11 +11,11 @@ Importante: DevProjex no modifica los archivos del proyecto abierto.
 Casillas de verificación: la selección de un nodo se aplica a sus hijos; El estado principal se recalcula automáticamente.
 
 Teclas de acceso rápido:
-* Ctrl+E: expandir todo
-* Ctrl+W: contrae todo (la raíz permanece expandida)
+* {mod}E: expandir todo
+* {collapseAll}: contrae todo (la raíz permanece expandida)
 
 ## 3) Archivo
-* Abrir carpeta… — abrir carpeta raíz (Ctrl+O)
+* Abrir carpeta… — abrir carpeta raíz ({mod}O)
 * Nueva ventana: abre una nueva instancia independiente de DevProjex
 * Reciente: lista de carpetas locales abiertas recientemente
 * Actualizar: vuelve a escanear una carpeta local y reconstruye el árbol (F5)
@@ -141,7 +141,7 @@ La alternancia no afecta:
 Copia el árbol del proyecto.
 Si hay nodos marcados, el árbol se construye a partir de la selección; si la selección está vacía o no es válida, se copia el árbol completo.
 El formato del resultado se define mediante la palanca de formato de árbol.
-Teclas de acceso rápido: Ctrl+Shift+C y Ctrl+Alt+C.
+Teclas de acceso rápido: {mod}{shift}C y {mod}{alt}C.
 
 ### Copiar contenido
 Copia el contenido del archivo:
@@ -149,14 +149,14 @@ Copia el contenido del archivo:
 * los archivos que no son de texto se ignoran (incluidos los binarios);
 * para archivos de texto vacíos, se muestran la ruta y la línea `[No Content, 0 bytes]`;
 * para archivos que contienen solo espacios en blanco/saltos de línea, se generan la ruta y la línea `[Whitespace, N bytes]`.
-Tecla de acceso rápido: Ctrl+Alt+V.
+Tecla de acceso rápido: {mod}{alt}V.
 
 ### Copiar árbol + contenido
 Combina árbol y contenido:
 * el árbol se construye a partir de la selección; si la selección está vacía/no es válida, se utiliza el árbol completo;
 * el contenido sigue las mismas reglas que "Copiar contenido";
 * El formato del bloque de árbol se define mediante la palanca de formato de árbol.
-Tecla de acceso rápido: Ctrl+Mayús+V.
+Tecla de acceso rápido: {mod}{shift}V.
 
 ### Representaciones de árboles
 Los formatos de árbol utilizan diferentes representaciones para el mismo árbol de proyecto seleccionado.
@@ -183,11 +183,11 @@ Médico:
 * exportado como `.txt`.
 
 ## 7) Modo de vista previa
-Se abre con el botón del icono del ojo en la barra superior o con Ctrl+B.
+Se abre con el botón del icono del ojo en la barra superior o con {mod}B.
 
 Los botones laterales del ratón siguen la navegación del navegador: Adelante abre el modo de vista previa y Atrás lo cierra. Repetir la dirección ya activa no tiene efecto.
 
-Ctrl+Shift+F abre o cierra la búsqueda en el contenido de los archivos de la vista previa. Enter o F3 va a la siguiente coincidencia; Shift+Enter o Shift+F3, a la anterior.
+{mod}{shift}F abre o cierra la búsqueda en el contenido de los archivos de la vista previa. Enter o F3 va a la siguiente coincidencia; {shift}Enter o {shift}F3, a la anterior.
 
 Muestra el resultado final en un espacio de trabajo separado al lado del árbol. Este modo no copia al portapapeles ni exporta a un archivo por sí solo: es un modo de visualización.
 
@@ -220,22 +220,22 @@ Botones:
 * X en el panel del árbol: oculta el árbol y deja solo el panel de vista previa;
 * X en el panel de vista previa superior: cierra completamente el modo Vista previa;
 * pequeño botón de copia en el encabezado del archivo fijado: copia el bloque de archivo visible actual exactamente como se muestra en Vista previa;
-* Al presionar el ícono del ojo nuevamente o Ctrl+B también se cierra el modo Vista previa.
+* Al presionar el ícono del ojo nuevamente o {mod}B también se cierra el modo Vista previa.
 
 Buscar y Filtrar están disponibles mientras el panel de árbol está visible en Vista previa.
 Si el árbol está oculto, Buscar y Filtrar no estarán disponibles temporalmente hasta que salga del modo de solo vista previa.
 
 ## 8) Ver
 ### Ampliar
-* Ctrl++ / Ctrl+= — acercar
-* Ctrl+- - alejar
-* Ctrl+0 — restablecer
-* Ctrl + rueda del mouse: zoom suave en el panel debajo del cursor
+* {mod}+ / {mod}= — acercar
+* {mod}- - alejar
+* {mod}0 — restablecer
+* {mod}rueda del mouse: zoom suave en el panel debajo del cursor
 
 Comportamiento:
 * en modo normal, el árbol se amplía;
 * en Vista previa con el árbol visible, Acercar, Alejar y Restablecer del menú se aplican tanto al árbol como a la vista previa;
-* con Ctrl + rueda del ratón, árbol y zoom de vista previa de forma independiente dependiendo de dónde esté el cursor;
+* con {mod}rueda del ratón, árbol y zoom de vista previa de forma independiente dependiendo de dónde esté el cursor;
 * en el modo de solo vista previa, solo se amplía el panel de vista previa.
 
 Rango: 6–28, el reinicio es 15.
@@ -254,9 +254,9 @@ La fuente seleccionada se aplica después de hacer clic en "Aplicar configuraci�
 
 ## 9) Búsqueda (árbol)
 Abre la barra de búsqueda, resalta coincidencias y permite la navegación.
-* Ctrl+F: mostrar/ocultar
+* {mod}F: mostrar/ocultar
 * Ingresar: siguiente resultado
-* Mayús+Entrar — anterior
+* {shift}Entrar — anterior
 * Esc-cerrar
 
 La búsqueda expande automáticamente solo las ramas necesarias; borrar la consulta colapsa el árbol (excepto la raíz).
@@ -270,7 +270,7 @@ Restricciones:
 
 ## 10) Filtrar (por nombre)
 Muestra solo los nodos que coinciden con la cadena de filtro y sus padres. Las actualizaciones son rechazadas.
-* Ctrl+Shift+N — mostrar/ocultar filtro
+* {mod}{shift}N — mostrar/ocultar filtro
 * Esc — cerrar filtro
 
 Restricciones:
@@ -296,7 +296,7 @@ Nota sobre las "Extensiones":
 * esta lista muestra sólo archivos que tienen una extensión;
 * Los archivos sin extensión no se agregan a esta lista y se controlan mediante una opción separada en "Exclusiones".
 
-Ctrl+P: muestra/oculta el panel.
+{mod}P: muestra/oculta el panel.
 
 ### 11.1 Perfiles de parámetros del proyecto local
 Para las carpetas locales, DevProjex recuerda los últimos parámetros del proyecto aplicados:

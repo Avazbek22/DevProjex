@@ -33,9 +33,13 @@ public static class AvaloniaCompositionRoot
         SessionMetricsOptions sessionMetrics,
         Func<string>? appDataPathProvider)
     {
+        var desktopPlatform = DesktopPlatformResolver.Resolve();
         var localizationCatalog = new JsonLocalizationCatalog();
-        var localization = new LocalizationService(localizationCatalog, language);
-        var helpContentProvider = new HelpContentProvider();
+        var localization = new LocalizationService(
+            localizationCatalog,
+            language,
+            text => DesktopShortcutTextFormatter.Format(text, desktopPlatform));
+        var helpContentProvider = new HelpContentProvider(desktopPlatform);
         var iconStore = new EmbeddedIconStore();
         var iconMapper = new IconMapper();
         var treePresenter = new TreeNodePresentationService(localization, iconMapper);

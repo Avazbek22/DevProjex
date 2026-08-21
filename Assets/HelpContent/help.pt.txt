@@ -11,11 +11,11 @@ Importante: o DevProjex não modifica os arquivos do projeto aberto.
 Caixas de seleção: a seleção de um nó se aplica aos seus filhos; o estado pai é recalculado automaticamente.
 
 Teclas de atalho:
-* Ctrl+E – expandir tudo
-* Ctrl+W – recolhe tudo (a raiz permanece expandida)
+* {mod}E – expandir tudo
+* {collapseAll} – recolhe tudo (a raiz permanece expandida)
 
 ## 3) Arquivo
-* Abrir pasta… — abre a pasta raiz (Ctrl+O)
+* Abrir pasta… — abre a pasta raiz ({mod}O)
 * Nova janela – abra uma nova instância independente do DevProjex
 * Recente — lista de pastas locais abertas recentemente
 * Atualizar – verifique novamente uma pasta local e reconstrua a árvore (F5)
@@ -141,7 +141,7 @@ A alternância não afeta:
 Copia a árvore do projeto.
 Se houver nós marcados, a árvore é construída a partir da seleção; se a seleção estiver vazia ou inválida, a árvore completa será copiada.
 O formato do resultado é definido pela alternância do formato da árvore.
-Teclas de atalho: Ctrl+Shift+C e Ctrl+Alt+C.
+Teclas de atalho: {mod}{shift}C e {mod}{alt}C.
 
 ### Copiar conteúdo
 Copia o conteúdo do arquivo:
@@ -149,14 +149,14 @@ Copia o conteúdo do arquivo:
 * arquivos não textuais são ignorados (incluindo binários);
 * para arquivos de texto vazios, o caminho e a linha `[No Content, 0 bytes]` são gerados;
 * para arquivos contendo apenas espaços em branco/quebras de linha, o caminho e a linha `[Whitespace, N bytes]` são gerados.
-Tecla de atalho: Ctrl+Alt+V.
+Tecla de atalho: {mod}{alt}V.
 
 ### Copiar árvore + conteúdo
 Combina árvore e conteúdo:
 * a árvore é construída a partir da seleção; se a seleção estiver vazia/inválida, a árvore completa será usada;
 * o conteúdo segue as mesmas regras de “Copiar conteúdo”;
 * o formato do bloco de árvore é definido pela alternância de formato de árvore.
-Tecla de atalho: Ctrl+Shift+V.
+Tecla de atalho: {mod}{shift}V.
 
 ### Representações de árvores
 Os formatos de árvore utilizam representações diferentes para a mesma árvore de projeto selecionada.
@@ -183,11 +183,11 @@ Médico:
 * exportado como `.txt`.
 
 ## 7) Modo de visualização
-Aberto com o botão do ícone de olho na barra superior ou com Ctrl+B.
+Aberto com o botão do ícone de olho na barra superior ou com {mod}B.
 
 Os botões laterais do mouse seguem a navegação do navegador: Avançar abre o modo de visualização e Voltar o fecha. Repetir a direção já ativa não tem efeito.
 
-Ctrl+Shift+F abre ou fecha a pesquisa no conteúdo dos arquivos da visualização. Enter ou F3 vai para a próxima ocorrência; Shift+Enter ou Shift+F3, para a anterior.
+{mod}{shift}F abre ou fecha a pesquisa no conteúdo dos arquivos da visualização. Enter ou F3 vai para a próxima ocorrência; {shift}Enter ou {shift}F3, para a anterior.
 
 Mostra o resultado final em uma área de trabalho separada próxima à árvore. Este modo não copia para a área de transferência e não exporta sozinho para um arquivo — é um modo de visualização.
 
@@ -220,22 +220,22 @@ Botões:
 * X no painel de árvore — oculta a árvore e deixa apenas o painel de visualização;
 * X no painel de visualização superior — fecha completamente o modo de visualização;
 * botão de cópia pequena no cabeçalho do arquivo fixado — copia o bloco de arquivo visível atual exatamente como é mostrado na visualização;
-* pressionar o ícone do olho novamente ou Ctrl+B também fecha o modo de visualização.
+* pressionar o ícone do olho novamente ou {mod}B também fecha o modo de visualização.
 
 Pesquisa e Filtro estão disponíveis enquanto o painel em árvore está visível na Visualização.
 Se a árvore estiver oculta, a Pesquisa e o Filtro ficarão temporariamente indisponíveis até você sair do modo somente visualização.
 
 ## 8) Ver
 ### Zoom
-* Ctrl++ / Ctrl+= — aumentar o zoom
-* Ctrl+- – diminuir o zoom
-* Ctrl+0 – redefinir
-* Ctrl + roda do mouse – zoom suave no painel sob o cursor
+* {mod}+ / {mod}= — aumentar o zoom
+* {mod}- – diminuir o zoom
+* {mod}0 – redefinir
+* {mod}roda do mouse – zoom suave no painel sob o cursor
 
 Comportamento:
 * no modo normal, a árvore é ampliada;
 * na visualização com a árvore visível, Aumentar zoom, Diminuir zoom e Redefinir no menu aplicam-se à árvore e à visualização;
-* com Ctrl + roda do mouse, árvore e zoom de visualização de forma independente dependendo de onde o cursor está;
+* com {mod}roda do mouse, árvore e zoom de visualização de forma independente dependendo de onde o cursor está;
 * no modo somente visualização, apenas o painel de visualização é ampliado.
 
 Faixa: 6–28, a redefinição é 15.
@@ -254,9 +254,9 @@ A fonte selecionada é aplicada após clicar em “Aplicar configurações” no
 
 ## 9) Pesquisa (árvore)
 Abre a barra de pesquisa, destaca as correspondências e permite a navegação.
-* Ctrl+F – mostrar/ocultar
+* {mod}F – mostrar/ocultar
 * Entrar – próximo resultado
-* Shift + Enter – anterior
+* {shift}Enter – anterior
 * Esc – fechar
 
 A pesquisa expande automaticamente apenas as ramificações necessárias; limpar a consulta recolhe a árvore (exceto raiz).
@@ -270,7 +270,7 @@ Restrições:
 
 ## 10) Filtrar (por nome)
 Mostra apenas os nós que correspondem à string do filtro e seus pais. As atualizações são rejeitadas.
-* Ctrl+Shift+N — mostrar/ocultar filtro
+* {mod}{shift}N — mostrar/ocultar filtro
 * Esc – fechar filtro
 
 Restrições:
@@ -296,7 +296,7 @@ Nota sobre "Extensões":
 * esta lista mostra apenas arquivos que possuem uma extensão;
 * arquivos sem extensão não são adicionados a esta lista e são controlados por uma opção separada em "Exclusões".
 
-Ctrl+P — mostra/oculta o painel.
+{mod}P — mostra/oculta o painel.
 
 ### 11.1 Perfis de parâmetros de projetos locais
 Para pastas locais, o DevProjex lembra os últimos parâmetros de projeto aplicados:

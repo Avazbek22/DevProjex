@@ -34,6 +34,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private readonly Action _cancelMemoryCleanup;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly CancellationToken _lifetimeToken;
+    private readonly DesktopShortcutModifiers _shortcutModifiers;
 
     private ProjectTreeExpansionSnapshot? _filterExpansionSnapshot;
     private SuspendedTextTool _suspendedTool;
@@ -65,7 +66,8 @@ internal sealed class SearchFilterInteractionController : IDisposable
         Func<bool> wasLastInteractiveFilterInMemory,
         Func<Exception, Task> showErrorAsync,
         Action<MemoryCleanupReason> scheduleMemoryCleanup,
-        Action cancelMemoryCleanup)
+        Action cancelMemoryCleanup,
+        DesktopShortcutModifiers? shortcutModifiers = null)
     {
         _lifetimeToken = _lifetimeCts.Token;
         _window = window;
@@ -82,6 +84,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
         _showErrorAsync = showErrorAsync;
         _scheduleMemoryCleanup = scheduleMemoryCleanup;
         _cancelMemoryCleanup = cancelMemoryCleanup;
+        _shortcutModifiers = shortcutModifiers ?? DesktopShortcutModifiers.Current;
 
         _search = CreateToolState(
             TextToolKind.Search,
@@ -329,7 +332,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
             return false;
 
         var modifiers = e.KeyModifiers;
-        if (modifiers == KeyModifiers.Control && e.Key == Key.F)
+        if (_shortcutModifiers.IsPrimary(modifiers) && e.Key == Key.F)
         {
             if (!IsHotkeyDebounced(ref _lastSearchHotkeyTimestamp))
                 ScheduleHotkeyToggle(TextToolKind.Search);
@@ -338,7 +341,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
             return true;
         }
 
-        if (modifiers != (KeyModifiers.Control | KeyModifiers.Shift) || e.Key != Key.N)
+        if (!_shortcutModifiers.IsPrimaryWithShift(modifiers) || e.Key != Key.N)
             return false;
 
         if (!IsHotkeyDebounced(ref _lastFilterHotkeyTimestamp))

@@ -11,11 +11,11 @@ Muhim: DevProjex ochilgan loyihadagi fayllarni o‘zgartirmaydi.
 Checkboxlar: tugunni belgilash uning avlodlariga qo‘llanadi; ota holati avtomatik qayta hisoblanadi.
 
 Issiq tugmalar:
-* Ctrl+E — hammasini ochish
-* Ctrl+W — hammasini yopish (ildiz ochiq qoladi)
+* {mod}E — hammasini ochish
+* {collapseAll} — hammasini yopish (ildiz ochiq qoladi)
 
 ## 3) Fayl
-* Jildni ochish… — ildiz papkani ochish (Ctrl+O)
+* Jildni ochish… — ildiz papkani ochish ({mod}O)
 * Yangi oyna — DevProjex’ning yangi mustaqil nusxasini ochish
 * So‘nggilar — yaqinda ochilgan lokal jildlar ro‘yxati
 * Yangilash — lokal jildni qayta o‘qish va daraxtni qayta qurish (F5)
@@ -141,7 +141,7 @@ Tumbler quyidagilarga ta’sir qilmaydi:
 Loyiha daraxtini nusxalaydi.
 Agar belgilangan tugunlar bo‘lsa, daraxt tanlov bo‘yicha quriladi; tanlov bo‘sh yoki yaroqsiz bo‘lsa, to‘liq daraxt nusxalanadi.
 Natija formati daraxt formati tumbleri bilan aniqlanadi.
-Tugmalar: Ctrl+Shift+C va Ctrl+Alt+C.
+Tugmalar: {mod}{shift}C va {mod}{alt}C.
 
 ### Mazmunni nusxalash
 Fayllar mazmunini nusxalaydi:
@@ -149,14 +149,14 @@ Fayllar mazmunini nusxalaydi:
 * matnli bo‘lmagan fayllar e’tiborga olinmaydi (binarlarni ham);
 * bo‘sh matnli fayllar uchun yo‘l va `[No Content, 0 bytes]` yoziladi;
 * faqat bo‘sh joylar/satr uzilishlaridan iborat fayllar uchun yo‘l va `[Whitespace, N bytes]` yoziladi.
-Tugma: Ctrl+Alt+V.
+Tugma: {mod}{alt}V.
 
 ### Daraxt + mazmunni nusxalash
 Daraxt va mazmunni birlashtiradi:
 * daraxt tanlov bo‘yicha; agar tanlov bo‘sh yoki yaroqsiz bo‘lsa — to‘liq daraxt;
 * mazmun «Mazmunni nusxalash» qoidalari bo‘yicha;
 * daraxt blokining formati daraxt formati tumbleri bilan aniqlanadi.
-Tugma: Ctrl+Shift+V.
+Tugma: {mod}{shift}V.
 
 ### Daraxt ko‘rinishlari
 Daraxt formatlari bir xil tanlangan loyiha daraxtini turlicha ko‘rsatadi.
@@ -183,11 +183,11 @@ Daraxt + mazmun:
 * eksport `.txt` formatida saqlanadi.
 
 ## 7) Preview rejimi
-Yuqori paneldagi ko‘zcha ikonali tugma yoki Ctrl+B orqali ochiladi.
+Yuqori paneldagi ko‘zcha ikonali tugma yoki {mod}B orqali ochiladi.
 
 Sichqonchaning yon tugmalari brauzerdagi kabi ishlaydi: «Oldinga» Preview rejimini ochadi, «Orqaga» esa yopadi. Joriy yo‘nalishni qayta bosish hech narsani o‘zgartirmaydi.
 
-Ctrl+Shift+F previewdagi fayllar mazmunidan qidirishni ochadi yoki yopadi. Enter yoki F3 keyingi moslikka, Shift+Enter yoki Shift+F3 oldingi moslikka o‘tadi.
+{mod}{shift}F previewdagi fayllar mazmunidan qidirishni ochadi yoki yopadi. Enter yoki F3 keyingi moslikka, {shift}Enter yoki {shift}F3 oldingi moslikka o‘tadi.
 
 Yakuniy natijani daraxt yonidagi alohida ishchi hududda ko‘rsatadi. Bu rejim o‘zi hech narsani clipboardga nusxalamaydi va faylga eksport qilmaydi — u faqat ko‘rish uchun xizmat qiladi.
 
@@ -220,22 +220,22 @@ Tugmalar:
 * daraxt orolidagi X — daraxtni yashiradi va faqat preview orolini qoldiradi;
 * preview’ning yuqori orolidagi X — preview rejimini to‘liq yopadi;
 * faylning mahkamlangan yuqori sarlavhasidagi kichik nusxa tugmasi — joriy ko‘rinib turgan fayl blokini previewda ko‘rsatilgan holatda nusxalaydi;
-* ko‘zcha ikonani yana bir marta bosish yoki Ctrl+B ham preview rejimini yopadi.
+* ko‘zcha ikonani yana bir marta bosish yoki {mod}B ham preview rejimini yopadi.
 
 Qidiruv va filtr preview ichida daraxt oroli ko‘rinib turgan paytda ishlaydi.
 Agar daraxt yashirilsa, qidiruv va filtr preview-only rejimidan chiqquncha vaqtincha ishlamaydi.
 
 ## 8) Ko‘rinish
 ### Masshtab
-* Ctrl++ / Ctrl+= — kattalashtirish
-* Ctrl+- — kichraytirish
-* Ctrl+0 — tiklash
-* Ctrl + g‘ildirak — kursor turgan orolda silliq zoom
+* {mod}+ / {mod}= — kattalashtirish
+* {mod}- — kichraytirish
+* {mod}0 — tiklash
+* {mod}g‘ildirak — kursor turgan orolda silliq zoom
 
 Xulq-atvor:
 * oddiy rejimda daraxt masshtablanadi;
 * daraxt ko‘rinib turgan preview rejimida menyudagi kattalashtirish, kichraytirish va tiklash daraxt va preview’ga bir vaqtda qo‘llanadi;
-* Ctrl + g‘ildirak bilan daraxt va preview kursor joylashuviga qarab mustaqil masshtablanadi;
+* {mod}g‘ildirak bilan daraxt va preview kursor joylashuviga qarab mustaqil masshtablanadi;
 * preview-only rejimida faqat preview oroli masshtablanadi.
 
 Oraliq: 6–28, tiklash — 15.
@@ -254,9 +254,9 @@ Tanlangan shrift sozlamalar panelidagi «Sozlamalarni qo‘llash» tugmasi bosil
 
 ## 9) Daraxt bo'yicha qidiruv
 Qidiruv panelini ochadi, mosliklarni yoritadi va navigatsiya qiladi.
-* Ctrl+F — ko‘rsatish/yashirish
+* {mod}F — ko‘rsatish/yashirish
 * Enter — keyingi
-* Shift+Enter — oldingi
+* {shift}Enter — oldingi
 * Esc — yopish
 
 Qidiruv faqat kerakli shoxlarni ochadi; so‘rov tozalansa, daraxt yig‘iladi (ildizdan tashqari).
@@ -270,7 +270,7 @@ Cheklovlar:
 
 ## 10) Nom bo‘yicha filtr
 Filtr satriga mos tugunlar va ularning ota‑onalarini ko‘rsatadi. Yangilanish kechikish bilan.
-* Ctrl+Shift+N — filtrni ko‘rsatish/yashirish
+* {mod}{shift}N — filtrni ko‘rsatish/yashirish
 * Esc — filtrni yopish
 
 Cheklovlar:
@@ -296,7 +296,7 @@ Har bir ro‘yxatda Barchasi tugmasi bor.
 * bu ro‘yxatda faqat kengaytmali fayllar ko‘rsatiladi;
 * kengaytmasiz fayllar bu ro‘yxatga qo‘shilmaydi va «Istisnolar» ichidagi alohida band orqali boshqariladi.
 
-Ctrl+P — panelni ko‘rsatish/yashirish.
+{mod}P — panelni ko‘rsatish/yashirish.
 
 ### 11.1 Mahalliy loyiha parametr profillari
 Mahalliy jildlar uchun DevProjex loyihaning oxirgi qo‘llangan parametrlarini eslab qoladi:

@@ -1768,6 +1768,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string DropZoneTitle { get; private set; } = string.Empty;
     public string DropZoneButtonText { get; private set; } = string.Empty;
     public string DropZoneHotkeyHint { get; private set; } = string.Empty;
+	public string DropZoneShortcut { get; private set; } = string.Empty;
     public string DropZoneCloneButtonText { get; private set; } = string.Empty;
 
     public string StatusOperationLoadingProject { get; private set; } = string.Empty;
@@ -1938,6 +1939,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         DropZoneTitle = _localization["DropZone.Title"];
         DropZoneButtonText = _localization["DropZone.Button"];
         DropZoneHotkeyHint = _localization["DropZone.HotkeyHint"];
+		DropZoneShortcut = _localization["DropZone.Shortcut"];
         DropZoneCloneButtonText = _localization["DropZone.CloneButton"];
 
         StatusOperationLoadingProject = _localization["Status.Operation.LoadingProject"];
@@ -2107,6 +2109,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(DropZoneTitle));
         RaisePropertyChanged(nameof(DropZoneButtonText));
         RaisePropertyChanged(nameof(DropZoneHotkeyHint));
+		RaisePropertyChanged(nameof(DropZoneShortcut));
         RaisePropertyChanged(nameof(DropZoneCloneButtonText));
 
         RaisePropertyChanged(nameof(StatusOperationLoadingProject));
