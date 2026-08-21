@@ -18,8 +18,12 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 	private readonly Func<string, Task> _showError;
 	private readonly MenuFlyout _menu = new();
 	private readonly CancellationTokenSource _lifetime = new();
+	private static Cursor? _menuCursor;
 	private TreeNodeViewModel? _activeNode;
 	private bool _disposed;
+
+	private static Cursor MenuCursor =>
+		_menuCursor ??= new Cursor(StandardCursorType.Arrow);
 
 	public ProjectTreeContextMenuController(
 		TreeView treeView,
@@ -45,6 +49,8 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		_selectOnly = selectOnly ?? throw new ArgumentNullException(nameof(selectOnly));
 		_setBranchExpanded = setBranchExpanded ?? throw new ArgumentNullException(nameof(setBranchExpanded));
 		_showError = showError ?? throw new ArgumentNullException(nameof(showError));
+		_treeView.ContextFlyout = _menu;
+		_menu.Opened += OnMenuOpened;
 
 		_treeView.AddHandler(
 			InputElement.PointerPressedEvent,
@@ -54,6 +60,11 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		_treeView.AddHandler(
 			InputElement.KeyDownEvent,
 			OnTreeKeyDown,
+			RoutingStrategies.Tunnel,
+			handledEventsToo: true);
+		_treeView.AddHandler(
+			InputElement.ContextRequestedEvent,
+			OnTreeContextRequested,
 			RoutingStrategies.Tunnel,
 			handledEventsToo: true);
 	}
@@ -103,6 +114,24 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 			e.Handled = true;
 	}
 
+	private static void OnTreeContextRequested(object? sender, ContextRequestedEventArgs e)
+	{
+		// Opening is resolved explicitly so empty tree space never inherits the shared flyout.
+		e.Handled = true;
+	}
+
+	private void OnMenuOpened(object? sender, EventArgs e)
+	{
+		if (_treeView.DataContext is not MainWindowViewModel viewModel)
+			return;
+
+		PopupBackdropConfigurator.TryApply(
+			_menu.Items.OfType<MenuItem>().FirstOrDefault(),
+			TopLevel.GetTopLevel(_treeView),
+			viewModel.ActiveThemeEffect,
+			PopupBackdropTransparencyFallback.Transparent);
+	}
+
 	private TreeNodeViewModel? ResolveKeyboardNode()
 	{
 		var focused = TopLevel.GetTopLevel(_treeView)?.FocusManager?.GetFocusedElement() as Visual;
@@ -131,7 +160,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		{
 			if (entry.Kind == ProjectTreeContextMenuEntryKind.Separator)
 			{
-				_menu.Items.Add(new Separator());
+				_menu.Items.Add(new Separator { Cursor = MenuCursor });
 				continue;
 			}
 
@@ -142,7 +171,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 				Header = ResolveHeader(command),
 				IsEnabled = entry.IsEnabled,
 				Tag = command,
-				Cursor = new Cursor(StandardCursorType.Hand)
+				Cursor = MenuCursor
 			};
 			item.Click += OnMenuItemClick;
 			_menu.Items.Add(item);
@@ -286,6 +315,10 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		_lifetime.Dispose();
 		_treeView.RemoveHandler(InputElement.PointerPressedEvent, OnTreePointerPressed);
 		_treeView.RemoveHandler(InputElement.KeyDownEvent, OnTreeKeyDown);
+		_treeView.RemoveHandler(InputElement.ContextRequestedEvent, OnTreeContextRequested);
+		_menu.Opened -= OnMenuOpened;
+		if (ReferenceEquals(_treeView.ContextFlyout, _menu))
+			_treeView.ContextFlyout = null;
 		foreach (var item in _menu.Items.OfType<MenuItem>())
 			item.Click -= OnMenuItemClick;
 		_menu.Items.Clear();

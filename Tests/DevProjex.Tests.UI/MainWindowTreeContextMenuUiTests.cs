@@ -24,6 +24,7 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 			var file = root.Children.Single(node => node.DisplayName == "README.md");
 			var fileItem = FindRealizedItem(window, file);
 			var controller = GetController(window);
+			Assert.Same(controller.Menu, tree.ContextFlyout);
 
 			await RightClickAsync(window, fileItem);
 
