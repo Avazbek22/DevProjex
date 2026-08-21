@@ -8,12 +8,17 @@
           IsEnabled="{Binding IsProjectLoaded}"
           UseLayoutRounding="True"
           MinWidth="408">
-    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6" Margin="12,6">
+    <Grid ColumnSpacing="6" Margin="12,6">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="3*" MinWidth="220" MaxWidth="370" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
       <TextBox Name="SearchBox"
                Grid.Column="0"
                PlaceholderText="{Binding MenuSearch}"
                Text="{Binding SearchQuery, Mode=TwoWay}"
-               Width="220"
+               HorizontalAlignment="Stretch"
                FocusAdorner="{x:Null}"
                KeyDown="OnSearchKeyDown" />
       <TextBlock Name="SearchMatchSummary"

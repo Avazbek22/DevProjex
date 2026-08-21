@@ -87,6 +87,49 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task SearchInput_UsesSurplusWidthWithoutShiftingWhenResultsAppear()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            window.Width = window.MinWidth;
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.OpenSearchAsync(window);
+
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+            var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+            var initialBounds = UiTestDriver.GetBoundsInWindow(searchBox, window);
+
+            await UiTestDriver.EnterTextAsync(window, searchBox, "app");
+            await UiTestDriver.WaitForSearchAppliedAsync(window, "app");
+            var populatedBounds = UiTestDriver.GetBoundsInWindow(searchBox, window);
+
+            Assert.Equal(initialBounds.Left, populatedBounds.Left, precision: 1);
+            Assert.Equal(initialBounds.Width, populatedBounds.Width, precision: 1);
+
+            window.Width = window.MinWidth + 300;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+            await UiTestDriver.DragAsync(
+                window,
+                UiTestDriver.GetRequiredControl<Border>(window, "TreePreviewSplitter"),
+                deltaX: 150);
+            var expandedBounds = UiTestDriver.GetBoundsInWindow(searchBox, window);
+
+            Assert.Equal(populatedBounds.Left, expandedBounds.Left, precision: 1);
+            Assert.True(
+                expandedBounds.Width > populatedBounds.Width,
+                $"The tree-search input did not use surplus width: before={populatedBounds}, after={expandedBounds}, " +
+                $"searchBar={searchBar.Bounds}, tree={UiTestDriver.GetRequiredControl<Border>(window, "TreeIsland").Bounds}.");
+            Assert.InRange(expandedBounds.Width, populatedBounds.Width, 370.5);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SearchNextButton_DoesNotRevealAdditionalBranchesAfterSearchSettles()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
