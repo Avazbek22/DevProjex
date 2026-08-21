@@ -383,13 +383,6 @@ public partial class MainWindow
             if (PathComparer.Default.Equals(_currentPath, result.LocalPath))
                 await RefreshGitBranchesAsync(result.LocalPath, cancellationToken);
         }
-		else if (result.SourceType == ProjectSourceType.GitClone)
-		{
-			_viewModel.GitBranches.Clear();
-			if (!string.IsNullOrWhiteSpace(result.DefaultBranch))
-				_viewModel.GitBranches.Add(new GitBranch(result.DefaultBranch, IsActive: true, IsRemote: false));
-			UpdateBranchMenu();
-		}
 
         if (PathComparer.Default.Equals(_currentPath, result.LocalPath))
         {

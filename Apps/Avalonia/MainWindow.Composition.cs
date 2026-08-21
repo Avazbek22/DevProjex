@@ -852,6 +852,8 @@ public partial class MainWindow
 	private int _suppressTreeSelectionChanges;
 	private ContentTransformationContext? _publishedTransformationContext;
 	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
+	private readonly TransformedFileContentReader _transformedFileContentReader;
+	private readonly ProjectTreeContextMenuController _treeContextMenu;
 	private static readonly TimeSpan SecretDiscoveryInteractiveDebounce =
 		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(150));
 	private CancellationTokenSource? _secretRedactionCountCts;
@@ -904,6 +906,9 @@ public partial class MainWindow
 		_secretRedactionSession = services.SecretRedactionSession;
 		_codeCompressionSession = services.CodeCompressionSession;
 		_secretRedactionPreparer = new SecretRedactionOutputPreparer(services.FileContentAnalyzer);
+		_transformedFileContentReader = new TransformedFileContentReader(
+			services.FileContentAnalyzer,
+			_secretRedactionPreparer);
 		_secretRedactionSession.SnapshotPublished += OnSecretRedactionSnapshotPublished;
 		_codeCompressionSession.SnapshotPublished += OnCodeCompressionSnapshotPublished;
         _recentProjectsStore = services.RecentProjectsStore;
@@ -1237,6 +1242,20 @@ public partial class MainWindow
                     "Preview line numbers control was not found.")),
             CancelAllMemoryCleanup,
             ScheduleBackgroundMemoryCleanup);
+		_treeContextMenu = new ProjectTreeContextMenuController(
+			_treeView ?? throw new InvalidOperationException("Project tree control was not found."),
+			_localization,
+			_toastService,
+			services.ProjectPathLauncher,
+			() => _currentPath,
+			IsCurrentTreeNode,
+			CanUseTreeContextContentAndSelection,
+			ShouldShowSelectOnlyTreeNode,
+			ReadTreeNodeContentAsync,
+			SetClipboardTextAsync,
+			SelectOnlyTreeNode,
+			SetTreeBranchExpanded,
+			ShowErrorAsync);
         _themeBrushCoordinator = new ThemeBrushCoordinator(this, _viewModel, () => _topMenuBar?.MainMenuControl);
         _appearanceSettings = new AppearanceSettingsController(
             this,

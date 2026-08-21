@@ -1,6 +1,7 @@
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Application.Updates;
+using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -40,4 +41,5 @@ public sealed record AvaloniaAppServices(
     ITaskbarProgressService TaskbarProgressService,
     SessionMetricsRecorder SessionMetricsRecorder,
 	SecretRedactionSession SecretRedactionSession,
-	CodeCompressionSession CodeCompressionSession);
+	CodeCompressionSession CodeCompressionSession,
+	IProjectPathLauncher ProjectPathLauncher);
