@@ -61,6 +61,63 @@ public sealed class ExportMarkersIntegrationTests
 		Assert.DoesNotContain($"{binary}:", output);
 	}
 
+	[Fact]
+	public void Export_AccessDeniedNodes_PreserveNamesAcrossFormats()
+	{
+		using var temp = new TemporaryDirectory();
+		var deniedFilePath = Path.Combine(temp.Path, "secrets", "keys.json");
+		var sourceRoot = new FileSystemNode(
+			"project",
+			temp.Path,
+			isDirectory: true,
+			isAccessDenied: true,
+			[
+				new FileSystemNode(
+					"secrets",
+					Path.Combine(temp.Path, "secrets"),
+					isDirectory: true,
+					isAccessDenied: true,
+					[
+						new FileSystemNode(
+							"keys.json",
+							deniedFilePath,
+							isDirectory: false,
+							isAccessDenied: true,
+							FileSystemNode.EmptyChildren)
+					])
+			]);
+		var presenter = new TreeNodePresentationService(
+			new LocalizationService(new FakeLocalizationCatalog(), AppLanguage.En),
+			new FakeIconMapper());
+		var root = presenter.Build(sourceRoot);
+		var service = new TreeExportService();
+
+		var ascii = service.BuildFullTree(temp.Path, root, TreeTextFormat.Ascii);
+		var json = service.BuildFullTree(temp.Path, root, TreeTextFormat.Json);
+		var xml = service.BuildFullTree(temp.Path, root, TreeTextFormat.Xml);
+		var markdown = service.BuildFullTree(temp.Path, root, TreeTextFormat.Markdown);
+
+		Assert.Contains("├── project [access denied]", ascii, StringComparison.Ordinal);
+		Assert.Contains("secrets [access denied]", ascii, StringComparison.Ordinal);
+		Assert.Contains("keys.json [access denied]", ascii, StringComparison.Ordinal);
+
+		using var jsonDocument = JsonDocument.Parse(json);
+		var jsonFolder = JsonTreeExportTestHelper.GetTree(jsonDocument)
+			.GetProperty("secrets [access denied]");
+		Assert.Equal(["keys.json [access denied]"], jsonFolder.EnumerateArray()
+			.Select(static item => item.GetString()!)
+			.ToArray());
+
+		var xmlDocument = System.Xml.Linq.XDocument.Parse(xml);
+		var xmlFolder = Assert.Single(xmlDocument.Descendants("d"));
+		Assert.Equal("secrets [access denied]", xmlFolder.Attribute("n")?.Value);
+		Assert.Equal("keys.json [access denied]", Assert.Single(xmlDocument.Descendants("f")).Value);
+
+		Assert.Contains("- secrets [access denied]/", markdown, StringComparison.Ordinal);
+		Assert.Contains("  - keys.json [access denied]", markdown, StringComparison.Ordinal);
+		Assert.DoesNotContain("⛔", ascii + json + xml + markdown, StringComparison.Ordinal);
+	}
+
 	private static TreeNodeDescriptor BuildPresentedTree(string rootPath, params string[] extensions)
 	{
 		var allowedExtensions = new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);
@@ -90,8 +147,7 @@ public sealed class ExportMarkersIntegrationTests
 		{
 			return new Dictionary<string, string>
 			{
-				{ "Tree.AccessDeniedRoot", "Access denied" },
-				{ "Tree.AccessDenied", "Access denied" }
+				{ "Tree.AccessDenied", "access denied" }
 			};
 		}
 	}
