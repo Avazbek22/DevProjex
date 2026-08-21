@@ -26,7 +26,7 @@ param(
     [string]$Repository = "Avazbek22/DevProjex",
     [ValidateSet("x64", "arm64", "all")]
     [string]$Architecture = "all",
-    [string]$LicenseValue = "GPL-3.0-only"
+    [string]$LicenseValue = "Apache-2.0"
 )
 
 Set-StrictMode -Version Latest
