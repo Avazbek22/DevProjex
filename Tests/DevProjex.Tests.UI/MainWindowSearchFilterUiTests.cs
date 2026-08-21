@@ -45,6 +45,44 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task SearchSummary_RemainsVisibleAtMinimumWidthWithPreviewOpen()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            window.Width = window.MinWidth;
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.OpenSearchAsync(window);
+
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+            var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+            await UiTestDriver.EnterTextAsync(window, searchBox, "app");
+            await UiTestDriver.WaitForSearchAppliedAsync(window, "app");
+
+            var summary = Assert.IsType<TextBlock>(
+                searchBar.FindControl<TextBlock>("SearchMatchSummary"));
+            var previousButton = Assert.IsType<Button>(
+                searchBar.FindControl<Button>("SearchPreviousButton"));
+            var searchBoxBounds = UiTestDriver.GetBoundsInWindow(searchBox, window);
+            var summaryBounds = UiTestDriver.GetBoundsInWindow(summary, window);
+            var previousButtonBounds = UiTestDriver.GetBoundsInWindow(previousButton, window);
+
+            Assert.True(summary.IsVisible);
+            Assert.False(string.IsNullOrWhiteSpace(summary.Text));
+            Assert.True(
+                summaryBounds.Width >= 40,
+                $"The tree-search summary was compressed: summary={summaryBounds}, searchBar={searchBar.Bounds}.");
+            Assert.True(summaryBounds.Left >= searchBoxBounds.Right - 0.5);
+            Assert.True(summaryBounds.Right <= previousButtonBounds.Left + 0.5);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SearchNextButton_DoesNotRevealAdditionalBranchesAfterSearchSettles()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
