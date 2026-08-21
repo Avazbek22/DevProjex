@@ -1,0 +1,95 @@
+name: GUI bug
+description: Report a defect in the desktop application (tree, preview, settings, export, Git windows).
+title: "[GUI] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private source content, or security vulnerabilities.
+        For security issues, follow SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: DevProjex version
+      description: Shown in Help → About, or paste the output of `devprojex --version`.
+      placeholder: "5.x.x"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: "Windows 11 24H2, Ubuntu 24.04, macOS 15"
+    validations:
+      required: true
+  - type: dropdown
+    id: install-source
+    attributes:
+      label: Installation source
+      options:
+        - GitHub release
+        - Microsoft Store
+        - winget
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: app-language
+    attributes:
+      label: App language
+      placeholder: "English, Русский"
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps from application start to the defect.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: project
+    attributes:
+      label: Project specifics
+      description: >-
+        Approximate project size, opened as a folder or a Git repository, and relevant
+        settings (Hide Secrets, Hide Private Data, code compression, filters).
+  - type: textarea
+    id: recording
+    attributes:
+      label: Screenshot or recording
+      description: Attach only if it contains no sensitive project data.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I reproduced this with an official DevProjex build.
+          required: true
+        - label: I removed credentials and private project content.
+          required: true
+        - label: I searched existing issues and discussions.
+          required: true

@@ -1,0 +1,49 @@
+name: Feature request or improvement
+description: Propose new functionality or an improvement to existing behavior or documentation.
+title: "[Feat] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open-ended ideas or questions, consider starting a discussion first:
+        https://github.com/Avazbek22/DevProjex/discussions
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - GUI
+        - TUI
+        - CLI
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is inconvenient, missing, or slower than it should be today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you would like to see, including where it lives in the UI or CLI.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you use today or other approaches you rejected.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
